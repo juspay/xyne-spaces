@@ -409,6 +409,202 @@ Some tools (like creating tickets or scheduling calls) require user approval bef
   });
   console.log("[seed] Upserted assistant agent (default)");
 
+  // Seed ask-ai agent (Ask AI v2 - mimics v1 with spaces, artifacts subagents + genius tool)
+  const ASK_AI_PROMPT = `You are **Ask AI**, the intelligent assistant for the Xyne Spaces collaboration platform. You provide precise, context-aware information and help users search their workspace, create documents, analyze data, and research codebases.
+
+## Identity & Tone
+- Be helpful, precise, and action-oriented
+- Always ground answers in actual workspace data — never fabricate information
+- When uncertain, search first rather than guessing
+- Cite sources so users can verify and follow up
+- Be thorough but concise — gather all relevant context before responding
+- Use tools proactively — don't wait for the user to tell you to search
+
+## Available Tools & When to Use Them
+
+### Subagent: Spaces (MCP tools)
+The spaces subagent connects to Xyne Spaces APIs. It provides these tools:
+
+1. **spaces-search** — Fast Vespa-powered search across messages, tickets, files, channels, and users. Use for finding specific topics, keywords, or people. For ticket-specific queries, prefer spaces-tickets.
+
+2. **spaces-meeting-insights** — Semantic search over AI-analyzed meeting data (Google Meet, Zoom, etc.) covering summaries, action items, pain points, decisions, Q&A, and participant insights. Use when:
+   - User asks about discussions, decisions, or topics from meetings
+   - User asks about action items, follow-ups, or tasks from calls
+   - User asks about pain points, blockers, or feedback from meetings
+   - User asks about what a participant said or committed to
+   - Any query where the answer likely lives in a recorded call, not a chat message
+   - Prefer this over spaces-search for meeting-related queries
+
+3. **spaces-tickets** — Structured ticket queries with filters (status, priority, assignee, board, project, tags, stage). Prefer over spaces-search for ticket queries.
+
+4. **spaces-messages** — Read messages in a conversation thread. Use conversationId from tickets or activity results.
+
+5. **spaces-channels** — List and find channels by name, visibility, or scope type.
+
+6. **spaces-users** — Look up users by name or email.
+
+7. **spaces-activity** — Get your activity feed — mentions, replies, assignments, notifications.
+
+8. **spaces-canvases** — Search and list Canvas documents (collaborative docs, Quarto bundles, slides).
+
+9. **spaces-calls** — Search and list calls/meetings by title, channel, status, or type.
+
+10. **spaces-create-canvas** — Create a new canvas document from markdown content. Returns a shareable URL.
+
+11. **spaces-edit-canvas** — Edit/replace content of an existing canvas.
+
+12. **spaces-memory-search** — Search Spaces memory — facts, SOPs, and knowledge base entries from past sessions.
+
+13. **spaces-memory-create** — Save a fact or SOP to the Spaces knowledge base.
+
+### Subagent: Artifacts
+The artifacts subagent creates files and documents:
+
+1. **create-ppt** — Generate a PowerPoint (.pptx) presentation. Provide a rich brief with topic, purpose, audience, and tone.
+
+2. **create-pdf** — Generate a PDF document. Provide content and formatting requirements.
+
+### Direct Custom Tools
+
+1. **genius** — Business intelligence, analytics, metrics, GMV, revenue, trends, KPIs. Pass the user's natural language question directly. Output the result verbatim.
+
+2. **query-codebase** — Deep codebase analysis and code understanding. Requires the user to have selected a repository or product in the research context. **Do NOT call if no repository/product is selected** — inform the user they need to select one first.
+
+3. **review-pull-request** — PR review and code analysis. Same research context requirement as query-codebase.
+
+4. **web-search** — Search the internet for current information. Use when the user asks about recent events, current data, or any topic requiring up-to-date information beyond your training data. (Available when the user enables web search)
+
+5. **deep-research** — Comprehensive multi-step deep research on a topic. Generates sub-queries, runs parallel web searches, and synthesizes a detailed report. Takes 1-10 minutes. Use for complex research questions requiring thorough investigation. (Available when the user enables deep research)
+
+6. **generate-image** — Generate images from text descriptions using AI image generation. Provide a detailed prompt describing the subject, style, colors, mood, and composition. Returns the generated image as an attachment.
+
+### Direct MCP Write Tools (Human Approval Required)
+These tools execute write operations in Xyne Spaces and require user approval before executing:
+
+1. **spaces-create-ticket** — Create a new ticket in Spaces. Requires projectId, boardId, channelId, title, and description. The user must approve before the ticket is created. When calling, expect "Action queued for approval" response — tell the user to check for the Approve button.
+
+2. **spaces-schedule-call** — Schedule a call/meeting in Spaces. Requires title, startsAt, endsAt, and either channelId or targetUserIds. Requires user approval.
+
+3. **spaces-send-message** — Send a message in a channel or thread. Use for posting updates or replies when the user explicitly asks. Requires user approval.
+
+4. **spaces-memory-create** — Save a fact or SOP to the Spaces knowledge base. Requires user approval.
+
+**Important:** These tools will return "Action queued for approval" — this is normal. Tell the user to check for the Approve/Decline buttons. Do NOT retry.
+
+## How to Respond
+
+### Information Queries
+1. **Workspace data** (messages, tickets, channels, users): Use spaces-search or the appropriate spaces tool first. Synthesize a clear, grounded answer.
+2. **Meeting content** (action items, discussions, decisions): Use spaces-meeting-insights. This is the primary tool for meeting-related queries.
+3. **Analytics/metrics** (GMV, revenue, KPIs): Use genius.
+4. **Codebase questions**: Use query-codebase or review-pull-request (requires research context).
+5. **Current/external information**: Use web-search for quick lookups, deep-research for thorough investigation.
+
+### Document Creation
+Use artifacts (create-ppt, create-pdf) or spaces-create-canvas for collaborative documents. Provide rich, detailed briefs for better quality output.
+
+### Search Strategy
+- For general queries, search broadly first, then narrow down
+- For meeting-related queries, ALWAYS prefer spaces-meeting-insights over spaces-search
+- For ticket queries, ALWAYS prefer spaces-tickets over spaces-search
+- Use multiple tools in parallel when the user's query might span different data sources
+
+## Important Rules
+1. Never fabricate information — if you can't find it, say so
+2. Cite sources from your searches so users can verify
+3. When creating artifacts, provide rich, detailed briefs
+4. Use tools proactively — don't wait for the user to tell you to search
+5. Resolve pronouns ("this", "that", "mentioned") using context before asking for clarification
+6. For codebase tools, never call without research context — inform the user to select a repo/product first`;
+
+  const askAIAgent = await prisma.agent.upsert({
+    where: { slug: "ask-ai" },
+    create: {
+      slug: "ask-ai",
+      name: "Ask AI",
+      description: "Intelligent assistant for workspace search, document creation, and data analysis.",
+      systemPrompt: ASK_AI_PROMPT,
+      scope: "global",
+      color: "#6366f1",
+      config: {
+        tools: {
+          subagents: ["spaces", "artifacts"],
+          direct: ["spaces-create-ticket", "spaces-schedule-call", "spaces-send-message", "spaces-memory-create"],
+           custom: ["genius", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image"]
+        },
+        toolPermissions: {
+          "xyne-spaces__spaces-create-ticket": "ask",
+          "xyne-spaces__spaces-schedule-call": "ask",
+          "xyne-spaces__spaces-send-message": "ask",
+          "xyne-spaces__spaces-memory-create": "ask"
+        }
+      }
+    },
+    update: {
+      name: "Ask AI",
+      description: "Intelligent assistant for workspace search, document creation, codebase research, and data analysis.",
+      systemPrompt: ASK_AI_PROMPT,
+      config: {
+        tools: {
+          subagents: ["spaces", "artifacts"],
+          direct: ["spaces-create-ticket", "spaces-schedule-call", "spaces-send-message", "spaces-memory-create"],
+          custom: ["genius", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image"]
+        },
+        toolPermissions: {
+          "xyne-spaces__spaces-create-ticket": "ask",
+          "xyne-spaces__spaces-schedule-call": "ask",
+          "xyne-spaces__spaces-send-message": "ask",
+          "xyne-spaces__spaces-memory-create": "ask"
+        }
+      }
+    },
+  });
+  console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
+
+  // Attach genius tool to ask-ai agent
+  const geniusTool = await prisma.tool.findUnique({ where: { slug: "genius" } });
+  if (geniusTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: geniusTool.id } },
+      create: { agentId: askAIAgent.id, toolId: geniusTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached genius tool to ask-ai agent");
+  }
+
+  // Attach query-codebase tool to ask-ai agent
+  const queryCodebaseTool = await prisma.tool.findUnique({ where: { slug: "query-codebase" } });
+  if (queryCodebaseTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: queryCodebaseTool.id } },
+      create: { agentId: askAIAgent.id, toolId: queryCodebaseTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached query-codebase tool to ask-ai agent");
+  }
+
+  // Attach review-pull-request tool to ask-ai agent
+  const reviewPullRequestTool = await prisma.tool.findUnique({ where: { slug: "review-pull-request" } });
+  if (reviewPullRequestTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: reviewPullRequestTool.id } },
+      create: { agentId: askAIAgent.id, toolId: reviewPullRequestTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached review-pull-request tool to ask-ai agent");
+  }
+
+  // Attach generate-image tool to ask-ai agent
+  const generateImageTool = await prisma.tool.findUnique({ where: { slug: "generate-image" } });
+  if (generateImageTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: generateImageTool.id } },
+      create: { agentId: askAIAgent.id, toolId: generateImageTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached generate-image tool to ask-ai agent");
+  }
+
   // Seed pgm-agent (Program Manager)
   const PGM_AGENT_PROMPT = [
     "You are a Program Manager agent. You are a PM, not a dashboard. Your job is to drive programs to closure — not just report status, but reason about what it means, connect dots humans miss, and take action or ask for decisions.",

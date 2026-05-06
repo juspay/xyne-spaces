@@ -1,4 +1,38 @@
-import type { ToolDefinition } from "../types.js";
+import type { ToolDefinition, ToolExecutionContext } from "../types.js";
+
+/**
+ * Push a tool invocation to the progress endpoint for streaming to frontend.
+ * Mirrors the pushInvocation function in xyne-claw/src/agent.ts
+ */
+function pushToolInvocation(
+  progressUrl: string | undefined,
+  sessionId: string | undefined,
+  s2sKey: string | undefined,
+  invocation: unknown,
+): void {
+  if (!progressUrl || !sessionId) return;
+  fetch(progressUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+    },
+    body: JSON.stringify({ sessionId, toolInvocation: invocation }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch((err) => {
+    console.warn(`[research-agent] Tool invocation push failed: ${err instanceof Error ? err.message : String(err)}`);
+  });
+}
+
+interface ResearchAgentToolEvent {
+  event_type: "tool_execution_started" | "tool_execution_complete" | "tool_execution_error";
+  tool_name?: string;
+  tool_call_id?: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  duration_ms?: number;
+}
 
 export const RESEARCH_AGENT_CONFIG_SCHEMA = {
   RESEARCH_AGENT_API_URL: {
@@ -13,11 +47,11 @@ export const RESEARCH_AGENT_CONFIG_SCHEMA = {
     required: false as const,
     placeholder: "Optional API key for authentication (falls back to RESEARCH_AGENT_API_KEY env var)",
   },
-  XYNE_SPACES_REPOSITORY_ID: {
-    label: "Xyne Spaces Repository ID",
+  DEFAULT_REPOSITORY_ID: {
+    label: "Default Repository ID",
     default: "989d9105-d8f0-4549-b63b-ac2363054ec0",
-    required: true as const,
-    placeholder: "Repository ID of xyne-spaces for the research agent session",
+    required: false as const,
+    placeholder: "Default repository ID when none specified (for backward compatibility)",
   },
 };
 
@@ -47,6 +81,14 @@ export const queryCodebase: ToolDefinition = {
           "Optional custom system prompt to guide the research agent's behavior. " +
           "If not provided, the research agent will use its default behavior.",
       },
+      repository: {
+        type: "string",
+        description: "Optional: Repository ID to query (overrides default context)",
+      },
+      product: {
+        type: "string",
+        description: "Optional: Product ID to query (overrides default context)",
+      },
     },
     required: ["prompt"],
   },
@@ -58,6 +100,8 @@ export const queryCodebase: ToolDefinition = {
 
     const prompt = params["prompt"] as string; 
     const systemPrompt = (params["systemPrompt"] as string) || "";
+    const explicitRepository = params["repository"] as string | undefined;
+    const explicitProduct = params["product"] as string | undefined;
 
     if (!prompt || !prompt.trim()) {
       return "Error: prompt is required.";
@@ -65,7 +109,49 @@ export const queryCodebase: ToolDefinition = {
 
     const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "http://localhost:8080";
     const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
-    const repositoryId = context.config["XYNE_SPACES_REPOSITORY_ID"] ?? "";
+
+    const defaultRepositoryId = context.config["DEFAULT_REPOSITORY_ID"] ?? "";
+
+    // Determine repository/product from multiple sources (priority order):
+    // 1. Explicit tool parameters (LLM-provided)
+    // 2. Runtime researchContext from agent execution (frontend-selected)
+    // 3. Default repository ID from config
+    const runtimeContext = (context as unknown as { researchContext?: { type?: string; id?: string; name?: string; repositoryId?: string; productId?: string } }).researchContext;
+    
+    let repositoryId: string | undefined;
+    let productId: string | undefined;
+
+    // If explicit parameters are provided, validate they look like UUIDs (not names)
+    // This prevents the LLM from passing "My Product" instead of the actual ID
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    
+    if (explicitRepository && UUID_REGEX.test(explicitRepository)) {
+      repositoryId = explicitRepository;
+    } else if (explicitRepository) {
+      // Ignoring explicit repository (not a UUID)
+    }
+    
+    if (explicitProduct && UUID_REGEX.test(explicitProduct)) {
+      productId = explicitProduct;
+    } else if (explicitProduct) {
+      // Ignoring explicit product (not a UUID)
+    }
+
+    // If no valid explicit params, use runtime context from frontend
+    if (!repositoryId && !productId && runtimeContext) {
+      if (runtimeContext.type === "repository") {
+        // Use repositoryId if available, otherwise fallback to id
+        repositoryId = runtimeContext.repositoryId || runtimeContext.id;
+      } else if (runtimeContext.type === "product") {
+        // Use productId if available, otherwise fallback to id
+        productId = runtimeContext.productId || runtimeContext.id;
+      }
+    }
+
+    // Fall back to default if nothing specified
+    if (!repositoryId && !productId) {
+      repositoryId = defaultRepositoryId;
+    }
 
     const maxIterations = 3;
     let currentIteration = 0;
@@ -78,12 +164,18 @@ export const queryCodebase: ToolDefinition = {
           "Content-Type": "application/json",
           ...(apiKey ? { "Authorization": `Bearer ${apiKey}` } : {}),
         };
-        const sessionBody = {
+        // Build session body - research agent API accepts either repository_id or product_id
+        const sessionBody: Record<string, string> = {
           title: "Xyne Doctor Research Query",
-          repository_id: repositoryId,
           session_type: "api_session",
         };
-
+        
+        if (repositoryId) {
+          sessionBody.repository_id = repositoryId;
+        } else if (productId) {
+          sessionBody.product_id = productId;
+        }
+        
         const sessionRes = await fetch(sessionUrl, {
           method: "POST",
           headers: sessionHeaders,
@@ -94,8 +186,6 @@ export const queryCodebase: ToolDefinition = {
         if (!sessionRes.ok) {
           throw new Error(`Session creation failed: ${sessionRes.status} ${await sessionRes.text()}`);
         }
-
-        console.log("session-created successfully")
 
         const sessionData = await sessionRes.json() as { id?: string };
         const sessionId = sessionData.id;
@@ -110,8 +200,6 @@ export const queryCodebase: ToolDefinition = {
           content: prompt.trim(),
           system_prompt: systemPrompt || undefined,
         };
-
-        console.log("stream gonna start: ", chatBody)
 
         const streamRes = await fetch(chatUrl, {
           method: "POST",
@@ -133,7 +221,15 @@ export const queryCodebase: ToolDefinition = {
         const decoder = new TextDecoder();
         let buffer = "";
         let currentEventType = "unknown";
+        let currentEventName = "";
         let result: string | null = null;
+        
+        // Track in-flight tool calls for streaming to frontend
+        const inFlightTools = new Map<string, { toolName: string; args: unknown; startedAt: number }>();
+        
+        // Get the parent tool call ID from context (assigned by claw framework)
+        // This is the ID of the query-codebase tool invocation itself
+        const parentToolCallId = (context as ToolExecutionContext | undefined)?.toolCallId;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -145,7 +241,11 @@ export const queryCodebase: ToolDefinition = {
 
           for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed) continue;
+            if (!trimmed) {
+              // Empty line indicates end of event, process it
+              currentEventName = "";
+              continue;
+            }
 
             if (trimmed.startsWith("event:")) {
               currentEventType = trimmed.slice(6).trim();
@@ -153,8 +253,75 @@ export const queryCodebase: ToolDefinition = {
               const dataStr = trimmed.slice(5).trim();
               try {
                 const data = JSON.parse(dataStr);
-
-                if (currentEventType === "complete") {
+                
+                // Handle tool_call events for streaming to frontend
+                if (currentEventType === "tool_call" && data) {
+                  // Try multiple possible field name formats
+                  const toolEvent = data as Record<string, unknown>;
+                  const eventType = (toolEvent.event_type || toolEvent.type || toolEvent.eventType) as string | undefined;
+                  const toolName = (toolEvent.tool_name || toolEvent.toolName || toolEvent.name || toolEvent.tool) as string | undefined;
+                  const toolCallId = (toolEvent.tool_call_id || toolEvent.toolCallId || toolEvent.id || toolEvent.callId) as string | undefined;
+                  const args = (toolEvent.args || toolEvent.arguments || toolEvent.parameters || toolEvent.params) as Record<string, unknown> | undefined;
+                  // Research agent uses "results" (plural), not "result"
+                  const toolResult = toolEvent.results || toolEvent.result;
+                  const error = toolEvent.error;
+                  const durationMs = (toolEvent.duration_ms || toolEvent.durationMs || toolEvent.duration) as number | undefined;
+                  
+                  if (eventType === "tool_execution_started" && toolCallId) {
+                    // Track the started tool
+                    inFlightTools.set(toolCallId, {
+                      toolName: toolName || "unknown",
+                      args: args || {},
+                      startedAt: Date.now(),
+                    });
+                    
+                    const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
+                    const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
+                    const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
+                    
+                    // Push child tool with parentToolCallId pointing to the framework's tool call ID
+                    pushToolInvocation(progressUrl, parentSessionId, s2sKey, {
+                      toolName: toolName || "research-agent-tool",
+                      args: args || {},
+                      result: "",
+                      isError: false,
+                      startedAt: new Date().toISOString(),
+                      durationMs: 0,
+                      status: "running",
+                      toolCallId: toolCallId,
+                      ...(parentToolCallId ? { parentToolCallId } : {}),
+                    });
+                  } else if ((eventType === "tool_execution_complete" || eventType === "tool_execution_error") && toolCallId) {
+                    // Get the started tool info
+                    const started = inFlightTools.get(toolCallId);
+                    if (started) {
+                      const resultStr = toolResult 
+                        ? (typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult))
+                        : (error || "No result");
+                      const truncated = typeof resultStr === "string" && resultStr.length > 10_000
+                        ? `${resultStr.slice(0, 10_000)}\n…[truncated ${resultStr.length - 10_000} chars]`
+                        : resultStr;
+                      
+                      // Push completed tool invocation to frontend
+                      const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
+                      const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
+                      const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
+                      pushToolInvocation(progressUrl, parentSessionId, s2sKey, {
+                        toolName: toolName || started.toolName,
+                        args: started.args,
+                        result: truncated,
+                        isError: eventType === "tool_execution_error",
+                        startedAt: new Date(started.startedAt).toISOString(),
+                        durationMs: durationMs ?? (Date.now() - started.startedAt),
+                        status: "completed",
+                        toolCallId: toolCallId,
+                        ...(parentToolCallId ? { parentToolCallId } : {}),
+                      });
+                      
+                      inFlightTools.delete(toolCallId);
+                    }
+                  }
+                } else if (currentEventType === "complete") {
                   if (typeof data === "object" && data !== null && "response" in data) {
                     result = data.response as string;
                   } else if (typeof data === "string") {
@@ -272,10 +439,16 @@ export const reviewPullRequest: ToolDefinition = {
     if (!destinationBranch?.trim()) {
       return "Error: destinationBranch is required.";
     }
-
     const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "http://localhost:8080";
     const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
-    const repositoryId = context.config["XYNE_SPACES_REPOSITORY_ID"] ?? "";
+    
+    const defaultRepositoryId = context.config["DEFAULT_REPOSITORY_ID"] ?? "";
+
+    // Get repository from runtime context or default
+    const runtimeContext = (context as unknown as { researchContext?: { type?: string; id?: string; repositoryId?: string } }).researchContext;
+    const repositoryId = runtimeContext?.type === "repository" 
+      ? (runtimeContext.repositoryId || runtimeContext.id) 
+      : defaultRepositoryId;
 
     // Build PR review specific prompt
     const focusAreasText = focusAreas.length > 0
@@ -369,6 +542,15 @@ Review Guidelines:
         let buffer = "";
         let currentEventType = "unknown";
         let result: string | null = null;
+        
+        // Track in-flight tool calls for streaming to frontend
+        const inFlightTools = new Map<string, { toolName: string; args: unknown; startedAt: number }>();
+        
+        // Get the parent tool call ID from context (assigned by claw framework)
+        const parentToolCallId = (context as ToolExecutionContext | undefined)?.toolCallId;
+        const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
+        const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
+        const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -389,7 +571,64 @@ Review Guidelines:
               try {
                 const data = JSON.parse(dataStr);
 
-                if (currentEventType === "complete") {
+                // Handle tool_call events for streaming to frontend
+                if (currentEventType === "tool_call" && data) {
+                  const toolEvent = data as ResearchAgentToolEvent;
+                  
+                  if (toolEvent.event_type === "tool_execution_started" && toolEvent.tool_call_id) {
+                    // Track the started tool
+                    inFlightTools.set(toolEvent.tool_call_id, {
+                      toolName: toolEvent.tool_name || "unknown",
+                      args: toolEvent.args || {},
+                      startedAt: Date.now(),
+                    });
+                    
+                    // Push "running" placeholder to frontend
+                    const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
+                    const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
+                    const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
+                    pushToolInvocation(progressUrl, parentSessionId, s2sKey, {
+                      toolName: toolEvent.tool_name || "research-agent-tool",
+                      args: toolEvent.args || {},
+                      result: "",
+                      isError: false,
+                      startedAt: new Date().toISOString(),
+                      durationMs: 0,
+                      status: "running",
+                      toolCallId: toolEvent.tool_call_id,
+                      ...(parentToolCallId ? { parentToolCallId } : {}),
+                    });
+                  } else if ((toolEvent.event_type === "tool_execution_complete" || toolEvent.event_type === "tool_execution_error") && toolEvent.tool_call_id) {
+                    // Get the started tool info
+                    const started = inFlightTools.get(toolEvent.tool_call_id);
+                    if (started) {
+                      const resultStr = toolEvent.result 
+                        ? (typeof toolEvent.result === "string" ? toolEvent.result : JSON.stringify(toolEvent.result))
+                        : (toolEvent.error || "No result");
+                      const truncated = resultStr.length > 10_000
+                        ? `${resultStr.slice(0, 10_000)}\n…[truncated ${resultStr.length - 10_000} chars]`
+                        : resultStr;
+                      
+                      // Push completed tool invocation to frontend
+                      const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
+                      const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
+                      const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
+                      pushToolInvocation(progressUrl, parentSessionId, s2sKey, {
+                        toolName: toolEvent.tool_name || started.toolName,
+                        args: started.args,
+                        result: truncated,
+                        isError: toolEvent.event_type === "tool_execution_error",
+                        startedAt: new Date(started.startedAt).toISOString(),
+                        durationMs: toolEvent.duration_ms ?? (Date.now() - started.startedAt),
+                        status: "completed",
+                        toolCallId: toolEvent.tool_call_id,
+                        ...(parentToolCallId ? { parentToolCallId } : {}),
+                      });
+                      
+                      inFlightTools.delete(toolEvent.tool_call_id);
+                    }
+                  }
+                } else if (currentEventType === "complete") {
                   if (typeof data === "object" && data !== null && "response" in data) {
                     result = data.response as string;
                   } else if (typeof data === "string") {

@@ -83,20 +83,30 @@ export function loadCustomTools(
   agentConfig?: Record<string, unknown>,
   meta?: Record<string, string>,
   onAttachment?: (a: Attachment) => void,
+  researchContext?: { type: string; id?: string; name: string; repositoryId?: string; productId?: string },
+  progressUrl?: string,
+  sessionId?: string,
+  s2sKey?: string,
+  parentToolCallId?: string,
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
   const allCustomTools = getAllCustomTools();
+  const config = agentConfig ?? {};
 
   // Filter tools by agent — restrict certain tool sets to specific agent
   const customTools = allCustomTools.filter((ct) => {
-    if (ct.source === "custom:pgm") return agentSlug === "pgm-agent";
-    if (ct.source === "custom:google") return agentSlug === "google-agent";
-    if (ct.source === "custom:microsoft") return agentSlug === "microsoft-agent";
-    if (ct.source === "custom:research-agent") return agentSlug === "research-agent";
-    return true;
+    let allowed = true;
+    if (ct.source === "custom:pgm") allowed = agentSlug === "pgm-agent";
+    else if (ct.source === "custom:google") allowed = agentSlug === "google-agent";
+    else if (ct.source === "custom:microsoft") allowed = agentSlug === "microsoft-agent";
+    else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai";
+    else if (ct.source === "custom:web-search") allowed = agentSlug === "ask-ai" && String(config["webSearchEnabled"]) === "true";
+    else if (ct.source === "custom:deep-research") allowed = agentSlug === "ask-ai" && String(config["deepResearchEnabled"]) === "true";
+    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai";
+    
+    return allowed;
   });
-  const config = agentConfig ?? {};
   const allAttachments: Attachment[] = [];
   const allPendingQuestions: PendingQuestion[] = [];
   const allPendingActions: Array<Record<string, unknown>> = [];
@@ -107,8 +117,12 @@ export function loadCustomTools(
     const context: ToolExecutionContext = {
       config: resolvedConfig,
       ...(meta ? { meta } : {}),
+      ...(researchContext ? { researchContext } : {}),
       pendingQuestions: allPendingQuestions,
       pendingResponses: allPendingResponses,
+      ...(progressUrl ? { progressUrl } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(s2sKey ? { s2sKey } : {}),
     };
 
     return {
@@ -118,6 +132,12 @@ export function loadCustomTools(
       source: ct.source,
       parameters: Type.Unsafe(ct.inputSchema),
       async execute(_toolCallId: string, params: unknown) {
+        // Pass the framework-assigned tool call ID into the context
+        // so child tools (like research agent) can nest their invocations under this parent
+        const toolContext: ToolExecutionContext = {
+          ...context,
+          toolCallId: _toolCallId,
+        };
         // Write tools require user approval — don't execute, produce pendingAction
         if (ct.isWriteTool) {
           try {
@@ -141,7 +161,7 @@ export function loadCustomTools(
 
         let result: string;
         try {
-          result = await ct.execute(params as Record<string, unknown>, context);
+          result = await ct.execute(params as Record<string, unknown>, toolContext);
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           console.error(`[custom-tool] ${ct.slug} threw:`, errMsg);

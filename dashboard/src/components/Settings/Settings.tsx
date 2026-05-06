@@ -25,6 +25,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import { useEnterSendsMessage } from '../../hooks/useEnterSendsMessage';
 import { useDebugSettings } from '../../hooks/useDebugSettings';
+import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import { MeetingDetectionToggle } from './MeetingDetectionToggle';
 import { isElectronApp } from '../../utils/electronApp';
 import { cn } from '../../utils/classNames';
@@ -50,6 +51,7 @@ const Settings = (): ReactElement => {
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
+  const { askAIVersion, setAskAIVersion } = useAskAIVersion();
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const zero = useZero();
@@ -648,6 +650,12 @@ const Settings = (): ReactElement => {
             checked={debugSettings.showSendIndicators}
             onCheckedChange={toggleSendIndicators}
             label='Show send indicators'
+          />
+          <Switch
+            id='ask-ai-version'
+            checked={askAIVersion === 'v2'}
+            onCheckedChange={checked => setAskAIVersion(checked ? 'v2' : 'v1')}
+            label='Use Ask AI v2'
           />
         </div>
       </div>

@@ -32,6 +32,14 @@ export interface ToolExecutionContext {
   meta?: Record<string, string>;
   pendingQuestions?: PendingQuestion[];
   pendingResponses?: PendingResponse[];
+  /** Progress URL for streaming tool invocations to the frontend (claw agent only) */
+  progressUrl?: string;
+  /** Session ID for this agent run (claw agent only) */
+  sessionId?: string;
+  /** S2S key for authenticating with the progress endpoint (claw agent only) */
+  s2sKey?: string;
+  /** The tool call ID assigned by the claw framework for this tool execution */
+  toolCallId?: string;
 }
 
 export interface ToolDefinition {

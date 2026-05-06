@@ -1063,6 +1063,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     ): void => {
       setSelectedResearch({
         type,
+        id: item.id,
         name: item.name,
       });
       setShowResearchDropdown(false);

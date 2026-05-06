@@ -6,6 +6,7 @@ import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
+import { useAskAIVersion } from '../../../hooks/useAskAIVersion';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
 import type {
@@ -19,6 +20,8 @@ import {
   loadSessionDetail,
   saveSessionMetadata,
 } from '../../../hooks/useAskAISessions';
+import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
+import { fetchV2ConversationMessages } from '../../../services/XyneAI/XyneAISessionsV2Service';
 import type { Message, SummarizerCitation, MessageAttachment, UserTag } from './utils/XyneAITypes';
 import { buildCitationUrl } from './utils/citationUrlBuilder';
 import { attachmentCitationPreviewStore } from '../../FileViewer/AttachmentCitationPreview';
@@ -41,6 +44,7 @@ import {
   type SelectedTranscript,
   type SelectedRecording,
   type ContextSelections,
+  toAttachedContext,
 } from './components/ContextPickerPanel';
 import { MessageItem } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
@@ -66,6 +70,7 @@ import { xyneAIStreamManager } from '../../../services/XyneAI';
 interface XyneAIConfigResponse {
   webSearchAccessible: boolean;
   deepResearchAccessible: boolean;
+  v2Enabled?: boolean;
 }
 
 interface XyneAISidebarProps {
@@ -330,6 +335,8 @@ const XyneAISidebar = ({
     },
   });
 
+  const { askAIVersion } = useAskAIVersion();
+  const isV2 = askAIVersion === 'v2';
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
 
@@ -350,6 +357,7 @@ const XyneAISidebar = ({
   // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: selectedChannels.map(ch => ch.id),
+    activities: selectedActivities,
     conversationId,
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
@@ -361,10 +369,18 @@ const XyneAISidebar = ({
     deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
     researchContext: selectedResearchContext,
     createCanvasEnabled,
+    isV2,
     channelId: channelId || undefined, // Pass channelId for thread ID construction
     ticketIds: selectedTickets.map(t => t.id),
     canvasIds: selectedCanvases.map(c => c.id),
     callIds: [...selectedTranscripts.map(t => t.id), ...selectedRecordings.map(r => r.id)],
+    attachedContext: toAttachedContext({
+      channels: selectedChannels,
+      tickets: selectedTickets,
+      canvases: selectedCanvases,
+      transcripts: selectedTranscripts,
+      recordings: selectedRecordings,
+    }),
   });
 
   // Start fresh chat when startFreshChat flag is set
@@ -419,7 +435,7 @@ const XyneAISidebar = ({
     return ALL_ONBOARDING_SUGGESTIONS.filter(s => !askedQuestions.has(s)).slice(0, 3);
   }, [aiOnboarding.isActive, messages]);
 
-  // Fetch sessions list from backend (used by history sidebar)
+  // v1 sessions hooks (used when v2 is not enabled)
   const { data: sessionsData, refetch: refetchSessions } = useSessionsList();
   const {
     toggleStar: toggleStarMutation,
@@ -428,12 +444,19 @@ const XyneAISidebar = ({
     updateMetadata: _updateMetadataMutation,
   } = useSessionMutations();
 
+  // v2 sessions hooks (used when v2 is enabled)
+  const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList();
+  const { invalidateSessions: _invalidateV2Sessions } = useV2SessionInvalidator();
+
   // Sync sessions list to local state for the ConversationHistory component
+  // Uses v2 data when available, otherwise falls back to v1
   useEffect(() => {
-    if (sessionsData) {
+    if (isV2 && v2SessionsData) {
+      setConversations(v2SessionsData);
+    } else if (!isV2 && sessionsData) {
       setConversations(sessionsData);
     }
-  }, [sessionsData]);
+  }, [isV2, v2SessionsData, sessionsData]);
 
   // Load most recent conversation on mount
   // Restore input box state from lastInputContext
@@ -497,87 +520,109 @@ const XyneAISidebar = ({
           return;
         }
 
-        // Load most recent session from backend
-        // Use the sessions list (already fetched or fetch now) to find the most recent
-        let sessions = sessionsData;
-        if (!sessions) {
-          // Fetch sessions if not yet loaded
-          const result = await refetchSessions();
-          sessions = result.data;
-        }
+        // v2: Load most recent conversation from claw
+        if (isV2) {
+          let v2Sessions = v2SessionsData;
+          if (!v2Sessions) {
+            const result = await refetchV2Sessions();
+            v2Sessions = result.data;
+          }
 
-        hasLoadedInitialConversationRef.current = true;
+          hasLoadedInitialConversationRef.current = true;
 
-        if (!sessions || sessions.length === 0) {
-          setIsLoadingConversation(false);
-          return;
-        }
+          if (!v2Sessions || v2Sessions.length === 0) {
+            setIsLoadingConversation(false);
+            return;
+          }
 
-        // Filter sessions based on context
-        let matchingSessions = sessions;
-        if (threadConversationId && channelId) {
-          // Thread context: find sessions for this specific thread
-          matchingSessions = sessions.filter(s => s.threadConversationId === threadConversationId);
+          // Load the most recent conversation's messages from claw
+          const mostRecentConv = v2Sessions[0]!;
+          const clawMessages = await fetchV2ConversationMessages(mostRecentConv.sessionId);
+          const messagesWithoutStreaming: Message[] = clawMessages.map(msg => ({
+            ...msg,
+            isStreaming: false,
+          }));
+          setMessages(messagesWithoutStreaming);
+          setConversationId(mostRecentConv.sessionId);
+          setConversationChannelId(mostRecentConv.channelId || null);
+
+          setTimeout(() => {
+            scrollToBottom();
+          }, 100);
         } else {
-          // Global context: only non-thread conversations
-          matchingSessions = sessions.filter(s => !s.threadConversationId);
-        }
-
-        if (matchingSessions.length === 0) {
-          setIsLoadingConversation(false);
-          return;
-        }
-
-        // Sessions are already sorted by updatedAt desc from backend, take first
-        const mostRecentSession = matchingSessions[0]!;
-
-        // Fetch full session detail (with messages) from backend
-        const mostRecent = await loadSessionDetail(mostRecentSession.sessionId);
-        if (!mostRecent) {
-          setIsLoadingConversation(false);
-          return;
-        }
-
-        // Set the original channel ID from the loaded conversation
-        setConversationChannelId(mostRecent.channelId);
-
-        // Clear streaming state and mark aborted messages
-        const messagesWithoutStreaming: Message[] = mostRecent.messages.map(msg => {
-          const toolOutputs = msg.toolOutputs;
-          if (
-            msg.type === 'bot' &&
-            msg.isStreaming &&
-            (!msg.content || msg.content.trim().length === 0) &&
-            (!toolOutputs || toolOutputs.length === 0)
-          ) {
-            return {
-              ...msg,
-              isStreaming: false,
-              isAborted: true,
-              content: 'Answer was aborted. Please try asking your question again.',
-            };
+          // v1: Load most recent session from backend
+          let sessions = sessionsData;
+          if (!sessions) {
+            const result = await refetchSessions();
+            sessions = result.data;
           }
-          return { ...msg, isStreaming: false };
-        });
-        setMessages(messagesWithoutStreaming);
-        setConversationId(mostRecent.sessionId);
-        setBranchSelections(mostRecent.branchSelections ?? {});
 
-        // Restore input box state
-        restoreInputContext(mostRecent.lastInputContext);
+          hasLoadedInitialConversationRef.current = true;
 
-        // Restore feedback from stored messages
-        const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
-        mostRecent.messages.forEach(msg => {
-          if (msg.feedback === 1) {
-            restoredFeedbackMap[msg.id] = 'LIKE';
-          } else if (msg.feedback === 2) {
-            restoredFeedbackMap[msg.id] = 'DISLIKE';
+          if (!sessions || sessions.length === 0) {
+            setIsLoadingConversation(false);
+            return;
+          }
+
+          // Filter sessions based on context
+          let matchingSessions = sessions;
+          if (threadConversationId && channelId) {
+            matchingSessions = sessions.filter(
+              s => s.threadConversationId === threadConversationId,
+            );
           } else {
-            restoredFeedbackMap[msg.id] = null;
+            matchingSessions = sessions.filter(s => !s.threadConversationId);
           }
-        });
-        setFeedbackMap(restoredFeedbackMap);
+
+          if (matchingSessions.length === 0) {
+            setIsLoadingConversation(false);
+            return;
+          }
+
+          const mostRecentSession = matchingSessions[0]!;
+          const mostRecent = await loadSessionDetail(mostRecentSession.sessionId);
+          if (!mostRecent) {
+            setIsLoadingConversation(false);
+            return;
+          }
+
+          setConversationChannelId(mostRecent.channelId);
+
+          const messagesWithoutStreaming: Message[] = mostRecent.messages.map(msg => {
+            const toolOutputs = msg.toolOutputs;
+            if (
+              msg.type === 'bot' &&
+              msg.isStreaming &&
+              (!msg.content || msg.content.trim().length === 0) &&
+              (!toolOutputs || toolOutputs.length === 0)
+            ) {
+              return {
+                ...msg,
+                isStreaming: false,
+                isAborted: true,
+                content: 'Answer was aborted. Please try asking your question again.',
+              };
+            }
+            return { ...msg, isStreaming: false };
+          });
+          setMessages(messagesWithoutStreaming);
+          setConversationId(mostRecent.sessionId);
+          setBranchSelections(mostRecent.branchSelections ?? {});
+
+          restoreInputContext(mostRecent.lastInputContext);
+
+          const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
+          mostRecent.messages.forEach(msg => {
+            if (msg.feedback === 1) {
+              restoredFeedbackMap[msg.id] = 'LIKE';
+            } else if (msg.feedback === 2) {
+              restoredFeedbackMap[msg.id] = 'DISLIKE';
+            } else {
+              restoredFeedbackMap[msg.id] = null;
+            }
+          });
+          setFeedbackMap(restoredFeedbackMap);
+        }
 
         // Scroll to bottom after loading
         setTimeout(() => {
@@ -597,21 +642,31 @@ const XyneAISidebar = ({
     threadInfo?.conversationId,
     scrollToBottom,
     startFreshChat,
+    isV2,
     sessionsData,
     refetchSessions,
+    v2SessionsData,
+    refetchV2Sessions,
     restoreInputContext,
   ]);
 
   // Refetch sessions list when history sidebar is opened to get fresh data
   useEffect(() => {
     if (showHistorySidebar) {
-      void refetchSessions();
+      if (isV2) {
+        void refetchV2Sessions();
+      } else {
+        void refetchSessions();
+      }
     }
-  }, [showHistorySidebar, refetchSessions]);
+  }, [showHistorySidebar, isV2, refetchSessions, refetchV2Sessions]);
 
   // Save session metadata (branchSelections, feedbackMap) to backend when they change
-  // Messages are already persisted by the backend during streaming, so we only save metadata
+  // v2: claw handles its own persistence, skip this effect
+  // v1: Messages are already persisted by the backend during streaming, so we only save metadata
   useEffect(() => {
+    if (isV2) return;
+
     const saveChannelId = conversationChannelId || channelId;
     if (messages.length === 0 || !conversationId || !saveChannelId) {
       return;
@@ -640,6 +695,7 @@ const XyneAISidebar = ({
     }
     void saveSessionMetadata(conversationId, metadata);
   }, [
+    isV2,
     messages,
     channelId,
     conversationChannelId,
@@ -654,59 +710,77 @@ const XyneAISidebar = ({
 
   const handleLoadConversation = async (conversation: ConversationHistoryType): Promise<void> => {
     try {
-      // Fetch full session detail (with messages) from backend
-      const fullConversation = await loadSessionDetail(conversation.sessionId);
-      if (!fullConversation) {
-        console.error('[XyneAISidebar] Failed to load conversation detail');
-        return;
+      if (isV2) {
+        // v2: Load conversation messages from claw via proxy endpoint
+        const clawMessages = await fetchV2ConversationMessages(conversation.sessionId);
+        const messagesWithoutStreaming: Message[] = clawMessages.map(msg => ({
+          ...msg,
+          isStreaming: false,
+        }));
+        setMessages(messagesWithoutStreaming);
+        setConversationId(conversation.sessionId);
+        setConversationChannelId(conversation.channelId || null);
+        setBranchSelections({});
+        setEditingMessageId(null);
+        setShowHistorySidebar(false);
+        setFeedbackMap({});
+
+        setTimeout(() => {
+          scrollToBottom();
+        }, 100);
+      } else {
+        // v1: Fetch full session detail (with messages) from backend
+        const fullConversation = await loadSessionDetail(conversation.sessionId);
+        if (!fullConversation) {
+          console.error('[XyneAISidebar] Failed to load conversation detail');
+          return;
+        }
+
+        // Clear streaming state and mark aborted messages
+        const messagesWithoutStreaming: Message[] = fullConversation.messages.map(msg => {
+          const toolOutputs = msg.toolOutputs;
+          if (
+            msg.type === 'bot' &&
+            msg.isStreaming &&
+            (!msg.content || msg.content.trim().length === 0) &&
+            (!toolOutputs || toolOutputs.length === 0)
+          ) {
+            return {
+              ...msg,
+              isStreaming: false,
+              isAborted: true,
+              content: 'Answer was aborted. Please try asking your question again.',
+            };
+          }
+          return { ...msg, isStreaming: false };
+        });
+        setMessages(messagesWithoutStreaming);
+        setConversationId(fullConversation.sessionId);
+        setConversationChannelId(fullConversation.channelId);
+        setBranchSelections(fullConversation.branchSelections ?? {});
+        setEditingMessageId(null);
+        setShowHistorySidebar(false);
+
+        // Restore input box state
+        restoreInputContext(fullConversation.lastInputContext);
+
+        // Restore feedback from stored messages
+        const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
+        fullConversation.messages.forEach(msg => {
+          if (msg.feedback === 1) {
+            restoredFeedbackMap[msg.id] = 'LIKE';
+          } else if (msg.feedback === 2) {
+            restoredFeedbackMap[msg.id] = 'DISLIKE';
+          } else {
+            restoredFeedbackMap[msg.id] = null;
+          }
+        });
+        setFeedbackMap(restoredFeedbackMap);
+
+        setTimeout(() => {
+          scrollToBottom();
+        }, 100);
       }
-
-      // Clear streaming state and mark aborted messages
-      const messagesWithoutStreaming: Message[] = fullConversation.messages.map(msg => {
-        const toolOutputs = msg.toolOutputs;
-        if (
-          msg.type === 'bot' &&
-          msg.isStreaming &&
-          (!msg.content || msg.content.trim().length === 0) &&
-          (!toolOutputs || toolOutputs.length === 0)
-        ) {
-          return {
-            ...msg,
-            isStreaming: false,
-            isAborted: true,
-            content: 'Answer was aborted. Please try asking your question again.',
-          };
-        }
-        return { ...msg, isStreaming: false };
-      });
-      setMessages(messagesWithoutStreaming);
-      setConversationId(fullConversation.sessionId);
-      // Set the original channel ID from the loaded conversation
-      setConversationChannelId(fullConversation.channelId);
-      setBranchSelections(fullConversation.branchSelections ?? {});
-      setEditingMessageId(null);
-      setShowHistorySidebar(false);
-
-      // Restore input box state
-      restoreInputContext(fullConversation.lastInputContext);
-
-      // Restore feedback from stored messages
-      const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
-      fullConversation.messages.forEach(msg => {
-        if (msg.feedback === 1) {
-          restoredFeedbackMap[msg.id] = 'LIKE';
-        } else if (msg.feedback === 2) {
-          restoredFeedbackMap[msg.id] = 'DISLIKE';
-        } else {
-          restoredFeedbackMap[msg.id] = null;
-        }
-      });
-      setFeedbackMap(restoredFeedbackMap);
-
-      // Scroll to bottom after loading conversation
-      setTimeout(() => {
-        scrollToBottom();
-      }, 100);
     } catch (error) {
       console.error('[XyneAISidebar] Failed to load conversation:', error);
     }
@@ -992,23 +1066,6 @@ const XyneAISidebar = ({
     [navigate, isMobile],
   );
 
-  const formatActivitiesAsText = (activities: UserActivity[]): string => {
-    if (activities.length === 0) return '';
-
-    const activityLines = activities
-      .reverse()
-      .map(
-        (activity, index) =>
-          `${index + 1}. [${activity.eventName}] (${activity.eventCategory})
-          Metadata: ${activity.contextMetadata ? JSON.stringify(activity.contextMetadata) : 'N/A'}
-          RelatedInformation: ${activity.relatedData ? JSON.stringify(activity.relatedData) : 'N/A'}
-          Timestamp: ${activity.timestamp ?? 'N/A'}\n`,
-      )
-      .join('\n');
-
-    return `\nUser journey across app:\n${activityLines}`;
-  };
-
   // Regenerate: re-submit the same user query, creating a sibling bot branch
   const handleRegenerate = useCallback(async (): Promise<void> => {
     if (messages.some((m: Message) => m.isStreaming)) return;
@@ -1102,11 +1159,8 @@ const XyneAISidebar = ({
     const displayContent = inputValue.trim();
 
     // Build the full query with all context for the AI
+    // Note: Activities are sent separately via attachedContext in useXyneAIStream, not in query
     let query = inputValue;
-
-    if (selectedActivities.length > 0) {
-      query = query + formatActivitiesAsText(selectedActivities);
-    }
 
     // Add browser context if present (hidden from display but sent to AI)
     if (browserContext) {

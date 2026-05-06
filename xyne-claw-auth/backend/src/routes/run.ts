@@ -1,6 +1,15 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
+import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
+import { gcsService } from "../services/gcsService.js";
+import {
+  normalizeAttachedContext,
+  buildAttachedContextPayload,
+  type AttachedContextRef,
+} from "../services/agentChatContextService.js";
+import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 
 const router = Router();
 
@@ -136,6 +145,35 @@ async function resolveUserId(body: Record<string, unknown>): Promise<{ userId: s
   return { error: "Either userId or (gatewayType + externalUserId) is required" };
 }
 
+// ── Resolve Spaces auth from request (for service-to-service calls) ──
+
+async function resolveSpacesAuthFromRequest(req: Request): Promise<SpacesAuthContext | undefined> {
+  try {
+    const cookies = req.headers.cookie;
+    if (!cookies) return undefined;
+
+    // Parse cookies
+    const cookieMap = new Map<string, string>();
+    for (const cookie of cookies.split(";")) {
+      const [name, ...rest] = cookie.trim().split("=");
+      if (name && rest.length > 0) {
+        cookieMap.set(name, rest.join("="));
+      }
+    }    
+    // Look for Spaces session cookies
+    const sessionCookie = cookieMap.get("xyne_session") || cookieMap.get("session") || cookieMap.get("connect.sid");
+    if (!sessionCookie) return undefined;
+
+    // Return auth context with sessionId - the actual validation happens in the interact() calls
+    return {
+      sessionId: sessionCookie,
+    };
+  } catch (err) {
+    console.warn("[run] Failed to resolve Spaces auth from request:", err);
+    return undefined;
+  }
+}
+
 // ── Resolve agent config ──
 
 async function resolveAgent(agentSlug: string | undefined): Promise<{
@@ -226,7 +264,41 @@ router.post("/run", async (req: Request, res: Response) => {
       effectivePrompt = eventType === "USER_MENTIONED" ? TWIN_PROMPT : ASSISTANT_PROMPT;
     }
 
+    // Resolve attachedContext to actual content if Spaces auth is available
+    let resolvedAttachedContext: { contextFiles: Array<{ path: string; content: string }>; promptPrefix?: string } | undefined;
+    if (attachedContext?.length) {
+      const normalized = normalizeAttachedContext(attachedContext);
+      if (!normalized.error && normalized.items.length > 0) {
+        // Try to get Spaces auth from request cookies
+        const spacesAuth = await resolveSpacesAuthFromRequest(req);
+        if (spacesAuth) {
+          try {
+            resolvedAttachedContext = await buildAttachedContextPayload(normalized.items, spacesAuth);
+            console.log(`[run] Resolved ${normalized.items.length} attached context items to ${resolvedAttachedContext.contextFiles.length} context files`);
+          } catch (err) {
+            console.warn("[run] Failed to resolve attachedContext:", err instanceof Error ? err.message : String(err));
+          }
+        } else {
+          console.warn("[run] No Spaces auth available to resolve attachedContext");
+        }
+      }
+    }
+
     // Forward to xyne-claw (returns sessionId immediately)
+    // Include resolved attached context (contextFiles + promptPrefix) if available
+    const mergedContextFiles = [
+      ...(contextFiles ?? []),
+      ...(resolvedAttachedContext?.contextFiles ?? []),
+    ];
+    
+    // Build additional instructions that include the promptPrefix from resolved context
+    let additionalInstructions = (req.body as { additionalInstructions?: string }).additionalInstructions ?? "";
+    if (resolvedAttachedContext?.promptPrefix) {
+      additionalInstructions = additionalInstructions 
+        ? `${resolvedAttachedContext.promptPrefix}\n\n${additionalInstructions}`
+        : resolvedAttachedContext.promptPrefix;
+    }
+
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/run`, {
       method: "POST",
       headers: {
@@ -243,7 +315,7 @@ router.post("/run", async (req: Request, res: Response) => {
         ...(callbackUrl ? { callbackUrl } : {}),
         ...(effectivePrompt ? { systemPrompt: effectivePrompt } : {}),
         ...(agent.modelId ? { modelId: agent.modelId } : {}),
-        agentConfig: agent.agentConfig,
+        agentConfig: { ...agent.agentConfig, ...((req.body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}) },
         agentSlug,
         channelId,
         ...(eventType ? { eventType } : {}),
@@ -256,8 +328,10 @@ router.post("/run", async (req: Request, res: Response) => {
         ...(agent.skills ? { skills: agent.skills } : {}),
         ...(progressUrl ? { progressUrl } : {}),
         ...(attachments?.length ? { attachments } : {}),
-        ...(contextFiles?.length ? { contextFiles } : {}),
+        ...(mergedContextFiles.length > 0 ? { contextFiles: mergedContextFiles } : {}),
         ...(attachedContext?.length ? { attachedContext } : {}),
+        ...((req.body as { researchContext?: unknown }).researchContext ? { researchContext: (req.body as { researchContext?: unknown }).researchContext } : {}),
+        ...(additionalInstructions ? { additionalInstructions } : {}),
       }),
     });
 
@@ -266,6 +340,36 @@ router.post("/run", async (req: Request, res: Response) => {
     if (!body.success || !body.sessionId) {
       res.status(clawRes.status).json(body);
       return;
+    }
+
+    // Persist user message UNLESS the caller (e.g., /chat) has already persisted it.
+    // /chat sets __persistedByCaller: true to skip this, since it creates the user message.
+    // Direct callers like Ask AI v2 rely on this endpoint to persist messages.
+    const persistedByCaller = (req.body as { __persistedByCaller?: boolean }).__persistedByCaller;
+    if (conversationId && !persistedByCaller) {
+      try {
+        await chatMessageRepository.create({
+          conversationId,
+          agentSlug: agentSlug || 'assistant',
+          userId: resolved.userId,
+          role: 'user',
+          content: task.trim(),
+        });
+      } catch (msgErr) {
+        console.warn("[run] Failed to persist user message:", msgErr instanceof Error ? msgErr.message : msgErr);
+      }
+    }
+
+    // Track run for Agent Control Center
+    if (conversationId) {
+      agentRunRepository.start({
+        sessionId: body.sessionId,
+        userId: resolved.userId,
+        agentSlug: agentSlug || 'assistant',
+        triggerSource: "spaces",
+        task: task.trim(),
+        conversationId,
+      }).catch((e) => console.warn("[run] AgentRun.start failed:", e instanceof Error ? e.message : e));
     }
 
     res.json({ success: true, sessionId: body.sessionId });
@@ -285,6 +389,94 @@ router.post("/sessions/:id/result", async (req: Request<{ id: string }>, res: Re
 
   // Acknowledge xyne-claw immediately
   res.json({ success: true });
+
+  // Persist assistant message in ChatMessage table (same as /chat callback)
+  // so conversations appear in the /conversations history endpoint
+  const conversationId = payload["conversationId"] as string | undefined;
+  const agentSlug = payload["agentSlug"] as string | undefined;
+  const userId = payload["userId"] as string | undefined;
+  const content = (payload["result"] as string) || (payload["error"] as string) || "";
+  const status = payload["status"] as string;
+
+  const toolInvocations = payload["toolInvocations"] as unknown[] | undefined;
+  const toolsUsed = payload["toolsUsed"] as string[] | undefined;
+  const attachments = payload["attachments"] as Array<{ fileName: string; mimeType: string; data: string }> | undefined;
+
+  if (conversationId && userId) {
+    try {
+      // Persist any tool-generated attachments (e.g. create-ppt .pptx) into GCS
+      // and the ChatAttachment table so the UI can render download cards
+      const persistedAttachments: Array<{ id: string; mimeType: string; originalFilename: string; size: number }> = [];
+      
+      if (attachments?.length) {
+        for (const att of attachments) {
+          try {
+            const buffer = Buffer.from(att.data, 'base64');
+            const now = new Date();
+            const year = String(now.getUTCFullYear());
+            const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+            const safeName = att.fileName.replace(/[^\w.\-]+/g, '_').slice(0, 200);
+            const destPath = `chat-attachments/${userId}/${year}/${month}/${Date.now()}-${randomUUID()}-${safeName}`;
+            
+            await gcsService.uploadFile(buffer, destPath, att.mimeType);
+            
+            const row = await prisma.chatAttachment.create({
+              data: {
+                uploaderUserId: userId,
+                storageProvider: 'gcs',
+                url: destPath,
+                originalFilename: att.fileName,
+                mimeType: att.mimeType,
+                size: buffer.length,
+              },
+            });
+            
+            persistedAttachments.push({
+              id: row.id,
+              mimeType: row.mimeType,
+              originalFilename: row.originalFilename,
+              size: row.size,
+            });
+          } catch (attErr) {
+            console.error(`[sessions] ${id}: failed to persist attachment ${att.fileName}:`, attErr instanceof Error ? attErr.message : String(attErr));
+          }
+        }
+      }
+
+      const assistantMsg = await chatMessageRepository.create({
+        conversationId,
+        agentSlug: agentSlug || 'assistant',
+        userId,
+        role: 'assistant',
+        content,
+        status: status === 'completed' ? 'completed' : 'failed',
+      });
+
+      // Link attachments to the assistant message
+      if (persistedAttachments.length) {
+        await chatAttachmentRepository.linkToMessage(
+          persistedAttachments.map(a => a.id),
+          assistantMsg.id,
+          userId
+        );
+      }
+    } catch (msgErr) {
+      console.warn(`[sessions] ${id}: failed to persist assistant message:`, msgErr instanceof Error ? msgErr.message : String(msgErr));
+    }
+
+    // Also finalize the AgentRun with tool invocations so they appear in history
+    try {
+      await agentRunRepository.finalize(id, {
+        status: status === 'completed' ? 'completed' : 'failed',
+        result: content,
+        error: status !== 'completed' ? content : null,
+        toolsUsed: toolsUsed ?? [],
+        ...(toolInvocations ? { toolInvocations } : {}),
+      });
+    } catch (finalizeErr) {
+      console.warn(`[sessions] ${id}: failed to finalize agent run:`, finalizeErr instanceof Error ? finalizeErr.message : finalizeErr);
+    }
+  }
 
   // Forward result to Xyne Spaces
   if (!CONFIG.xyneSpacesCallbackUrl) {

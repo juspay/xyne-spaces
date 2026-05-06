@@ -19,5 +19,6 @@ export interface ResearchRepository {
  */
 export interface ResearchContext {
   type: 'product' | 'repository';
+  id?: string;
   name: string;
 }

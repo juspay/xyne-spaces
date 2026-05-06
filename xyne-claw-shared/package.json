@@ -12,12 +12,14 @@
     "./tools/google": "./src/tools/google/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "npx playwright install chromium"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@xyne/kata-sdk": "file:../packages/kata-sdk",
     "pdf-parse": "^2.4.5",
+    "playwright": "^1.59.1",
     "pptxgenjs": "^4.0.1",
     "yaml": "^2.7.0"
   },

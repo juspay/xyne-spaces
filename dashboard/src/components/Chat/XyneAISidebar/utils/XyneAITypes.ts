@@ -40,6 +40,7 @@ export interface SelectionContextInput {
 
 export interface ResearchContext {
   type: 'product' | 'repository';
+  id: string;
   name: string;
 }
 
@@ -82,6 +83,102 @@ export interface StoredMessage {
   feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
   attachments?: MessageAttachment[];
   parentId?: string | null; // Parent message ID for tree branching
+
+  // ============================================================================
+  // v2 Types (xyne-claw integration)
+  // ============================================================================
+
+  /**
+   * Reasoning/thinking content from the agent (v2)
+   */
+  reasoning?: string;
+
+  /**
+   * Tool invocations made during the response (v2)
+   */
+  toolInvocations?: ToolInvocation[];
+
+  /**
+   * Pending actions requiring human approval (v2)
+   */
+  pendingActions?: PendingAction[];
+}
+
+/**
+ * Citation from xyne-claw tools
+ */
+export interface ClawCitation {
+  label?: string;
+  kind: 'thread' | 'canvas' | 'ticket' | 'external';
+  channelId?: string;
+  conversationId?: string;
+  channelName?: string;
+  channelType?: string;
+  viewAccessId?: string;
+  ticketId?: string;
+  url?: string;
+}
+
+/**
+ * Tool invocation from v2 streaming (xyne-claw)
+ */
+export interface ToolInvocation {
+  toolName: string;
+  toolCallId?: string;
+  args: Record<string, unknown>;
+  result?: string;
+  status: 'running' | 'completed' | 'error';
+  durationMs: number;
+  isError?: boolean;
+  subagentName?: string;
+  parentToolCallId?: string;
+  citations?: ClawCitation[];
+}
+
+/**
+ * Pending action for human-in-the-loop approval (v2)
+ */
+export interface PendingAction {
+  id: string;
+  serverType: string;
+  tool: string;
+  params: Record<string, unknown>;
+  signature: string;
+}
+
+/**
+ * v2 Stream Event Types from backend SSE
+ */
+export type StreamEventType =
+  | 'start'
+  | 'delta'
+  | 'tool_invocation'
+  | 'reasoning_delta'
+  | 'attachment'
+  | 'complete'
+  | 'error'
+  | 'end'
+  | 'ping';
+
+/**
+ * v2 Stream Event structure from SSE
+ */
+export interface StreamEvent {
+  type: StreamEventType;
+  sessionId?: string;
+  traceId?: string;
+  content?: string;
+  delta?: string;
+  reasoningDelta?: string;
+  toolInvocation?: ToolInvocation;
+  attachments?: Array<{
+    fileName: string;
+    mimeType: string;
+    data: string;
+  }>;
+  pendingActions?: PendingAction[];
+  status?: 'completed' | 'failed';
+  error?: string;
 }
 
 export interface ConversationHistory {
@@ -155,9 +252,30 @@ export interface Participant {
   picture: string;
 }
 export interface MessageAttachment {
-  filename: string;
+  /** Unique attachment ID (for persisted attachments from claw-auth) */
+  id?: string;
+  /** Original filename (from claw-auth API) */
+  originalFilename?: string;
+  /** Filename (alias for originalFilename, for compatibility) */
+  filename?: string;
+  /** MIME type */
   mimeType: string;
-  data: string; // base64 data
+  /** Base64 data (for streaming attachments during generation) */
+  data?: string;
+  /** Download URL (optional, for persisted attachments) */
+  downloadUrl?: string;
+  /** Width (for images) */
+  width?: number | null;
+  /** Height (for images) */
+  height?: number | null;
+  /** Metadata for special attachments (e.g., slide JSON for PPTX) */
+  metadata?: {
+    slideJson?: Array<{
+      index: number;
+      background?: { color?: string } | string;
+      objects: unknown[];
+    }>;
+  };
 }
 
 // Selection context from canvas
@@ -197,6 +315,26 @@ export interface Message {
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts
   parentId?: string | null; // Parent message ID for tree branching
+  sessionId?: string; // Session ID for v2 streaming
+
+  // ============================================================================
+  // v2 Types (xyne-claw integration) - mirrored from StoredMessage
+  // ============================================================================
+
+  /**
+   * Reasoning/thinking content from the agent (v2)
+   */
+  reasoning?: string;
+
+  /**
+   * Tool invocations made during the response (v2)
+   */
+  toolInvocations?: ToolInvocation[];
+
+  /**
+   * Pending actions requiring human approval (v2)
+   */
+  pendingActions?: PendingAction[];
   errorInfo?: {
     code?: string;
     title: string;

@@ -1,0 +1,180 @@
+/**
+ * Service layer for Ask AI v2 session API calls (xyne-claw backed).
+ * Proxies through the Spaces backend to xyne-claw-auth conversation APIs.
+ */
+
+import { apiInstance } from '../clients/apiClient';
+import type {
+  ConversationHistory as ConversationHistoryType,
+  Message,
+  ToolInvocation,
+} from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
+
+// ============================================================================
+// Claw API response types
+// ============================================================================
+
+interface ClawConversationSummary {
+  conversationId: string;
+  title: string;
+  messageCount: number;
+  lastMessageAt: string;
+}
+
+interface ClawConversationListResponse {
+  success: boolean;
+  data: ClawConversationSummary[];
+}
+
+interface ClawChatMessage {
+  id: string;
+  conversationId: string;
+  agentSlug: string;
+  userId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  status: string;
+  createdAt: string;
+  attachments?: Array<{
+    id: string;
+    mimeType: string;
+    originalFilename: string;
+    width: number | null;
+    height: number | null;
+  }>;
+}
+
+interface ClawMessagesResponse {
+  success: boolean;
+  data: ClawChatMessage[];
+  toolInvocations?: unknown[];
+}
+
+// ============================================================================
+// API functions
+// ============================================================================
+
+/**
+ * Fetch all conversations for the current user from claw.
+ * Maps claw format to the existing ConversationHistoryType.
+ */
+export async function fetchV2Conversations(): Promise<ConversationHistoryType[]> {
+  const response = await apiInstance.get<ClawConversationListResponse>('/xyne-ai/v2/conversations');
+
+  if (!response.data.success || !response.data.data) {
+    return [];
+  }
+
+  return response.data.data.map(conv => ({
+    id: conv.conversationId,
+    sessionId: conv.conversationId,
+    title: conv.title || 'New Chat',
+    channelId: '',
+    isStarred: false,
+    lastUpdated: new Date(conv.lastMessageAt),
+    createdAt: new Date(conv.lastMessageAt),
+    messages: [],
+  }));
+}
+
+/**
+ * Fetch messages for a specific conversation from claw.
+ * Maps claw message format to the frontend Message type.
+ */
+export async function fetchV2ConversationMessages(conversationId: string): Promise<Message[]> {
+  const response = await apiInstance.get<ClawMessagesResponse>(
+    `/xyne-ai/v2/conversations/${conversationId}/messages`,
+  );
+
+  if (!response.data.success || !response.data.data) {
+    return [];
+  }
+
+  const allToolInvocations = (response.data.toolInvocations || []) as Array<{
+    toolName: string;
+    args: Record<string, unknown>;
+    result?: string;
+    status: 'running' | 'completed' | 'error';
+    durationMs: number;
+    toolCallId?: string;
+    startedAt?: string;
+    isError?: boolean;
+    citations?: ToolInvocation['citations'];
+  }>;
+
+  // Chain messages sequentially by setting parentId
+  // Each message's parent is the previous message in the array
+  const mappedMessages = response.data.data.map((msg, index, arr) => {
+    const isUser = msg.role === 'user';
+
+    // Set parentId to the previous message's id, or null for the first message
+    const parentId = index > 0 ? arr[index - 1]!.id : null;
+
+    // For assistant messages, find tool invocations that were started just before this message was created
+    // Tool invocations should be associated with the assistant response they helped generate
+    let msgToolInvocations: ToolInvocation[] = [];
+    if (!isUser && allToolInvocations.length > 0) {
+      const msgCreatedAt = new Date(msg.createdAt).getTime();
+
+      // Find tool invocations that were started before this message was created
+      // and after the previous user message (if any)
+      const prevUserMsg = arr
+        .slice(0, index)
+        .reverse()
+        .find(m => m.role === 'user');
+      const prevUserTime = prevUserMsg ? new Date(prevUserMsg.createdAt).getTime() : 0;
+
+      msgToolInvocations = allToolInvocations
+        .filter(inv => {
+          const toolStartedAt = inv.startedAt ? new Date(inv.startedAt).getTime() : 0;
+          // Tool was started after the previous user message and before this assistant message
+          return toolStartedAt > prevUserTime && toolStartedAt <= msgCreatedAt;
+        })
+        .map(inv => {
+          const baseInvocation: ToolInvocation = {
+            toolName: inv.toolName,
+            args: inv.args,
+            status: inv.status,
+            durationMs: inv.durationMs,
+            toolCallId: inv.toolCallId ?? `call-${Math.random().toString(36).slice(2)}`,
+          };
+
+          // Only add optional properties if they exist
+          if (inv.result !== undefined) baseInvocation.result = inv.result;
+          if (inv.isError !== undefined) baseInvocation.isError = inv.isError;
+          if (inv.citations !== undefined) baseInvocation.citations = inv.citations;
+
+          return baseInvocation;
+        });
+    }
+
+    const mappedMessage: Message = {
+      id: msg.id,
+      type: isUser ? ('user' as const) : ('bot' as const),
+      content: msg.content,
+      timestamp: new Date(msg.createdAt),
+      isStreaming: false,
+      streamingContent: '',
+      sessionId: conversationId,
+      parentId,
+      toolOutputs: [],
+      toolInvocations: msgToolInvocations,
+      pendingActions: [],
+    };
+
+    // Map attachments from claw format to frontend format
+    if (msg.attachments && msg.attachments.length > 0) {
+      mappedMessage.attachments = msg.attachments.map(att => ({
+        id: att.id,
+        originalFilename: att.originalFilename,
+        mimeType: att.mimeType,
+        width: att.width,
+        height: att.height,
+      }));
+    }
+
+    return mappedMessage;
+  });
+
+  return mappedMessages;
+}

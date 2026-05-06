@@ -361,7 +361,8 @@ export const generateToolInputStatus = (
           'Wrapping up the research',
         ];
 
-      case 'generate_image': {
+      case 'generate_image':
+      case 'generate-image': {
         const prompt = extractSafeString(input['prompt']);
         return [
           prompt
