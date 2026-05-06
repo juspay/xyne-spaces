@@ -766,6 +766,9 @@ export const ticketTable = table('tickets')
     ticketType: string().optional(),
     isArchived: boolean(),
     lastEmailAt: number(),
+    classificationData: json().optional(),
+    aiCategory: string().optional(),
+    aiSubCategory: string().optional(),
   })
   .primaryKey('id');
 
@@ -1744,8 +1747,23 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     assigneeUserGroupId: string().optional(),
     boardId: string().optional(),
     sendAsEmail: string().optional(),
+    classificationEnabled: boolean(),
+    classificationPrompt: string().optional(),
+    categoryField: string().optional(),
+    subCategoryField: string().optional(),
   })
   .primaryKey('channelId');
+
+export const classificationMappingTable = table('classification_mappings') // ClassificationMapping
+  .columns({
+    id: string(),
+    channelId: string(),
+    category: string(),
+    subCategory: string().optional(),
+    userGroupId: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
 
 export const formTable = table('forms')
   .columns({
@@ -3852,6 +3870,7 @@ export const schema = createSchema({
     emailSignatureTable,
     emailReadTable,
     emailChannelPreferenceTable,
+    classificationMappingTable,
     formTable,
     formContextMappingTable,
     formFieldsTable,
@@ -4055,6 +4074,7 @@ export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailRead = Row<typeof schema.tables.email_reads>;
 export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
+export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
 export type FormFields = Row<typeof schema.tables.form_fields>;

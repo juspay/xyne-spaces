@@ -9572,8 +9572,74 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ownerUserId: ownerUserId ?? authData.sub,
               assigneeUserGroupId: assigneeUserGroupId ?? null,
               sendAsEmail: sendAsEmail ?? null,
+              classificationEnabled: false,
             });
           }
+        },
+      ),
+      upsertClassificationConfig: defineMutator(
+        z.object({
+          channelId: z.string(),
+          classificationEnabled: z.boolean(),
+          classificationPrompt: z.string(),
+          categoryField: z.string(),
+          subCategoryField: z.string().optional().nullable(),
+        }),
+        async ({ tx, ctx, args }) => {
+          const { channelId, classificationEnabled, classificationPrompt, categoryField, subCategoryField } = args;
+          const existing = await tx.run(
+            zql.email_channel_preferences.where('channelId', channelId).one(),
+          );
+          if (existing) {
+            await tx.mutate.email_channel_preferences.update({
+              channelId,
+              classificationEnabled,
+              classificationPrompt,
+              categoryField,
+              subCategoryField: subCategoryField ?? null,
+            });
+          } else {
+            await tx.mutate.email_channel_preferences.insert({
+              channelId,
+              ownerUserId: ctx.userID,
+              classificationEnabled,
+              classificationPrompt,
+              categoryField,
+              subCategoryField: subCategoryField ?? null,
+            });
+          }
+        },
+      ),
+    },
+    classificationMapping: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          channelId: z.string(),
+          category: z.string(),
+          subCategory: z.string().optional().nullable(),
+          userGroupId: z.string(),
+          createdAt: z.number(),
+        }),
+        async ({ tx, args }) => {
+          await tx.mutate.classification_mappings.insert(args);
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          category: z.string().optional(),
+          subCategory: z.string().optional().nullable(),
+          userGroupId: z.string().optional(),
+        }),
+        async ({ tx, args: { id, ...fields } }) => {
+          await tx.mutate.classification_mappings.update({ id, ...fields });
+        },
+      ),
+      delete: defineMutator(
+        z.object({ id: z.string() }),
+        async ({ tx, args: { id } }) => {
+          await tx.mutate.classification_mappings.delete({ id });
         },
       ),
     },

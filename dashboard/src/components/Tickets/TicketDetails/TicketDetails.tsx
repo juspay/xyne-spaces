@@ -86,6 +86,8 @@ import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import ApprovalNudgeBanner from './ApprovalNudgeBanner';
 import { isReleaseTicket } from '@xyne/shared';
 import { generateReleaseNotes } from '../../../services/ticketBoardService';
+import { AIClassificationPanel } from './AIClassificationPanel';
+import type { TicketClassificationData } from '../../../types/classification';
 
 const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -2461,6 +2463,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             ticketKey='Merchant ID'
             value={<span className='text-sm text-muted-foreground'>{ticket.merchantId}</span>}
           />
+        )}
+
+        {/* AI Classification Panel */}
+        {ticket?.classificationData && channelId && (
+          <div className='my-4'>
+            <AIClassificationPanel
+              ticketId={ticket.id}
+              channelId={channelId}
+              classificationData={ticket.classificationData as unknown as TicketClassificationData}
+              userGroups={userGroups.map(g => ({ id: g.id, name: g.name }))}
+              hasFormFields={!!(allFormFields && allFormFields.length > 0)}
+            />
+          </div>
         )}
 
         {/* Additional Form Fields */}

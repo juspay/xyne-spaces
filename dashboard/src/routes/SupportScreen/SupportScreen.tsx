@@ -109,6 +109,8 @@ import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetch
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
 import { InboxSettings } from '../../components/xyne-desk/InboxSettings/InboxSettings';
+import { ClassificationSettings } from '../../components/xyne-desk/ClassificationSettings/ClassificationSettings';
+import { useUserGroups } from '../../hooks/useUserGroup';
 import { DeskIntegrationCard } from '../../components/xyne-desk/DeskIntegrationCard/DeskIntegrationCard';
 import {
   useEmailChannelPreference,
@@ -448,6 +450,8 @@ const SupportScreen = (): ReactElement => {
     setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
     setDraftInboxSendAsEmail(currentInboxSendAsEmail);
   }, [currentInboxOwnerUserId, currentInboxAssigneeUserGroupId, currentInboxSendAsEmail]);
+
+  const allUserGroups = useUserGroups();
 
   // Fetch stages for the board configured in email channel preference
   const boardId = emailChannelPreference?.boardId;
@@ -1484,6 +1488,11 @@ const SupportScreen = (): ReactElement => {
                         <div className='border-t border-border' />
                         <DeskIntegrationCard
                           channelId={selectedChannelId}
+                          canManage={canEditSendAsEmail}
+                        />
+                        <ClassificationSettings
+                          channelId={selectedChannelId}
+                          userGroups={allUserGroups.map(g => ({ id: g.id, name: g.name }))}
                           canManage={canEditSendAsEmail}
                         />
                         <div className='border-t border-border' />
