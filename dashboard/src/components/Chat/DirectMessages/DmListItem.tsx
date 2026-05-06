@@ -162,7 +162,12 @@ export const DmListItem = ({
                 />
               )}
             </div>
-            <p className='shrink-0 text-[14px] tracking-[-0.28px] text-muted-foreground'>
+            <p
+              className={cn(
+                'shrink-0 text-[14px] tracking-[-0.28px] text-muted-foreground',
+                unreadCount > 0 && 'text-sidebar-badge-accent',
+              )}
+            >
               {formatTime(lastMessage?.createdAt)}
             </p>
           </div>
@@ -209,7 +214,7 @@ export const DmListItem = ({
               {renderMessagePreview()}
             </div>
             {unreadCount > 0 ? (
-              <div className='font-["Geist_Mono"] text-[14px] font-semibold leading-[1.2] text-action-primary-foreground shrink-0 bg-action-primary flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
+              <div className='font-["Geist_Mono"] text-[14px] font-semibold leading-[1.2] text-sidebar-badge-accent-foreground shrink-0 bg-sidebar-badge-accent flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
                 {unreadCount}
               </div>
             ) : null}
@@ -270,7 +275,12 @@ export const DmListItem = ({
               )}
             </div>
             {lastMessage && (
-              <span className="shrink-0 font-['Inter'] font-normal text-[12px] text-muted-foreground tracking-[-0.24px] leading-[1.2]">
+              <span
+                className={cn(
+                  "shrink-0 font-['Inter'] font-normal text-[12px] text-muted-foreground tracking-[-0.24px] leading-[1.2]",
+                  unreadCount > 0 && 'text-sidebar-badge-accent',
+                )}
+              >
                 {formatTime(lastMessage.createdAt)}
               </span>
             )}
@@ -321,8 +331,8 @@ export const DmListItem = ({
               {renderMessagePreview()}
             </p>
             {unreadCount > 0 && (
-              <div className='shrink-0 bg-action-primary flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
-                <span className="font-['Geist_Mono'] text-[14px] font-semibold leading-[1.2] text-action-primary-foreground">
+              <div className='shrink-0 bg-sidebar-badge-accent flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
+                <span className="font-['Geist_Mono'] text-[14px] font-semibold leading-[1.2] text-sidebar-badge-accent-foreground">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               </div>

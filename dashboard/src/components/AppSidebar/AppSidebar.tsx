@@ -44,6 +44,7 @@ import {
   AppWindow,
   SearchCode,
   Building2,
+  AlertCircle,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -63,9 +64,11 @@ import { useKeyboard } from '../../contexts/KeyboardContext';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
+import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 
 const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize?: number }[] = [
   { path: '/chat/dir', label: 'Chat', icon: Inbox },
+  { path: '/chat/dm', label: 'DMs', icon: MessageCircle },
   { path: '/calls', label: 'Calls', icon: Phone },
   { path: '/recordings', label: 'Recordings', icon: Mic },
   { path: '/tickets', label: 'Tickets', icon: Ticket },
@@ -143,6 +146,11 @@ const mobileNavigationItems = [
     path: '/chat/recap',
     label: 'Recap',
     icon: Sparkles,
+  },
+  {
+    path: '/error-report',
+    label: 'Report Issue',
+    icon: AlertCircle,
   },
 ];
 
@@ -478,6 +486,7 @@ const MobileNavbar = ({
   const analyticsPermission = useCanViewAnalytics();
   const { isMobile } = usePlatform();
   const { isKeyboardOpen } = useKeyboard();
+  const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
 
   // All hooks MUST be called before any early returns (React Rules of Hooks)
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -516,6 +525,10 @@ const MobileNavbar = ({
   const handleItemClick = (item: { path: string; label: string }): void => {
     if (item.path === '/recorder' && isMobile && reactNativeBridge.isAvailable()) {
       reactNativeBridge.startNoteTaker();
+      onNavigationClick(item.label);
+    }
+    if (item.path === '/error-report') {
+      setIsErrorReportOpen(true);
       onNavigationClick(item.label);
     }
   };
@@ -616,9 +629,10 @@ const MobileNavbar = ({
                     const Icon = item.icon;
                     const isActive = activeRoute === item.path;
                     const isRecorder = item.path === '/recorder';
+                    const isButtonItem = isRecorder || item.path === '/error-report';
 
                     // For Record, don't use Link - just handle click
-                    if (isRecorder) {
+                    if (isButtonItem) {
                       return (
                         <div
                           key={item.path}
@@ -708,6 +722,7 @@ const MobileNavbar = ({
           </div>
         </div>
       )}
+      <ErrorReportModal isOpen={isErrorReportOpen} onClose={() => setIsErrorReportOpen(false)} />
     </>
   );
 };
