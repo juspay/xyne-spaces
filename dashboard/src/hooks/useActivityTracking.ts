@@ -4,6 +4,7 @@ import { websocketService } from '../services/clients/socketClient';
 import { Platform, TriggerType, ActivityEventPayload, TrackActivityOptions } from '@xyne/shared';
 import { isElectronApp } from '../utils/electronApp';
 import { useSelf } from './useUsers';
+import { ENABLE_ACTIVITY_LOG } from '../config';
 
 export const WS_ACTIVITY_EVENT = 'user_activity_event';
 
@@ -78,6 +79,9 @@ export function useActivityTracking() {
   const track = useCallback(
     (options: TrackActivityOptions): void => {
       if (!currentUser?.id) {
+        return;
+      }
+      if (!ENABLE_ACTIVITY_LOG) {
         return;
       }
 

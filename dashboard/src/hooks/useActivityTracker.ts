@@ -5,6 +5,7 @@ import { ActivityEvent, ActivityStatus, ActivityLogPayload } from '@xyne/shared'
 import { useAuth } from './useAuth';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
+import { ENABLE_ACTIVITY_LOG } from '../config';
 
 // Idle timeout
 const IDLE_TIMEOUT_MS = 60_000; // 60 seconds
@@ -51,6 +52,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
     ) => {
       // Don't log if user not authenticated
       if (!user?.id) return;
+      if (!ENABLE_ACTIVITY_LOG) return;
 
       const payload: ActivityLogPayload = {
         timestamp: new Date().toISOString(),
@@ -156,6 +158,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
   // Initialize idle timer
   const idleTimer = useIdleTimer({
     timeout: IDLE_TIMEOUT_MS,
+    disabled: !ENABLE_ACTIVITY_LOG,
 
     // Events to monitor
     events: ['mousemove', 'keydown', 'wheel', 'mousedown', 'touchstart', 'touchmove'],

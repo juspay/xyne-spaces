@@ -13,13 +13,22 @@ import {
   SEMRESATTRS_SERVICE_INSTANCE_ID,
 } from '@opentelemetry/semantic-conventions';
 import { metrics } from '@opentelemetry/api';
-import { OTEL_METRICS_ENDPOINT, OTEL_EXPORT_INTERVAL_MS, OTEL_SERVICE_NAME } from '../../config';
+import {
+  ENABLE_OTEL_METRICS,
+  OTEL_METRICS_ENDPOINT,
+  OTEL_EXPORT_INTERVAL_MS,
+  OTEL_SERVICE_NAME,
+} from '../../config';
 
 /**
  * Initialize OpenTelemetry metrics provider
  * Should be called once at application startup
  */
 export function initializeTelemetry(): void {
+  if (!ENABLE_OTEL_METRICS) {
+    return;
+  }
+
   try {
     // Create resource with service identification
     const resource = resourceFromAttributes({

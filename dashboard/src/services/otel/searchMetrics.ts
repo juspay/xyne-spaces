@@ -10,7 +10,7 @@
 
 import { metrics } from '@opentelemetry/api';
 import type { Counter, Histogram, Meter } from '@opentelemetry/api';
-import { SEARCH_VERSION, OTEL_SERVICE_NAME } from '../../config';
+import { ENABLE_OTEL_METRICS, SEARCH_VERSION, OTEL_SERVICE_NAME } from '../../config';
 
 /**
  * Lazy getter for meter - only accessed when metrics are first used
@@ -174,6 +174,10 @@ export const searchTabClicks: Counter = new Proxy({} as Counter, {
  * Wraps metric operations in try-catch to prevent app crashes
  */
 export function safeRecordMetric(fn: () => void): void {
+  if (!ENABLE_OTEL_METRICS) {
+    return;
+  }
+
   try {
     fn();
   } catch (error) {

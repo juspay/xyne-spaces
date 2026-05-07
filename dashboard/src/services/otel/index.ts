@@ -1,3 +1,5 @@
+import { ENABLE_OTEL_METRICS } from '../../config';
+
 export { httpRequestDuration, httpRequestTotal, httpRequestErrors } from './apiMetrics';
 
 export {
@@ -41,6 +43,10 @@ export {
 export { trackNudgeActed, trackNudgeDismissed } from './nudgeMetrics';
 
 export function safeRecordMetric(fn: () => void): void {
+  if (!ENABLE_OTEL_METRICS) {
+    return;
+  }
+
   try {
     fn();
   } catch (error) {
