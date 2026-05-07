@@ -69,9 +69,9 @@ export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, 
     });
   }
 
-  async findByXyneId(xyneId: string): Promise<Ticket | null> {
+  async findByXyneId(xyneId: string, workspaceId: string): Promise<Ticket | null> {
     return await this.db.ticket.findUnique({
-      where: { xyneId },
+      where: { workspaceId_xyneId: { workspaceId, xyneId } },
     });
   }
 

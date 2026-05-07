@@ -28,6 +28,7 @@ import { ThreadSummary } from '../../components/Chat/Summary';
 import { useMachine } from '@xstate/react';
 import { vscodeWorkspaceMachine, type EditorTab } from '../../machines/vscodeWorkspaceMachine';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useAuthContextValues } from '../../hooks/useAuth';
 
 const VSCodeWorkspaceScreen: React.FC = () => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -814,10 +815,14 @@ const TabContent: React.FC<{
   setShowSummary: (show: boolean) => void;
   onClose: () => void;
 }> = ({ tab, showSummary, setShowSummary, onClose }) => {
+  const { workspaceId } = useAuthContextValues();
   // Query ticket by xyneId if this is a ticket tab that doesn't have conversation/channel details yet
-  const [ticket] = useCachedQuery(queries.ticketByXyneId({ xyneId: tab.xyneId || '' }), {
-    enabled: !!tab.xyneId && !tab.conversationId,
-  });
+  const [ticket] = useCachedQuery(
+    queries.ticketByXyneIdV2({ xyneId: tab.xyneId || '', workspaceId }),
+    {
+      enabled: !!tab.xyneId && !tab.conversationId,
+    },
+  );
 
   const conversationId = tab.conversationId || ticket?.conversationId;
   const channelId = tab.channelId || ticket?.conversation?.channelId;

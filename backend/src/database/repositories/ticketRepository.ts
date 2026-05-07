@@ -597,9 +597,9 @@ export class TicketRepository {
   /**
    * Find ticket by xyneId with minimal fields for meet callback
    */
-  async findByXyneIdForMeet(xyneId: string) {
+  async findByXyneIdForMeet(xyneId: string, workspaceId: string) {
     return await prisma.ticket.findFirst({
-      where: { xyneId },
+      where: { xyneId, workspaceId },
       select: {
         id: true,
         conversationId: true,
@@ -626,9 +626,9 @@ export class TicketRepository {
   /**
    * Get ticket by XYNE ID (e.g., "XYNE-123")
    */
-  async getTicketByXyneId(xyneId: string) {
+  async getTicketByXyneId(xyneId: string, workspaceId: string) {
     return await prisma.ticket.findUnique({
-      where: { xyneId }
+      where: { workspaceId_xyneId: { workspaceId, xyneId } }
     });
   }
 

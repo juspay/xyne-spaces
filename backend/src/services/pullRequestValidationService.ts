@@ -46,6 +46,7 @@ export class PullRequestValidationService {
     commitHash: string,
     sourceBranch: string,
     destinationBranch: string,
+    workspaceId: string,
     repoName?: string,
     repoUrl?: string,
     prUrl?: string,
@@ -65,7 +66,7 @@ export class PullRequestValidationService {
       const ticketId = `${ticketIdMatch[1]}-${ticketIdMatch[2]}`;
       logger.info(`[PR-Validation] Validating PR ${prId} against ticket ${ticketId}`);
 
-      const ticket = await this.ticketRepository.getTicketByXyneId(ticketId);
+      const ticket = await this.ticketRepository.getTicketByXyneId(ticketId, workspaceId);
 
 
       if (!ticket) {

@@ -179,10 +179,18 @@ async function handleBitbucketWebhook(req: Request, res: Response): Promise<void
             return;
         }
 
+        // Extract workspaceId from URL path
+        const workspaceId = req.params.workspaceId;
+        if (!workspaceId) {
+            logger.warn('[Bitbucket-Webhook] Missing workspaceId in URL path');
+            res.status(400).json({ success: false, error: 'Missing workspaceId' });
+            return;
+        }
+
         payload.eventKey = eventKey;
         payload.receivedAt = new Date().toISOString();
 
-        const result = await bitbucketWebhookService.handleWebhookEvent(eventKey, payload);
+        const result = await bitbucketWebhookService.handleWebhookEvent(eventKey, payload, workspaceId);
         res.status(200).json(result);
     } catch (error) {
         logger.error('[Bitbucket-Webhook] Error:', error);
@@ -191,7 +199,7 @@ async function handleBitbucketWebhook(req: Request, res: Response): Promise<void
 }
 
 
-router.post('/bitbucket', bitbucketWebhookMiddleware.verify, handleBitbucketWebhook);
+router.post('/bitbucket/:workspaceId', bitbucketWebhookMiddleware.verify, handleBitbucketWebhook);
 
 async function handleGitHubWebhook(req: Request, res: Response): Promise<void> {
   try {

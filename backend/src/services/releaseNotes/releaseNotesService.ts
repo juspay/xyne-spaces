@@ -145,6 +145,11 @@ export class ReleaseNotesService {
     const prs: ReleaseNotesContext['prs'] = [];
 
     try {
+      const ticket = await this.ticketRepository.getTicketById(ticketId);
+      if (!ticket) {
+        logger.warn(`[ReleaseNotesService] Ticket not found for ID ${ticketId}`);
+        return prs;
+      }
 
       const formValues = await this.formsRepository.getFormEntityValuesByEntityId(
         ticketId,
@@ -169,6 +174,7 @@ export class ReleaseNotesService {
         projectKey: workspace,
         repositorySlug: repoSlug,
         branch,
+        workspaceId: ticket.workspaceId,
       });
 
       if (!results || results.length === 0) {
@@ -186,7 +192,7 @@ export class ReleaseNotesService {
         processedPRs.add(prId);
 
         const ticketIdFromPR = this.extractTicketId(result.pullRequest.title);
-        const linkedTicket = ticketIdFromPR ? await this.fetchTicketByXyneId(ticketIdFromPR) : null;
+        const linkedTicket = ticketIdFromPR ? await this.fetchTicketByXyneId(ticketIdFromPR, ticket.workspaceId) : null;
 
         const potVideoLink = this.extractPotVideoLink(result.pullRequest.description);
 
@@ -220,13 +226,13 @@ export class ReleaseNotesService {
     return null;
   }
 
-  private async fetchTicketByXyneId(xyneId: string): Promise<LinkedPrTicket['ticket'] | null> {
+  private async fetchTicketByXyneId(xyneId: string, workspaceId: string): Promise<LinkedPrTicket['ticket'] | null> {
     if (!this.ticketRepository) {
       return null;
     }
 
     try {
-      const ticket = await this.ticketRepository.getTicketByXyneId(xyneId);
+      const ticket = await this.ticketRepository.getTicketByXyneId(xyneId, workspaceId);
       if (!ticket) {
         return null;
       }

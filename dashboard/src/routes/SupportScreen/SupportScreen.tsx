@@ -2059,6 +2059,7 @@ const SupportTicketDetail = (): ReactElement => {
     channelId?: string;
     ticketId?: string;
   }>();
+  const { workspaceId } = useAuthContextValues();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const isAIPanelOpen = useSelector(
     xyneAIActor,
@@ -2112,8 +2113,9 @@ const SupportTicketDetail = (): ReactElement => {
     { enabled: !!ticketId && !!routeChannelId },
   );
   const [ticketByXyneId] = useCachedQuery(
-    queries.supportTicketByXyneIdV2({
+    queries.supportTicketByXyneIdV3({
       xyneId: ticketIdParam || '',
+      workspaceId: workspaceId,
       channelId: routeChannelId,
       isMember,
     }),

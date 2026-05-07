@@ -21,6 +21,7 @@ export type AnalyzeCommitsRequest =
     commitIds: string[];
     projectKey: string;
     repositorySlug: string;
+    workspaceId: string;
     branch?: string;
   }
   | {
@@ -28,6 +29,7 @@ export type AnalyzeCommitsRequest =
     newCommitId: string;
     projectKey: string;
     repositorySlug: string;
+    workspaceId: string;
     branch?: string;
   };
 
@@ -117,9 +119,9 @@ export class CommitAnalysisService {
     return null;
   }
 
-  private async fetchTicketByXyneId(xyneId: string): Promise<TicketInfo | null> {
+  private async fetchTicketByXyneId(xyneId: string, workspaceId: string): Promise<TicketInfo | null> {
     try {
-      const ticket = await this.ticketRepository!.getTicketByXyneId(xyneId);
+      const ticket = await this.ticketRepository!.getTicketByXyneId(xyneId, workspaceId);
 
       if (!ticket) {
         logger.debug(`Ticket ${xyneId} not found in database`);
@@ -171,7 +173,8 @@ export class CommitAnalysisService {
     commitId: string,
     projectKey: string,
     repositorySlug: string,
-    branch?: string
+    workspaceId: string,
+    branch?: string,
   ): Promise<CommitAnalysisResult> {
     const result: CommitAnalysisResult = {
       commitId,
@@ -212,7 +215,7 @@ export class CommitAnalysisService {
       } else {
         logger.debug(`Commit ${commitId}: Extracted ticket ID ${ticketId}`);
 
-        const ticket = await this.fetchTicketByXyneId(ticketId);
+        const ticket = await this.fetchTicketByXyneId(ticketId, workspaceId);
 
         if (!ticket) {
           logger.info(`Commit ${commitId}: Ticket ${ticketId} not found in database`);
@@ -261,6 +264,11 @@ export class CommitAnalysisService {
     const isRangeMode = 'deployedCommitId' in request && 'newCommitId' in request;
     const projectKey = request.projectKey;
     const repositorySlug = request.repositorySlug;
+    const workspaceId = request.workspaceId;
+
+    if (!workspaceId) {
+      throw new Error('workspaceId is required for commit analysis');
+    }
 
     let commitIds: string[];
 
@@ -317,7 +325,7 @@ export class CommitAnalysisService {
     try {
       results = await Promise.all(
         commitIds.map((commitId) =>
-          this.analyzeEachCommit(commitId, projectKey, repositorySlug, request.branch)
+          this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, request.branch)
         )
       );
     } catch (error) {

@@ -605,6 +605,22 @@ export const queries = defineQueries({
         .one();
     },
   ),
+  supportTicketByXyneIdV3: defineQuery(
+    z.object({ xyneId: z.string(), workspaceId: z.string(), channelId: z.string(), isMember: z.boolean() }),
+    ({ ctx, args: { xyneId, workspaceId } }) => {
+      return zql.tickets
+        .where('xyneId', xyneId)
+        .where('workspaceId', workspaceId)
+        .related('project')
+        .related('tags')
+        .related('entity')
+        .related('emails', q => q.related('attachments'))
+        .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('emailReads', q => q.where('userId', ctx.userID))
+        .related('conversation')
+        .one();
+    },
+  ),
   // Paginated variant of supportTicketsFiltered for use with @rocicorp/zero-virtual.
   // Cursor = (lastEmailAt, id) matching the orderBy. Active threads bubble up.
   // channelId + isMember are forwarded to TicketsACL for membership gating.
@@ -782,6 +798,18 @@ export const queries = defineQueries({
   ticketByXyneId: defineQuery(z.object({ xyneId: z.string() }), ({ args: { xyneId } }) => {
     return zql.tickets
       .where('xyneId', xyneId)
+      .related('project')
+      .related('tags')
+      .related('referencesOut', ref => ref.related('targetTicket'))
+      .related('referencesIn', ref => ref.related('sourceTicket'))
+      .related('entity')
+      .related('conversation')
+      .one();
+  }),
+  ticketByXyneIdV2: defineQuery(z.object({ xyneId: z.string(), workspaceId: z.string() }), ({ args: { xyneId, workspaceId } }) => {
+    return zql.tickets
+      .where('xyneId', xyneId)
+      .where('workspaceId', workspaceId)
       .related('project')
       .related('tags')
       .related('referencesOut', ref => ref.related('targetTicket'))

@@ -385,7 +385,7 @@ model Ticket {
   closedAt         DateTime?         // When the reporter closed the ticket after verification
   closedBy         String?           // User who closed the ticket
   referenceTicket  String[]          // Array of ticket IDs for related tickets (duplicates, related incidents, etc.)
-  xyneId           String            @unique // Human readable ID
+  xyneId           String            // Human readable ID
   projectId        String            // Project to which the ticket is linked
   workspaceId      String            // Workspace for ACL optimization (denormalized from project)
   userGroupId      String?            // User group to which the ticket belongs
@@ -443,6 +443,8 @@ model Ticket {
   @@index([isArchived, createdAt(sort: Desc), id])
   @@index([projectId, createdAt(sort: Desc), id])
   @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([xyneId])
+  @@unique([workspaceId, xyneId])
   @@map("tickets")
   @@schema("public")
 }
