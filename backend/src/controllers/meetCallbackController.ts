@@ -63,11 +63,13 @@ export class MeetCallbackController {
 
       // Extract identifiers from query params
       const xyneTicketId = req.query.xyneTicketId as string;
+      const workspaceId = req.query.workspaceId as string;
       const threadId = req.query.threadId as string;
       const meetCode = req.query.meetCode as string;
 
       logger.info('[MeetCallbackController] Received callback from SAM', {
         xyneTicketId,
+        workspaceId,
         threadId,
         meetCode,
         status: payload.status,
@@ -80,6 +82,13 @@ export class MeetCallbackController {
         return;
       }
 
+      if (!workspaceId) {
+        res.status(400).json({
+          error: 'Missing required parameter: workspaceId',
+        });
+        return;
+      }
+
       if (!meetCode) {
         res.status(400).json({
           error: 'Missing required parameter: meetCode',
@@ -87,8 +96,8 @@ export class MeetCallbackController {
         return;
       }
 
-      // Find ticket by xyneId using centralized repository
-      const ticket = await repositories.tickets.findByXyneIdForMeet(xyneTicketId);
+      // Find ticket by xyneId and workspaceId using centralized repository
+      const ticket = await repositories.tickets.findByXyneIdForMeet(xyneTicketId, workspaceId);
 
       if (!ticket) {
         logger.warn('[MeetCallbackController] Ticket not found', { xyneTicketId });

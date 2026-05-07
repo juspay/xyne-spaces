@@ -140,6 +140,7 @@ export class CommitAnalysisController {
         branch,
         projectKey: workspace,
         repositorySlug: repoSlug,
+        workspaceId: params.workspaceId,
       };
 
       const results = await this.commitAnalysisService!.analyzeCommits(analysisRequest);

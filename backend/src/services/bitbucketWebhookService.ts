@@ -54,10 +54,11 @@ export class BitbucketWebhookService {
    */
   async handleWebhookEvent(
     eventKey: string,
-    payload: BitbucketWebhookEnvelope
+    payload: BitbucketWebhookEnvelope,
+    workspaceId: string,
   ): Promise<{ success: boolean; message: string }> {
     try {
-      logger.info(`[Bitbucket-Webhook] Received event: ${eventKey}`);
+      logger.info(`[Bitbucket-Webhook] Received event: ${eventKey} for workspace: ${workspaceId}`);
 
       // Check if this is a PR event
       if (!this.isPullRequestEvent(eventKey)) {
@@ -66,7 +67,7 @@ export class BitbucketWebhookService {
 
       // Handle comment events separately
       if (this.isCommentEvent(eventKey)) {
-        return await this.handleCommentEvent(eventKey as BitbucketPREventType, payload);
+        return await this.handleCommentEvent(eventKey as BitbucketPREventType, payload, workspaceId);
       }
 
       // Validate PR data exists (Bitbucket Server uses 'pullRequest' with capital R)
@@ -78,14 +79,7 @@ export class BitbucketWebhookService {
       }
 
       // Extract PR context
-      const context = this.extractPRContext(payload);
-
-      // pr:deleted bypasses title validation — we just need to remove the PR row
-      if (eventKey === BitbucketPREventType.PR_DELETED) {
-        await this.handlePRDeleted(context);
-        return { success: true, message: `Event ${eventKey} processed successfully` };
-      }
-
+      const context = this.extractPRContext(payload, workspaceId);
       let validationResult: { isValid: boolean; ticketId?: string };
 
         // PR doesn't exist or wasn't created by workflow - run full validation
@@ -129,7 +123,8 @@ export class BitbucketWebhookService {
    */
   private async handleCommentEvent(
     eventKey: BitbucketPREventType,
-    payload: BitbucketWebhookEnvelope
+    payload: BitbucketWebhookEnvelope,
+    workspaceId: string,
   ): Promise<{ success: boolean; message: string }> {
     try {
       if (!payload.comment || !payload.pullRequest) {
@@ -149,7 +144,7 @@ export class BitbucketWebhookService {
       if (mentions.some(m => m.toLowerCase() === 'john.doe@gmail.com')) {
         logger.info(`[Bitbucket-Webhook] Detected @john.doe@gmail.com mention in PR #${pr.id} comment #${comment.id}`);
         
-        const context = this.extractPRContext(payload);
+        const context = this.extractPRContext(payload, workspaceId);
         
         await xyneCommentService.handleXyneMention({
           prId: context.prId,
@@ -196,7 +191,7 @@ export class BitbucketWebhookService {
   /**
    * Extract common PR context from webhook payload (Bitbucket Server format)
    */
-  private extractPRContext(payload: BitbucketWebhookEnvelope): PREventContext {
+  private extractPRContext(payload: BitbucketWebhookEnvelope, workspaceId: string): PREventContext {
     const pr = payload.pullRequest!;
     const repo = pr.toRef.repository;
     const repoName =repo.name;
@@ -220,7 +215,7 @@ export class BitbucketWebhookService {
       repoName,
       repoUrl,
       projectName,
-      workspace: projectName, // In Server, project key serves as workspace
+      workspace: workspaceId, // In Server, project key serves as workspace
       sourceBranch: pr.fromRef.displayId,
       destinationBranch: pr.toRef.displayId,
       numberOfComments: pr.properties?.commentCount || 0,
@@ -325,6 +320,7 @@ export class BitbucketWebhookService {
       context.pr.fromRef.latestCommit,
       context.sourceBranch,
       context.destinationBranch,
+      context.workspace,
       context.repoName,
       context.repoUrl,
       context.prUrl,

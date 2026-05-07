@@ -241,7 +241,7 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
 
     try {
      
-      const ticket = await this.ticketRepository.getTicketByXyneId(ticketXyneId);
+      const ticket = await this.ticketRepository.getTicketByXyneId(ticketXyneId, config.defaultWorkspaceId);
 
       if (!ticket) {
         logger.warn(`[QaAlertBot] Ticket not found for XyneId: ${ticketXyneId}`);
