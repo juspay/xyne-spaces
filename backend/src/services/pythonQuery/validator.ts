@@ -10,6 +10,7 @@ export const ALLOWED_MODELS = new Set([
   'board',
   'stage',
   'channel',
+  'channelParticipant',
   'conversation',
   'message',
   'workflow',
