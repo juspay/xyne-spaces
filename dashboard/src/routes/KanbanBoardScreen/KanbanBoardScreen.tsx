@@ -1221,10 +1221,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const handleTicketClick = useCallback(
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
-      const ticketUrl = `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
 
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
+        const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
+        const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
         window.open(ticketUrl, '_blank');
         return;
       }

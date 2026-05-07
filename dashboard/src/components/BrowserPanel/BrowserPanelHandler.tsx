@@ -4,6 +4,7 @@ import { useSelector } from '@xstate/react';
 import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor } from '../../machines/browserPanelMachine';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { logger, Event } from '../../utils/logger';
 
 // Browser context interface for deep link
 interface BrowserContextFromDeepLink {
@@ -31,6 +32,8 @@ export function BrowserPanelHandler(): null {
 
     const cleanup = api.onOpenInBrowserPanel((url: string) => {
       xyneAIActor.send({ type: 'CLOSE' });
+
+      logger.info(Event.BROWSER_LINK_CLICK, { url });
 
       if (browserPanelState === 'open' || isOnBrowserRoute) {
         browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
