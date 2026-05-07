@@ -688,6 +688,7 @@ export const ticketTable = table("tickets")
     conversationId: string(),
     channelId: string(),
     eta: number().optional(),
+    firstRespondedAt: number().optional(),
     priority: enumeration<TicketPriority>(),
     metadata: json().optional(),
     closedAt: number().optional(),
@@ -1521,6 +1522,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     classificationPrompt: string().optional(),
     categoryField: string().optional(),
     subCategoryField: string().optional(),
+    defaultCc: string().optional(),
   })
   .primaryKey("channelId");
 
@@ -1532,6 +1534,23 @@ export const classificationMappingTable = table("classification_mappings")
     subCategory: string().optional(),
     userGroupId: string(),
     createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const boardSlaPolicyTable = table("board_sla_policies")
+  .columns({
+    id: string(),
+    boardId: string(),
+    priority: enumeration<TicketPriority>(),
+    responseHours: number(),
+    resolutionHours: number(),
+    businessHoursOnly: boolean(),
+    timezone: string(),
+    workdayStart: number(),
+    workdayEnd: number(),
+    isActive: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -3201,6 +3220,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ["id"],
     destField: ["boardId"],
     destSchema: userExpertiseMappingTable,
+  }),
+  slaPolicies: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: boardSlaPolicyTable,
   })
 }));
 
@@ -3347,6 +3371,14 @@ export const conversationParticipantTableRelationships = relationships(conversat
     sourceField: ["userId"],
     destField: ["id"],
     destSchema: userTable,
+  })
+}));
+
+export const boardSlaPolicyTableRelationships = relationships(boardSlaPolicyTable, ({ one }) => ({
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
   })
 }));
 
@@ -3611,6 +3643,7 @@ export const schema = createSchema(
       emailSignatureTable,
       emailChannelPreferenceTable,
       classificationMappingTable,
+      boardSlaPolicyTable,
       messageTable,
       messageSearchTable,
       messageAttachmentTable,
@@ -3718,6 +3751,7 @@ export const schema = createSchema(
       channelUserStatusTableRelationships,
       conversationTableRelationships,
       conversationParticipantTableRelationships,
+      boardSlaPolicyTableRelationships,
       messageTableRelationships,
       messageSearchTableRelationships,
       messageAttachmentTableRelationships,
@@ -3803,6 +3837,7 @@ export type EmailRead = Row<typeof schema.tables.email_reads>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
+export type BoardSlaPolicy = Row<typeof schema.tables.board_sla_policies>;
 export type Message = Row<typeof schema.tables.messages>;
 export type MessageSearch = Row<typeof schema.tables.message_search>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;

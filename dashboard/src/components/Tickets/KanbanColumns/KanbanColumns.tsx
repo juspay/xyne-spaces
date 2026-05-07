@@ -11,6 +11,7 @@ import type {
   SortableTicketCardProps,
   Stage,
 } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
+import type { BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { TicketCard } from '../TicketCard/TicketCard';
 import Button from '../../ui/Button';
 import { CollapseIcon } from '../../../assets/icons/CollapseIcon';
@@ -27,6 +28,7 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   onClick,
   availableTags = [],
   visibleColumns,
+  slaPolicies,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
@@ -55,6 +57,7 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
         onClick={onClick}
         availableTags={availableTags}
         visibleColumns={visibleColumns}
+        {...(slaPolicies !== undefined && { slaPolicies })}
       />
     </div>
   );
@@ -72,7 +75,16 @@ const VirtualizedStageList: React.FC<{
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
-}> = ({ stageId, stageTickets, tagsByTicketId, availableTags, visibleColumns, onTicketClick }) => {
+  slaPolicies?: BoardSlaPolicy[];
+}> = ({
+  stageId,
+  stageTickets,
+  tagsByTicketId,
+  availableTags,
+  visibleColumns,
+  onTicketClick,
+  slaPolicies,
+}) => {
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const scrollKey = `kanban-scroll-${stageId}`;
 
@@ -127,6 +139,7 @@ const VirtualizedStageList: React.FC<{
                 availableTags={availableTags}
                 onClick={e => onTicketClick(e, ticket)}
                 visibleColumns={visibleColumns}
+                {...(slaPolicies !== undefined && { slaPolicies })}
               />
             </div>
           );
@@ -145,6 +158,14 @@ interface KanbanColumnsProps {
   availableTags?: string[];
   containerClassName?: string;
   visibleColumns?: Set<string> | undefined;
+  /**
+   * SLA policies pre-fetched by the parent for the active board.
+   * Passed through to each TicketCard so they skip their own per-card
+   * Zero subscription (avoids N identical subscriptions for N tickets).
+   * Only supplied when the board uses priority-based SLA mode; omit for
+   * stage-based SLA (no policy fetch needed in that case).
+   */
+  slaPolicies?: BoardSlaPolicy[];
 }
 
 export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
@@ -167,6 +188,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   containerClassName,
   availableTags = [],
   visibleColumns,
+  slaPolicies,
 }) => {
   const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>([]);
 
@@ -301,6 +323,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       availableTags={availableTags}
                       visibleColumns={visibleColumns}
                       onTicketClick={onTicketClick}
+                      {...(slaPolicies !== undefined && { slaPolicies })}
                     />
                   </SortableContext>
                 </div>

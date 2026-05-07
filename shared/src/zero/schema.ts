@@ -770,6 +770,7 @@ export const ticketTable = table('tickets')
     classificationData: json().optional(),
     aiCategory: string().optional(),
     aiSubCategory: string().optional(),
+    firstRespondedAt: number().optional(),
   })
   .primaryKey('id');
 
@@ -1752,6 +1753,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     classificationPrompt: string().optional(),
     categoryField: string().optional(),
     subCategoryField: string().optional(),
+    defaultCc: string().optional(),
   })
   .primaryKey('channelId');
 
@@ -1763,6 +1765,23 @@ export const classificationMappingTable = table('classification_mappings') // Cl
     subCategory: string().optional(),
     userGroupId: string(),
     createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const boardSlaPolicyTable = table('board_sla_policies')
+  .columns({
+    id: string(),
+    boardId: string(),
+    priority: enumeration<TicketPriority>(),
+    responseHours: number(),
+    resolutionHours: number(),
+    businessHoursOnly: boolean(),
+    timezone: string(),
+    workdayStart: number(),
+    workdayEnd: number(),
+    isActive: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -2498,6 +2517,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ['id'],
     destField: ['boardId'],
     destSchema: applicationTable,
+  }),
+  slaPolicies: many({
+    sourceField: ['id'],
+    destField: ['boardId'],
+    destSchema: boardSlaPolicyTable,
   }),
 }));
 
@@ -3544,6 +3568,14 @@ export const emailChannelPreferenceTableRelationships = relationships(emailChann
   }),
 }));
 
+export const boardSlaPolicyTableRelationships = relationships(boardSlaPolicyTable, ({ one }) => ({
+  board: one({
+    sourceField: ['boardId'],
+    destField: ['id'],
+    destSchema: boardTable,
+  }),
+}));
+
 export const formTableRelationships = relationships(formTable, ({ one, many }) => ({
   createdByUser: one({
     sourceField: ['createdBy'],
@@ -3872,6 +3904,7 @@ export const schema = createSchema({
     emailReadTable,
     emailChannelPreferenceTable,
     classificationMappingTable,
+    boardSlaPolicyTable,
     formTable,
     formContextMappingTable,
     formFieldsTable,
@@ -3974,6 +4007,7 @@ export const schema = createSchema({
     emailSignatureTableRelationships,
     emailReadTableRelationships,
     emailChannelPreferenceTableRelationships,
+    boardSlaPolicyTableRelationships,
     formTableRelationships,
     formContextMappingTableRelationships,
     formFieldsTableRelationships,

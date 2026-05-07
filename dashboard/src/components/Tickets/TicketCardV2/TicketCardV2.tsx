@@ -66,6 +66,7 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     classificationData: null,
     aiCategory: null,
     aiSubCategory: null,
+    firstRespondedAt: null,
   };
 };
 

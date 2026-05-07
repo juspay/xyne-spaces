@@ -28,7 +28,7 @@ export interface UseDeskAIDraftReturn {
   isDraftActive: boolean;
   triggerDraft: () => void;
   rephraseDraft: (instruction: string, sourceText: string) => void;
-  refineDraft: (instruction: string) => void;
+  refineDraft: (instruction: string, options?: { selectedText?: string }) => void;
   acceptDraft: () => string;
   rejectDraft: () => void;
 }
@@ -310,16 +310,27 @@ export function useDeskAIDraft({
   );
 
   const refineDraft = useCallback(
-    (instruction: string) => {
+    (instruction: string, options?: { selectedText?: string }) => {
       const trimmedInstruction = instruction.trim();
+      const trimmedSelectedText = options?.selectedText?.trim() ?? '';
       const parts = [basePrompt];
       if (draftContent) {
-        parts.push(
-          `A previous AI draft was generated:\n"""\n${draftContent}\n"""\nRefine it per the user's guidance below.`,
-        );
+        if (trimmedSelectedText) {
+          parts.push(
+            `A previous AI draft was generated. Refine only the selected portion while keeping the rest of the draft aligned with the same tone and intent.\n\nFull AI draft:\n"""\n${draftContent}\n"""\n\nSelected text to refine:\n"""\n${trimmedSelectedText}\n"""`,
+          );
+        } else {
+          parts.push(
+            `A previous AI draft was generated:\n"""\n${draftContent}\n"""\nRefine it per the user's guidance below.`,
+          );
+        }
       }
       if (trimmedInstruction) {
-        parts.push(`Refinement guidance from the user: "${trimmedInstruction}"`);
+        parts.push(
+          trimmedSelectedText
+            ? `Refinement guidance from the user for the selected text: "${trimmedInstruction}"`
+            : `Refinement guidance from the user: "${trimmedInstruction}"`,
+        );
       }
       void submit(parts.join('\n\n'), trimmedInstruction || 'Refine draft');
     },

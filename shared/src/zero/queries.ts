@@ -725,6 +725,28 @@ export const queries = defineQueries({
       return zql.classification_mappings.where('channelId', channelId).orderBy('createdAt', 'asc');
     },
   ),
+  getBoardSlaPolicies: defineQuery(
+    z.object({ boardId: z.string() }),
+    ({ args: { boardId } }) => {
+      return zql.board_sla_policies.where('boardId', boardId).where('isActive', true);
+    },
+  ),
+  /**
+   * Fetches active SLA policies for multiple boards in a single query.
+   * Use this at the board/screen level instead of per-card fetches to avoid
+   * N identical subscriptions when displaying a list of tickets.
+   */
+  getBoardSlaPoliciesByBoardIds: defineQuery(
+    z.object({ boardIds: z.array(z.string()) }),
+    ({ args: { boardIds } }) => {
+      if (boardIds.length === 0) {
+        return zql.board_sla_policies.where('id', 'nonexistent').limit(0);
+      }
+      return zql.board_sla_policies
+        .where('boardId', 'IN', boardIds)
+        .where('isActive', true);
+    },
+  ),
   getCurrentUserPreference: defineQuery(z.object({}), ({ ctx }) => {
     return zql.user_preferences.where('userId', ctx.userID).one();
   }),

@@ -46,7 +46,6 @@ import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailD
 import { useDeskAIDraft } from '../../../hooks/useDeskAIDraft';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useChannelConnectedEmail } from '../../../hooks/useChannelConnectedEmail';
-import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 
 import { DraftCard } from '../DraftCard/DraftCard';
 import { EmailEditor } from '../EmailEditor/EmailEditor';
@@ -121,7 +120,9 @@ const COMPOSE_FEATURES: EmailComposerFeatures = {
   showAI: true,
   showSignature: true,
   showMinimizeButton: false,
-  showDiscardButton: false,
+  // Compose mode now saves on X (close = save draft), so we need an explicit
+  // discard button so users can still throw away a draft they don't want.
+  showDiscardButton: true,
   showResizeGrip: false,
   showCardWrap: false,
 };
@@ -146,6 +147,14 @@ interface EmailComposerProps {
   mode?: 'reply' | 'compose';
   /** Override individual feature toggles. Defaults are derived from `mode`. */
   features?: Partial<EmailComposerFeatures>;
+  /**
+   * Unique ID for scoping the compose-mode localStorage draft.
+   * When provided (multi-compose scenario), the draft key becomes
+   * `xyne:composeDraft:${userID}:${composeDraftId}` instead of the default
+   * `xyne:composeDraft:${userID}:${channelId}`. This lets multiple compose
+   * windows for the same channel each maintain independent drafts.
+   */
+  composeDraftId?: string;
 }
 
 export const EmailComposer = ({
@@ -159,6 +168,7 @@ export const EmailComposer = ({
   replyMode = 'reply',
   mode = 'reply',
   features: featureOverrides,
+  composeDraftId,
 }: EmailComposerProps): ReactElement => {
   const isComposeMode = mode === 'compose';
   const features = resolveFeatures(mode, featureOverrides);
@@ -173,7 +183,14 @@ export const EmailComposer = ({
   // Use the existing `useChannelConnectedEmail` API for the desk's mailbox
   // address. Contacts still come from the desk-mailbox address book hook.
   const channelConnectedEmail = useChannelConnectedEmail(channelId || null);
-  const channelPreference = useEmailChannelPreference(channelId || null);
+  // Use the raw query so we get `details.type` to distinguish "not loaded yet"
+  // from "loaded but no preference row" — both return undefined for
+  // channelPreference otherwise, which would stall the default-CC seeding.
+  const [channelPreferenceList, channelPreferenceDetails] = useCachedQuery(
+    queries.getEmailChannelPreference({ channelId: channelId || '' }),
+    { enabled: !!channelId },
+  );
+  const channelPreference = channelPreferenceList?.[0];
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
   const deskContacts = useDeskContacts(channelId);
   // Use email draft hooks
@@ -391,8 +408,16 @@ export const EmailComposer = ({
   // without losing work.
   // Per-user, per-channel scope so drafts don't bleed across users
   // sharing a browser, and a user keeps independent drafts per channel.
+  // When `composeDraftId` is supplied (multi-compose), use it as the scope key
+  // so multiple windows on the same channel each maintain independent drafts.
   const composeDraftKey =
-    isComposeMode && channelId && userID ? `xyne:composeDraft:${userID}:${channelId}` : null;
+    isComposeMode && userID
+      ? composeDraftId
+        ? `xyne:composeDraft:${userID}:${composeDraftId}`
+        : channelId
+          ? `xyne:composeDraft:${userID}:${channelId}`
+          : null
+      : null;
 
   // Restore compose draft on mount
   const [composeDraftLoaded, setComposeDraftLoaded] = useState(false);
@@ -428,6 +453,44 @@ export const EmailComposer = ({
     }
     setComposeDraftLoaded(true);
   }, [composeDraftKey, composeDraftLoaded]);
+
+  // Seed default CC from channel preference when opening a fresh compose (no
+  // saved draft). Uses a ref keyed by composeDraftKey so it fires at most once
+  // per compose session — this handles the race where channelPreference loads
+  // after composeDraftLoaded has already been set to true.
+  const defaultCcSeededKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isComposeMode) return;
+    if (!composeDraftLoaded) return;
+    if (!composeDraftKey) return;
+    // Already seeded for this compose session.
+    if (defaultCcSeededKeyRef.current === composeDraftKey) return;
+    // Preference query hasn't settled yet — wait for next render.
+    if (channelPreferenceDetails?.type !== 'complete') return;
+    // Only seed when the user hasn't already entered CC (saved draft or manual).
+    if (ccEmails.length > 0) {
+      defaultCcSeededKeyRef.current = composeDraftKey;
+      return;
+    }
+    if (channelPreference?.defaultCc) {
+      const parsed = channelPreference.defaultCc
+        .split(',')
+        .map((e: string) => e.trim())
+        .filter((e: string) => e.length > 0 && e.includes('@'));
+      if (parsed.length > 0) {
+        setCcEmails(parsed);
+        setShowCc(true);
+      }
+    }
+    defaultCcSeededKeyRef.current = composeDraftKey;
+  }, [
+    isComposeMode,
+    composeDraftLoaded,
+    composeDraftKey,
+    channelPreference?.defaultCc,
+    channelPreferenceDetails?.type,
+    ccEmails.length,
+  ]);
 
   // Save compose draft on change (debounced via the natural batch of state updates)
   useEffect(() => {
@@ -1524,7 +1587,9 @@ export const EmailComposer = ({
                 onReject={() => {
                   aiDraft.rejectDraft();
                 }}
-                onRefine={(instruction: string) => aiDraft.refineDraft(instruction)}
+                onRefine={(instruction: string, options?: { selectedText?: string }) =>
+                  aiDraft.refineDraft(instruction, options)
+                }
               />
             ) : null;
 
@@ -1831,6 +1896,16 @@ export const EmailComposer = ({
                     className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors'
                     onClick={() => {
                       deleteDraft();
+                      // For compose mode, also remove the localStorage draft so
+                      // the parent's onClose handler treats this as a discard
+                      // (no content → silent delete) rather than saving as draft.
+                      if (composeDraftKey) {
+                        try {
+                          localStorage.removeItem(composeDraftKey);
+                        } catch {
+                          /* ignore quota/access errors */
+                        }
+                      }
                       setEmailContent('');
                       setAttachments([]);
                       setToEmails([]);
@@ -1839,10 +1914,10 @@ export const EmailComposer = ({
                       onClose();
                     }}
                     disabled={isSending}
-                    aria-label='Discard reply'
+                    aria-label='Discard draft'
                     title='Discard draft'
                     data-track-category='Support'
-                    data-track-name='DiscardReplyComposer'
+                    data-track-name='DiscardComposerDraft'
                   >
                     <Trash2 size={14} />
                   </button>

@@ -58,6 +58,7 @@ import {
   EmailsACL,
   EmailDraftsACL,
   EmailChannelPreferencesACL,
+  BoardSlaPoliciesACL,
   DelayedMessagesACL,
 } from '../tables';
 export class QueryACLFactory {
@@ -184,6 +185,8 @@ export class QueryACLFactory {
         return new EmailDraftsACL(ctx) as BaseQueryACL<TTable>;
       case 'email_channel_preferences':
         return new EmailChannelPreferencesACL(ctx) as BaseQueryACL<TTable>;
+      case 'board_sla_policies':
+        return new BoardSlaPoliciesACL(ctx) as BaseQueryACL<TTable>;
       case 'forms':
         return new FormsACL(ctx) as BaseQueryACL<TTable>;
       case 'form_entity_values':

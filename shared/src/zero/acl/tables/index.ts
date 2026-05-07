@@ -6,6 +6,7 @@ export { EmailSignaturesACL } from './email-signatures-acl';
 export { EmailsACL } from './emails-acl';
 export { EmailDraftsACL } from './email-drafts-acl';
 export { EmailChannelPreferencesACL } from './email-channel-preferences-acl';
+export { BoardSlaPoliciesACL } from './board-sla-policies-acl';
 export { CallParticipantsACL } from './call-participants-acl';
 export { CallsACL } from './calls-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';
