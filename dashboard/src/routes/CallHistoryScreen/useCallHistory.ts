@@ -215,8 +215,8 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     }
 
     return allCalls.sort((a, b) => {
-      const aTime = a.startedAt || a.startsAt || a.createdAt;
-      const bTime = b.startedAt || b.startsAt || b.createdAt;
+      const aTime = a.startsAt || a.startedAt || a.createdAt;
+      const bTime = b.startsAt || b.startedAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
   }, [
