@@ -12,6 +12,20 @@ import { ExternalSourcePlatform } from '../core/types';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
+import { config as appConfig } from '@/config/env';
+
+function resolveFrontendUrl(req?: Request): string {
+  if (req) {
+    const originalHost = req.headers['x-original-host'];
+    if (originalHost && typeof originalHost === 'string') {
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+      return `${protocol}://${originalHost}`;
+    }
+  }
+  const url = appConfig.frontendUrl;
+  if (!url) throw new Error('FRONTEND_URL config is required');
+  return url.trim();
+}
 
 const TAG = '[GoogleAuth]';
 const router = express.Router();
@@ -35,6 +49,8 @@ export type OAuthStateValue = {
   channelData?: PendingChannelData;
   mode?: 'reconnect';
   expectedEmail?: string;
+  workspaceId?: string;
+  platform?: 'electron' | 'web';
   timestamp: number;
 };
 const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
@@ -64,14 +80,7 @@ async function deleteOAuthState(state: string): Promise<void> {
 }
 
 export function getFrontendUrl(req: Request): string {
-  const originalHost = req.headers['x-original-host'];
-  if (originalHost && typeof originalHost === 'string') {
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-    return `${protocol}://${originalHost}`;
-  }
-  const url = process.env.FRONTEND_URL;
-  if (!url) throw new Error('FRONTEND_URL environment variable is required');
-  return url.trim();
+  return resolveFrontendUrl(req);
 }
 
 
@@ -95,6 +104,43 @@ export function createOAuth2Client(redirectUri?: string) {
   );
 }
 
+function buildPostOAuthRedirect(
+  frontendUrl: string,
+  path: string,
+  platform?: 'electron' | 'web',
+): string {
+  if (platform === 'electron') {
+    return `${frontendUrl}/launch?path=${encodeURIComponent(path)}`;
+  }
+  return `${frontendUrl}${path}`;
+}
+
+function buildSupportPath(
+  workspaceId: string | undefined,
+  channelId: string | undefined,
+  query: URLSearchParams,
+): string {
+  const queryString = query.toString();
+  const wsSegment = workspaceId ? `/${workspaceId}` : '';
+  const channelSegment = channelId ? `/${channelId}` : '';
+  const suffix = queryString ? `?${queryString}` : '';
+  return `${wsSegment}/support${channelSegment}${suffix}`;
+}
+
+function redirectError(
+  res: Response,
+  frontendUrl: string,
+  error: string,
+  platform: 'electron' | 'web' | undefined,
+  workspaceId?: string,
+  channelId?: string,
+): void {
+  const params = new URLSearchParams({ emailError: error });
+  res.redirect(
+    buildPostOAuthRedirect(frontendUrl, buildSupportPath(workspaceId, channelId, params), platform),
+  );
+}
+
 function htmlPage(title: string, body: string, status: 'success' | 'error' = 'success'): string {
   const color = status === 'success' ? '#4CAF50' : '#F44336';
   return `<!DOCTYPE html>
@@ -112,6 +158,8 @@ function htmlPage(title: string, body: string, status: 'success' | 'error' = 'su
 // GET /api/integrations/google/connect
 // Initiates Google OAuth flow for email channel creation (mirrors Microsoft /connect)
 router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+  const platform: 'electron' | 'web' =
+    req.query.platform === 'electron' ? 'electron' : 'web';
   try {
     const { name, description, visibility, projectId, assigneeUserGroupId } = req.query;
     const userId = req.user!.id;
@@ -119,6 +167,12 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
 
     if (!name || !projectId) {
       res.status(400).json({ error: 'name and projectId are required' });
+      return;
+    }
+
+    const project = await db.project.findUnique({ where: { id: projectId as string } });
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
       return;
     }
 
@@ -133,6 +187,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
         workspaceId,
         assigneeUserGroupId: assigneeUserGroupId as string | undefined,
       },
+      platform,
       timestamp: Date.now(),
     });
 
@@ -147,7 +202,13 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
     res.redirect(authUrl);
   } catch (error: any) {
     logger.error(`${TAG} Error initiating Google connect:`, error);
-    res.redirect(`${getFrontendUrl(req)}?error=google_connect_failed`);
+    redirectError(
+      res,
+      getFrontendUrl(req),
+      'google_connect_failed',
+      platform,
+      req.user!.workspaceId,
+    );
   }
 });
 
@@ -183,24 +244,32 @@ router.post('/auth/start', async (req: Request, res: Response): Promise<void> =>
 
 // GET /api/integrations/google/auth/callback
 router.get('/auth/callback', async (req: Request, res: Response): Promise<void> => {
-  const frontendUrl = process.env.FRONTEND_URL?.trim() || '';
-  try {
-    const { code, state, error } = req.query;
+  const frontendUrl = resolveFrontendUrl(req);
+  const { code, state, error } = req.query;
+  const stateData = state ? await getOAuthState(state as string) : null;
+  const platform = stateData?.platform;
+  const channelHint = stateData?.channelId;
+  const stateWorkspaceId =
+    stateData?.workspaceId ?? stateData?.channelData?.workspaceId;
 
+  try {
     logger.info(`${TAG} OAuth callback received`, { hasCode: !!code, hasState: !!state, error });
 
     if (error) {
       logger.error(`${TAG} OAuth error:`, error);
-      res.status(400).send(htmlPage('Authentication Failed',
-        `<h1>Authentication Failed</h1><p>${error}</p><p class="muted">Close this window and try again.</p>`,
-        'error'));
+      if (state) await deleteOAuthState(state as string);
+      redirectError(res, frontendUrl, String(error), platform, stateWorkspaceId, channelHint);
       return;
     }
 
-    if (!code || !state) { res.status(400).json({ error: 'Missing code or state' }); return; }
-
-    const stateData = await getOAuthState(state as string);
-    if (!stateData) { res.status(400).json({ error: 'Invalid or expired state' }); return; }
+    if (!code || !state) {
+      redirectError(res, frontendUrl, 'missing_code_or_state', platform, stateWorkspaceId, channelHint);
+      return;
+    }
+    if (!stateData) {
+      redirectError(res, frontendUrl, 'expired_state', platform);
+      return;
+    }
 
     await deleteOAuthState(state as string);
 
@@ -234,14 +303,21 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         !!stateData.channelId && !!existingSource.channelId && existingSource.channelId !== stateData.channelId;
       if (isConnectFlow || isDifferentChannel) {
         const existingChannel = existingSource.channelId
-          ? await db.channel.findUnique({ where: { id: existingSource.channelId }, select: { name: true } })
+          ? ((await db.channel.findUnique({ where: { id: existingSource.channelId } })) as
+              | { name: string }
+              | null)
           : null;
         const channelName = existingChannel?.name || 'unknown';
         const message = `Google account ${emailAddress} is already connected to channel "${channelName}"`;
         logger.warn(`${TAG} ${message}`, { sourceName, existingChannelId: existingSource.channelId });
         const params = new URLSearchParams({ emailError: message });
-        if (existingSource.channelId) params.set('channel', existingSource.channelId);
-        res.redirect(`${frontendUrl}/support?${params.toString()}`);
+        res.redirect(
+          buildPostOAuthRedirect(
+            frontendUrl,
+            buildSupportPath(stateWorkspaceId, existingSource.channelId ?? undefined, params),
+            stateData.platform,
+          ),
+        );
         return;
       }
     }
@@ -251,10 +327,15 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       if (emailAddress.toLowerCase() !== expected) {
         logger.warn(`${TAG} Reconnect email mismatch: got ${emailAddress}, expected ${expected}`);
         const params = new URLSearchParams({
-          channel: stateData.channelId,
           emailError: `This desk is bound to ${expected}. Please sign in with that account.`,
         });
-        res.redirect(`${frontendUrl}/support?${params.toString()}`);
+        res.redirect(
+          buildPostOAuthRedirect(
+            frontendUrl,
+            buildSupportPath(stateWorkspaceId, stateData.channelId, params),
+            stateData.platform,
+          ),
+        );
         return;
       }
 
@@ -264,8 +345,13 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         orderBy: { createdAt: 'desc' },
       });
       if (!sourceRow) {
+        const params = new URLSearchParams({ emailError: 'no_source_to_reconnect' });
         res.redirect(
-          `${frontendUrl}/support?channel=${stateData.channelId}&emailError=no_source_to_reconnect`,
+          buildPostOAuthRedirect(
+            frontendUrl,
+            buildSupportPath(stateWorkspaceId, stateData.channelId, params),
+            stateData.platform,
+          ),
         );
         return;
       }
@@ -284,8 +370,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         channelId: stateData.channelId,
         sourceId: sourceRow.id,
       });
+      const params = new URLSearchParams({
+        emailReconnected: 'true',
+        provider: 'google',
+      });
       res.redirect(
-        `${frontendUrl}/support?emailReconnected=true&channel=${stateData.channelId}&provider=google`,
+        buildPostOAuthRedirect(
+          frontendUrl,
+          buildSupportPath(stateWorkspaceId, stateData.channelId, params),
+          stateData.platform,
+        ),
       );
       return;
     }
@@ -369,8 +463,13 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       });
 
       logger.info(`${TAG} Gmail integration setup complete`, { sourceName: network.sourceName });
+      const params = new URLSearchParams({ emailConnected: 'true', provider: 'google' });
       res.redirect(
-        `${frontendUrl}/support?emailConnected=true&channel=${txResult.channelId}&provider=google`,
+        buildPostOAuthRedirect(
+          frontendUrl,
+          buildSupportPath(cd.workspaceId, txResult.channelId, params),
+          stateData.platform,
+        ),
       );
     } else if (stateData.channelId) {
       // /auth/start flow: channel was pre-created, resolve board from channel's project
@@ -408,9 +507,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     const message = error?.message || 'Unknown error';
     const stack = error?.stack || '';
     logger.error(`${TAG} Error in OAuth callback: ${message}`, { stack });
-    res.status(500).send(htmlPage('Setup Failed',
-      `<h1>Setup Failed</h1><p><strong>${message}</strong></p><pre style="font-size:11px;overflow:auto">${stack}</pre><p class="muted">Check backend logs for details.</p>`,
-      'error'));
+    redirectError(res, frontendUrl, message, platform, stateWorkspaceId, channelHint);
   }
 });
 

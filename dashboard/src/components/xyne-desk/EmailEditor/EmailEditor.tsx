@@ -1,10 +1,57 @@
 import { useEffect, useRef, type ReactElement } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, ReactNodeViewRenderer, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
+import Image from '@tiptap/extension-image';
 import { EditorToolbar } from '../../ui/EditorToolbar';
 import { TableExtensions } from '../../ui/TipTapExtensions';
+import { InlineImageNodeView } from './InlineImageNodeView';
+
+const InlineImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      dataAttId: {
+        default: null,
+        parseHTML: el => el.getAttribute('data-att-id'),
+        renderHTML: attrs => {
+          const id = (attrs as { dataAttId?: string | null }).dataAttId;
+          return id ? { 'data-att-id': id } : {};
+        },
+      },
+      crossorigin: {
+        default: 'use-credentials',
+        parseHTML: el => el.getAttribute('crossorigin') || 'use-credentials',
+        renderHTML: attrs => {
+          const v = (attrs as { crossorigin?: string | null }).crossorigin;
+          return v ? { crossorigin: v } : {};
+        },
+      },
+      width: {
+        default: null,
+        parseHTML: el => {
+          const w = el.getAttribute('width');
+          if (w) return Number(w) || null;
+          // Fall back to inline style width=Npx so paste-from-Gmail keeps size.
+          const m = el.style?.width?.match(/^(\d+)px$/);
+          return m ? Number(m[1]) : null;
+        },
+        renderHTML: attrs => {
+          const w = (attrs as { width?: number | string | null }).width;
+          if (w === null || w === undefined || w === '') return {};
+          const num = typeof w === 'number' ? w : Number(w);
+          if (!Number.isFinite(num)) return {};
+
+          return { width: String(num) };
+        },
+      },
+    };
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(InlineImageNodeView);
+  },
+});
 
 interface EmailEditorProps {
   value: string;
@@ -12,6 +59,7 @@ interface EmailEditorProps {
   onAddFiles?: (files: File[]) => void;
   onSendShortcut?: () => void;
   onBlur?: () => void;
+  onEditorReady?: (editor: Editor) => void;
   placeholder?: string;
   disabled?: boolean;
   readOnly?: boolean;
@@ -24,13 +72,14 @@ export const EmailEditor = ({
   onAddFiles,
   onSendShortcut,
   onBlur,
+  onEditorReady,
   placeholder = 'Compose email...',
   disabled = false,
   readOnly = false,
   className = '',
 }: EmailEditorProps): ReactElement => {
-  const cb = useRef({ onChange, onAddFiles, onSendShortcut, onBlur });
-  cb.current = { onChange, onAddFiles, onSendShortcut, onBlur };
+  const cb = useRef({ onChange, onAddFiles, onSendShortcut, onBlur, onEditorReady });
+  cb.current = { onChange, onAddFiles, onSendShortcut, onBlur, onEditorReady };
   const lastEmittedRef = useRef('');
 
   const editor = useEditor({
@@ -56,8 +105,18 @@ export const EmailEditor = ({
       }),
       LinkExtension.configure({ openOnClick: false }),
       Placeholder.configure({ placeholder }),
+      InlineImage.configure({
+        inline: true,
+        allowBase64: false,
+        HTMLAttributes: {
+          style: 'max-width: 100%; height: auto; vertical-align: middle;',
+        },
+      }),
       ...TableExtensions,
     ],
+    onCreate: ({ editor }) => {
+      cb.current.onEditorReady?.(editor);
+    },
     content: value || '',
     editable: !disabled && !readOnly,
     onUpdate: ({ editor }) => {
@@ -67,6 +126,8 @@ export const EmailEditor = ({
     },
     onBlur: () => cb.current.onBlur?.(),
     editorProps: {
+      scrollThreshold: 80,
+      scrollMargin: 80,
       attributes: {
         class:
           'tiptap email-composer-editor prose prose-sm dark:prose-invert max-w-none focus:outline-none px-4 py-3 min-h-full',

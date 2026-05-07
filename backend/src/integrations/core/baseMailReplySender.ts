@@ -5,6 +5,14 @@
  * uses the *initial* one) so callers stay provider-agnostic.
  */
 
+export interface OutgoingAttachment {
+  name: string;
+  contentType: string;
+  content: Buffer | string;
+  cid?: string;
+  isInline?: boolean;
+}
+
 export interface MailReplyContext {
   encryptedCredentials: string;
   sourceId: string;
@@ -20,7 +28,7 @@ export interface MailReplyContext {
   /** External message id of the most recent email — used as In-Reply-To. */
   latestExternalMessageId: string;
   fromEmailAddress?: string;
-  fileAttachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+  fileAttachments?: OutgoingAttachment[];
 }
 
 export interface MailReplyResult {
@@ -37,7 +45,7 @@ export interface NewMailContext {
   cc: string[];
   bcc: string[];
   fromEmailAddress?: string;
-  fileAttachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+  fileAttachments?: OutgoingAttachment[];
 }
 
 export class AttachmentUploadError extends Error {

@@ -162,7 +162,11 @@ interface BuiltDoc {
   hasBlockedImages: boolean;
 }
 
-const buildIframeSrcdoc = (rawBody: string, showRemoteImages: boolean): BuiltDoc => {
+const buildIframeSrcdoc = (
+  rawBody: string,
+  showRemoteImages: boolean,
+  rewriteCidRefs: (html: string) => string,
+): BuiltDoc => {
   if (!rawBody || !rawBody.trim()) {
     return {
       srcdoc: `<!doctype html><html><head><style>${IFRAME_STYLES}</style></head><body><p style="color:#5f6368;font-style:italic;">No content</p></body></html>`,
@@ -177,13 +181,14 @@ const buildIframeSrcdoc = (rawBody: string, showRemoteImages: boolean): BuiltDoc
 
   const purifier = buildPurifier();
   const sanitized = purifier.sanitize(htmlInput, { RETURN_DOM_FRAGMENT: false });
+  const cidResolved = rewriteCidRefs(sanitized);
 
   const parser = new DOMParser();
-  const doc = parser.parseFromString(`<div id="root">${sanitized}</div>`, 'text/html');
+  const doc = parser.parseFromString(`<div id="root">${cidResolved}</div>`, 'text/html');
   const root = doc.getElementById('root');
   if (!root) {
     return {
-      srcdoc: `<!doctype html><html><head><style>${IFRAME_STYLES}</style></head><body>${sanitized}</body></html>`,
+      srcdoc: `<!doctype html><html><head><style>${IFRAME_STYLES}</style></head><body>${cidResolved}</body></html>`,
       hasBlockedImages: false,
     };
   }
@@ -225,11 +230,10 @@ export const EmailBodyRenderer = ({
   }, [emailId]);
 
   const { rewrite: rewriteCidRefs } = useCidImageResolver(attachments);
-  const rewrittenBody = useMemo(() => rewriteCidRefs(body), [rewriteCidRefs, body]);
 
   const { srcdoc, hasBlockedImages } = useMemo(
-    () => buildIframeSrcdoc(rewrittenBody, showRemoteImages),
-    [rewrittenBody, showRemoteImages],
+    () => buildIframeSrcdoc(body, showRemoteImages, rewriteCidRefs),
+    [body, showRemoteImages, rewriteCidRefs],
   );
 
   useEffect(() => {
@@ -255,6 +259,44 @@ export const EmailBodyRenderer = ({
         img.addEventListener('load', measure);
         img.addEventListener('error', measure);
       });
+
+      const findScrollContainer = (el: HTMLElement): HTMLElement | Window => {
+        let cur: HTMLElement | null = el.parentElement;
+        while (cur) {
+          const style = window.getComputedStyle(cur);
+          const overflowY = style.overflowY;
+          if (
+            (overflowY === 'auto' || overflowY === 'scroll') &&
+            cur.scrollHeight > cur.clientHeight
+          ) {
+            return cur;
+          }
+          cur = cur.parentElement;
+        }
+        return window;
+      };
+      contentDoc.addEventListener(
+        'wheel',
+        e => {
+          let target = e.target as HTMLElement | null;
+          while (target && target !== contentDoc.body && target !== contentDoc.documentElement) {
+            const style = target.ownerDocument.defaultView?.getComputedStyle(target);
+            const overflowY = style?.overflowY;
+            if (
+              (overflowY === 'auto' || overflowY === 'scroll') &&
+              target.scrollHeight > target.clientHeight
+            ) {
+              return;
+            }
+            target = target.parentElement;
+          }
+
+          const container = findScrollContainer(iframe);
+          container.scrollBy({ top: e.deltaY, left: e.deltaX });
+          e.preventDefault();
+        },
+        { passive: false },
+      );
 
       contentDoc.addEventListener(
         'click',

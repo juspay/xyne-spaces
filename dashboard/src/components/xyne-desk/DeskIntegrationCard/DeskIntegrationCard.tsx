@@ -47,8 +47,17 @@ export const DeskIntegrationCard = ({
   const handleReconnect = async (): Promise<void> => {
     setIsReconnecting(true);
     try {
-      const authUrl = await initDeskIntegrationReconnect(channelId);
-      window.location.href = authUrl;
+      const isElectron = typeof window.electronAPI?.openExternal === 'function';
+      const authUrl = await initDeskIntegrationReconnect(
+        channelId,
+        isElectron ? 'electron' : 'web',
+      );
+      if (isElectron && window.electronAPI?.openExternal) {
+        window.electronAPI.openExternal(authUrl);
+        setIsReconnecting(false);
+      } else {
+        window.location.href = authUrl;
+      }
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : 'Failed to start reconnect — please try again.',

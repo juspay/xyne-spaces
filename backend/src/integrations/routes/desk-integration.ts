@@ -167,6 +167,9 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
     const userId = req.user!.id;
+    const workspaceId = req.user!.workspaceId;
+    const platform: 'electron' | 'web' =
+      (req.body as { platform?: string } | undefined)?.platform === 'electron' ? 'electron' : 'web';
 
     try {
       await assertChannelOwner(channelId, userId);
@@ -195,6 +198,8 @@ router.post(
           mode: 'reconnect',
           channelId,
           expectedEmail,
+          workspaceId,
+          platform,
           timestamp: Date.now(),
         });
 
@@ -224,6 +229,8 @@ router.post(
           userId,
           channelId,
           expectedEmail,
+          workspaceId,
+          platform,
         });
 
         const redirectUri = `${getBackendUrl(req)}/api/integrations/microsoft/callback`;

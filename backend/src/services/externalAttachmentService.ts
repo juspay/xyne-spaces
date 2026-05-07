@@ -326,12 +326,22 @@ export class ExternalAttachmentService {
     attachmentIds?: string[];
     fileAttachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
   }): Promise<{
-    attachments: Array<{ name: string; contentType: string; content: Buffer | string }>;
+    attachments: Array<{
+      name: string;
+      contentType: string;
+      content: Buffer | string;
+      attachmentId?: string;
+    }>;
     stagedRowIds: string[];
   }> {
     const ids = params.attachmentIds ?? [];
     const stagedRowIds: string[] = [];
-    let stagedAttachments: Array<{ name: string; contentType: string; content: Buffer }> = [];
+    let stagedAttachments: Array<{
+      name: string;
+      contentType: string;
+      content: Buffer;
+      attachmentId: string;
+    }> = [];
 
     if (ids.length > 0) {
       const { repositories } = await import('@/database/repositories');
@@ -342,7 +352,12 @@ export class ExternalAttachmentService {
           const content = await storageService.getFileBuffer(row.url);
           return {
             row,
-            attachment: { name: row.originalFilename, contentType: row.mimetype, content },
+            attachment: {
+              name: row.originalFilename,
+              contentType: row.mimetype,
+              content,
+              attachmentId: row.id,
+            },
           };
         }),
       );
@@ -365,7 +380,8 @@ export class ExternalAttachmentService {
 
     const seen = new Set<string>();
     const attachments = [...(params.fileAttachments ?? []), ...stagedAttachments].filter(att => {
-      const key = `${att.name}|${att.contentType}`;
+      const id = (att as { attachmentId?: string }).attachmentId;
+      const key = id ? `id:${id}` : `nc:${att.name}|${att.contentType}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

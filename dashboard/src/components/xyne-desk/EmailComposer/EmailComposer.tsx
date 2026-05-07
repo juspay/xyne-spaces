@@ -7,9 +7,9 @@ import React, {
   useState,
   type DragEvent,
 } from 'react';
+import type { Editor } from '@tiptap/react';
 import {
   ArrowUp,
-  Minimize2,
   Paperclip,
   Pencil,
   RefreshCw,
@@ -17,6 +17,7 @@ import {
   Signature,
   Trash2,
   Wand2,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -34,7 +35,7 @@ import { MediaViewer } from '../../ui/files';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { cn } from '../../../utils/classNames';
 
-import { apiInstance } from '../../../services/clients/apiClient';
+import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { markdownToHtml } from '../../../utils/clipboardUtils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -233,6 +234,7 @@ export const EmailComposer = ({
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const editorRef = useRef<Editor | null>(null);
 
   // Reset all composer state when switching conversations
   useEffect(() => {
@@ -250,6 +252,7 @@ export const EmailComposer = ({
   }, [draftContent, conversationId, isComposeMode]);
 
   const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
+  const hasInlineImages = useMemo(() => /\sdata-att-id=["']/i.test(emailContent), [emailContent]);
 
   const toInputRef = React.useRef<HTMLInputElement>(null);
   const ccInputRef = React.useRef<HTMLInputElement>(null);
@@ -549,23 +552,26 @@ export const EmailComposer = ({
         const nextBcc: string[] = [];
 
         if (replyMode === 'replyAll') {
-          // Reply-all is anchored on the LATEST message in the thread —
-          // that's the most recent state of the conversation. Two cases,
-          // both produce the same result via the same path because we
-          // dedup against `selfEmail` and skip duplicates:
+          // Reply-all is anchored on the email the user clicked Reply All on
+          // (`targetEmail`) — that's how Gmail / Outlook do it. Defaults to
+          // the latest message when no specific email is targeted, but if
+          // the user clicked Reply All on E2 in a 4-email thread, we want
+          // E2's recipients, not E4's. Two cases, both produce the right
+          // result via the same path because we dedup against `selfEmail`
+          // and skip duplicates:
           //
-          //   (a) Latest is OURS (we sent it last):
+          //   (a) Target is OURS (we sent it):
           //       from   = us            → skipped by isSelf filter
           //       to     = [recipients]  → become nextTo
           //       cc     = [ccs]         → become nextCc
           //
-          //   (b) Latest is THEIRS (we received the most recent):
+          //   (b) Target is THEIRS:
           //       from   = sender        → first nextTo entry
           //       to     = [us, others]  → us filtered, others appended to nextTo
           //       cc     = [ccs]         → become nextCc
           //
           // Either way: never include ourselves, never duplicate.
-          const source = latestEmail;
+          const source = targetEmail;
           const seen = new Set<string>();
           const addUnique = (target: string[], list: ReadonlyArray<string>): void => {
             for (const addr of list) {
@@ -667,7 +673,11 @@ export const EmailComposer = ({
   const handleSendEmail = async (): Promise<void> => {
     const hasContent = hasEmailBody;
     const hasAttachments = attachments.length > 0;
-    if ((!hasContent && !hasAttachments) || isSending || toEmails.length === 0) {
+    if (
+      (!hasContent && !hasAttachments && !hasInlineImages) ||
+      isSending ||
+      toEmails.length === 0
+    ) {
       return;
     }
     if (isComposeMode) {
@@ -677,11 +687,20 @@ export const EmailComposer = ({
     }
     setIsSending(true);
     try {
-      let attachmentIds: string[] = [];
+      let regularAttachmentIds: string[] = [];
 
       if (hasAttachments) {
-        attachmentIds = await uploadAttachments(attachments);
+        regularAttachmentIds = await uploadAttachments(attachments);
       }
+
+      const inlineIdsFromBody = new Set<string>();
+      const imgRe = /<img\b[^>]*>/gi;
+      let imgMatch: RegExpExecArray | null;
+      while ((imgMatch = imgRe.exec(emailContent)) !== null) {
+        const attMatch = /data-att-id="([^"]+)"/i.exec(imgMatch[0]);
+        if (attMatch?.[1]) inlineIdsFromBody.add(attMatch[1]);
+      }
+      const attachmentIds = Array.from(new Set([...regularAttachmentIds, ...inlineIdsFromBody]));
 
       const activeSig = selectedSignatureId
         ? signatures?.find(s => s.id === selectedSignatureId)
@@ -753,6 +772,7 @@ export const EmailComposer = ({
         cc: ccEmails,
         bcc: bccEmails,
         ...(attachmentIds.length > 0 && { attachmentIds }),
+        ...(replyToEmailId && { replyToEmailId }),
       });
 
       setEmailContent('');
@@ -781,29 +801,52 @@ export const EmailComposer = ({
     }
   };
 
+  const uploadAndInsertInlineImages = useCallback(
+    async (images: File[]): Promise<void> => {
+      if (images.length === 0) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      try {
+        const ids = await uploadAttachments(images);
+        if (ids.length === 0) return;
+        let chain = editor.chain().focus();
+        ids.forEach((id, i) => {
+          const file = images[i];
+          chain = chain.setImage({
+            src: `${BASE_URL}/attachments/${id}/download`,
+            alt: file?.name ?? 'image',
+            // @ts-expect-error custom attributes added via Image.extend()
+            dataAttId: id,
+            width: 480,
+          });
+        });
+        chain.run();
+        editor.commands.splitBlock();
+      } catch {
+        // uploadAttachments already toasts; nothing to do here.
+      }
+    },
+
+    [channelId, conversationId, isComposeMode], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   // Shared validation+append for file-input, paste, and drag-and-drop. Uses
   // the latest `attachments` value via the setter callback to avoid stale
   // closures when several drops/pastes fire in quick succession.
-  const addFilesToAttachments = useCallback((files: File[]): void => {
-    if (files.length === 0) return;
+  const addFilesToAttachments = useCallback(
+    (files: File[]): void => {
+      if (files.length === 0) return;
 
-    setAttachments(prev => {
-      const accepted: File[] = [];
+      const images: File[] = [];
+      const others: File[] = [];
       const rejectedTooLarge: string[] = [];
-      let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - prev.length;
-      let droppedForCount = 0;
-
       for (const file of files) {
-        if (availableSlots <= 0) {
-          droppedForCount++;
-          continue;
-        }
         if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
           rejectedTooLarge.push(file.name);
           continue;
         }
-        accepted.push(file);
-        availableSlots--;
+        if (file.type.startsWith('image/')) images.push(file);
+        else others.push(file);
       }
 
       if (rejectedTooLarge.length > 0) {
@@ -811,15 +854,35 @@ export const EmailComposer = ({
           `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
         );
       }
-      if (droppedForCount > 0) {
-        toast.error(
-          `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
-        );
+
+      if (others.length > 0) {
+        setAttachments(prev => {
+          const accepted: File[] = [];
+          let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - prev.length;
+          let droppedForCount = 0;
+          for (const file of others) {
+            if (availableSlots <= 0) {
+              droppedForCount++;
+              continue;
+            }
+            accepted.push(file);
+            availableSlots--;
+          }
+          if (droppedForCount > 0) {
+            toast.error(
+              `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
+            );
+          }
+          return accepted.length > 0 ? [...prev, ...accepted] : prev;
+        });
       }
 
-      return accepted.length > 0 ? [...prev, ...accepted] : prev;
-    });
-  }, []);
+      if (images.length > 0) {
+        void uploadAndInsertInlineImages(images);
+      }
+    },
+    [uploadAndInsertInlineImages],
+  );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(e.target.files || []);
@@ -1164,7 +1227,10 @@ export const EmailComposer = ({
                   />
                 </div>
 
-                {/* Cc/Bcc buttons on the right - Gmail style */}
+                {/* Cc/Bcc toggles plus the panel-level Close button at
+                    the right of the recipient row. Close lives here —
+                    away from the bottom Discard/Trash — so users don't
+                    confuse "close & save draft" with "throw it away". */}
                 <div className='flex items-center gap-1 flex-shrink-0 mt-0.5'>
                   {!showCc && (
                     <button
@@ -1196,6 +1262,23 @@ export const EmailComposer = ({
                       })}
                     >
                       Bcc
+                    </button>
+                  )}
+                  {onClose && features.showMinimizeButton && (
+                    <button
+                      type='button'
+                      onClick={() => {
+                        if (hasEmailBody) saveDraft(emailContent);
+                        onClose();
+                      }}
+                      disabled={isSending}
+                      className='size-6 ml-1 flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50'
+                      aria-label='Close reply'
+                      title='Close (keeps draft)'
+                      data-track-category='Support'
+                      data-track-name='CloseReplyComposer'
+                    >
+                      <X size={14} />
                     </button>
                   )}
                 </div>
@@ -1486,6 +1569,9 @@ export const EmailComposer = ({
                       value={emailContent}
                       onChange={setEmailContent}
                       onAddFiles={addFilesToAttachments}
+                      onEditorReady={editor => {
+                        editorRef.current = editor;
+                      }}
                       onSendShortcut={() => {
                         const canSend = isComposeMode
                           ? !!channelId && composeSubject.trim().length > 0
@@ -1523,6 +1609,9 @@ export const EmailComposer = ({
                 value={emailContent}
                 onChange={setEmailContent}
                 onAddFiles={addFilesToAttachments}
+                onEditorReady={editor => {
+                  editorRef.current = editor;
+                }}
                 onSendShortcut={() => {
                   const canSend = isComposeMode
                     ? !!channelId && composeSubject.trim().length > 0
@@ -1734,25 +1823,9 @@ export const EmailComposer = ({
               </Tooltip>
             )}
 
-            {onClose && (features.showMinimizeButton || features.showDiscardButton) && (
+            {onClose && features.showDiscardButton && (
               <>
                 <div className='w-px h-4 bg-border mx-1' />
-                {features.showMinimizeButton && (
-                  <button
-                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                    onClick={() => {
-                      if (hasEmailBody) saveDraft(emailContent);
-                      onClose();
-                    }}
-                    disabled={isSending}
-                    aria-label='Minimize reply'
-                    title='Minimize (keeps draft)'
-                    data-track-category='Support'
-                    data-track-name='MinimizeReplyComposer'
-                  >
-                    <Minimize2 size={14} />
-                  </button>
-                )}
                 {features.showDiscardButton && (
                   <button
                     className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors'
@@ -1781,7 +1854,7 @@ export const EmailComposer = ({
               className='size-7 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
               onClick={() => void handleSendEmail()}
               disabled={
-                (!hasEmailBody && attachments.length === 0) ||
+                (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
                 (isComposeMode
                   ? !channelId || composeSubject.trim().length === 0
                   : !conversationId) ||

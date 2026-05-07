@@ -25,6 +25,7 @@ export interface PendingChannelCreate {
   userId: string;
   workspaceId: string;
   assigneeUserGroupId?: string;
+  platform?: 'electron' | 'web';
 }
 
 export interface PendingChannelReconnect {
@@ -32,6 +33,8 @@ export interface PendingChannelReconnect {
   userId: string;
   channelId: string;
   expectedEmail: string;
+  workspaceId?: string;
+  platform?: 'electron' | 'web';
 }
 
 export function isReconnectChannelData(
@@ -517,7 +520,13 @@ export class MicrosoftDeskService {
   private static async attachFileToDraft(
     accessToken: string,
     draftId: string,
-    att: { name: string; contentType: string; content: Buffer | string },
+    att: {
+      name: string;
+      contentType: string;
+      content: Buffer | string;
+      cid?: string;
+      isInline?: boolean;
+    },
   ): Promise<void> {
     const buffer = Buffer.isBuffer(att.content)
       ? att.content
@@ -544,7 +553,7 @@ export class MicrosoftDeskService {
   private static async attachFileInline(
     accessToken: string,
     draftId: string,
-    att: { name: string; contentType: string },
+    att: { name: string; contentType: string; cid?: string; isInline?: boolean },
     buffer: Buffer,
   ): Promise<void> {
     const contentBytes = buffer.toString('base64');
@@ -561,6 +570,8 @@ export class MicrosoftDeskService {
           name: att.name,
           contentType: att.contentType,
           contentBytes,
+          ...(att.isInline && { isInline: true }),
+          ...(att.cid && { contentId: att.cid }),
         }),
       },
     );
@@ -582,7 +593,7 @@ export class MicrosoftDeskService {
   private static async attachFileViaUploadSession(
     accessToken: string,
     draftId: string,
-    att: { name: string; contentType: string },
+    att: { name: string; contentType: string; cid?: string; isInline?: boolean },
     buffer: Buffer,
   ): Promise<void> {
     const totalSize = buffer.length;
@@ -602,6 +613,8 @@ export class MicrosoftDeskService {
             name: att.name,
             size: totalSize,
             contentType: att.contentType,
+            ...(att.isInline && { isInline: true }),
+            ...(att.cid && { contentId: att.cid }),
           },
         }),
       },
@@ -679,7 +692,13 @@ export class MicrosoftDeskService {
         threadId: string;
         fromEmailAddress?: string;
         /** Optional inline attachments (e.g. an ICS calendar invite or user-uploaded files). */
-        attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+        attachments?: Array<{
+          name: string;
+          contentType: string;
+          content: Buffer | string;
+          cid?: string;
+          isInline?: boolean;
+        }>;
       }): Promise<{ threadId: string; messageId: string }> {
         const {
           content,
@@ -949,7 +968,13 @@ export class MicrosoftDeskService {
         cc?: string[];
         bcc?: string[];
         fromEmailAddress?: string;
-        attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+        attachments?: Array<{
+          name: string;
+          contentType: string;
+          content: Buffer | string;
+          cid?: string;
+          isInline?: boolean;
+        }>;
       }): Promise<{ threadId: string; messageId: string; fromEmail: string }> {
         const accessToken = await getAccessToken();
 
@@ -971,6 +996,8 @@ export class MicrosoftDeskService {
                 contentBytes: Buffer.isBuffer(a.content)
                   ? a.content.toString('base64')
                   : Buffer.from(a.content).toString('base64'),
+                ...(a.isInline && { isInline: true }),
+                ...(a.cid && { contentId: a.cid }),
               })),
             }),
           },
