@@ -11,6 +11,7 @@ export * from './types/workflowApproval';
 export * from './types/userActivity';
 export * from './types/callChat';
 export * from './utils/etaCalculation';
+export * from './utils/slaCalculator';
 export * from './utils/project';
 export * from './utils/activityMetadataParser';
 export * from './utils/origins';

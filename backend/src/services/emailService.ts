@@ -60,6 +60,7 @@ import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { EmailClassificationService } from './emailClassificationService';
+import { computeSlaDueDates } from '@/utils/slaCalculator';
 
 const emailClassificationService = new EmailClassificationService();
 
@@ -203,6 +204,53 @@ export class EmailService {
     this.prisma = DatabaseClient.getInstance();
   }
 
+  /**
+   * Looks up the active SLA policy for (boardId, priority) and returns the
+   * computed resolution deadline to store in `eta`, but only when the board
+   * has `slaPolicyType === 'priority'` in its metadata.
+   *
+   * The response deadline is intentionally NOT stored — it is derived at
+   * runtime from the policy config.  Returns null when:
+   *   - boardId is null/undefined
+   *   - the board's slaPolicyType is not 'priority'
+   *   - no active policy exists for this board+priority combination
+   *   - any lookup/computation error occurs
+   */
+  private async getSlaResolutionDue(
+    boardId: string | null | undefined,
+    priority: TicketPriority,
+    receivedAt: Date,
+  ): Promise<Date | null> {
+    if (!boardId) return null;
+    try {
+      // Only apply priority-based SLA when the board has explicitly opted in.
+      const board = await this.prisma.board.findUnique({
+        where: { id: boardId },
+        select: { metadata: true },
+      });
+      const metadata = board?.metadata as { slaPolicyType?: string } | null;
+      if (metadata?.slaPolicyType !== 'priority') return null;
+
+      const policy = await this.prisma.boardSlaPolicy.findUnique({
+        where: { boardId_priority: { boardId, priority } },
+        select: {
+          responseHours: true,
+          resolutionHours: true,
+          businessHoursOnly: true,
+          timezone: true,
+          workdayStart: true,
+          workdayEnd: true,
+          isActive: true,
+        },
+      });
+      if (!policy || !policy.isActive) return null;
+      const { slaResolutionDue } = computeSlaDueDates(receivedAt, policy);
+      return slaResolutionDue;
+    } catch (err) {
+      logger.warn('[EmailService] Failed to compute SLA resolution due date:', err);
+      return null;
+    }
+  }
 
   /**
    * Get user info - checks bot registry first, then user table
@@ -532,6 +580,14 @@ export class EmailService {
       });
     }
 
+    // Derive ticket priority outside the transaction so we can look up the SLA policy.
+    const ticketPriorityForSla = derivePriorityFromSubject(emailSubject ?? '');
+    const slaResolutionDue = await this.getSlaResolutionDue(
+      boardId,
+      ticketPriorityForSla,
+      receivedAt ?? new Date(),
+    );
+
     // Create conversation + email + ticket in a single transaction.
     // Email has @@unique on externalMessageId — if a duplicate notification arrives
     // concurrently, the transaction rolls back everything (no orphaned tickets).
@@ -586,6 +642,7 @@ export class EmailService {
           lastEmailAt: receivedAt ?? new Date(),
           stageName: firstStage.name,
           priority: ticketPriority,
+          ...(slaResolutionDue && { eta: slaResolutionDue }),
           ...(userGroup && { userGroupId: groupId }),
           ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
           ...(receivedAt && { createdAt: receivedAt }),
@@ -1029,13 +1086,15 @@ export class EmailService {
 
     const conversation = await this.conversationRepository.create(conversationData);
 
-    // Step 2: Create ticket in a transaction
+    // Step 2: Create ticket in a transaction.
+    // Derive priority + SLA deadline outside the transaction so a slow policy
+    // lookup never holds an open DB transaction.
+    const ticketPriority = derivePriorityFromSubject(emailSubject);
+    const slaResolutionDue = await this.getSlaResolutionDue(boardId, ticketPriority, new Date());
     const ticket = await this.prisma.$transaction(async (tx) => {
       // Generate xyneId using project-scoped format
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
-      // Create ticket using transaction client
-      const ticketPriority = derivePriorityFromSubject(emailSubject);
       return await tx.ticket.create({
         data: {
           title: emailSubject,
@@ -1050,6 +1109,7 @@ export class EmailService {
           boardId: boardId,
           stageName: stageName,
           priority: ticketPriority,
+          ...(slaResolutionDue && { eta: slaResolutionDue }),
           ...(userGroupId && { userGroupId }),
           lastEmailAt: new Date(),
         }
@@ -1141,6 +1201,31 @@ export class EmailService {
       ticket,
       channel,
     };
+  }
+
+  /**
+   * Records the timestamp of the first outbound agent reply on a ticket.
+   *
+   * Sets `firstRespondedAt` on every ticket linked to `conversationId` where
+   * it is not yet set. The write is idempotent — subsequent replies are no-ops.
+   *
+   * This method is intentionally independent of any caller transaction: an SLA
+   * tracking failure must never roll back or block the reply that triggered it.
+   * Errors are logged at ERROR level and swallowed.
+   */
+  async recordFirstResponse(conversationId: string, respondedAt: Date): Promise<void> {
+    try {
+      await this.prisma.ticket.updateMany({
+        where: { conversationId, firstRespondedAt: null },
+        data: { firstRespondedAt: respondedAt },
+      });
+    } catch (err) {
+      logger.error('[EmailService.recordFirstResponse] Failed to record first response time', {
+        conversationId,
+        respondedAt,
+        err,
+      });
+    }
   }
 
   /**
@@ -1250,6 +1335,11 @@ export class EmailService {
       if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) throw err;
     }
 
+    // Record the first response time for SLA tracking. Uses the email's own
+    // createdAt so the timestamp is consistent with what is persisted in the DB.
+    // Called after the transaction so a tracking failure never rolls back the reply.
+    await this.recordFirstResponse(params.conversationId, email.createdAt);
+
     return {
       emailId: email.id,
       threadId: sent.threadId,
@@ -1340,6 +1430,17 @@ export class EmailService {
       groupId = preference?.assigneeUserGroupId ?? null;
     }
 
+    // Pre-compute SLA due dates before the transaction using the first email's
+    // priority (derived from subject) and its receivedAt timestamp.
+    const ingestTicketPriority = derivePriorityFromSubject(firstEmail.subject ?? '');
+    const ingestSlaResolutionDue = existingFirstEmail
+      ? null
+      : await this.getSlaResolutionDue(
+          boardId,
+          ingestTicketPriority,
+          firstEmail.receivedAt ?? new Date(),
+        );
+
     const emailRowIds = emails.map(() => uuidv4());
     const emailRows = emails.map((e, i) => ({
       id: emailRowIds[i]!,
@@ -1414,6 +1515,7 @@ export class EmailService {
               boardId: boardId!,
               lastEmailAt: firstEmail.receivedAt ?? new Date(),
               stageName: firstStage.name,
+              ...(ingestSlaResolutionDue && { eta: ingestSlaResolutionDue }),
               ...(groupId && { userGroupId: groupId }),
               ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
               ...(firstEmail.receivedAt && { createdAt: firstEmail.receivedAt }),

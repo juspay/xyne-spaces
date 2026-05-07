@@ -1,5 +1,14 @@
 import { ReactElement, useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Plus, X, Timer, ChevronDown, GitBranch, MoreVertical, ChevronLeft } from 'lucide-react';
+import {
+  Plus,
+  X,
+  Timer,
+  ChevronDown,
+  GitBranch,
+  MoreVertical,
+  ChevronLeft,
+  Clock,
+} from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -28,6 +37,7 @@ import { formService } from '../../../services/Form/formService';
 import { FormEntityType } from '@xyne/shared';
 import { StatusIndicator } from '../../../components/Board/StatusIndicator';
 import { STATUS_OPTIONS, getStatusOption } from './BoardStageConfigScreen.types.tsx';
+import { SlaSettings } from '../../xyne-desk/SlaSettings/SlaSettings';
 
 interface BoardStageConfigScreenProps {
   boardId: string;
@@ -122,6 +132,12 @@ const BoardStageConfigScreen = ({
   const [isAllowedToTransfer, setIsAllowedToTransfer] = useState(false);
   const [fullRoleAssignment, setFullRoleAssignment] = useState(false);
 
+  // ── SLA Policy Type Toggle ───────────────────────────────────────────────────
+  // 'stages' (default): SLA deadlines derive from per-stage ETAs.
+  // 'priority': SLA deadlines derive from board_sla_policies (per-priority config).
+  // Typed as the non-nullable union so comparisons against 'priority' are unambiguous.
+  const [slaPolicyType, setSlaPolicyType] = useState<'stages' | 'priority'>('stages');
+
   // ── Local state ─────────────────────────────────────────────────────────────
   // Default stages for new boards (when no stages exist)
   const defaultStages: Stage[] = [
@@ -198,6 +214,11 @@ const BoardStageConfigScreen = ({
       }
       if (metadata?.['fullRoleAssignment'] !== undefined) {
         setFullRoleAssignment(Boolean(metadata['fullRoleAssignment']));
+      }
+      if (metadata?.['slaPolicyType'] === 'priority') {
+        setSlaPolicyType('priority');
+      } else {
+        setSlaPolicyType('stages');
       }
     }
   }, [board]);
@@ -734,6 +755,7 @@ const BoardStageConfigScreen = ({
           ...existingMetadata,
           isAllowedToTransfer,
           fullRoleAssignment,
+          slaPolicyType,
         },
         timestamp: Date.now(),
         stageIds,
@@ -762,7 +784,17 @@ const BoardStageConfigScreen = ({
         duration: 5000,
       });
     }
-  }, [boardId, board, stages, onSave, onClose, zero, isAllowedToTransfer, fullRoleAssignment]);
+  }, [
+    boardId,
+    board,
+    stages,
+    onSave,
+    onClose,
+    zero,
+    isAllowedToTransfer,
+    fullRoleAssignment,
+    slaPolicyType,
+  ]);
 
   if (!isOpen) return null;
 
@@ -922,285 +954,348 @@ const BoardStageConfigScreen = ({
           </div>
         </div>
 
-        {/* ── Stages Area with Rounded Column Background ── */}
-        <div className='flex-1 overflow-hidden px-6 pt-3 pb-6'>
-          {/* Rounded container with columns background */}
-          <div className='h-full w-full rounded-[16px] bg-muted/50 overflow-x-auto overflow-y-hidden'>
-            {/* Stage Cards Row - centered when few, scrollable when many */}
-            <div className='h-full flex items-stretch justify-center min-w-max relative'>
-              {/* Dotted grid pattern background - at top level */}
-              <div
-                className='absolute inset-0 pointer-events-none z-[20]'
-                style={{
-                  backgroundImage:
-                    'radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)',
-                  backgroundSize: '24px 24px',
-                }}
-              />
-              {stages.map((stage, index) => {
-                const statusOption = getStatusOption(stage.defaultTicketStatusV2);
-                const isLast = index === stages.length - 1;
+        {/* ── SLA Mode Selector ── */}
+        <div className='px-6 py-3 border-t border-border flex-shrink-0'>
+          <div className='flex items-center justify-between gap-4'>
+            {/* Left: label + context */}
+            <div className='flex items-center gap-2 min-w-0'>
+              <Clock size={14} className='text-muted-foreground flex-shrink-0' />
+              <span className='text-[13px] font-medium text-foreground whitespace-nowrap'>
+                SLA Mode
+              </span>
+              <span className='text-[12px] text-muted-foreground truncate hidden sm:block'>
+                {slaPolicyType === 'priority'
+                  ? '— deadlines set by per-priority policy'
+                  : '— deadlines set by per-stage ETA'}
+              </span>
+            </div>
 
-                // Calculate active stages for progress indicator (exclude TODO and CANCELLED from position calc)
-                const activeStages = stages.filter(
-                  s =>
-                    s.defaultTicketStatusV2 !== TicketStatusV2.TODO &&
-                    s.defaultTicketStatusV2 !== TicketStatusV2.CANCELLED,
-                );
-                const totalActiveStages = activeStages.length;
-                const stageIndexInActive = activeStages.findIndex(s => s.tempId === stage.tempId);
-
-                // Get background color based on status - uses semantic theme-aware colors
-                const getStatusBgColor = (status: TicketStatusV2): string => {
-                  switch (status) {
-                    case TicketStatusV2.TODO:
-                      return 'bg-stage-todo';
-                    case TicketStatusV2.STARTED:
-                      return 'bg-muted/30';
-                    case TicketStatusV2.PAUSED:
-                      return 'bg-muted/50';
-                    case TicketStatusV2.COMPLETED:
-                      return 'bg-stage-completed';
-                    case TicketStatusV2.CANCELLED:
-                      return 'bg-stage-cancelled';
-                    default:
-                      return 'bg-muted/30';
-                  }
-                };
-
-                return (
-                  <div key={stage.tempId} className='flex items-stretch h-full relative'>
-                    {/* Colored Background Column - full width touching adjacent boxes */}
-                    <div
-                      className={`${getStatusBgColor(stage.defaultTicketStatusV2)} self-stretch flex items-start justify-center px-10 pt-20 relative`}
-                    >
-                      {/* Stage Card - narrower than colored background */}
-                      <div className='w-[260px] bg-background rounded-[10px] border border-border shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] overflow-hidden pb-[10px] shrink-0 z-40'>
-                        {/* Card Header */}
-                        <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
-                          {/* Status Dropdown */}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              className='flex items-center gap-[6px] outline-none'
-                              data-track-category='board_config'
-                              data-track-name='change_stage_status'
-                            >
-                              <span className='text-[13px] font-medium text-muted-foreground'>
-                                {statusOption.label}
-                              </span>
-                              <ChevronDown size={14} className='text-muted-foreground' />
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align='start'>
-                              {STATUS_OPTIONS.map(opt => (
-                                <DropdownMenuItem
-                                  key={opt.status}
-                                  onSelect={() =>
-                                    handleUpdateStage(stage.tempId, {
-                                      defaultTicketStatusV2: opt.status,
-                                    })
-                                  }
-                                  className='flex items-center gap-2'
-                                >
-                                  {opt.icon}
-                                  <span>{opt.label}</span>
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-
-                          {/* ETA & Close */}
-                          <div className='flex items-center gap-2 relative'>
-                            {/* Set ETA button - always visible */}
-                            <Button
-                              onClick={() => handleStartEditEta(stage)}
-                              variant='ghost'
-                              size='sm'
-                              className='flex items-center gap-[4px] text-[12px] text-foreground hover:text-foreground/80 p-[4px] rounded-[6px] h-auto'
-                              data-track-category='board_config'
-                              data-track-name='start_edit_eta'
-                            >
-                              <Timer size={12} />
-                              <span className='font-[450]'>
-                                {stage.eta > 0 ? `${stage.eta}h` : 'Set ETA'}
-                              </span>
-                            </Button>
-
-                            {/* ETA Input dropdown - appears below when editing */}
-                            {editingEtaId === stage.tempId && (
-                              <div className='absolute top-full right-0 mt-2 z-50 bg-background border border-border rounded-[6px] shadow-[0px_2px_6px_0px_rgba(5,5,6,0.07)] pl-[10px] pr-[6px] py-[8px] flex items-center gap-2 min-w-[80px]'>
-                                <input
-                                  ref={etaInputRef}
-                                  type='text'
-                                  inputMode='numeric'
-                                  pattern='[0-9]*'
-                                  value={etaValue}
-                                  onChange={e => setEtaValue(e.target.value)}
-                                  onBlur={() => handleSaveEta(stage.tempId)}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') handleSaveEta(stage.tempId);
-                                    if (e.key === 'Escape') setEditingEtaId(null);
-                                  }}
-                                  data-track-category='board_config'
-                                  data-track-name='edit_eta_input'
-                                  placeholder='ETA'
-                                  className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
-                                />
-                                <span className='text-[14px] font-[450] text-foreground'>hrs</span>
-                              </div>
-                            )}
-                            <Button
-                              onClick={() => handleDeleteStage(stage.tempId)}
-                              variant='ghost'
-                              size='iconSm'
-                              className='text-muted-foreground hover:text-muted-foreground/80 shrink-0'
-                              data-track-category='board_config'
-                              data-track-name='delete_stage'
-                            >
-                              <X size={14} />
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* Card Body */}
-                        <div className='px-3 py-3'>
-                          {/* Status Icon + Stage Name */}
-                          <div className='flex items-center gap-[4px] mb-3'>
-                            <div className='bg-background h-[26px] flex items-center justify-center px-[6px] py-[4px] rounded-[6px]'>
-                              <StatusIndicator
-                                status={stage.defaultTicketStatusV2}
-                                size={16}
-                                stageIndex={
-                                  stageIndexInActive >= 0 ? stageIndexInActive : undefined
-                                }
-                                totalNonCancelledStages={
-                                  totalActiveStages > 0 ? totalActiveStages : undefined
-                                }
-                              />
-                            </div>
-                            <input
-                              type='text'
-                              value={stage.name}
-                              onChange={e =>
-                                handleUpdateStage(stage.tempId, { name: e.target.value })
-                              }
-                              data-track-category='board_config'
-                              data-track-name='edit_stage_name'
-                              placeholder='Stage name...'
-                              className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
-                            />
-                          </div>
-
-                          {/* Condition Boxes */}
-                          {stage.conditions && stage.conditions.length > 0 && (
-                            <div className='flex flex-col gap-2 mb-3'>
-                              {stage.conditions.map((condition, condIdx) => (
-                                <Button
-                                  key={condition.id}
-                                  onClick={() => handleOpenConditionModal(stage.tempId, condition)}
-                                  variant='ghost'
-                                  className='w-full bg-background border border-border rounded-[12px] h-auto min-h-[40px] px-2 py-2 flex items-center gap-[6px] hover:bg-muted transition-colors justify-start'
-                                  data-track-category='board_config'
-                                  data-track-name='edit_condition'
-                                >
-                                  <GitBranch
-                                    size={14}
-                                    className='text-muted-foreground flex-shrink-0'
-                                  />
-                                  <span className='text-[14px] font-medium text-foreground break-words whitespace-normal text-left leading-[18px]'>
-                                    {condition.name || `Condition ${condIdx + 1}`}
-                                  </span>
-                                </Button>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Add Condition Link */}
-                          <Button
-                            onClick={() => handleOpenConditionModal(stage.tempId)}
-                            variant='ghost'
-                            size='sm'
-                            className='flex items-center gap-[6px] text-[14px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] h-auto'
-                            data-track-category='board_config'
-                            data-track-name='add_condition'
-                          >
-                            <GitBranch size={14} className='text-[#6276be]' />
-                            <span>Add Condition</span>
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Condition Builder - positioned absolutely to the right */}
-                    {isConditionModalOpen && selectedStageForCondition === stage.tempId && (
-                      <div className='absolute left-1/4 top-1/4 -translate-y-[250px] ml-[16px] z-50'>
-                        <ConditionBuilder
-                          isOpen={true}
-                          onClose={handleCloseConditionModal}
-                          onSave={handleSaveCondition}
-                          onDelete={editingCondition ? handleDeleteCondition : undefined}
-                          condition={editingCondition}
-                          onOpenCreateForm={handleOpenCreateForm}
-                          nextStageName={stages[index + 1]?.name}
-                          allStages={stages.map(s => ({
-                            name: s.name,
-                            sequenceNumber: s.sequenceNumber,
-                            ...(s.formId && { formId: s.formId }),
-                          }))}
-                        />
-                      </div>
-                    )}
-
-                    {/* Create Form Slide Out - fixed panel matching grey background height */}
-                    {isCreateFormOpen && selectedStageForCondition === stage.tempId && (
-                      <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
-                        <CreateFormSlideOut
-                          isOpen={true}
-                          onClose={handleCloseCreateForm}
-                          onSave={formData => void handleCreateFormSave(formData)}
-                        />
-                      </div>
-                    )}
-
-                    {/* Black line on top of where colored backgrounds meet */}
-                    {!isLast && (
-                      <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-10 w-[80px] h-[2px] bg-muted-foreground' />
-                    )}
-
-                    {/* Plus button on top of the line - matches Figma design */}
-                    {!isLast && (
-                      <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-20'>
-                        <Button
-                          onClick={() => handleAddStageAt(index + 1)}
-                          data-track-category='board_config'
-                          data-track-name='add_stage_between'
-                          variant='ghost'
-                          size='iconSm'
-                          className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
-                        >
-                          <Plus size={12} className='text-foreground' />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-              {/* Final Add Stage Card (when no stages or as last option) */}
-              {stages.length === 0 && (
-                <Button
-                  onClick={() => handleAddStageAt(0)}
-                  data-track-category='board_config'
-                  data-track-name='add_first_stage'
-                  variant='ghost'
-                  className='w-[280px] h-[120px] rounded-lg border-2 border-dashed border-muted-foreground flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-muted-foreground/80 hover:border-muted-foreground/60 hover:bg-background/50 transition-colors'
-                >
-                  <Plus size={20} />
-                  <span className='text-sm font-medium'>Add Stage</span>
-                </Button>
-              )}
+            {/* Right: segmented control */}
+            <div className='flex items-center bg-muted rounded-[8px] p-[3px] gap-[2px] flex-shrink-0'>
+              <button
+                type='button'
+                onClick={() => setSlaPolicyType('stages')}
+                data-track-category='board_config'
+                data-track-name='sla_mode_stages'
+                className={`flex items-center gap-[6px] px-3 py-[5px] rounded-[6px] text-[12px] font-medium transition-all duration-150 ${
+                  slaPolicyType === 'stages'
+                    ? 'bg-background text-foreground shadow-sm border border-border'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Timer size={12} className='flex-shrink-0' />
+                Stage ETAs
+              </button>
+              <button
+                type='button'
+                onClick={() => setSlaPolicyType('priority')}
+                data-track-category='board_config'
+                data-track-name='sla_mode_priority'
+                className={`flex items-center gap-[6px] px-3 py-[5px] rounded-[6px] text-[12px] font-medium transition-all duration-150 ${
+                  slaPolicyType === 'priority'
+                    ? 'bg-[#6276BE] text-white shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Clock size={12} className='flex-shrink-0' />
+                Priority SLA
+              </button>
             </div>
           </div>
+
+          {/* Inline SLA settings panel — expands when Priority SLA is active */}
+          {slaPolicyType === 'priority' && (
+            <div className='mt-3 rounded-[10px] border border-border bg-muted/30 px-4 py-3'>
+              <SlaSettings boardId={boardId} />
+            </div>
+          )}
         </div>
+
+        {/* ── Stages Area — hidden when Priority SLA mode is active ── */}
+        {slaPolicyType !== 'priority' && (
+          <div className='flex-1 overflow-hidden px-6 pt-3 pb-6'>
+            {/* Rounded container with columns background */}
+            <div className='h-full w-full rounded-[16px] bg-muted/50 overflow-x-auto overflow-y-hidden'>
+              {/* Stage Cards Row - centered when few, scrollable when many */}
+              <div className='h-full flex items-stretch justify-center min-w-max relative'>
+                {/* Dotted grid pattern background - at top level */}
+                <div
+                  className='absolute inset-0 pointer-events-none z-[20]'
+                  style={{
+                    backgroundImage:
+                      'radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)',
+                    backgroundSize: '24px 24px',
+                  }}
+                />
+                {stages.map((stage, index) => {
+                  const statusOption = getStatusOption(stage.defaultTicketStatusV2);
+                  const isLast = index === stages.length - 1;
+
+                  // Calculate active stages for progress indicator (exclude TODO and CANCELLED from position calc)
+                  const activeStages = stages.filter(
+                    s =>
+                      s.defaultTicketStatusV2 !== TicketStatusV2.TODO &&
+                      s.defaultTicketStatusV2 !== TicketStatusV2.CANCELLED,
+                  );
+                  const totalActiveStages = activeStages.length;
+                  const stageIndexInActive = activeStages.findIndex(s => s.tempId === stage.tempId);
+
+                  // Get background color based on status - uses semantic theme-aware colors
+                  const getStatusBgColor = (status: TicketStatusV2): string => {
+                    switch (status) {
+                      case TicketStatusV2.TODO:
+                        return 'bg-stage-todo';
+                      case TicketStatusV2.STARTED:
+                        return 'bg-muted/30';
+                      case TicketStatusV2.PAUSED:
+                        return 'bg-muted/50';
+                      case TicketStatusV2.COMPLETED:
+                        return 'bg-stage-completed';
+                      case TicketStatusV2.CANCELLED:
+                        return 'bg-stage-cancelled';
+                      default:
+                        return 'bg-muted/30';
+                    }
+                  };
+
+                  return (
+                    <div key={stage.tempId} className='flex items-stretch h-full relative'>
+                      {/* Colored Background Column - full width touching adjacent boxes */}
+                      <div
+                        className={`${getStatusBgColor(stage.defaultTicketStatusV2)} self-stretch flex items-start justify-center px-10 pt-20 relative`}
+                      >
+                        {/* Stage Card - narrower than colored background */}
+                        <div className='w-[260px] bg-background rounded-[10px] border border-border shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] overflow-hidden pb-[10px] shrink-0 z-40'>
+                          {/* Card Header */}
+                          <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
+                            {/* Status Dropdown */}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger
+                                className='flex items-center gap-[6px] outline-none'
+                                data-track-category='board_config'
+                                data-track-name='change_stage_status'
+                              >
+                                <span className='text-[13px] font-medium text-muted-foreground'>
+                                  {statusOption.label}
+                                </span>
+                                <ChevronDown size={14} className='text-muted-foreground' />
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align='start'>
+                                {STATUS_OPTIONS.map(opt => (
+                                  <DropdownMenuItem
+                                    key={opt.status}
+                                    onSelect={() =>
+                                      handleUpdateStage(stage.tempId, {
+                                        defaultTicketStatusV2: opt.status,
+                                      })
+                                    }
+                                    className='flex items-center gap-2'
+                                  >
+                                    {opt.icon}
+                                    <span>{opt.label}</span>
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+
+                            {/* ETA & Close */}
+                            <div className='flex items-center gap-2 relative'>
+                              {/* Set ETA button - always visible here (outer block already guards slaPolicyType !== 'priority') */}
+                              <Button
+                                onClick={() => handleStartEditEta(stage)}
+                                variant='ghost'
+                                size='sm'
+                                className='flex items-center gap-[4px] text-[12px] text-foreground hover:text-foreground/80 p-[4px] rounded-[6px] h-auto'
+                                data-track-category='board_config'
+                                data-track-name='start_edit_eta'
+                              >
+                                <Timer size={12} />
+                                <span className='font-[450]'>
+                                  {stage.eta > 0 ? `${stage.eta}h` : 'Set ETA'}
+                                </span>
+                              </Button>
+
+                              {/* ETA Input dropdown - appears below when editing */}
+                              {editingEtaId === stage.tempId && (
+                                <div className='absolute top-full right-0 mt-2 z-50 bg-background border border-border rounded-[6px] shadow-[0px_2px_6px_0px_rgba(5,5,6,0.07)] pl-[10px] pr-[6px] py-[8px] flex items-center gap-2 min-w-[80px]'>
+                                  <input
+                                    ref={etaInputRef}
+                                    type='text'
+                                    inputMode='numeric'
+                                    pattern='[0-9]*'
+                                    value={etaValue}
+                                    onChange={e => setEtaValue(e.target.value)}
+                                    onBlur={() => handleSaveEta(stage.tempId)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleSaveEta(stage.tempId);
+                                      if (e.key === 'Escape') setEditingEtaId(null);
+                                    }}
+                                    data-track-category='board_config'
+                                    data-track-name='edit_eta_input'
+                                    placeholder='ETA'
+                                    className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
+                                  />
+                                  <span className='text-[14px] font-[450] text-foreground'>
+                                    hrs
+                                  </span>
+                                </div>
+                              )}
+                              <Button
+                                onClick={() => handleDeleteStage(stage.tempId)}
+                                variant='ghost'
+                                size='iconSm'
+                                className='text-muted-foreground hover:text-muted-foreground/80 shrink-0'
+                                data-track-category='board_config'
+                                data-track-name='delete_stage'
+                              >
+                                <X size={14} />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Card Body */}
+                          <div className='px-3 py-3'>
+                            {/* Status Icon + Stage Name */}
+                            <div className='flex items-center gap-[4px] mb-3'>
+                              <div className='bg-background h-[26px] flex items-center justify-center px-[6px] py-[4px] rounded-[6px]'>
+                                <StatusIndicator
+                                  status={stage.defaultTicketStatusV2}
+                                  size={16}
+                                  stageIndex={
+                                    stageIndexInActive >= 0 ? stageIndexInActive : undefined
+                                  }
+                                  totalNonCancelledStages={
+                                    totalActiveStages > 0 ? totalActiveStages : undefined
+                                  }
+                                />
+                              </div>
+                              <input
+                                type='text'
+                                value={stage.name}
+                                onChange={e =>
+                                  handleUpdateStage(stage.tempId, { name: e.target.value })
+                                }
+                                data-track-category='board_config'
+                                data-track-name='edit_stage_name'
+                                placeholder='Stage name...'
+                                className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
+                              />
+                            </div>
+
+                            {/* Condition Boxes */}
+                            {stage.conditions && stage.conditions.length > 0 && (
+                              <div className='flex flex-col gap-2 mb-3'>
+                                {stage.conditions.map((condition, condIdx) => (
+                                  <Button
+                                    key={condition.id}
+                                    onClick={() =>
+                                      handleOpenConditionModal(stage.tempId, condition)
+                                    }
+                                    variant='ghost'
+                                    className='w-full bg-background border border-border rounded-[12px] h-auto min-h-[40px] px-2 py-2 flex items-center gap-[6px] hover:bg-muted transition-colors justify-start'
+                                    data-track-category='board_config'
+                                    data-track-name='edit_condition'
+                                  >
+                                    <GitBranch
+                                      size={14}
+                                      className='text-muted-foreground flex-shrink-0'
+                                    />
+                                    <span className='text-[14px] font-medium text-foreground break-words whitespace-normal text-left leading-[18px]'>
+                                      {condition.name || `Condition ${condIdx + 1}`}
+                                    </span>
+                                  </Button>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Add Condition Link */}
+                            <Button
+                              onClick={() => handleOpenConditionModal(stage.tempId)}
+                              variant='ghost'
+                              size='sm'
+                              className='flex items-center gap-[6px] text-[14px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] h-auto'
+                              data-track-category='board_config'
+                              data-track-name='add_condition'
+                            >
+                              <GitBranch size={14} className='text-[#6276be]' />
+                              <span>Add Condition</span>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Condition Builder - positioned absolutely to the right */}
+                      {isConditionModalOpen && selectedStageForCondition === stage.tempId && (
+                        <div className='absolute left-1/4 top-1/4 -translate-y-[250px] ml-[16px] z-50'>
+                          <ConditionBuilder
+                            isOpen={true}
+                            onClose={handleCloseConditionModal}
+                            onSave={handleSaveCondition}
+                            onDelete={editingCondition ? handleDeleteCondition : undefined}
+                            condition={editingCondition}
+                            onOpenCreateForm={handleOpenCreateForm}
+                            nextStageName={stages[index + 1]?.name}
+                            allStages={stages.map(s => ({
+                              name: s.name,
+                              sequenceNumber: s.sequenceNumber,
+                              ...(s.formId && { formId: s.formId }),
+                            }))}
+                          />
+                        </div>
+                      )}
+
+                      {/* Create Form Slide Out - fixed panel matching grey background height */}
+                      {isCreateFormOpen && selectedStageForCondition === stage.tempId && (
+                        <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                          <CreateFormSlideOut
+                            isOpen={true}
+                            onClose={handleCloseCreateForm}
+                            onSave={formData => void handleCreateFormSave(formData)}
+                          />
+                        </div>
+                      )}
+
+                      {/* Black line on top of where colored backgrounds meet */}
+                      {!isLast && (
+                        <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-10 w-[80px] h-[2px] bg-muted-foreground' />
+                      )}
+
+                      {/* Plus button on top of the line - matches Figma design */}
+                      {!isLast && (
+                        <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-20'>
+                          <Button
+                            onClick={() => handleAddStageAt(index + 1)}
+                            data-track-category='board_config'
+                            data-track-name='add_stage_between'
+                            variant='ghost'
+                            size='iconSm'
+                            className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
+                          >
+                            <Plus size={12} className='text-foreground' />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Final Add Stage Card (when no stages or as last option) */}
+                {stages.length === 0 && (
+                  <Button
+                    onClick={() => handleAddStageAt(0)}
+                    data-track-category='board_config'
+                    data-track-name='add_first_stage'
+                    variant='ghost'
+                    className='w-[280px] h-[120px] rounded-lg border-2 border-dashed border-muted-foreground flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-muted-foreground/80 hover:border-muted-foreground/60 hover:bg-background/50 transition-colors'
+                  >
+                    <Plus size={20} />
+                    <span className='text-sm font-medium'>Add Stage</span>
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -48,7 +48,13 @@ import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
-import type { Ticket, FormEntityValues, TicketStageRequest, TicketAssignment } from '@xyne/shared';
+import type {
+  Ticket,
+  FormEntityValues,
+  TicketStageRequest,
+  TicketAssignment,
+  BoardMetadata,
+} from '@xyne/shared';
 import { TicketStatusV2, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
@@ -78,6 +84,7 @@ import { stateMachineActor } from '../../machines/stateMachine';
 import { Dialog } from '../../components/ui/Dialog';
 import Button from '../../components/ui/Button';
 import { useZero } from '../../hooks/useZero';
+import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 
 function valuesToFilters(
   values: ReadonlyArray<{
@@ -836,6 +843,49 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     },
   );
   if (ticketsDetails.type === 'complete') logEntityTiming('allProjectTickets');
+
+  // Collect the unique board IDs visible on screen.
+  //
+  // Priority:
+  //  1. Single-board view (URL param or single filter entry) — cheapest, no ticket scan.
+  //  2. Explicit multi-board filter — boards are already known from filter state.
+  //  3. All-boards channel/project view — derive from loaded tickets. Returns [] while
+  //     tickets are still loading; Zero reactively re-fetches once they arrive.
+  const visibleBoardIds = useMemo((): string[] => {
+    if (filteredSingleBoardId) return [filteredSingleBoardId];
+    if (filters.boards && filters.boards.length > 0) return filters.boards;
+    return Array.from(
+      new Set((allProjectTickets ?? []).map(t => t.boardId).filter((id): id is string => !!id)),
+    );
+  }, [filteredSingleBoardId, filters.boards, allProjectTickets]);
+
+  // Fetch lightweight board metadata for all visible boards so we can determine
+  // which ones use priority-based SLA. In single-board view selectedBoardDetail
+  // already contains metadata, so boardsByIds is disabled to avoid a duplicate
+  // subscription. In multi-board view boardsByIds is the only source.
+  const [visibleBoards] = useCachedQuery(queries.boardsByIds({ boardIds: visibleBoardIds }), {
+    enabled: visibleBoardIds.length > 1,
+  });
+
+  // Narrow the visible board IDs to only those configured for priority-based SLA.
+  // Boards using stage-based SLA (the default) have no active entries in
+  // board_sla_policies, but we avoid the subscription entirely rather than
+  // letting it fire an empty query.
+  const prioritySlaBoardIds = useMemo((): string[] => {
+    if (filteredSingleBoardId) {
+      // Single-board: metadata is already in selectedBoardDetail.
+      const meta = selectedBoardDetail?.metadata as BoardMetadata | null | undefined;
+      return meta?.slaPolicyType === 'priority' ? [filteredSingleBoardId] : [];
+    }
+    // Multi-board: filter using metadata returned by boardsByIds.
+    return (visibleBoards ?? [])
+      .filter(b => (b.metadata as BoardMetadata | null | undefined)?.slaPolicyType === 'priority')
+      .map(b => b.id);
+  }, [filteredSingleBoardId, selectedBoardDetail, visibleBoards]);
+
+  // One subscription for all priority-SLA boards on screen. TicketCard looks up
+  // the policy by boardId + priority, so no per-card fetches are needed.
+  const kanbanSlaPolicies = useBoardsSlaPolicies(prioritySlaBoardIds);
 
   // Calculate available priorities, users, and user groups from ALL project tickets (not filtered)
   // Return undefined if tickets haven't loaded yet to prevent filtering out all options
@@ -2004,6 +2054,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           onTicketClick={handleTicketClick}
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
+                          slaPolicies={kanbanSlaPolicies}
                         />
                       </div>
                     )}
@@ -2020,6 +2071,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   tags={tagsByTicketId.get(activeTicket.id) || []}
                   visibleColumns={visibleColumns}
                   availableTags={availableTags || []}
+                  slaPolicies={kanbanSlaPolicies}
                 />
               )}
             </DragOverlay>

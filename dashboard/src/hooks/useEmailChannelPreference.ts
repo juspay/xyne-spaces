@@ -28,11 +28,13 @@ export function useUpdateEmailChannelPreference() {
       ownerUserId,
       assigneeUserGroupId,
       sendAsEmail,
+      defaultCc,
     }: {
       channelId: string;
       ownerUserId?: string;
       assigneeUserGroupId?: string | null;
       sendAsEmail?: string | null;
+      defaultCc?: string | null;
     }): Promise<void> => {
       zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -40,6 +42,7 @@ export function useUpdateEmailChannelPreference() {
           ...(ownerUserId !== undefined ? { ownerUserId } : {}),
           ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
           ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
+          ...(defaultCc !== undefined ? { defaultCc } : {}),
         }),
       );
       return Promise.resolve();

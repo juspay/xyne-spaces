@@ -1,6 +1,13 @@
 import React, { useRef, useState } from 'react';
-import { Calendar, User, Tag } from 'lucide-react';
-import { BaseTicketType, isReleaseTicket, Ticket, TicketTag } from '@xyne/shared';
+import { Calendar, User, Tag, Timer } from 'lucide-react';
+import {
+  BaseTicketType,
+  isReleaseTicket,
+  Ticket,
+  TicketTag,
+  TicketStatusV2,
+  addSlaHours,
+} from '@xyne/shared';
 import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
 import { useUser, useUsers } from '../../../hooks/useUsers';
@@ -15,8 +22,102 @@ import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableHelper';
 import { v4 as uuidv4 } from 'uuid';
+import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 
 const DEFAULT_VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'tags']);
+
+// ---------------------------------------------------------------------------
+// SLA response badge — module-level component so it is not re-created on
+// every TicketCard render. Closed over nothing from TicketCard; all data is
+// passed explicitly via props.
+// ---------------------------------------------------------------------------
+
+/** Format an elapsed duration (ms) as "Xm", "Xh Ym", or "Xd Yh". */
+const formatElapsed = (ms: number): string => {
+  const totalMins = Math.round(ms / 60_000);
+  if (totalMins < 60) return `${totalMins}m`;
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hours < 24) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remH = hours % 24;
+  return remH > 0 ? `${days}d ${remH}h` : `${days}d`;
+};
+
+interface SlaResponseBadgeProps {
+  /** Response SLA deadline as Unix epoch ms (derived from policy + createdAt). */
+  responseDueMs: number;
+  /** Unix ms when an agent first replied; null if not yet responded. */
+  firstRespondedAt: number | null;
+  /** Unix ms of ticket creation. */
+  ticketCreatedAt: number;
+  /** Whether the ticket is in a terminal state (COMPLETED / CANCELLED). */
+  isTerminal: boolean;
+}
+
+const SlaResponseBadge: React.FC<SlaResponseBadgeProps> = ({
+  responseDueMs,
+  firstRespondedAt,
+  ticketCreatedAt,
+  isTerminal,
+}) => {
+  // ── Already responded: show actual elapsed time ────────────────────────
+  if (firstRespondedAt) {
+    const elapsed = firstRespondedAt - ticketCreatedAt;
+    const metSla = firstRespondedAt <= responseDueMs;
+    return (
+      <Tooltip content={`First responded at ${new Date(firstRespondedAt).toLocaleString()}`}>
+        <div
+          className={cn(
+            'flex items-center gap-1 px-2 py-1 rounded-md border text-xs font-medium',
+            metSla
+              ? 'border-border text-muted-foreground'
+              : 'bg-red-50 border-red-100 text-red-500',
+          )}
+        >
+          <Timer className='w-3.5 h-3.5 shrink-0' strokeWidth={2} />
+          <span>{formatElapsed(elapsed)}</span>
+        </div>
+      </Tooltip>
+    );
+  }
+
+  // ── Awaiting response: countdown or overdue ────────────────────────────
+  const diffMs = responseDueMs - Date.now();
+  const isOverdue = diffMs < 0;
+
+  const label = isOverdue ? formatElapsed(Math.abs(diffMs)) + ' ago' : formatElapsed(diffMs);
+
+  const urgency =
+    isOverdue && !isTerminal
+      ? 'overdue'
+      : !isOverdue && diffMs < 3_600_000
+        ? 'critical'
+        : !isOverdue && diffMs < 4 * 3_600_000
+          ? 'warning'
+          : 'normal';
+
+  const colorMap = {
+    overdue: 'bg-red-50 border-red-100 text-red-500',
+    critical: 'bg-orange-50 border-orange-100 text-orange-600',
+    warning: 'bg-amber-50 border-amber-100 text-amber-600',
+    normal: 'border-border text-muted-foreground',
+  };
+
+  return (
+    <Tooltip content={`Response SLA due: ${new Date(responseDueMs).toLocaleString()}`}>
+      <div
+        className={cn(
+          'flex items-center gap-1 px-2 py-1 rounded-md border text-xs font-medium',
+          colorMap[urgency],
+        )}
+      >
+        <Timer className='w-3.5 h-3.5 shrink-0' strokeWidth={2} />
+        <span>{label}</span>
+      </div>
+    </Tooltip>
+  );
+};
 
 const AssigneeEditor: React.FC<{
   selectedValue: string | null;
@@ -50,6 +151,11 @@ interface TicketCardProps {
   isCompact?: boolean;
   visibleColumns?: Set<string> | undefined;
   isConversation?: boolean;
+  /**
+   * SLA policies pre-fetched by the parent for the whole board.
+   * When omitted, SLA badges are not shown — no per-card fetch is performed.
+   */
+  slaPolicies?: BoardSlaPolicy[];
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({
@@ -61,6 +167,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   isCompact = false,
   visibleColumns = DEFAULT_VISIBLE_COLUMNS,
   isConversation = false,
+  slaPolicies: slaPoliciesProp,
 }) => {
   const zero = useZero();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -89,6 +196,23 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const assigneeId = ticket.assignedTo?.replace(/^(user:|group:)/, '') || '';
   const shouldResolveAssignee = showAssignee || !isCompact;
   const shouldResolveCreator = showCreatedBy;
+
+  // firstRespondedAt — stored as ms epoch in Zero, not in the base Ticket type yet
+  const firstRespondedAt =
+    (ticket as unknown as { firstRespondedAt?: number | null }).firstRespondedAt ?? null;
+
+  // Derive response SLA deadline from the board's active policy + ticket.createdAt.
+  // Policies are pre-fetched once by the parent; if not provided the badge is hidden.
+  const slaPolicies = slaPoliciesProp ?? [];
+  // Filter by boardId in addition to priority so the array is safe to use in
+  // multi-board views where policies from several boards are merged together.
+  const activePolicy =
+    slaPolicies.find(
+      p => p.boardId === ticket.boardId && p.priority === ticket.priority && p.isActive,
+    ) ?? null;
+  const responseDueMs = activePolicy
+    ? addSlaHours(new Date(ticket.createdAt), activePolicy.responseHours, activePolicy).getTime()
+    : null;
 
   const creator = useUser(shouldResolveCreator ? ticket.createdBy || '' : '');
   const assignedUser = useUser(shouldResolveAssignee && assigneeType === 'user' ? assigneeId : '');
@@ -292,6 +416,11 @@ export const TicketCard: React.FC<TicketCardProps> = ({
       </div>
     );
   };
+
+  // ---- SLA response badge ------------------------------------------------
+  // Shows how long until the first-response SLA is due, or how long it took
+  // to respond once firstRespondedAt is set. Resolution SLA is shown by the
+  // existing DueDateDisplay (ticket.eta = resolution deadline set at creation).
 
   return (
     <button
@@ -500,6 +629,18 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         </Tooltip>
                       ))}
                   </div>
+                  {/* SLA Response badge — only shown when the board has an active policy */}
+                  {responseDueMs && (
+                    <SlaResponseBadge
+                      responseDueMs={responseDueMs}
+                      firstRespondedAt={firstRespondedAt}
+                      ticketCreatedAt={ticket.createdAt}
+                      isTerminal={
+                        ticket.statusV2 === TicketStatusV2.COMPLETED ||
+                        ticket.statusV2 === TicketStatusV2.CANCELLED
+                      }
+                    />
+                  )}
                   {/* Tags Section - Now Editable */}
                   {showTags &&
                     (isEditingTags ? (

@@ -329,8 +329,12 @@ export class EmailController {
       
       await db.ticket.updateMany({
         where: { conversationId },
-        data: { lastEmailAt: new Date() },
+        data: { lastEmailAt: newEmail.createdAt },
       });
+
+      // Record the first response time for SLA tracking.
+      // Uses newEmail.createdAt so the timestamp matches the persisted email record.
+      await emailService.recordFirstResponse(conversationId, newEmail.createdAt);
 
       // 7. Create ExternalMessage tracking record for deduplication.
       // Prevents the provider sync from re-creating an Email row for the

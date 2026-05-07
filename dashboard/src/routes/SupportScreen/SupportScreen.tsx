@@ -29,6 +29,7 @@ import {
   Hash,
   Inbox,
   CheckCheck,
+  SquareCheck,
 } from 'lucide-react';
 import { ChannelVisibility } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
@@ -68,6 +69,7 @@ import Badge from '../../components/ui/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
+import type { TicketListViewHandle } from '../../components/Tickets/TicketListView/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import {
   DndContext,
@@ -88,7 +90,7 @@ import {
   createTagsByTicketIdMap,
 } from '../KanbanBoardScreen/KanbanBoardScreen.utils';
 import { TicketPriority } from '@xyne/shared';
-import type { Ticket } from '@xyne/shared';
+import type { Ticket, BoardMetadata } from '@xyne/shared';
 import { getDraft } from '../../hooks/useDraft';
 import { useShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
@@ -116,6 +118,7 @@ import {
   useEmailChannelPreference,
   useUpdateEmailChannelPreference,
 } from '../../hooks/useEmailChannelPreference';
+import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import {
   useChannelConnectedEmail,
   clearChannelConnectedEmailCache,
@@ -177,6 +180,121 @@ const ALL_CHANNELS_ID = 'all';
 
 const composerOpenByConv = new Map<string, boolean>();
 
+// ---------------------------------------------------------------------------
+// Multi-compose types + localStorage helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Represents one in-flight compose window. Each instance has a stable UUID
+ * (`id`) that is used as the localStorage draft scope key, independent of
+ * channelId — so two windows on the same channel keep separate drafts.
+ */
+interface ComposeInstance {
+  /** Stable UUID. Used as composeDraftId inside EmailComposer. */
+  id: string;
+  channelId: string;
+  minimized: boolean;
+  /** Incremented to force-remount the inner EmailComposer when needed. */
+  key: number;
+}
+
+/** Persisted shape — only the stable fields, no ephemeral UI state. */
+interface PersistedComposeInstance {
+  id: string;
+  channelId: string;
+  /**
+   * When `true` the window was explicitly closed (X) and the draft was
+   * intentionally saved. Such instances are surfaced in the Drafts list
+   * rather than auto-restored as minimized windows on channel revisit.
+   */
+  closedAsDraft?: boolean;
+  /** Unix ms timestamp of when the draft was last saved/closed. */
+  savedAt?: number;
+}
+
+const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
+const COMPOSE_DRAFT_KEY_PREFIX = 'xyne:composeDraft:';
+
+const readPersistedInstances = (userId: string): PersistedComposeInstance[] => {
+  try {
+    const raw = localStorage.getItem(`${COMPOSE_INSTANCES_KEY_PREFIX}${userId}`);
+    if (!raw) return [];
+    return JSON.parse(raw) as PersistedComposeInstance[];
+  } catch {
+    return [];
+  }
+};
+
+const writePersistedInstances = (userId: string, instances: PersistedComposeInstance[]): void => {
+  try {
+    localStorage.setItem(`${COMPOSE_INSTANCES_KEY_PREFIX}${userId}`, JSON.stringify(instances));
+  } catch {
+    /* ignore quota errors */
+  }
+};
+
+/** Returns true when the draft for this instance has any non-empty content. */
+const instanceHasDraft = (userId: string, instanceId: string): boolean => {
+  try {
+    const raw = localStorage.getItem(`${COMPOSE_DRAFT_KEY_PREFIX}${userId}:${instanceId}`);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as {
+      subject?: string;
+      body?: string;
+      to?: string[];
+      cc?: string[];
+      bcc?: string[];
+    };
+    const bodyText = parsed.body ? stripHtml(parsed.body) : '';
+    return (
+      (parsed.subject?.trim().length ?? 0) > 0 ||
+      bodyText.trim().length > 0 ||
+      (parsed.to?.length ?? 0) > 0 ||
+      (parsed.cc?.length ?? 0) > 0 ||
+      (parsed.bcc?.length ?? 0) > 0
+    );
+  } catch {
+    return false;
+  }
+};
+
+/** Returns a lightweight preview of a compose draft for display in the Drafts list. */
+const readDraftPreview = (
+  userId: string,
+  instanceId: string,
+): { subject: string; to: string[]; bodySnippet: string } => {
+  try {
+    const raw = localStorage.getItem(`${COMPOSE_DRAFT_KEY_PREFIX}${userId}:${instanceId}`);
+    if (!raw) return { subject: '', to: [], bodySnippet: '' };
+    const parsed = JSON.parse(raw) as {
+      subject?: string;
+      body?: string;
+      to?: string[];
+    };
+    const bodySnippet = parsed.body
+      ? stripHtml(parsed.body).replace(/\s+/g, ' ').trim().slice(0, 120)
+      : '';
+    return {
+      subject: parsed.subject?.trim() ?? '',
+      to: parsed.to ?? [],
+      bodySnippet,
+    };
+  } catch {
+    return { subject: '', to: [], bodySnippet: '' };
+  }
+};
+
+/** Removes all localStorage artefacts for a compose instance (draft + AI draft). */
+const clearInstanceStorage = (userId: string, instanceId: string, channelId: string): void => {
+  try {
+    localStorage.removeItem(`${COMPOSE_DRAFT_KEY_PREFIX}${userId}:${instanceId}`);
+    // AI draft key mirrors the pattern used in SupportScreen's onClose handler.
+    localStorage.removeItem(`xd-ai-draft:${channelId}_compose`);
+    localStorage.removeItem(`xd-ai-draft:${instanceId}_compose`);
+  } catch {
+    /* ignore */
+  }
+};
 type Email = NonNullable<
   NonNullable<QueryResultType<typeof queries.supportTicketRowV2>>['emails']
 >[number];
@@ -380,6 +498,7 @@ const SupportScreen = (): ReactElement => {
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
   const currentInboxAssigneeUserGroupId = emailChannelPreference?.assigneeUserGroupId ?? null;
   const currentInboxSendAsEmail = emailChannelPreference?.sendAsEmail ?? null;
+  const currentInboxDefaultCc = emailChannelPreference?.defaultCc ?? null;
   const [draftInboxOwnerUserId, setDraftInboxOwnerUserId] = useState<string | null>(
     currentInboxOwnerUserId,
   );
@@ -390,7 +509,7 @@ const SupportScreen = (): ReactElement => {
     currentInboxSendAsEmail,
   );
   const [isSavingInboxSettings, setIsSavingInboxSettings] = useState(false);
-
+  const [isSavingDefaultCc, setIsSavingDefaultCc] = useState(false);
   useEffect(() => {
     setDraftInboxOwnerUserId(currentInboxOwnerUserId);
   }, [currentInboxOwnerUserId]);
@@ -460,11 +579,44 @@ const SupportScreen = (): ReactElement => {
 
   const allUserGroups = useUserGroups();
 
+  const handleSaveDefaultCc = useCallback(
+    async (value: string | null) => {
+      if (!selectedChannelId) return;
+      setIsSavingDefaultCc(true);
+      try {
+        await updateEmailChannelPreference.mutateAsync({
+          channelId: selectedChannelId,
+          defaultCc: value,
+        });
+      } catch (error) {
+        console.error('Failed to save default CC:', error);
+      } finally {
+        setIsSavingDefaultCc(false);
+      }
+    },
+    [selectedChannelId, updateEmailChannelPreference],
+  );
+
   // Fetch stages for the board configured in email channel preference
   const boardId = emailChannelPreference?.boardId;
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: boardId || '' }), {
     enabled: !!boardId,
   });
+
+  // Fetch board metadata to determine the active SLA mechanism.
+  // getBoardById is lightweight (board + project only, no stages) and is a
+  // separate subscription from stagesByBoard, which returns stages not board rows.
+  const [boardForSla] = useCachedQuery(queries.getBoardById({ boardId: boardId || '' }), {
+    enabled: !!boardId,
+  });
+  const isBoardPrioritySla =
+    (boardForSla?.metadata as BoardMetadata | null | undefined)?.slaPolicyType === 'priority';
+
+  // Fetch SLA policies only when the board is configured for priority-based SLA.
+  // Boards using stage-based SLA (the default) have no active entries in
+  // board_sla_policies, so we skip the subscription entirely rather than letting
+  // it fire an empty query.
+  const kanbanSlaPolicies = useBoardsSlaPolicies(isBoardPrioritySla && boardId ? [boardId] : []);
 
   const setSelectedChannelId = useCallback(
     (next: string | null): void => {
@@ -521,51 +673,138 @@ const SupportScreen = (): ReactElement => {
   );
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
-  const [composeChannelId, setComposeChannelId] = useState<string | null>(null);
-  const [composeMinimized, setComposeMinimized] = useState(false);
-  const [composeKey, setComposeKey] = useState(0);
 
-  useEffect(() => {
-    if (composeChannelId && (ticketId || composeChannelId !== selectedChannelId)) {
-      setComposeMinimized(true);
-    }
-  }, [composeChannelId, ticketId, selectedChannelId]);
+  // ---------------------------------------------------------------------------
+  // Multi-compose state — each entry is one floating compose window.
+  // ---------------------------------------------------------------------------
+  const [composeInstances, setComposeInstances] = useState<ComposeInstance[]>([]);
 
+  /** Add a new compose window for the given channel. */
+  const openNewCompose = useCallback(
+    (channelId: string): void => {
+      const id = uuidv4();
+      const next: ComposeInstance = { id, channelId, minimized: false, key: 0 };
+      setComposeInstances(prev => [...prev, next]);
+      if (userID) {
+        const persisted = readPersistedInstances(userID);
+        writePersistedInstances(userID, [...persisted, { id, channelId }]);
+      }
+    },
+    [userID],
+  );
+
+  /** Close (save as draft) a compose window by instance ID. */
+  const closeCompose = useCallback(
+    (instanceId: string): void => {
+      // localStorage reads/writes must happen outside the setState updater.
+      // React StrictMode double-invokes updaters, which would corrupt the
+      // persisted registry if the writes were inside the updater function.
+      setComposeInstances(prev => {
+        const target = prev.find(i => i.id === instanceId);
+        if (target && userID) {
+          const hasDraft = instanceHasDraft(userID, instanceId);
+          if (hasDraft) {
+            // Save as draft: keep localStorage intact, mark as closedAsDraft in registry.
+            const persisted = readPersistedInstances(userID);
+            const alreadyPresent = persisted.find(p => p.id === instanceId);
+            const updated = alreadyPresent
+              ? persisted.map(p =>
+                  p.id === instanceId ? { ...p, closedAsDraft: true, savedAt: Date.now() } : p,
+                )
+              : [
+                  ...persisted,
+                  {
+                    id: instanceId,
+                    channelId: target.channelId,
+                    closedAsDraft: true,
+                    savedAt: Date.now(),
+                  },
+                ];
+            writePersistedInstances(userID, updated);
+          } else {
+            // No content — discard silently.
+            clearInstanceStorage(userID, instanceId, target.channelId);
+            writePersistedInstances(
+              userID,
+              readPersistedInstances(userID).filter(p => p.id !== instanceId),
+            );
+          }
+        }
+        return prev.filter(i => i.id !== instanceId);
+      });
+    },
+    [userID],
+  );
+
+  /** Permanently discard a saved draft (from the Drafts list). */
+  const discardDraft = useCallback(
+    (instanceId: string): void => {
+      if (!userID) return;
+      const persisted = readPersistedInstances(userID);
+      const target = persisted.find(p => p.id === instanceId);
+      if (target) {
+        clearInstanceStorage(userID, instanceId, target.channelId);
+      }
+      writePersistedInstances(
+        userID,
+        persisted.filter(p => p.id !== instanceId),
+      );
+      // Also remove from active instances if somehow present.
+      setComposeInstances(prev => prev.filter(i => i.id !== instanceId));
+    },
+    [userID],
+  );
+
+  /** Reopen a saved draft as a compose window. */
+  const reopenDraft = useCallback(
+    (instanceId: string): void => {
+      if (!userID) return;
+      const persisted = readPersistedInstances(userID);
+      const target = persisted.find(p => p.id === instanceId);
+      if (!target) return;
+      // Update registry: no longer closedAsDraft.
+      const updated = persisted.map(p =>
+        p.id === instanceId ? { ...p, closedAsDraft: false } : p,
+      );
+      writePersistedInstances(userID, updated);
+      // Add to active compose instances (reuse same id so draft content is picked up).
+      setComposeInstances(prev => {
+        if (prev.find(i => i.id === instanceId)) return prev; // already open
+        return [...prev, { id: instanceId, channelId: target.channelId, minimized: false, key: 0 }];
+      });
+    },
+    [userID],
+  );
+
+  /** Toggle minimized state for a single compose window. */
+  const setComposeMinimized = useCallback((instanceId: string, minimized: boolean): void => {
+    setComposeInstances(prev => prev.map(i => (i.id === instanceId ? { ...i, minimized } : i)));
+  }, []);
+
+  // Restore any persisted compose drafts for the current channel on channel change.
+  // Only instances that were NOT explicitly closed as drafts are restored as minimized
+  // windows. Closed drafts are shown in the Drafts list instead.
   useEffect(() => {
     if (!selectedChannelId || !userID) return;
-    if (composeChannelId === selectedChannelId) return;
-    try {
-      const raw = localStorage.getItem(`xyne:composeDraft:${userID}:${selectedChannelId}`);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        subject?: string;
-        body?: string;
-        to?: string[];
-        cc?: string[];
-        bcc?: string[];
-      };
+    const persisted = readPersistedInstances(userID);
+    const channelPersisted = persisted.filter(p => p.channelId === selectedChannelId);
+    if (channelPersisted.length === 0) return;
 
-      const bodyText = parsed.body ? stripHtml(parsed.body) : '';
-      const hasDraft =
-        (parsed.subject?.trim().length ?? 0) > 0 ||
-        bodyText.trim().length > 0 ||
-        (parsed.to?.length ?? 0) > 0 ||
-        (parsed.cc?.length ?? 0) > 0 ||
-        (parsed.bcc?.length ?? 0) > 0;
-      if (!hasDraft) {
-        try {
-          localStorage.removeItem(`xyne:composeDraft:${userID}:${selectedChannelId}`);
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
-      setComposeChannelId(selectedChannelId);
-      setComposeMinimized(true);
-    } catch {
-      /* corrupt JSON — ignore */
-    }
-  }, [selectedChannelId, userID, composeChannelId]);
+    setComposeInstances(prev => {
+      // Only restore instances not already in state and not explicitly closed as drafts.
+      const existingIds = new Set(prev.map(i => i.id));
+      const toRestore: ComposeInstance[] = channelPersisted
+        .filter(p => !p.closedAsDraft && !existingIds.has(p.id) && instanceHasDraft(userID, p.id))
+        .map(p => ({ id: p.id, channelId: p.channelId, minimized: true, key: 0 }));
+      if (toRestore.length === 0) return prev;
+      return [...prev, ...toRestore];
+    });
+
+    // Prune any persisted instances whose drafts are now empty.
+    const nonEmpty = channelPersisted.filter(p => instanceHasDraft(userID, p.id));
+    const others = persisted.filter(p => p.channelId !== selectedChannelId);
+    writePersistedInstances(userID, [...others, ...nonEmpty]);
+  }, [selectedChannelId, userID]);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
 
@@ -748,6 +987,7 @@ const SupportScreen = (): ReactElement => {
     emails: ReadonlyArray<{ id: string; createdAt: number }>;
     emailReads: ReadonlyArray<{ userId: string; lastReadEmailId: string }>;
   };
+  const listViewRef = useRef<TicketListViewHandle>(null);
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
   );
@@ -804,6 +1044,22 @@ const SupportScreen = (): ReactElement => {
       setLocalTickets(displayedTickets as Ticket[]);
     }
   }, [displayedTickets]);
+
+  const handleSelectAll = useCallback((): void => {
+    const rows = listViewRef.current?.getLoadedRows() ?? [];
+    if (rows.length === 0) return;
+    setSelectedTickets(() => {
+      const next = new Map<string, SelectedTicket>();
+      for (const row of rows) {
+        next.set(row.id, {
+          id: row.id,
+          emails: row.emails ?? [],
+          emailReads: row.emailReads ?? [],
+        });
+      }
+      return next;
+    });
+  }, []);
 
   const ticketsByStage = useMemo(
     () => groupTicketsByStage(localTickets, stageColumns),
@@ -990,6 +1246,20 @@ const SupportScreen = (): ReactElement => {
       </div>
     );
   };
+
+  // Derive saved drafts: persisted instances for the current channel that were
+  // explicitly closed (X) and still have content — shown in the Drafts banner.
+  const savedDrafts = useMemo(() => {
+    if (!selectedChannelId || !userID) return [];
+    const openIds = new Set(composeInstances.map(i => i.id));
+    return readPersistedInstances(userID).filter(
+      p =>
+        p.channelId === selectedChannelId &&
+        p.closedAsDraft === true &&
+        !openIds.has(p.id) &&
+        instanceHasDraft(userID, p.id),
+    );
+  }, [selectedChannelId, userID, composeInstances]);
 
   return (
     <div className='h-full flex flex-col relative bg-background md:rounded-2xl overflow-hidden shadow-md'>
@@ -1302,21 +1572,7 @@ const SupportScreen = (): ReactElement => {
                     {isSelectedChannelJoined && selectedChannelId && (
                       <Tooltip content='Compose new email' side='bottom'>
                         <button
-                          onClick={() => {
-                            // Re-clicking Compose while the modal is
-                            // minimized should expand it to the editor
-                            // again. Only remount the inner composer
-                            // when opening fresh (not when already open)
-                            // so an in-progress draft isn't lost.
-                            // Bump key (force inner remount) when opening a
-                            // different channel's compose, so the new mount
-                            // reads the correct localStorage draft.
-                            if (composeChannelId !== selectedChannelId) {
-                              setComposeKey(k => k + 1);
-                            }
-                            setComposeChannelId(selectedChannelId);
-                            setComposeMinimized(false);
-                          }}
+                          onClick={() => openNewCompose(selectedChannelId)}
                           className='inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-input shadow-xs text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
                           data-track-name='OpenComposeEmail'
@@ -1435,6 +1691,20 @@ const SupportScreen = (): ReactElement => {
                     <Button
                       type='button'
                       size='sm'
+                      variant='outline'
+                      onClick={handleSelectAll}
+                      data-track-category='Support'
+                      data-track-name='SelectAllTickets'
+                      data-track-metadata={JSON.stringify({
+                        channelId: refetchChannelId,
+                      })}
+                    >
+                      <SquareCheck size={14} />
+                      Select all
+                    </Button>
+                    <Button
+                      type='button'
+                      size='sm'
                       variant='default'
                       onClick={handleMarkSelectedAsRead}
                       data-track-category='Support'
@@ -1510,6 +1780,9 @@ const SupportScreen = (): ReactElement => {
                           sendAsEmail={draftInboxSendAsEmail}
                           onSendAsEmailChange={setDraftInboxSendAsEmail}
                           canEditSendAsEmail={canEditSendAsEmail}
+                          defaultCc={currentInboxDefaultCc}
+                          onSaveDefaultCc={value => void handleSaveDefaultCc(value)}
+                          isSavingDefaultCc={isSavingDefaultCc}
                           disabled={isSavingInboxSettings}
                         />
                         <div className='border-t border-border' />
@@ -1558,52 +1831,110 @@ const SupportScreen = (): ReactElement => {
                         : {})}
                     />
                   </div>
-                ) : viewMode === 'kanban' ? (
-                  <DndContext
-                    sensors={sensors}
-                    collisionDetection={closestCenter}
-                    onDragStart={handleDragStart}
-                    onDragEnd={event => void handleDragEnd(event)}
-                  >
-                    <KanbanColumns
-                      stages={stageColumns}
-                      ticketsByStage={ticketsByStage}
-                      tagsByTicketId={tagsByTicketId}
-                      onTicketClick={handleTicketClick}
-                      containerClassName='h-full'
-                    />
-                    <DragOverlay>
-                      {activeTicket ? (
-                        <TicketCard
-                          ticket={activeTicket}
-                          isCompact={true}
-                          onClick={() => {}}
-                          data-track-category='Support'
-                          data-track-name='DragOverlayTicketClick'
-                          data-track-metadata={JSON.stringify({ ticketId: activeTicket?.id })}
-                        />
-                      ) : null}
-                    </DragOverlay>
-                  </DndContext>
                 ) : (
-                  <TicketListView
-                    filter={{
-                      channelId: selectedChannelId,
-                      ...ticketFilter,
-                    }}
-                    showExtraFields={true}
-                    activeTicketId={ticketId}
-                    selectedIds={selectedTicketIds}
-                    onToggleSelect={toggleTicketSelected}
-                    onTicketClick={ticket => {
-                      void navigate(`/support/${ticket.channelId}/${ticket.xyneId}`, {
-                        state: {
-                          conversationId: ticket.conversationId,
-                          ticketId: ticket.id,
-                        },
-                      });
-                    }}
-                  />
+                  <>
+                    {/* Drafts banner — visible when there are saved-but-closed drafts */}
+                    {savedDrafts.length > 0 && userID && (
+                      <div className='flex-shrink-0 border-b border-border'>
+                        <div className='px-4 py-2 flex items-center gap-1.5'>
+                          <span className='text-xs font-semibold text-muted-foreground uppercase tracking-wide mr-1'>
+                            Drafts
+                          </span>
+                          <div className='flex items-center gap-2 flex-wrap'>
+                            {savedDrafts
+                              .slice()
+                              .sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))
+                              .map(draft => {
+                                const preview = readDraftPreview(userID, draft.id);
+                                const label =
+                                  preview.subject ||
+                                  (preview.to.length > 0 ? `To: ${preview.to[0]}` : '') ||
+                                  preview.bodySnippet ||
+                                  'No subject';
+                                return (
+                                  <div
+                                    key={draft.id}
+                                    className='flex items-center gap-1 bg-muted/60 border border-border rounded-full pl-3 pr-1 py-0.5 max-w-[280px] group'
+                                  >
+                                    <button
+                                      type='button'
+                                      onClick={() => reopenDraft(draft.id)}
+                                      className='text-xs text-foreground truncate hover:text-primary transition-colors'
+                                      title={`Reopen draft: ${label}`}
+                                      data-track-category='Support'
+                                      data-track-name='ReopenDraft'
+                                    >
+                                      {label}
+                                    </button>
+                                    <button
+                                      type='button'
+                                      onClick={() => discardDraft(draft.id)}
+                                      className='p-0.5 rounded-full text-muted-foreground hover:text-destructive transition-colors shrink-0'
+                                      title='Discard draft'
+                                      aria-label='Discard draft'
+                                      data-track-category='Support'
+                                      data-track-name='DiscardDraft'
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {viewMode === 'kanban' ? (
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragStart={handleDragStart}
+                        onDragEnd={event => void handleDragEnd(event)}
+                      >
+                        <KanbanColumns
+                          stages={stageColumns}
+                          ticketsByStage={ticketsByStage}
+                          tagsByTicketId={tagsByTicketId}
+                          onTicketClick={handleTicketClick}
+                          containerClassName='h-full'
+                          slaPolicies={kanbanSlaPolicies}
+                        />
+                        <DragOverlay>
+                          {activeTicket ? (
+                            <TicketCard
+                              ticket={activeTicket}
+                              isCompact={true}
+                              onClick={() => {}}
+                              data-track-category='Support'
+                              data-track-name='DragOverlayTicketClick'
+                              data-track-metadata={JSON.stringify({ ticketId: activeTicket?.id })}
+                              slaPolicies={kanbanSlaPolicies}
+                            />
+                          ) : null}
+                        </DragOverlay>
+                      </DndContext>
+                    ) : (
+                      <TicketListView
+                        ref={listViewRef}
+                        filter={{
+                          channelId: selectedChannelId,
+                          ...ticketFilter,
+                        }}
+                        showExtraFields={true}
+                        activeTicketId={ticketId}
+                        selectedIds={selectedTicketIds}
+                        onToggleSelect={toggleTicketSelected}
+                        onTicketClick={ticket => {
+                          void navigate(`/support/${ticket.channelId}/${ticket.xyneId}`, {
+                            state: {
+                              conversationId: ticket.conversationId,
+                              ticketId: ticket.id,
+                            },
+                          });
+                        }}
+                      />
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -1658,40 +1989,35 @@ const SupportScreen = (): ReactElement => {
           }}
         />
       )}
-      {/* Compose new email — floating Gmail-style modal (lives in its own file).
-          Bound to the channel it was opened on: hidden when viewing another
-          channel or a ticket. State (draft + minimized) is preserved, so
-          returning to the channel reveals the modal again — collapsed, per
-          the auto-minimize effect. */}
-      {composeChannelId &&
-        composeChannelId === selectedChannelId &&
-        isSelectedChannelJoined &&
-        !ticketId && (
-          <ComposeEmailModal
-            open
-            channelId={composeChannelId}
-            channelName={selectedChannelName}
-            resetKey={composeKey}
-            minimized={composeMinimized}
-            onMinimizedChange={setComposeMinimized}
-            onClose={() => {
-              // X = "I'm done with this draft" — explicitly discard the
-              // compose body/recipients AND any unfinished AI draft for this
-              // channel. Minimize keeps both; only X clears.
-              try {
-                if (userID && composeChannelId) {
-                  localStorage.removeItem(`xyne:composeDraft:${userID}:${composeChannelId}`);
-                }
-                if (composeChannelId) {
-                  localStorage.removeItem(`xd-ai-draft:${composeChannelId}_compose`);
-                }
-              } catch {
-                /* ignore quota/access errors */
-              }
-              setComposeChannelId(null);
-              setComposeMinimized(false);
-            }}
-          />
+      {/* Multi-compose scrollable strip — fixed at the bottom, spans full width.
+          Windows are laid out right-to-left (flex-row-reverse) so the newest
+          window always sits at the right edge. When there are more windows than
+          fit on screen, the strip becomes horizontally scrollable; the user
+          scrolls left to reveal older windows. pointer-events-none on the strip
+          itself prevents it from blocking clicks on the ticket list beneath. */}
+      {isSelectedChannelJoined &&
+        !ticketId &&
+        composeInstances.filter(inst => inst.channelId === selectedChannelId).length > 0 && (
+          <div
+            className='fixed bottom-0 left-0 right-0 z-50 flex flex-row-reverse items-end gap-3 overflow-x-auto pointer-events-none pr-6'
+            style={{ scrollbarWidth: 'none' }}
+          >
+            {composeInstances
+              .filter(inst => inst.channelId === selectedChannelId)
+              .map(inst => (
+                <ComposeEmailModal
+                  key={inst.id}
+                  open
+                  channelId={inst.channelId}
+                  channelName={selectedChannelName}
+                  draftId={inst.id}
+                  resetKey={inst.key}
+                  minimized={inst.minimized}
+                  onMinimizedChange={next => setComposeMinimized(inst.id, next)}
+                  onClose={() => closeCompose(inst.id)}
+                />
+              ))}
+          </div>
         )}
     </div>
   );

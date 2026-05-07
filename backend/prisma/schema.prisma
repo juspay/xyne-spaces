@@ -379,6 +379,7 @@ model Ticket {
   conversationId   String            // The xyne chat conversation to which the ticket is linked
   channelId        String            // The channel to which the ticket is linked
   eta              DateTime?         // Calculated ETA for a ticket based on ETA of task Type
+  firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
   priority         TicketPriority    @default(LOW)
   metadata         Json?             // Additional metadata - external source tracking, domain-specific context
   closedAt         DateTime?         // When the reporter closed the ticket after verification
@@ -1865,6 +1866,7 @@ model EmailChannelPreference {
   assigneeUserGroupId    String?  // User group ID for assignee (no FK constraint)
   boardId                String?  // Target board for ticket creation (no FK constraint)
   sendAsEmail            String?  // Optional alias email for outbound replies (e.g. support@...)
+  defaultCc              String?  // Comma-separated list of emails to pre-populate CC in compose
   classificationEnabled  Boolean  @default(false)
   classificationPrompt   String?  // Custom system prompt for the classification LLM
   categoryField          String?  // Label for the top-level category
@@ -1888,6 +1890,32 @@ model ClassificationMapping {
   @@index([channelId])
   @@index([channelId, category])
   @@map("classification_mappings")
+  @@schema("public")
+}
+
+// SLA policy configured per board and per priority level.
+// When a board's metadata.slaPolicyType is set to 'priority', these policies are used
+// to compute response/resolution deadlines for tickets based on their priority.
+// responseHours and resolutionHours can be calendar hours (businessHoursOnly=false)
+// or business hours (businessHoursOnly=true, Mon-Fri workdayStart–workdayEnd in timezone).
+model BoardSlaPolicy {
+  id              String         @id @default(cuid())
+  boardId         String
+  priority        TicketPriority
+  responseHours   Float          // SLA first-response window in hours
+  resolutionHours Float          // SLA resolution window in hours
+  businessHoursOnly Boolean      @default(true)
+  timezone        String         @default("UTC") // IANA timezone string e.g. "Asia/Kolkata"
+  workdayStart    Int            @default(9)     // Hour of day (0-23) when business day starts
+  workdayEnd      Int            @default(18)    // Hour of day (0-23) when business day ends
+  isActive        Boolean        @default(true)
+  createdAt       DateTime
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([boardId, priority])
+  @@index([boardId])
+  @@index([isActive])
+  @@map("board_sla_policies")
   @@schema("public")
 }
 

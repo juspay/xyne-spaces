@@ -10,9 +10,17 @@ interface ComposeEmailModalProps {
   minimized?: boolean;
   onMinimizedChange?: (next: boolean) => void;
   onClose: () => void;
+  /**
+   * Unique identifier for this compose instance, used to scope the
+   * localStorage draft key. When not provided, the draft is keyed by
+   * channelId (legacy single-compose behaviour).
+   */
+  draftId?: string;
 }
 
 const COMPOSE_HEIGHT_KEY = 'support-compose-height-vh';
+export const COMPOSE_WINDOW_WIDTH_PX = 560;
+
 const MIN_VH = 35;
 const MAX_VH = 95;
 const DEFAULT_VH = 40;
@@ -24,6 +32,12 @@ const readSavedHeight = (): number => {
   return Number.isFinite(parsed) && parsed >= MIN_VH && parsed <= MAX_VH ? parsed : DEFAULT_VH;
 };
 
+/**
+ * A single compose window rendered as a flex child inside the parent's
+ * horizontally-scrollable strip. Positioning (fixed, bottom, right) is
+ * owned by the strip container in SupportScreen — this component is purely
+ * responsible for its own height and internal layout.
+ */
 export const ComposeEmailModal = ({
   open,
   channelId,
@@ -32,6 +46,7 @@ export const ComposeEmailModal = ({
   minimized: minimizedProp,
   onMinimizedChange,
   onClose,
+  draftId,
 }: ComposeEmailModalProps): ReactElement | null => {
   const [internalMinimized, setInternalMinimized] = useState(false);
   const isControlled = typeof minimizedProp === 'boolean';
@@ -81,15 +96,16 @@ export const ComposeEmailModal = ({
 
   return (
     <div
-      className='fixed bottom-0 right-6 z-50 w-[760px] max-w-[calc(100vw-32px)] bg-background border border-border rounded-t-xl shadow-2xl flex flex-col'
-      style={minimized ? undefined : { height: `${heightVh}vh` }}
+      className='flex-shrink-0 pointer-events-auto bg-background border border-border rounded-t-xl shadow-2xl flex flex-col self-end transition-[width] duration-200'
+      style={{
+        width: minimized ? '260px' : `${COMPOSE_WINDOW_WIDTH_PX}px`,
+        ...(minimized ? {} : { height: `${heightVh}vh` }),
+      }}
       role='dialog'
-      aria-label='Compose new email'
+      aria-label={`Compose new email — ${channelName}`}
+      aria-modal='true'
     >
-      {/* Top-edge drag handle — only visible when expanded. Uses a <button>
-          element so it satisfies the a11y rule about interactive controls
-          having proper roles, even though the actual interaction is a
-          mouse-drag rather than a click. */}
+      {/* Top-edge drag handle — only visible when expanded */}
       {!minimized && (
         <button
           type='button'
@@ -106,9 +122,7 @@ export const ComposeEmailModal = ({
           <span className='block h-1 w-12 rounded-full bg-muted-foreground/30 group-hover:bg-muted-foreground/60 transition-colors' />
         </button>
       )}
-      {/* Header bar — clicking it expands a minimized modal but never
-          collapses an expanded one (use the explicit minimize button for
-          that). One-way prevents accidental collapse from a stray click. */}
+      {/* Header bar — clicking it expands a minimized modal */}
       <div
         className={`flex items-center justify-between px-4 py-2 bg-muted/40 border-b border-border rounded-t-xl ${minimized ? 'cursor-pointer' : ''}`}
         onClick={() => {
@@ -161,10 +175,11 @@ export const ComposeEmailModal = ({
       {!minimized && (
         <div className='flex-1 min-h-0 flex flex-col'>
           <EmailComposer
-            key={`${resetKey}-${channelId}`}
+            key={`${resetKey}-${draftId ?? channelId}`}
             mode='compose'
             channelId={channelId}
             onClose={onClose}
+            {...(draftId ? { composeDraftId: draftId } : {})}
           />
         </div>
       )}

@@ -16,6 +16,7 @@ import {
   ChannelSortOrder,
   ConversationParticipation,
   TicketStatusV2,
+  TicketPriority,
   ActivityType,
   TicketReferenceRelation,
   CanvasVisibility,
@@ -9574,8 +9575,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           ownerUserId: z.string().optional(),
           assigneeUserGroupId: z.string().optional().nullable(),
           sendAsEmail: z.string().optional().nullable(),
+          defaultCc: z.string().optional().nullable(),
         }),
-        async ({ tx, args: { channelId, ownerUserId, assigneeUserGroupId, sendAsEmail } }) => {
+        async ({ tx, args: { channelId, ownerUserId, assigneeUserGroupId, sendAsEmail, defaultCc } }) => {
           const existing = await tx.run(
             zql.email_channel_preferences.where('channelId', channelId).one(),
           );
@@ -9585,6 +9587,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ...(ownerUserId !== undefined ? { ownerUserId } : {}),
               ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
               ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
+              ...(defaultCc !== undefined ? { defaultCc } : {}),
             });
           } else {
             await tx.mutate.email_channel_preferences.insert({
@@ -9593,6 +9596,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               assigneeUserGroupId: assigneeUserGroupId ?? null,
               sendAsEmail: sendAsEmail ?? null,
               classificationEnabled: false,
+              defaultCc: defaultCc ?? null,
             });
           }
         },
@@ -9660,6 +9664,69 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         z.object({ id: z.string() }),
         async ({ tx, args: { id } }) => {
           await tx.mutate.classification_mappings.delete({ id });
+        },
+      ),
+    },
+
+    boardSlaPolicy: {
+      upsert: defineMutator(
+        z.object({
+          id: z.string(),
+          boardId: z.string(),
+          priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+          responseHours: z.number().min(0),
+          resolutionHours: z.number().min(0),
+          businessHoursOnly: z.boolean(),
+          timezone: z.string(),
+          workdayStart: z.number().int().min(0).max(23),
+          workdayEnd: z.number().int().min(1).max(24),
+          isActive: z.boolean(),
+        }),
+        async ({
+          tx,
+          args: { id, boardId, priority, responseHours, resolutionHours, businessHoursOnly, timezone, workdayStart, workdayEnd, isActive },
+        }) => {
+          const now = Date.now();
+          const existing = await tx.run(
+            zql.board_sla_policies
+              .where('boardId', boardId)
+              .where('priority', priority as TicketPriority)
+              .one(),
+          );
+          if (existing) {
+            await tx.mutate.board_sla_policies.update({
+              id: existing.id,
+              responseHours,
+              resolutionHours,
+              businessHoursOnly,
+              timezone,
+              workdayStart,
+              workdayEnd,
+              isActive,
+              updatedAt: now,
+            });
+          } else {
+            await tx.mutate.board_sla_policies.insert({
+              id,
+              boardId,
+              priority: priority as TicketPriority,
+              responseHours,
+              resolutionHours,
+              businessHoursOnly,
+              timezone,
+              workdayStart,
+              workdayEnd,
+              isActive,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        },
+      ),
+      delete: defineMutator(
+        z.object({ id: z.string() }),
+        async ({ tx, args: { id } }) => {
+          await tx.mutate.board_sla_policies.update({ id, isActive: false, updatedAt: Date.now() });
         },
       ),
     },

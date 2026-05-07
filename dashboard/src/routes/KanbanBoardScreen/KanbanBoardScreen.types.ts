@@ -1,4 +1,5 @@
 import type { Ticket, TicketTag, TicketStatusV2 } from '@xyne/shared';
+import type { BoardSlaPolicy } from '../../hooks/useChannelSlaPolicy';
 
 export interface Stage {
   id: string;
@@ -23,6 +24,8 @@ export interface SortableTicketCardProps {
   availableTags?: string[];
   onClick: (e: React.MouseEvent | KeyboardEvent) => void;
   visibleColumns?: Set<string> | undefined;
+  /** SLA policies pre-fetched by the parent; forwarded to TicketCard to avoid per-card fetches. */
+  slaPolicies?: BoardSlaPolicy[];
 }
 
 export interface DroppableStageProps {

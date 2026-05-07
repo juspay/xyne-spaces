@@ -44,4 +44,18 @@ export interface BoardMetadata {
   fullRoleAssignment?: boolean;
   fieldOrder?: FieldOrderItem[];
   customFieldsFormId?: string;
+  /**
+   * Controls which SLA mechanism is active for this board.
+   *
+   * - `'stages'` (default): SLA deadlines are derived from per-stage ETAs
+   *   (the existing behaviour — each stage has an `eta` field in hours that is
+   *   used to compute `ticket_stage_eta` due dates).
+   * - `'priority'`: SLA deadlines are derived from the board's
+   *   `board_sla_policies` table rows, keyed by ticket priority.  When a ticket
+   *   is created the matching policy is used to compute `eta` / `slaResolutionDue`.
+   *
+   * The value is stored in the `boards.metadata` JSON column so it requires no
+   * schema migration and defaults gracefully to `'stages'` when absent.
+   */
+  slaPolicyType?: 'stages' | 'priority';
 }
