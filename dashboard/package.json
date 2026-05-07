@@ -7,6 +7,7 @@
     "postinstall": "cd ../shared && npm install && npm run build",
     "dev": "vite",
     "dev:test": "vite --mode test",
+    "claw:test": "VITE_SANDBOX_TEST_MODE=true vite --mode test",
     "dev:prod": "vite --mode prod-local",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
