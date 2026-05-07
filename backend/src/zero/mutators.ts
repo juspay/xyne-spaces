@@ -91,6 +91,7 @@ import {
   unifiedBotUserService,
 } from '@/bots/unified/index.js';
 import { z } from 'zod';
+import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
 
 const storageService = getStorageService();
@@ -4277,6 +4278,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           boardId: z.string().optional(),
           metadata: z.any().optional(),
           isArchived: z.boolean().optional(),
+          kanbanPosition: z.string().nullable().optional(),
           updatedAt: z.number(),
         }),
         async ({ tx, args: params }) => {
@@ -4333,7 +4335,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const updateData: any = { updatedAt: params.updatedAt, updatedBy: authData.sub };
           const activities: any[] = [];
-          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived'] as const;
+          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived', 'kanbanPosition'] as const;
           const oldAssignedTo = ticket.assignedTo;
           const oldBoardId = ticket.boardId;
 
@@ -4362,13 +4364,29 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               : null;
 
             // 3. Update ticket with first stage and new ETA
+            const existingTicketsInFirstStage = await tx.run(
+              zql.tickets
+                .where('boardId', params.boardId)
+                .where('stageName', firstStage.name)
+                .where('kanbanPosition', 'IS NOT', null)
+                .orderBy('kanbanPosition', 'asc')
+                .limit(1)
+            );
+            const firstWithPosition = existingTicketsInFirstStage[0];
+            let newKanbanPosition: string;
+            try {
+              newKanbanPosition = generateKeyBetween(null, firstWithPosition?.kanbanPosition ?? null);
+            } catch {
+              newKanbanPosition = generateKeyBetween(null, null);
+            }
             await tx.mutate.tickets.update({
               id: params.id,
               stageName: firstStage.name,
-              ...(firstStage.defaultTicketStatusV2 && { 
-                statusV2: firstStage.defaultTicketStatusV2 
+              ...(firstStage.defaultTicketStatusV2 && {
+                statusV2: firstStage.defaultTicketStatusV2
               }),
               ...(newTicketEta && { eta: newTicketEta }),
+              kanbanPosition: newKanbanPosition,
               updatedAt: now,
               updatedBy: authData.sub
             });
@@ -4491,6 +4509,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           for (const field of fields) {
             if (params[field] !== undefined && params[field] !== ticket[field]) {
               updateData[field] = params[field];
+              if (field === 'kanbanPosition') continue;
               let activityType = field.toUpperCase();
               if (field === 'stageName') activityType = 'STATUS';
               if (field === 'statusV2') activityType = 'STATUS';

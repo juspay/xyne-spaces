@@ -765,6 +765,7 @@ export const ticketTable = table('tickets')
     stageName: string(),
     ticketType: string().optional(),
     isArchived: boolean(),
+    kanbanPosition: string().optional(),
     lastEmailAt: number(),
     classificationData: json().optional(),
     aiCategory: string().optional(),

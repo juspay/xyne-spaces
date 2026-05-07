@@ -701,7 +701,11 @@ export const ticketTable = table("tickets")
     stageName: string(),
     ticketType: string().optional(),
     isArchived: boolean(),
+    kanbanPosition: string().optional(),
     lastEmailAt: number(),
+    classificationData: json().optional(),
+    aiCategory: string().optional(),
+    aiSubCategory: string().optional(),
   })
   .primaryKey("id");
 
@@ -1024,6 +1028,7 @@ export const userPreferenceTable = table("user_preferences")
     userId: string(),
     askai_custom_instruction: string().optional(),
     channelSortOrder: enumeration<ChannelSortOrder>(),
+    enterSendsMessage: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1446,6 +1451,8 @@ export const conversationParticipantTable = table("conversation_participants")
     isSubscribed: boolean(),
     joinedAt: number(),
     lastReadAt: number().optional(),
+    lastReplyAt: number().optional(),
+    channelId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1510,8 +1517,23 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     assigneeUserGroupId: string().optional(),
     boardId: string().optional(),
     sendAsEmail: string().optional(),
+    classificationEnabled: boolean(),
+    classificationPrompt: string().optional(),
+    categoryField: string().optional(),
+    subCategoryField: string().optional(),
   })
   .primaryKey("channelId");
+
+export const classificationMappingTable = table("classification_mappings")
+  .columns({
+    id: string(),
+    channelId: string(),
+    category: string(),
+    subCategory: string().optional(),
+    userGroupId: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
 
 export const messageTable = table("messages")
   .columns({
@@ -3206,6 +3228,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ["channelId"],
     destSchema: channelParticipantTable,
   }),
+  conversationParticipants: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: conversationParticipantTable,
+  }),
   participantsStatus: many({
     sourceField: ["id"],
     destField: ["channelId"],
@@ -3310,6 +3337,11 @@ export const conversationParticipantTableRelationships = relationships(conversat
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: conversationTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   }),
   user: one({
     sourceField: ["userId"],
@@ -3578,6 +3610,7 @@ export const schema = createSchema(
       emailReadTable,
       emailSignatureTable,
       emailChannelPreferenceTable,
+      classificationMappingTable,
       messageTable,
       messageSearchTable,
       messageAttachmentTable,
@@ -3769,6 +3802,7 @@ export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type EmailRead = Row<typeof schema.tables.email_reads>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
+export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type Message = Row<typeof schema.tables.messages>;
 export type MessageSearch = Row<typeof schema.tables.message_search>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;

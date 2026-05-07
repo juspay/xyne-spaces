@@ -6,6 +6,7 @@ import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { BaseTicketType, PRActivityValue } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { generateKeyBetween } from 'fractional-indexing';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -69,6 +70,23 @@ export class TicketRepository {
       }
     }
 
+    // New ticket at top of its column: position before the current first ticket
+    const firstTicketInStage = await db.ticket.findFirst({
+      where: {
+        boardId: data.boardId,
+        stageName: selectedStage.name,
+        kanbanPosition: { not: null },
+      },
+      orderBy: { kanbanPosition: 'asc' },
+      select: { kanbanPosition: true },
+    });
+    let kanbanPosition: string;
+    try {
+      kanbanPosition = generateKeyBetween(null, firstTicketInStage?.kanbanPosition ?? null);
+    } catch {
+      kanbanPosition = generateKeyBetween(null, null);
+    }
+
     // Calculate total ETA by summing only stages with ETA (in hours)
     const totalEtaHours = stages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
 
@@ -111,6 +129,7 @@ export class TicketRepository {
         closedBy: data.closedBy,
         merchantId: data.merchantId,
         ticketType: data.ticketType,
+        kanbanPosition,
         ...(data.createdAt && { createdAt: data.createdAt }),
         lastEmailAt: data.createdAt ?? new Date(),
       }

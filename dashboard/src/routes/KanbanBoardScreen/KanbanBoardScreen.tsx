@@ -1143,6 +1143,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return viewMode === 'board' || filteredSingleBoardId ? 'stage' : 'status';
   }, [channelId, viewMode, channelViewType, filteredSingleBoardId]);
 
+  const canReorder = !!filteredSingleBoardId;
+
   const {
     activeTicket,
     handleDragStart,
@@ -1156,6 +1158,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     zero,
     stages,
     mode: dragDropMode,
+    canReorder,
     onStageFormRequired: handleStageFormRequired,
     onBackwardStageChange: handleBackwardStageChange,
     stageFormMap,
@@ -1248,7 +1251,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return entries.map(([groupName, groupTickets]) => {
       const ticketsByColumn = shouldGroupByStatus
         ? groupTicketsByStatus(groupTickets, stages)
-        : groupTicketsByStage(groupTickets, stages);
+        : groupTicketsByStage(groupTickets, stages, canReorder);
 
       // Get display name based on group type
       let displayName = groupName;
@@ -1309,6 +1312,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     channelViewType,
     userNamesById,
     groupNamesById,
+    canReorder,
   ]);
 
   // Auto-expand the first group when groups change

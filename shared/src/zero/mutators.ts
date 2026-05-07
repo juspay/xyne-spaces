@@ -2985,6 +2985,7 @@ export const mutators = defineMutators({
         boardId: z.string().optional(),
         metadata: z.any().optional(),
         isArchived: z.boolean().optional(),
+        kanbanPosition: z.string().nullable().optional(),
         updatedAt: z.number(),
       }),
       async ({
@@ -3003,6 +3004,7 @@ export const mutators = defineMutators({
           boardId,
           metadata,
           isArchived,
+          kanbanPosition,
           updatedAt,
         },
       }) => {
@@ -3020,6 +3022,7 @@ export const mutators = defineMutators({
           boardId?: string;
           metadata?: ReadonlyJSONValue;
           isArchived?: boolean;
+          kanbanPosition?: string | null;
         }
 
         const updateData: TicketUpdateData = {
@@ -3043,6 +3046,7 @@ export const mutators = defineMutators({
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         if (metadata !== undefined) updateData.metadata = metadata;
         if (isArchived !== undefined) updateData.isArchived = isArchived;
+        if (kanbanPosition !== undefined) updateData.kanbanPosition = kanbanPosition;
 
         await tx.mutate.tickets.update({
           id,

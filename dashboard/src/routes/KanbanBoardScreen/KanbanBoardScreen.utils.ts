@@ -175,9 +175,35 @@ export const createTagsByTicketIdMap = (
   return map;
 };
 
+/**
+ * Sorts tickets by kanbanPosition (lexicographic ascending, nulls last)
+ * with createdAt DESC as tiebreaker.
+ * IMPORTANT: Uses native string comparison (<, >), NOT localeCompare.
+ */
+export const sortByKanbanPosition = (tickets: Ticket[]): Ticket[] => {
+  return [...tickets].sort((a, b) => {
+    const aPos = a.kanbanPosition;
+    const bPos = b.kanbanPosition;
+
+    // Both have positions — lexicographic ascending
+    if (aPos !== null && aPos !== undefined && bPos !== null && bPos !== undefined) {
+      if (aPos < bPos) return -1;
+      if (aPos > bPos) return 1;
+      // Same position — fall through to createdAt tiebreaker
+    }
+    // Nulls last
+    if ((aPos === null || aPos === undefined) && bPos !== null && bPos !== undefined) return 1;
+    if (aPos !== null && aPos !== undefined && (bPos === null || bPos === undefined)) return -1;
+
+    // Both null or same position — createdAt DESC (newest first)
+    return b.createdAt - a.createdAt;
+  });
+};
+
 export const groupTicketsByStage = (
   localTickets: Ticket[] | undefined,
   stages: Stage[],
+  useKanbanPosition = false,
 ): Record<string, Ticket[]> => {
   const grouped: Record<string, Ticket[]> = {};
   stages.forEach(stage => {
@@ -204,6 +230,13 @@ export const groupTicketsByStage = (
       assignedTicketIds.add(ticket.id);
     }
   });
+
+  // Sort within each column by kanbanPosition when in single-board mode
+  if (useKanbanPosition) {
+    for (const stageId of Object.keys(grouped)) {
+      grouped[stageId] = sortByKanbanPosition(grouped[stageId] ?? []);
+    }
+  }
 
   return grouped;
 };

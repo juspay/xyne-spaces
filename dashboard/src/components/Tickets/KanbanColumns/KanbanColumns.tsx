@@ -66,13 +66,30 @@ const DroppableStage: React.FC<DroppableStageProps> = ({ id, children }) => {
 };
 
 const VirtualizedStageList: React.FC<{
+  stageId: string;
   stageTickets: Ticket[];
   tagsByTicketId: Map<string, TicketTag[]>;
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
-}> = ({ stageTickets, tagsByTicketId, availableTags, visibleColumns, onTicketClick }) => {
+}> = ({ stageId, stageTickets, tagsByTicketId, availableTags, visibleColumns, onTicketClick }) => {
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const scrollKey = `kanban-scroll-${stageId}`;
+
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const saved = sessionStorage.getItem(scrollKey);
+    if (saved) el.scrollTop = parseInt(saved, 10);
+
+    const onScroll = (): void => {
+      sessionStorage.setItem(scrollKey, String(el.scrollTop));
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [scrollKey]);
+
   const virtualizer = useVirtualizer({
     count: stageTickets.length,
     getScrollElement: () => scrollRef.current,
@@ -278,6 +295,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                 <div className='flex-1 min-h-0'>
                   <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
                     <VirtualizedStageList
+                      stageId={stage.id}
                       stageTickets={stageTickets}
                       tagsByTicketId={tagsByTicketId}
                       availableTags={availableTags}

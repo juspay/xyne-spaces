@@ -116,6 +116,7 @@
     "driver.js": "^1.4.0",
     "emoji-datasource": "^16.0.0",
     "emoji-picker-react": "^4.15.0",
+    "fractional-indexing": "^3.2.0",
     "framer-motion": "^12.23.24",
     "fuse.js": "^7.1.0",
     "hast-util-to-html": "^9.0.5",
