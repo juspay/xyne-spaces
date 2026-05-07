@@ -92,6 +92,29 @@ export async function authenticateApp(
     req.body.userId = verifiedResult.data.userId;
     req.body.appId = verifiedResult.data.appId;
 
+    // Fetch user to get workspaceId for downstream controllers that expect req.user
+    const user = await repositories.users.findById(userId);
+    if (!user) {
+      logger.warn('[APP-AUTH] User not found for app token');
+      sendError(res, 401);
+      return;
+    }
+
+    // Fetch orgMember to get orgRole
+    const orgMember = await repositories.orgMembers.findById(user.orgMemberId);
+
+    // Set req.user for compatibility with controllers that expect workspaceId
+    req.user = {
+      id: user.id,
+      googleId: user.providerUserId,
+      email: user.email,
+      name: user.name,
+      workspaceId: user.workspaceId,
+      memberId: user.orgMemberId,
+      role: user.role,
+      orgRole: orgMember?.role ?? 'MEMBER',
+    };
+
     next();
   } catch (error) {
     logger.error('[APP-AUTH] Unexpected error:', error);

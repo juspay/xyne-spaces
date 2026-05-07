@@ -55,6 +55,7 @@ export { IncomingWebhooksRepository } from './incomingWebhooksRepository';
 export { ScheduledCallRepository } from './scheduledCallRepository';
 export { WorkspaceRepository } from './workspaces';
 export { CallMessageRepository } from './callMessageRepository';
+export { OrgMemberRepository } from './orgMember';
 
 // Import statements for the container
 import { AgentRepository } from './agents';
@@ -102,6 +103,7 @@ import { IncomingWebhooksRepository } from './incomingWebhooksRepository';
 import { ScheduledCallRepository } from './scheduledCallRepository';
 import { WorkspaceRepository } from './workspaces';
 import { CallMessageRepository } from './callMessageRepository';
+import { OrgMemberRepository } from './orgMember';
 
 // Repository container for dependency injection
 export class RepositoryContainer {
@@ -149,6 +151,7 @@ export class RepositoryContainer {
   public scheduledCalls: ScheduledCallRepository;
   public workspaces: WorkspaceRepository;
   public callMessages: CallMessageRepository;
+  public orgMembers: OrgMemberRepository;
 
   private constructor() {
     this.agents = new AgentRepository();
@@ -193,6 +196,7 @@ export class RepositoryContainer {
     this.scheduledCalls = new ScheduledCallRepository();
     this.workspaces = new WorkspaceRepository();
     this.callMessages = new CallMessageRepository();
+    this.orgMembers = new OrgMemberRepository();
   }
 
   static getInstance(): RepositoryContainer {
