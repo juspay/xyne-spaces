@@ -672,14 +672,16 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             <Download className='h-4 w-4' />
           </button>
           {includeCloseButton && (
-            <Dialog.Close asChild>
-              <button
-                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
-                aria-label='Close'
-              >
-                <X className='h-5 w-5' />
-              </button>
-            </Dialog.Close>
+            <button
+              type='button'
+              onClick={onClose}
+              data-track-category='FileViewer'
+              data-track-name='CloseFilePreview'
+              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+              aria-label='Close'
+            >
+              <X className='h-5 w-5' />
+            </button>
           )}
         </div>
       </div>
@@ -737,7 +739,12 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   const renderMainContent = () => (hasStackNavigation ? renderCarousel() : renderContent());
 
   return (
-    <Dialog.Root open={isOpen} onOpenChange={() => attachmentViewerActor.send({ type: 'CLOSE' })}>
+    <Dialog.Root
+      open={isOpen}
+      onOpenChange={open => {
+        if (!open) onClose();
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[56]' />
         <Dialog.Content
@@ -756,7 +763,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
           }}
-          onInteractOutside={() => attachmentViewerActor.send({ type: 'CLOSE' })}
+          onInteractOutside={() => onClose()}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
         >
