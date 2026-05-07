@@ -43,6 +43,12 @@ import { BaseTicketType, FormContextType, FormEntityType, serializeTicketMd } fr
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
+import { z } from 'zod';
+
+const AddAttachmentsFromConversationBodySchema = z.object({
+  sourceConversationId: z.string().min(1, 'sourceConversationId is required'),
+  sourceMessageId: z.string().min(1).optional(),
+});
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { TicketIdService } from '@/services/ticketIdService';
 import { unifiedBotUserService } from '@/bots/unified';
@@ -1333,4 +1339,87 @@ export class TicketController {
 
     return { candidates, analysis };
   }
+
+  /**
+   * POST /api/tickets/:ticketId/attachments/from-conversation
+   * Transfer CHAT MessageAttachments from a Spaces conversation message to an
+   * existing ticket. Used by the claw agent (spaces-add-ticket-attachments tool)
+   * when a ticket was created without sourceConversationId.
+   *
+   * Body: { sourceConversationId: string, sourceMessageId?: string }
+   * - If sourceMessageId is provided, transfers attachments from that specific message.
+   * - Otherwise falls back to the conversation's initialMessageId.
+   */
+  addAttachmentsFromConversation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId } = req.params;
+
+      const bodyResult = AddAttachmentsFromConversationBodySchema.safeParse(req.body);
+      if (!bodyResult.success) {
+        res.status(400).json({ error: bodyResult.error.errors[0]?.message ?? 'Invalid request body' });
+        return;
+      }
+      const { sourceConversationId, sourceMessageId } = bodyResult.data;
+
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      // Validate ticket exists and enforce workspace-scoped ACL
+      const ticket = await this.ticketRepository.getTicketById(ticketId);
+      if (!ticket) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      if (ticket.workspaceId !== req.user!.workspaceId) {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+      }
+
+      // Validate conversation exists
+      const conversation = await this.conversationRepository.findById(sourceConversationId);
+      if (!conversation) {
+        res.status(400).json({ error: 'Source conversation not found' });
+        return;
+      }
+
+      // Determine which message to pull attachments from:
+      // - If caller specifies sourceMessageId (e.g. the exact triggering message), prefer that.
+      // - Otherwise fall back to the conversation's initialMessageId.
+      const messageId = sourceMessageId ?? conversation.initialMessageId;
+      if (!messageId) {
+        res.json({ count: 0 });
+        return;
+      }
+
+      const attachments = await this.messageAttachmentRepository.findByMessageId(messageId);
+      if (attachments.length === 0) {
+        res.json({ count: 0 });
+        return;
+      }
+
+      const attachmentIds = attachments.map((a) => a.id);
+      await this.messageAttachmentRepository.updateManyEntityTypeAndId(
+        attachmentIds,
+        AttachmentEntityType.TICKET,
+        ticketId,
+      );
+
+      // Re-index transferred attachments in Vespa
+      this.pushVespaJobForAttachments(
+        attachments.map((a) => ({ id: a.id, mimetype: a.mimetype })),
+        userId,
+      ).catch((err) => {
+        logger.error(`[TicketController] Vespa re-index failed for attachments on ticket ${ticketId}:`, err);
+      });
+
+      logger.info(`[TicketController] Transferred ${attachments.length} attachment(s) from message ${messageId} to ticket ${ticketId}`);
+      res.json({ count: attachments.length });
+    } catch (err) {
+      logger.error('[TicketController] addAttachmentsFromConversation error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 }

@@ -24,6 +24,8 @@ router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketContr
 
 router.get('/:ticketId/pending-human-intervention', ticketController.getPendingHumanIntervention);
 
+router.post('/:ticketId/attachments/from-conversation', ticketController.addAttachmentsFromConversation);
+
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
 
 export default router;
