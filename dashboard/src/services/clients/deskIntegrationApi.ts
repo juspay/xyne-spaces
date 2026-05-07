@@ -20,9 +20,13 @@ export async function disconnectDeskIntegration(channelId: string): Promise<void
  * already stored the reconnect state with `expectedEmail`, so the callback
  * will reject if the user signs in with a different mailbox.
  */
-export async function initDeskIntegrationReconnect(channelId: string): Promise<string> {
+export async function initDeskIntegrationReconnect(
+  channelId: string,
+  platform: 'electron' | 'web' = 'web',
+): Promise<string> {
   const res = await apiInstance.post<{ authUrl: string }>(
     `/integrations/desk/${channelId}/reconnect-init`,
+    { platform },
   );
   return res.data.authUrl;
 }

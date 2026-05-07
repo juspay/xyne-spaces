@@ -999,11 +999,12 @@ export class ChannelController {
       });
       const hasSource = !!source;
       const isConnected = source?.isActive === true;
+      const sourceType = source?.sourceType ?? null;
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
       if (fromDisplay) {
         res
           .status(200)
-          .json({ email: fromDisplay.toLowerCase(), isConnected, hasSource });
+          .json({ email: fromDisplay.toLowerCase(), isConnected, hasSource, sourceType });
         return;
       }
 
@@ -1019,12 +1020,12 @@ export class ChannelController {
         if (owner?.email) {
           res
             .status(200)
-            .json({ email: owner.email.toLowerCase(), isConnected, hasSource });
+            .json({ email: owner.email.toLowerCase(), isConnected, hasSource, sourceType });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });

@@ -12,12 +12,13 @@ import {
 import { encrypt } from '../../services/encryptionService';
 import { db } from '../../database/client';
 import { logger } from '../../utils/logger';
+import { config as appConfig } from '../../config/env';
 
 const router = Router();
 
 function getFrontendUrl(): string {
-  const url = process.env.FRONTEND_URL;
-  if (!url) throw new Error('FRONTEND_URL environment variable is required');
+  const url = appConfig.frontendUrl;
+  if (!url) throw new Error('FRONTEND_URL config is required');
   return url.trim();
 }
 
@@ -51,26 +52,71 @@ export const MICROSOFT_OAUTH_SCOPES = [
 /** Space-joined scope string for Microsoft's token-exchange API. */
 export const MICROSOFT_OAUTH_SCOPE_STRING = MICROSOFT_OAUTH_SCOPES.join(' ');
 
+function buildPostOAuthRedirect(
+  frontendUrl: string,
+  path: string,
+  platform?: 'electron' | 'web',
+): string {
+  if (platform === 'electron') {
+    return `${frontendUrl}/launch?path=${encodeURIComponent(path)}`;
+  }
+  return `${frontendUrl}${path}`;
+}
+
+function buildSupportPath(
+  workspaceId: string | undefined,
+  channelId: string | undefined,
+  query: URLSearchParams,
+): string {
+  const queryString = query.toString();
+  const wsSegment = workspaceId ? `/${workspaceId}` : '';
+  const channelSegment = channelId ? `/${channelId}` : '';
+  const suffix = queryString ? `?${queryString}` : '';
+  return `${wsSegment}/support${channelSegment}${suffix}`;
+}
+
+function redirectError(
+  res: Response,
+  frontendUrl: string,
+  error: string,
+  platform: 'electron' | 'web' | undefined,
+  workspaceId?: string,
+  channelId?: string,
+): void {
+  const params = new URLSearchParams({ emailError: error });
+  res.redirect(
+    buildPostOAuthRedirect(frontendUrl, buildSupportPath(workspaceId, channelId, params), platform),
+  );
+}
+
 /**
  * GET /api/integrations/microsoft/connect
  * Initiates Microsoft OAuth flow for email channel creation
  */
 router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: Response) => {
   const requestId = `MS_DESK_CONNECT_${Date.now()}`;
+  const platform: 'electron' | 'web' =
+    req.query.platform === 'electron' ? 'electron' : 'web';
+  const workspaceId = req.user!.workspaceId;
 
   try {
     const oauthClient = microsoftDeskService.getOAuthClient();
     if (!oauthClient) {
-      res.status(503).json({ error: 'Microsoft OAuth not configured' });
+      redirectError(res, getFrontendUrl(), 'microsoft_not_configured', platform, workspaceId);
       return;
     }
 
     const { name, description, visibility, projectId, assigneeUserGroupId } = req.query;
     const userId = req.user!.id;
-    const workspaceId = req.user!.workspaceId;
 
     if (!name || !projectId) {
-      res.status(400).json({ error: 'name and projectId are required' });
+      redirectError(res, getFrontendUrl(), 'name and projectId are required', platform, workspaceId);
+      return;
+    }
+
+    const project = await db.project.findUnique({ where: { id: projectId as string } });
+    if (!project) {
+      redirectError(res, getFrontendUrl(), 'project_not_found', platform, workspaceId);
       return;
     }
 
@@ -84,6 +130,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       userId,
       workspaceId,
       assigneeUserGroupId: assigneeUserGroupId as string | undefined,
+      platform,
     });
 
     const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;
@@ -99,7 +146,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
     res.redirect(authorizationUri);
   } catch (error) {
     logger.error(`[${requestId}] Error initiating Microsoft email connect:`, error);
-    res.redirect(`${getFrontendUrl()}?error=microsoft_connect_failed`);
+    redirectError(res, getFrontendUrl(), 'microsoft_connect_failed', platform, workspaceId);
   }
 });
 
@@ -110,31 +157,43 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
 router.get('/callback', async (req: Request, res: Response) => {
   const requestId = `MS_DESK_CALLBACK_${Date.now()}`;
   const frontendUrl = getFrontendUrl();
+  const { code, state, error } = req.query;
+  const channelData = state
+    ? await microsoftDeskService.getPendingChannel(state as string)
+    : null;
+  const platform: 'electron' | 'web' =
+    channelData?.platform === 'electron' ? 'electron' : 'web';
+  const channelHint = channelData && isReconnectChannelData(channelData)
+    ? channelData.channelId
+    : undefined;
+
+  const stateWorkspaceId = channelData
+    ? isReconnectChannelData(channelData)
+      ? channelData.workspaceId
+      : channelData.workspaceId
+    : undefined;
 
   try {
     const oauthClient = microsoftDeskService.getOAuthClient();
     if (!oauthClient) {
-      res.redirect(`${frontendUrl}?error=microsoft_not_configured`);
+      redirectError(res, frontendUrl, 'microsoft_not_configured', platform, stateWorkspaceId, channelHint);
       return;
     }
 
-    const { code, state, error } = req.query;
-
     if (error) {
       logger.error(`[${requestId}] Microsoft OAuth error: ${error}`);
-      res.redirect(`${frontendUrl}?error=microsoft_oauth_error&message=${encodeURIComponent(error as string)}`);
+      redirectError(res, frontendUrl, String(error), platform, stateWorkspaceId, channelHint);
       return;
     }
 
     if (!code || !state) {
-      res.redirect(`${frontendUrl}?error=missing_params`);
+      redirectError(res, frontendUrl, 'missing_params', platform, stateWorkspaceId, channelHint);
       return;
     }
 
-    const channelData = await microsoftDeskService.getPendingChannel(state as string);
     if (!channelData) {
       logger.error(`[${requestId}] Pending channel data not found or expired`);
-      res.redirect(`${frontendUrl}?error=expired_state`);
+      redirectError(res, frontendUrl, 'expired_state', platform);
       return;
     }
 
@@ -150,14 +209,14 @@ router.get('/callback', async (req: Request, res: Response) => {
 
     if (!accessToken) {
       logger.error(`[${requestId}] No access token received from Microsoft`);
-      res.redirect(`${frontendUrl}?error=no_access_token`);
+      redirectError(res, frontendUrl, 'no_access_token', platform, stateWorkspaceId, channelHint);
       return;
     }
 
     const email = await microsoftDeskService.resolveEmail(accessToken, token.id_token as string | undefined);
     if (!email) {
       logger.error(`[${requestId}] Could not determine email from Microsoft profile`);
-      res.redirect(`${frontendUrl}?error=no_email`);
+      redirectError(res, frontendUrl, 'no_email', platform, stateWorkspaceId, channelHint);
       return;
     }
 
@@ -166,10 +225,15 @@ router.get('/callback', async (req: Request, res: Response) => {
       const expected = channelData.expectedEmail.toLowerCase();
       if (email.toLowerCase() !== expected) {
         logger.warn(`[${requestId}] Reconnect email mismatch: got ${email}, expected ${expected}`);
+        const params = new URLSearchParams({
+          emailError: `This desk is bound to ${expected}. Please sign in with that account.`,
+        });
         res.redirect(
-          `${frontendUrl}/support?channel=${channelData.channelId}&emailError=${encodeURIComponent(
-            `This desk is bound to ${expected}. Please sign in with that account.`,
-          )}`,
+          buildPostOAuthRedirect(
+            frontendUrl,
+            buildSupportPath(channelData.workspaceId, channelData.channelId, params),
+            platform,
+          ),
         );
         return;
       }
@@ -181,7 +245,14 @@ router.get('/callback', async (req: Request, res: Response) => {
       });
       if (!source) {
         logger.error(`[${requestId}] No ExternalSource found for reconnect`);
-        res.redirect(`${frontendUrl}/support?channel=${channelData.channelId}&emailError=no_source`);
+        const params = new URLSearchParams({ emailError: 'no_source' });
+        res.redirect(
+          buildPostOAuthRedirect(
+            frontendUrl,
+            buildSupportPath(channelData.workspaceId, channelData.channelId, params),
+            platform,
+          ),
+        );
         return;
       }
 
@@ -203,15 +274,23 @@ router.get('/callback', async (req: Request, res: Response) => {
       });
 
       try {
-        const webhookUrl = `${getPublicUrl(req)}/api/integrations/microsoft/webhook/${source.name}`;
+        const webhookUrl = `${getPublicUrl(req)}/api/external-source-sync/${source.name}/ingest`;
         await microsoftDeskService.registerGraphWebhook(accessToken, webhookUrl);
       } catch (err) {
         logger.warn(`[${requestId}] Failed to re-register webhook on reconnect`, err);
       }
 
       logger.info(`[${requestId}] Microsoft integration reconnected: ${channelData.channelId}`);
+      const params = new URLSearchParams({
+        emailReconnected: 'true',
+        provider: 'microsoft',
+      });
       res.redirect(
-        `${frontendUrl}/support?emailReconnected=true&channel=${channelData.channelId}&provider=microsoft`,
+        buildPostOAuthRedirect(
+          frontendUrl,
+          buildSupportPath(channelData.workspaceId, channelData.channelId, params),
+          platform,
+        ),
       );
       return;
     }
@@ -225,18 +304,23 @@ router.get('/callback', async (req: Request, res: Response) => {
 
     logger.info(`[${requestId}] Microsoft email channel created: ${channelId}`);
 
+    const successParams = new URLSearchParams({
+      emailConnected: 'true',
+      provider: 'microsoft',
+    });
     res.redirect(
-      `${frontendUrl}/support?emailConnected=true&channel=${channelId}&provider=microsoft`,
+      buildPostOAuthRedirect(
+        frontendUrl,
+        buildSupportPath(channelData.workspaceId, channelId, successParams),
+        platform,
+      ),
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${requestId}] Microsoft email callback error: ${errorMessage}`, error);
 
-    const params = new URLSearchParams({ emailError: errorMessage });
     const existingChannelId = (error as Error & { existingChannelId?: string })?.existingChannelId;
-    if (existingChannelId) params.set('channel', existingChannelId);
-
-    res.redirect(`${frontendUrl}/support?${params.toString()}`);
+    redirectError(res, frontendUrl, errorMessage, platform, stateWorkspaceId, existingChannelId ?? channelHint);
   }
 });
 

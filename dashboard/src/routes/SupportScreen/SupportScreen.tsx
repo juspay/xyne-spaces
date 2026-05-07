@@ -244,16 +244,23 @@ const EmailAttachmentsRow = ({
   body?: string;
 }): ReactElement | null => {
   const inlineCids = new Set<string>();
+  const inlineAttachmentIds = new Set<string>();
   if (body) {
-    const re = /cid:([^\s"'>]+)/gi;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(body)) !== null) {
-      if (match[1]) inlineCids.add(match[1].trim());
+    const cidRe = /cid:([^\s"'>]+)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = cidRe.exec(body)) !== null) {
+      if (m[1]) inlineCids.add(m[1].trim());
+    }
+    const dataAttRe = /data-att-id="([^"]+)"/gi;
+    while ((m = dataAttRe.exec(body)) !== null) {
+      if (m[1]) inlineAttachmentIds.add(m[1].trim());
     }
   }
   const visibleRows = rows.filter(r => {
     const meta = r.metadata as { contentId?: string } | null | undefined;
-    return !(meta?.contentId && inlineCids.has(meta.contentId));
+    if (meta?.contentId && inlineCids.has(meta.contentId)) return false;
+    if (inlineAttachmentIds.has(r.id)) return false;
+    return true;
   });
 
   if (!visibleRows || visibleRows.length === 0) return null;
@@ -854,6 +861,7 @@ const SupportScreen = (): ReactElement => {
     },
   ) => {
     const { connector, ...rest } = data;
+    const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (connector === 'microsoft') {
       const params = new URLSearchParams({
@@ -867,7 +875,16 @@ const SupportScreen = (): ReactElement => {
       if (rest.assigneeUserGroupId) {
         params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
       }
-      window.location.href = `${API_BASE_URL}/integrations/microsoft/connect?${params.toString()}`;
+      if (isElectron) {
+        params.set('platform', 'electron');
+      }
+      const microsoftUrl = `${API_BASE_URL}/integrations/microsoft/connect?${params.toString()}`;
+      if (isElectron && window.electronAPI?.openExternal) {
+        window.electronAPI.openExternal(microsoftUrl);
+        setShowCreateChannelModal(false);
+      } else {
+        window.location.href = microsoftUrl;
+      }
       return;
     }
 
@@ -883,7 +900,16 @@ const SupportScreen = (): ReactElement => {
       if (rest.assigneeUserGroupId) {
         params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
       }
-      window.location.href = `${API_BASE_URL}/integrations/google/connect?${params.toString()}`;
+      if (isElectron) {
+        params.set('platform', 'electron');
+      }
+      const googleUrl = `${API_BASE_URL}/integrations/google/connect?${params.toString()}`;
+      if (isElectron && window.electronAPI?.openExternal) {
+        window.electronAPI.openExternal(googleUrl);
+        setShowCreateChannelModal(false);
+      } else {
+        window.location.href = googleUrl;
+      }
       return;
     }
 
@@ -2481,10 +2507,10 @@ const SupportTicketDetail = (): ReactElement => {
                         | Array<{ userId: string; lastReadEmailId: string }>
                         | undefined
                     }
-                    onReplyToEmail={emailId => {
+                    onReplyToEmail={(emailId, mode) => {
                       clearStoredRecipients(conversationId);
                       setReplyToEmailId(emailId);
-                      setReplyMode('reply');
+                      setReplyMode(mode);
                       setComposerOpen(true);
                     }}
                     deskEmail={deskEmail}
@@ -2865,7 +2891,7 @@ const EmailThread = ({
   collapseState: EmailCollapseState;
   ticketId?: string | null | undefined;
   emailReads?: ReadonlyArray<{ userId: string; lastReadEmailId: string }> | undefined;
-  onReplyToEmail?: (emailId: string) => void;
+  onReplyToEmail?: (emailId: string, mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
@@ -2874,6 +2900,10 @@ const EmailThread = ({
   // stored id to the current latest email, so every email header in the
   // thread flips read/unread together.
   const { isRead } = useMarkEmailRead(ticketId, lastEmailId ?? null, emailReads, true);
+  const threadAttachments = useMemo(
+    () => sortedEmails.flatMap(e => e.attachments ?? []),
+    [sortedEmails],
+  );
   return (
     <div className='divide-y divide-gray-200 relative'>
       {sortedEmails.map(email => (
@@ -2884,12 +2914,13 @@ const EmailThread = ({
           canCollapse={email.id !== lastEmailId}
           onToggleCollapse={() => toggleOne(email.id)}
           isRead={isRead}
+          threadAttachments={threadAttachments}
           {...(onReplyToEmail &&
             email.id !== lastEmailId && {
-              // Per-email Reply only on older messages — the latest already
-              // has the dedicated Reply / Reply all bar at the thread footer,
+              // Per-email Reply / Reply all only on older messages — the
+              // latest already has the dedicated bar at the thread footer,
               // so showing one here would be a duplicate.
-              onReply: () => onReplyToEmail(email.id),
+              onReply: (mode: 'reply' | 'replyAll') => onReplyToEmail(email.id, mode),
             })}
           deskEmail={deskEmail}
         />
@@ -2906,14 +2937,16 @@ const EmailThreadItem = ({
   isRead = true,
   onReply,
   deskEmail,
+  threadAttachments,
 }: {
   email: Email;
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
   isRead?: boolean;
-  onReply?: () => void;
+  onReply?: (mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
+  threadAttachments?: NonNullable<Email['attachments']>;
 }): ReactElement => {
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
@@ -3051,7 +3084,7 @@ const EmailThreadItem = ({
                 <EmailBodyRenderer
                   body={email.body}
                   emailId={email.id}
-                  attachments={email.attachments}
+                  attachments={threadAttachments ?? email.attachments}
                 />
               ) : (
                 <span className='text-muted-foreground italic'>No content</span>
@@ -3066,12 +3099,12 @@ const EmailThreadItem = ({
               />
             )}
             {onReply && (
-              <div className='mt-3'>
+              <div className='mt-3 flex items-center gap-2'>
                 <button
                   type='button'
                   onClick={e => {
                     e.stopPropagation();
-                    onReply();
+                    onReply('reply');
                   }}
                   className='inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-border text-xs font-medium text-muted-foreground hover:bg-muted active:bg-accent transition-colors cursor-pointer'
                   data-track-category='Support'
@@ -3080,6 +3113,20 @@ const EmailThreadItem = ({
                 >
                   <ArrowUp size={12} className='rotate-[-90deg]' />
                   Reply
+                </button>
+                <button
+                  type='button'
+                  onClick={e => {
+                    e.stopPropagation();
+                    onReply('replyAll');
+                  }}
+                  className='inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-border text-xs font-medium text-muted-foreground hover:bg-muted active:bg-accent transition-colors cursor-pointer'
+                  data-track-category='Support'
+                  data-track-name='ReplyAllToSpecificEmail'
+                  data-track-metadata={JSON.stringify({ emailId: email.id })}
+                >
+                  <ReplyAll size={12} />
+                  Reply all
                 </button>
               </div>
             )}

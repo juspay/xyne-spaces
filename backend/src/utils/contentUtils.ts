@@ -18,39 +18,13 @@ export function sanitizeEmailBodyHtml(html: string): string {
   return DOMPurify.sanitize(html);
 }
 
-const HTML_REPLY_MARKERS: RegExp[] = [
-  /<div[^>]*\bclass=["']?[^"'>]*\bgmail_quote\b/i,
-  /<blockquote[^>]*\bclass=["']?[^"'>]*\bgmail_quote\b/i,
-  /<div[^>]*\bid=["']?appendonsend["']?/i,
-  /<div[^>]*\bid=["']?divRplyFwdMsg["']?/i,
-  /<p[^>]*>\s*<b>\s*From:\s*<\/b>/i,
-  /<div[^>]*\bclass=["']?[^"'>]*\byahoo_quoted\b/i,
-  /<blockquote[^>]*\btype=["']?cite["']?/i,
-  /<div[^>]*\bclass=["']?[^"'>]*\bmoz-cite-prefix\b/i,
-];
-
 export function cleanEmailBodyHtml(html: string): string {
   if (!html?.trim()) return html;
 
-  let working = html
+  const working = html
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-
-  let cutAt = working.length;
-  for (const marker of HTML_REPLY_MARKERS) {
-    const match = working.match(marker);
-    if (match && match.index !== undefined && match.index < cutAt) {
-      cutAt = match.index;
-    }
-  }
-
-  if (cutAt < working.length) {
-    const kept = working.slice(0, cutAt).replace(/<[^>]+>/g, '').trim();
-    if (kept.length >= 40) {
-      working = working.slice(0, cutAt);
-    }
-  }
 
   return sanitizeEmailBodyHtml(working);
 }

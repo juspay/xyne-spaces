@@ -15,7 +15,7 @@ interface ComposeEmailModalProps {
 const COMPOSE_HEIGHT_KEY = 'support-compose-height-vh';
 const MIN_VH = 35;
 const MAX_VH = 95;
-const DEFAULT_VH = 75;
+const DEFAULT_VH = 40;
 
 const readSavedHeight = (): number => {
   if (typeof window === 'undefined') return DEFAULT_VH;

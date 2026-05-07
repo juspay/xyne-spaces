@@ -21,6 +21,9 @@ import { ZohoService } from '@/services/zohoService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { GoogleService } from '@/services/googleService';
 import { ExternalAttachmentService } from '@/services/externalAttachmentService';
+import { applyInlineAttachments } from '@/utils/inlineAttachments';
+import { appendReplyQuote } from '@/utils/replyQuote';
+import { reattachTrailImages } from '@/utils/reattachTrailImages';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { AttachmentUploadError } from '@/integrations/core/baseMailReplySender';
@@ -34,6 +37,7 @@ interface ReplyEmailRequest {
   cc?: string[];
   bcc?: string[];
   attachmentIds?: string[];
+  replyToEmailId?: string;
 }
 
 export class EmailController {
@@ -58,7 +62,8 @@ export class EmailController {
   replyToEmail = async (req: Request, res: Response) => {
     try {
       const { conversationId } = req.params;
-      const { body, type, to: customTo, cc: customCc, bcc: customBcc } = req.body as ReplyEmailRequest;
+      const { body, type, to: customTo, cc: customCc, bcc: customBcc, replyToEmailId } =
+        req.body as ReplyEmailRequest;
       const attachmentIds: string[] = Array.isArray(req.body.attachmentIds) ? req.body.attachmentIds : [];
 
       // Validate input — body OR at least one attachment is required.
@@ -112,23 +117,6 @@ export class EmailController {
       // Most recent email (first in DESC-ordered array) — used as isReplyTo for Zoho threading
       const latestEmail = emails[0];
 
-      // 3. Compose recipients based on reply type or use custom recipients if provided
-      let toRecipients: string[];
-      let ccRecipients: string[] = [];
-      let bccRecipients: string[] = [];
-
-      if (customTo && customTo.length > 0) {
-        toRecipients = customTo;
-        ccRecipients = customCc || [];
-        bccRecipients = customBcc || [];
-      } else if (type === 'REPLY') {
-        toRecipients = [initialEmail.from];
-      } else {
-        const allRecipients = [initialEmail.from, ...initialEmail.to];
-        toRecipients = [...new Set(allRecipients)];
-        ccRecipients = initialEmail.cc || [];
-      }
-
       // 4. Get external source for credentials
       const channel = await this.channelRepo.findById(conversation.channelId);
       if (!channel) {
@@ -139,6 +127,17 @@ export class EmailController {
       if (!externalSource) {
         return res.status(404).json({ error: 'External source not found' });
       }
+
+      const quoteSource =
+        (replyToEmailId && emails.find(e => e.id === replyToEmailId)) || latestEmail;
+      const isGmail = externalSource.sourceType === ExternalSourcePlatform.GOOGLE;
+      const bodyWithQuote = isGmail
+        ? appendReplyQuote(safeBody, {
+            from: quoteSource.from,
+            body: quoteSource.body,
+            createdAt: quoteSource.createdAt,
+          })
+        : safeBody;
 
       const preference = await this.emailChannelPreferenceRepo.findByChannelId(channel.id);
       if (!preference?.ownerUserId) {
@@ -162,17 +161,75 @@ export class EmailController {
         extractEmailAddress(externalSource.displayName) ||
         owner.email;
 
+      if (!customTo || customTo.length === 0) {
+        return res.status(400).json({ error: 'Recipients required' });
+      }
+      const toRecipients = customTo;
+      const ccRecipients = customCc || [];
+      const bccRecipients = customBcc || [];
+
       logger.info(`[EmailController] Sending ${type} via ${externalSource.sourceType} for conversation ${conversationId}`);
 
       // Mail-providers (those with a registered mail-reply sender) take
+      if (attachmentIds.length > 0) {
+        const rows = await this.messageAttachmentRepo.findByIds(attachmentIds);
+        const allowed = new Set(
+          rows.filter(r => r.uploadedByUserId === userId).map(r => r.id),
+        );
+        const denied = attachmentIds.filter(id => !allowed.has(id));
+        if (denied.length > 0) {
+          logger.warn('[EmailController] Reply blocked: unauthorized attachment ids', {
+            userId,
+            conversationId,
+            denied,
+          });
+          return res.status(403).json({ error: 'Unauthorized attachment access' });
+        }
+      }
+
       // attachment bytes inline; Zoho takes its own native attachmentIds in
       // the send body and doesn't need buffer resolution here.
       const adapter = adapterRegistry.getAdapter(externalSource.name);
       const isMailProvider = !!adapter.sendMailReply;
-      const { attachments: fileAttachments, stagedRowIds: stagedAttachmentRowIds } =
+      const { attachments: preparedAttachments, stagedRowIds: stagedAttachmentRowIds } =
         await new ExternalAttachmentService().prepareOutboundAttachments(
           isMailProvider ? { attachmentIds } : {},
         );
+
+      const inlineRewrite = isMailProvider
+        ? applyInlineAttachments(bodyWithQuote, preparedAttachments)
+        : {
+            body: bodyWithQuote,
+            attachments: preparedAttachments,
+            inlineCidByAttachmentId: new Map<string, string>(),
+          };
+          
+      const outboundBody = inlineRewrite.body;
+      const inlineCidByAttachmentId = inlineRewrite.inlineCidByAttachmentId;
+      const priorEmailIds = emails.map(e => e.id).filter(id => id);
+      const priorAttachments = priorEmailIds.length > 0
+        ? await db.messageAttachment.findMany({
+            where: {
+              entityType: AttachmentEntityType.EMAIL,
+              entityId: { in: priorEmailIds },
+            },
+            select: {
+              id: true,
+              url: true,
+              originalFilename: true,
+              mimetype: true,
+              metadata: true,
+            },
+          })
+        : [];
+      const trailAttachments = isMailProvider
+        ? await reattachTrailImages({
+            body: outboundBody,
+            excludeCids: inlineCidByAttachmentId.values(),
+            priorAttachments,
+          })
+        : [];
+      const fileAttachments = [...inlineRewrite.attachments, ...trailAttachments];
 
       // 5. Send reply via the appropriate provider
       // messageId (optional) is the per-message unique id from the provider —
@@ -186,7 +243,7 @@ export class EmailController {
           externalSource.id
         );
         result = await sender.replyToConversation({
-          content: safeBody,
+          content: outboundBody,
           subject: initialEmail.subject,
           to: toRecipients,
           cc: ccRecipients,
@@ -203,7 +260,7 @@ export class EmailController {
         );
         try {
           result = await sender.replyToConversation({
-            content: safeBody,
+            content: outboundBody,
             subject: initialEmail.subject,
             to: toRecipients,
             cc: ccRecipients,
@@ -234,7 +291,7 @@ export class EmailController {
 
         const zohoResult = await zohoService.sendReply({
           ticketId,
-          content: safeBody,
+          content: bodyWithQuote,
           to: toRecipients,
           cc: ccRecipients,
           bcc: bccRecipients,
@@ -259,7 +316,7 @@ export class EmailController {
       const newEmail = await this.emailRepo.create({
         type: emailType,
         subject: `Re: ${initialEmail.subject}`,
-        body: safeBody,
+        body: outboundBody,
         to: toRecipients,
         from: fromEmailAddress,
         cc: ccRecipients,
@@ -308,6 +365,22 @@ export class EmailController {
           );
         } catch (error) {
           logger.warn(`[EmailController] Failed to rebind staged attachments to email ${newEmail.id}:`, error);
+        }
+
+        if (inlineCidByAttachmentId.size > 0) {
+          await Promise.allSettled(
+            [...inlineCidByAttachmentId.entries()].map(async ([attId, cid]) => {
+              const row = await db.messageAttachment.findUnique({
+                where: { id: attId },
+                select: { metadata: true },
+              });
+              const existing = (row?.metadata ?? {}) as Record<string, unknown>;
+              await db.messageAttachment.update({
+                where: { id: attId },
+                data: { metadata: { ...existing, contentId: cid, isInline: true } },
+              });
+            }),
+          );
         }
       }
 
@@ -530,14 +603,33 @@ export class EmailController {
         externalSource.displayName ||
         '';
 
-      const { attachments: fileAttachments, stagedRowIds: stagedAttachmentRowIds } =
+      if (attachmentIds.length > 0) {
+        const rows = await this.messageAttachmentRepo.findByIds(attachmentIds);
+        const allowed = new Set(rows.filter(r => r.uploadedByUserId === userId).map(r => r.id));
+        const denied = attachmentIds.filter(id => !allowed.has(id));
+        if (denied.length > 0) {
+          logger.warn('[EmailController] Compose blocked: unauthorized attachment ids', {
+            userId,
+            channelId,
+            denied,
+          });
+          return res.status(403).json({ error: 'Unauthorized attachment access' });
+        }
+      }
+
+      const { attachments: preparedAttachments, stagedRowIds: stagedAttachmentRowIds } =
         await new ExternalAttachmentService().prepareOutboundAttachments({ attachmentIds });
+
+      const inlineRewrite = applyInlineAttachments(safeBody, preparedAttachments);
+      const outboundBody = inlineRewrite.body;
+      const fileAttachments = inlineRewrite.attachments;
+      const inlineCidByAttachmentId = inlineRewrite.inlineCidByAttachmentId;
 
       const sendResult = await adapter.sendMailNew({
         encryptedCredentials: externalSource.credentials,
         sourceId: externalSource.id,
         subject: safeSubject,
-        body: safeBody,
+        body: outboundBody,
         to: [...new Set(to)],
         cc: [...new Set(cc)],
         bcc: [...new Set(bcc)],
@@ -564,7 +656,7 @@ export class EmailController {
           userId,
           ...(boardId && { boardId }),
           emailSubject: safeSubject,
-          emailBody: safeBody,
+          emailBody: outboundBody,
           emailTo: [...new Set(to)],
           emailFrom: fromEmail,
           emailCc: [...new Set(cc)],
@@ -626,6 +718,22 @@ export class EmailController {
             logger.warn(
               `[EmailController] Failed to rebind staged attachments to email ${newEmail.id}:`,
               error,
+            );
+          }
+
+          if (inlineCidByAttachmentId.size > 0) {
+            await Promise.allSettled(
+              [...inlineCidByAttachmentId.entries()].map(async ([attId, cid]) => {
+                const row = await db.messageAttachment.findUnique({
+                  where: { id: attId },
+                  select: { metadata: true },
+                });
+                const existing = (row?.metadata ?? {}) as Record<string, unknown>;
+                await db.messageAttachment.update({
+                  where: { id: attId },
+                  data: { metadata: { ...existing, contentId: cid, isInline: true } },
+                });
+              }),
             );
           }
         }

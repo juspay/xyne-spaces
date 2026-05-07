@@ -6,9 +6,15 @@ interface ConnectedEmailInfo {
   email: string | null;
   isConnected: boolean;
   hasSource: boolean;
+  sourceType: string | null;
 }
 
-const EMPTY: ConnectedEmailInfo = { email: null, isConnected: false, hasSource: false };
+const EMPTY: ConnectedEmailInfo = {
+  email: null,
+  isConnected: false,
+  hasSource: false,
+  sourceType: null,
+};
 
 const cache = new Map<string, ConnectedEmailInfo>();
 const inflight = new Map<string, Promise<ConnectedEmailInfo>>();
@@ -33,6 +39,7 @@ const fetchConnectedEmail = (channelId: string): Promise<ConnectedEmailInfo> => 
       isConnected?: boolean;
       hasSource?: boolean;
       hasIntegration?: boolean;
+      sourceType?: string | null;
     }>(`/channels/${channelId}/connected-email`)
     .then(res => {
       const isConnected = res.data?.isConnected ?? res.data?.hasIntegration ?? false;
@@ -40,6 +47,7 @@ const fetchConnectedEmail = (channelId: string): Promise<ConnectedEmailInfo> => 
         email: res.data?.email ?? null,
         isConnected,
         hasSource: res.data?.hasSource ?? isConnected,
+        sourceType: res.data?.sourceType ?? null,
       };
       cache.set(channelId, info);
       return info;

@@ -66,7 +66,13 @@ interface ReplyParams {
   latestExternalMessageId: string;
   fromEmailAddress?: string;
   /** Optional file attachments (e.g. ICS calendar invite or user-uploaded files). */
-  attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+  attachments?: Array<{
+    name: string;
+    contentType: string;
+    content: Buffer | string;
+    cid?: string;
+    isInline?: boolean;
+  }>;
 }
 
 interface ReplyResult {
@@ -83,7 +89,13 @@ interface MimeOptions {
   body: string;
   inReplyTo?: string;
   references?: string;
-  attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+  attachments?: Array<{
+    name: string;
+    contentType: string;
+    content: Buffer | string;
+    cid?: string;
+    isInline?: boolean;
+  }>;
 }
 
 // ─── Service ────────────────────────────────────────────────────────────────
@@ -701,7 +713,13 @@ export class GoogleService {
         cc?: string[];
         bcc?: string[];
         fromEmailAddress?: string;
-        attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+        attachments?: Array<{
+          name: string;
+          contentType: string;
+          content: Buffer | string;
+          cid?: string;
+          isInline?: boolean;
+        }>;
       }): Promise<{ messageId: string; threadId: string; fromEmail: string }> {
         const fromHeader = params.fromEmailAddress || credentials.email;
         const mime = await buildMimeMessage({
@@ -813,6 +831,7 @@ async function buildMimeMessage(opts: MimeOptions): Promise<Buffer> {
         filename: a.name,
         content: a.content,
         contentType: a.contentType,
+        ...(a.cid && { cid: a.cid }),
       })),
     }),
   } as never).compile().build() as unknown as Promise<Buffer>;
