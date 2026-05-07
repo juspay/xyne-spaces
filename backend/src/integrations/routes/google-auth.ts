@@ -409,6 +409,18 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           },
         });
         const now = new Date();
+        const seenConversations = await tx.conversation.findMany({
+          where: {
+            channelId: ch.id,
+            createdAt: { lte: now },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 25,
+          select: { createdAt: true },
+        });
+        const conversationSeenCutoffAt =
+          seenConversations[seenConversations.length - 1]?.createdAt ?? now;
+
         await tx.channelParticipant.create({
           data: { channelId: ch.id, userId: cd.userId, role: 'ADMIN' },
         });
@@ -418,6 +430,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             channelId: ch.id,
             userId: cd.userId,
             lastViewedAt: now,
+            conversationSeenCutoffAt,
             updatedAt: now,
           },
         });

@@ -45,6 +45,23 @@ async function computeUnreadCountForUser(
   }
   return unread;
 }
+
+async function getConversationSeenCutoffAt(
+  tx: Transaction<Schema>,
+  channelId: string,
+  fallbackTimestamp: number,
+): Promise<number> {
+  const seenConversations = await tx.run(
+    zql.conversations
+      .where('channelId', channelId)
+      .where('createdAt', '<=', fallbackTimestamp)
+      .orderBy('createdAt', 'desc')
+      .limit(25),
+  );
+
+  return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
+}
+
 /**
  * Adds a single participant to a channel and increments participantCount
  * @param tx - Zero transaction
@@ -77,6 +94,7 @@ export async function addChannelParticipant(
 
   const id = participantId;
   const now = timestamp;
+  const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, now);
 
   // Check for existing soft-deleted channel_user_status to restore
   const existingSoftDeletedStatus = await tx.run(zql.channel_user_status
@@ -105,6 +123,7 @@ export async function addChannelParticipant(
       id: existingSoftDeletedStatus.id,
       isDeleted: false,
       lastViewedAt: now,
+      conversationSeenCutoffAt,
       isClosed: false,
       unreadCount,
       updatedAt: now,
@@ -115,6 +134,7 @@ export async function addChannelParticipant(
       channelId,
       userId,
       lastViewedAt: now,
+      conversationSeenCutoffAt,
       isStarred: false,
       isClosed: false,
       unreadCount,
@@ -181,6 +201,7 @@ export async function addChannelParticipants(
       .filter((s: any) => newUserIds.includes(s.userId))
       .map((s: any) => [s.userId, s])
   );
+  const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, timestamp);
 
   // unreadCount is recomputed per user since rejoiners may carry their own
   // pre-existing email_reads — no shared value across users.
@@ -207,6 +228,7 @@ export async function addChannelParticipants(
         id: softDeletedStatus.id,
         isDeleted: false,
         lastViewedAt: timestamp,
+        conversationSeenCutoffAt,
         isClosed: false,
         unreadCount,
         updatedAt: timestamp,
@@ -217,6 +239,7 @@ export async function addChannelParticipants(
         channelId,
         userId,
         lastViewedAt: timestamp,
+        conversationSeenCutoffAt,
         isStarred: false,
         isClosed: false,
         unreadCount,

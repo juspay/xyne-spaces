@@ -23,6 +23,24 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     super('channelParticipant');
   }
 
+  private async getConversationSeenCutoffAt(
+    tx: { conversation: { findMany: (args: any) => Promise<Array<{ createdAt: Date }>> } },
+    channelId: string,
+    fallbackDate: Date,
+  ): Promise<Date> {
+    const seenConversations = await tx.conversation.findMany({
+      where: {
+        channelId,
+        createdAt: { lte: fallbackDate },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+      select: { createdAt: true },
+    });
+
+    return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
+  }
+
   async create(data: CreateChannelParticipantInput): Promise<ChannelParticipant> {
     await this.validateString(data.channelId, 'channelId');
     await this.validateString(data.userId, 'userId');
@@ -32,6 +50,12 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     }
 
     return await this.db.$transaction(async (tx) => {
+      const now = new Date();
+      const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(
+        tx,
+        data.channelId,
+        now,
+      );
       const participant = await tx.channelParticipant.create({
         data: {
           channelId: data.channelId,
@@ -47,7 +71,8 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
           userId: data.userId,
           isClosed: false,
           isStarred: false,
-          lastViewedAt: new Date(),
+          lastViewedAt: now,
+          conversationSeenCutoffAt,
         }
       });
 
@@ -114,6 +139,8 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
   // Channel Participant specific methods
   async addParticipant(channelId: string, userId: string, role: ChannelRole = 'MEMBER', isClosed: boolean = false): Promise<ChannelParticipant> {
     return await this.db.$transaction(async (tx) => {
+      const now = new Date();
+      const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(tx, channelId, now);
       // Check if participant already exists
       const existing = await tx.channelParticipant.findUnique({
         where: {
@@ -143,7 +170,8 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
           userId,
           isClosed,
           isStarred: false,
-          lastViewedAt: new Date(),
+          lastViewedAt: now,
+          conversationSeenCutoffAt,
         }
       });
 
@@ -255,6 +283,8 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     }
 
     return await this.db.$transaction(async (tx) => {
+      const now = new Date();
+      const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(tx, channelId, now);
       const existingParticipants = await tx.channelParticipant.findMany({
         where: {
           channelId,
@@ -289,7 +319,8 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
           userId,
           isClosed,
           isStarred: false,
-          lastViewedAt: new Date(),
+          lastViewedAt: now,
+          conversationSeenCutoffAt,
         })),
         skipDuplicates: true,
       });

@@ -41,9 +41,28 @@ export class UnreadService {
     conversationId?: string // ✅ Now optional
   ): Promise<void> {
     try {
-      const updateData: { lastViewedAt: Date; lastViewedConversationId?: string; updatedAt: Date } = {
-        lastViewedAt: new Date(),
-        updatedAt: new Date(),
+      const viewedAt = new Date();
+      const seenConversations = await prisma.conversation.findMany({
+        where: {
+          channelId,
+          createdAt: { lte: viewedAt },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 25,
+        select: { createdAt: true },
+      });
+      const conversationSeenCutoffAt =
+        seenConversations[seenConversations.length - 1]?.createdAt ?? viewedAt;
+
+      const updateData: {
+        lastViewedAt: Date;
+        conversationSeenCutoffAt: Date;
+        lastViewedConversationId?: string;
+        updatedAt: Date;
+      } = {
+        lastViewedAt: viewedAt,
+        conversationSeenCutoffAt,
+        updatedAt: viewedAt,
       };
 
       if (conversationId) {

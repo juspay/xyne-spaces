@@ -1690,7 +1690,7 @@ model ChannelUserStatus {
   isClosed                  Boolean     @default(false) // Track if user has closed/hidden this DM
   unreadCount               Int         @default(0) // Track unread count for this channel
   selectedBoardId           String?     // Track user's preferred board for this channel
-  
+  conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation seen by the user
   // Recap subscription fields
   isRecapSubscribed         Boolean     @default(false) // User opted into AI recaps for this channel
   lastSeenRecapDate         DateTime?   @db.Date // Last recap date the user has seen for this channel
