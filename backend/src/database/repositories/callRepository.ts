@@ -398,6 +398,19 @@ export class CallRepository {
     return participants.map((p) => p.userId);
   }
 
+  async getParticipantIdsByMeetingStatus(callId: string, meetingStatus: MeetingStatus): Promise<string[]> {
+    const participants = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        callId,
+        meetingStatus,
+      },
+      select: {
+        userId: true,
+      },
+    });
+    return participants.map((p) => p.userId);
+  }
+
   /**
    * Get up to 3 participants who joined the call (with user names) and total count
    * Now uses the smaller utility methods with transaction support

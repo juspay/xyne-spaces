@@ -90,19 +90,26 @@ class ScheduledCallNotificationService {
           return;
         }
 
-        // Filter out participants who have already accepted the call
-        const acceptedUserIds = await repositories.calls.getParticipantIdsByResponse(callId, InvitationResponse.ACCEPTED);
-        const acceptedUserIdsSet = new Set(acceptedUserIds);
+        // Filter out participants who declined the RSVP (NO) or have already joined the call
+        const [declinedUserIds, joinedUserIds] = await Promise.all([
+          repositories.calls.getParticipantIdsByMeetingStatus(callId, MeetingStatus.DECLINED),
+          repositories.calls.getParticipantIdsByResponse(callId, InvitationResponse.ACCEPTED),
+        ]);
+        const excludedUserIdsSet = new Set([...declinedUserIds, ...joinedUserIds]);
 
-        const participantsToRemind = participantIds.filter(id => !acceptedUserIdsSet.has(id));
+        // Send reminders to everyone except those who said NO or are already in the call
+        const participantsToRemind = participantIds.filter(id => !excludedUserIdsSet.has(id));
 
         if (participantsToRemind.length === 0) {
-          logger.info(`All participants for call ${callExternalId} have already accepted the call, skipping reminders`);
+          logger.info(`All participants for call ${callExternalId} have either declined or already joined, skipping reminders`);
           return;
         }
 
-        if (acceptedUserIds.length > 0) {
-          logger.info(`Skipping reminder for ${acceptedUserIds.length} participant(s) who already accepted call ${callExternalId}`);
+        if (declinedUserIds.length > 0) {
+          logger.info(`Skipping reminder for ${declinedUserIds.length} participant(s) who declined RSVP for call ${callExternalId}`);
+        }
+        if (joinedUserIds.length > 0) {
+          logger.info(`Skipping reminder for ${joinedUserIds.length} participant(s) who already joined call ${callExternalId}`);
         }
 
         // Send notification to participants not currently in the call
