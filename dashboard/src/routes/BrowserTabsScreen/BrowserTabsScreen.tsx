@@ -21,6 +21,7 @@ import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
 import { pickWebviewPartition } from '../../utils/browserPanelPartition';
 import { useActivityTracking } from '../../hooks/useActivityTracking';
+import { logger, Event } from '../../utils/logger';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettingsMenu';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -471,6 +472,10 @@ export function BrowserTabsScreen({
 
   const handleClosePanel = () => {
     if (isPanel) {
+      logger.info(Event.BROWSER_PANEL_CLOSED, {
+        url: activeTab?.url,
+        tabCount: tabs.length,
+      });
       browserPanelActor.send({ type: 'CLOSE' });
     }
   };

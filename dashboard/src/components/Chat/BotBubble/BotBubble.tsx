@@ -72,9 +72,10 @@ const TicketDisplayModeV2: React.FC<{
     }
 
     const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
-    const ticketUrl = `/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
 
     if (!isMobile && isCmdClick) {
+      const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
+      const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
       window.open(ticketUrl, '_blank');
       return;
     }

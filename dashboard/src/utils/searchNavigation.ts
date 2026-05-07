@@ -474,7 +474,15 @@ export const openSearchResult = async (
   }
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const url = target.kind === 'external' ? target.url : `${origin}${target.path}`;
+  // Paths from computeSearchResultPath are /chat/... — they need the
+  // /:workspaceId prefix that useWorkspaceNavigate normally injects.
+  // Extract it from the current pathname (first non-empty segment).
+  const firstSegment =
+    typeof window !== 'undefined'
+      ? (window.location.pathname.split('/').find(s => s.length > 0) ?? '')
+      : '';
+  const workspacePrefix = firstSegment ? `/${firstSegment}` : '';
+  const url = target.kind === 'external' ? target.url : `${origin}${workspacePrefix}${target.path}`;
 
   if (isElectron) {
     // For Xyne URLs, carry the current theme into the panel via a query

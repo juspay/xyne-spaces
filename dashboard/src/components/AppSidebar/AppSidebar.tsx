@@ -58,6 +58,8 @@ import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
 import { useRecapUnreadCount } from '../../hooks/useRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useAllVisibleChannels } from '../../hooks/useChannels';
+import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { useKeyboard } from '../../contexts/KeyboardContext';
@@ -65,6 +67,7 @@ import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
+import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 
 const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize?: number }[] = [
   { path: '/chat/dir', label: 'Chat', icon: Inbox },
@@ -164,6 +167,8 @@ const AppSidebar = (): ReactElement => {
   const missedCallCount = useMissedCallCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
+  const visibleChannels = useAllVisibleChannels();
+  const unreadCounts = useAllUnreadCount();
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -240,6 +245,12 @@ const AppSidebar = (): ReactElement => {
       return hasAccess;
     });
   }, [permissions]);
+
+  const hasPendingDirectMessages = useMemo(() => {
+    return visibleChannels.some(
+      channel => isDMChannel(channel.scopeType) && (unreadCounts[channel.id] ?? 0) > 0,
+    );
+  }, [visibleChannels, unreadCounts]);
 
   const handleNavigationClick = (label: string): void => {
     mixpanelService.track(EVENTS.NAVIGATION, { item: label });
@@ -332,6 +343,7 @@ const AppSidebar = (): ReactElement => {
             {filteredNavigationItems.map(item => {
               const isActive = activeRoute === item.path;
               const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
+              const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
               const Icon = item.icon;
 
               const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
@@ -348,17 +360,25 @@ const AppSidebar = (): ReactElement => {
                     <Link
                       to={item.path}
                       onClick={() => handleNavigationClick(item.label)}
+                      aria-label={showPendingDmDot ? 'DMs unread' : item.label}
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
                       data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
-                      className={`size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
+                      className={cn(
+                        'relative size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
                         isActive
                           ? 'text-appSidebar-activeIcon'
-                          : 'bg-transparent text-appSidebar-activeForeground'
-                      }`}
+                          : 'bg-transparent text-appSidebar-activeForeground',
+                      )}
                     >
                       <Icon size={item.iconSize ?? 16} />
+                      {showPendingDmDot && (
+                        <span
+                          aria-hidden='true'
+                          className='absolute top-1 right-1 size-2 rounded-full bg-sidebar-badge-accent ring-1 ring-background'
+                        />
+                      )}
                       {showMissedCallBadge && (
                         <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
                           {missedCallCount > 99 ? '99+' : missedCallCount}

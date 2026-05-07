@@ -33,6 +33,7 @@ import { getUserDisplayNameById } from '../../../utils/userDisplayName';
 import { ToolOutputRenderer, type ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import { cn } from '../../../utils/classNames';
 import { isElectronApp, isElectronStandaloneWindow } from '../../../utils/electronApp';
+import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -1116,6 +1117,11 @@ const parseNode = (
       if (isExternal) {
         (props as { href: string; target: string; rel: string }).target = '_blank';
         (props as { href: string; target: string; rel: string }).rel = 'noopener noreferrer';
+        props['onClick'] = (e: React.MouseEvent<HTMLAnchorElement>): void => {
+          if (e.metaKey || e.ctrlKey) {
+            logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: href });
+          }
+        };
       } else {
         const isSupportedRoute = urlObj.pathname.startsWith('/chat/');
 

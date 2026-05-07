@@ -131,6 +131,9 @@ export const Event = {
   DESK_CONNECTED_EMAIL_FETCH_FAILED: 'desk_connected_email_fetch_failed',
   DESK_AI_DRAFT_SESSIONS_FETCH_FAILED: 'desk_ai_draft_sessions_fetch_failed',
   DESK_AI_DRAFT_STREAM_FAILED: 'desk_ai_draft_stream_failed',
+  BROWSER_LINK_CLICK: 'browser_link_click',
+  BROWSER_LINK_CMD_CLICK: 'browser_link_cmd_click',
+  BROWSER_PANEL_CLOSED: 'browser_panel_closed',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];
