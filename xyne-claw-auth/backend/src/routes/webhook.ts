@@ -756,7 +756,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         callbackUrl: `${CONFIG.selfUrl}/claw/api/v1/webhook/result`,
         progressUrl: `${CONFIG.selfUrl}/claw/api/v1/webhook/progress`,
         channelId: payload.channelId,
-        ...(history ? { context: `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n${history}` } : {}),
+        ...(history
+          ? {
+              context: `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n${history}`
+            }
+          : {}),
         ...(repoUrl ? { repoUrl } : {}),
         ...(agentSkills && agentSkills.length > 0 ? { skills: agentSkills } : {}),
         ...(userProvider ? { provider: userProvider } : {}),

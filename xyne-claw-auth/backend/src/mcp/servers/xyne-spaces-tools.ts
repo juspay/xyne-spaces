@@ -1231,7 +1231,10 @@ const spacesCreateTicket: ToolDef = {
   name: "spaces-create-ticket",
   description:
     "Create a new ticket in Spaces. Requires projectId, boardId, and channelId — " +
-    "use spaces-projects, spaces-boards, and spaces-channels to look these up first.",
+    "use spaces-projects, spaces-boards, and spaces-channels to look these up first. " +
+    "IMPORTANT: If the user's message contained file attachments, pass the conversationId from " +
+    "the session context as sourceConversationId so those attachments are automatically linked " +
+    "to the new ticket. Do NOT pass channelId when using sourceConversationId.",
   inputSchema: {
     type: "object",
     properties: {
@@ -1239,23 +1242,32 @@ const spacesCreateTicket: ToolDef = {
       description: { type: "string", description: "Ticket description" },
       projectId: { type: "string", description: "Project ID (use spaces-projects to find)" },
       boardId: { type: "string", description: "Board ID (use spaces-boards to find)" },
-      channelId: { type: "string", description: "Channel ID (use spaces-channels to find)" },
+      channelId: { type: "string", description: "Channel ID — use when NOT passing sourceConversationId (use spaces-channels to find)" },
+      sourceConversationId: {
+        type: "string",
+        description: "ConversationId of the message that triggered this ticket creation. Pass this (instead of channelId) whenever the triggering message had file attachments — the backend will automatically transfer those attachments to the ticket.",
+      },
       priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Ticket priority" },
       assignedTo: { type: "string", description: "User ID to assign (use spaces-users to find)" },
       eta: { type: "string", description: "Due date as ISO 8601 string" },
       tags: { type: "array", items: { type: "string" }, description: "Tags to apply" },
     },
-    required: ["title", "description", "projectId", "boardId", "channelId"],
+    required: ["title", "description", "projectId", "boardId"],
   },
   async handler(args) {
     try {
+      if (!args["channelId"] && !args["sourceConversationId"]) {
+        return err("Either channelId or sourceConversationId is required.");
+      }
+
       const body: Record<string, unknown> = {
         title: args["title"],
         description: args["description"],
         projectId: args["projectId"],
         boardId: args["boardId"],
-        channelId: args["channelId"],
       };
+      if (args["sourceConversationId"]) body["sourceConversationId"] = args["sourceConversationId"];
+      else body["channelId"] = args["channelId"];
       if (args["priority"]) body["priority"] = args["priority"];
       if (args["assignedTo"]) body["assignedTo"] = args["assignedTo"];
       if (args["eta"]) body["eta"] = args["eta"];
@@ -1276,6 +1288,53 @@ const spacesCreateTicket: ToolDef = {
       ].join("\n"));
     } catch (e) {
       return err(`Create ticket error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+// ── spaces-schedule-call ────────────────────────────────────────────
+
+const spacesAddTicketAttachments: ToolDef = {
+  name: "spaces-add-ticket-attachments",
+  description:
+    "Transfer file attachments from a Spaces conversation message to an existing ticket. " +
+    "Call this after spaces-create-ticket when the ticket was created without sourceConversationId, " +
+    "or when the user explicitly asks to attach files from a message to a ticket.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      ticketId: {
+        type: "string",
+        description: "Ticket ID — the `id` field returned by spaces-create-ticket (NOT the xyneId).",
+      },
+      sourceConversationId: {
+        type: "string",
+        description: "ConversationId of the Spaces message that contains the attachments.",
+      },
+      sourceMessageId: {
+        type: "string",
+        description: "Optional. MessageId of the specific message with the attachments. If omitted, falls back to the first message in the conversation.",
+      },
+    },
+    required: ["ticketId", "sourceConversationId"],
+  },
+  async handler(args) {
+    try {
+      const ticketId = String(args["ticketId"]);
+      const sourceConversationId = String(args["sourceConversationId"]);
+      const sourceMessageId = args["sourceMessageId"] as string | undefined;
+
+      const body: Record<string, unknown> = { sourceConversationId };
+      if (sourceMessageId) body["sourceMessageId"] = sourceMessageId;
+
+      const data = (await spacesFetch(`/api/tickets/${encodeURIComponent(ticketId)}/attachments/from-conversation`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      })) as { count: number };
+
+      return ok(`Attached ${data.count} file(s) to ticket ${ticketId}.`);
+    } catch (e) {
+      return err(`Add ticket attachments error: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 };
@@ -1714,6 +1773,7 @@ export const tools: ToolDef[] = [
   spacesBoards,
   spacesSendMessage,
   spacesCreateTicket,
+  spacesAddTicketAttachments,
   spacesScheduleCall,
   spacesPublishDocs,
   spacesCreateCanvas,
