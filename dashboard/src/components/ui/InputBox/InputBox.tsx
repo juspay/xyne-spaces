@@ -10,7 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
-import { Extension, textblockTypeInputRule } from '@tiptap/core';
+import { Extension, InputRule, textblockTypeInputRule } from '@tiptap/core';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
@@ -443,9 +443,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         CodeBlockLowlight.extend({
           addInputRules() {
             return [
+              // Empty paragraph: ``` → empty code block
               textblockTypeInputRule({
                 find: /^```$/,
                 type: this.type,
+              }),
+              // Text before ```: keep existing text as-is, split and create a new empty code block after
+              new InputRule({
+                find: /^(.+)```$/,
+                handler: ({ range, chain }) => {
+                  chain()
+                    .deleteRange({ from: range.to - 3, to: range.to })
+                    .splitBlock()
+                    .setNode(this.type)
+                    .run();
+                },
               }),
             ];
           },
