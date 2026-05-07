@@ -228,6 +228,17 @@ export class MicrosoftDeskService {
       });
 
       const now = new Date();
+      const seenConversations = await tx.conversation.findMany({
+        where: {
+          channelId: channel.id,
+          createdAt: { lte: now },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 25,
+        select: { createdAt: true },
+      });
+      const conversationSeenCutoffAt =
+        seenConversations[seenConversations.length - 1]?.createdAt ?? now;
 
       await tx.channelParticipant.create({
         data: {
@@ -242,6 +253,7 @@ export class MicrosoftDeskService {
           channelId: channel.id,
           userId: channelData.userId,
           lastViewedAt: now,
+          conversationSeenCutoffAt,
           updatedAt: now,
         },
       });

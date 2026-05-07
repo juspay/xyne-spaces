@@ -1290,6 +1290,7 @@ export const channelUserStatusTable = table('channel_user_status')
     isClosed: boolean(),
     unreadCount: number(),
     selectedBoardId: string().optional(),
+    conversationSeenCutoffAt: number(),
     // Recap subscription fields
     isRecapSubscribed: boolean(),
     lastSeenRecapDate: number().optional(),

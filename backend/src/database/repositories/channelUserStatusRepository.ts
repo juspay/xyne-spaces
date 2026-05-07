@@ -9,6 +9,7 @@ export interface CreateChannelUserStatusInput {
   lastViewedConversationId?: string;
   isStarred?: boolean;
   isClosed?: boolean;
+  conversationSeenCutoffAt?: Date,
 }
 
 export interface UpdateChannelUserStatusInput {
@@ -16,6 +17,7 @@ export interface UpdateChannelUserStatusInput {
   lastViewedConversationId?: string;
   isStarred?: boolean;
   isClosed?: boolean;
+  conversationSeenCutoffAt?: Date,
 }
 
 export interface ChannelUserStatusFilters {
@@ -31,17 +33,37 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
     super('channelUserStatus')
   }
 
+  private async getConversationSeenCutoffAt(channelId: string, fallbackDate: Date): Promise<Date> {
+    const seenConversations = await this.db.conversation.findMany({
+      where: {
+        channelId,
+        createdAt: { lte: fallbackDate },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+      select: { createdAt: true },
+    });
+
+    return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
+  }
+
   /**
    * Create a new channel user status record
    */
   async create(data: CreateChannelUserStatusInput): Promise<ChannelUserStatus> {
     const now = new Date();
-    
+    const lastViewedAt = data.lastViewedAt ?? now;
+    const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(
+      data.channelId,
+      lastViewedAt,
+    );
+
     return this.db.channelUserStatus.create({
       data: {
         channelId: data.channelId,
         userId: data.userId,
-        lastViewedAt: data.lastViewedAt ?? now,
+        lastViewedAt,
+        conversationSeenCutoffAt,
         lastViewedConversationId: data.lastViewedConversationId,
         isStarred: data.isStarred ?? false,
         isClosed: data.isClosed ?? false,
@@ -127,7 +149,9 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
     data: UpdateChannelUserStatusInput
   ): Promise<ChannelUserStatus> {
     const now = new Date();
-    
+    const lastViewedAt = data.lastViewedAt ?? now;
+    const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(channelId, lastViewedAt);
+
     return this.db.channelUserStatus.upsert({
       where: {
         channelId_userId: {
@@ -137,12 +161,14 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
       },
       update: {
         ...data,
+        ...(data.lastViewedAt && { conversationSeenCutoffAt }),
         updatedAt: now,
       },
       create: {
         channelId,
         userId,
-        lastViewedAt: data.lastViewedAt ?? now,
+        lastViewedAt,
+        conversationSeenCutoffAt,
         lastViewedConversationId: data.lastViewedConversationId,
         isStarred: data.isStarred ?? false,
         isClosed: data.isClosed ?? false,
@@ -161,10 +187,13 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
     lastViewedConversationId?: string
   ): Promise<ChannelUserStatus> {
     const now = new Date();
-    
-    return this.upsert(channelId, userId, {
-      lastViewedAt: lastViewedAt ?? now,
-      lastViewedConversationId,
+    const viewedAt = lastViewedAt ?? now;
+    const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(channelId, viewedAt);
+
+    return this.upsert(channelId, userId,{    
+        lastViewedAt: viewedAt,
+        conversationSeenCutoffAt,
+        lastViewedConversationId,
     });
   }
 

@@ -109,6 +109,21 @@ export type AuthData = {
 
 export type ParticipantOperationType = 'participants_added' | 'participants_removed' | 'participants_joined';
 
+async function getConversationSeenCutoffAt(
+  tx: Transaction<Schema>,
+  channelId: string,
+  fallbackTimestamp: number,
+): Promise<number> {
+  const seenConversations = await tx.run(
+    zql.conversations
+      .where('channelId', channelId)
+      .where('createdAt', '<=', fallbackTimestamp)
+      .orderBy('createdAt', 'desc')
+      .limit(25),
+  );
+
+  return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
+}
 
 async function decrementSurfaceNudgeCountRow(
   tx: Transaction<Schema>,
@@ -986,10 +1001,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Not a channel participant');
           }
 
+          const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, timestamp);
+
+
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           const isEmailChannel = channel?.type === 'EMAIL';
           const updateData: any = {
             lastViewedAt: timestamp,
+            conversationSeenCutoffAt,
           };
           if (!isEmailChannel) {
             updateData.unreadCount = 0;
@@ -1200,9 +1219,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             lastViewedAt: number;
             unreadCount: number;
             lastViewedConversationId?: string;
+            conversationSeenCutoffAt: number;
           } = {
             lastViewedAt: newLastViewedAt,
             unreadCount: unreadCount,
+            conversationSeenCutoffAt: await getConversationSeenCutoffAt(
+              tx,
+              channelId,
+              newLastViewedAt,
+            ),
           };
 
           if (conversationId) {
@@ -1803,9 +1828,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             lastActivityAt: now,
           });
 
+          const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channel.id, now);
           await tx.mutate.channel_user_status.update({
             id: channelUserStatusParticipant.id,
             lastViewedAt: now,
+            conversationSeenCutoffAt,
             lastViewedConversationId: conversationId,
             updatedAt: now,
           });
@@ -2230,9 +2257,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .one()
           );
           if (userStatus) {
+            const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, targetChannelId, now);
             await tx.mutate.channel_user_status.update({
               id: userStatus.id,
               lastViewedAt: now,
+              conversationSeenCutoffAt,
               lastViewedConversationId: conversationId,
               updatedAt: now,
             });
@@ -2494,9 +2523,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             .one());
 
           if (senderParticipation) {
+            const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
+              tx,
+              channel.id,
+              timestamp,
+            );
             await tx.mutate.channel_user_status.update({
               id: senderParticipation.id,
               lastViewedAt: timestamp,
+              conversationSeenCutoffAt,
               updatedAt: timestamp,
             });
           }

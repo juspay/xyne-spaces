@@ -1,4 +1,4 @@
-import { ReadonlyJSONValue, defineMutators, defineMutator } from '@rocicorp/zero';
+import { ReadonlyJSONValue, Transaction, defineMutators, defineMutator } from '@rocicorp/zero';
 import {
   ChannelRole,
   ChannelType,
@@ -50,6 +50,7 @@ import {
   Status,
   OrgRole,
   DelayedMessageStatus,
+  Schema,
 
 } from './schema.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
@@ -122,6 +123,22 @@ import {
   updateInitialMessageMdReaction,
 } from './messageMetadata.js';
 import { updateTicketMdFromZero } from '../utils/ticketMetadata.js';
+
+async function getConversationSeenCutoffAt(
+  tx: Transaction<Schema>,
+  channelId: string,
+  fallbackTimestamp: number,
+): Promise<number> {
+  const seenConversations = await tx.run(
+    zql.conversations
+      .where('channelId', channelId)
+      .where('createdAt', '<=', fallbackTimestamp)
+      .orderBy('createdAt', 'desc')
+      .limit(25),
+  );
+
+  return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
+}
 
 export type AuthData = {
   sub: string;
@@ -261,6 +278,11 @@ export const mutators = defineMutators({
             .where('isDeleted', true)
             .one(),
         );
+        const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
+          tx,
+          channelId,
+          timestamp,
+        );
 
         if (existingSoftDeletedStatus) {
           // Restore the soft-deleted status record
@@ -269,6 +291,7 @@ export const mutators = defineMutators({
             isDeleted: false,
             isClosed: false,
             lastViewedAt: timestamp,
+            conversationSeenCutoffAt,
             updatedAt: timestamp,
           });
         } else {
@@ -276,6 +299,7 @@ export const mutators = defineMutators({
             id: channelUserStatusId,
             channelId: channelId,
             lastViewedAt: timestamp,
+            conversationSeenCutoffAt,
             userId: _ctx.userID,
             isStarred: false,
             isClosed: false,
@@ -351,6 +375,11 @@ export const mutators = defineMutators({
 
         const users = await Promise.all(userIds.map(id => tx.run(zql.users.where('id', id).one())));
         const validUsers = users.filter(user => user !== undefined);
+        const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
+          tx,
+          channelId,
+          timestamp,
+        );
 
         for (const user of validUsers) {
           const isAlreadyParticipant = await tx.run(
@@ -384,6 +413,7 @@ export const mutators = defineMutators({
             id: statusId,
             channelId: channelId,
             lastViewedAt: timestamp,
+            conversationSeenCutoffAt,
             userId: user.id,
             isStarred: false,
             isClosed: false,
@@ -583,13 +613,21 @@ export const mutators = defineMutators({
           throw new Error('Not a channel participant');
         }
 
+        const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
+          tx,
+          channelId,
+          timestamp,
+        );
+
         const updateData: {
           lastViewedAt: number;
           unreadCount: number;
           lastViewedConversationId?: string;
+          conversationSeenCutoffAt?: number;
         } = {
           lastViewedAt: timestamp,
           unreadCount: 0,
+          conversationSeenCutoffAt,
         };
 
         if (conversationId) {
@@ -799,9 +837,15 @@ export const mutators = defineMutators({
           lastViewedAt: number;
           unreadCount: number;
           lastViewedConversationId?: string;
+          conversationSeenCutoffAt?: number;
         } = {
           lastViewedAt: newLastViewedAt,
           unreadCount: unreadCount,
+          conversationSeenCutoffAt: await getConversationSeenCutoffAt(
+            tx,
+            channelId,
+            newLastViewedAt,
+          ),
         };
 
         if (conversationId) {
@@ -1336,9 +1380,11 @@ export const mutators = defineMutators({
         );
 
         if (participation) {
+          const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, now);
           await tx.mutate.channel_user_status.update({
             id: participation.id,
             lastViewedAt: now,
+            conversationSeenCutoffAt,
             lastViewedConversationId: conversationId,
             isClosed: false,
             updatedAt: now,
@@ -1508,9 +1554,15 @@ export const mutators = defineMutators({
             .one(),
         );
         if (userStatus) {
+          const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
+            tx,
+            targetChannelId,
+            now,
+          );
           await tx.mutate.channel_user_status.update({
             id: userStatus.id,
             lastViewedAt: now,
+            conversationSeenCutoffAt,
             lastViewedConversationId: conversationId,
             updatedAt: now,
           });
