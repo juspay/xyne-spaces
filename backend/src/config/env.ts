@@ -5,6 +5,7 @@ dotenv.config();
 
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
+  SANDBOX_TEST_MODE: Joi.boolean().default(false),
   RESEARCH_AGENT_URL: Joi.string().default(''),
   // Python transcription agent (health server also exposes /embed-voice)
   PYTHON_AGENT_URL: Joi.string().default(''),
@@ -236,6 +237,7 @@ if (error) {
 export const config = {
   env: envVars.NODE_ENV,
   isTestEnv: envVars.NODE_ENV === 'test',
+  isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
   research_agent_url: envVars.RESEARCH_AGENT_URL,
   pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,
   nx_graph_server_url: envVars.NX_GRAPH_SERVER_URL,

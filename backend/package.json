@@ -23,6 +23,7 @@
     "dev:api": "NODE_ENV=development tsx watch src/index.ts",
     "dev:worker": "dotenv -e .env.local -- sh -c 'NODE_ENV=development tsx watch src/worker.ts'",
     "dev:test": "dotenv -e .env.local -- sh -c 'NODE_ENV=test tsx src/index.ts'",
+    "claw:test": "dotenv -e .env.local -- sh -c 'NODE_ENV=test SANDBOX_TEST_MODE=true tsx src/index.ts'",
     "ysweet": "cd ../ysweet && podman-compose up -d",
     "ysweet:down": "cd ../ysweet && podman-compose down",
     "test": "jest",
