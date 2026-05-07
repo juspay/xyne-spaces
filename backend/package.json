@@ -87,6 +87,7 @@
     "eventsource": "^4.1.0",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
+    "fractional-indexing": "^3.2.0",
     "google-auth-library": "^10.4.0",
     "googleapis": "^144.0.0",
     "hdbscan-ts": "^1.0.17",

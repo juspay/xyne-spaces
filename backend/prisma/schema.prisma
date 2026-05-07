@@ -390,8 +390,9 @@ model Ticket {
   userGroupId      String?            // User group to which the ticket belongs
   boardId          String            // Board to which the ticket belongs
   stageName        String            // Current stage of the ticket
-  ticketType       String?           
+  ticketType       String?
   isArchived       Boolean           @default(false)
+  kanbanPosition   String?
   lastEmailAt      DateTime          // Timestamp of most recent email in the ticket's conversation; powers Gmail-style ordering. No @default(now()) because Zero needs every write to flow through the application — every ticket-create call site sets this explicitly.
   classificationData   Json?             // Full AI classification output (rawOutput, resolvedGroupId, isManualOverride, classifiedAt)
   aiCategory           String?           // Top-level category from AI classification (indexed for querying)

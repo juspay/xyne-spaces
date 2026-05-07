@@ -60,6 +60,7 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     stageName: summary.stageName ?? '',
     ticketType: summary.ticketType ?? null,
     isArchived: false,
+    kanbanPosition: null,
     workspaceId: workspaceId,
     lastEmailAt: summary.createdAt ?? now,
     classificationData: null,

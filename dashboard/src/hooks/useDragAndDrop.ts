@@ -1,13 +1,14 @@
 import { useCallback, useState } from 'react';
 import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
-import { arrayMove } from '@dnd-kit/sortable';
 import { toast } from 'sonner';
 import type { Ticket, TicketStatusV2 } from '@xyne/shared';
 import { TicketStageRequestStatus, type TicketStageRequest } from '@xyne/shared';
 import type { Zero } from '@rocicorp/zero';
+import { generateKeyBetween } from 'fractional-indexing';
 import { mutators } from '../zero/mutators';
 import { queries } from '../zero/queries';
 import type { Stage } from '../routes/KanbanBoardScreen/KanbanBoardScreen.types';
+import { sortByKanbanPosition } from '../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { useAuth } from './useAuth';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -17,6 +18,7 @@ interface UseDragAndDropProps {
   zero: Zero;
   stages: Stage[];
   mode: 'stage' | 'status'; // 'stage' for board view, 'status' for project/all view
+  canReorder: boolean;
   onStageFormRequired?: (data: {
     ticket: Ticket;
     targetStage: Stage;
@@ -38,6 +40,7 @@ export const useDragAndDrop = ({
   zero,
   stages,
   mode,
+  canReorder,
   onStageFormRequired,
   onBackwardStageChange,
   stageFormMap = new Map(),
@@ -60,6 +63,62 @@ export const useDragAndDrop = ({
     requestId: string;
   } | null>(null);
   const { user: currentUser } = useAuth();
+
+  const getColumnTickets = useCallback(
+    (columnKey: string): Ticket[] => {
+      const tickets =
+        mode === 'stage'
+          ? localTickets.filter(t => {
+              const stage = stages.find(s => s.id === columnKey || s.name === columnKey);
+              return stage ? t.stageName?.toLowerCase() === stage.name.toLowerCase() : false;
+            })
+          : localTickets.filter(t => t.statusV2 === (columnKey as typeof t.statusV2));
+      return sortByKanbanPosition(tickets);
+    },
+    [localTickets, stages, mode],
+  );
+
+  const computeNewPosition = useCallback(
+    (columnKey: string, activeId: string, overTicketId: string | null): string => {
+      try {
+        const allSorted = getColumnTickets(columnKey);
+        const sorted = allSorted.filter(t => t.id !== activeId);
+
+        if (sorted.length === 0) {
+          return generateKeyBetween(null, null);
+        }
+
+        if (!overTicketId) {
+          return generateKeyBetween(null, sorted[0]?.kanbanPosition ?? null);
+        }
+
+        const overIndex = sorted.findIndex(t => t.id === overTicketId);
+        if (overIndex === -1) {
+          return generateKeyBetween(null, sorted[0]?.kanbanPosition ?? null);
+        }
+
+        const activeIndexInFull = allSorted.findIndex(t => t.id === activeId);
+        const overIndexInFull = allSorted.findIndex(t => t.id === overTicketId);
+
+        let after: string | null;
+        let before: string | null;
+
+        if (activeIndexInFull === -1 || activeIndexInFull < overIndexInFull) {
+          after = sorted[overIndex]?.kanbanPosition ?? null;
+          before =
+            overIndex + 1 < sorted.length ? (sorted[overIndex + 1]?.kanbanPosition ?? null) : null;
+        } else {
+          before = sorted[overIndex]?.kanbanPosition ?? null;
+          after = overIndex - 1 >= 0 ? (sorted[overIndex - 1]?.kanbanPosition ?? null) : null;
+        }
+
+        return generateKeyBetween(after, before);
+      } catch {
+        return generateKeyBetween(null, null);
+      }
+    },
+    [getColumnTickets],
+  );
 
   const handleDragStart = useCallback(
     (event: DragStartEvent): void => {
@@ -215,21 +274,31 @@ export const useDragAndDrop = ({
             }
           }
 
-          // Update local state immediately for smooth UI
+          // Compute kanban position in target column if reordering is enabled
+          const kanbanPosition =
+            canReorder && targetStage
+              ? computeNewPosition(targetStage.id, activeTicket.id, overTicket?.id ?? null)
+              : undefined;
+
           setLocalTickets(prev =>
             prev.map(t =>
               t.id === activeTicket.id
-                ? { ...t, stageName: newStageName, ...(newStatus && { statusV2: newStatus }) }
+                ? {
+                    ...t,
+                    stageName: newStageName,
+                    ...(newStatus && { statusV2: newStatus }),
+                    ...(kanbanPosition !== undefined && { kanbanPosition }),
+                  }
                 : t,
             ),
           );
 
-          // Update database
           void zero.mutate(
             mutators.ticket.update({
               id: activeTicket.id,
               stageName: newStageName,
               ...(newStatus && { statusV2: newStatus }),
+              ...(kanbanPosition !== undefined && { kanbanPosition }),
               updatedAt: Date.now(),
             }),
           );
@@ -240,11 +309,27 @@ export const useDragAndDrop = ({
           overTicket &&
           activeTicket.stageName === overTicket.stageName
         ) {
-          setLocalTickets(prev => {
-            const activeIndex = prev.findIndex(t => t.id === active.id);
-            const overIndex = prev.findIndex(t => t.id === over.id);
-            return arrayMove(prev, activeIndex, overIndex);
-          });
+          if (canReorder) {
+            const newPosition = computeNewPosition(
+              activeTicket.stageName,
+              activeTicket.id,
+              overTicket.id,
+            );
+
+            setLocalTickets(prev =>
+              prev.map(t => (t.id === activeTicket.id ? { ...t, kanbanPosition: newPosition } : t)),
+            );
+
+            void zero.mutate(
+              mutators.ticket.update({
+                id: activeTicket.id,
+                kanbanPosition: newPosition,
+                updatedAt: Date.now(),
+              }),
+            );
+          } else {
+            toast.info('Reordering is only available when viewing a single board');
+          }
         }
       } else {
         // Project/All view: Update status
@@ -275,11 +360,7 @@ export const useDragAndDrop = ({
           overTicket &&
           activeTicket.statusV2 === overTicket.statusV2
         ) {
-          setLocalTickets(prev => {
-            const activeIndex = prev.findIndex(t => t.id === active.id);
-            const overIndex = prev.findIndex(t => t.id === over.id);
-            return arrayMove(prev, activeIndex, overIndex);
-          });
+          toast.info('Reordering is only available when viewing a single board');
         }
       }
     },
@@ -289,6 +370,8 @@ export const useDragAndDrop = ({
       zero,
       stages,
       mode,
+      canReorder,
+      computeNewPosition,
       onStageFormRequired,
       onBackwardStageChange,
       stageFormMap,

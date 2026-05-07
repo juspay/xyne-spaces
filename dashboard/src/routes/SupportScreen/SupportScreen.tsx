@@ -818,6 +818,7 @@ const SupportScreen = (): ReactElement => {
     zero,
     stages: stageColumns,
     mode: 'stage',
+    canReorder: false,
   });
 
   const sensors = useSensors(
