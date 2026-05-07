@@ -53,6 +53,8 @@ export const OTEL_EXPORT_INTERVAL_MS: number = parseInt(
   (import.meta.env['VITE_OTEL_EXPORT_INTERVAL_MS'] as string) || '60000',
   10,
 );
+export const ENABLE_OTEL_METRICS: boolean = import.meta.env['VITE_ENABLE_OTEL_METRICS'] !== 'false';
+export const ENABLE_ACTIVITY_LOG: boolean = import.meta.env['VITE_ENABLE_ACTIVITY_LOG'] !== 'false';
 
 export const SEARCH_VERSION = import.meta.env['VITE_SEARCH_VERSION'] as string;
 

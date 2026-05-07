@@ -63,6 +63,7 @@ export const EnrollmentEvent = {
 
   // OpenTelemetry
   OTEL_INIT_SUCCESS: 'otel_init_success',
+  OTEL_INIT_SKIPPED: 'otel_init_skipped',
   OTEL_INIT_FAILED: 'otel_init_failed',
   OTEL_METRIC_ERROR: 'otel_metric_error',
   OTEL_SHUTDOWN_SUCCESS: 'otel_shutdown_success',

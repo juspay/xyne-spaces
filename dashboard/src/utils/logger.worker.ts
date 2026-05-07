@@ -54,6 +54,9 @@ export interface WorkerMessage {
 }
 
 class LoggerWorker {
+  private static readonly MAX_BUFFER_SIZE = 1000;
+  private static readonly DROP_FAILURE_THRESHOLD = 2;
+
   private clientSessionId: string = '';
   private platformName: string = '';
   private emailId: string | null = null;
@@ -71,6 +74,8 @@ class LoggerWorker {
   private maxRetries: number = 3;
   private lastFlushTime: number = Date.now();
   private flushTimer: number | null = null;
+  private consecutiveFailures: number = 0;
+  private droppedLogsCount: number = 0;
 
   constructor() {
     this.setupMessageHandler();
@@ -166,6 +171,14 @@ class LoggerWorker {
         console.log(JSON.stringify(logEntry));
       }
 
+      if (
+        this.consecutiveFailures >= LoggerWorker.DROP_FAILURE_THRESHOLD &&
+        this.logs.length >= LoggerWorker.MAX_BUFFER_SIZE
+      ) {
+        this.logs.shift();
+        this.droppedLogsCount++;
+      }
+
       this.logs.push(logEntry);
     }
   }
@@ -241,9 +254,25 @@ class LoggerWorker {
       try {
         const url = this.loggerBaseUrl;
         await this.sendLogsWithRetry(url, logsToPush);
+        this.consecutiveFailures = 0;
       } catch (error) {
         console.error('Failed to push logs after all retries:', error);
-        this.logs.unshift(...logsToPush);
+        this.consecutiveFailures++;
+
+        const combined = [...logsToPush, ...this.logs];
+        if (
+          this.consecutiveFailures >= LoggerWorker.DROP_FAILURE_THRESHOLD &&
+          combined.length > LoggerWorker.MAX_BUFFER_SIZE
+        ) {
+          const dropped = combined.length - LoggerWorker.MAX_BUFFER_SIZE;
+          this.droppedLogsCount += dropped;
+          this.logs = combined.slice(combined.length - LoggerWorker.MAX_BUFFER_SIZE);
+          console.warn(
+            `Dropped ${dropped} log entries after ${this.consecutiveFailures} consecutive flush failures (total dropped: ${this.droppedLogsCount}, buffer capped at ${LoggerWorker.MAX_BUFFER_SIZE})`,
+          );
+        } else {
+          this.logs = combined;
+        }
       }
     }
 

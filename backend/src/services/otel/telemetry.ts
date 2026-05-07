@@ -20,34 +20,43 @@ function getLangfuseTraceExporter(): OTLPTraceExporter | undefined {
 
   return new OTLPTraceExporter({
     url: collectorUrl,
-    headers: { 'Authorization': `Basic ${authCredentials}` },
+    headers: { Authorization: `Basic ${authCredentials}` },
   });
 }
 
 export function initializeOpenTelemetry(): void {
   try {
-    const metricsEndpoint = `${config.otel.baseUrl}/v1/metrics`;
-    const metricExporter = new OTLPMetricExporter({
-      url: metricsEndpoint,
-      timeoutMillis: 10000,
-    });
+    let metricReader: PeriodicExportingMetricReader | undefined;
+    if (config.otel.metricsEnabled) {
+      const metricsEndpoint = `${config.otel.baseUrl}/v1/metrics`;
+      const metricExporter = new OTLPMetricExporter({
+        url: metricsEndpoint,
+        timeoutMillis: 10000,
+      });
 
-    const metricReader = new PeriodicExportingMetricReader({
-      exporter: metricExporter,
-      exportIntervalMillis: config.otel.exportIntervalMs,
-    });
+      metricReader = new PeriodicExportingMetricReader({
+        exporter: metricExporter,
+        exportIntervalMillis: config.otel.exportIntervalMs,
+      });
+    }
 
     const traceExporter = getLangfuseTraceExporter();
 
+    if (!metricReader && !traceExporter) {
+      logger.info('[OTEL] OpenTelemetry SDK skipped (metrics disabled and tracing not configured)');
+      return;
+    }
+
     sdk = new NodeSDK({
-      serviceName:  config.otel.serviceName,
-      metricReader,
+      serviceName: config.otel.serviceName,
+      ...(metricReader && { metricReader }),
       ...(traceExporter && { traceExporter }),
     });
 
     sdk.start();
-    logger.info(`[OTEL] OpenTelemetry SDK started successfully for service: ${config.otel.serviceName} (tracing: ${!!traceExporter})`);
-
+    logger.info(
+      `[OTEL] OpenTelemetry SDK started successfully for service: ${config.otel.serviceName} (metrics: ${!!metricReader}, tracing: ${!!traceExporter})`
+    );
   } catch (error) {
     logger.error('[OTEL] Failed to initialize OpenTelemetry:', error);
   }

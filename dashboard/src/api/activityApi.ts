@@ -1,11 +1,16 @@
 import { ActivityLogPayload } from '@xyne/shared';
 import { apiInstance } from '../services/clients/apiClient';
+import { ENABLE_ACTIVITY_LOG } from '../config';
 
 export const activityApi = {
   /**
    * Send activity log to backend
    */
   logActivity: async (payload: ActivityLogPayload): Promise<void> => {
+    if (!ENABLE_ACTIVITY_LOG) {
+      return;
+    }
+
     try {
       await apiInstance.post('/activity/log', payload, {
         timeout: 5000, // 5 second timeout

@@ -174,6 +174,7 @@ const envSchema = Joi.object({
   XYNE_AI_EXTENDED_URL: Joi.string().uri().allow('').default(''),
   ENABLE_WORKFLOW_RECOVERY: Joi.boolean().default(true),
   // Otel Configuration
+  ENABLE_OTEL_METRICS: Joi.boolean().default(true),
   OTEL_BASE_URL: Joi.string().default(''),
   OTEL_SERVICE_NAME: Joi.string().default(''),
   OTEL_EXPORT_INTERVAL_MS: Joi.number().default(60000),
@@ -462,6 +463,7 @@ export const config = {
     retentionDays: envVars.RECAP_RETENTION_DAYS,
   },
   otel: {
+    metricsEnabled: envVars.ENABLE_OTEL_METRICS,
     baseUrl: envVars.OTEL_BASE_URL,
     serviceName: envVars.OTEL_SERVICE_NAME,
     exportIntervalMs: envVars.OTEL_EXPORT_INTERVAL_MS,

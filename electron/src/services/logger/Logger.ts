@@ -48,6 +48,9 @@ interface LogEntry {
 
 
 class LoggerService {
+  private static readonly MAX_BUFFER_SIZE = 1000;
+  private static readonly DROP_FAILURE_THRESHOLD = 2;
+
   private clientSessionId: string;
   private platformName: string;
   private electronVersion: string;
@@ -61,6 +64,8 @@ class LoggerService {
   private loggerUrl: string;
   private isEnabled: boolean = true;
   private store: Store;
+  private consecutiveFailures: number = 0;
+  private droppedLogsCount: number = 0;
 
   constructor() {
     this.store = new Store();
@@ -191,7 +196,15 @@ class LoggerService {
         JSON.stringify(logEntry)
       );
     }
-    
+
+    if (
+      this.consecutiveFailures >= LoggerService.DROP_FAILURE_THRESHOLD &&
+      this.logs.length >= LoggerService.MAX_BUFFER_SIZE
+    ) {
+      this.logs.shift();
+      this.droppedLogsCount++;
+    }
+
     this.logs.push(logEntry);
 
     // Auto-flush if batch size reached
@@ -224,8 +237,18 @@ class LoggerService {
     this.logs = [];
 
     this.sendLogsWithRetry(logsToPush)
+      .then(() => {
+        this.consecutiveFailures = 0;
+      })
       .catch((error) => {
         log.error('[Logger] Failed to push logs after all retries:', error);
+        this.consecutiveFailures++;
+        if (this.consecutiveFailures >= LoggerService.DROP_FAILURE_THRESHOLD) {
+          this.droppedLogsCount += logsToPush.length;
+          log.warn(
+            `[Logger] Dropped ${logsToPush.length} log entries after ${this.consecutiveFailures} consecutive flush failures (total dropped: ${this.droppedLogsCount})`,
+          );
+        }
       })
       .finally(() => {
         this.flushInProgress = false;

@@ -31,6 +31,11 @@ let meterProviderInstance: MeterProvider | null = null;
  * Should be called once at application startup
  */
 export function initializeTelemetry(): void {
+  if (!config.enableOtelMetrics) {
+    Logger.info(EnrollmentEvent.OTEL_INIT_SKIPPED);
+    return;
+  }
+
   try {
     // Create resource with service identification
     const resource = resourceFromAttributes({
@@ -71,6 +76,10 @@ export function initializeTelemetry(): void {
  * Wraps metric operations in try-catch to prevent app crashes
  */
 export function safeRecordMetric(fn: () => void): void {
+  if (!config.enableOtelMetrics) {
+    return;
+  }
+
   try {
     fn();
   } catch (error) {
