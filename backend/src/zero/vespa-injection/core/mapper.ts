@@ -884,9 +884,13 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
       const buffer = await storageService.getFileBuffer(gcsPath);
       fileSize = buffer.length;
 
-      // Use FileProcessor to detect strategy from mime type and parse
-      const processor = FileProcessor.fromMimeType(args.mimetype);
-      const result = await processor.processBuffer(buffer, args.id);
+      // Use FileProcessor with Docling fallback support
+      const result = await FileProcessor.processBufferWithFallback(
+        buffer,
+        args.id,
+        args.originalFilename || 'file',
+        args.mimetype
+      );
       chunks = result.chunks;
       processingResult = result;
 

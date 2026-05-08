@@ -1,10 +1,12 @@
 import { getStorageService } from "@/services/storage"
 import { logger } from "@/utils/logger"
+import { config } from "@/config/env"
 import type { ProcessingResult, StrategyConfig } from "./types"
 import { BaseStrategy } from "./strategies/BaseStrategy"
 import { TextStrategy } from "./strategies/TextStrategy"
 import { PdfJsStrategy } from "./strategies/PdfJsStrategy"
 import { DocxStrategy } from "./strategies/DocxStrategy"
+import { DoclingService } from "./DoclingService"
 
 /**
  * Supported MIME types for file processing.
@@ -74,6 +76,7 @@ export class FileProcessor {
      * Factory method: Load a file from GCS and process it
      * 
      * Auto-detects the parsing strategy based on the file extension.
+     * If Docling is enabled and healthy, tries Docling first before falling back to local strategies.
      * Falls back to TextStrategy for unknown extensions.
      * 
      * @param gcsPath - Path to the file in GCS (e.g., "uploads/org123/report.pdf")
@@ -84,12 +87,19 @@ export class FileProcessor {
     static async fromGcs(
         gcsPath: string,
         vespaDocId: string,
-        config?: StrategyConfig
+        strategyConfig?: StrategyConfig
     ): Promise<ProcessingResult> {
         const storage = getStorageService()
         const buffer = await storage.getFileBuffer(gcsPath)
 
-        const strategy = FileProcessor.detectStrategy(gcsPath, config)
+        // Try Docling first if enabled
+        const doclingResult = await FileProcessor.tryDocling(buffer, gcsPath, vespaDocId)
+        if (doclingResult) {
+            return doclingResult
+        }
+
+        // Fall back to local strategy detection
+        const strategy = FileProcessor.detectStrategy(gcsPath, strategyConfig)
         const processor = new FileProcessor(strategy)
 
         return processor.processBuffer(buffer, vespaDocId)
@@ -98,6 +108,8 @@ export class FileProcessor {
     /**
      * Factory method: Create a FileProcessor from a MIME type
      * 
+     * Note: For buffer-based processing, use processBufferWithFallback for Docling support.
+     * 
      * @param mimeType - MIME type of the file (e.g., "application/pdf")
      * @param config - Optional strategy configuration
      * @returns A FileProcessor configured with the appropriate strategy
@@ -105,6 +117,77 @@ export class FileProcessor {
     static fromMimeType(mimeType: string, config?: StrategyConfig): FileProcessor {
         const strategy = FileProcessor.detectStrategyFromMimeType(mimeType, config)
         return new FileProcessor(strategy)
+    }
+
+    /**
+     * Process a buffer with automatic Docling fallback
+     * 
+     * First tries Docling if enabled and healthy, then falls back to local strategies.
+     * 
+     * @param buffer - File content as Buffer
+     * @param vespaDocId - Document ID for Vespa ingestion
+     * @param filename - Original filename for Docling hint
+     * @param mimeType - MIME type for local strategy selection
+     * @param config - Optional strategy configuration
+     * @returns Processing result with text chunks
+     */
+    static async processBufferWithFallback(
+        buffer: Buffer,
+        vespaDocId: string,
+        filename: string,
+        mimeType: string,
+        config?: StrategyConfig
+    ): Promise<ProcessingResult> {
+        // Try Docling first if enabled
+        const doclingResult = await FileProcessor.tryDocling(buffer, filename, vespaDocId)
+        if (doclingResult) {
+            return doclingResult
+        }
+
+        // Fall back to local strategy
+        const strategy = FileProcessor.detectStrategyFromMimeType(mimeType, config)
+        const processor = new FileProcessor(strategy)
+        return processor.processBuffer(buffer, vespaDocId)
+    }
+
+    /**
+     * Try to process with Docling if enabled and healthy
+     * 
+     * @param buffer - File content
+     * @param filename - Filename hint for Docling
+     * @param vespaDocId - Document ID
+     * @returns ProcessingResult if Docling succeeds, null otherwise
+     */
+    private static async tryDocling(
+        buffer: Buffer,
+        filename: string,
+        vespaDocId: string
+    ): Promise<ProcessingResult | null> {
+        // Check if Docling is enabled
+        if (!config.docling.enabled || !config.docling.baseUrl) {
+            return null
+        }
+
+        const doclingService = new DoclingService()
+
+        // Check health first (uses cache)
+        const health = await doclingService.checkHealth()
+        if (!health.healthy) {
+            logger.warn(`[FileProcessor] Docling unhealthy, skipping: ${health.error}`)
+            return null
+        }
+
+        // Try to process with Docling
+        try {
+            logger.info(`[FileProcessor] Trying Docling for ${vespaDocId}`)
+            const result = await doclingService.processDocument(buffer, filename)
+            logger.info(`[FileProcessor] Docling succeeded for ${vespaDocId} with ${result.chunks.length} chunks`)
+            return result
+        } catch (err) {
+            const error = err instanceof Error ? err.message : String(err)
+            logger.warn(`[FileProcessor] Docling failed for ${vespaDocId}, falling back: ${error}`)
+            return null
+        }
     }
 
     /**

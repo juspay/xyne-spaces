@@ -11,4 +11,8 @@ export {
     PdfJsStrategy,
     PdfPerPageStrategy,
     DocxStrategy,
+    DoclingStrategy,
 } from "./strategies"
+
+// Docling Service
+export { DoclingService } from "./DoclingService"
