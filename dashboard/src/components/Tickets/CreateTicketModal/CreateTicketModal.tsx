@@ -217,6 +217,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Track assignee search
   const [assigneeSearchValue, setAssigneeSearchValue] = useState('');
+  // Persist the selected option so the pill stays visible after search resets on close
+  const [selectedAssigneeOption, setSelectedAssigneeOption] = useState<{
+    value: string;
+    label: string;
+    icon: React.ReactNode;
+  } | null>(null);
 
   // Track dynamic field errors
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
@@ -1245,11 +1251,17 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         type: 'userGroup' as const,
       })) || [];
 
-    // If userGroupsOnly is enabled, only show groups, otherwise show both
-    return showUserGroupsOnly
+    // Always include the selected option so the pill stays visible when it
+    // falls outside the current search result window (e.g. after close resets the query).
+    const options = showUserGroupsOnly
       ? groupOptions.sort((a, b) => a.label.localeCompare(b.label))
       : [...userOptions, ...groupOptions].sort((a, b) => a.label.localeCompare(b.label));
-  }, [users, userGroupOptions, assigneeSearchValue, showUserGroupsOnly]);
+
+    if (selectedAssigneeOption && !options.some(o => o.value === selectedAssigneeOption.value)) {
+      return [selectedAssigneeOption as (typeof options)[number], ...options];
+    }
+    return options;
+  }, [users, userGroupOptions, assigneeSearchValue, showUserGroupsOnly, selectedAssigneeOption]);
 
   // Get tag options
   const tagOptions = useMemo(() => {
@@ -2093,8 +2105,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   }
                   onSelect={(value: string | null) => {
                     field.handleChange(parseAssignee(value));
-                    if (!value) {
-                      setAssigneeSearchValue('');
+                    if (value) {
+                      const picked = assigneeOptions.find(o => o.value === value);
+                      setSelectedAssigneeOption(
+                        picked
+                          ? { value: picked.value, label: picked.label, icon: picked.icon }
+                          : null,
+                      );
+                    } else {
+                      setSelectedAssigneeOption(null);
                     }
                   }}
                   onSearchChange={setAssigneeSearchValue}
