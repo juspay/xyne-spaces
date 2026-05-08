@@ -27,7 +27,13 @@ import {
   FileText,
   Clock,
 } from 'lucide-react';
-import { Tooltip, TooltipSide, Menu, MenuSide, MenuAlignment } from '@juspay/blend-design-system';
+import { Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../dropdown-menu';
 
 import { toast } from 'sonner';
 import { EditorToolbar } from '../EditorToolbar';
@@ -1249,8 +1255,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             <div className='flex items-center justify-between p-2'>
               <div className='flex items-center gap-1'>
                 {features.fileAttachments && (
-                  <Menu
-                    trigger={
+                  <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
+                    <DropdownMenuTrigger asChild>
                       <button
                         type='button'
                         className='p-1.5 bg-muted hover:bg-accent transition-all duration-200 ease-in-out rounded-full'
@@ -1259,42 +1265,34 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       >
                         <Plus className='h-4 w-4 text-muted-foreground' />
                       </button>
-                    }
-                    open={isPlusMenuOpen}
-                    onOpenChange={setIsPlusMenuOpen}
-                    side={MenuSide.TOP}
-                    alignment={MenuAlignment.START}
-                    items={[
-                      {
-                        items: [
-                          {
-                            label: 'Upload Files',
-                            slot1: <Plus className='h-4 w-4' />,
-                            onClick: () => {
-                              handleAttachClick();
-                              setIsPlusMenuOpen(false);
-                            },
-                          },
-                          {
-                            label: 'Add Call Summary',
-                            slot1: <FileText className='h-4 w-4' />,
-                            onClick: () => {
-                              setIsTranscriptSelectorOpen(true);
-                              setIsPlusMenuOpen(false);
-                            },
-                          },
-                          {
-                            label: 'Canvas',
-                            slot1: <FileText className='h-4 w-4' />,
-                            onClick: () => {
-                              setIsCanvasAttachmentModalOpen(true);
-                              setIsPlusMenuOpen(false);
-                            },
-                          },
-                        ],
-                      },
-                    ]}
-                  />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side='top' align='start'>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          handleAttachClick();
+                          setIsPlusMenuOpen(false);
+                        }}
+                      >
+                        <Plus className='h-4 w-4' /> Upload Files
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setIsTranscriptSelectorOpen(true);
+                          setIsPlusMenuOpen(false);
+                        }}
+                      >
+                        <FileText className='h-4 w-4' /> Add Call Summary
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setIsCanvasAttachmentModalOpen(true);
+                          setIsPlusMenuOpen(false);
+                        }}
+                      >
+                        <FileText className='h-4 w-4' /> Canvas
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
 
                 <Dialog
@@ -1441,8 +1439,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               : 'bg-muted-foreground/20'
                           }`}
                         ></div>
-                        <Menu
-                          trigger={
+                        <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
+                          <DropdownMenuTrigger asChild>
                             <button
                               type='button'
                               disabled={disabled || sendDisabled || isSending}
@@ -1451,54 +1449,40 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             >
                               <ChevronDown className='h-3 w-3' />
                             </button>
-                          }
-                          items={[
-                            {
-                              items: [
-                                ...(sendMode === 'message' && !(hasTicket || ticketCreated)
-                                  ? [
-                                      {
-                                        label: 'Create a ticket',
-                                        slot1: <Ticket className='h-4 w-4' />,
-                                        onClick: (): void => {
-                                          setSendMode('ticket');
-                                          setIsSendMenuOpen(false);
-                                        },
-                                      },
-                                    ]
-                                  : []),
-                                ...(sendMode === 'ticket'
-                                  ? [
-                                      {
-                                        label: 'Send as message',
-                                        slot1: <ArrowUp className='h-4 w-4' />,
-                                        onClick: (): void => {
-                                          setSendMode('message');
-                                          setIsSendMenuOpen(false);
-                                        },
-                                      },
-                                    ]
-                                  : []),
-                                ...(onScheduleSend
-                                  ? [
-                                      {
-                                        label: 'Schedule message',
-                                        slot1: <Clock className='h-4 w-4' />,
-                                        onClick: (): void => {
-                                          setIsSendMenuOpen(false);
-                                          openScheduleDialog();
-                                        },
-                                      },
-                                    ]
-                                  : []),
-                              ],
-                            },
-                          ]}
-                          open={isSendMenuOpen}
-                          onOpenChange={setIsSendMenuOpen}
-                          side={MenuSide.TOP}
-                          alignment={MenuAlignment.END}
-                        />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent side='top' align='end'>
+                            {sendMode === 'message' && !(hasTicket || ticketCreated) && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSendMode('ticket');
+                                  setIsSendMenuOpen(false);
+                                }}
+                              >
+                                <Ticket className='h-4 w-4' /> Create a ticket
+                              </DropdownMenuItem>
+                            )}
+                            {sendMode === 'ticket' && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSendMode('message');
+                                  setIsSendMenuOpen(false);
+                                }}
+                              >
+                                <ArrowUp className='h-4 w-4' /> Send as message
+                              </DropdownMenuItem>
+                            )}
+                            {onScheduleSend && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setIsSendMenuOpen(false);
+                                  openScheduleDialog();
+                                }}
+                              >
+                                <Clock className='h-4 w-4' /> Schedule message
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     ) : onScheduleSend ? (
                       // No ticket creation but schedule send is available — split button
@@ -1534,8 +1518,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <div
                           className={`w-px h-4 ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
                         ></div>
-                        <Menu
-                          trigger={
+                        <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
+                          <DropdownMenuTrigger asChild>
                             <button
                               type='button'
                               disabled={disabled || isSending}
@@ -1544,34 +1528,26 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             >
                               <ChevronDown className='h-3 w-3' />
                             </button>
-                          }
-                          items={[
-                            {
-                              items: [
-                                {
-                                  label: 'Send now',
-                                  slot1: <ArrowUp className='h-4 w-4' />,
-                                  onClick: (): void => {
-                                    void handleSend();
-                                    setIsSendMenuOpen(false);
-                                  },
-                                },
-                                {
-                                  label: 'Schedule message',
-                                  slot1: <Clock className='h-4 w-4' />,
-                                  onClick: (): void => {
-                                    setIsSendMenuOpen(false);
-                                    openScheduleDialog();
-                                  },
-                                },
-                              ],
-                            },
-                          ]}
-                          open={isSendMenuOpen}
-                          onOpenChange={setIsSendMenuOpen}
-                          side={MenuSide.TOP}
-                          alignment={MenuAlignment.END}
-                        />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent side='top' align='end'>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                void handleSend();
+                                setIsSendMenuOpen(false);
+                              }}
+                            >
+                              <ArrowUp className='h-4 w-4' /> Send now
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setIsSendMenuOpen(false);
+                                openScheduleDialog();
+                              }}
+                            >
+                              <Clock className='h-4 w-4' /> Schedule message
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     ) : (
                       <Tooltip content='Send message' side={TooltipSide.TOP}>

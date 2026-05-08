@@ -108,7 +108,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
               onClick={() => setViewMode('diagram')}
               className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
                 viewMode === 'diagram'
-                  ? 'bg-blue-100 text-blue-700'
+                  ? 'bg-blue-100 text-blue-700 mermaid-tab-active'
                   : 'text-muted-foreground hover:bg-accent'
               }`}
               title='View diagram'
@@ -122,7 +122,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
               onClick={() => setViewMode('code')}
               className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
                 viewMode === 'code'
-                  ? 'bg-blue-100 text-blue-700'
+                  ? 'bg-blue-100 text-blue-700 mermaid-tab-active'
                   : 'text-muted-foreground hover:bg-accent'
               }`}
               title='View code'
@@ -176,7 +176,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
           <>
             <div
               ref={elementRef}
-              className='mermaid-diagram flex justify-center p-4 bg-card border border-border rounded-lg cursor-pointer hover:bg-accent transition-colors'
+              className='mermaid-diagram flex justify-center p-4 bg-white border border-border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors'
               /* eslint-disable-next-line react/no-danger, @typescript-eslint/naming-convention */
               dangerouslySetInnerHTML={{ __html: svg }}
               onClick={() => setShowPreview(true)}
@@ -228,9 +228,9 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
           </button>
 
           {/* Preview Content */}
-          <div className='h-full w-full flex items-center justify-center p-4 overflow-auto'>
+          <div className='h-full w-full flex items-center justify-center p-4 overflow-auto rounded-lg'>
             <div
-              className='mermaid-diagram flex justify-center w-[90vw] h-[85vh]'
+              className='mermaid-diagram flex justify-center w-[90vw] h-[85vh] bg-white rounded-lg m-10'
               style={{ maxWidth: '90vw', maxHeight: '85vh' }}
               /* eslint-disable-next-line react/no-danger, @typescript-eslint/naming-convention */
               dangerouslySetInnerHTML={{ __html: svg }}

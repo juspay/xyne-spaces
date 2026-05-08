@@ -244,7 +244,7 @@ const AboutChannel = ({
                     value={editName}
                     onChange={handleNameChange}
                     onKeyDown={handleNameKeyDown}
-                    className='w-full mt-1 p-2 text-sm border border-border rounded-[8px] focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+                    className='w-full mt-1 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
                     placeholder='channel-name'
                     maxLength={80}
                     data-track-event='blur'
@@ -312,7 +312,7 @@ const AboutChannel = ({
                   value={editDescription}
                   onChange={e => setEditDescription(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  className='w-full mt-2 p-2 text-sm border border-border rounded-[8px] resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+                  className='w-full mt-2 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
                   rows={3}
                   placeholder='Add a description...'
                   data-track-event='blur'

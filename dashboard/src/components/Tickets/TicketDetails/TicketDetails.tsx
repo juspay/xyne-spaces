@@ -2065,7 +2065,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           onChange={e => setTagSearchQuery(e.target.value)}
                           onKeyDown={handleTagKeyDown}
                           placeholder='Search or create tag...'
-                          className='w-full px-2.5 py-1.5 text-sm border border-input rounded outline-none focus:border-border'
+                          className='w-full px-2.5 py-1.5 text-sm border text-foreground bg-background border-input rounded outline-none focus:border-border'
                           data-track-category='Tickets'
                           data-track-name='SearchTags'
                         />
@@ -2261,7 +2261,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           setEditingETA(false);
                         }
                       }}
-                      className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-border'
+                      className='text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-border'
                       data-track-category='Tickets'
                       data-track-name='StageETAInput'
                       data-track-metadata={JSON.stringify({ ticketId: ticket.id })}

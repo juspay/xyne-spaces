@@ -446,9 +446,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
             </div>
           </div>
         )}
-        {!isCompact && (
-          <div className='bg-gradient-to-b from-xyne-purple-100 to-xyne-primary-100 w-1.5 self-stretch' />
-        )}
+        {!isCompact && <div className='ticket-card-accent-bar w-1.5 self-stretch' />}
         <div
           className={cn('flex flex-col gap-2 w-full min-w-0', isCompact ? 'p-0' : 'p-3 sm:p-4')}
           ref={contentRef}

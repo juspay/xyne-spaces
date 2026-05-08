@@ -120,6 +120,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
               </label>
               <Textarea
                 id='dm-message'
+                className='text-foreground'
                 value={field.state.value}
                 onChange={e => field.handleChange(e.target.value)}
                 placeholder='Say something to start the conversation...'

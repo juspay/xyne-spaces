@@ -28,13 +28,14 @@ import { FilePill } from '../files';
 import { useReactions } from '../../../hooks/useReaction';
 import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
+import { useTheme } from '../../../hooks/useTheme';
 import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { Bookmark, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
-import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
+import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
 import { BotBubble } from '../../Chat/BotBubble';
 import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
@@ -1290,6 +1291,8 @@ export const ReactionView = ({
   const users = useUsers();
   const { data: customEmojis } = useCustomEmojis();
   const { isMobile } = usePlatform();
+  const { theme } = useTheme();
+  const emojiPickerTheme = theme === 'midnight' ? EmojiTheme.DARK : EmojiTheme.LIGHT;
 
   // Touch handling refs for long press detection
   const pressTimerRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -1463,6 +1466,7 @@ export const ReactionView = ({
                 >
                   <EmojiPicker
                     emojiStyle={EmojiStyle.NATIVE}
+                    theme={emojiPickerTheme}
                     style={{
                       ['--epr-emoji-size' as string]: '22px',
                       ['--epr-emoji-gap' as string]: '4px',

@@ -376,7 +376,8 @@ const AppSidebar = (): ReactElement => {
                       {showPendingDmDot && (
                         <span
                           aria-hidden='true'
-                          className='absolute top-1 right-1 size-2 rounded-full bg-sidebar-badge-accent ring-1 ring-background'
+                          className='absolute top-1 right-1 size-[9px] rounded-full bg-[var(--sidebar-dm-dot-bg)]'
+                          style={{ boxShadow: 'var(--sidebar-dm-dot-shadow)' }}
                         />
                       )}
                       {showMissedCallBadge && (
