@@ -108,6 +108,7 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
           canvas.title,
           createdByUserId,
           senderName,
+          this.ctx.workspaceId,
           channelName,
           undefined // no specific blockId for AI-generated content
         ),
