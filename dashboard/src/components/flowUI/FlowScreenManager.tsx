@@ -146,14 +146,14 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
               App flow action screen
             </DialogPrimitive.Description>
 
-            <div className='rounded-xl border border-neutral-200 bg-white shadow-xl overflow-hidden'>
+            <div className='rounded-xl border border-border bg-popover text-popover-foreground shadow-xl overflow-hidden'>
               {/* Header */}
-              <div className='flex items-center justify-between px-4 py-2.5 border-b border-neutral-100 bg-neutral-50'>
+              <div className='flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted'>
                 <div className='flex items-center gap-1'>
                   {hasMultiplePopups && (
                     <button
                       onClick={goBack}
-                      className='rounded-md p-0.5 text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors mr-1'
+                      className='rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors mr-1'
                       aria-label='Back'
                       data-track-category='flow'
                       data-track-name='back-popup'
@@ -161,13 +161,13 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
                       <ChevronLeft className='size-3.5' />
                     </button>
                   )}
-                  <span className='text-xs font-semibold text-neutral-500 uppercase tracking-wide'>
+                  <span className='text-xs font-semibold text-foreground uppercase tracking-wide'>
                     {popupScreen?.title ?? 'Action'}
                   </span>
                 </div>
                 <button
                   onClick={closePopup}
-                  className='rounded-md p-0.5 text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors'
+                  className='rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                   aria-label='Close'
                   data-track-category='flow'
                   data-track-name='close-popup'

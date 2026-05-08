@@ -1,5 +1,6 @@
 import { SlackBlockKitParser } from "@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser";
 import { convertBlockKitToFlowJSON } from "@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitToFlowJSON";
+import { config } from "@/config/env";
 import type { TransformContext } from "../../types";
 import type {
 	SlackChatPostMessageRequest,
@@ -33,13 +34,15 @@ async function processContent(
 		SlackChatPostMessageRequest,
 		"text" | "blocks" | "attachments" | "mrkdwn"
 	>,
+	botToken?: string,
+	workspaceId?: string,
 ): Promise<{ content: string; isMarkdown: boolean }> {
 	if (req.blocks?.length || req.attachments?.length) {
 		const flowJSON = await convertBlockKitToFlowJSON({
 			text: req.text,
 			blocks: req.blocks,
 			attachments: req.attachments,
-		});
+		}, botToken, workspaceId);
 
 		if (flowJSON) {
 			const escapedJSON = JSON.stringify(flowJSON).replace(/"/g, "&quot;");
@@ -78,7 +81,7 @@ export async function transformPostMessage(
 	slackReq: SlackChatPostMessageRequest,
 	context: TransformContext,
 ): Promise<PostMessageArgs> {
-	const { content, isMarkdown } = await processContent(slackReq);
+	const { content, isMarkdown } = await processContent(slackReq, config.slackBotToken, config.defaultWorkspaceId);
 
 	return {
 		channelId: slackReq.channel,
@@ -93,7 +96,7 @@ export async function transformPostMessage(
 export async function transformUpdate(
 	slackReq: SlackChatUpdateRequest,
 ): Promise<UpdateMessageArgs> {
-	const { content } = await processContent(slackReq);
+	const { content } = await processContent(slackReq, config.slackBotToken, config.defaultWorkspaceId);
 
 	return {
 		messageId: slackReq.ts,

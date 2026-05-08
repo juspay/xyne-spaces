@@ -178,6 +178,16 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       // submit / inputChange — network action
       // Don't set submitting=true for inputChange — keeps the form interactive during cascade loads
       const isInputChange = action.type === 'inputChange';
+
+      // Guard: messageId/conversationId are required for network actions.
+      // They may be empty if the component rendered before Zero sync completed.
+      if (!messageId || !conversationId) {
+        console.warn(
+          '[FlowRenderer] Cannot execute network action — messageId/conversationId not yet available. Please try again.',
+        );
+        toast.error('Message context not ready yet. Please try again in a moment.');
+        return;
+      }
       if (!isInputChange) {
         setState(prev => {
           const next = { ...prev, submitting: true };
@@ -295,7 +305,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   }
 
   if (!registryReady || !validatedFlow) {
-    return <div className='animate-pulse bg-gray-100 h-32 rounded-lg' />;
+    return <div className='animate-pulse bg-muted h-32 rounded-lg' />;
   }
 
   return (
@@ -304,7 +314,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         className={
           compact
             ? 'flow-ui-compact'
-            : 'flow-ui-container max-w-2xl w-full rounded-lg border bg-white p-4 shadow-sm'
+            : 'flow-ui-container max-w-2xl w-full rounded-lg border bg-card p-4 shadow-sm'
         }
       >
         {validatedFlow.title && (

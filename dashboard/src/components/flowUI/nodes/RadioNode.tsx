@@ -26,7 +26,7 @@ export const RadioNode: React.FC<RadioNodeProps> = ({ node }) => {
   return (
     <div className='space-y-2' style={node.style}>
       {props.label && (
-        <label className='block text-sm font-medium text-gray-700'>{props.label}</label>
+        <label className='block text-sm font-medium text-foreground'>{props.label}</label>
       )}
       <div className={props.orientation === 'horizontal' ? 'flex space-x-4' : 'space-y-2'}>
         {props.options?.map(opt => (
@@ -40,9 +40,9 @@ export const RadioNode: React.FC<RadioNodeProps> = ({ node }) => {
               onChange={e => updateFieldValue(props.name, e.target.value)}
               data-track-category='flowUI'
               data-track-name={`${props.name}-${opt.value}`}
-              className='w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500'
+              className='w-4 h-4 text-primary border-border focus:ring-ring'
             />
-            <span className='text-sm text-gray-700'>{opt.label}</span>
+            <span className='text-sm text-foreground'>{opt.label}</span>
           </label>
         ))}
       </div>
