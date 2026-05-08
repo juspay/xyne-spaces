@@ -300,7 +300,7 @@ const AboutChannel = ({
 
         {/* Description */}
         {/* Description */}
-        <div className='relative bg-card p-[12px] rounded-[12px] border border-border mb-3'>
+        <div className='relative bg-card p-[12px] rounded-[12px] border border-border mb-3 break-words'>
           <div className='flex flex-col gap-y-2'>
             <div className='flex items-start justify-between'>
               <p className='text-sm font-medium text-foreground'>Description</p>

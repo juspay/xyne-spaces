@@ -34,7 +34,7 @@ export const AboutChannel: React.FC<AboutChannelProps> = ({ channel }) => {
           <h3 className='text-sm font-medium text-foreground'>Description</h3>
           <Button buttonType={ButtonType.SECONDARY} size={ButtonSize.SMALL} text='Edit' />
         </div>
-        <p className='text-sm text-muted-foreground'>
+        <p className='text-sm text-muted-foreground break-words'>
           {channel.description || 'Click edit to add description'}
         </p>
       </div>
