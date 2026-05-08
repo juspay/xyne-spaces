@@ -2,7 +2,7 @@ import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { websocketService } from '../../services/clients/socketClient';
 import { toast } from 'sonner';
 import { useAuthContext } from '../../providers/AuthProvider';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
 import { callActor } from '../../machines/callMachine';
@@ -72,7 +72,6 @@ const buildChatActionUrl = (notification: NotificationData['notification']): str
 export const NotificationHandler: React.FC = () => {
   const { user } = useAuthContext();
   const navigate = useNavigate();
-  const location = useLocation();
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
   const [suppressNativeToasts, setSuppressNativeToasts] = useState<boolean>(() =>
@@ -82,9 +81,6 @@ export const NotificationHandler: React.FC = () => {
   const handleNotification = useCallback(
     (data: NotificationData): void => {
       try {
-        // Check if user is currently in VS Code editor
-        const isOnVSCode = location.pathname === '/vscode';
-
         // For canvas notifications, construct actionUrl from data if not provided
         const canvasActionUrl =
           !data.notification.actionUrl && data.notification.data?.canvasId
@@ -117,26 +113,7 @@ export const NotificationHandler: React.FC = () => {
                   label: 'View',
                   onClick: (): void => {
                     if (resolvedActionUrl) {
-                      // If in VS Code editor and notification has thread/conversation data, open thread in editor
-                      if (
-                        isOnVSCode &&
-                        (data.notification.data?.conversationId ||
-                          data.notification.data?.channelId)
-                      ) {
-                        // Dispatch custom event to open thread in VS Code workspace
-                        window.dispatchEvent(
-                          new CustomEvent('vscode-open-thread', {
-                            detail: {
-                              conversationId: data.notification.data.conversationId,
-                              channelId: data.notification.data.channelId,
-                              messageId: data.notification.data.messageId,
-                            },
-                          }),
-                        );
-                      } else {
-                        // Normal navigation behavior
-                        void navigate(resolvedActionUrl);
-                      }
+                      void navigate(resolvedActionUrl);
                     }
                   },
                 }
@@ -161,7 +138,7 @@ export const NotificationHandler: React.FC = () => {
         console.error('Error handling notification:', error);
       }
     },
-    [navigate, location.pathname, isElectron, suppressNativeToasts],
+    [navigate, isElectron, suppressNativeToasts],
   );
 
   const handleNotificationAckConfirmed = useCallback((): void => {}, []);
@@ -346,27 +323,6 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     if (isElectron && window.electronAPI && typeof window.electronAPI.onNavigateTo === 'function') {
       const handleNavigate = (url: string): void => {
-        // Check if user is on VS Code page and URL is a chat URL
-        const isOnVSCode = location.pathname === '/vscode';
-
-        if (isOnVSCode && url.startsWith('/chat/')) {
-          // Parse conversation and channel from URL like /chat/dir/{channelId}/{conversationId}
-          const urlParts = url.split('/').filter(Boolean);
-          if (urlParts.length >= 3 && urlParts[0] === 'chat') {
-            const channelId = urlParts[2];
-            const conversationId = urlParts[3]?.split('#')[0]; // Remove hash if present
-
-            // Dispatch event to open thread in VS Code workspace
-            window.dispatchEvent(
-              new CustomEvent('vscode-open-thread', {
-                detail: { conversationId, channelId },
-              }),
-            );
-            return;
-          }
-        }
-
-        // Default: navigate normally
         void navigate(url);
       };
 
@@ -374,7 +330,7 @@ export const NotificationHandler: React.FC = () => {
       return cleanup;
     }
     return undefined;
-  }, [navigate, isElectron, location.pathname]);
+  }, [navigate, isElectron]);
 
   useEffect(() => {
     const meetingDetector = window.electronAPI?.meetingDetector;

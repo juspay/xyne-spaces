@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, dialog, Menu, MenuItem, app, webContents } from 'electron';
+import { BrowserWindow, shell, Menu, MenuItem, app, webContents } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
@@ -6,7 +6,6 @@ import { getIsQuitting } from '../app/main';
 import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links';
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
 import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
-import { codeServerService } from '../services/code-server';
 import { getBundledUIUrl } from '../services/custom-protocol';
 
 import { keychain } from '../keychain';
@@ -242,40 +241,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 
   // Handle close (hide on macOS, unless quitting via Cmd+Q)
   mainWindow.on('close', (event) => {
-    // Check if VS Code has active sessions
-    if (codeServerService.hasActiveSessions() && !getIsQuitting()) {
-      event.preventDefault();
-      
-      const choice = dialog.showMessageBoxSync(mainWindow!, {
-        type: 'warning',
-        buttons: ['Go Back', 'Close VS Code'],
-        defaultId: 0,
-        cancelId: 0,
-        title: 'Close VS Code?',
-        message: 'VS Code is currently open. Closing it may result in unsaved changes being lost.',
-        detail: 'Make sure to save your work before continuing.',
-      });
-
-      if (choice === 1) {
-        // User confirmed - clear sessions and allow close
-        codeServerService.clearActiveSessions();
-        
-        if (process.platform === 'darwin' && !getIsQuitting()) {
-          if (mainWindow?.isFullScreen()) {
-            mainWindow.once('leave-full-screen', () => mainWindow?.hide());
-            mainWindow.setFullScreen(false);
-          } else {
-            mainWindow?.hide();
-          }
-        } else {
-          mainWindow?.close();
-        }
-      }
-      // If choice === 0 (Go Back), do nothing - window stays open
-      return;
-    }
-
-    // Normal close behavior when no VS Code sessions
+    // Normal close behavior
     if (process.platform === 'darwin' && !getIsQuitting()) {
       event.preventDefault();
       if (mainWindow?.isFullScreen()) {

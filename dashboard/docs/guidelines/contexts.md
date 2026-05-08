@@ -8,10 +8,8 @@ React contexts for shared state.
 
 | Context | Purpose |
 |---------|---------|
-| `CodeServerContext` | Code server integration |
 | `DragDropFileContext` | File drag and drop |
 | `TypingStateContext` | Typing indicators |
-| `VSCodeContext` | VS Code integration |
 
 ## When to Use
 

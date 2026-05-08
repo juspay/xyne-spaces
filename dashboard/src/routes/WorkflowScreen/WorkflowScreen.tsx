@@ -39,7 +39,6 @@ import LiveEditsPanel from '../../components/Workflows/LiveEditsPanel';
 import PreviewChangesPanel from '../../components/Workflows/PreviewChangesPanel';
 import { RCADetailsPanel, type RCAItem } from '../../components/Workflows/RCADetailsPanel';
 import { workflowScreenMachine } from '../../machines/workflowScreenMachine';
-import { VSCodePanel } from '../../components/Workflows/VSCodePanel';
 import { usePlatform } from '../../hooks/usePlatform';
 
 import { LAST_WORKFLOW_PATH_KEY } from '../../components/Tickets/constants';
@@ -252,19 +251,6 @@ const WorkflowScreen: React.FC = () => {
     closeTab,
   } = useWorkflowTabs(
     [
-      // code viewer tab commented out, not useful for now
-      // ...(isElectron
-      //   ? [
-      //       {
-      //         id: 'vscode',
-      //         title: 'Code Viewer',
-      //         type: 'vscode' as const,
-      //         icon: <Eye size={15} />,
-      //         closable: false,
-      //         disabled: false,
-      //       },
-      //     ]
-      //   : []),
       {
         id: 'git-diff',
         title: 'Final Git Diff',
@@ -481,16 +467,6 @@ const WorkflowScreen: React.FC = () => {
       if (!tab) return null;
 
       switch (tab.type) {
-        case 'vscode':
-          return effectiveSelectedExecutionId ? (
-            <VSCodePanel
-              executionId={effectiveSelectedExecutionId}
-              {...(gitInfo ? { gitInfo } : {})}
-              {...(executionStatus !== undefined && { executionStatus })}
-              isActive={activeTabId === 'vscode'}
-              workflowOutput={workflowOutput}
-            />
-          ) : null;
         case 'git-diff':
           return (
             <GitDiffPanel executionId={effectiveSelectedExecutionId} onRefresh={handleRefresh} />

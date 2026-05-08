@@ -1,12 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { X, Plus, Layout, Globe, GitBranch, Table2, MonitorPlay, AlertCircle } from 'lucide-react';
+import { X, Plus, Layout, Globe, GitBranch, Table2, AlertCircle } from 'lucide-react';
 
 export type TabType =
   | 'graph'
   | 'preview'
   | 'table'
   | 'debug'
-  | 'vscode'
   | 'custom'
   | 'git-diff'
   | 'live-preview'
@@ -47,8 +46,6 @@ const getTabIcon = (type: TabType, customIcon?: React.ReactNode): React.ReactNod
       return <Globe size={12} />;
     case 'table':
       return <Table2 size={12} />;
-    case 'vscode':
-      return <MonitorPlay size={12} />;
     case 'rca-details':
       return <AlertCircle size={12} className='text-red-500' />;
     default:

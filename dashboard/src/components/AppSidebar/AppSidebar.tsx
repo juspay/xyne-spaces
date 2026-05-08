@@ -240,7 +240,6 @@ const AppSidebar = (): ReactElement => {
         }
       }
 
-      // if (item.path === '/vscode' && !isElectronApp()) return false;
       if (item.path === '/browser' && !isElectronApp()) return false;
       return hasAccess;
     });

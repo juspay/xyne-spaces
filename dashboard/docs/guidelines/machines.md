@@ -18,7 +18,6 @@ XState machines for complex state management.
 | `queryCacheMachine` | Query caching |
 | `pdfMachine` | PDF generation |
 | `webviewMachine` | Webview state |
-| `vscodeWorkspaceMachine` | VS Code integration |
 | `stateMachine` | Generic state machine utilities, having cached values of data and other utilites |
 
 ## When to Use

@@ -10,7 +10,6 @@ import {
   setupXyneSpacesInterceptor,
 } from '../services/request-interceptor';
 import { setupMTLS } from '../services/mtls';
-import { codeServerService } from '../services/code-server';
 import { docsPublishService } from '../services/docs-publish';
 import { agentAuthService } from '../services/agent-auth';
 import { BrowserWindow } from 'electron';
@@ -28,14 +27,11 @@ import { clearAllCookies } from '../services/cookies';
 import Sentry from "@sentry/electron/main";
 
 
-// Forward logs to renderer process. This is a DATA TRANSPORT for CodeServer/workflow IPC
-// messages, NOT a logging transport. Suppressing it would break features.
+// Forward logs to renderer process for workflow IPC messages.
 (log.transports as any).forwardToRenderer = (message: any) => {
   // Convert message data to string for filtering
   const msgContent = (message.data || []).map((item: any) => String(item)).join(' ');
-  const shouldForward =
-    msgContent.includes('[CodeServer]') ||
-    msgContent.toLowerCase().includes('workflow');
+  const shouldForward = msgContent.toLowerCase().includes('workflow');
 
   if (shouldForward) {
     BrowserWindow.getAllWindows().forEach((w) => {
@@ -118,14 +114,6 @@ app.on('before-quit', async () => {
   } catch (error) {
     Logger.logError(ElectronEvent.DOCS_PUBLISH_SERVER_START_FAILED, error, {}, 'App');
   }
-
-  // Gracefully stop code-server when app is quitting
-  try {
-    await codeServerService.stopCodeServer();
-    Logger.info(ElectronEvent.CODE_SERVER_STOP, {}, 'App');
-  } catch (error) {
-    Logger.logError(ElectronEvent.CODE_SERVER_ERROR, error, {}, 'App');
-  }
 });
 
 
@@ -157,8 +145,6 @@ async function initializeApp(): Promise<void> {
   // Auto-start agent authorization server
   startAgentAuthServerInBackground();
 
-  // Auto-start code-server in the background
-  startCodeServerInBackground();
   // Initialize UI updater (checks for updates in background)
   if (config.useBundledUI) {
     void initializeUIUpdater();
@@ -196,21 +182,6 @@ function startAgentAuthServerInBackground(): void {
     })
     .catch((error) => {
       log.error('[App] Failed to start agent auth server:', error);
-    });
-}
-
-/**
- * Start code-server in the background without blocking app startup
- */
-function startCodeServerInBackground(): void {
-  Logger.info(ElectronEvent.CODE_SERVER_START, {}, 'App');
-  codeServerService.startCodeServer()
-    .then((url) => {
-      Logger.info(ElectronEvent.CODE_SERVER_STARTED, { url }, 'App');
-    })
-    .catch((error) => {
-      Logger.logError(ElectronEvent.CODE_SERVER_START_FAILED, error, {}, 'App');
-      // Don't block the app if code-server fails to start
     });
 }
 
