@@ -1112,6 +1112,39 @@ export const EmailComposer = ({
 
   const { isDraggingFiles, dragHandlers } = useComposerDragDrop(addFilesToAttachments);
 
+  const composerFooter = (
+    <>
+      {attachments.length > 0 && (
+        <div className='px-4 pb-3'>
+          <div className='flex flex-wrap gap-2'>
+            {attachments.map((file, index) => (
+              <AttachmentPreview
+                key={`${file.name}-${file.size}-${index}`}
+                file={file}
+                onRemove={() => handleRemoveAttachment(index)}
+                onPreview={() => handlePreviewAttachment(file)}
+                isUploading={isUploadingAttachments && index === attachments.length - 1}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {selectedSignatureId && (
+        <div className='px-4 pb-3'>
+          <div className='border-t border-border pt-2'>
+            <p className='text-xs text-muted-foreground mb-1'>--</p>
+            <div
+              className='text-sm text-muted-foreground prose prose-sm max-w-none'
+              dangerouslySetInnerHTML={{
+                __html: signatures?.find(s => s.id === selectedSignatureId)?.content ?? '',
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div
       className={cn('w-full', features.showCardWrap ? 'p-4' : 'h-full flex flex-col')}
@@ -1656,6 +1689,7 @@ export const EmailComposer = ({
                       readOnly={aiDraft.isDraftActive}
                       disabled={isSending}
                       className='flex-1 min-h-0'
+                      footerSlot={composerFooter}
                     />
                   </div>
                   <div className='flex-1 min-w-0 flex flex-col min-h-0'>
@@ -1666,7 +1700,12 @@ export const EmailComposer = ({
             }
 
             if (aiOnlyFull) {
-              return <div className='flex-1 min-h-0 flex flex-col px-4 pt-2 pb-3'>{draftCard}</div>;
+              return (
+                <div className='flex-1 min-h-0 flex flex-col px-4 pt-2 pb-3'>
+                  {draftCard}
+                  {composerFooter}
+                </div>
+              );
             }
 
             return (
@@ -1695,40 +1734,10 @@ export const EmailComposer = ({
                 }}
                 disabled={isSending}
                 className='flex-1 min-h-0'
+                footerSlot={composerFooter}
               />
             );
           })()}
-
-          {/* Attachments section */}
-          {attachments.length > 0 && (
-            <div className='px-4 pb-3'>
-              <div className='flex flex-wrap gap-2'>
-                {attachments.map((file, index) => (
-                  <AttachmentPreview
-                    key={`${file.name}-${file.size}-${index}`}
-                    file={file}
-                    onRemove={() => handleRemoveAttachment(index)}
-                    onPreview={() => handlePreviewAttachment(file)}
-                    isUploading={isUploadingAttachments && index === attachments.length - 1}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {selectedSignatureId && (
-            <div className='px-4 pb-3'>
-              <div className='border-t border-border pt-2'>
-                <p className='text-xs text-muted-foreground mb-1'>--</p>
-                <div
-                  className='text-sm text-muted-foreground prose prose-sm max-w-none'
-                  dangerouslySetInnerHTML={{
-                    __html: signatures?.find(s => s.id === selectedSignatureId)?.content ?? '',
-                  }}
-                />
-              </div>
-            </div>
-          )}
         </div>
 
         <div className='px-3 py-1.5 flex items-center justify-between'>
