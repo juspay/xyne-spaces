@@ -82,14 +82,15 @@ export const NotificationHandler: React.FC = () => {
     (data: NotificationData): void => {
       try {
         // For canvas notifications, construct actionUrl from data if not provided
-        const canvasActionUrl =
+        const canvasRedirectUrl =
           !data.notification.actionUrl && data.notification.data?.canvasId
             ? data.notification.data.blockId
-              ? `/redirected?canvasId=${encodeURIComponent(data.notification.data.canvasId)}&blockId=${encodeURIComponent(data.notification.data.blockId)}`
-              : `/redirected?canvasId=${encodeURIComponent(data.notification.data.canvasId)}`
+              ? `/redirected?type=canvas&canvasId=${encodeURIComponent(data.notification.data.canvasId)}&blockId=${encodeURIComponent(data.notification.data.blockId)}`
+              : `/redirected?type=canvas&canvasId=${encodeURIComponent(data.notification.data.canvasId)}`
             : undefined;
         const fallbackChatActionUrl = buildChatActionUrl(data.notification);
-        const resolvedActionUrl = canvasActionUrl || fallbackChatActionUrl;
+        const resolvedActionUrl =
+          data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
 
         if (
           isElectron &&

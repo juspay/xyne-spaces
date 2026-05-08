@@ -1025,6 +1025,7 @@ class NotificationService {
     canvasTitle: string,
     senderId: string,
     senderName: string,
+    workspaceId: string,
     channelName?: string,
     blockId?: string,
   ): Promise<{ deliveredUserIds: string[] }> {
@@ -1068,18 +1069,22 @@ class NotificationService {
 
     const results = await Promise.allSettled(
       recipientIds.map(async userId => {
+        const actionUrl = blockId
+          ? `/${workspaceId}/chat/canvas/${canvasId}?blockId=${encodeURIComponent(blockId)}`
+          : `/${workspaceId}/chat/canvas/${canvasId}`;
         const result = await this.createNotification(userId, {
           title,
           message,
           type: NotificationType.MENTION,
           relatedEntityType: 'canvas',
           relatedEntityId: canvasId,
-          // actionUrl removed - frontend will construct from data (canvasId, blockId) using CanvasRedirectPage
+          actionUrl,
           metadata: {
             canvasId,
             canvasTitle,
             senderId,
             senderName,
+            workspaceId,
             ...(blockId ? { blockId } : {}),
           },
         });

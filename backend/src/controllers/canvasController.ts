@@ -368,6 +368,7 @@ createCanvas = async (req: Request, res: Response): Promise<void> => {
           canvasTitle ?? 'Canvas',
           userId,
           senderName,
+          req.user?.workspaceId ?? '',
           channelName,
           blockId,
         );
