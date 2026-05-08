@@ -230,6 +230,14 @@ const envSchema = Joi.object({
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
+  // Docling Configuration
+  DOCLING_ENABLED: Joi.boolean().default(false),
+  DOCLING_BASE_URL: Joi.string().uri().allow('').default(''),
+  DOCLING_HEALTH_ENDPOINT: Joi.string().default(''),
+  DOCLING_PROCESS_ENDPOINT: Joi.string().default(''),
+  DOCLING_TIMEOUT_MS: Joi.number().default(240000),
+  DOCLING_HEALTH_CACHE_TTL_MS: Joi.number().default(30000),
+  DOCLING_DO_OCR: Joi.boolean().default(true),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -526,5 +534,14 @@ export const config = {
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
     batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
+  },
+  docling: {
+    enabled: envVars.DOCLING_ENABLED as boolean,
+    baseUrl: envVars.DOCLING_BASE_URL as string,
+    healthEndpoint: envVars.DOCLING_HEALTH_ENDPOINT as string,
+    processEndpoint: envVars.DOCLING_PROCESS_ENDPOINT as string,
+    timeoutMs: envVars.DOCLING_TIMEOUT_MS as number,
+    healthCacheTtlMs: envVars.DOCLING_HEALTH_CACHE_TTL_MS as number,
+    doOcr: envVars.DOCLING_DO_OCR as boolean,
   },
 };

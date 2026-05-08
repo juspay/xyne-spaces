@@ -6,6 +6,7 @@ import { pollingService } from './workflows/services/polling-service'
 import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
+import { vespaFileWorker } from './workers/vespaFileWorker'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
@@ -54,6 +55,7 @@ class WorkerService {
       }
 
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
+      const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
       const activityClassificationEnabled =
         process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
@@ -92,6 +94,11 @@ class WorkerService {
         logger.info('Starting call timeout worker service...')
         await callTimeoutWorker.startWorker()
       } 
+
+      if (vespaFileWorkerEnabled) {
+        await vespaFileWorker.start()
+      }
+
       if(workflowType){
         logger.info(`WORKFLOW_TYPE is set to ${workflowType}. Only starting workers compatible with this workflow type.`)
         await Promise.all([
@@ -215,6 +222,7 @@ class WorkerService {
       logger.info('Shutting down worker service...')
       await shutdownOpenCode()
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
+      const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
       const activityClassificationEnabled =
         process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
@@ -238,7 +246,11 @@ class WorkerService {
         await notificationWorker.shutdown()
         await callTimeoutWorker.shutdown()
         await redisService.disconnect()
-      }  
+      }
+
+      if (vespaFileWorkerEnabled) {
+        await vespaFileWorker.shutdown()
+      }
       if(workflowType){
         logger.info(`WORKFLOW_TYPE is set to ${workflowType}. Only stopping workers compatible with this workflow type.`)
         await Promise.all([

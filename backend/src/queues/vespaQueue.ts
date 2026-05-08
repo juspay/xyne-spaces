@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger';
 import { VespaJob } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { registerVespaBackfillQueueMetrics } from '@/services/otel/vespaMetrics';
+import { fileSchema } from '@/vespa/src/types';
 
 class VespaQueue {
 	private queues: Map<string, Bull.Queue<VespaJob>> = new Map();
@@ -33,7 +34,7 @@ class VespaQueue {
 				})
 			};
 
-			const queueNames = (process.env.VESPA_QUEUE_NAMES || 'vespa-ingestion')
+			const queueNames = (process.env.VESPA_QUEUE_NAMES || 'vespa-ingestion,vespa-files')
 				.split(',')
 				.map(n => n.trim())
 				.filter(Boolean);
@@ -87,26 +88,43 @@ class VespaQueue {
 
 	}
 
+	/**
+	 * Determine the target queue based on schema type
+	 * File schemas go to vespa-files queue, everything else goes to vespa-ingestion
+	 */
+	private getTargetQueueName(schema: string): string {
+		// File schemas (files, attachments, etc.) go to dedicated file queue
+		if (schema === fileSchema) {
+			return process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
+		}
+		// All other schemas (messages, tickets, etc.) go to default ingestion queue
+		return 'vespa-ingestion';
+	}
 
 	/**
-	 * Add a job to the queue
+	 * Add a job to the appropriate queue based on schema type
 	 */
-	async addJob(vespaJob: VespaJob): Promise<Bull.Job<VespaJob>[]> {
+	async addJob(vespaJob: VespaJob): Promise<Bull.Job<VespaJob>> {
 		if (this.queues.size === 0 || !this.isInitialized) {
 			throw new Error('Vespa queue not initialized Properly');
 		}
 
 		const { schema, jobType, docId } = vespaJob;
 		try {
+			const targetQueueName = this.getTargetQueueName(schema as string);
+			const targetQueue = this.queues.get(targetQueueName);
+
+			if (!targetQueue) {
+				throw new Error(`Target queue '${targetQueueName}' not found. Available queues: ${[...this.queues.keys()].join(', ')}`);
+			}
+
 			const jobData: VespaJob = vespaJob;
 			const jobOpts = { priority: jobType === 'delete' ? 1 : 5 };
 
-			const jobs = await Promise.all(
-				[...this.queues.values()].map(q => q.add(`vespa-${schema}`, jobData, jobOpts))
-			);
+			const job = await targetQueue.add(`vespa-${schema}`, jobData, jobOpts);
 
-			logger.info(`Queue vespa ingestion job successfully ${schema}/${jobType}/${docId}`)
-			return jobs;
+			logger.info(`Queued ${schema} job to ${targetQueueName}: ${schema}/${jobType}/${docId}`);
+			return job;
 		} catch (error) {
 			logger.error(
 				`Failed to add Vespa job: ${schema}/${jobType}/${docId}`,
