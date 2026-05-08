@@ -100,6 +100,9 @@ export function invitationEmailHtml({
         Or copy and paste this link into your browser:
         <a href="${invitationLink}">${invitationLink}</a>
       </p>
+      <p style="margin-top: 24px; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+        Download the app from <a href="https://spaces.xyne.juspay.net/apps/downloads" style="color: #6366f1;">https://spaces.xyne.juspay.net/apps/downloads</a>
+      </p>
     </div>
     <div class="footer">
       <p>This invitation was sent by Xyne Spaces.<br>If you weren't expecting this email, you can safely ignore it.</p>

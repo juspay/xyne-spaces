@@ -52,7 +52,7 @@ export class InvitationController {
         to: email,
         inviterName: req.user?.name || 'A team member',
         workspaceName: invitation.workspace?.name || 'the workspace',
-        invitationLink: `${config.frontendUrl}/invite?workspaceId=${workspaceId}&invitationId=${invitation.invitationId || invitation.id}`,
+        invitationLink: `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspaceId}&invitationId=${invitation.invitationId || invitation.id}`)}`,
         invitationId: invitation.invitationId || invitation.id,
       });
 
@@ -346,7 +346,7 @@ export class InvitationController {
         to: ownerEmail.trim().toLowerCase(),
         inviterName: req.user?.name ?? 'Administrator',
         workspaceName: workspaceName.trim(),
-        invitationLink: `${config.frontendUrl}/invite?workspaceId=${workspace.id}&invitationId=${invitationId}`,
+        invitationLink: `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspace.id}&invitationId=${invitationId}`)}`,
         invitationId,
       });
 
