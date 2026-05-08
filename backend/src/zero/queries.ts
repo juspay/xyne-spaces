@@ -1045,6 +1045,25 @@ export const queries = defineQueries({
     },
   ),
 
+  userRecordings: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ args: { limit, start } }) => {
+      let query = zql.calls
+        .where('callType', CallType.HEADLESS)
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+
+      return query.limit(limit);
+    },
+  ),
+
   recurringSeriesById: defineQuery(
     z.object({ seriesId: z.string() }),
     ({ args: { seriesId } }) => {

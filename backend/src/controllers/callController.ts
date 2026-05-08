@@ -653,12 +653,11 @@ export class CallController {
 
   /**
    * GET /api/calls/recordings
-   * Get all HEADLESS recordings for the current user, sorted by newest first
+   * Get HEADLESS recordings for the current user, sorted by newest first.
+   * Supports cursor-based pagination via query params: limit, cursor (opaque base64 token)
    */
   getRecordings = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const cursorStr = req.query.cursor as string;
 
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -666,54 +665,62 @@ export class CallController {
     }
 
     try {
-      // Find all headless recordings
-      let recordings = await repositories.calls.findByUserAndType(userId, 'HEADLESS' as CallType);
-      recordings.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-      
-      // Apply cursor pagination
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+      const cursorStr = req.query.cursor as string | undefined;
+
+      let cursor: { startedAt: Date; id: string } | undefined;
       if (cursorStr) {
-        const cursorIndex = recordings.findIndex(c => c.id === cursorStr);
-        if (cursorIndex >= 0) {
-          recordings = recordings.slice(cursorIndex + 1);
+        try {
+          const decoded = Buffer.from(cursorStr, 'base64').toString('utf-8');
+          const pipeIdx = decoded.lastIndexOf('|');
+          if (pipeIdx < 0) throw new Error('invalid format');
+          const startedAt = new Date(decoded.slice(0, pipeIdx));
+          const id = decoded.slice(pipeIdx + 1);
+          if (isNaN(startedAt.getTime()) || !id) throw new Error('invalid date or id');
+          cursor = { startedAt, id };
+        } catch {
+          res.status(400).json({ success: false, error: 'Invalid cursor' });
+          return;
         }
       }
-      
-      // Apply limit
-      const hasMore = recordings.length > limit;
-      recordings = recordings.slice(0, limit);
-      const nextCursor = recordings.length > 0 && hasMore ? recordings[recordings.length - 1].id : null;
 
-      // Map to response format and fetch messageIds for each head message
-      const response = await Promise.all(recordings
-        .map(async (call) => {
-          let messageId: string | null = null;
-          try {
-            // Find the matching head message using repository method
-            const callMessage = await repositories.messages.findHeadMessageByCallId(call.externalId);
-            messageId = callMessage?.messageId || null;
-          } catch (e) {
-            logger.warn(`Failed to find head message for call ${call.externalId}`);
-          }
+      const { calls, nextCursor: nextCursorObj } = await repositories.calls.findByUserAndType(
+        userId,
+        'HEADLESS' as CallType,
+        { limit, cursor }
+      );
 
-          const recordingAttachment = await repositories.messageAttachments.findRecordingByCallId(call.externalId).catch(() => null);
+      const nextCursor = nextCursorObj
+        ? Buffer.from(`${nextCursorObj.startedAt.toISOString()}|${nextCursorObj.id}`).toString('base64')
+        : null;
 
-          return {
-            id: call.id,
-            externalId: call.externalId,
-            title: call.title || 'Untitled Recording',
-            startedAt: call.startedAt,
-            endedAt: call.endedAt,
-            durationMs: call.endedAt
-              ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
-              : null,
-            hasTranscript: !!call.transcript,
-            hasSummary: !!call.aiSummary,
-            hasRecording: !!recordingAttachment,
-            messageId,
-          };
-        }));
+      // Read messageId and recording status directly from the Call row —
+      // no extra queries to messages or message_attachments needed.
+      const recordings = calls.map((call) => {
+        const metadata = call.metadata as { systemMessageId?: string } | null;
 
-      res.json({ success: true, recordings: response, nextCursor, hasMore });
+        return {
+          id: call.id,
+          externalId: call.externalId,
+          title: call.title || 'Untitled Recording',
+          startedAt: call.startedAt,
+          endedAt: call.endedAt,
+          durationMs: call.endedAt
+            ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
+            : null,
+          hasTranscript: !!call.transcript,
+          hasSummary: !!call.aiSummary,
+          hasRecording: !!call.recordingUrl,
+          messageId: metadata?.systemMessageId || null,
+        };
+      });
+
+      res.json({
+        success: true,
+        recordings,
+        nextCursor,
+        hasMore: nextCursor !== null,
+      });
     } catch (error) {
       logger.error('Failed to fetch recordings:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch recordings' });

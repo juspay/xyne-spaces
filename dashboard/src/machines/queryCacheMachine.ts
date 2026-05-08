@@ -8,8 +8,10 @@ export {
   queryCacheActor,
   getChannelConversationsQueryHash,
   getCallHistoryQueryHash,
+  getRecordingsQueryHash,
   FINGERPRINT_FIELD,
   CALL_HISTORY_KEY,
+  RECORDINGS_KEY,
 } from '@xyne/shared/machines';
 
 export type {
@@ -18,6 +20,8 @@ export type {
   QueryCacheContext,
   QueryCacheEvent,
   CallHistoryState,
+  RecordingEntry,
+  RecordingsState,
 } from '@xyne/shared/machines';
 
 // Dashboard-specific call history types (used by usePaginatedCalls)

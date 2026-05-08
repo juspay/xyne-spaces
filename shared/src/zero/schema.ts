@@ -1554,6 +1554,7 @@ export const callTable = table('calls')
     recurrenceRule: string().optional(),
     instanceDate: number().optional(),
     recordingEnabled: boolean(),
+    recordingUrl: string().optional(),
     transcript: string().optional(),
     aiSummary: string().optional(),
     startedAt: number(),

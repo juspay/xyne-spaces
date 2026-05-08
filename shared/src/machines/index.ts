@@ -3,10 +3,12 @@ export {
   queryCacheActor,
   getChannelConversationsQueryHash,
   getCallHistoryQueryHash,
+  getRecordingsQueryHash,
   setupQueryCachePersistence,
   hydrateQueryCacheFromStorage,
   FINGERPRINT_FIELD,
   CALL_HISTORY_KEY,
+  RECORDINGS_KEY,
 } from './queryCacheMachine.js';
 
 export type {
@@ -15,6 +17,8 @@ export type {
   QueryCacheContext,
   QueryCacheEvent,
   CallHistoryState,
+  RecordingEntry,
+  RecordingsState,
 } from './queryCacheMachine.js';
 
 export {
