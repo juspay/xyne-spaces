@@ -10,7 +10,6 @@ import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketsScreen from './TicketsScreen/TicketScreen';
 import TicketView from '../components/Tickets/TicketView/TicketView';
 import WorkflowScreen from './WorkflowScreen/WorkflowScreen';
-import VSCodeWorkspaceScreen from './VSCodeWorkspaceScreen/VSCodeWorkspaceScreen';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
@@ -302,13 +301,12 @@ const AppRoot = (): ReactElement => {
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
 
-  // Get current location to check if we're on onboarding or vscode
+  // Get current location to check if we're on onboarding
   const location = useLocation();
 
   // Initialize activity tracking
   useActivityTracker(location.pathname);
   const isOnboarding = location.pathname.endsWith('/onboarding');
-  const isOnVSCode = location.pathname.endsWith('/vscode');
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -497,16 +495,7 @@ const AppRoot = (): ReactElement => {
                       <Panel ref={xyneAILeftPanelRef} defaultSize={65}>
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
-                          {/* VSCode panel - always mounted, visibility controlled by route */}
-                          <div
-                            className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
-                          >
-                            <VSCodeWorkspaceScreen />
-                          </div>
-                          {/* Regular content - hidden when on VSCode route */}
-                          <main
-                            className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
-                          >
+                          <main className='flex-1 no-scrollbar overflow-auto'>
                             <EditWarningModal />
                             <Outlet />
                           </main>
@@ -539,16 +528,7 @@ const AppRoot = (): ReactElement => {
                       <Panel ref={browserPanelLeftRef} defaultSize={65}>
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
-                          {/* VSCode panel - always mounted, visibility controlled by route */}
-                          <div
-                            className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
-                          >
-                            <VSCodeWorkspaceScreen />
-                          </div>
-                          {/* Regular content - hidden when on VSCode route */}
-                          <main
-                            className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
-                          >
+                          <main className='flex-1 no-scrollbar overflow-auto'>
                             <EditWarningModal />
                             <Outlet />
                           </main>
@@ -572,16 +552,7 @@ const AppRoot = (): ReactElement => {
                       className={`flex flex-1 overflow-hidden ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                     >
                       <AppSidebar />
-                      {/* VSCode panel - always mounted, visibility controlled by route */}
-                      <div
-                        className={`flex-1 no-scrollbar min-[500px]:p-2 overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
-                      >
-                        <VSCodeWorkspaceScreen />
-                      </div>
-                      {/* Regular content - hidden when on VSCode route */}
-                      <main
-                        className={`flex-1 no-scrollbar min-[500px]:p-2 overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
-                      >
+                      <main className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'>
                         <EditWarningModal />
                         <Outlet />
                       </main>
@@ -599,16 +570,7 @@ const AppRoot = (): ReactElement => {
                       <Panel ref={leftPanelRef} defaultSize={50}>
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
-                          {/* VSCode panel - always mounted, visibility controlled by route */}
-                          <div
-                            className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
-                          >
-                            <VSCodeWorkspaceScreen />
-                          </div>
-                          {/* Regular content - hidden when on VSCode route */}
-                          <main
-                            className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
-                          >
+                          <main className='flex-1 no-scrollbar overflow-auto'>
                             <EditWarningModal />
                             <Outlet />
                           </main>
@@ -1060,10 +1022,6 @@ export const router = createBrowserRouter([
                     ],
                   },
                 ],
-              },
-              {
-                path: 'vscode',
-                element: <VSCodeWorkspaceScreen />,
               },
               {
                 path: 'browser',

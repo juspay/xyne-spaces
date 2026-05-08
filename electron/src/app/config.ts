@@ -4,18 +4,6 @@
 
 const { APP_ENV, SENTRY_DSN } = require('../../package.json');
 
-export interface CodeServerConfig {
-  version: string;
-  defaultPort: number;
-  portRangeStart: number;
-  portRangeEnd: number;
-  dataDir: string;
-  binaryDir: string;
-  authType: 'none' | 'password';
-  useLocalSettings: boolean;        // Use local VS Code settings instead of isolated
-  xyneSpacesDir: string;            // Folder name for all repos (under userData)
-}
-
 export interface AppConfig {
   BACKEND_URL: string;
   MTLS_BACKEND_URL: string;
@@ -26,7 +14,7 @@ export interface AppConfig {
   DEEP_LINK_PROTOCOL: string;
   USER_DATA_SUFFIX: string;         // Appended to userData dir to isolate flavors
   APP_NAME: string;
-  APP_CONFIG: string;            
+  APP_CONFIG: string;
   APP_ID: string;
   SENTRY_DSN?: string;
   window: {
@@ -42,7 +30,6 @@ export interface AppConfig {
   RELEASE_CONFIG_URL: string;
   UI_ZIP_URL: string;
   uiUpdateCheckIntervalMs: number;
-  codeServer: CodeServerConfig;
   agentInteract: {
     endpoint: string;
     method: string;
@@ -73,17 +60,6 @@ const devConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'http://localhost:3456',
   UI_ZIP_URL: 'http://localhost:8888/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 60 * 1000, // 1 minute for dev
-  codeServer: {
-    version: '4.107.0',
-    defaultPort: 7080,
-    portRangeStart: 7080,
-    portRangeEnd: 7280,
-    dataDir: 'code-server-data',
-    binaryDir: 'code-server',
-    authType: 'none',
-    useLocalSettings: true,
-    xyneSpacesDir: 'xyne-spaces',
-  },
   agentInteract: {
     endpoint: "/api/query",
     method: "POST"
@@ -115,17 +91,6 @@ const prodConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
-  codeServer: {
-    version: '4.107.0',
-    defaultPort: 7080,
-    portRangeStart: 7080,
-    portRangeEnd: 7280,
-    dataDir: 'code-server-data',
-    binaryDir: 'code-server',
-    authType: 'none',
-    useLocalSettings: true,
-    xyneSpacesDir: 'xyne-spaces',
-  },
   agentInteract: {
     endpoint: "/api/query",
     method: "POST"
@@ -157,17 +122,6 @@ const sandboxConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
-  codeServer: {
-    version: '4.107.0',
-    defaultPort: 7080,
-    portRangeStart: 7080,
-    portRangeEnd: 7280,
-    dataDir: 'code-server-data',
-    binaryDir: 'code-server',
-    authType: 'none',
-    useLocalSettings: true,
-    xyneSpacesDir: 'xyne-spaces',
-  },
   agentInteract: {
     endpoint: "/api/query",
     method: "POST"

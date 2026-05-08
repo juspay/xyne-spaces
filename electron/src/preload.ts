@@ -161,59 +161,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File Management APIs
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
 
-  // Code Server APIs
-  codeServer: {
-    start: () => ipcRenderer.invoke('code-server:start'),
-    stop: () => ipcRenderer.invoke('code-server:stop'),
-    restart: () => ipcRenderer.invoke('code-server:restart'),
-    getStatus: () => ipcRenderer.invoke('code-server:status'),
-    getUrl: () => ipcRenderer.invoke('code-server:get-url'),
-    downloadBinary: () => ipcRenderer.invoke('code-server:download-binary'),
-    isBinaryInstalled: () => ipcRenderer.invoke('code-server:is-binary-installed'),
-    onStatusChange: (callback: (data: { isRunning: boolean; url: string | null }) => void) => {
-      const listener = (_event: unknown, data: { isRunning: boolean; url: string | null }) => callback(data);
-      ipcRenderer.on('code-server:status-change', listener);
-      return () => ipcRenderer.removeListener('code-server:status-change', listener);
-    },
-    // Git workspace APIs (for workflow executions)
-    cloneBranch: (repoUrl: string, branch: string, commitHash: string | undefined, executionId: string) =>
-      ipcRenderer.invoke('code-server:clone-branch', repoUrl, branch, commitHash, executionId),
-    pullUpdates: (executionId: string, branch: string, repoUrl: string) =>
-      ipcRenderer.invoke('code-server:pull-updates', executionId, branch, repoUrl),
-    getWorkspacePath: (executionId: string) =>
-      ipcRenderer.invoke('code-server:get-workspace-path', executionId),
-    workspaceExists: (executionId: string) =>
-      ipcRenderer.invoke('code-server:workspace-exists', executionId),
-    getUrlWithFolder: (folderPath: string) =>
-      ipcRenderer.invoke('code-server:get-url-with-folder', folderPath),
-    openFolderDialog: () =>
-      ipcRenderer.invoke('code-server:open-folder-dialog'),
-    deleteWorkspace: (executionId: string) =>
-      ipcRenderer.invoke('code-server:delete-workspace', executionId),
-    listWorkspaces: () =>
-      ipcRenderer.invoke('code-server:list-workspaces'),
-
-    // Xyne-spaces repo management APIs (for ticket IDE integration)
-    getXyneSpacesDir: () =>
-      ipcRenderer.invoke('code-server:get-xyne-spaces-dir'),
-    listRepos: () =>
-      ipcRenderer.invoke('code-server:list-repos'),
-    getRepoPath: (repoName: string) =>
-      ipcRenderer.invoke('code-server:get-repo-path', repoName),
-    getRepoStatus: (repoPath: string) =>
-      ipcRenderer.invoke('code-server:get-repo-status', repoPath),
-    stashChanges: (repoPath: string) =>
-      ipcRenderer.invoke('code-server:stash-changes', repoPath),
-    checkoutBranch: (repoPath: string, branchName: string, baseBranch?: string) =>
-      ipcRenderer.invoke('code-server:checkout-branch', repoPath, branchName, baseBranch),
-    prepareForTicket: (repoUrl: string, baseBranch: string, ticketBranchName: string) =>
-      ipcRenderer.invoke('code-server:prepare-for-ticket', repoUrl, baseBranch, ticketBranchName),
-    hasActiveSessions: () =>
-      ipcRenderer.invoke('code-server:has-active-sessions'),
-    getActiveSessionCount: () =>
-      ipcRenderer.invoke('code-server:get-active-session-count'),
-  },
-
   // Docs Publish APIs
   docsPublish: {
     getStatus: () =>

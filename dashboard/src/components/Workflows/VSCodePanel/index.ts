@@ -1,1 +1,0 @@
-export { VSCodePanel } from './VSCodePanel';

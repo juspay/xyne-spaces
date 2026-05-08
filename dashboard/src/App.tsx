@@ -17,9 +17,6 @@ import {
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTheme } from './hooks/useTheme';
 import { ShortcutsProvider } from './shortcuts';
-import { CodeServerProvider } from './contexts/CodeServerContext';
-import { VSCodeProvider } from './contexts/VSCodeContext';
-import { WorkflowVSCodeOverlay } from './components/Workflows/VSCodePanel/WorkflowVSCodeOverlay';
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
@@ -100,59 +97,54 @@ const App = (): ReactElement => {
         <KeyboardProvider>
           <AuthProvider>
             <AnalyticsProvider>
-              <CodeServerProvider>
-                <VSCodeProvider>
-                  <ThemeProvider
-                    foundationTokens={
-                      theme === 'midnight' ? XYNE_DARK_FOUNDATION_TOKENS : XYNE_FOUNDATION_TOKENS
-                    }
-                    componentTokens={
-                      theme === 'midnight'
-                        ? XYNE_THEME_COMPONENT_TOKENS_DARK
-                        : XYNE_THEME_COMPONENT_TOKENS
-                    }
-                    theme={theme === 'midnight' ? 'dark' : 'light'}
-                  >
-                    <ShortcutsProvider>
-                      <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
-                        <RouterProvider router={router}></RouterProvider>
-                      </main>
-                      <Toaster
-                        position='top-right'
-                        richColors
-                        closeButton
-                        className='visual-regression-hide'
-                        toastOptions={{
-                          style: {
-                            alignItems: 'flex-start',
-                            background: '#000000',
-                            color: '#ffffff',
-                            border: '1px solid #27272a',
-                          },
-                          classNames: {
-                            toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
-                            icon: 'mt-1',
-                            title: '!text-white !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
-                            description: '!text-white !opacity-80',
+              <ThemeProvider
+                foundationTokens={
+                  theme === 'midnight' ? XYNE_DARK_FOUNDATION_TOKENS : XYNE_FOUNDATION_TOKENS
+                }
+                componentTokens={
+                  theme === 'midnight'
+                    ? XYNE_THEME_COMPONENT_TOKENS_DARK
+                    : XYNE_THEME_COMPONENT_TOKENS
+                }
+                theme={theme === 'midnight' ? 'dark' : 'light'}
+              >
+                <ShortcutsProvider>
+                  <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
+                    <RouterProvider router={router}></RouterProvider>
+                  </main>
+                  <Toaster
+                    position='top-right'
+                    richColors
+                    closeButton
+                    className='visual-regression-hide'
+                    toastOptions={{
+                      style: {
+                        alignItems: 'flex-start',
+                        background: '#000000',
+                        color: '#ffffff',
+                        border: '1px solid #27272a',
+                      },
+                      classNames: {
+                        toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
+                        icon: 'mt-1',
+                        title: '!text-white !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
+                        description: '!text-white !opacity-80',
 
-                            actionButton: '!bg-white !text-black hover:!bg-zinc-200 !mt-8',
-                            cancelButton: '!bg-zinc-800 !text-white hover:!bg-zinc-700 !mt-8',
+                        actionButton: '!bg-white !text-black hover:!bg-zinc-200 !mt-8',
+                        cancelButton: '!bg-zinc-800 !text-white hover:!bg-zinc-700 !mt-8',
 
-                            closeButton:
-                              '!absolute !right-3 !top-5 !left-auto !bg-transparent !opacity-100 !text-white hover:!opacity-50 rounded-md z-10',
+                        closeButton:
+                          '!absolute !right-3 !top-5 !left-auto !bg-transparent !opacity-100 !text-white hover:!opacity-50 rounded-md z-10',
 
-                            success: '!text-green-500 !border-green-100',
-                            error: '!text-red-500 !border-red-100',
-                            warning: '!text-yellow-500 !border-yellow-100',
-                            info: '!text-blue-500 !border-blue-100',
-                          },
-                        }}
-                      />
-                      <WorkflowVSCodeOverlay />
-                    </ShortcutsProvider>
-                  </ThemeProvider>
-                </VSCodeProvider>
-              </CodeServerProvider>
+                        success: '!text-green-500 !border-green-100',
+                        error: '!text-red-500 !border-red-100',
+                        warning: '!text-yellow-500 !border-yellow-100',
+                        info: '!text-blue-500 !border-blue-100',
+                      },
+                    }}
+                  />
+                </ShortcutsProvider>
+              </ThemeProvider>
             </AnalyticsProvider>
           </AuthProvider>
         </KeyboardProvider>
