@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactElement } from 'react';
+import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
 import { useEditor, EditorContent, ReactNodeViewRenderer, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -64,6 +64,7 @@ interface EmailEditorProps {
   disabled?: boolean;
   readOnly?: boolean;
   className?: string;
+  footerSlot?: ReactNode;
 }
 
 export const EmailEditor = ({
@@ -77,6 +78,7 @@ export const EmailEditor = ({
   disabled = false,
   readOnly = false,
   className = '',
+  footerSlot,
 }: EmailEditorProps): ReactElement => {
   const cb = useRef({ onChange, onAddFiles, onSendShortcut, onBlur, onEditorReady });
   cb.current = { onChange, onAddFiles, onSendShortcut, onBlur, onEditorReady };
@@ -185,8 +187,11 @@ export const EmailEditor = ({
       {/* Padding lives on the ProseMirror element (via editorProps class)
           so clicks anywhere in the visible area land on the editor and
           focus it natively — no wrapper-level click handler needed. */}
-      <div className='flex-1 min-h-0 overflow-y-auto text-sm cursor-text [&>div]:h-full'>
-        <EditorContent editor={editor} />
+      <div className='flex-1 min-h-0 overflow-y-auto text-sm cursor-text'>
+        <div className='flex flex-col min-h-full'>
+          <EditorContent editor={editor} className='flex-1' />
+          {footerSlot}
+        </div>
       </div>
     </div>
   );
