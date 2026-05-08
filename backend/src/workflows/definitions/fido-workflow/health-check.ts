@@ -127,7 +127,7 @@ async function checkDbEntry(): Promise<HealthCheckResult> {
         email: testEmail,
         providerUserId: testEmail, // Must be unique
         workspace: { connect: { id: 'health-check-workspace' } },
-        orgMemberId: orgMember.memberId,
+        orgMember: { connect: { memberId: orgMember.memberId } },
       },
     });
     createdUserId = createdUser.id;

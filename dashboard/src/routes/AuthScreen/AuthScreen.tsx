@@ -154,7 +154,7 @@ const AuthScreen = (): ReactElement => {
                   <h2 className='text-lg lg:text-xl font-medium md:font-semibold text-foreground'>
                     Log in to Xyne Spaces
                   </h2>
-                  <p className='text-xs sm:text-sm md:text-sm text-muted-foreground'>
+                  <p className='text-xs sm:text-sm md:text-sm text-muted-foreground pb-4'>
                     {isLoading
                       ? 'Signing you in...'
                       : 'Communicate, collaborate & 10x your daily productivity'}

@@ -1011,6 +1011,7 @@ model User {
   installedAppsFor          InstalledApps[]        @relation("InstalledAppsUser")
   incomingWebhooksCreated   AppIncomingWebhook[]     @relation("AppIncomingWebhookCreatedBy")
   incomingWebhooksRevoked   AppIncomingWebhook[]     @relation("AppIncomingWebhookRevokedBy")
+  orgMember                 OrgMember?              @relation(fields: [orgMemberId], references: [memberId])
 
   @@unique([providerUserId, workspaceId])
   @@unique([email, workspaceId])
@@ -1414,6 +1415,7 @@ model OrgMember {
 
   // Relations
   organization Organization @relation(fields: [orgId], references: [orgId])
+  users        User[]
 
   @@index([orgId])
   @@index([orgId, joinedAt])

@@ -123,7 +123,11 @@ export class UserSessionService {
       return await this.prisma.userSession.findUnique({
         where: { id: sessionId },
         include: {
-          user: true,
+          user: {
+            include: {
+              orgMember: true,
+            },
+          },
         },
       });
     } catch (error) {

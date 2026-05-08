@@ -42,7 +42,7 @@ export class AuthMiddleware {
     // Get workspace ID from header or last_workspace cookie
     const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
     const workspaceToken = workspaceId ? req.cookies?.[`xyne_ws_${workspaceId}_token`] : undefined;
-    const workspaceSession = workspaceId ? req.cookies?.[`xyne_session`] : undefined;
+    const workspaceSession = req.cookies?.['user_session_id'];
     
     // For logging - use workspace session if available
     const requestSessionId = workspaceSession;

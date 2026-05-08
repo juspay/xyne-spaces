@@ -308,7 +308,7 @@ export class TestAuthSeeder {
             authProvider: AuthProvider.GOOGLE,
             workspace: { connect: { id: workspaceId } },
             role: 'MEMBER',
-            orgMemberId: orgMember.memberId,
+            orgMember: { connect: { memberId: orgMember.memberId } },
           },
         });
       }

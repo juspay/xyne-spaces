@@ -74,10 +74,6 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
     }
 
     if (participant.userId === this.ctx.userID) {
-      throw new MutationACLError('Channel participant delete failed: cannot delete participants in archived channel', 'channel_participants');
-    }
-
-    if (participant.userId === this.ctx.userID) {
       if (participant.role === ChannelRole.ADMIN) {
         const otherAdmins = await tx.run(zql.channel_participants
           .where('channelId', '=', participant.channelId)

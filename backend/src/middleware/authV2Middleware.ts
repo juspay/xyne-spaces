@@ -52,11 +52,7 @@ class AuthV2Middleware {
     }
 
     // Backward compat: user_session_id cookie (for old dashboard versions)
-    if (req.cookies?.user_session_id) {
-      return req.cookies.user_session_id;
-    }
-
-    return req.cookies?.xyne_session;
+    return req.cookies?.user_session_id;
   }
 
   /**

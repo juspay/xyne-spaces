@@ -76,7 +76,7 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     
     // For restore (isDeleted: false), only allow updating specific columns
     if (isRestore) {
-      const allowedRestoreKeys = ['id', 'isDeleted', 'isClosed', 'lastViewedAt', 'updatedAt'];
+      const allowedRestoreKeys = ['id', 'isDeleted', 'isClosed', 'lastViewedAt', 'updatedAt', 'unreadCount'];
       const invalidKeys = argsKeys.filter(k => !allowedRestoreKeys.includes(k));
       if (invalidKeys.length > 0) {
         throw new MutationACLError('Channel user status restore failed: invalid keys', 'channel_user_status');
