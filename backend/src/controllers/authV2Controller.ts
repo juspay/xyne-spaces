@@ -32,6 +32,7 @@ type AutoLoginResult = {
 
 export class AuthV2Controller {
   private googleClient: OAuth2Client;
+  private googleClientNew: OAuth2Client | null = null;
   private userService: UserService;
   private userSessionService: UserSessionService;
   private microsoftAuthController: MicrosoftAuthController;
@@ -47,9 +48,23 @@ export class AuthV2Controller {
     }
 
     this.googleClient = new OAuth2Client(clientId, clientSecret);
+
+    const clientIdNew = process.env.GOOGLE_CLIENT_ID_NEW;
+    const clientSecretNew = process.env.GOOGLE_CLIENT_SECRET_NEW;
+    if (clientIdNew && clientSecretNew) {
+      this.googleClientNew = new OAuth2Client(clientIdNew, clientSecretNew);
+    }
+
     this.userService = new UserService();
     this.userSessionService = new UserSessionService();
     this.microsoftAuthController = new MicrosoftAuthController();
+  }
+
+  private getGoogleClient(isNy?: boolean): OAuth2Client {
+    if (isNy && this.googleClientNew) {
+      return this.googleClientNew;
+    }
+    return this.googleClient;
   }
 
   private async ensureSelfDmForUser(
@@ -226,6 +241,8 @@ export class AuthV2Controller {
       const platform = platformQuery || this.detectPlatform(req);
       logger.info(`[${requestId}] Detected platform: ${platform}`);
 
+      const isNy = req.query.isNy === 'true';
+
       const codeVerifier = pkceServiceV2.generateCodeVerifier();
       const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
 
@@ -244,7 +261,7 @@ export class AuthV2Controller {
         } catch (_e) {}
       }
 
-      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo);
+      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo, undefined, isNy);
 
       await pkceServiceV2.storeVerifier(state, codeVerifier);
 
@@ -252,7 +269,7 @@ export class AuthV2Controller {
 
       logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
 
-      const authUrl = this.googleClient.generateAuthUrl({
+      const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
         access_type: 'offline',
         scope: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/calendar.readonly'],
         prompt: 'consent',
@@ -348,7 +365,7 @@ export class AuthV2Controller {
       logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
 
       logger.info(`[${requestId}] Exchanging code for tokens`);
-      const { tokens } = await this.googleClient.getToken({
+      const { tokens } = await this.getGoogleClient(stateData.isNy).getToken({
         code: code as string,
         redirect_uri: redirectUri,
         codeVerifier: codeVerifier,
@@ -366,9 +383,9 @@ export class AuthV2Controller {
       }
 
       logger.info(`[${requestId}] Verifying ID token`);
-      const ticket = await this.googleClient.verifyIdToken({
+      const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
         idToken: id_token,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        audience: stateData.isNy ? process.env.GOOGLE_CLIENT_ID_NEW : process.env.GOOGLE_CLIENT_ID,
       });
 
       const payload = ticket.getPayload();
@@ -677,7 +694,7 @@ export class AuthV2Controller {
       logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
 
       logger.info(`[${requestId}] Exchanging code for tokens`);
-      const { tokens } = await this.googleClient.getToken({
+      const { tokens } = await this.getGoogleClient(stateData.isNy).getToken({
         code,
         redirect_uri: redirectUri,
         codeVerifier: codeVerifier,
@@ -695,9 +712,9 @@ export class AuthV2Controller {
       }
 
       logger.info(`[${requestId}] Verifying ID token`);
-      const ticket = await this.googleClient.verifyIdToken({
+      const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
         idToken: id_token,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        audience: stateData.isNy ? process.env.GOOGLE_CLIENT_ID_NEW : process.env.GOOGLE_CLIENT_ID,
       });
 
       const payload = ticket.getPayload();

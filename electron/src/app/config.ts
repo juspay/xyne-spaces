@@ -35,6 +35,7 @@ export interface AppConfig {
     title: string;
   };
   enableMtls: boolean;
+  loginTempHeader?: boolean;
   useBundledUI: boolean;
   sendLogs: boolean;
   enableOtelMetrics: boolean;
@@ -110,6 +111,7 @@ const prodConfig: AppConfig = {
   useBundledUI: false,
   sendLogs: true,
   enableOtelMetrics: true,
+  loginTempHeader: true,
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod

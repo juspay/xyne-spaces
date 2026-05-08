@@ -32,6 +32,10 @@ const envSchema = Joi.object({
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
   // Email sender configuration (Google OAuth2 via nodemailer)
   GOOGLE_REFRESH_TOKEN: Joi.string().allow('').default(''),
+  // Alternative Google OAuth app (isNy flow)
+  GOOGLE_CLIENT_ID_NEW: Joi.string().allow('').default(''),
+  GOOGLE_CLIENT_SECRET_NEW: Joi.string().allow('').default(''),
+  GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().allow('').default(''),
   JWT_SECRET: Joi.string().required(),
