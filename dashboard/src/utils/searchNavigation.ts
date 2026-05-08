@@ -7,7 +7,7 @@
 import { NavigateFunction } from 'react-router-dom';
 import { DisplaySearchResult } from '../types/search';
 import { channelService } from '../services/Chat/channelService';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, ChannelType } from '@xyne/shared';
 import { toast } from 'sonner';
 import { browserPanelActor } from '../machines/browserPanelMachine';
 import { xyneAIActor } from '../machines/xyneAIMachine';
@@ -20,6 +20,7 @@ import { isXyneOrigin } from './browserPanelPartition';
 interface Channel {
   readonly id: string;
   readonly scopeType: ChannelScopeType;
+  readonly type?: ChannelType;
   readonly participants?: ReadonlyArray<{ readonly userId: string }>;
 }
 
@@ -55,7 +56,7 @@ export const navigateToSearchResult = async (
       break;
 
     case 'ticket':
-      navigateToTicket(result, navigate);
+      navigateToTicket(result, navigate, channelData);
       break;
 
     case 'attachment':
@@ -200,19 +201,40 @@ export const navigateToMail = (result: DisplaySearchResult, navigate: NavigateFu
 /**
  * Navigate to a ticket
  *
- * Navigate to minimized view (thread view) with ticket details
+ * Routes to Support view for EMAIL channel tickets, Chat view for board tickets
  */
-export const navigateToTicket = (result: DisplaySearchResult, navigate: NavigateFunction): void => {
+export const navigateToTicket = (
+  result: DisplaySearchResult,
+  navigate: NavigateFunction,
+  channelData?: Channel[],
+): void => {
   const ticketId = result.searchContext?.ticketId || result.id;
   const channelId = result.searchContext?.channelId;
   const conversationId = result.searchContext?.conversationId;
+  const xyneId = result.searchContext?.xyneId;
 
-  if (!channelId || !conversationId) {
-    toast.error('Cannot navigate to ticket: missing channel or conversation information');
+  if (!channelId) {
+    toast.error('Cannot navigate to ticket: missing channel information');
     return;
   }
 
-  // Navigate to minimized view (thread view) with details tab
+  // Lookup channel to determine type
+  const channel = channelData?.find(c => c.id === channelId);
+
+  // If EMAIL channel (Support/Desk ticket) AND has xyneId → Support view
+  if (channel?.type === ChannelType.EMAIL && xyneId) {
+    void navigate(`/support/${channelId}/${xyneId}`, {
+      state: { conversationId, ticketId },
+    });
+    return;
+  }
+
+  // Board ticket OR fallback → Chat view
+  if (!conversationId) {
+    toast.error('Cannot navigate to ticket: missing conversation information');
+    return;
+  }
+
   void navigate(`/chat/dir/${channelId}/${conversationId}/${ticketId}?selectedTab=details`);
 };
 
