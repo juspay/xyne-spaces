@@ -47,7 +47,7 @@ export const createUser = async (req: Request, res: Response) => {
         providerUserId,
         authProvider: 'API_KEY',
         workspace: { connect: { id: workspaceId } },
-        orgMemberId: orgMember.memberId,
+        orgMember: { connect: { memberId: orgMember.memberId } },
       },
     });
 

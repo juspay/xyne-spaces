@@ -107,7 +107,7 @@ export const findOrCreateUser = async (
       authProvider: AuthProvider.GOOGLE,
       status: isDeactivated ? 'INACTIVE' : 'ACTIVE',
       workspace: { connect: { id: workspaceId } },
-      orgMemberId: orgMember.memberId,
+      orgMember: { connect: { memberId: orgMember.memberId } },
     });
     logger.info('[IngestSlack] User created', { userId: user.id, userEmail });
   }

@@ -98,7 +98,7 @@ export class ApiKeyService {
                 providerUserId: `env_api_${Buffer.from(userEmail).toString('base64')}`,
                 status: 'ACTIVE',
                 workspace: { connect: { id: workspaceId } },
-                orgMemberId: orgMember.memberId,
+                orgMember: { connect: { memberId: orgMember.memberId } },
               }
             });
             logger.info(`Created new user for environment API key: ${userEmail} (${user.id})`);
@@ -346,7 +346,7 @@ export class ApiKeyService {
           providerUserId: `api_${crypto.randomUUID()}`,
           status: UserStatus.ACTIVE,
           workspace: { connect: { id: workspaceId } },
-          orgMemberId: orgMember.memberId,
+          orgMember: { connect: { memberId: orgMember.memberId } },
         }
       });
 

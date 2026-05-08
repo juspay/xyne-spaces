@@ -68,6 +68,31 @@ class ScheduledMessageWorker {
 
     if (!botUser) {
       logger.info(`[SCHEDULED-MESSAGE-WORKER] Creating scheduler bot user: ${botEmail}`);
+
+      // Get workspace to find orgId
+      const workspace = await db.workspace.findUnique({
+        where: { id: channelWorkspaceId },
+        select: { orgId: true },
+      });
+
+      // Ensure bot has an orgMember
+      let orgMember = await db.orgMember.findUnique({
+        where: { email: botEmail },
+        select: { memberId: true },
+      });
+
+      if (!orgMember && workspace?.orgId) {
+        orgMember = await db.orgMember.create({
+          data: {
+            email: botEmail,
+            orgId: workspace.orgId,
+            role: 'MEMBER',
+          },
+          select: { memberId: true },
+        });
+        logger.info(`[SCHEDULED-MESSAGE-WORKER] Created orgMember for bot: ${botEmail}`);
+      }
+
       botUser = await db.user.create({
         data: {
           name: 'Scheduler Bot',
@@ -76,8 +101,8 @@ class ScheduledMessageWorker {
           providerUserId: 'bot_scheduler-bot',
           status: UserStatus.ACTIVE,
           userType: UserType.BOT,
-          orgMemberId: '',
           workspace: { connect: { id: channelWorkspaceId } },
+          ...(orgMember && { orgMember: { connect: { memberId: orgMember.memberId } } }),
           metadata: {
             botId: 'scheduler-bot',
             description: 'Posts scheduled messages to channels',

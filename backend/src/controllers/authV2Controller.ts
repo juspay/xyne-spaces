@@ -493,16 +493,9 @@ export class AuthV2Controller {
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
-        // Use xyne_session cookie (consistent with refreshSession endpoint)
-        if (sessionId) {
-          res.cookie('xyne_session', sessionId, {
-            ...cookieBase,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
-          });
-        }
 
         logger.info(`[${requestId}] Auto-login complete - redirecting to dashboard with cookies`);
-        logger.info(`[${requestId}] Cookies set: xyne_last_workspace=${workspaceId}, xyne_session=${sessionId}, xyne_ws_${workspaceId}_token=<JWT>`);
+        logger.info(`[${requestId}] Cookies set: xyne_last_workspace=${workspaceId}, user_session_id=${sessionId}, xyne_ws_${workspaceId}_token=<JWT>`);
 
         // Include user data and autoLoginWorkspace in redirect
         // Frontend will call loginWorkspace which will find the session from cookies
@@ -550,7 +543,7 @@ export class AuthV2Controller {
       logger.info(`[${requestId}] Refresh session endpoint called`);
 
       // Get session from global session cookie
-      const sessionId = req.cookies?.xyne_session;
+      const sessionId = req.cookies?.user_session_id;
 
       if (!sessionId) {
         logger.warn(`[${requestId}] No session ID cookie found`);
@@ -780,14 +773,7 @@ export class AuthV2Controller {
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
-        if (sessionId) {
-          res.cookie('xyne_session', sessionId, {
-            ...cookieBase,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
-          });
-        }
-
-        logger.info(`[${requestId}] Electron auto-login complete - cookies set: xyne_session`);
+        logger.info(`[${requestId}] Electron auto-login complete - cookies set: user_session_id`);
 
         // Return JSON with workspaces (Electron expects this for renderer to handle)
         res.status(200).json({
@@ -942,6 +928,7 @@ export class AuthV2Controller {
       // Store all Google auth data in one cookie (until workspace selection)
       const customToken = {
         user: googleUserData,
+        provider: 'google',
         refreshToken: refresh_token || null,
         accessToken: access_token || null,
       };
@@ -984,18 +971,13 @@ export class AuthV2Controller {
         });
 
         if (sessionId) {
-          res.cookie('xyne_session', sessionId, {
-            ...cookieBase,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
-          });
-          // Legacy cookie for mobile app backward compatibility
           res.cookie('user_session_id', sessionId, {
             ...cookieBase,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
           });
         }
 
-        logger.info(`[${requestId}] Mobile auto-login complete - cookies set: xyne_session, user_session_id`);
+        logger.info(`[${requestId}] Mobile auto-login complete - cookies set: user_session_id`);
 
         // Return JSON instead of redirect (mobile expects this)
         res.status(200).json({
@@ -1062,7 +1044,7 @@ export class AuthV2Controller {
       logger.info(`[${requestId}] Processing logout`);
 
       // Find and revoke global session
-      const sessionId = req.cookies?.xyne_session;
+      const sessionId = req.cookies?.user_session_id;
       
       if (sessionId) {
         logger.info(`[${requestId}] Revoking session: ${sessionId} for user ${req.user?.email}`);
@@ -1070,7 +1052,7 @@ export class AuthV2Controller {
       }
 
       // Clear global session cookie
-      res.clearCookie('xyne_session', { path: '/' });
+      res.clearCookie('user_session_id', { path: '/' });
       
       // Clear all workspace-specific token cookies (session is now global)
       for (const cookieName of Object.keys(req.cookies || {})) {
@@ -1128,7 +1110,7 @@ export class AuthV2Controller {
 
       // Get pending auth data from cookie (for normal OAuth flow)
       const pendingAuthCookie = req.cookies?.google_access_token;
-      const existingSessionId = req.cookies?.xyne_session || req.cookies?.user_session_id;
+      const existingSessionId = req.cookies?.user_session_id;
       
       let oauthUserData: { email: string; name: string; googleId?: string; providerUserId?: string; picture?: string };
       let provider: string;
@@ -1265,7 +1247,7 @@ export class AuthV2Controller {
       });
 
       if (sessionId) {
-        res.cookie('xyne_session', sessionId, {
+        res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
@@ -1425,9 +1407,9 @@ export class AuthV2Controller {
       });
 
       if (sessionId) {
-        res.cookie('xyne_session', sessionId, {
+        res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000, // 30 days
         });
       }
       
@@ -1530,7 +1512,7 @@ export class AuthV2Controller {
 
       // Get existing session from global session cookie
       // We reuse the same session across workspaces (session belongs to user, not workspace)
-      const sessionId = req.cookies?.xyne_session;
+      const sessionId = req.cookies?.user_session_id;
       
       // Verify session exists and is valid
       let validSessionId: string | null = null;
@@ -1564,7 +1546,7 @@ export class AuthV2Controller {
       
       // Set global session cookie (reusing existing session)
       if (validSessionId) {
-        res.cookie('xyne_session', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+        res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
       }
 
       logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
@@ -1619,7 +1601,7 @@ export class AuthV2Controller {
 
       // Reuse refresh token from current session
       // Get global session cookie
-      const sessionId = req.cookies?.xyne_session;
+      const sessionId = req.cookies?.user_session_id;
       
       const currentSession = sessionId ? await this.userSessionService.getSessionById(sessionId) : null;
 
@@ -1659,7 +1641,7 @@ export class AuthV2Controller {
       
       res.cookie(`xyne_ws_${targetWorkspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
       if (newSessionId) {
-        res.cookie('xyne_session', newSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+        res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
       res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
       res.cookie('is_new_user', 'true', {

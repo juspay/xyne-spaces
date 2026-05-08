@@ -117,7 +117,7 @@ export class UserService {
           name: userData.name,
           picture: userData.picture,
           workspace: { connect: { id: workspaceId } },
-          orgMemberId: orgMember.memberId,
+          orgMember: { connect: { memberId: orgMember.memberId } },
         },
       });
 
@@ -795,7 +795,7 @@ export class UserService {
           authProvider: (userData.authProvider || 'GOOGLE') as AuthProvider,
           workspace: { connect: { id: userData.workspaceId } },
           role,
-          orgMemberId: orgMember.memberId,
+          orgMember: { connect: { memberId: orgMember.memberId } },
         }
       });
 
@@ -879,7 +879,7 @@ export class UserService {
           authProvider: authProvider as AuthProvider,
           workspace: { connect: { id: workspace.id } },
           role: 'OWNER',
-          orgMemberId: orgMember.memberId,
+          orgMember: { connect: { memberId: orgMember.memberId } },
         }
       });
 
@@ -986,7 +986,7 @@ export class UserService {
         authProvider: 'GOOGLE',
         workspace: { connect: { id: workspace.id } },
         role: 'OWNER',
-        orgMemberId: orgMember.memberId,
+        orgMember: { connect: { memberId: orgMember.memberId } },
       },
     });
 
@@ -1028,6 +1028,7 @@ export class UserService {
       'AGENT-TOOLS-MAPPINGS', 'EXTERNAL-STEP-RESPONSE', 'ANALYTICS',
       'USER-MANAGEMENT', 'USERS', 'FORMS', 'SUPPORT', 'PROJECTS',
       'PRODUCT-INSIGHTS', 'LISTPROJECTS', 'CHANNELS', 'CANVASES',
+      'WORKSPACE',
     ];
     try {
       for (const resourceName of ADMIN_RESOURCES) {

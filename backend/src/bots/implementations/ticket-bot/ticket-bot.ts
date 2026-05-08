@@ -520,7 +520,7 @@ Provide a concise but informative summary:`;
             picture: botPicture,
             providerUserId: botId, // Use bot ID as provider user ID
             workspace: { connect: { id: workspaceId } },
-            orgMemberId: orgMember.memberId,
+            orgMember: { connect: { memberId: orgMember.memberId } },
           });
           logger.info(`[TicketBot] Bot user created successfully:`, botUser);
         } else {

@@ -65,12 +65,12 @@ export async function installApp(appId: string, workspaceId: string) {
     const appUser = await repositories.users.create({
       name: app.name,
       email: email,
-      providerUserId: `xyne-app-${appId}`, 
+      providerUserId: `xyne-app-${appId}`,
       authProvider: AuthProvider.API_KEY,
       userType: UserType.APP,
       status: 'ACTIVE',
       workspace: { connect: { id: workspaceId } },
-      orgMemberId: orgMember.memberId,
+      orgMember: { connect: { memberId: orgMember.memberId } },
     });
     logger.info(`[INSTALL-APP] Created new app user: ${appUser.id} for app ${appId}`);
 

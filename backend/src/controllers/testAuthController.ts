@@ -178,7 +178,7 @@ export class TestAuthController {
               authProvider: 'GOOGLE' as AuthProvider,
               workspace: { connect: { id: TestAuthController.testWorkspaceId! } },
               role: 'MEMBER',
-              orgMemberId: orgMember.memberId,
+              orgMember: { connect: { memberId: orgMember.memberId } },
             },
           });
         }
@@ -233,7 +233,7 @@ export class TestAuthController {
                 data: {
                   userId: user.id,
                   resourceId: resource.id,
-                  accessType: AccessType.ADMIN,
+                  accessType: AccessType.ADMIN,                
                 },
               });
               logger.info(`[${requestId}] Granted ADMIN access to resource ${resource.name} for user ${user.email}`);
