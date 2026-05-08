@@ -57,11 +57,11 @@ export const GenericMentionHoverPopover: React.FC<GenericMentionHoverPopoverProp
           </div>
 
           {data.subtitle && (
-            <div className='text-sm text-muted-foreground mb-1'>{data.subtitle}</div>
+            <div className='text-sm text-muted-foreground mb-1 break-words'>{data.subtitle}</div>
           )}
 
           {data.description && (
-            <div className='text-sm text-foreground mb-3'>{data.description}</div>
+            <div className='text-sm text-foreground mb-3 break-words'>{data.description}</div>
           )}
 
           {data.meta && <div className='text-xs text-muted-foreground'>{data.meta}</div>}
