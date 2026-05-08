@@ -604,6 +604,7 @@ export class TicketRepository {
         id: true,
         conversationId: true,
         title: true,
+        workspaceId: true,
       },
     });
   }

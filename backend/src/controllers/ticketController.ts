@@ -1094,7 +1094,7 @@ export class TicketController {
         // TODO: Replace hardcoded values with actual configuration from project/board settings
         const workspace = 'XYNE';
         const repoSlug = 'xyne-spaces';
-        const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot');
+        const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot', ticket.workspaceId);
 
         this.commitAnalysisController.analyzeCommits({
           workspace,

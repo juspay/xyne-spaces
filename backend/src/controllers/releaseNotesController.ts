@@ -74,7 +74,7 @@ export class ReleaseNotesController {
         return;
       }
 
-      const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot');
+      const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot', ticket.workspaceId);
       if (!xyneReleaseBot) {
         res.status(400).json({
           success: false,

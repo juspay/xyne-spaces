@@ -91,7 +91,7 @@ class UnifiedDMService {
     let botUserId = entry.dbUserId;
     if (!botUserId) {
       // Try to resolve from user service
-      const botUser = await unifiedBotUserService.getBotByBotId(botId);
+      const botUser = await unifiedBotUserService.getBotByBotId(botId, workspaceId);
       if (!botUser) {
         logger.error(`[UnifiedDMService] Bot user not found for: ${botId}`);
         return null;

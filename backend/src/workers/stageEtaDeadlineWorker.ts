@@ -88,6 +88,7 @@ class StageEtaDeadlineWorker {
         conversationId: true,
         stageName: true,
         eta: true,
+        workspaceId: true,
       },
     });
   }
@@ -96,9 +97,6 @@ class StageEtaDeadlineWorker {
     tickets: TicketWithStageInfo[],
     now: Date
   ): Promise<void> {
-    // Get bot actorId for activities
-    const actorId = await getTicketBotActorId();
-
     // Get active stage entries for these tickets
     const activeStageEntries = await db.ticketStageEta.findMany({
       where: {
@@ -124,6 +122,9 @@ class StageEtaDeadlineWorker {
       const stage = stageMap.get(entry.stageId);
 
       if (!ticket || !stage) continue;
+
+      // Get bot actorId for this ticket's workspace
+      const actorId = await getTicketBotActorId(ticket.workspaceId);
 
       // Skip if stage ETA is not set on the board (ETA was disabled after entry was created)
       if (stage.eta === null || stage.eta === 0) continue;

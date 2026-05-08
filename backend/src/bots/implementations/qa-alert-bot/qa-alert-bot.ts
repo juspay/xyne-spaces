@@ -254,7 +254,7 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
       }
 
       
-      const qaAlertBot = await unifiedBotUserService.getBotByEmail('qa-alert-bot@bot.xyne.ai');
+      const qaAlertBot = await unifiedBotUserService.getBotByEmail('qa-alert-bot@bot.xyne.ai', ticket.workspaceId);
 
       if (!qaAlertBot) {
         logger.error('[QaAlertBot] QA Alert bot user not found');

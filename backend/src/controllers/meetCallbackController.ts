@@ -121,7 +121,7 @@ export class MeetCallbackController {
       const messageContent = this.formatMeetResponseMarkdown(payload, meetCode);
 
       // Get the Xyne Automatic bot user for posting the message (same as call summaries)
-      const botUser = await unifiedBotUserService.getBotByEmail('xyne-automatic@bot.xyne.ai');
+      const botUser = await unifiedBotUserService.getBotByEmail('xyne-automatic@bot.xyne.ai', ticket.workspaceId);
       if (!botUser) {
         logger.error('[MeetCallbackController] Xyne Automatic bot not found');
         res.status(500).json({

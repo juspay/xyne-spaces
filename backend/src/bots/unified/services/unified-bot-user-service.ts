@@ -46,7 +46,8 @@ class UnifiedBotUserService {
       const definition = entry.definition;
       try {
         const user = await this.ensureBotUserExists(definition, workspaceId);
-        this.botUserCache.set(definition.id, user);
+        const cacheKey = `${definition.id}:${workspaceId}`;
+        this.botUserCache.set(cacheKey, user);
         botCatalog.setDbUserId(definition.id, user.id);
         logger.info(`[UnifiedBotUserService] [${workspaceId}] Synced bot "${definition.name}" (userId: ${user.id})`);
         synced++;
@@ -171,10 +172,11 @@ class UnifiedBotUserService {
   /**
    * Get a bot user by their email
    */
-  async getBotByEmail(email: string): Promise<User | null> {
+  async getBotByEmail(email: string, workspaceId: string): Promise<User | null> {
     return await db.user.findFirst({
       where: {
         email,
+        workspaceId,
         status: UserStatus.ACTIVE,
         userType: UserType.BOT,
       },
@@ -184,9 +186,9 @@ class UnifiedBotUserService {
   /**
    * Get a bot user by their bot ID (catalog ID)
    */
-  async getBotByBotId(botId: string): Promise<User | null> {
-    // Check cache first
-    const cached = this.botUserCache.get(botId);
+  async getBotByBotId(botId: string, workspaceId: string): Promise<User | null> {
+    const cacheKey = `${botId}:${workspaceId}`;
+    const cached = this.botUserCache.get(cacheKey);
     if (cached) return cached;
 
     // Get from catalog
@@ -194,9 +196,9 @@ class UnifiedBotUserService {
     if (!entry) return null;
 
     // Query by email
-    const user = await this.getBotByEmail(entry.definition.email);
+    const user = await this.getBotByEmail(entry.definition.email, workspaceId);
     if (user) {
-      this.botUserCache.set(botId, user);
+      this.botUserCache.set(cacheKey, user);
     }
 
     return user;

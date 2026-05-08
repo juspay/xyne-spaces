@@ -49,6 +49,7 @@ interface TicketInfo {
   userGroupId: string | null;
   channelId: string | null;
   assignedTo: string | null;
+  workspaceId: string;
 }
 
 interface StageInfo {
@@ -77,25 +78,21 @@ export class PRTicketStatusSyncService {
   /**
    * Look up user by email and return user ID, or Bitbucket bot ID if not found
    */
-  private async resolveUpdatedBy(email: string | undefined, workspaceId?: string): Promise<string> {
+  private async resolveUpdatedBy(email: string | undefined, workspaceId: string): Promise<string> {
     if (!email) {
-      return await this.getBitbucketBotId();
+      return await this.getBitbucketBotId(workspaceId);
     }
 
     try {
-      // workspaceId required for unique user lookup
-      if (!workspaceId) {
-        return await this.getBitbucketBotId();
-      }
       const user = await this.userRepository.findByEmail(email, workspaceId);
       if (user) {
         return user.id;
       }
 
-      return await this.getBitbucketBotId();
+      return await this.getBitbucketBotId(workspaceId);
     } catch (error) {
       logger.error(`[PR-Ticket-Sync] Error looking up user by email ${email}:`, error);
-      return await this.getBitbucketBotId();
+      return await this.getBitbucketBotId(workspaceId);
     }
   }
 
@@ -103,15 +100,15 @@ export class PRTicketStatusSyncService {
    * Get the Bitbucket bot user ID
    * Falls back to xyne-automatic bot if Bitbucket bot is not found
    */
-  private async getBitbucketBotId(): Promise<string> {
+  private async getBitbucketBotId(workspaceId: string): Promise<string> {
     try {
-      const bitbucketBot = await unifiedBotUserService.getBotByEmail('bitbucket-bot@bot.xyne.ai');
+      const bitbucketBot = await unifiedBotUserService.getBotByEmail('bitbucket-bot@bot.xyne.ai', workspaceId);
       if (bitbucketBot) {
         return bitbucketBot.id;
       }
 
       logger.warn('[PR-Ticket-Sync] Bitbucket bot not found, falling back to xyne-automatic bot');
-      const xyneBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai');
+      const xyneBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai', workspaceId);
       if (xyneBot) {
         return xyneBot.id;
       }
@@ -242,7 +239,7 @@ export class PRTicketStatusSyncService {
       }
 
       // 3. Resolve the user who triggered the update
-      const updatedBy = await this.resolveUpdatedBy(params.prAuthorEmail);
+      const updatedBy = await this.resolveUpdatedBy(params.prAuthorEmail, ticket.workspaceId);
 
       // 4. Find stage with this PR status mapped
       const targetStage = await this.findStageForPRStatus(ticket.boardId, params.stageEvent ?? params.prEvent);
@@ -417,6 +414,7 @@ export class PRTicketStatusSyncService {
           userGroupId: true,
           channelId: true,
           assignedTo: true,
+          workspaceId: true,
         },
       });
       if (ticket) {
@@ -451,6 +449,7 @@ export class PRTicketStatusSyncService {
               userGroupId: true,
               channelId: true,
               assignedTo: true,
+              workspaceId: true,
             },
           });
           if (ticket) {

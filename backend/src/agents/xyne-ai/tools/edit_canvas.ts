@@ -54,10 +54,21 @@ export function createEditCanvasTool(): Tool<{ canvasViewId?: string; content: s
       }
       
       logger.info(`[Tool] [${context.sessionId}] edit_canvas: canvasViewId="${canvasViewId}"`);
-      
+
+      const prisma = DatabaseClient.getInstance();
+
       try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { workspaceId: true }
+        });
+        if (!user?.workspaceId) {
+          logger.error('[EditCanvas] User workspace not found - cannot edit canvas');
+          return 'Error editing canvas: User workspace not found.';
+        }
+
         // Get the Ask AI bot user
-        const askAIBot = await unifiedBotUserService.getBotByBotId('ask-ai');
+        const askAIBot = await unifiedBotUserService.getBotByBotId('ask-ai', user.workspaceId);
         if (!askAIBot) {
           logger.error('[EditCanvas] Ask AI bot not found - cannot edit canvas');
           return 'Error editing canvas: Ask AI bot not found. Please ensure the bot is registered.';
@@ -81,8 +92,6 @@ export function createEditCanvasTool(): Tool<{ canvasViewId?: string; content: s
         
         // Update the canvas metadata (content is stored in Y-Sweet only)
         const now = new Date();
-        const prisma = DatabaseClient.getInstance();
-        
         await prisma.canvas.update({
           where: { id: authResult.canvas.id },
           data: {

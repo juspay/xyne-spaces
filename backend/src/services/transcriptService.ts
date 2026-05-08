@@ -1249,9 +1249,22 @@ Output ONLY the processed transcript, nothing else.`;
       `[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`
     );
 
+    const conversation = await repositories.conversations.findById(conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found');
+    }
+
+    const channel = await db.channel.findUnique({
+      where: { id: conversation.channelId },
+      select: { workspaceId: true }
+    });
+    if (!channel?.workspaceId) {
+      throw new Error('Channel workspace not found');
+    }
+
     let xyneAutomaticBot;
     try {
-      xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+      xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
     } catch (error) {
       logger.error('Failed to retrieve Xyne Automatic bot', { error: JSON.stringify(error) });
       throw new Error(`Failed to retrieve bot user: ${JSON.stringify(error)}`);
@@ -1682,7 +1695,24 @@ Output ONLY the processed transcript, nothing else.`;
       orgContext: import('@/services/pulseService').PulseOrgContext;
     }>,
   ): Promise<void> {
-    const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+    // Get conversation to retrieve workspaceId
+    const conversation = await repositories.conversations.findById(conversationId);
+    if (!conversation) {
+      logger.error('[Pulse] Conversation not found — cannot post Pulse tickets message');
+      return;
+    }
+
+    // Get channel to retrieve workspaceId
+    const channel = await db.channel.findUnique({
+      where: { id: conversation.channelId },
+      select: { workspaceId: true }
+    });
+    if (!channel?.workspaceId) {
+      logger.error('[Pulse] Channel workspace not found — cannot post Pulse tickets message');
+      return;
+    }
+
+    const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
     if (!xyneAutomaticBot) {
       logger.error('[Pulse] xyne-automatic bot not found — cannot post Pulse tickets message');
       return;

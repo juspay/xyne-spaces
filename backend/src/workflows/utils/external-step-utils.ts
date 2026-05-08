@@ -111,10 +111,13 @@ export async function createQuestionActivity(executionId: string): Promise<void>
       const workflow = await repositories.workflows.findById(workflowId)
       const ticketId = workflow?.ticketId
       if (ticketId) {
-        const ticket = await db.ticket.findUnique({ where: { id: ticketId } })
+        const ticket = await db.ticket.findUnique({
+          where: { id: ticketId },
+          select: { createdBy: true, workspaceId: true }
+        })
         const userId = (execution as any)?.createdBy || ticket?.createdBy
-        if (userId) {
-          const workflowBot = await unifiedBotUserService.getBotByEmail('workflow-bot@bot.xyne.ai')
+        if (userId && ticket?.workspaceId) {
+          const workflowBot = await unifiedBotUserService.getBotByEmail('workflow-bot@bot.xyne.ai', ticket.workspaceId)
           await activityService.createActivity({
             userId,
             actorAction: 'workflow_question',
