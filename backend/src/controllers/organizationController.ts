@@ -210,7 +210,7 @@ export class OrganizationController {
         to: ownerEmail.trim(),
         inviterName: req.user!.name || 'Admin',
         workspaceName: workspaceName.trim(),
-        invitationLink: `${config.frontendUrl}/invite?workspaceId=${workspace.id}&invitationId=${invitation.invitationId || invitation.id}`,
+        invitationLink: `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspace.id}&invitationId=${invitation.invitationId || invitation.id}`)}`,
         invitationId: invitation.invitationId || invitation.id,
       });
 
