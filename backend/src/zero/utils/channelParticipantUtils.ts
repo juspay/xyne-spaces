@@ -1,7 +1,17 @@
 import { Transaction } from '@rocicorp/zero';
-import { Schema, ChannelRole, ChannelType } from '@xyne/shared';
+import { Schema, ChannelRole, ChannelScopeType, ChannelType } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { zql } from '../queries'
+
+// For regular channels, THREADS_ONLY is the persisted value behind the UI's
+// "Default" option: mentions + subscribed thread replies.
+const DEFAULT_REGULAR_CHANNEL_NOTIFICATION_LEVEL = 'THREADS_ONLY';
+
+function getDefaultNotificationLevel(scopeType?: string | null): 'ALL' | 'THREADS_ONLY' {
+  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM
+    ? 'ALL'
+    : DEFAULT_REGULAR_CHANNEL_NOTIFICATION_LEVEL;
+}
 
 /**
  * Per-(channel, user) unread count for email channels.
@@ -116,7 +126,9 @@ export async function addChannelParticipant(
     isClosed: false,
   });
   
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
   const unreadCount = await computeUnreadCountForUser(tx, channelId, userId);
+  const notificationLevel = getDefaultNotificationLevel(channel?.scopeType);
 
   if (existingSoftDeletedStatus) {
     await tx.mutate.channel_user_status.update({
@@ -139,8 +151,8 @@ export async function addChannelParticipant(
       isClosed: false,
       unreadCount,
       isRecapSubscribed: false,
-      desktopNotificationLevel: 'ALL',
-      mobileNotificationLevel: 'ALL',
+      desktopNotificationLevel: notificationLevel,
+      mobileNotificationLevel: notificationLevel,
       isDeleted: false,
       updatedAt: now,
     });
@@ -203,6 +215,9 @@ export async function addChannelParticipants(
   );
   const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, timestamp);
 
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  const notificationLevel = getDefaultNotificationLevel(channel?.scopeType);
+
   // unreadCount is recomputed per user since rejoiners may carry their own
   // pre-existing email_reads — no shared value across users.
   for (const userId of newUserIds) {
@@ -244,8 +259,8 @@ export async function addChannelParticipants(
         isClosed: false,
         unreadCount,
         isRecapSubscribed: false,
-        desktopNotificationLevel: 'ALL',
-        mobileNotificationLevel: 'ALL',
+        desktopNotificationLevel: notificationLevel,
+        mobileNotificationLevel: notificationLevel,
         isDeleted: false,
         updatedAt: timestamp,
       });

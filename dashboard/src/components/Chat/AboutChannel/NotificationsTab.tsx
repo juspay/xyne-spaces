@@ -9,8 +9,10 @@ import { cn } from '../../../utils/classNames';
 
 const NOTIFICATION_LEVELS = [
   { value: NotificationLevel.ALL, label: 'All notifications' },
+  // Persisted as THREADS_ONLY, but shown as "Default" in the UI.
+  // Default means mentions + subscribed thread replies.
+  { value: NotificationLevel.THREADS_ONLY, label: 'Default' },
   { value: NotificationLevel.MENTIONS_ONLY, label: 'Mentions only' },
-  { value: NotificationLevel.THREADS_ONLY, label: 'Threads only' },
 ] as const;
 
 // Check if channel is a DM or Group DM
@@ -33,11 +35,12 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
 
   // Load channel user status for notification settings (from cached state machine data)
   const channelUserStatus = useGetChannelUserStatus(channel.id);
+  const defaultEnabledLevel = channelIsDM ? NotificationLevel.ALL : NotificationLevel.THREADS_ONLY;
 
   // Derive initial values from query data
   // desktopNotificationLevel is now the source of truth for desktop toggle
   const initialDesktopLevel =
-    (channelUserStatus?.desktopNotificationLevel as NotificationLevel) ?? NotificationLevel.ALL;
+    (channelUserStatus?.desktopNotificationLevel as NotificationLevel) ?? defaultEnabledLevel;
   // mobileNotificationLevel is now the source of truth for mobile toggle
   const initialMobileLevel =
     (channelUserStatus?.mobileNotificationLevel as NotificationLevel | null) ?? null;
@@ -51,23 +54,23 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
   );
 
   // Notification level selectors (shown when toggles are ON)
-  // When toggle is ON but no specific level set, default to ALL
+  // When toggle is ON but no specific level set, default to mentions and subscribed thread replies.
   const [desktopNotificationLevel, setDesktopNotificationLevel] = useState<NotificationLevel>(
-    initialDesktopLevel === NotificationLevel.NONE ? NotificationLevel.ALL : initialDesktopLevel,
+    initialDesktopLevel === NotificationLevel.NONE ? defaultEnabledLevel : initialDesktopLevel,
   );
   const [mobileNotificationLevel, setMobileNotificationLevel] = useState<NotificationLevel>(
     initialMobileLevel === null || initialMobileLevel === NotificationLevel.NONE
-      ? NotificationLevel.ALL
+      ? defaultEnabledLevel
       : initialMobileLevel,
   );
 
   const handleDesktopToggle = (checked: boolean): void => {
     setDesktopNotifications(checked);
 
-    // When toggled ON, default to ALL if not already set
+    // When toggled ON, default to mentions and subscribed thread replies if not already set.
     const newLevel = checked
       ? desktopNotificationLevel === NotificationLevel.NONE
-        ? NotificationLevel.ALL
+        ? defaultEnabledLevel
         : desktopNotificationLevel
       : NotificationLevel.NONE;
 
@@ -85,11 +88,11 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
   const handleMobileToggle = (checked: boolean): void => {
     setMobileNotifications(checked);
 
-    // When toggled ON, default to ALL if not already set
+    // When toggled ON, default to mentions and subscribed thread replies if not already set.
     // When toggled OFF, set to NONE (not undefined) to properly disable mobile notifications
     const newLevel = checked
       ? mobileNotificationLevel === NotificationLevel.NONE
-        ? NotificationLevel.ALL
+        ? defaultEnabledLevel
         : mobileNotificationLevel
       : NotificationLevel.NONE;
 
