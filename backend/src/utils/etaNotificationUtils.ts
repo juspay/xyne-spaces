@@ -18,6 +18,7 @@ export interface TicketBasicInfo {
   channelId: string;
   conversationId: string | null;
   eta: Date | null;
+  workspaceId: string;
 }
 
 /**
@@ -146,9 +147,9 @@ export async function getUsersToNotifyForTicket(
 /**
  * Get the ticket bot actor ID for system-generated activities
  */
-export async function getTicketBotActorId(): Promise<string> {
+export async function getTicketBotActorId(workspaceId: string): Promise<string> {
   try {
-    const xyneTicketBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai');
+    const xyneTicketBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai', workspaceId);
     return xyneTicketBot?.id || 'cmjkaarlm0001jq9oftpebya1';
   } catch (error) {
     logger.error('[ETA-UTILS] Error fetching ticket bot, using fallback actorId:', error);
@@ -212,6 +213,7 @@ export async function getOpenTickets(includeStage: boolean = false): Promise<Tic
     channelId: true,
     conversationId: true,
     eta: true,
+    workspaceId: true,
   };
 
   const select = includeStage

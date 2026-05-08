@@ -22,6 +22,7 @@ import {
 import type { GeniusQueryWorkflowOutput, MerchantIdErrorData } from './types';
 import { ticketService } from '@/services/ticketService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
+import { db } from '@/database/client';
 
 // Context Interface
 export interface GeniusQueryWorkflowContext extends BaseWorkflowContext {
@@ -75,7 +76,17 @@ export const geniusQueryWorkflow: WorkflowDefinition<
   ): Promise<GeniusQueryWorkflowOutput> {
 
     const {ticketId} = engine.getContext()
-    const geniusBotUser = await unifiedBotUserService.getBotByEmail('genius@bot.xyne.ai');
+
+    // Get ticket to retrieve workspaceId
+    const ticket = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { workspaceId: true }
+    });
+    if (!ticket?.workspaceId) {
+      throw new Error('Ticket workspace not found');
+    }
+
+    const geniusBotUser = await unifiedBotUserService.getBotByEmail('genius@bot.xyne.ai', ticket.workspaceId);
     const botUserId = geniusBotUser?.id || "cmjkaarlq0002jq9om34yalc7";
 
     await ticketService.updateTicketStageForWorkflow(ticketId, botUserId, AI_STAGES.AI_PICKED_UP)

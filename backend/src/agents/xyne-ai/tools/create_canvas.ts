@@ -42,16 +42,24 @@ export function createCreateCanvasTool(): Tool<{ markdown: string; title: string
       const { userId } = context;
       
       logger.info(`[Tool] [${context.sessionId}] create_canvas: title="${title}"`);
-      
+      const prisma = DatabaseClient.getInstance();
+
       try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { workspaceId: true }
+        });
+        if (!user?.workspaceId) {
+          logger.error('[CreateCanvas] User workspace not found - cannot create canvas');
+          return 'Error creating canvas: User workspace not found.';
+        }
+
         // Get the Ask AI bot user
-        const askAIBot = await unifiedBotUserService.getBotByBotId('ask-ai');
+        const askAIBot = await unifiedBotUserService.getBotByBotId('ask-ai', user.workspaceId);
         if (!askAIBot) {
           logger.error('[CreateCanvas] Ask AI bot not found - cannot create canvas');
           return 'Error creating canvas: Ask AI bot not found. Please ensure the bot is registered.';
         }
-
-        const prisma = DatabaseClient.getInstance();
         const now = new Date();
         
         // Generate IDs

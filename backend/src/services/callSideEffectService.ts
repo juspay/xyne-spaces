@@ -389,7 +389,17 @@ class CallSideEffectService {
                 return;
             }
 
-            const bot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+            // Get channel to retrieve workspaceId
+            const channel = await db.channel.findUnique({
+                where: { id: call.channelId! },
+                select: { workspaceId: true }
+            });
+            if (!channel?.workspaceId) {
+                this.logger.warn(`No workspace found for call ${callExternalId} — skipping external chat summary`);
+                return;
+            }
+
+            const bot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
             if (!bot) {
                 this.logger.warn('Xyne Automatic bot not found — skipping external chat summary');
                 return;

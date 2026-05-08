@@ -516,13 +516,6 @@ export class DocsService {
         channelId: string | null,
         channelName: string
     ): Promise<void> {
-        // Get the bot user from the database
-        const botUser = await unifiedBotUserService.getBotByBotId(DOCS_PUBLISHER_BOT_ID);
-        if (!botUser) {
-            logger.error('[DocsService] Docs Publisher bot not found - cannot send notification');
-            throw new Error('Docs Publisher bot not found');
-        }
-
         const channelRepository = new ChannelRepository();
         const channelParticipantRepository = new ChannelParticipantRepository();
         const conversationRepository = new ConversationRepository();
@@ -535,6 +528,12 @@ export class DocsService {
         });
         if (!user?.workspaceId) {
             throw new Error('User workspace not found');
+        }
+
+        const botUser = await unifiedBotUserService.getBotByBotId(DOCS_PUBLISHER_BOT_ID, user.workspaceId);
+        if (!botUser) {
+            logger.error('[DocsService] Docs Publisher bot not found - cannot send notification');
+            throw new Error('Docs Publisher bot not found');
         }
 
         // Find or create DM channel with the docs publisher bot (using database user ID)

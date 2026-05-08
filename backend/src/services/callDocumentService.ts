@@ -1087,11 +1087,12 @@ export class CallDocumentService {
     conversationId: string,
     callId: string,
     canvasUrl: string,
-    prdTitle: string
+    prdTitle: string,
+    workspaceId: string
   ): Promise<void> {
     try {
       // Get Xyne Automatic bot
-      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
       if (!xyneAutomaticBot) {
         throw new Error('Xyne Automatic bot not found');
       }
@@ -1139,11 +1140,12 @@ A Product Requirements Document has been generated from this call discussion.
     callId: string,
     canvasUrl: string,
     summaryTitle: string,
+    workspaceId: string,
     version: number = 1
   ): Promise<void> {
     try {
       const prisma = DatabaseClient.getInstance();
-      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
       if (!xyneAutomaticBot) {
         throw new Error('Xyne Automatic bot not found');
       }
@@ -1279,6 +1281,18 @@ A comprehensive detailed summary has been generated from this call.
     customPrompt?: string
   ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
     try {
+      const conversation = await repositories.conversations.findById(conversationId);
+      if (!conversation) {
+        return { success: false, error: 'Conversation not found' };
+      }
+
+      const channel = await db.channel.findUnique({
+        where: { id: conversation.channelId },
+        select: { workspaceId: true }
+      });
+      if (!channel?.workspaceId) {
+        return { success: false, error: 'Channel workspace not found' };
+      }
       // 1. Generate PRD from transcript
       const prd = await this.generatePRDFromTranscript(transcript, summary, customPrompt);
       if (!prd) {
@@ -1286,15 +1300,9 @@ A comprehensive detailed summary has been generated from this call.
       }
 
       // Get Xyne Automatic bot to create canvas
-      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
       if (!xyneAutomaticBot) {
         return { success: false, error: 'Xyne Automatic bot not found' };
-      }
-
-      // Get conversation to retrieve channelId
-      const conversation = await repositories.conversations.findById(conversationId);
-      if (!conversation) {
-        return { success: false, error: 'Conversation not found' };
       }
 
       // 2. Create Canvas with bot as creator
@@ -1316,7 +1324,8 @@ A comprehensive detailed summary has been generated from this call.
         conversationId,
         callId,
         canvasUrl,
-        prd.title
+        prd.title,
+        channel.workspaceId
       );
 
       return { success: true, canvasUrl };
@@ -1339,19 +1348,6 @@ A comprehensive detailed summary has been generated from this call.
     customPrompt?: string
   ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
     try {
-      // 1. Generate detailed summary markdown
-      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript, callId, customPrompt);
-      if (!detailedSummaryMarkdown) {
-        return { success: false, error: 'Failed to generate detailed summary' };
-      }
-
-      // Get Xyne Automatic bot
-      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
-      if (!xyneAutomaticBot) {
-        throw new Error('Xyne Automatic bot not found');
-      }
-
-      // Get call and conversation info
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
         return { success: false, error: 'Call not found' };
@@ -1360,6 +1356,26 @@ A comprehensive detailed summary has been generated from this call.
       const conversation = await repositories.conversations.findById(conversationId);
       if (!conversation) {
         return { success: false, error: 'Conversation not found' };
+      }
+
+      const channel = await db.channel.findUnique({
+        where: { id: call.channelId || conversation.channelId },
+        select: { workspaceId: true }
+      });
+      if (!channel?.workspaceId) {
+        return { success: false, error: 'Channel workspace not found' };
+      }
+
+      // 1. Generate detailed summary markdown
+      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript, callId, customPrompt);
+      if (!detailedSummaryMarkdown) {
+        return { success: false, error: 'Failed to generate detailed summary' };
+      }
+
+      // Get Xyne Automatic bot
+      const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
+      if (!xyneAutomaticBot) {
+        throw new Error('Xyne Automatic bot not found');
       }
 
       // 2. Create or Update Canvas (handles rejoin scenario)
@@ -1388,6 +1404,7 @@ A comprehensive detailed summary has been generated from this call.
         callId,
         canvasUrl,
         canvasTitle,
+        channel.workspaceId,
         version
       );
 

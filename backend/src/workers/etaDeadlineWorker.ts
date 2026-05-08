@@ -53,10 +53,11 @@ class EtaDeadlineWorker {
 
       logger.info(`[ETA-DEADLINE-WORKER] Found ${tickets.length} open tickets with ETA`);
 
-      const actorId = await getTicketBotActorId();
-
       for (const ticket of tickets) {
         if (!ticket.eta) continue;
+
+        // Get bot actorId for this ticket's workspace
+        const actorId = await getTicketBotActorId(ticket.workspaceId);
 
         const daysOverdue = calculateDaysOverdueMidnight(new Date(ticket.eta), today);
 
@@ -112,6 +113,7 @@ class EtaDeadlineWorker {
     createdBy: string | null;
     channelId: string;
     conversationId: string | null;
+    workspaceId: string;
   }>> {
     return await db.ticket.findMany({
       where: {
@@ -125,6 +127,7 @@ class EtaDeadlineWorker {
         assignedTo: true,
         createdBy: true,
         channelId: true,
+        workspaceId: true,
         conversationId: true,
       },
     });

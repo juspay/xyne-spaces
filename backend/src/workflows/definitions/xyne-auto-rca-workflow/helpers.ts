@@ -380,14 +380,18 @@ export const shareCanvasLink = async (
 ): Promise<ShareCanvasResult> => {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
-    select: { conversationId: true },
+    select: { conversationId: true, workspaceId: true },
   });
 
   if (!ticket || !ticket.conversationId) {
     throw new Error('Ticket or conversation not found');
   }
 
-  const geniusBotUser = await unifiedBotUserService.getBotByEmail('genius@bot.xyne.ai');
+  if (!ticket.workspaceId) {
+    throw new Error('Ticket workspace not found');
+  }
+
+  const geniusBotUser = await unifiedBotUserService.getBotByEmail('genius@bot.xyne.ai', ticket.workspaceId);
 
   const message = await repositories.messages.create({
     conversationId: ticket.conversationId,

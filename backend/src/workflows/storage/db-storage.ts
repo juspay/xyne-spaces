@@ -3444,7 +3444,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
       const ticket = await prisma.ticket.findUnique({
         where: { id: workflow.ticketId },
-        select: { conversationId: true, xyneId: true }
+        select: { conversationId: true, xyneId: true, workspaceId: true }
       })
 
       if (!ticket?.conversationId) {
@@ -3452,7 +3452,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
         return
       }
 
-      const workflowBot = await unifiedBotUserService.getBotByEmail('workflow-bot@bot.xyne.ai')
+      const workflowBot = await unifiedBotUserService.getBotByEmail('workflow-bot@bot.xyne.ai', ticket.workspaceId)
       const senderId = workflowBot?.id || 'Workflow Bot'
 
       const messageContent = `⏳ The workflow needs your input to proceed. Please visit Ticket Details section and resume the workflow.`

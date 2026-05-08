@@ -179,9 +179,9 @@ export class CallController {
    * Helper method to get the Xyne Automatic bot user
    * Uses the unified bot service to ensure consistency with transcript service
    */
-  async getOrCreateBotUser() {
+  async getOrCreateBotUser(workspaceId: string) {
     try {
-      const botUser = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+      const botUser = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
 
       if (!botUser) {
         throw new Error('Xyne Automatic bot not found - make sure bot registry is initialized');
@@ -216,7 +216,7 @@ export class CallController {
 
       // Handle headless recording - create DM with bot
       if (isHeadless && !channelId && !invitedUserIds) {
-        const botUser = await this.getOrCreateBotUser();
+        const botUser = await this.getOrCreateBotUser(req.user!.workspaceId!);
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           [botUser.id],
