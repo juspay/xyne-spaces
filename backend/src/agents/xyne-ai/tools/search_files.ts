@@ -361,6 +361,9 @@ export async function searchFilesImpl(
         case 'rca':
           entityType = 'ticket';
           break;
+        case 'collections':
+          entityType = 'knowledge_base';
+          break;
         case 'chat_attachment':
         default:
           entityType = 'attachment';
@@ -454,6 +457,7 @@ export async function searchFilesImpl(
         callCount: kept.filter(e => e.entityType === 'call').length,
         canvasCount: kept.filter(e => e.entityType === 'canvas').length,
         ticketCount: kept.filter(e => e.entityType === 'ticket').length,
+        knowledgeBaseCount: kept.filter(e => e.entityType === 'knowledge_base').length,
       },
       truncated,
       totalAvailable,
@@ -535,16 +539,16 @@ export function createSearchFilesTool(): Tool<
         createdOn,
       } = args;
 
-      logger.info(
-        `[Tool] [${context.sessionId}] search_files called: query="${query}", file_type=${file_type}, channels=${JSON.stringify(channels)}`,
-      );
-
       // ── Build FileFilters ──────────────────────────────────────────────
 
       const fileFilters: Partial<FileFilters> = {};
 
-      // SubApp filter (file_type → subApp)
-      if (file_type) {
+      // When KB collection context is active, auto-scope to collections and ignore file_type
+      if (context.collectionIds && context.collectionIds.length > 0) {
+        fileFilters.subApp = ['collections'];
+        fileFilters.collectionId = context.collectionIds;
+      } else if (file_type) {
+        // SubApp filter (file_type → subApp) — only when no KB context
         const upper = file_type.toUpperCase();
         const validTypes = ['CANVAS', 'TRANSCRIPT', 'RCA', 'CHAT_ATTACHMENT'];
         if (!validTypes.includes(upper)) {

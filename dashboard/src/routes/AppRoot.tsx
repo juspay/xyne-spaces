@@ -13,8 +13,10 @@ import WorkflowScreen from './WorkflowScreen/WorkflowScreen';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
-import KnowledgeBaseScreen from './KnowledgeBaseScreen/KnowledgeBase';
+import { KnowledgeBasePage } from './KnowledgeBaseScreen/KnowledgeBasePage';
 import { MemoryScreen } from './MemoryScreen';
+import { TreeLayout } from '../components/knowledgeBase/layout/TreeLayout';
+import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
@@ -154,6 +156,7 @@ import Inspector from '../components/Inspector/Inspector';
 import { buildGrafanaLogsExploreUrl } from '../components/Inspector/grafanaUrl';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
+import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { getTicketsPath } from '../components/ErrorReportModal/ErrorReportModal.utils';
@@ -307,6 +310,7 @@ const AppRoot = (): ReactElement => {
   // Initialize activity tracking
   useActivityTracker(location.pathname);
   const isOnboarding = location.pathname.endsWith('/onboarding');
+  const isOnKnowledgeBase = location.pathname.startsWith('/knowledge-base');
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -483,8 +487,9 @@ const AppRoot = (): ReactElement => {
                     <EditWarningModal />
                     <Outlet />
                   </main>
-                ) : xyneAIState.matches('open') && !isMobile ? (
+                ) : xyneAIState.matches('open') && !isMobile && !isOnKnowledgeBase ? (
                   // XyneAI is open on desktop - show panel layout with XyneAI
+                  // Note: KB pages render their own XyneAISidebar via KBChatContext
                   <div className='flex flex-col h-screen'>
                     {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <PanelGroup
@@ -595,6 +600,7 @@ const AppRoot = (): ReactElement => {
                     <IncomingCallModal />
                     <GlobalCallOverlay />
                     <RecordingOverlay />
+                    <GlobalUploadProgress />
                     <NotificationHandler />
                     <CallFromRecentsHandler />
                     <BrowserPanelHandler />
@@ -606,6 +612,7 @@ const AppRoot = (): ReactElement => {
                   </>
                 )}
                 <AttachmentGalleryModal />
+                <AttachmentCitationPreview />
                 <ErrorReportModal
                   isOpen={isErrorReportOpen}
                   onClose={() => setIsErrorReportOpen(false)}
@@ -624,7 +631,8 @@ const AppRoot = (): ReactElement => {
                   }}
                 />
                 {/* XyneAI Mobile Drawer */}
-                {isMobile && !isInPanelWebview && (
+                {/* Note: KB pages render their own XyneAISidebar via KBChatContext (same as desktop) */}
+                {isMobile && !isInPanelWebview && !isOnKnowledgeBase && (
                   <Drawer
                     open={xyneAIState.matches('open')}
                     onOpenChange={open => {
@@ -891,12 +899,32 @@ export const router = createBrowserRouter([
                 ),
               },
               {
+                // Layout route: providers live here and persist across all child routes.
+                // Navigating between TreeLayout ↔ FileViewerLayout never remounts providers.
                 path: 'knowledge-base',
-                element: (
-                  <ResourceProtectedRoute resourceName='KNOWLEDGE-BASE'>
-                    <KnowledgeBaseScreen />
-                  </ResourceProtectedRoute>
-                ),
+                element: <KnowledgeBasePage />,
+                children: [
+                  {
+                    index: true,
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId',
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId/:collectionId',
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId/:collectionId/:folderId',
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId/:collectionId/:folderId/:fileId',
+                    element: <FileViewerLayout />,
+                  },
+                ],
               },
               {
                 path: 'memory',

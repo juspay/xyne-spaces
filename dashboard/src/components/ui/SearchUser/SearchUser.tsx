@@ -27,6 +27,8 @@ interface SearchUserProps {
   };
   channelId?: string;
   autoFocus?: boolean;
+  /** When set, only users whose id is in this set are shown (e.g. project members for share collection) */
+  allowedUserIds?: Set<string> | null;
 }
 
 export const SearchUser: React.FC<SearchUserProps> = ({
@@ -40,6 +42,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
   disabled = { value: false, reason: undefined },
   channelId,
   autoFocus = false,
+  allowedUserIds,
 }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -62,7 +65,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
     return new Set(channelParticipantsData.map(p => p.userId));
   }, [channelId, channelParticipantsData]);
 
-  // Filter users based on exclusions and channel participants
+  // Filter users based on exclusions, channel participants, and allowedUserIds (e.g. project members)
   // searchUsers already handles: name/email filtering, active status, and result limit
   const availableUsers = useMemo(() => {
     if (!searchResults) return [];
@@ -73,6 +76,11 @@ export const SearchUser: React.FC<SearchUserProps> = ({
         return false;
       }
 
+      // If allowedUserIds is provided (e.g. project members for share collection), only show those users
+      if (allowedUserIds && !allowedUserIds.has(user.id)) {
+        return false;
+      }
+
       // Exclude users that are already selected or in the exclude list
       const isExcluded =
         excludeUserIds?.includes(user.id) ||
@@ -80,7 +88,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
 
       return !isExcluded;
     });
-  }, [searchResults, excludeUserIds, selectedUsers, channelUserIds]);
+  }, [searchResults, excludeUserIds, selectedUsers, channelUserIds, allowedUserIds]);
 
   // Get filtered users (limit to 10)
   const filteredUsers = availableUsers.slice(0, 10);

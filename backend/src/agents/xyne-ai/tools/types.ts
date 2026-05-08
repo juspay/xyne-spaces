@@ -49,6 +49,7 @@ export interface ResearchContext {
  */
 export interface XyneAIAgentContext {
   channelIds: string[];
+  collectionIds?: string[];  // Selected collections for KB search
   conversationId?: string;
   userId: string;
   sessionId: string;
@@ -193,7 +194,7 @@ export interface ToolResultWithCapping extends ToolResult {
 /**
  * Entity type discriminator for different content types
  */
-export type EntityType = 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search' | 'email';
+export type EntityType = 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search' | 'email' | 'knowledge_base';
 
 /**
  * Enhanced tool entity that can represent any content type
@@ -248,6 +249,7 @@ export interface EnhancedToolResult {
     canvasCount: number;
     ticketCount: number;
     emailCount?: number;
+    knowledgeBaseCount?: number;
     dateFrom?: string;
     dateTo?: string;
   };

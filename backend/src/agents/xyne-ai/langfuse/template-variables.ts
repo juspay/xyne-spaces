@@ -345,6 +345,32 @@ export interface Skill {
 }
 
 
+/**
+ * Format knowledge base instruction based on whether KB is enabled and if channels are also selected
+ */
+function formatKnowledgeBaseInstruction(
+  knowledgeBaseEnabled?: boolean,
+  hasChannels?: boolean
+): string {
+  if (!knowledgeBaseEnabled) {
+    return '';
+  }
+
+  if (hasChannels) {
+    return `IMPORTANT: Knowledge base collections are selected alongside channels. Modified search protocol — OVERRIDE the normal two-route protocol:
+1. Call search_relevant_content for channel content (messages/tickets).
+2. Call search_files — it automatically scopes to the KB collections and returns results in a "KNOWLEDGE BASE" section.
+3. Combine results from both and answer. Cite KB results as [A1], [A2] etc.
+4. NEVER say "not found" if the KNOWLEDGE BASE section has content.`;
+  }
+
+  return `IMPORTANT: Knowledge base collections are selected. OVERRIDE the normal two-route search protocol entirely:
+1. Do NOT call search_relevant_content — it searches messages/tickets which are not your KB.
+2. Call ONLY search_files — it automatically searches the KB collections and returns results in a "KNOWLEDGE BASE" section.
+3. Answer DIRECTLY from the KNOWLEDGE BASE results and cite them as [A1], [A2] etc.
+4. NEVER say "not found" or "no information" if the KNOWLEDGE BASE section has content — that IS the answer.`;
+}
+
 export function buildAgentTemplateVariables(
   _source: SourceType,
   currentTimestamp?: string,
@@ -357,7 +383,9 @@ export function buildAgentTemplateVariables(
   customInstruction?: string,
   hasThreadContext?: boolean,
   skills?: Skill[],
-  providedContexts?: ProvidedContexts
+  providedContexts?: ProvidedContexts,
+  hasChannels?: boolean,
+  knowledgeBaseEnabled?: boolean
 ): Record<string, string> {
   const variables = {
     current_timestamp: currentTimestamp || getCurrentTimestamp(),
@@ -413,6 +441,7 @@ export function buildAgentTemplateVariables(
     research_context: formatFullResearchContext(researchContext, researchOptions),
     provided_context: formatProvidedContexts(providedContexts),
     provided_context_few_shot_example: formatProvidedContextFewShotExample(providedContexts),
+    knowledge_base_instruction: formatKnowledgeBaseInstruction(knowledgeBaseEnabled, hasChannels),
   };
   
   return variables;

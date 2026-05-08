@@ -5,7 +5,7 @@ import type { InsertValue } from '@rocicorp/zero';
 import { ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
 import { VespaJob, VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Conversation, Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call } from '@prisma/client';
+import { Conversation, Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem } from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
@@ -17,6 +17,7 @@ import { config } from '@/config/env';
 import { TextStrategy } from '../strategies/TextStrategy';
 import { getStorageService } from '@/services/storage';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import { PdfPerPageStrategy } from '@/services/fileProcessor/strategies';
 
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
@@ -594,6 +595,117 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
   }
 }
 
+export const mapCollection = async (
+  args: CollectionItem,
+): Promise<VespaFileDocument> => {
+  const collectionItem = await db.collectionItem.findUnique({
+    where: { id: args.id },
+    include: {
+      collection: {
+        include: {
+          permissions: true
+        }
+      }
+    }
+  });
+
+  if (!collectionItem) {
+    throw new Error(`CollectionItem not found: ${args.id}`);
+  }
+
+  const slideUrls = (collectionItem.metadata as Record<string, any>)?.slideUrls as
+    Record<string, string> | undefined;
+
+  const collection = collectionItem.collection;
+
+  // Resolve permissions from the parent collection
+  const permissions = collection.permissions
+    .map(p => p.userId)
+    .filter((id): id is string => id !== null);
+
+  // If no explicit permissions, default to owner
+  if (permissions.length === 0) {
+    permissions.push(collection.ownerId);
+  }
+
+  // Process file: fetch from GCS and extract chunks using FileProcessor
+  let chunks: string[] = [];
+  let chunks_pos: string[] = [];
+  let image_chunks: string[] = [];
+  let image_chunks_pos: string[] = [];
+  let chunks_map: any[] | undefined;
+  let documentOutline: string | undefined;
+
+  if (collectionItem.storageKey) {
+    try {
+      const storageService = getStorageService();
+      const buffer = await storageService.getFileBuffer(collectionItem.storageKey);
+
+      let result;
+      if (slideUrls) {
+        // Use per-page strategy when slide URLs are provided
+        const processor = new FileProcessor(new PdfPerPageStrategy());
+        result = await processor.processBuffer(buffer, collectionItem.id);
+      } else {
+        // Use MIME type-based strategy detection (same as mapFile)
+        const processor = FileProcessor.fromMimeType(collectionItem.mimeType || '');
+        result = await processor.processBuffer(buffer, collectionItem.id);
+      }
+
+      chunks = result.chunks || [];
+      chunks_pos = result.chunks_pos
+        ? result.chunks_pos.map(String)
+        : chunks.map((_, index) => String(index));
+      image_chunks = result.image_chunks || [];
+      image_chunks_pos = (result.image_chunks_pos || []).map(String);
+      chunks_map = result.chunks_map;
+      documentOutline = result.documentOutline;
+
+      logger.info(`[MAP_FILE] Processed file ${collectionItem.name} (${collectionItem.id}): ${chunks.length} chunks, ${image_chunks.length} image chunks, method: ${result.processingMethod}`);
+    } catch (error) {
+      logger.error(`[MAP_FILE] Failed to process file ${collectionItem.name} (${collectionItem.id}):`, error);
+      // Still insert the document with empty chunks so it's searchable by metadata
+    }
+  }
+
+  // Build slideUrl[] parallel to chunks[] using page numbers from chunks_pos
+  let slideUrl: string[] = [];
+  if (slideUrls && chunks_pos.length > 0) {
+    slideUrl = chunks_pos.map(pageNum => slideUrls[pageNum] || '');
+  }
+
+  const meta = collectionItem.metadata as Record<string, any> | null;
+
+  return {
+    docId: collectionItem.id,
+    docType: VespaDocType.FILE,
+    fileName: collectionItem.name,
+    description: meta?.description || '',
+    chunks,
+    chunks_pos,
+    chunks_map,
+    image_chunks,
+    image_chunks_pos,
+    slideUrl,
+    documentOutline,
+    metadata: JSON.stringify(collectionItem.metadata || {}),
+    createdBy: collectionItem.uploadedById || collectionItem.ownerId,
+    createdAt: toTimestamp(collectionItem.createdAt),
+    updatedAt: toTimestamp(collectionItem.updatedAt),
+    ownerId: collectionItem.ownerId,
+    permissions,
+    urlInternal: collectionItem.storageKey || '',
+    urlOriginal: '',
+    fileSize: Number(collectionItem.fileSize || 0),
+    isPrivate: collection.isPrivate,
+    mimeType: collectionItem.mimeType || '',
+    subApp: 'collections',
+    clId: collectionItem.collectionId,
+    clFd: collectionItem.parentId || '',
+    projectId: collection.projectId,
+  };
+}
+
 export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<VespaFileDocument> => {
   // Get channel info if channelId exists
   let channelRef: string | undefined;
@@ -661,7 +773,10 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<Vesp
     mimeType: 'application/json',
     subApp: SubApp.CANVAS,
     channelRef,
-    conversationId: undefined
+    conversationId: undefined,
+    slideUrl: [],
+    clId: '',
+    clFd: '',
   };
 };
 
@@ -754,7 +869,10 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promi
     subApp: SubApp.TRANSCRIPT,
     channelRef,
     conversationId,
-    callType: args.callType
+    callType: args.callType,
+    slideUrl: [],
+    clId: '',
+    clFd: '',
   };
 };
 
@@ -805,6 +923,9 @@ export const mapRCA = (args: RCAWithRelations): VespaFileDocument => {
     isPrivate: false,
     mimeType: 'text/markdown',
     subApp: SubApp.RCA,
+    slideUrl: [],
+    clId: '',
+    clFd: '',
   };
 };
 
@@ -935,7 +1056,10 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
     channelRef,
     conversationId,
     messageId: args.entityType === 'CHAT' ? args.entityId : undefined,
-    ticketId: args.entityType === 'TICKET' ? args.entityId : undefined
+    ticketId: args.entityType === 'TICKET' ? args.entityId : undefined,
+    slideUrl: [],
+    clId: '',
+    clFd: '',
   };
 };
 
@@ -1068,6 +1192,8 @@ export const mapBySchema = async (
             return mapTranscript(args as InsertValue<TranscriptsSchema>);
           case SubApp.RCA:
             return mapRCA(args as RCAWithRelations);
+          case SubApp.COLLECTIONS:
+            return mapCollection(args as CollectionItem);
           case SubApp.CHAT_ATTACHMENT:
           case SubApp.TICKET_ATTACHMENT:
             return mapFile(args as InsertValue<MessageAttachmentsSchema>);
@@ -1111,7 +1237,7 @@ export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
   app?: SubApp
-): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | null> => {
+): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | null> => {
   switch (schema) {
     case channelSchema:
       return await db.channel.findUnique({
@@ -1146,9 +1272,14 @@ export const fetchDataBySchema = async (
           return await db.call.findUnique({
             where: { id: docId }
           });
-        case SubApp.RCA:
+        case SubApp.RCA: {
           const releaseRepository = new ReleaseRepository();
           return await releaseRepository.getRCAById(docId, { includeImpacts: true, includeCOEs: true }) as RCAWithRelations;
+        }
+        case SubApp.COLLECTIONS:
+          return await db.collectionItem.findUnique({
+            where: { id: docId }
+          });
         case SubApp.CHAT_ATTACHMENT:
         case SubApp.TICKET_ATTACHMENT:
           return await db.messageAttachment.findUnique({

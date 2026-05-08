@@ -239,7 +239,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.slack.projectId = projectIds;
       options.ticket.projectId = projectIds;
     }
-    
+
     // Add ticket-specific filters
     if (status) {
       options.ticket.status = (status as string).split(',');
@@ -293,6 +293,25 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (subApp) {
       options.file.subApp = (subApp as string).split(',');
+    }
+
+    // For collection searches, always scope to the user's own projects server-side.
+    // This prevents cross-workspace exposure regardless of isPrivate flag.
+    // Must run AFTER options.file.subApp is set (line above).
+    const originalApps = (apps as string).split(',').map((a: string) => a.toLowerCase());
+    const isCollectionSearch = originalApps.includes('collection') ||
+      (options.file.subApp as string[] | undefined)?.includes('collections');
+    if (isCollectionSearch) {
+      const participantRows = await db.channelParticipant.findMany({
+        where: { userId },
+        select: { channel: { select: { projectId: true } } },
+      });
+      const userProjectIds = [...new Set(
+        participantRows.map((r: any) => r.channel?.projectId).filter(Boolean)
+      )] as string[];
+      if (userProjectIds.length > 0) {
+        options.file.projectId = userProjectIds;
+      }
     }
 
     if (callType) {

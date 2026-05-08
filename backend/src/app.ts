@@ -142,6 +142,8 @@ import { appRoutes } from '@/apps';
 import { ChatController } from '@/apps/controllers/chatController';
 import userMigrationRoutes from '@/routes/userMigration';
 import internalRoutes from '@/routes/internal';
+import collectionsRoutes from '@/routes/collections';
+
 
 export class App {
   public app: Application;
@@ -460,6 +462,9 @@ export class App {
 
     // Scheduled messages routes (auth required)
     this.app.use('/api/scheduled-messages', authMiddleware.authenticate, scheduledMessageRoutes);
+
+    // Collections routes
+    this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
 
     // Activity logging routes (auth required)
     this.app.use('/api/activity', authMiddleware.authenticate, activityLogRoutes);
