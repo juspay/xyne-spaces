@@ -3,14 +3,20 @@ import { NotificationLevel } from '@prisma/client';
 
 const prisma = DatabaseClient.getInstance();
 
+// Regular channel UI "Default" is persisted as THREADS_ONLY for compatibility.
+// Product meaning: notify for mentions and subscribed thread replies, but not
+// every top-level channel message.
+const DEFAULT_CHANNEL_NOTIFICATION_LEVEL = NotificationLevel.THREADS_ONLY;
+const DEFAULT_DM_NOTIFICATION_LEVEL: NotificationLevel = NotificationLevel.ALL;
+
 /**
  * The type of notification being delivered, used to gate which NotificationLevel
  * values allow the notification through in Layer 3 of the evaluation.
  *
  * - 'channel_message' → passes only for ALL
- * - 'mention'         → passes for ALL and MENTIONS_ONLY; blocked by THREADS_ONLY
- * - 'thread_reply'    → passes for ALL and THREADS_ONLY; blocked by MENTIONS_ONLY
- * - 'thread_mention'  → passes for ALL, MENTIONS_ONLY, and THREADS_ONLY (a direct @mention
+ * - 'mention'         → passes for ALL, MENTIONS_ONLY, and THREADS_ONLY (UI Default)
+ * - 'thread_reply'    → passes for ALL and THREADS_ONLY (UI Default); blocked by MENTIONS_ONLY
+ * - 'thread_mention'  → passes for ALL, MENTIONS_ONLY, and THREADS_ONLY (UI Default) (a direct @mention
  *                       inside a thread — relevant to both mention and thread subscribers)
  */
 export type NotificationContext =
@@ -40,28 +46,31 @@ function parseTimestamp(value: Date | number | null | undefined): number | null 
  *
  * NotificationLevel semantics:
  *   ALL           – every notification type passes (channel posts + mentions + thread replies)
+ *   THREADS_ONLY  – UI Default for regular channels: explicit mentions and subscribed
+ *                   thread replies pass; top-level channel posts are suppressed
  *   MENTIONS_ONLY – only explicit @mentions pass; thread replies are suppressed even if subscribed
- *   THREADS_ONLY  – only thread replies the user is subscribed to pass; standalone mentions are suppressed
  */
 function isLevelAllowed(level: NotificationLevel, context: NotificationContext): boolean {
   switch (context) {
     case 'channel_message':
-      // Top-level channel posts should only notify users explicitly set to ALL.
+      // A normal top-level channel message is noisy, so only "All notifications"
+      // users receive it. UI "Default" (stored as THREADS_ONLY) does not.
       return level === NotificationLevel.ALL;
     case 'mention':
-      // Mentions pass for ALL and MENTIONS_ONLY; THREADS_ONLY blocks them
-      return level === NotificationLevel.ALL || level === NotificationLevel.MENTIONS_ONLY;
-    case 'thread_reply':
-      // Thread replies pass for ALL and THREADS_ONLY; MENTIONS_ONLY blocks them
-      return level === NotificationLevel.ALL || level === NotificationLevel.THREADS_ONLY;
     case 'thread_mention':
-      // A direct @mention inside a thread is relevant to both mention and thread subscribers.
-      // It passes for ALL, MENTIONS_ONLY, and THREADS_ONLY.
+      // Direct mentions notify all enabled mention audiences:
+      // - ALL: receives everything.
+      // - MENTIONS_ONLY: receives direct mentions, including mentions inside threads.
+      // - UI Default: persisted as THREADS_ONLY, receives mentions + subscribed thread replies.
       return (
         level === NotificationLevel.ALL ||
         level === NotificationLevel.MENTIONS_ONLY ||
-        level === NotificationLevel.THREADS_ONLY
+        level === DEFAULT_CHANNEL_NOTIFICATION_LEVEL
       );
+    case 'thread_reply':
+      // A normal thread reply has no direct @mention. It should notify users who
+      // chose ALL or UI Default (stored as THREADS_ONLY), but not MENTIONS_ONLY.
+      return level === NotificationLevel.ALL || level === DEFAULT_CHANNEL_NOTIFICATION_LEVEL;
     default:
       return true;
   }
@@ -75,9 +84,9 @@ function isLevelAllowed(level: NotificationLevel, context: NotificationContext):
  *    user receives nothing on any device while paused.
  * 2. Per-device notification level filtered by notification context:
  *    - 'channel_message': ALL passes.
- *    - 'mention':         ALL or MENTIONS_ONLY passes; THREADS_ONLY blocks.
- *    - 'thread_reply':    ALL or THREADS_ONLY passes; MENTIONS_ONLY blocks (even for subscribed threads).
- *    - 'thread_mention':  ALL, MENTIONS_ONLY, or THREADS_ONLY passes.
+ *    - 'mention':         ALL, MENTIONS_ONLY, or THREADS_ONLY (UI Default) passes.
+ *    - 'thread_reply':    ALL or THREADS_ONLY (UI Default) passes; MENTIONS_ONLY blocks.
+ *    - 'thread_mention':  ALL, MENTIONS_ONLY, or THREADS_ONLY (UI Default) passes.
  */
 function evaluateNotificationSettings(
   settings: UserNotificationSettings,
@@ -124,8 +133,8 @@ function evaluateNotificationSettings(
  * 2. Channel-level settings:
  *    - desktopNotificationLevel filtered by `context`:
  *        'channel_message' → ALL passes.
- *        'mention'         → ALL or MENTIONS_ONLY passes; THREADS_ONLY blocks.
- *        'thread_reply'    → ALL or THREADS_ONLY passes; MENTIONS_ONLY blocks (even for subscribed threads).
+ *        'mention'         → ALL, MENTIONS_ONLY, or THREADS_ONLY (UI Default) passes.
+ *        'thread_reply'    → ALL or THREADS_ONLY (UI Default) passes; MENTIONS_ONLY blocks.
  * 3. Thread subscription state has the lowest priority and is evaluated upstream
  *    (callers should only pass subscribed-thread recipients for 'thread_reply' context).
  *
@@ -134,8 +143,8 @@ function evaluateNotificationSettings(
  * @param isDMChannel - If true, only global pause applies (notification level is skipped).
  * @param context     - The type of notification being sent. Controls which NotificationLevel values
  *                      allow the notification through. Ignored when isDMChannel is true.
- *                      Use 'thread_mention' when an @mention occurs inside a thread reply so that
- *                      users with THREADS_ONLY are also notified. Defaults to 'mention'.
+ *                      Use 'thread_mention' when an @mention occurs inside a thread reply.
+ *                      Defaults to 'mention'.
  */
 export async function filterUsers(
   userIds: string[],
@@ -184,14 +193,19 @@ export async function filterUsers(
     const channelStatus = channelStatusMap.get(userId);
     const globalPausedUntil = globalPauseMap.get(userId) ?? null;
 
-    // No channel-specific settings found → default to allowing all, but still check global pause
+    // No channel-specific settings found → fall back to the persisted UI defaults.
     if (!channelStatus) {
-      const globalPausedTs = parseTimestamp(globalPausedUntil);
-      const isGloballyPaused = globalPausedTs !== null && globalPausedTs > Date.now();
-      if (!isGloballyPaused) {
-        desktopUsers.push(userId);
-        mobileUsers.push(userId);
-      }
+      const defaultNotificationLevel = isDMChannel
+        ? DEFAULT_DM_NOTIFICATION_LEVEL
+        : DEFAULT_CHANNEL_NOTIFICATION_LEVEL;
+      const result = evaluateNotificationSettings({
+        userId,
+        desktopNotificationLevel: defaultNotificationLevel,
+        mobileNotificationLevel: defaultNotificationLevel,
+        globalPausedUntil,
+      }, context);
+      if (result.shouldNotifyDesktop) desktopUsers.push(userId);
+      if (result.shouldNotifyMobile) mobileUsers.push(userId);
       continue;
     }
 
@@ -223,8 +237,8 @@ export async function filterUsers(
     // For regular channels: apply global pause + notification level (gated by context)
     const settings: UserNotificationSettings = {
       userId,
-      desktopNotificationLevel: channelStatus.desktopNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
-      mobileNotificationLevel: channelStatus.mobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
+      desktopNotificationLevel: channelStatus.desktopNotificationLevel ?? DEFAULT_CHANNEL_NOTIFICATION_LEVEL,
+      mobileNotificationLevel: channelStatus.mobileNotificationLevel ?? DEFAULT_CHANNEL_NOTIFICATION_LEVEL,
       globalPausedUntil,
     };
 

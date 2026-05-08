@@ -1,6 +1,12 @@
 import { BaseRepository } from './base';
-import { ChannelParticipant, ChannelRole } from '@prisma/client';
+import { ChannelParticipant, ChannelRole, ChannelScopeType, NotificationLevel } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
+
+function getDefaultNotificationLevel(scopeType?: ChannelScopeType | null): NotificationLevel {
+  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM
+    ? NotificationLevel.ALL
+    : NotificationLevel.THREADS_ONLY;
+}
 
 export interface CreateChannelParticipantInput {
   channelId: string;
@@ -56,6 +62,12 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         data.channelId,
         now,
       );
+      const channel = await tx.channel.findUnique({
+        where: { id: data.channelId },
+        select: { scopeType: true },
+      });
+      const notificationLevel = getDefaultNotificationLevel(channel?.scopeType);
+
       const participant = await tx.channelParticipant.create({
         data: {
           channelId: data.channelId,
@@ -73,6 +85,8 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
           isStarred: false,
           lastViewedAt: now,
           conversationSeenCutoffAt,
+          desktopNotificationLevel: notificationLevel,
+          mobileNotificationLevel: notificationLevel,
         }
       });
 
@@ -154,6 +168,12 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         return existing;
       }
 
+      const channel = await tx.channel.findUnique({
+        where: { id: channelId },
+        select: { scopeType: true },
+      });
+      const notificationLevel = getDefaultNotificationLevel(channel?.scopeType);
+
       // Create participant
       const participant = await tx.channelParticipant.create({
         data: {
@@ -172,6 +192,8 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
           isStarred: false,
           lastViewedAt: now,
           conversationSeenCutoffAt,
+          desktopNotificationLevel: notificationLevel,
+          mobileNotificationLevel: notificationLevel,
         }
       });
 

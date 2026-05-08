@@ -185,6 +185,14 @@ const buildCompletedBookmarkMetadata = (
   return nextMetadata as ReadonlyJSONValue;
 };
 
+function getDefaultChannelNotificationLevel(
+  scopeType?: ChannelScopeType | null,
+): NotificationLevel {
+  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM
+    ? NotificationLevel.ALL
+    : NotificationLevel.THREADS_ONLY;
+}
+
 export const mutators = defineMutators({
   notificationSettings: {
     setChannelNotificationLevel: defineMutator(
@@ -247,6 +255,8 @@ export const mutators = defineMutators({
           throw new Error('Can only join public channels');
         }
 
+        const notificationLevel = getDefaultChannelNotificationLevel(channel.scopeType);
+
         // Check if user is already a participant
         const existingParticipant = await tx.run(
           zql.channel_participants.where('channelId', channelId).where('userId', _ctx.userID).one(),
@@ -305,8 +315,8 @@ export const mutators = defineMutators({
             isClosed: false,
             unreadCount: 0,
             isRecapSubscribed: false,
-            desktopNotificationLevel: NotificationLevel.ALL,
-            mobileNotificationLevel: NotificationLevel.ALL,
+            desktopNotificationLevel: notificationLevel,
+            mobileNotificationLevel: notificationLevel,
             isDeleted: false,
             updatedAt: timestamp,
           });
@@ -373,6 +383,8 @@ export const mutators = defineMutators({
           throw new Error('You are not allowed to add someone');
         }
 
+        const notificationLevel = getDefaultChannelNotificationLevel(channel.scopeType);
+
         const users = await Promise.all(userIds.map(id => tx.run(zql.users.where('id', id).one())));
         const validUsers = users.filter(user => user !== undefined);
         const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
@@ -419,8 +431,8 @@ export const mutators = defineMutators({
             isClosed: false,
             unreadCount: 0,
             isRecapSubscribed: false,
-            desktopNotificationLevel: NotificationLevel.ALL,
-            mobileNotificationLevel: NotificationLevel.ALL,
+            desktopNotificationLevel: notificationLevel,
+            mobileNotificationLevel: notificationLevel,
             isDeleted: false,
             updatedAt: timestamp,
           });

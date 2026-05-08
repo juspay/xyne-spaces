@@ -941,9 +941,9 @@ class NotificationService {
     getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
     // Filter users based on device preferences, pause settings and notification level.
     // For DM channels, only device filter is applied (skips notification level checks).
-    // context='thread_mention': passes for ALL, MENTIONS_ONLY, and THREADS_ONLY — a direct
+    // context='thread_mention': passes for ALL, MENTIONS_ONLY, and UI Default (THREADS_ONLY) — a direct
     //   @mention inside a thread is relevant to both mention and thread-reply subscribers.
-    // context='mention': ALL or MENTIONS_ONLY passes; THREADS_ONLY blocks.
+    // context='mention': passes for ALL, MENTIONS_ONLY, and UI Default (THREADS_ONLY).
     const notificationContext = isThreadMessage && !isDMChannel ? 'thread_mention' : 'mention';
     const { desktopUsers, mobileUsers } = await notificationFilterService.filterUsers(
       recipientIds,
