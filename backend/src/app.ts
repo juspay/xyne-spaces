@@ -141,6 +141,7 @@ import applicationBackfillRoutes from '@/routes/applicationBackfill';
 import { appRoutes } from '@/apps';
 import { ChatController } from '@/apps/controllers/chatController';
 import userMigrationRoutes from '@/routes/userMigration';
+import internalRoutes from '@/routes/internal';
 
 export class App {
   public app: Application;
@@ -513,6 +514,8 @@ export class App {
       aclMiddleware.checkAccess,
       userManagementRoutes
     );
+
+    this.app.use('/internal', internalRoutes);
 
     // API versioning placeholder
     this.app.use('/api/v1', (_req, res) => {

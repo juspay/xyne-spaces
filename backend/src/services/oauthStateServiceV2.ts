@@ -10,6 +10,7 @@ interface OAuthState {
   codeChallenge?: string;
   createdAt: number;
   redirectTo?: string;
+  isNy?: boolean;
 }
 
 class OAuthStateService {
@@ -23,6 +24,7 @@ class OAuthStateService {
     codeChallenge?: string,
     redirectTo?: string,
     provider: OAuthProvider = 'google',
+    isNy?: boolean,
   ): Promise<string> {
     const { redisService } = await import('./redisService');
     const client = redisService.getClient();
@@ -36,6 +38,7 @@ class OAuthStateService {
       codeChallenge,
       createdAt: Date.now(),
       ...(redirectTo !== undefined ? { redirectTo } : {}),
+      ...(isNy ? { isNy } : {}),
     };
 
     await client.setex(
