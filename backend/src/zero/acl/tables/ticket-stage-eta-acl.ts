@@ -1,4 +1,4 @@
-import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
+import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
 import {
   MutationACLError,
   type TableSchema,
@@ -29,7 +29,14 @@ export class TicketStageEtaACL extends BaseACL<'ticket_stage_eta'> {
     await this.verifyTicketInWorkspace(eta.ticketId, tx);
   }
 
-  async canDelete(_args: DeleteID<TableSchema<'ticket_stage_eta'>>, _tx: Transaction<Schema>): Promise<void> {
-    throw new MutationACLError('Ticket stage ETA delete failed: ETA records are immutable', 'ticket_stage_eta');
+  async canDelete(args: DeleteID<TableSchema<'ticket_stage_eta'>>, tx: Transaction<Schema>): Promise<void> {
+    const eta = await tx.run(zql.ticket_stage_eta.where('id', args.id).one());
+    if (eta) {
+      await this.verifyTicketInWorkspace(eta.ticketId, tx);
+    }
+  }
+
+  async canUpsert(args: UpsertValue<TableSchema<'ticket_stage_eta'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyTicketInWorkspace(args.ticketId, tx);
   }
 }
