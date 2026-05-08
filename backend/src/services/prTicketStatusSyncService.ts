@@ -33,6 +33,7 @@ interface PRStatusUpdateParams {
   prUrl: string;
   newStatus: PRStatus;
   prEvent: PRStatusEvent;
+  stageEvent?: PRStatusEvent;
   prAuthor?: string;
   prAuthorEmail?: string;
   remainingOpenPRs?: number;
@@ -244,7 +245,7 @@ export class PRTicketStatusSyncService {
       const updatedBy = await this.resolveUpdatedBy(params.prAuthorEmail);
 
       // 4. Find stage with this PR status mapped
-      const targetStage = await this.findStageForPRStatus(ticket.boardId, params.prEvent);
+      const targetStage = await this.findStageForPRStatus(ticket.boardId, params.stageEvent ?? params.prEvent);
       if (!targetStage) {
         logger.debug(
           `[PR-Ticket-Sync] No stage mapped for PR status: ${params.prEvent} in board ${ticket.boardId}, logging activity only`
@@ -350,7 +351,7 @@ export class PRTicketStatusSyncService {
       }
 
       // 8. Auto-assign PR_REVIEWER or QA based on PR event
-      await this.handleAssignmentBasedOnPREvent(ticket, params.prEvent, updatedBy);
+      await this.handleAssignmentBasedOnPREvent(ticket, params.prEvent, updatedBy, params.stageEvent);
 
       // 9. Send message to conversation
       const stageChange = stageChanged
@@ -369,7 +370,9 @@ export class PRTicketStatusSyncService {
   private shouldSkipUpdate(params: PRStatusUpdateParams): boolean {
     const remainingOpenPRs = params.remainingOpenPRs ?? 0;
     return (
-      (params.prEvent === PRStatusEvent.MERGED || params.prEvent === PRStatusEvent.DELETED) &&
+      (params.prEvent === PRStatusEvent.MERGED ||
+        params.prEvent === PRStatusEvent.DELETED ||
+        params.prEvent === PRStatusEvent.DECLINED) &&
       remainingOpenPRs > 0
     );
   }
@@ -749,7 +752,8 @@ export class PRTicketStatusSyncService {
   private async handleAssignmentBasedOnPREvent(
     ticket: TicketInfo,
     prEvent: PRStatusEvent,
-    updatedBy: string
+    updatedBy: string,
+    stageEvent?: PRStatusEvent
   ): Promise<void> {
     // Skip if ticket doesn't have a user group
     if (!ticket.userGroupId) {
@@ -763,14 +767,18 @@ export class PRTicketStatusSyncService {
       let assignmentType: AssignmentType | null = null;
       let fieldToUpdate: 'prReviewerId' | 'qaId' | null = null;
 
-      // Determine assignment type based on PR event
-      if (prEvent === PRStatusEvent.CREATED || prEvent === PRStatusEvent.UPDATED) {
+      // Use stageEvent (if provided) for assignment decisions so that DECLINED/DELETED
+      // events that fall back to the MERGED stage also trigger QA assignment.
+      const effectiveEvent = stageEvent ?? prEvent;
+
+      // Determine assignment type based on effective event
+      if (effectiveEvent === PRStatusEvent.CREATED || effectiveEvent === PRStatusEvent.UPDATED) {
         assignmentType = AssignmentType.PR_REVIEWER;
         fieldToUpdate = 'prReviewerId';
         logger.info(
-          `[PR-Ticket-Sync] PR ${prEvent} event for ticket ${ticket.xyneId} - assigning PR_REVIEWER`
+          `[PR-Ticket-Sync] PR ${effectiveEvent} event for ticket ${ticket.xyneId} - assigning PR_REVIEWER`
         );
-      } else if (prEvent === PRStatusEvent.MERGED) {
+      } else if (effectiveEvent === PRStatusEvent.MERGED) {
         assignmentType = AssignmentType.QA;
         fieldToUpdate = 'qaId';
         logger.info(

@@ -503,6 +503,32 @@ export class BitbucketWebhookService {
     if (result) {
       if (result.statusChanged) {
         logger.info(`[Bitbucket-Webhook] PR ${context.prId} status: ${result.previousStatus} → DECLINED`);
+
+        const ticketId = result.pr.ticketId ?? await this.getTicketIdForPR(result.pr);
+
+        let openCount = 0;
+        let mergedCount = 0;
+
+        if (ticketId) {
+          openCount = await this.prMetricsRepository.countPRsForTicket(
+            ticketId,
+            context.prId,
+            context.prUrl,
+            [PRStatus.OPEN, PRStatus.UPDATED]
+          );
+          if (openCount === 0) {
+            mergedCount = await this.prMetricsRepository.countPRsForTicket(
+              ticketId,
+              context.prId,
+              context.prUrl,
+              [PRStatus.MERGED]
+            );
+          }
+        }
+
+        // If no open PRs remain and merged PRs exist, move to the MERGED stage instead
+        const stageEvent = openCount === 0 && mergedCount > 0 ? PRStatusEvent.MERGED : undefined;
+
         await prTicketStatusSyncService.syncTicketStatusOnPRChange({
           prId: context.prId,
           prUrl: context.prUrl,
@@ -510,6 +536,8 @@ export class BitbucketWebhookService {
           prAuthor: context.prAuthor,
           prAuthorEmail: context.prAuthorEmail,
           prEvent: PRStatusEvent.DECLINED,
+          stageEvent,
+          remainingOpenPRs: openCount,
         });
       }
     } else {
@@ -547,28 +575,32 @@ export class BitbucketWebhookService {
       return;
     }
 
-    // Count remaining active PRs (excluding DECLINED and DELETED) for the same ticket
-    let remainingOpenPRs = 0;
-    const ticketId = trackedPr.ticketId;
+    const ticketId = trackedPr.ticketId ?? await this.getTicketIdForPR(trackedPr);
+
+    let openCount = 0;
+    let mergedCount = 0;
 
     if (ticketId) {
-      remainingOpenPRs = await this.prMetricsRepository.countPRsForTicket(
+      // Count only active (open/updated) PRs — MERGED is handled separately below
+      openCount = await this.prMetricsRepository.countPRsForTicket(
         ticketId,
         context.prId,
         context.prUrl,
-        [PRStatus.OPEN, PRStatus.UPDATED, PRStatus.MERGED]
+        [PRStatus.OPEN, PRStatus.UPDATED]
       );
-    } else {
-      const prTicketId = await this.getTicketIdForPR(trackedPr);
-      if (prTicketId) {
-        remainingOpenPRs = await this.prMetricsRepository.countPRsForTicket(
-          prTicketId,
+      // Only check for merged PRs when no open/updated ones remain
+      if (openCount === 0) {
+        mergedCount = await this.prMetricsRepository.countPRsForTicket(
+          ticketId,
           context.prId,
           context.prUrl,
-          [PRStatus.OPEN, PRStatus.UPDATED, PRStatus.MERGED]
+          [PRStatus.MERGED]
         );
       }
     }
+
+    // If no open PRs remain and merged PRs exist, move to the MERGED stage instead
+    const stageEvent = openCount === 0 && mergedCount > 0 ? PRStatusEvent.MERGED : undefined;
 
     // Sync ticket status before marking the PR as deleted
     await prTicketStatusSyncService.syncTicketStatusOnPRChange({
@@ -578,7 +610,8 @@ export class BitbucketWebhookService {
       prAuthor: context.prAuthor,
       prAuthorEmail: context.prAuthorEmail,
       prEvent: PRStatusEvent.DELETED,
-      remainingOpenPRs,
+      stageEvent,
+      remainingOpenPRs: openCount,
     });
 
     // Soft-delete: mark status as DELETED instead of removing the row
