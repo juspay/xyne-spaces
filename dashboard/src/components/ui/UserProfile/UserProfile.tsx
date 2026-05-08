@@ -718,7 +718,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                         }}
                         placeholder='Enter display name'
                         maxLength={50}
-                        className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
+                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-none focus:border-ring'
                         autoFocus={!isMobile}
                       />
                       <button
@@ -784,7 +784,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                         }}
                         placeholder='Enter phone number'
                         maxLength={15}
-                        className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
+                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-none focus:border-ring'
                         autoFocus={!isMobile}
                       />
                       <button
@@ -873,7 +873,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                           if (e.key === 'Escape') handleCancelEdit();
                         }}
                         max={new Date().toISOString().split('T')[0]}
-                        className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
+                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-none focus:border-ring'
                         autoFocus={!isMobile}
                       />
                       <button

@@ -44,6 +44,8 @@
     --sidebar-item-active: #eff3ed;
     --sidebar-badge-accent: #57ab02;
     --sidebar-badge-accent-foreground: #ffffff;
+    --sidebar-dm-dot-bg: #ed6252;
+    --sidebar-dm-dot-shadow: inset 0 0 0 1px #c14c40;
     --action-primary: #57ab02;
     --action-primary-foreground: #ffffff;
     --sidebar-divider: #e5ebf0;
@@ -133,6 +135,8 @@
     --sidebar-item-active: #ffffff;
     --sidebar-badge-accent: #6e7aa6;
     --sidebar-badge-accent-foreground: #ffffff;
+    --sidebar-dm-dot-bg: #ed6252;
+    --sidebar-dm-dot-shadow: inset 0 0 0 1px #c14c40;
     --action-primary: #6e7aa6;
     --action-primary-foreground: #ffffff;
     --sidebar-divider: #e5ebf0;
@@ -168,26 +172,26 @@
 
   /* Midnight theme - dark theme variant */
   [data-theme="midnight"] {
-    --root-bg: #0a0a0a;
-    --background: 0 0% 12%;
-    --foreground: 0 0% 95%;
-    --card: 0 0% 15%;
-    --card-foreground: 0 0% 95%;
-    --popover: 0 0% 15%;
-    --popover-foreground: 0 0% 95%;
+    --root-bg: #111113;
+    --background: 216 6% 12%;
+    --foreground: 210 8% 93%;
+    --card: 216 6% 15%;
+    --card-foreground: 210 8% 93%;
+    --popover: 216 6% 15%;
+    --popover-foreground: 210 8% 93%;
     --primary: 0 0% 100%;
     --primary-foreground: 0 0% 5%;
-    --secondary: 240 3% 21%;
-    --secondary-foreground: 0 0% 90%;
-    --muted: 240 3% 21%;
-    --muted-foreground: 240 5% 65%;
-    --accent: 240 3% 21%;
-    --accent-foreground: 0 0% 90%;
+    --secondary: 216 6% 18%;
+    --secondary-foreground: 210 8% 93%;
+    --muted: 216 6% 18%;
+    --muted-foreground: 216 5% 71%;
+    --accent: 216 6% 18%;
+    --accent-foreground: 210 8% 93%;
     --destructive: 0 62% 55%;
-    --destructive-foreground: 0 0% 95%;
-    --border: 240 3% 25%;
-    --input: 240 3% 25%;
-    --ring: 0 0% 29%;
+    --destructive-foreground: 210 8% 93%;
+    --border: 213 6% 23%;
+    --input: 213 6% 23%;
+    --ring: 213 6% 28%;
     --radius: 0.5rem;
     --chart-1: 12 76% 65%;
     --chart-2: 173 58% 50%;
@@ -195,30 +199,32 @@
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
 
-    --app-sidebar-active: #3a3d42;
-    --app-sidebar-active-foreground: #e0e0e0;
+    --app-sidebar-active: #363a3f;
+    --app-sidebar-active-foreground: #edeef0;
 
-    --root-border: #363840;
-    --sidebar: #141414;
+    --root-border: #363a3f;
+    --sidebar: #18191b;
     --sidebar-background-blur: 12.5px;
-    --sidebar-primary-foreground: #e0e0e0;
-    --sidebar-secondary-foreground: #9ca3af;
-    --sidebar-item-hover: #2e3035;
-    --sidebar-item-active: #3a3d42;
+    --sidebar-primary-foreground: #edeef0;
+    --sidebar-secondary-foreground: #b0b4ba;
+    --sidebar-item-hover: #272a2d;
+    --sidebar-item-active: #2e3135;
     --sidebar-badge-accent: #4a9e00;
     --sidebar-badge-accent-foreground: #ffffff;
+    --sidebar-dm-dot-bg: #ed6252;
+    --sidebar-dm-dot-shadow: inset 0 0 0 1px #c14c40;
     --action-primary: #0073bf;
     --action-primary-foreground: #ffffff;
-    --sidebar-divider: #363840;
-    --metrics-bar-color: #b0b8c1;
+    --sidebar-divider: #363a3f;
+    --metrics-bar-color: #b0b4ba;
     --metrics-bar-divider: rgba(255, 255, 255, 0.2);
-    --nav-active-icon: #b0b8c1;
-    --nav-disabled-icon: #4b5563;
-    --call-action-button-color: #b0b8c1;
-    --nav-icon-seperator: #374151;
+    --nav-active-icon: #b0b4ba;
+    --nav-disabled-icon: #43484e;
+    --call-action-button-color: #b0b4ba;
+    --nav-icon-seperator: #363a3f;
     --nav-search-btn-bg: rgba(255, 255, 255, 0.08);
-    --nav-search-btn-text: #b0b8c1;
-    --chat-mobile-my-bubble: #1e293b;
+    --nav-search-btn-text: #b0b4ba;
+    --chat-mobile-my-bubble: #212225;
     --mention-color: #3d9df2;
     --mention-hover-color: #7dc0f7;
     --mention-bg: rgba(61, 157, 242, 0.15);
@@ -229,18 +235,18 @@
     --mention-group-color: #60a5fa;
     --link-color: #2563eb;
     --link-hover-color: #1d4ed8;
-    --mobile-panel-bg: #151515;
+    --mobile-panel-bg: #18191b;
 
     /* Stage status backgrounds - semantic for dark theme */
-    --stage-todo-bg: 240 4% 16%;
-    --stage-todo-border: 240 4% 25%;
+    --stage-todo-bg: 216 6% 15%;
+    --stage-todo-border: 213 6% 23%;
     --stage-completed-bg: 120 10% 15%;
     --stage-completed-border: 120 20% 25%;
     --stage-cancelled-bg: 0 20% 15%;
     --stage-cancelled-border: 0 20% 25%;
 
     /* Workflow status colors - accessible on dark bg */
-    --status-new: #9ca3af;
+    --status-new: #b0b4ba;
     --status-pending: #fbbf24;
     --status-scheduled: #60a5fa;
     --status-success: #4ade80;
@@ -699,6 +705,10 @@
 
   .hljs-strong {
     font-weight: 700;
+  }
+
+  .ticket-card-accent-bar {
+    background: linear-gradient(to bottom, #f3e8ff, #dbeafe);
   }
 }
 
@@ -1827,6 +1837,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
  * MIDNIGHT THEME OVERRIDES — hardcoded color scoped overrides
  * ============================================================================ */
 
+/* --- Ticket card left accent bar --- */
+[data-theme="midnight"] .ticket-card-accent-bar {
+  background: linear-gradient(to bottom, #43484e, #5a6169);
+}
+
 /* --- Bookmarked message background --- */
 [data-theme="midnight"] .message-bookmarked-bg {
   background-color: rgba(59, 130, 246, 0.1);
@@ -1957,6 +1972,12 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-theme="midnight"] .jp-message-html blockquote {
   color: #9ca3af;
   border-left-color: #4b5563;
+}
+
+/* --- Mermaid Diagram --- */
+[data-theme="midnight"] .mermaid-tab-active {
+  background-color: rgba(96, 165, 250, 0.15) !important;
+  color: #60a5fa !important;
 }
 
 /* --- 2D: Mention Styles --- */
