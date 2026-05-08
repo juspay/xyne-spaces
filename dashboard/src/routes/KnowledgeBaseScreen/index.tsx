@@ -1,1 +1,1 @@
-export { default } from './KnowledgeBase';
+export { KnowledgeBasePage as default, KnowledgeBasePage } from './KnowledgeBasePage';

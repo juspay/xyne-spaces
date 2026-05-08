@@ -897,6 +897,7 @@ model UserGroup {
   workloadMappings     UserWorkloadMapping[]
   expertiseMappings    UserExpertiseMapping[]
   isActive    Boolean     @default(true)
+  collectionPermissions CollectionPermission[]
   workspace            Workspace            @relation(fields: [workspaceId], references: [id])
 
   @@unique([workspaceId, name])
@@ -1013,6 +1014,7 @@ model User {
   incomingWebhooksRevoked   AppIncomingWebhook[]     @relation("AppIncomingWebhookRevokedBy")
   orgMember                 OrgMember?              @relation(fields: [orgMemberId], references: [memberId])
 
+  permissions CollectionPermission[]
   @@unique([providerUserId, workspaceId])
   @@unique([email, workspaceId])
   @@index([email])
@@ -2972,6 +2974,155 @@ model ActivityAlias {
   @@index([eventCategory])
   @@map("activity_aliases")
   @@schema("workflow")
+}
+
+// Collection-related Enums
+enum UploadStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  NONE
+  @@schema("public")
+}
+
+enum CollectionRole {
+  OWNER      
+  EDITOR     
+  VIEWER     
+  @@schema("public")
+}
+
+enum CollectionItemType {
+  FOLDER
+  FILE
+  @@schema("public")
+}
+
+model Collection {
+  id                  String         @id @default(cuid())
+  ownerId             String         
+  name                String   
+  projectId           String      
+  description         String?        
+  vespaDocId          String         
+  isPrivate           Boolean        @default(true)
+  totalItems          Int            @default(0)
+  lastUpdatedByEmail  String?        
+  lastUpdatedById     String?
+  metadata            Json           @default("{}")
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  deletedAt           DateTime?
+
+  // Relations
+  items               CollectionItem[]
+  permissions         CollectionPermission[]
+
+  @@unique([ownerId, name, projectId], map: "unique_owner_collection_name_not_deleted")
+  @@index([id, ownerId], map: "idx_collections_id_owner")
+  @@index([projectId, deletedAt, createdAt, id], map: "idx_collections_project_deleted_created_id")
+  @@index([deletedAt, createdAt, id], map: "idx_collections_deleted_created_id")
+  @@map("collections")
+  @@schema("public")
+}
+
+model CollectionItem {
+  id                  String              @id @default(cuid())
+  collectionId        String              
+  parentId            String?             
+  ownerId             String              
+  name                String              
+  type                CollectionItemType  
+  path                String              
+  position            Int                 @default(0)
+  vespaDocId          String?             
+  totalFileCount      Int                 @default(0)
+
+  // Folder aggregation counters (null for files, used for derived upload status)
+  totalFiles          Int?               @default(0)  // Total descendant files
+  pendingFiles        Int?               @default(0)  // Files in PENDING state
+  processingFiles     Int?               @default(0)  // Files in PROCESSING state
+  completedFiles      Int?               @default(0)  // Files in COMPLETED state
+  failedFiles         Int?               @default(0)  // Files in FAILED state
+
+  // File-specific fields (null for folders)
+  storageKey          String?             
+  mimeType            String?                        
+  fileSize            BigInt?
+  checksum            String?             
+  uploadedByEmail     String?             
+  uploadedById        String?
+
+  processingInfo      Json                @default("{}")
+  processedAt         DateTime?
+  uploadStatus        UploadStatus        @default(NONE)
+  statusMessage       String?             
+  retryCount          Int                 @default(0)
+  currentVersionNumber Int                @default(1)
+  versionCount        Int                 @default(1)
+  metadata            Json                @default("{}")
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  deletedAt           DateTime?
+
+  // Relations
+  collection          Collection          @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  parent              CollectionItem?     @relation("ParentChild", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  children            CollectionItem[]    @relation("ParentChild")
+  versions            CollectionItemVersion[]
+
+  @@unique([collectionId, parentId, name], map: "unique_collection_parent_name_not_deleted")
+  @@index([collectionId, deletedAt, createdAt, id], map: "idx_items_collection_deleted_created_id")
+  @@map("collection_items")
+  @@schema("public")
+}
+
+model CollectionPermission {
+  id              String          @id @default(cuid())
+  collectionId    String          
+  userId          String?         
+  userGroupId     String?         
+  role            CollectionRole  
+  canShare        Boolean         @default(false)
+  
+  grantedBy       String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  collection      Collection      @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  user            User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userGroup       UserGroup?      @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, userId])
+  @@unique([collectionId, userGroupId])
+  @@index([userGroupId])
+  @@index([collectionId, userId, id], map: "idx_collection_permissions_collection_user_id")
+  @@map("collection_permissions")
+  @@schema("public")
+}
+
+model CollectionItemVersion {
+  id                    String         @id @default(cuid())
+  itemId                String
+  versionNumber         Int
+  storageKey            String
+  mimeType              String
+  fileSize              BigInt
+  checksum              String
+  uploadedById          String
+  uploadedByEmail       String
+  restoredFromVersionId String?
+  metadata              Json           @default("{}")
+  createdAt             DateTime       @default(now())
+
+  item                  CollectionItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, versionNumber], map: "collection_item_versions_itemId_versionNumber_key")
+  @@index([itemId], map: "collection_item_versions_itemId_idx")
+  @@map("collection_item_versions")
+  @@schema("public")
 }
 
 model StageApprovers {

@@ -285,7 +285,7 @@ const {
   query,
   sessionId,
   channelIds,
-  conversationId,
+  collectionIds, conversationId,
   canvasViewAccessId,
   selectionContexts,
   createCanvasEnabled,
@@ -653,6 +653,7 @@ const {
 
   const agentContext = {
     channelIds,
+    collectionIds,
     conversationId,
     canvasViewAccessId,
     selectionContexts,

@@ -784,6 +784,17 @@ export function formatEnhancedToolResultForContext(
     output += `TICKETS (${tickets.length}):\n${formattedTickets}\n\n`;
   }
 
+  // Format knowledge base documents
+  const knowledgeBaseEntities = result.entities.filter(e => e.entityType === 'knowledge_base');
+  if (knowledgeBaseEntities.length > 0) {
+    const formattedKBDocs = knowledgeBaseEntities.map(doc => {
+      const fileInfo = doc.fileName ? ` **${doc.fileName}**` : '';
+      return `[${prefix}${doc.entityIndex}]${fileInfo}:\n${doc.content}`;
+    }).join('\n\n');
+
+    output += `KNOWLEDGE BASE (${knowledgeBaseEntities.length}):\n${formattedKBDocs}\n\n`;
+  }
+
   return output.trim();
 }
 
