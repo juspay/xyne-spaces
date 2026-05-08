@@ -18,11 +18,18 @@ import type { Context } from '../zero/schema.js';
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
 export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistory>[number];
+export type RecordingEntry = QueryResultType<typeof queries.userRecordings>[number];
 
 export const CALL_HISTORY_KEY = 'callHistory';
+export const RECORDINGS_KEY = 'recordings';
 
 export interface CallHistoryState {
   calls: CallHistoryEntry[];
+  hasMore: boolean;
+}
+
+export interface RecordingsState {
+  recordings: RecordingEntry[];
   hasMore: boolean;
 }
 
@@ -38,6 +45,7 @@ export interface QueryCacheContext {
     [channelId: string]: Conversation[];
   };
   callHistory: CallHistoryState;
+  recordings: RecordingsState;
 }
 
 export type QueryCacheEvent =
@@ -61,7 +69,9 @@ export type QueryCacheEvent =
     }
   | { type: 'SET_CONVERSATIONS'; channelId: string; conversations: Conversation[] }
   | { type: 'MERGE_CALL_HISTORY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
-  | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState };
+  | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState }
+  | { type: 'MERGE_RECORDINGS_PAGE'; page: RecordingEntry[]; hasMore: boolean }
+  | { type: 'HYDRATE_RECORDINGS'; data: RecordingsState };
 
 export const FINGERPRINT_FIELD = '__conversationFingerprint__';
 
@@ -160,6 +170,28 @@ export const queryCacheMachine = setup({
         return event.data;
       },
     }),
+    mergeRecordingsPage: assign({
+      recordings: ({ context, event }) => {
+        if (event.type !== 'MERGE_RECORDINGS_PAGE') return context.recordings;
+        const map = new Map(context.recordings.recordings.map(r => [r.id, r]));
+        for (const rec of event.page) map.set(rec.id, rec);
+        const recordings = [...map.values()].sort(
+          (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
+        );
+        const hasMore = !event.hasMore
+          ? false
+          : context.recordings.recordings.length === 0
+            ? true
+            : context.recordings.hasMore;
+        return { recordings, hasMore };
+      },
+    }),
+    hydrateRecordings: assign({
+      recordings: ({ event }) => {
+        if (event.type !== 'HYDRATE_RECORDINGS') return { recordings: [], hasMore: true };
+        return event.data;
+      },
+    }),
   },
 }).createMachine({
   id: 'queryCache',
@@ -167,6 +199,7 @@ export const queryCacheMachine = setup({
     cache: new Map(),
     channelConversations: {},
     callHistory: { calls: [], hasMore: true },
+    recordings: { recordings: [], hasMore: true },
   },
   on: {
     SET_KEY: {
@@ -186,6 +219,12 @@ export const queryCacheMachine = setup({
     },
     HYDRATE_CALL_HISTORY: {
       actions: 'hydrateCallHistory',
+    },
+    MERGE_RECORDINGS_PAGE: {
+      actions: 'mergeRecordingsPage',
+    },
+    HYDRATE_RECORDINGS: {
+      actions: 'hydrateRecordings',
     },
   },
 });
@@ -240,6 +279,23 @@ export const getCallHistoryQueryHash = (): string => {
 };
 
 /**
+ * Get the AST-based hash for the userRecordings query.
+ */
+export const getRecordingsQueryHash = (): string => {
+  try {
+    const query = queries.userRecordings.fn({
+      args: { limit: 1, start: null },
+      ctx: {} as Context,
+    });
+    // @ts-expect-error - hash() is part of QueryImpl, not public Query interface
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return query.hash() as string;
+  } catch {
+    return '';
+  }
+};
+
+/**
  * Setup persistence middleware for query cache.
  * Accepts a StorageAdapter for platform-agnostic persistence.
  */
@@ -257,7 +313,7 @@ export const setupQueryCachePersistence = (
         }
 
         persistTimeout = setTimeout(() => {
-          const { cache, channelConversations, callHistory } = snapshot.context;
+          const { cache, channelConversations, callHistory, recordings } = snapshot.context;
 
           cache.forEach((value, key) => {
             storage.saveContextProperty(key, value).catch(error => {
@@ -283,6 +339,15 @@ export const setupQueryCachePersistence = (
             })
             .catch(error => {
               console.error('Failed to persist call history:', error);
+            });
+
+          storage
+            .saveContextProperty(RECORDINGS_KEY, {
+              ...recordings,
+              [FINGERPRINT_FIELD]: getRecordingsQueryHash(),
+            })
+            .catch(error => {
+              console.error('Failed to persist recordings:', error);
             });
         }, PERSIST_DEBOUNCE_MS);
       }),
@@ -314,6 +379,7 @@ export const hydrateQueryCacheFromStorage = async (
     const cacheData: Record<string, CacheEntry<any>> = {};
     const conversationsData: Record<string, Conversation[]> = {};
     let callHistoryHydrated = false;
+    let recordingsHydrated = false;
 
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
 
@@ -357,6 +423,25 @@ export const hydrateQueryCacheFromStorage = async (
           data: { calls: raw.calls, hasMore: raw.hasMore },
         });
         callHistoryHydrated = true;
+      } else if (key === RECORDINGS_KEY) {
+        const raw = value as RecordingsState & { [FINGERPRINT_FIELD]?: string };
+
+        const storedHash = raw[FINGERPRINT_FIELD];
+        const currentRecordingsHash = getRecordingsQueryHash();
+
+        if (storedHash !== undefined && storedHash !== currentRecordingsHash) {
+          console.log(
+            'recordings discarded: query has changed since last save ' +
+              `(stored hash: ${storedHash}, current: ${currentRecordingsHash}).`,
+          );
+          continue;
+        }
+
+        queryCacheActor.send({
+          type: 'HYDRATE_RECORDINGS',
+          data: { recordings: raw.recordings, hasMore: raw.hasMore },
+        });
+        recordingsHydrated = true;
       } else {
         const entry = value as CacheEntry<unknown>;
         //eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -385,7 +470,8 @@ export const hydrateQueryCacheFromStorage = async (
     return (
       Object.keys(cacheData).length > 0 ||
       Object.keys(conversationsData).length > 0 ||
-      callHistoryHydrated
+      callHistoryHydrated ||
+      recordingsHydrated
     );
   } catch (error) {
     console.error('Failed to hydrate query cache from storage:', error);

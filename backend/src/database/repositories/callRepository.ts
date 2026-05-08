@@ -191,17 +191,51 @@ export class CallRepository {
     return result;
   }
 
-  async findByUserAndType(userId: string, callType: CallType): Promise<Call[]> {
-    const result = await DatabaseClient.getInstance().call.findMany({
-      where: {
-        createdByUserId: userId,
-        callType
-      },
-      orderBy: {
-        startedAt: 'desc'
-      }
+  async findByUserAndType(userId: string, callType: CallType): Promise<Call[]>;
+  async findByUserAndType(
+    userId: string,
+    callType: CallType,
+    options: { limit: number; cursor?: { startedAt: Date; id: string } }
+  ): Promise<{ calls: Call[]; nextCursor: { startedAt: Date; id: string } | null }>;
+  async findByUserAndType(
+    userId: string,
+    callType: CallType,
+    options?: { limit: number; cursor?: { startedAt: Date; id: string } }
+  ): Promise<Call[] | { calls: Call[]; nextCursor: { startedAt: Date; id: string } | null }> {
+    const where: Prisma.CallWhereInput = {
+      createdByUserId: userId,
+      callType,
+      ...(options?.cursor && {
+        OR: [
+          { startedAt: { lt: options.cursor.startedAt } },
+          { startedAt: options.cursor.startedAt, id: { lt: options.cursor.id } },
+        ],
+      }),
+    };
+
+    if (!options) {
+      return await DatabaseClient.getInstance().call.findMany({
+        where,
+        orderBy: { startedAt: 'desc' },
+      });
+    }
+
+    const { limit } = options;
+    // Fetch one extra to determine if there is a next page
+    const calls = await DatabaseClient.getInstance().call.findMany({
+      where,
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
     });
-    return result;
+
+    let nextCursor: { startedAt: Date; id: string } | null = null;
+    if (calls.length > limit) {
+      calls.pop(); // discard the sentinel item (not part of the current page)
+      const lastInPage = calls[calls.length - 1];
+      nextCursor = { startedAt: lastInPage.startedAt, id: lastInPage.id };
+    }
+
+    return { calls, nextCursor };
   }
 
   async delete(id: string): Promise<void> {

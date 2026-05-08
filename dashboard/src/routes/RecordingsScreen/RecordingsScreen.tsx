@@ -6,10 +6,10 @@
  * Recording persists across navigation via the global RecordingOverlay.
  */
 
-import { ReactElement, useState, useEffect, useCallback, useRef } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
-import { recordingService, Recording } from '../../services/Recording/recordingService';
+import { recordingService } from '../../services/Recording/recordingService';
 import { Mic, Clock, FileText, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -25,16 +25,11 @@ import { toast } from 'sonner';
 import {
   formatRecordingDuration,
   generateRecordingTitle,
-  logRecordingError,
   STT_MODEL_LABELS,
 } from '../../utils/recordingUtils';
+import { usePaginatedRecordings, type RecordingEntry } from '../../hooks/usePaginatedRecordings';
 
 export default function RecordingsScreen(): ReactElement {
-  const [recordings, setRecordings] = useState<Recording[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [showTitleModal, setShowTitleModal] = useState(false);
@@ -42,6 +37,8 @@ export default function RecordingsScreen(): ReactElement {
   const [showSttPicker, setShowSttPicker] = useState(false);
   const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('azure');
   const navigate = useNavigate();
+
+  const { recordings, hasMoreRecordings, loadMoreRecordings, isLoading } = usePaginatedRecordings();
 
   // Recording store state (context holds the recording-specific fields)
   const recordingStatus = useRecordingStore(ctx => ctx.status);
@@ -57,44 +54,6 @@ export default function RecordingsScreen(): ReactElement {
 
   // Live transcript streaming from global store (subscription is managed by the store)
   const { transcripts } = useTranscriptStream();
-
-  const loadRecordings = useCallback(
-    async (reset = false): Promise<void> => {
-      try {
-        if (reset) {
-          setLoading(true);
-          setError(null);
-        } else {
-          setLoadingMore(true);
-        }
-
-        const currentCursor = reset ? null : nextCursor;
-        const data = await recordingService.getRecordings({ limit: 20, cursor: currentCursor });
-
-        setRecordings(prev => (reset ? data.recordings : [...prev, ...data.recordings]));
-        setHasMore(data.hasMore ?? false);
-        setNextCursor(data.nextCursor ?? null);
-      } catch (err) {
-        logRecordingError('RecordingsScreen.loadRecordings', err);
-        setError('Failed to load recordings. Please try again.');
-      } finally {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    },
-    [nextCursor],
-  );
-
-  const loadMoreRecordings = useCallback(() => {
-    if (!loadingMore && hasMore) {
-      void loadRecordings(false);
-    }
-  }, [loadingMore, hasMore, loadRecordings]);
-
-  useEffect(() => {
-    void loadRecordings(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const formatDuration = formatRecordingDuration;
   const generateAutoTitle = (): string => generateRecordingTitle(startTime);
@@ -158,8 +117,6 @@ export default function RecordingsScreen(): ReactElement {
       setShowTitleModal(false);
       sendRecordingEvent({ type: 'clearTranscripts' });
       toast.success('Recording saved', { description: title });
-      // Refresh recordings list
-      void loadRecordings(true);
     } catch {
       toast.error('Failed to save title');
     } finally {
@@ -167,7 +124,7 @@ export default function RecordingsScreen(): ReactElement {
     }
   };
 
-  const handleRecordingClick = (recording: Recording): void => {
+  const handleRecordingClick = (recording: RecordingEntry): void => {
     const recordingIds = recordings.map(r => r.externalId);
     void navigate(`/recordings/${recording.externalId}`, {
       state: { recordingIds },
@@ -175,7 +132,7 @@ export default function RecordingsScreen(): ReactElement {
   };
 
   // ─── Loading State ───────────────────────────────────────────────
-  if (loading && !isActive) {
+  if (isLoading && recordings.length === 0 && !isActive) {
     return (
       <div className='flex items-center justify-center h-full'>
         <div className='flex flex-col items-center gap-3'>
@@ -195,7 +152,7 @@ export default function RecordingsScreen(): ReactElement {
           <h3 className='text-lg font-semibold text-foreground dark:text-gray-100'>Error</h3>
           <p className='text-sm text-muted-foreground dark:text-muted-foreground'>{error}</p>
           <button
-            onClick={() => void loadRecordings()}
+            onClick={() => setError(null)}
             className='mt-4 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors'
             data-track-category='RecordingsScreen'
             data-track-name='try_again'
@@ -311,10 +268,11 @@ export default function RecordingsScreen(): ReactElement {
                   customScrollParent={scrollContainer}
                   data={recordings}
                   useWindowScroll={false}
+                  atBottomThreshold={100}
                   endReached={loadMoreRecordings}
                   components={{
                     Footer: () =>
-                      loadingMore ? (
+                      hasMoreRecordings ? (
                         <div className='py-4 text-center'>
                           <Loader2 className='w-5 h-5 animate-spin mx-auto text-muted-foreground' />
                         </div>
@@ -340,7 +298,7 @@ export default function RecordingsScreen(): ReactElement {
                             {/* Content */}
                             <div className='flex-1 min-w-0'>
                               <h3 className='font-semibold text-foreground dark:text-gray-100 mb-1 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
-                                {recording.title}
+                                {recording.title ?? 'Untitled Recording'}
                               </h3>
 
                               <div className='flex items-center gap-4 text-xs text-muted-foreground dark:text-muted-foreground mb-2'>
@@ -352,22 +310,24 @@ export default function RecordingsScreen(): ReactElement {
                                     })}
                                   </span>
                                 </div>
-                                {recording.durationMs && (
+                                {recording.endedAt && (
                                   <div className='flex items-center gap-1'>
-                                    <span>{formatDuration(recording.durationMs)}</span>
+                                    <span>
+                                      {formatDuration(recording.endedAt - recording.startedAt)}
+                                    </span>
                                   </div>
                                 )}
                               </div>
 
                               {/* Metadata badges */}
                               <div className='flex items-center gap-2 flex-wrap'>
-                                {recording.hasTranscript && (
+                                {!!recording.transcript && (
                                   <span className='inline-flex items-center gap-1 px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-md text-xs'>
                                     <FileText className='w-3 h-3' />
                                     Transcript
                                   </span>
                                 )}
-                                {recording.hasSummary && (
+                                {!!recording.aiSummary && (
                                   <span className='inline-flex items-center gap-1 px-2 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 rounded-md text-xs'>
                                     AI Summary
                                   </span>
@@ -384,7 +344,7 @@ export default function RecordingsScreen(): ReactElement {
                         </button>
 
                         {/* Inline audio player — only present when a GCS file exists */}
-                        {recording.hasRecording && (
+                        {!!recording.recordingUrl && (
                           <AudioPlayer
                             onLoad={async signal => {
                               await recordingService.saveRecordingAttachment(recording.externalId);
@@ -394,7 +354,9 @@ export default function RecordingsScreen(): ReactElement {
                               );
                             }}
                             initialDurationSec={
-                              recording.durationMs ? recording.durationMs / 1000 : undefined
+                              recording.endedAt
+                                ? (recording.endedAt - recording.startedAt) / 1000
+                                : undefined
                             }
                             stopPropagation
                             trackCategory='RecordingsScreen'
