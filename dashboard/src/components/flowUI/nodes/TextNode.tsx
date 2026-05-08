@@ -7,6 +7,7 @@ import {
   ChannelMentionRenderer,
   GroupMentionRenderer,
 } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { useChannel } from '../../../hooks/useChannels';
 
 // ---------------------------------------------------------------------------
@@ -34,11 +35,12 @@ type InlinePart =
   | { type: 'link'; href: string; label: string }
   | { type: 'user'; value: string }
   | { type: 'channel'; value: string }
+  | { type: 'broadcast'; range: string }
   | { type: 'group'; value: string; name: string; alias: string };
 
 // Order of alternations is match priority.
 const INLINE_RE =
-  /<(userid|channelid|groupid):([\w.-]+)(?::([^>]+))?>|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>/g;
+  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>/g;
 
 function parseInlineContent(content: string): InlinePart[] {
   const parts: InlinePart[] = [];
@@ -52,11 +54,12 @@ function parseInlineContent(content: string): InlinePart[] {
     }
 
     if (match[1]) {
-      const mentionType = match[1] as 'userid' | 'channelid' | 'groupid';
+      const mentionType = match[1] as 'userid' | 'channelid' | 'groupid' | 'broadcast';
       const id = match[2] ?? '';
       const alias = match[3];
       if (mentionType === 'userid') parts.push({ type: 'user', value: id });
       else if (mentionType === 'channelid') parts.push({ type: 'channel', value: id });
+      else if (mentionType === 'broadcast') parts.push({ type: 'broadcast', range: id });
       else parts.push({ type: 'group', value: id, name: alias ?? id, alias: alias ?? '' });
     } else if (match[4] !== undefined) {
       parts.push({ type: 'bold', value: match[4] });
@@ -128,10 +131,10 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
   const variantClasses: Record<string, string> = {
     default: 'text-foreground',
     muted: 'text-muted-foreground',
-    success: 'text-green-600',
-    warning: 'text-yellow-600',
-    danger: 'text-red-600',
-    accent: 'text-action-primary',
+    success: 'text-[var(--status-success)]',
+    warning: 'text-[var(--status-pending)]',
+    danger: 'text-destructive',
+    accent: 'text-[var(--action-primary)]',
   };
 
   if (!props?.content) return null;
@@ -142,6 +145,27 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
         return <MentionRenderer key={key} userId={part.value} />;
       case 'channel':
         return <FlowChannelMention key={key} channelId={part.value} />;
+      case 'broadcast': {
+        const broadcastData =
+          part.range === 'here'
+            ? { icon: '👋', title: 'Here Mention', subtitle: 'Notifies all online members' }
+            : {
+                icon: '📢',
+                title: 'Channel Mention',
+                subtitle: 'Notifies all members in this channel',
+              };
+        return (
+          <GenericMentionHoverPopover key={key} data={broadcastData}>
+            <span
+              data-mention=''
+              data-mention-type={part.range}
+              className='chat-input-special-mention'
+            >
+              @{part.range}
+            </span>
+          </GenericMentionHoverPopover>
+        );
+      }
       case 'group':
         return (
           <GroupMentionRenderer
@@ -171,7 +195,7 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
             href={part.href}
             target='_blank'
             rel='noopener noreferrer'
-            className='text-blue-600 underline hover:text-blue-800 break-all'
+            className='text-[var(--link-color)] underline hover:text-[var(--link-hover-color)] break-all'
           >
             {part.label}
           </a>

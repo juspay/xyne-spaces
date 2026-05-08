@@ -20,6 +20,7 @@
  */
 
 import type { FlowDefinition, FlowComponent } from '@xyne/shared';
+import { resolveSlackIds } from './slackUserResolver';
 import type {
   SlackAttachment,
   SlackBlock,
@@ -50,20 +51,74 @@ export interface BlockKitInput {
 }
 
 /**
+ * Collect every Slack user ID (<@USERID> in mrkdwn strings, or user_id fields
+ * inside rich_text elements) that appear anywhere in a BlockKit payload so
+ * they can be bulk-resolved to Xyne IDs before conversion begins.
+ */
+function collectAllSlackUserIds(input: BlockKitInput): string[] {
+  const ids = new Set<string>();
+  const mrkdwnRegex = /<@([A-Za-z0-9]+)(?:\|[^>]*)?>/g;
+
+  const fromText = (text: string) => {
+    for (const m of text.matchAll(mrkdwnRegex)) ids.add(m[1]);
+  };
+
+  const fromBlocks = (blocks: SlackBlock[]) => {
+    for (const block of blocks) {
+      if (block.type === 'rich_text') {
+        for (const section of (block as SlackRichTextBlock).elements) {
+          if ('elements' in section) {
+            for (const el of (section as SlackRichTextBlockElement).elements) {
+              if ((el as SlackRichTextInlineElement).type === 'user') {
+                ids.add((el as Extract<SlackRichTextInlineElement, { type: 'user' }>).user_id);
+              }
+            }
+          }
+        }
+      } else if (block.type === 'section') {
+        const s = block as SlackSectionBlock;
+        if (s.text) fromText(s.text.text);
+        if (s.fields) s.fields.forEach(f => fromText(f.text));
+      } else if (block.type === 'context') {
+        (block as SlackContextBlock).elements.forEach(el => {
+          if ('text' in el) fromText((el as SlackTextObject).text);
+        });
+      } else if (block.type === 'header') {
+        fromText(block.text.text);
+      }
+    }
+  };
+
+  if (input.text) fromText(input.text);
+  if (input.blocks) fromBlocks(input.blocks);
+  if (input.attachments) {
+    for (const att of input.attachments) {
+      if (att.pretext) fromText(att.pretext);
+      if (att.text) fromText(att.text);
+      if (att.fields) att.fields.forEach(f => fromText(f.value));
+      if (att.blocks) fromBlocks(att.blocks);
+    }
+  }
+
+  return [...ids];
+}
+
+/**
  * Convert a BlockKit message to a FlowDefinition (v2).
  *
- * @param input    BlockKit payload (text / blocks / attachments)
- * @param botToken Kept for API compatibility; mention resolution is now done
- *                 client-side via MentionRenderer so this is intentionally ignored.
- * @returns        FlowDefinition when structured content is found, null otherwise
+ * @param input       BlockKit payload (text / blocks / attachments)
+ * @param botToken    Bot token for Slack API calls to resolve user mentions
+ *                    that are not yet stored in the Xyne DB by slackId metadata.
+ * @param workspaceId Xyne workspace ID used when looking up users by email.
+ * @returns           FlowDefinition when structured content is found, null otherwise
  */
 export async function convertBlockKitToFlowJSON(
   input: BlockKitInput,
-  _botToken?: string,
+  botToken?: string,
+  workspaceId?: string,
 ): Promise<FlowDefinition | null> {
-  // Mentions are NOT pre-resolved here. Instead, Slack's <@USERID> tokens are
-  // normalised to Xyne's <userid:USERID> format inside mrkdwnToFlowComponent
-  // so the dashboard's MentionRenderer can look up display names at render time.
+  if(!botToken) 
+    {console.warn('No bot token provided, skipping Slack user ID resolution. User mentions may not render correctly.');}
   const rawText = input.text;
   let resolvedAttachments = input.attachments ? [...input.attachments] : undefined;
 
@@ -105,22 +160,48 @@ export async function convertBlockKitToFlowJSON(
     return null;
   }
 
+  // Pre-resolve all Slack user IDs (<@USERID> in mrkdwn / user_id in rich_text)
+  // to their corresponding Xyne DB IDs so mentions render correctly.
+  // Strategy:
+  //   1. Look up users whose metadata.slackId matches (fast DB query — populated during migration).
+  //   2. For any remaining IDs, call the Slack API, get their email, then find the
+  //      matching Xyne user by email.
+  // If botToken is not provided we skip resolution and fall back to passing the
+  // raw Slack ID; the dashboard MentionRenderer will show an unresolved mention.
+  let slackToXyneMap: Map<string, string> | undefined;
+  if (botToken) {
+    const slackUserIds = collectAllSlackUserIds({
+      text: plainText ?? rawText,
+      blocks,
+      attachments: resolvedAttachments,
+    });
+    if (slackUserIds.length > 0) {
+      const resolved = await resolveSlackIds(slackUserIds, botToken, 'user', workspaceId);
+      if (resolved) {
+        slackToXyneMap = new Map<string, string>();
+        for (const [slackId, entry] of resolved) {
+          if (entry.dbId) slackToXyneMap.set(slackId, entry.dbId);
+        }
+      }
+    }
+  }
+
   const components: FlowComponent[] = [];
 
   // Prepend plain text that accompanies a blocks payload
   if (plainText && blocks?.length) {
-    components.push(mrkdwnToFlowComponent(plainText));
+    components.push(mrkdwnToFlowComponent(plainText, slackToXyneMap));
   }
 
   // Convert modern blocks
   for (const block of blocks ?? []) {
-    const component = slackBlockToFlowComponent(block);
+    const component = slackBlockToFlowComponent(block, slackToXyneMap);
     if (component) components.push(component);
   }
 
   // Convert legacy attachments → bordered stripe components
   for (const attachment of resolvedAttachments ?? []) {
-    const card = slackAttachmentToFlowComponent(attachment);
+    const card = slackAttachmentToFlowComponent(attachment, slackToXyneMap);
     if (card) components.push(card);
   }
 
@@ -165,11 +246,14 @@ export async function convertBlockKitToFlowJSON(
  * Other mrkdwn markers (*bold*, _italic_, `code`, <url|label>) are kept as-is;
  * the TextNode inline parser handles them at render time on the frontend.
  */
-function normalizeSlackMentions(text: string): string {
+function normalizeSlackMentions(text: string, slackToXyneMap?: Map<string, string>): string {
   return text
-    .replace(/<@([A-Za-z0-9]+)(?:\|[^>]*)?>/g, (_, id) => `<userid:${id}>`)
+    .replace(/<@([A-Za-z0-9]+)(?:\|[^>]*)?>/g, (_, slackId) => {
+      const xyneId = slackToXyneMap?.get(slackId);
+      return `<userid:${xyneId ?? slackId}>`;
+    })
     .replace(/<#([A-Za-z0-9]+)(?:\|[^>]*)?>/g, (_, id) => `<channelid:${id}>`)
-    .replace(/<!([a-z]+)(?:\|[^>]*)?>/g,       (_, name) => `@${name}`);
+    .replace(/<!([a-z]+)(?:\|[^>]*)?>/g,       (_, name) => `<broadcast:${name}>`);
 }
 
 /**
@@ -178,10 +262,13 @@ function normalizeSlackMentions(text: string): string {
  * so that the frontend TextNode inline parser renders bold, italic, code, links,
  * and mentions correctly without splitting the text into multiple components.
  */
-export function mrkdwnToFlowComponent(textObj: SlackTextObject | string): FlowComponent {
+export function mrkdwnToFlowComponent(
+  textObj: SlackTextObject | string,
+  slackToXyneMap?: Map<string, string>,
+): FlowComponent {
   const raw      = typeof textObj === 'string' ? textObj : textObj.text;
   const isMrkdwn = typeof textObj === 'string' || textObj.type === 'mrkdwn';
-  const content  = isMrkdwn ? normalizeSlackMentions(raw) : raw;
+  const content  = isMrkdwn ? normalizeSlackMentions(raw, slackToXyneMap) : raw;
   return { id: crypto.randomUUID(), type: 'text', props: { content } };
 }
 
@@ -223,7 +310,10 @@ function withColorStripe(children: FlowComponent[], color: string): FlowComponen
 // ============================================================================
 
 /** Convert a single modern Slack block to a FlowComponent (returns null for unknown types). */
-export function slackBlockToFlowComponent(block: SlackBlock): FlowComponent | null {
+export function slackBlockToFlowComponent(
+  block: SlackBlock,
+  slackToXyneMap?: Map<string, string>,
+): FlowComponent | null {
   switch (block.type) {
     case 'header':
       return {
@@ -247,7 +337,7 @@ export function slackBlockToFlowComponent(block: SlackBlock): FlowComponent | nu
           id: crypto.randomUUID(),
           type: 'column',
           children: [
-            mrkdwnToFlowComponent(imgBlock.title),
+            mrkdwnToFlowComponent(imgBlock.title, slackToXyneMap),
             imageComponent,
           ],
         };
@@ -260,12 +350,12 @@ export function slackBlockToFlowComponent(block: SlackBlock): FlowComponent | nu
       const sectionChildren: FlowComponent[] = [];
 
       if (sectionBlock.text) {
-        sectionChildren.push(mrkdwnToFlowComponent(sectionBlock.text));
+        sectionChildren.push(mrkdwnToFlowComponent(sectionBlock.text, slackToXyneMap));
       }
 
       if (sectionBlock.fields?.length) {
         const fieldComponents: FlowComponent[] = sectionBlock.fields.map(
-          (field): FlowComponent => mrkdwnToFlowComponent(field),
+          (field): FlowComponent => mrkdwnToFlowComponent(field, slackToXyneMap),
         );
         sectionChildren.push({
           id: crypto.randomUUID(),
@@ -312,7 +402,7 @@ export function slackBlockToFlowComponent(block: SlackBlock): FlowComponent | nu
         .filter((el): el is SlackTextObject => !('image_url' in el));
       if (!textSegments.length) return null;
       // Render each context text element parsed through mrkdwn, then collect into a row
-      const parsed = textSegments.map((el) => mrkdwnToFlowComponent(el));
+      const parsed = textSegments.map((el) => mrkdwnToFlowComponent(el, slackToXyneMap));
       return {
         id: crypto.randomUUID(),
         type: 'row',
@@ -323,7 +413,7 @@ export function slackBlockToFlowComponent(block: SlackBlock): FlowComponent | nu
 
     case 'rich_text': {
       const richTextBlock = block as SlackRichTextBlock;
-      const children = richTextBlockToComponents(richTextBlock);
+      const children = richTextBlockToComponents(richTextBlock, slackToXyneMap);
       if (!children.length) return null;
       if (children.length === 1) return children[0];
       return { id: crypto.randomUUID(), type: 'column', children };
@@ -363,11 +453,14 @@ export function slackBlockElementToFlowComponent(element: SlackBlockElement): Fl
 }
 
 /** Convert a legacy Slack attachment to a card FlowComponent with a left colour stripe. */
-export function slackAttachmentToFlowComponent(attachment: SlackAttachment): FlowComponent | null {
+export function slackAttachmentToFlowComponent(
+  attachment: SlackAttachment,
+  slackToXyneMap?: Map<string, string>,
+): FlowComponent | null {
   const children: FlowComponent[] = [];
 
   if (attachment.pretext) {
-    children.push(mrkdwnToFlowComponent(attachment.pretext));
+    children.push(mrkdwnToFlowComponent(attachment.pretext, slackToXyneMap));
   }
 
   if (attachment.author_name) {
@@ -397,11 +490,11 @@ export function slackAttachmentToFlowComponent(attachment: SlackAttachment): Flo
   // Modern blocks inside the attachment take priority over legacy text
   if (attachment.blocks?.length) {
     for (const block of attachment.blocks) {
-      const component = slackBlockToFlowComponent(block);
+      const component = slackBlockToFlowComponent(block, slackToXyneMap);
       if (component) children.push(component);
     }
   } else if (attachment.text) {
-    children.push(mrkdwnToFlowComponent(attachment.text));
+    children.push(mrkdwnToFlowComponent(attachment.text, slackToXyneMap));
   }
 
   // Key-value fields — each field value is parsed through mrkdwn
@@ -412,7 +505,7 @@ export function slackAttachmentToFlowComponent(attachment: SlackAttachment): Flo
         type: 'column',
         children: [
           { id: crypto.randomUUID(), type: 'text', props: { content: field.title, bold: true } },
-          mrkdwnToFlowComponent(field.value),
+          mrkdwnToFlowComponent(field.value, slackToXyneMap),
         ],
       }),
     );
@@ -451,23 +544,29 @@ export function slackAttachmentToFlowComponent(attachment: SlackAttachment): Flo
  * Convert a rich_text block's elements to an array of FlowComponents,
  * preserving bold/italic/code/link styling from the inline elements.
  */
-function richTextBlockToComponents(block: SlackRichTextBlock): FlowComponent[] {
+function richTextBlockToComponents(
+  block: SlackRichTextBlock,
+  slackToXyneMap?: Map<string, string>,
+): FlowComponent[] {
   return block.elements
-    .map(richTextBlockElementToComponent)
+    .map(el => richTextBlockElementToComponent(el, slackToXyneMap))
     .filter((c): c is FlowComponent => c !== null);
 }
 
-function richTextBlockElementToComponent(el: SlackRichTextBlockElement): FlowComponent | null {
+function richTextBlockElementToComponent(
+  el: SlackRichTextBlockElement,
+  slackToXyneMap?: Map<string, string>,
+): FlowComponent | null {
   switch (el.type) {
     case 'rich_text_section': {
-      const parts = el.elements.map(richTextInlineToComponent).filter(Boolean) as FlowComponent[];
+      const parts = el.elements.map(e => richTextInlineToComponent(e, slackToXyneMap)).filter(Boolean) as FlowComponent[];
       if (!parts.length) return null;
       if (parts.length === 1) return parts[0];
       return { id: crypto.randomUUID(), type: 'row', children: parts };
     }
     case 'rich_text_list': {
       const items = el.elements.map((item): FlowComponent => {
-        const parts = item.elements.map(richTextInlineToComponent).filter(Boolean) as FlowComponent[];
+        const parts = item.elements.map(e => richTextInlineToComponent(e, slackToXyneMap)).filter(Boolean) as FlowComponent[];
         const bullet: FlowComponent = {
           id: crypto.randomUUID(),
           type: 'text',
@@ -486,7 +585,7 @@ function richTextBlockElementToComponent(el: SlackRichTextBlockElement): FlowCom
       return { id: crypto.randomUUID(), type: 'text', props: { content: text, variant: 'muted' } };
     }
     case 'rich_text_quote': {
-      const parts = el.elements.map(richTextInlineToComponent).filter(Boolean) as FlowComponent[];
+      const parts = el.elements.map(e => richTextInlineToComponent(e, slackToXyneMap)).filter(Boolean) as FlowComponent[];
       if (!parts.length) return null;
       return withColorStripe(parts, '#d1d5db');
     }
@@ -495,7 +594,10 @@ function richTextBlockElementToComponent(el: SlackRichTextBlockElement): FlowCom
   }
 }
 
-function richTextInlineToComponent(el: SlackRichTextInlineElement): FlowComponent | null {
+function richTextInlineToComponent(
+  el: SlackRichTextInlineElement,
+  slackToXyneMap?: Map<string, string>,
+): FlowComponent | null {
   switch (el.type) {
     case 'text': {
       const props: Record<string, unknown> = { content: el.text };
@@ -515,12 +617,16 @@ function richTextInlineToComponent(el: SlackRichTextInlineElement): FlowComponen
     }
     case 'emoji':
       return { id: crypto.randomUUID(), type: 'text', props: { content: `:${el.name}:` } };
-    case 'user':
-      return { id: crypto.randomUUID(), type: 'text', props: { content: `<userid:${el.user_id}>` } };
+    case 'user': {
+      // Resolve the Slack user_id to a Xyne DB ID when available so the
+      // dashboard MentionRenderer can look up the display name correctly.
+      const xyneId = slackToXyneMap?.get(el.user_id) ?? el.user_id;
+      return { id: crypto.randomUUID(), type: 'text', props: { content: `<userid:${xyneId}>` } };
+    }
     case 'channel':
       return { id: crypto.randomUUID(), type: 'text', props: { content: `<channelid:${el.channel_id}>` } };
     case 'broadcast':
-      return { id: crypto.randomUUID(), type: 'text', props: { content: `@${el.range}` } };
+      return { id: crypto.randomUUID(), type: 'text', props: { content: `<broadcast:${el.range}>` } };
     case 'usergroup':
       return { id: crypto.randomUUID(), type: 'text', props: { content: `@${el.usergroup_id}` } };
     default:

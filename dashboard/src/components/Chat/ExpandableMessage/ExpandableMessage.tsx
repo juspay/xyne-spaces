@@ -9,6 +9,8 @@ interface ExpandableMessageProps {
   maxHeight?: number; // in pixels, default 500
   className?: string;
   isSystemMessage?: boolean;
+  messageId?: string;
+  conversationId?: string;
 }
 
 export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
@@ -17,6 +19,8 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   maxHeight = 500,
   className = '',
   isSystemMessage = false,
+  messageId,
+  conversationId,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [shouldShowButton, setShouldShowButton] = useState(false);
@@ -51,6 +55,8 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
             message={message}
             showEdited={showEdited}
             isSystemMessage={isSystemMessage}
+            {...(messageId !== undefined && { messageId })}
+            {...(conversationId !== undefined && { conversationId })}
           />
         </div>
       </div>

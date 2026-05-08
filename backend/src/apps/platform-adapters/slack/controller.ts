@@ -88,10 +88,16 @@ const PostMessageSchema = z
 		mrkdwn: SlackBooleanSchema,
 		metadata: SlackRecordSchema,
 	})
-	.refine((data) => !!data.text || (data.blocks && data.blocks.length > 0), {
-		message: "Either text or blocks is required",
-		path: ["text"],
-	});
+	.refine(
+		(data) =>
+			!!data.text ||
+			(data.blocks && data.blocks.length > 0) ||
+			(data.attachments && data.attachments.length > 0),
+		{
+			message: "Either text, blocks, or attachments is required",
+			path: ["text"],
+		},
+	);
 
 const UpdateSchema = z
 	.object({
@@ -101,10 +107,16 @@ const UpdateSchema = z
 		blocks: SlackArraySchema,
 		attachments: SlackArraySchema,
 	})
-	.refine((data) => !!data.text || (data.blocks && data.blocks.length > 0), {
-		message: "Either text or blocks is required",
-		path: ["text"],
-	});
+	.refine(
+		(data) =>
+			!!data.text ||
+			(data.blocks && data.blocks.length > 0) ||
+			(data.attachments && data.attachments.length > 0),
+		{
+			message: "Either text, blocks, or attachments is required",
+			path: ["text"],
+		},
+	);
 
 const HistorySchema = z.object({
 	channel: z.string().min(1, "channel is required"),

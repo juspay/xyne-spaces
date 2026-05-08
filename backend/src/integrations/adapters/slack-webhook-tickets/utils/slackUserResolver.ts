@@ -60,7 +60,7 @@ export interface SlackGroupInfo {
   users: string[];
 }
 
-function extractAllSlackIds(text: string, isUser: boolean): string[] {
+export function extractAllSlackIds(text: string, isUser: boolean): string[] {
   const regex = isUser ? /<@([A-Z0-9]+)>/g : /<!subteam\^([A-Z0-9]+)>/g;
   const matches = text.matchAll(new RegExp(regex, 'g'));
   const ids = Array.from(matches, (match) => match[1]);
@@ -178,7 +178,7 @@ async function resolveApiGroup(slackGroupId: string, botOauthToken: string): Pro
 
 type ResolvedEntry = { dbId?: string; displayName?: string };
 
-async function resolveSlackIds(
+export async function resolveSlackIds(
   slackUserId: string[],
   botOauthToken: string,
   type: 'user' | 'group'

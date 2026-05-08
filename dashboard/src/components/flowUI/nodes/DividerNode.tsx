@@ -9,7 +9,7 @@ interface DividerNodeProps {
 export const DividerNode: React.FC<DividerNodeProps> = ({ node }) => {
   return (
     <hr
-      className='border-t border-gray-200'
+      className='border-t border-border'
       style={{
         margin: node.style?.margin || '16px 0',
         width: node.style?.width,

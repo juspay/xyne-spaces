@@ -54,8 +54,8 @@ const PostMessageBodySchema = ChatActionBodySchema.extend({
     }),
   }).optional(),
 }).refine(
-  data => !!data.text || !!data.markdownText || !!data.flow,
-  { message: 'Either text, markdownText, or flow is required', path: ['text'] }
+  data => !!data.text || !!data.markdownText || !!data.flow || (data.attachments && data.attachments.length > 0),
+  { message: 'Either text, markdownText, flow, or attachments is required', path: ['text'] }
 ).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
@@ -67,8 +67,8 @@ const UpdateMessageBodySchema = ChatActionBodySchema.extend({
   channelName: z.string().trim().optional(),
   flowJSON: z.record(z.unknown()).optional(),
 }).refine(
-  data => !!data.text || !!data.markdownText || !!data.flowJSON,
-  { message: 'Either text, markdownText, or flowJSON is required', path: ['text'] }
+  data => !!data.text || !!data.markdownText || !!data.flowJSON || (data.attachments && data.attachments.length > 0),
+  { message: 'Either text, markdownText, flowJSON, or attachments is required', path: ['text'] }
 );
 
 const ChannelHistoryQuerySchema = z.object({
@@ -152,7 +152,7 @@ export class ChatController {
     attachments?: SlackAttachment[],
     blocks?: unknown[],
   ) {
-    return convertBlockKitToFlowJSON({ text, blocks: blocks as SlackBlock[] | undefined, attachments }, config.slackBotToken);
+    return convertBlockKitToFlowJSON({ text, blocks: blocks as SlackBlock[] | undefined, attachments }, config.slackBotToken, config.defaultWorkspaceId);
   }
 
   /**

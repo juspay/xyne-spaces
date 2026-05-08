@@ -906,7 +906,7 @@ const parseNode = (
       'conversationId:',
       conversationId,
     );
-    if (raw && messageId && conversationId) {
+    if (raw) {
       try {
         const flowJSON = JSON.parse(raw) as FlowDefinition;
         console.log('[RenderMsg] parsed flowJSON ok, screenId:', flowJSON.screenId);
@@ -914,8 +914,8 @@ const parseNode = (
           <FlowScreenManager
             key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`}
             flow={flowJSON}
-            messageId={messageId}
-            conversationId={conversationId}
+            messageId={messageId ?? ''}
+            conversationId={conversationId ?? ''}
           />
         );
       } catch (e) {
@@ -923,12 +923,6 @@ const parseNode = (
         return null;
       }
     }
-    console.warn('[RenderMsg] data-flow-json div found but missing raw/messageId/conversationId', {
-      hasRaw: !!raw,
-      messageId,
-      conversationId,
-    });
-    return null;
   }
 
   // Check if this is a conversation history container

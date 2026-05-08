@@ -1133,6 +1133,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           showEdited={message.edited}
                           maxHeight={500}
                           isSystemMessage={isSystemMessage}
+                          messageId={message.messageId}
+                          conversationId={message.conversationId}
                         />
                       ) : (
                         <div className='jp-message-html inline-block'>
