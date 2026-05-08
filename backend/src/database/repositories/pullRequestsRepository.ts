@@ -216,7 +216,7 @@ export class PRMetricsRepository {
     repoUrl,
     numberOfComments,
     prUrl
-  }: PRCrudProps): Promise<{ statusChanged: boolean; previousStatus: string } | null> {
+  }: PRCrudProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
       const currentPr = await this.prisma.pullRequests.findFirst({
@@ -240,7 +240,7 @@ export class PRMetricsRepository {
         }
       });
 
-      return { statusChanged, previousStatus };
+      return { pr: currentPr, statusChanged, previousStatus };
     } catch (err) {
       logger.error(`[PR-Repository] Error marking PR as declined for ${prUrl}:`, err);
       return null;
