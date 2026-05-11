@@ -133,6 +133,14 @@ export class ChannelService {
     );
     return response.data;
   }
+
+  async getVespaParticipants(channelId: string): Promise<string[]> {
+    const response = await apiInstance.get<{
+      success: boolean;
+      data?: { userIds: string[] };
+    }>(`/channels/${channelId}/vespa-participants`);
+    return response.data.data?.userIds ?? [];
+  }
 }
 
 export const channelService = new ChannelService();

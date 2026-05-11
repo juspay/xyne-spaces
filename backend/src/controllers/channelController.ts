@@ -30,6 +30,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { vespaService } from '@/services/vespaSearch';
 
 export class ChannelController {
   private channelRepository: ChannelRepository;
@@ -1029,6 +1030,23 @@ export class ChannelController {
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // GET /api/channels/:channelId/vespa-participants - Channel participants (user IDs) from Vespa chat_container.permissions
+  getVespaParticipants = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const { channelId } = req.params;
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'channelId is required' });
+        return;
+      }
+      const userIds = await vespaService.channelService.getChannelParticipants(channelId, userId);
+      res.status(200).json({ success: true, data: { userIds } });
+    } catch (error) {
+      logger.error('Error in getVespaParticipants:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
     }
   };
 
