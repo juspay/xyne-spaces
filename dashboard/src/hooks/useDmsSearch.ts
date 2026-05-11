@@ -52,28 +52,33 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
       .map(k => k.trim())
       .filter(Boolean);
 
-    const isSelfSearch = keywords.some(k => k === 'self');
+    const currentUserName = usersById.get(currentUserId)?.name?.toLowerCase() ?? '';
+    const shouldMatchSelfDm = keywords.some(k => k === 'self' || currentUserName.includes(k));
     const dmChannels = allChannels.filter(channel => isDMChannel(channel.scopeType));
+
+    const isSelfDm = (dm: Channel): boolean => {
+      const ids = parseDMParticipantIds(dm);
+      return ids.length > 0 && ids.every(id => id === currentUserId);
+    };
 
     return dmChannels
       .filter(dm => {
-        const participantIds = parseDMParticipantIds(dm);
-        const participantNames = participantIds
+        if (shouldMatchSelfDm && isSelfDm(dm)) return true;
+
+        const participantNames = parseDMParticipantIds(dm)
+          .filter(id => id !== currentUserId)
           .map(id => usersById.get(id)?.name?.toLowerCase())
           .filter((name): name is string => !!name);
 
-        // For "self" keyword, match the self-DM channel (only participant is current user)
-        if (
-          isSelfSearch &&
-          participantIds.length > 0 &&
-          participantIds.every(id => id === currentUserId)
-        ) {
-          return true;
-        }
-
         return keywords.some(keyword => participantNames.some(name => name.includes(keyword)));
       })
-      .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+      .sort((a, b) => {
+        if (shouldMatchSelfDm) {
+          if (isSelfDm(a) && !isSelfDm(b)) return -1;
+          if (!isSelfDm(a) && isSelfDm(b)) return 1;
+        }
+        return b.lastActivityAt - a.lastActivityAt;
+      });
   }, [allChannels, dmSearchQuery, usersById, currentUserId]);
 
   // Autofocus search input when navigating to DM page
