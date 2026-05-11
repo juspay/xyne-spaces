@@ -120,6 +120,7 @@ export class AuthV2Controller {
           acceptLanguage: req.headers['accept-language'],
           timestamp: new Date().toISOString(),
           platform,
+          appVersion: req.headers['x-app-version'],
         });
 
         const session = await this.userSessionService.createSession({
@@ -1199,6 +1200,7 @@ export class AuthV2Controller {
             userAgent: req.headers['user-agent'],
             acceptLanguage: req.headers['accept-language'],
             timestamp: new Date().toISOString(),
+            appVersion: req.headers['x-app-version'],
           });
 
           const session = await this.userSessionService.createSession({
@@ -1364,6 +1366,7 @@ export class AuthV2Controller {
             userAgent: req.headers['user-agent'],
             acceptLanguage: req.headers['accept-language'],
             timestamp: new Date().toISOString(),
+            appVersion: req.headers['x-app-version'],
           });
 
           const session = await this.userSessionService.createSession({
@@ -1615,7 +1618,7 @@ export class AuthV2Controller {
             refreshToken: currentSession.refreshToken,
             refreshTokenExpiry,
             accessToken: currentSession.accessToken ?? undefined,
-            deviceInfo: JSON.stringify({ userAgent: req.headers['user-agent'], timestamp: new Date().toISOString() }),
+            deviceInfo: JSON.stringify({ userAgent: req.headers['user-agent'], timestamp: new Date().toISOString(), appVersion: req.headers['x-app-version'] }),
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
           });
           newSessionId = newSession.id;

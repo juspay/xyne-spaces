@@ -115,7 +115,8 @@ export class NotificationWorker {
         userId: data.userId,
         sessionId: data.sessionId,
         notificationId,
-        notificationType: data.payload?.type
+        notificationType: data.payload?.type,
+        appVersion: data.appVersion,
       });
 
       const result = await this.mobilePushChannel.deliver(data);
@@ -132,7 +133,8 @@ export class NotificationWorker {
           errorCode: result.errorCode,
           retryable: result.isRetryable,
           userId: data.userId,
-          notificationId 
+          notificationId,
+          appVersion: data.appVersion,
         });
 
         // Throw error to trigger Bull retry if it's a retryable error
@@ -148,7 +150,8 @@ export class NotificationWorker {
         this.logger.info(`${job.queue.name} job successful`, {
           jobId: job.id,
           userId: data.userId,
-          notificationId
+          notificationId,
+          appVersion: data.appVersion,
         });
       }
 
@@ -167,7 +170,10 @@ export class NotificationWorker {
       this.logger.info(`${jobName} job completed`, { 
         jobId: job.id, 
         notificationId,
-        userId
+        notificationType: data.payload?.type,
+        userId,
+        platform: data.platform,
+        appVersion: data.appVersion,
       });
 
       const platform = 'mobile';
@@ -203,7 +209,10 @@ export class NotificationWorker {
         jobId: job.id, 
         error: err.message,
         notificationId,
-        userId
+        notificationType: data.payload?.type,
+        userId,
+        platform: data.platform,
+        appVersion: data.appVersion,
       });
 
       const platform = 'mobile';
@@ -237,7 +246,15 @@ export class NotificationWorker {
     });
 
     queue.on('stalled', (job) => {
-      this.logger.warn(`${jobName} job stalled`, { jobId: job.id });
+      const data = job.data as MobilePushJobData;
+      this.logger.warn(`${jobName} job stalled`, {
+        jobId: job.id,
+        notificationId: data.payload?.notificationId,
+        notificationType: data.payload?.type,
+        userId: data.userId,
+        platform: data.platform,
+        appVersion: data.appVersion,
+      });
     });
 
     queue.on('error', (error) => {
@@ -252,7 +269,11 @@ export class NotificationWorker {
         jobId: job.id, 
         jobName: job.name,
         attempt: job.attemptsMade + 1,
-        notificationId
+        notificationId,
+        notificationType: data.payload?.type,
+        userId: data.userId,
+        platform: data.platform,
+        appVersion: data.appVersion,
       });
     });
   }

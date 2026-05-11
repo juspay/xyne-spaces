@@ -78,7 +78,7 @@ export class NotificationProducer {
 
   async queueMobilePush(
     userId: string,
-    session: { id: string; token: string; voipToken?: string; platform: string },
+    session: { id: string; token: string; voipToken?: string; platform: string; appVersion?: string },
     payload: MobilePushPayload
   ): Promise<void> {
     try {
@@ -89,6 +89,7 @@ export class NotificationProducer {
         token: session.token,
         voipToken: session.voipToken,
         platform: session.platform,
+        appVersion: session.appVersion,
         payload,
       };
 

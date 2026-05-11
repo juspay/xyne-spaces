@@ -157,6 +157,7 @@ export type MobilePushRegistration = {
   platform?: string;
   deviceId?: string;
   sessionId: string;
+  appVersion?: string;
 };
 
 export type FcmNotificationPayload = {
@@ -293,6 +294,21 @@ class FcmPushService {
 
     const nextDeviceId = payload.deviceId ?? sessionEntry.deviceId ?? null;
 
+    // Merge appVersion into deviceInfo if provided
+    let deviceInfoUpdate: string | undefined;
+    if (payload.appVersion) {
+      try {
+        const existing = await db.userSession.findUnique({
+          where: { id: sessionEntry.id },
+          select: { deviceInfo: true },
+        });
+        const parsed = existing?.deviceInfo ? JSON.parse(existing.deviceInfo) : {};
+        deviceInfoUpdate = JSON.stringify({ ...parsed, appVersion: payload.appVersion });
+      } catch {
+        // ignore, proceed without updating deviceInfo
+      }
+    }
+
     logger.info('[FCM] registerToken step=update_target_session', {
       userId,
       sessionId: sessionEntry.id,
@@ -306,6 +322,7 @@ class FcmPushService {
         fcmToken: composedToken,
         voipToken: composedVoipToken,
         deviceId: nextDeviceId,
+        ...(deviceInfoUpdate ? { deviceInfo: deviceInfoUpdate } : {}),
         updatedAt: new Date(),
       },
     });
@@ -673,7 +690,7 @@ class FcmPushService {
    */
   async getActiveSessionsWithTokens(
     userId: string
-  ): Promise<Array<{ id: string; token: string; voipToken?: string; platform: string }>> {
+  ): Promise<Array<{ id: string; token: string; voipToken?: string; platform: string; appVersion?: string }>> {
     const sessions = await db.userSession.findMany({
       where: {
         userId,
@@ -681,11 +698,11 @@ class FcmPushService {
         refreshTokenExpiry: { gt: new Date() },
         OR: [{ fcmToken: { not: null } }, { voipToken: { not: null } }],
       },
-      select: { id: true, fcmToken: true, voipToken: true },
+      select: { id: true, fcmToken: true, voipToken: true, deviceInfo: true },
       orderBy: { updatedAt: 'desc' },
     });
 
-    const results: Array<{ id: string; token: string; voipToken?: string; platform: string }> = [];
+    const results: Array<{ id: string; token: string; voipToken?: string; platform: string; appVersion?: string }> = [];
 
     for (const session of sessions) {
       const parsedFcm = session.fcmToken ? this.parseStoredToken(session.fcmToken) : null;
@@ -693,11 +710,22 @@ class FcmPushService {
 
       if (!parsedFcm) continue;
 
+      let appVersion: string | undefined;
+      if (session.deviceInfo) {
+        try {
+          const deviceInfo = JSON.parse(session.deviceInfo);
+          appVersion = deviceInfo.appVersion;
+        } catch {
+          // ignore malformed deviceInfo
+        }
+      }
+
       results.push({
         id: session.id,
         token: parsedFcm?.token || '',
         voipToken: parsedVoip?.token,
         platform: parsedFcm?.platform || parsedVoip?.platform || 'unknown',
+        appVersion,
       });
     }
 
