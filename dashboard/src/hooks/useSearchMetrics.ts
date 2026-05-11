@@ -512,6 +512,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       rankPosition: number;
       channel?: string;
       resultUrl?: string;
+      isPreview?: boolean;
     }) => {
       if (!searchSessionId) {
         return;
@@ -541,6 +542,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...(scrollDepth !== undefined && { scrollDepth }),
         ...(params.resultUrl && { resultUrl: params.resultUrl }),
         tab: previousTabRef.current,
+        isPreview: params.isPreview ?? false,
       });
 
       // End the session with 'click' reason after tracking the click
@@ -588,7 +590,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    * Track Result Click
    */
   const onResultClick = useCallback(
-    (result: DisplaySearchResult, rankPosition: number, channelId?: string, resultUrl?: string) => {
+    (
+      result: DisplaySearchResult,
+      rankPosition: number,
+      channelId?: string,
+      resultUrl?: string,
+      isPreview?: boolean,
+    ) => {
       trackClick({
         queryText: currentSearchContext.query,
         clickedDocId: result.id,
@@ -596,6 +604,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         rankPosition,
         ...(channelId !== undefined ? { channel: channelId } : {}),
         ...(resultUrl !== undefined ? { resultUrl } : {}),
+        isPreview: isPreview ?? false,
       });
     },
     [trackClick, currentSearchContext.query],

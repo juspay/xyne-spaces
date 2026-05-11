@@ -422,6 +422,7 @@ const ChannelCommandMenu = ({
     fileSize: number;
   } | null>(null);
   const [previewTicket, setPreviewTicket] = useState<DisplaySearchResult | null>(null);
+  const [hoveredResult, setHoveredResult] = useState<DisplaySearchResult | null>(null);
 
   const DISPLAY_LIMIT = 5;
 
@@ -945,6 +946,34 @@ const ChannelCommandMenu = ({
     });
   }, []);
 
+  // Handle mouse hover over ticket items to show preview
+  const handleTicketMouseEnter = useCallback(
+    (result: DisplaySearchResult): void => {
+      setHoveredResult(result);
+      // Only update when preview is already open
+      if (!previewTicket) {
+        return;
+      }
+      if (result.type !== 'ticket') {
+        // In ALL tab, close preview when hovering over non-ticket items
+        if (activeTab === TabType.ALL) {
+          setPreviewTicket(null);
+        }
+        return;
+      }
+      // Only update if the ticket is different
+      if (previewTicket.id !== result.id) {
+        setPreviewTicket(result);
+      }
+    },
+    [previewTicket, activeTab],
+  );
+
+  // Handle mouse leave to clear hover state
+  const handleTicketMouseLeave = useCallback((): void => {
+    setHoveredResult(null);
+  }, []);
+
   const getChannelIcon = (channel: Channel): ReactElement => {
     if (isGroupDMChannel(channel.scopeType)) {
       // Slack-style group icon: people glyph with participant count badge
@@ -1162,6 +1191,8 @@ const ChannelCommandMenu = ({
                     onSelect={res => handleBackendResultSelect(res, index + 1)}
                     onPreview={handleFilePreview}
                     onItemMouseDown={handleItemMouseDown}
+                    onItemMouseEnter={handleTicketMouseEnter}
+                    onItemMouseLeave={handleTicketMouseLeave}
                     isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
                   />
                 ))}
@@ -1233,6 +1264,8 @@ const ChannelCommandMenu = ({
                     onSelect={res => handleBackendResultSelect(res, index + 1)}
                     onPreview={handleFilePreview}
                     onItemMouseDown={handleItemMouseDown}
+                    onItemMouseEnter={handleTicketMouseEnter}
+                    onItemMouseLeave={handleTicketMouseLeave}
                     isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
                   />
                 ))}
@@ -1674,11 +1707,24 @@ const ChannelCommandMenu = ({
         const selectedItem = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
         const ticketId = selectedItem?.getAttribute('data-ticket-id');
         if (ticketId) {
-          const ticket = backendResults.find(r => r.type === 'ticket' && r.id === ticketId);
+          const ticketIndex = backendResults.findIndex(
+            r => r.type === 'ticket' && r.id === ticketId,
+          );
+          const ticket = ticketIndex >= 0 ? backendResults[ticketIndex] : undefined;
           if (ticket) {
             e.preventDefault();
             e.stopPropagation();
             setPreviewTicket(ticket);
+            // Track preview click
+            if (searchText.trim()) {
+              onResultClick(
+                ticket,
+                ticketIndex + 1,
+                ticket.searchContext?.channelId,
+                undefined,
+                true,
+              );
+            }
             return;
           }
         }
@@ -2579,20 +2625,17 @@ const ChannelCommandMenu = ({
                 </span>
                 <span>Close</span>
               </span>
-            ) : (
-              (activeTab === TabType.TICKETS ||
-                (activeTab === TabType.ALL &&
-                  (groupedBackendResults['ticket']?.length ?? 0) > 0)) && (
-                <span className='flex gap-2.5 items-center'>
-                  <span className='flex gap-1'>
-                    <span className='p-1 bg-background rounded-md border border-border'>
-                      <ArrowRight size={12} />
-                    </span>
+            ) : activeTab === TabType.TICKETS ||
+              (activeTab === TabType.ALL && hoveredResult?.type === 'ticket') ? (
+              <span className='flex gap-2.5 items-center'>
+                <span className='flex gap-1'>
+                  <span className='p-1 bg-background rounded-md border border-border'>
+                    <ArrowRight size={12} />
                   </span>
-                  <span>Quick look</span>
                 </span>
-              )
-            )}
+                <span>Quick look</span>
+              </span>
+            ) : null}
           </div>
         </div>
       )}

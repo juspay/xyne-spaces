@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { X, Calendar, CheckCircle2, User, UserPlus } from 'lucide-react';
+import { Calendar, CheckCircle2, User, UserPlus } from 'lucide-react';
 import type { DisplaySearchResult } from '../../../types/search';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -57,10 +57,7 @@ const getRelativeTime = (dateString?: string): string => {
  * TicketPreviewPanel - Displays ticket details in a side panel within the search/command menu.
  * Similar to Linear's preview navigation experience.
  */
-export const TicketPreviewPanel = ({
-  ticket,
-  onClose,
-}: TicketPreviewPanelProps): ReactElement | null => {
+export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactElement | null => {
   if (!ticket) return null;
 
   const { title, context, metadata, searchContext } = ticket;
@@ -76,15 +73,6 @@ export const TicketPreviewPanel = ({
           </div>
           <span className='text-sm font-semibold text-foreground'>Ticket Preview</span>
         </div>
-        <button
-          onClick={onClose}
-          className='p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors'
-          aria-label='Close preview'
-          data-track-category='TICKET_PREVIEW'
-          data-track-name='CLOSE_BUTTON_CLICK'
-        >
-          <X size={16} />
-        </button>
       </div>
 
       {/* Ticket Content */}

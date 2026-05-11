@@ -29,6 +29,10 @@ interface SearchResultItemProps {
   // Fires on mousedown before cmdk's click->onSelect chain so callers can
   // capture the modifier state of the gesture (cmdk's onSelect drops the event).
   onItemMouseDown?: (e: ReactMouseEvent, result: DisplaySearchResult) => void;
+  // Fires on mouse enter to show preview (Linear-style).
+  onItemMouseEnter?: (result: DisplaySearchResult) => void;
+  // Fires on mouse leave to clear hover state.
+  onItemMouseLeave?: () => void;
 }
 
 const getResultIcon = (result: DisplaySearchResult): ReactElement => {
@@ -141,10 +145,15 @@ const SearchResultItem = ({
   onPreview,
   isSelected = false,
   onItemMouseDown,
+  onItemMouseEnter,
+  onItemMouseLeave,
 }: SearchResultItemProps): ReactElement => {
   const handleMouseDown = onItemMouseDown
     ? (e: ReactMouseEvent) => onItemMouseDown(e, result)
     : undefined;
+
+  const handleMouseEnter = onItemMouseEnter ? () => onItemMouseEnter(result) : undefined;
+  const handleMouseLeave = onItemMouseLeave || undefined;
 
   switch (result.type) {
     case 'user':
@@ -244,6 +253,8 @@ const SearchResultItem = ({
           data-ticket-id={result.id}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
           className='group flex flex-col gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           <div className='flex items-center gap-2'>
