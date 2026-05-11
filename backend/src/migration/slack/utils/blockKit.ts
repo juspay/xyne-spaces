@@ -261,20 +261,31 @@ export function getMigrationMessageBlocks(data: MigrationMessageData) {
         text: '*Data filled in form:*',
       },
     },
-    ...(data.syncDate || (data.syncOptions && data.syncOptions.length > 0) ? [{
-      type: 'section',
-      fields: [
-        ...(data.syncDate ? [{
-          type: 'mrkdwn',
-          text: `*Sync Date:*\n${data.syncDate}`,
-        }] : []),
-        ...(data.syncOptions && data.syncOptions.length > 0 ? [{
-            type: 'mrkdwn',
-            text: `*Sync Options:*\n${optionsText}`,
+    ...(data.syncDate || (data.syncOptions && data.syncOptions.length > 0)
+      ? [
+          {
+            type: 'section',
+            fields: [
+              ...(data.syncDate
+                ? [
+                    {
+                      type: 'mrkdwn',
+                      text: `*Sync Date:*\n${data.syncDate}`,
+                    },
+                  ]
+                : []),
+              ...(data.syncOptions && data.syncOptions.length > 0
+                ? [
+                    {
+                      type: 'mrkdwn',
+                      text: `*Sync Options:*\n${optionsText}`,
+                    },
+                  ]
+                : []),
+            ],
           },
-        ] : []),
-      ],
-    }] : []),
+        ]
+      : []),
     ...(data.xyneSpaceChannelId
       ? [
           {
