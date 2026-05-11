@@ -86,6 +86,7 @@ export class NotificationController {
       await notificationService.registerMobilePushToken(userId, {
         ...validated,
         sessionId,
+        appVersion: req.headers['x-app-version'] as string | undefined,
       });
 
       res.json({ success: true });

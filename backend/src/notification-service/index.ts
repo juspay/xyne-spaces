@@ -47,7 +47,7 @@ export class NotificationService {
 
   async queueMobilePush(
     userId: string,
-    session: { id: string; token: string; platform: string },
+    session: { id: string; token: string; voipToken?: string; platform: string; appVersion?: string },
     payload: MobilePushPayload
   ): Promise<void> {
     if (!this.isInitialized) {

@@ -51,6 +51,7 @@ export interface MobilePushJobData {
   token: string;
   voipToken?: string;
   platform: string;
+  appVersion?: string;
   payload: MobilePushPayload;
 }
 

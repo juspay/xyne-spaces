@@ -6,7 +6,7 @@ import { getCallNotifications } from '@/services/otel';
 
 export class MobilePushChannel {
   async deliver(job: MobilePushJobData): Promise<NotificationDeliveryResult> {
-    const { sessionId, token, voipToken, platform, payload, userId } = job;
+    const { sessionId, token, voipToken, platform, payload, userId, appVersion } = job;
 
     logger.info(`[MobilePush] Delivering to session ${sessionId}...`, {
       userId,
@@ -15,6 +15,7 @@ export class MobilePushChannel {
       type: payload.type,
       voipToken: voipToken?.substring(0, 6),
       token: token?.substring(0, 6),
+      appVersion: appVersion,
     });
 
     const isIncomingCall = payload.type === 'INCOMING_CALL';
@@ -35,7 +36,7 @@ export class MobilePushChannel {
   }
 
   private async deliverFcm(job: MobilePushJobData): Promise<NotificationDeliveryResult> {
-    const { sessionId, token, platform, payload, userId } = job;
+    const { sessionId, token, platform, payload, userId, appVersion } = job;
     const isIncomingCall = payload.type === 'INCOMING_CALL';
 
     try {
@@ -78,6 +79,7 @@ export class MobilePushChannel {
         userId,
         platform,
         notificationId: payload.notificationId,
+        appVersion: appVersion,
       });
 
       return {
@@ -100,6 +102,7 @@ export class MobilePushChannel {
         status: error.status,
         message: error.message,
         notificationId: payload.notificationId,
+        appVersion,
       });
 
       // Clear invalid tokens
@@ -163,7 +166,12 @@ export class MobilePushChannel {
     getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'created' });
 
     try {
-      logger.info(`[MobilePush] Using APNS VoIP for incoming call`, { sessionId, userId , notificationId: payload.notificationId});
+      logger.info(`[MobilePush] Using APNS VoIP for incoming call`, {
+        sessionId,
+        userId,
+        notificationId: payload.notificationId,
+        appVersion: job.appVersion,
+      });
       
       const apnsPayload: ApnsPayload = {
         type: payload.type,
@@ -188,6 +196,12 @@ export class MobilePushChannel {
 
       if (success) {
         getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'sent' });
+        logger.info(`[MobilePush] ✅ APNS delivered`, {
+          sessionId,
+          userId,
+          notificationId: payload.notificationId,
+          appVersion: job.appVersion,
+        });
         return true;
       } else {
         getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'failed', failureReason: 'send_failed' });
@@ -196,7 +210,13 @@ export class MobilePushChannel {
       }
     } catch (error: any) {
       getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'failed', failureReason: 'error' });
-      logger.error(`[MobilePush] APNS VoIP error`, { error, sessionId });
+      logger.error(`[MobilePush] APNS VoIP error`, {
+        error,
+        sessionId,
+        userId,
+        notificationId: payload.notificationId,
+        appVersion: job.appVersion,
+      });
       return false;
     }
   }

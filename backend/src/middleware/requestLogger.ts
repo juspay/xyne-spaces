@@ -12,6 +12,7 @@ export const requestLogger = (req: CustomRequest, res: Response, next: NextFunct
     sessionId: (req.headers['x-session-id'] as string) || req.get('x-session-id') || undefined,
     emailId: req.headers['x-user-email'] as string,
     clientSessionId: req.headers['x-client-session-id'] as string || undefined,
+    appVersion: (req.headers['x-app-version'] as string) || undefined,
   };
   req.requestId = context.requestId;
 
