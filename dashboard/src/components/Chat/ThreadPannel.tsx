@@ -1035,6 +1035,7 @@ export const ThreadMessages = ({
       label: 'Create ticket',
       onSelect: handleCreateTicket,
       visible: !!channel?.projectId && !hasTicketInMessages && !channel?.isArchived,
+      testId: 'thread-create-ticket-button',
     },
   ];
 

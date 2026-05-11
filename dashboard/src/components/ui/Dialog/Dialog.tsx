@@ -13,6 +13,7 @@ export interface DialogProps {
   description?: ReactNode;
   className?: string;
   focusRef?: RefObject<HTMLElement | null>;
+  testId?: string;
 }
 
 /**
@@ -41,6 +42,7 @@ export const Dialog = ({
   description,
   className,
   focusRef,
+  testId,
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
   useOverlayEffect(open ?? false);
@@ -107,6 +109,7 @@ export const Dialog = ({
               }
             },
           })}
+          data-testid={testId ?? 'dialog-content'}
           className={cn(
             'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
             'w-full',

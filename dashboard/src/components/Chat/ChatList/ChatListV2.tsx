@@ -527,6 +527,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
         isScrolling={setScrolling}
         minOverscanItemCount={10}
         alignToBottom={true}
+        data-testid='virtuoso-item-list'
         groupContent={groupIndex => {
           const dateString = dateGroups[groupIndex];
           if (!dateString) return null;

@@ -1063,10 +1063,22 @@ export const authMachine = createMachine(
       performTestLogin: fromPromise(async () => {
         try {
           const urlParams = new URLSearchParams(window.location.search);
-          const isAdmin = urlParams.get('isAdmin') === 'true';
+          const email = urlParams.get('email');
+          const setAsNewUser = urlParams.get('setAsNewUser');
+          const loginParams = new URLSearchParams();
+
+          if (email) {
+            loginParams.set('email', email);
+          }
+
+          if (setAsNewUser === 'true' || setAsNewUser === 'false') {
+            loginParams.set('setAsNewUser', setAsNewUser);
+          }
+
+          const queryString = loginParams.toString();
 
           const response = await axios.post(
-            `${API_BASE_URL}/test/auth/login${isAdmin ? '?isAdmin=true' : ''}`,
+            `${API_BASE_URL}/test/auth/login${queryString ? `?${queryString}` : ''}`,
             {},
             {
               withCredentials: true,

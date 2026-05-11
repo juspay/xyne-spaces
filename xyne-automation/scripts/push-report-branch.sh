@@ -78,21 +78,39 @@ fi
 TEMP_BRANCH="${CURRENT_BRANCH}-test-reports"
 echo -e "${BLUE}Temp branch name: $TEMP_BRANCH${NC}"
 
-# Find the target report directory
-REPORT_DIR="$REPO_ROOT/xyne-automation/report"
+# Find the target report directory (supports both npm run test and npm run test:runner)
+REPORT_DIR="$REPO_ROOT/xyne-automation/reports"
 COMMIT_HASH=$(git rev-parse --short=9 HEAD)
 
-# If a custom report name is provided, use it, otherwise use the commit hash
+# If a custom report name is provided, use it, otherwise find the latest report for this commit
 if [ -n "$CUSTOM_REPORT_NAME" ]; then
   LATEST_BUILD_DIR="$REPORT_DIR/$CUSTOM_REPORT_NAME"
 else
-  LATEST_BUILD_DIR="$REPORT_DIR/$COMMIT_HASH"
+  # Find the latest report directory matching this commit hash
+  # Supports: {hash}-1, {hash}-2, {hash}-runner, etc.
+  LATEST_BUILD_DIR=$(ls -d "$REPORT_DIR/${COMMIT_HASH}"-* 2>/dev/null | sort -V | tail -1)
 fi
 
-if [ ! -d "$LATEST_BUILD_DIR" ]; then
-  echo -e "${RED}❌ Report directory for $COMMIT_HASH does not exist. ($LATEST_BUILD_DIR)${NC}"
-  echo -e "${RED}❌ Automation tests must pass locally first before pushing.${NC}"
-  exit 1
+if [ -z "$LATEST_BUILD_DIR" ] || [ ! -d "$LATEST_BUILD_DIR" ]; then
+  echo -e "${YELLOW}⚠️  No report for commit $COMMIT_HASH — running tests first.${NC}"
+  echo ""
+
+  if ! npm run test --prefix "$REPO_ROOT"; then
+    echo ""
+    echo -e "${RED}❌ Automation tests failed. Not pushing reports.${NC}"
+    echo -e "${RED}   Fix the failures and run 'npm run test:push' again.${NC}"
+    exit 1
+  fi
+
+  echo ""
+  echo -e "${BLUE}Re-checking for report after test run...${NC}"
+  LATEST_BUILD_DIR=$(ls -d "$REPORT_DIR/${COMMIT_HASH}"-* 2>/dev/null | sort -V | tail -1)
+
+  if [ -z "$LATEST_BUILD_DIR" ] || [ ! -d "$LATEST_BUILD_DIR" ]; then
+    echo -e "${RED}❌ Tests ran but no report directory was produced for commit $COMMIT_HASH.${NC}"
+    echo -e "${RED}   Check the test runner output above for errors.${NC}"
+    exit 1
+  fi
 fi
 
 echo -e "${GREEN}✓ Report directory: $LATEST_BUILD_DIR${NC}"
@@ -118,9 +136,9 @@ fi
 echo -e "${BLUE}Creating temp branch: $TEMP_BRANCH${NC}"
 git checkout -b "$TEMP_BRANCH"
 
-# Force add the report directory (it's gitignored)
-echo -e "${BLUE}Adding reports to temp branch...${NC}"
-git add -f "xyne-automation/report"
+# Force add the report directory for current commit only (it's gitignored)
+echo -e "${BLUE}Adding report for commit $COMMIT_HASH to temp branch...${NC}"
+git add -f "$LATEST_BUILD_DIR"
 
 # Check if there are staged changes
 if git diff --cached --quiet; then
@@ -148,6 +166,11 @@ else
   exit 1
 fi
 
+# Backup the report dir before checkout — git checkout would otherwise remove
+# the (now-tracked-on-temp-branch) files because the original branch doesn't track them.
+BACKUP_DIR=$(mktemp -d)
+cp -r "$LATEST_BUILD_DIR" "$BACKUP_DIR/"
+
 # Return to the original branch
 echo -e "${BLUE}Returning to original branch: $CURRENT_BRANCH${NC}"
 git checkout "$CURRENT_BRANCH"
@@ -155,6 +178,11 @@ git checkout "$CURRENT_BRANCH"
 # Delete local temp branch (remote remains for Jenkins)
 echo -e "${BLUE}Cleaning up local temp branch...${NC}"
 git branch -D "$TEMP_BRANCH"
+
+# Restore the local report so the user keeps a copy on disk
+mkdir -p "$(dirname "$LATEST_BUILD_DIR")"
+cp -r "$BACKUP_DIR/$(basename "$LATEST_BUILD_DIR")" "$(dirname "$LATEST_BUILD_DIR")/"
+rm -rf "$BACKUP_DIR"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"

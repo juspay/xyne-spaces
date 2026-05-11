@@ -22,6 +22,7 @@ const ProjectsScreen = (): ReactElement => {
   return (
     <div
       ref={containerRef}
+      data-testid='list-projects-page'
       className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
       data-component='ProjectsScreen'
     >

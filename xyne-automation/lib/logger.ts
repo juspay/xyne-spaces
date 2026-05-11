@@ -1,40 +1,62 @@
-/**
- * Centralized logger utility for consistent logging across the test automation codebase.
- * Provides prefixed log messages with timestamps and log levels.
- * Supports nested prefixes for hierarchical logging (e.g., [Cucumber] [API]).
- *
- * In CI/test mode (environment='test'), logs are written to a file only.
- */
-
-import * as fs from 'fs';
-import * as path from 'path';
-
-import { environment } from '@/config';
+/** biome-ignore-all lint/suspicious/noConsole: logger intentionally uses console for local output and bootstrap failures */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-interface LoggerOptions {
+interface LogEntry {
+  timestamp: string;
+  level: LogLevel;
+  pid: number;
+  runner: string;
   prefix: string;
-  showTimestamp?: boolean;
-  parentPrefix?: string;
+  message: string;
+  args?: unknown[];
 }
 
-// Check if running in test mode based on config environment
-function isTestMode(): boolean {
-  return environment === 'test';
+function shouldLogToConsole(): boolean {
+  return process.env.XYNE_LOG_TO_STDOUT !== 'false';
 }
 
-// Get log directory - use /app/report if in container, ./report otherwise
+let logFileLabel = `runner-${process.pid}`;
+
+function getRunnerLabel(): string {
+  const parts = logFileLabel.split('/');
+  if (parts.length >= 2) return parts[parts.length - 2];
+  return 'main';
+}
+
 function getLogDir(): string {
-  if (fs.existsSync('/app')) {
-    return '/app/report';
+  if (process.env.XYNE_RUN_ARTIFACT_DIR) {
+    return process.env.XYNE_RUN_ARTIFACT_DIR;
   }
-  return './report';
+
+  if (fs.existsSync('/app')) {
+    return '/app/reports';
+  }
+
+  return './reports';
 }
 
-// Create a write stream for file logging in CI mode
 let logStream: fs.WriteStream | null = null;
-let logStreamError: boolean = false;
+let logStreamError = false;
+
+export function setLoggerFileLabel(label: string): void {
+  if (label === logFileLabel) {
+    return;
+  }
+
+  logFileLabel = label;
+
+  if (logStream) {
+    logStream.end();
+    logStream = null;
+  }
+}
+
+export function getLoggerFilePath(): string {
+  return path.join(getLogDir(), `${logFileLabel}.log`);
+}
 
 function getLogStream(): fs.WriteStream | null {
   if (logStreamError) {
@@ -43,67 +65,81 @@ function getLogStream(): fs.WriteStream | null {
 
   if (!logStream) {
     try {
-      const logDir = getLogDir();
-      const logFile = path.join(logDir, 'automation.log');
+      const logFile = getLoggerFilePath();
+      const logDir = path.dirname(logFile);
+
       if (!fs.existsSync(logDir)) {
         fs.mkdirSync(logDir, { recursive: true });
       }
-      logStream = fs.createWriteStream(logFile, { flags: 'a' });
 
-      logStream.on('error', (err) => {
+      logStream = fs.createWriteStream(logFile, { flags: 'w' });
+      logStream.on('error', (error) => {
         logStreamError = true;
-        console.error(`[Logger] File stream error: ${err.message}`);
+        console.error(`[Logger] File stream error: ${error.message}`);
         logStream = null;
       });
-    } catch (err) {
+    } catch (error) {
       logStreamError = true;
-      const errorMessage = err instanceof Error ? err.message : String(err);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[Logger] Failed to initialize log file: ${errorMessage}`);
       return null;
     }
   }
+
   return logStream;
 }
 
-function writeToFile(message: string): void {
+function writeToFile(entry: LogEntry): void {
   try {
     const stream = getLogStream();
+
     if (stream && !stream.destroyed) {
-      const success = stream.write(message + '\n');
+      const success = stream.write(`${JSON.stringify(entry)}\n`);
       if (!success && !logStreamError) {
         console.warn('[Logger] Write buffer full, some logs may be delayed');
       }
     }
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[Logger] Failed to write to log file: ${errorMessage}`);
   }
 }
 
-class Logger {
-  private prefix: string;
-  private showTimestamp: boolean;
-  private parentPrefix?: string;
+function writeToConsole(level: LogLevel, formattedMessage: string, args: unknown[]): void {
+  switch (level) {
+    case 'debug':
+      console.debug(formattedMessage, ...args);
+      break;
+    case 'warn':
+      console.warn(formattedMessage, ...args);
+      break;
+    case 'error':
+      console.error(formattedMessage, ...args);
+      break;
+    default:
+      console.log(formattedMessage, ...args);
+  }
+}
 
-  constructor(options: LoggerOptions) {
-    this.prefix = options.prefix;
-    this.showTimestamp = options.showTimestamp ?? false;
-    this.parentPrefix = options.parentPrefix;
+class Logger {
+  private readonly prefix: string;
+
+  constructor(prefix: string) {
+    this.prefix = prefix;
   }
 
   private formatMessage(level: LogLevel, message: string): string {
-    const timestamp = this.showTimestamp ? `[${new Date().toISOString()}] ` : '';
     const levelIcon = this.getLevelIcon(level);
-    const parentPart = this.parentPrefix ? `[${this.parentPrefix}] ` : '';
-    return `${timestamp}${parentPart}[${this.prefix}] ${levelIcon}${message}`;
+    const runnerPart = `[runner:  ${getRunnerLabel()}]`;
+    const prefixPart = this.prefix ? `[${this.prefix}] ` : '';
+
+    return `${runnerPart}${prefixPart}${levelIcon}${message}`;
   }
 
   private getLevelIcon(level: LogLevel): string {
     switch (level) {
       case 'debug':
         return '🔍 ';
-      case 'info':
-        return '';
       case 'warn':
         return '⚠️ ';
       case 'error':
@@ -114,28 +150,24 @@ class Logger {
   }
 
   private output(level: LogLevel, message: string, args: unknown[]): void {
-    const formattedMessage = this.formatMessage(level, message);
-    const argsStr = args.length > 0 ? ' ' + args.map((a) => JSON.stringify(a)).join(' ') : '';
+    const entry: LogEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      pid: process.pid,
+      runner: getRunnerLabel(),
+      prefix: this.prefix,
+      message,
+      args: args.length > 0 ? args : undefined,
+    };
 
-    // Always write to file
-    writeToFile(formattedMessage + argsStr);
+    writeToFile(entry);
 
-    // In local mode (not test), also print to console
-    if (!isTestMode()) {
-      switch (level) {
-        case 'debug':
-          console.debug(formattedMessage, ...args);
-          break;
-        case 'warn':
-          console.warn(formattedMessage, ...args);
-          break;
-        case 'error':
-          console.error(formattedMessage, ...args);
-          break;
-        default:
-          console.log(formattedMessage, ...args);
-      }
+    if (!shouldLogToConsole()) {
+      return;
     }
+
+    const formattedMessage = this.formatMessage(level, message);
+    writeToConsole(level, formattedMessage, args);
   }
 
   debug(message: string, ...args: unknown[]): void {
@@ -153,48 +185,8 @@ class Logger {
   error(message: string, ...args: unknown[]): void {
     this.output('error', message, args);
   }
-
-  success(message: string, ...args: unknown[]): void {
-    this.output('info', `✅ ${message}`, args);
-  }
-
-  fail(message: string, ...args: unknown[]): void {
-    this.output('info', `❌ ${message}`, args);
-  }
-
-  /**
-   * Create a child logger that inherits this logger's prefix as parent
-   */
-  child(childPrefix: string): Logger {
-    const fullParentPrefix = this.parentPrefix
-      ? `${this.parentPrefix}] [${this.prefix}`
-      : this.prefix;
-    return new Logger({
-      prefix: childPrefix,
-      showTimestamp: this.showTimestamp,
-      parentPrefix: fullParentPrefix,
-    });
-  }
 }
 
-/**
- * Create a logger instance with a specific prefix
- */
-export function createLogger(prefix: string, showTimestamp = false): Logger {
-  return new Logger({ prefix, showTimestamp });
-}
-
-/**
- * Create a child logger with a parent prefix
- * This creates logs formatted as [parentPrefix] [prefix] message
- */
-function createChildLogger(parentPrefix: string, prefix: string, showTimestamp = false): Logger {
-  return new Logger({ prefix, showTimestamp, parentPrefix });
-}
-
-/**
- * Flush and close the log stream (call at end of test run)
- */
 export function closeLogger(): Promise<void> {
   return new Promise((resolve) => {
     if (logStream) {
@@ -202,20 +194,12 @@ export function closeLogger(): Promise<void> {
         logStream = null;
         resolve();
       });
-    } else {
-      resolve();
+      return;
     }
+
+    resolve();
   });
 }
 
-// Pre-configured loggers for common use cases
-export const cucumberLogger = createLogger('Cucumber');
-
-// Test type loggers - nested under Cucumber for consistent formatting
-// Output format: [Cucumber] [API] message
-export const apiLogger = createChildLogger('Cucumber', 'API');
-export const e2eLogger = createChildLogger('Cucumber', 'E2E');
-export const uiLogger = createChildLogger('Cucumber', 'UI');
-export const browserLogger = createChildLogger('Cucumber', 'Browser');
-
-export { Logger };
+export const gaugeLogger = new Logger('Gauge');
+export const baselineLogger = new Logger('');

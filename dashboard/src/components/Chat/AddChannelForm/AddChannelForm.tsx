@@ -219,7 +219,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   };
 
   const renderFormComponent = (): ReactElement => (
-    <div className='space-y-6 w-full'>
+    <div data-testid='add-channel-form' className='space-y-6 w-full'>
       {title ? (
         <div className='text-xl font-medium text-foreground mb-1'>{title}</div>
       ) : (
@@ -350,7 +350,11 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               onValueChange={selected => field.handleChange(selected)}
               disabled={projectOptions.length === 0}
             >
-              <SelectTrigger id='project-select' className='w-full'>
+              <SelectTrigger
+                id='project-select'
+                data-testid='project-select-trigger'
+                className='w-full'
+              >
                 <SelectValue
                   placeholder={
                     projectOptions.length > 0 ? 'Select a project' : 'No projects available'

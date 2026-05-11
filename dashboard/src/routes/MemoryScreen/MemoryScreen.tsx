@@ -19,7 +19,10 @@ const MemoryScreen = (): ReactElement => {
   });
 
   return (
-    <div className='h-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
+    <div
+      data-testid='context-page'
+      className='h-full bg-background md:rounded-2xl overflow-hidden shadow-md'
+    >
       <main className='mx-auto py-6 sm:px-6 lg:px-8'>
         <div className='px-4 py-6 sm:px-0'>
           <div className='bg-background rounded-lg shadow'>

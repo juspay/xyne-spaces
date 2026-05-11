@@ -166,7 +166,10 @@ export default function RecordingsScreen(): ReactElement {
 
   // ─── Main Layout ─────────────────────────────────────────────────
   return (
-    <div className='flex flex-col h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'>
+    <div
+      data-testid='recordings-page'
+      className='flex flex-col h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
+    >
       {/* ─── List View (slides out when recording is active) ───── */}
       <div
         ref={setScrollContainer}

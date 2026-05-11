@@ -1,0 +1,31 @@
+# Logging in as user <userAlias>
+* ensuring user is not logged in
+* logging in as user <userAlias>
+
+# Logging in as user <userAlias> as a new user
+* ensuring user is not logged in
+* logging in as user <userAlias> as a new user
+
+# Ensuring user <userAlias> is logged in
+* Logging in as user <userAlias>
+* verifying user is redirected to "/chat/dir/*"
+* skipping xyne-ai-onboarding overlay
+
+# Ensuring user <userAlias> exists (relogin required)
+* Ensuring user <userAlias> is logged in
+* ensuring user is not logged in
+
+# Logging in user <userAlias> on temp browser <browserAlias>
+* switching to temp browser <browserAlias>
+* Ensuring user <userAlias> is logged in
+* Switching to main browser
+
+# Skipping user onboarding
+* verifying user is redirected to "/onboarding"
+* clicking button with text "Get Started"
+* clicking button with text "->"
+* clicking button with text "->"
+* clicking button with text "->"
+* clicking button with text "Open My Workspace"
+* verifying user is redirected to "/chat/dir/*"
+* skipping xyne-ai-onboarding overlay

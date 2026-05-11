@@ -1,192 +1,81 @@
-/**
- * Common API step definitions for all API tests.
- * These steps provide reusable building blocks for API testing scenarios.
- */
-import { Given, Then, When } from '@cucumber/cucumber';
-import { AxiosError } from 'axios';
-import { expect } from 'chai';
+import assert from 'node:assert/strict';
+import { Step } from 'gauge-ts';
+import { testContext } from '@/tests/shared/runtime/test-context';
+import { ensureApiRequestContext } from '@/tests/shared/support/browser-manager';
+import {
+  assertValidStatusCode,
+  assertValidUrlPath,
+} from '@/tests/shared/support/literal-validation';
 
-import { apiLogger } from '@/lib/logger';
+export default class ApiHealthSteps {
+  // ===========================================
+  // SETUP
+  // ===========================================
 
-import { HttpMethod } from '@/fixtures/cucumber.parameters';
-import { CustomWorld } from '@/fixtures/cucumber.world';
-
-// ============================================
-// API Setup & Accessibility Steps
-// ============================================
-
-Given('the backend API is accessible', async function (this: CustomWorld) {
-  expect(this.apiClient).to.not.be.undefined;
-  apiLogger.info(`Backend URL: ${this.config.backend.baseUrl}`);
-});
-
-// ============================================
-// HTTP Request Steps
-// ============================================
-
-/**
- * Generic HTTP request step without body (GET, DELETE)
- */
-When(
-  'I send a {httpMethod} request to {string}',
-  async function (this: CustomWorld, method: HttpMethod, endpoint: string) {
-    this.startTime = Date.now();
-    try {
-      this.response = await this.apiClient.request({
-        method: method.toLowerCase(),
-        url: endpoint,
-      });
-    } catch (err) {
-      const error = err as AxiosError;
-      this.response = error.response;
-      if (!this.response) {
-        throw new Error(
-          `${method} request to ${endpoint} failed: ${error.message} (${error.code || 'No Code'})`
-        );
-      }
-    }
+  @Step('ensuring backend API is accessible')
+  public async backendApiIsAccessible(): Promise<void> {
+    const apiRequestContext = await ensureApiRequestContext();
+    testContext.apiRequestContext = apiRequestContext;
   }
-);
 
-/**
- * Generic HTTP request step with body (POST, PUT, PATCH)
- */
-When(
-  'I send a {httpMethod} request to {string} with body:',
-  async function (this: CustomWorld, method: HttpMethod, endpoint: string, docString: string) {
-    this.startTime = Date.now();
-    try {
-      const body = JSON.parse(docString);
-      this.response = await this.apiClient.request({
-        method: method.toLowerCase(),
-        url: endpoint,
-        data: body,
-      });
-    } catch (err) {
-      const error = err as AxiosError;
-      this.response = error.response;
-      if (!this.response) {
-        throw new Error(
-          `${method} request to ${endpoint} failed: ${error.message} (${error.code || 'No Code'})`
-        );
-      }
-    }
+  // ===========================================
+  // ACTION
+  // ===========================================
+
+  @Step('sending GET request to <urlPath>')
+  public async sendGetRequest(urlPath: string): Promise<void> {
+    assertValidUrlPath(urlPath);
+
+    const apiRequestContext = await ensureApiRequestContext();
+    testContext.lastResponse = await apiRequestContext.get(urlPath);
   }
-);
 
-// ============================================
-// Response Status Assertions
-// ============================================
+  // ===========================================
+  // ASSERTION
+  // ===========================================
 
-Then('the response status should be {int}', async function (this: CustomWorld, statusCode: number) {
-  expect(this.response).to.not.be.undefined;
-  expect(this.response!.status).to.equal(statusCode);
-});
+  @Step('verifying response status is <statusCode>')
+  public async assertResponseStatus(statusCode: string): Promise<void> {
+    assertValidStatusCode(statusCode);
 
-Then('the response should be successful', async function (this: CustomWorld) {
-  expect(this.response).to.not.be.undefined;
-  expect(this.response!.status).to.be.within(200, 299);
-});
-
-Then('the response should indicate a client error', async function (this: CustomWorld) {
-  expect(this.response).to.not.be.undefined;
-  expect(this.response!.status).to.be.within(400, 499);
-});
-
-Then('the response should indicate a server error', async function (this: CustomWorld) {
-  expect(this.response).to.not.be.undefined;
-  expect(this.response!.status).to.be.within(500, 599);
-});
-
-// ============================================
-// Response Body Assertions
-// ============================================
-
-Then(
-  'the response should contain property {string}',
-  async function (this: CustomWorld, key: string) {
-    expect(this.response).to.not.be.undefined;
-    expect(this.response!.data).to.have.property(key);
+    const response = testContext.lastResponse;
+    assert.ok(response, 'Expected an API response to be available');
+    assert.equal(response.status(), Number.parseInt(statusCode, 10));
   }
-);
 
-Then(
-  'the response should contain a {string} field',
-  async function (this: CustomWorld, key: string) {
-    expect(this.response).to.not.be.undefined;
-    expect(this.response!.data).to.have.property(key);
+  @Step('verifying response content-type is JSON')
+  public async assertJsonResponse(): Promise<void> {
+    const response = testContext.lastResponse;
+    assert.ok(response, 'Expected an API response to be available');
+
+    const contentType = response.headers()['content-type'] || '';
+    assert.match(contentType, /application\/json/i);
   }
-);
 
-Then(
-  'the response property {string} should equal {string}',
-  async function (this: CustomWorld, key: string, value: string) {
-    expect(this.response).to.not.be.undefined;
-    expect(String(this.response!.data[key])).to.equal(value);
+  @Step('verifying response property <propertyName> equals <value>')
+  public async assertResponseProperty(propertyName: string, value: string): Promise<void> {
+    const response = testContext.lastResponse;
+    assert.ok(response, 'Expected an API response to be available');
+
+    const body = await response.json().catch(() => null);
+    assert.ok(body && typeof body === 'object', 'Expected response body to be an object');
+
+    const responseRecord = body as Record<string, unknown>;
+    assert.equal(String(responseRecord[propertyName]), String(value));
   }
-);
 
-Then(
-  'the response property {string} should equal {int}',
-  async function (this: CustomWorld, key: string, value: number) {
-    expect(this.response).to.not.be.undefined;
-    expect(this.response!.data[key]).to.equal(value);
+  @Step('verifying response contains property <propertyName>')
+  public async assertResponseHasProperty(propertyName: string): Promise<void> {
+    const response = testContext.lastResponse;
+    assert.ok(response, 'Expected an API response to be available');
+
+    const body = await response.json().catch(() => null);
+    assert.ok(body && typeof body === 'object', 'Expected response body to be an object');
+
+    const responseRecord = body as Record<string, unknown>;
+    assert.ok(
+      propertyName in responseRecord,
+      `Expected response to contain property "${propertyName}"`
+    );
   }
-);
-
-Then('the response should be an array', async function (this: CustomWorld) {
-  expect(this.response).to.not.be.undefined;
-  expect(this.response!.data).to.be.an('array');
-});
-
-Then(
-  'the response array should have length {int}',
-  async function (this: CustomWorld, length: number) {
-    expect(this.response).to.not.be.undefined;
-    expect(this.response!.data).to.be.an('array').with.lengthOf(length);
-  }
-);
-
-Then('the response array should not be empty', async function (this: CustomWorld) {
-  expect(this.response).to.not.be.undefined;
-  expect(this.response!.data).to.be.an('array').that.is.not.empty;
-});
-
-// ============================================
-// Performance Assertions
-// ============================================
-
-Then(
-  'the response time should be less than {int} milliseconds',
-  function (this: CustomWorld, ms: number) {
-    const startTime = this.startTime || Date.now();
-    const duration = Date.now() - startTime;
-    apiLogger.info(`Response time: ${duration}ms`);
-    expect(duration).to.be.lessThan(ms);
-  }
-);
-
-// ============================================
-// Response Header Assertions
-// ============================================
-
-Then(
-  'the response header {string} should exist',
-  async function (this: CustomWorld, header: string) {
-    expect(this.response).to.not.be.undefined;
-    expect(this.response!.headers).to.have.property(header.toLowerCase());
-  }
-);
-
-Then(
-  'the response header {string} should contain {string}',
-  async function (this: CustomWorld, header: string, value: string) {
-    expect(this.response).to.not.be.undefined;
-    expect(this.response!.headers[header.toLowerCase()]).to.include(value);
-  }
-);
-
-Then('the response content-type should be JSON', async function (this: CustomWorld) {
-  expect(this.response).to.not.be.undefined;
-  expect(this.response!.headers['content-type']).to.include('application/json');
-});
+}

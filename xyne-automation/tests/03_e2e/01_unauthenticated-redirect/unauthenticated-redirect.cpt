@@ -1,0 +1,3 @@
+# Unauthenticated user opening <path> should land on login
+* opening Xyne-Space at <path>
+* verifying user is redirected to "/auth"

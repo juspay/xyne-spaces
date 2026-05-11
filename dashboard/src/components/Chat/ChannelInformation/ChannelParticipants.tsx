@@ -278,6 +278,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
                 <button
                   onClick={handleAddPeople}
                   className='flex items-center gap-3 w-full p-3 rounded-lg hover:bg-accent transition-colors group'
+                  data-testid='add-people-button'
                   data-track-category='CHANNEL_INFORMATION'
                   data-track-name='OPEN_ADD_PEOPLE_MODAL'
                   data-track-metadata={JSON.stringify({ channelId: channel?.id })}
@@ -395,6 +396,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
                 size={ButtonSize.MEDIUM}
                 onClick={() => void handleAddUsersSubmit(includeHistory)}
                 disabled={selectedUsers.length === 0 || addGroupDmParticipantsMutation.isPending}
+                data-testid='add-people-submit'
                 data-track-category='CHANNEL_INFORMATION'
                 data-track-name='ADD_USERS_TO_CHANNEL'
                 data-track-metadata={JSON.stringify({

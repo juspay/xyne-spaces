@@ -733,7 +733,11 @@ const ChatDirectory = ({
         </Accordion.Root>
       </div>
 
-      <Dialog open={showAddChannelForm} onOpenChange={setShowAddChannelForm}>
+      <Dialog
+        open={showAddChannelForm}
+        onOpenChange={setShowAddChannelForm}
+        testId='add-channel-dialog'
+      >
         <div className='p-4'>
           <AddChannelForm
             loading={createChannelMutation.isPending}
@@ -934,7 +938,11 @@ const ChatDirectory = ({
         </div> */}
       </div>
 
-      <Dialog open={showAddChannelForm} onOpenChange={setShowAddChannelForm}>
+      <Dialog
+        open={showAddChannelForm}
+        onOpenChange={setShowAddChannelForm}
+        testId='add-channel-dialog'
+      >
         <div className='p-4'>
           <AddChannelForm
             loading={createChannelMutation.isPending}

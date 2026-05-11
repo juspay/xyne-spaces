@@ -17,7 +17,10 @@ export default function Inspector(): ReactElement {
   }, []);
 
   return (
-    <div className='flex flex-col h-full bg-background rounded-xl overflow-hidden'>
+    <div
+      data-testid='inspector-page'
+      className='flex flex-col h-full bg-background rounded-xl overflow-hidden'
+    >
       <ContextBar />
 
       {/* Tab bar */}

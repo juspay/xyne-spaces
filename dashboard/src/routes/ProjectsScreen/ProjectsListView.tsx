@@ -80,7 +80,10 @@ const ProjectsListView = (): ReactElement => {
   }
 
   return (
-    <div className='h-full bg-background flex flex-col md:rounded-2xl overflow-hidden shadow-md'>
+    <div
+      data-testid='list-projects-page'
+      className='h-full bg-background flex flex-col md:rounded-2xl overflow-hidden shadow-md'
+    >
       <div className='flex-1 overflow-y-auto p-4'>
         {/* Header */}
         <div className='mb-6'>
@@ -110,7 +113,7 @@ const ProjectsListView = (): ReactElement => {
         </div>
 
         {/* Projects List */}
-        <div className='space-y-3'>
+        <div className='space-y-3' data-testid='project-list'>
           {filteredProjects.map(project => (
             <ProjectCard
               key={project.id}
@@ -151,7 +154,12 @@ const ProjectsListView = (): ReactElement => {
           showCloseButton={true}
           closeOnBackdropClick={false}
         >
-          <ProjectForm onSubmit={handleCreateProject} onCancel={() => setShowCreateModal(false)} />
+          <div data-testid='create-project-dialog'>
+            <ProjectForm
+              onSubmit={handleCreateProject}
+              onCancel={() => setShowCreateModal(false)}
+            />
+          </div>
         </Modal>
       )}
 

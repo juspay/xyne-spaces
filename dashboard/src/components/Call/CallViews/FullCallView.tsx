@@ -227,6 +227,7 @@ export function FullCallView({
       className={cn(
         'h-screen bg-gradient-to-br from-gray-900 to-gray-950 flex flex-col overflow-hidden transition-all duration-300',
       )}
+      data-testid='call-window'
     >
       {/* Floating reactions overlay */}
       <ReactionsOverlay reactions={reactions} />

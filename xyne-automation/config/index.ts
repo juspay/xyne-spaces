@@ -1,10 +1,9 @@
 import * as dotenv from 'dotenv';
 
-// Load environment variables from .env file
 dotenv.config({ quiet: true });
 
 export type Environment = 'local' | 'local-test' | 'test' | 'sbx' | 'prod';
-export type BrowserType = 'chromium' | 'firefox' | 'webkit';
+export type BrowserType = 'chromium' | 'chrome' | 'firefox' | 'webkit';
 
 export interface ServiceConfig {
   baseUrl: string;
@@ -14,21 +13,31 @@ export interface Config {
   backend: ServiceConfig;
   dashboard: ServiceConfig;
   timeout: number;
+  retries: number;
   headless: boolean;
   browser: BrowserType;
   enableBrowserConsoleLogs: boolean;
+  parallel: number;
 }
 
-// Get current environment from TEST_ENV env variable, default to 'local'
 export function getEnvironment(): Environment {
-  const env = process.env.TEST_ENV as Environment;
+  const env = process.env.TEST_ENV;
   const validEnvs: Environment[] = ['local', 'local-test', 'test', 'sbx', 'prod'];
-  return validEnvs.includes(env) ? env : 'local';
+
+  if (!env) {
+    throw new Error(
+      'TEST_ENV environment variable is required. Valid values: local, local-test, test, sbx, prod'
+    );
+  }
+
+  if (!validEnvs.includes(env as Environment)) {
+    throw new Error(`Invalid TEST_ENV "${env}". Valid values: ${validEnvs.join(', ')}`);
+  }
+
+  return env as Environment;
 }
 
-// Get backend base URL based on environment
 function getBackendUrl(env: Environment): string {
-  // Use env var if provided, otherwise use defaults per environment
   if (process.env.BACKEND_URL) {
     return process.env.BACKEND_URL;
   }
@@ -45,9 +54,7 @@ function getBackendUrl(env: Environment): string {
   }
 }
 
-// Get dashboard base URL based on environment
 function getDashboardUrl(env: Environment): string {
-  // Use env var if provided, otherwise use defaults per environment
   if (process.env.DASHBOARD_URL) {
     return process.env.DASHBOARD_URL;
   }
@@ -64,41 +71,51 @@ function getDashboardUrl(env: Environment): string {
   }
 }
 
-// Get headless mode based on environment
 function getHeadless(env: Environment): boolean {
-  // Use env var if provided
   if (process.env.HEADLESS !== undefined) {
     return process.env.HEADLESS === 'true';
   }
 
   switch (env) {
     case 'local':
-      return false; // local runs with browser visible
+      return false;
     case 'local-test':
     case 'test':
     case 'sbx':
     case 'prod':
-      return true; // CI/remote environments run headless
+      return true;
   }
 }
 
-// Get timeout from env or default
 function getTimeout(): number {
-  const DEFAULT_TIMEOUT = 45000;
-  if (!process.env.TIMEOUT) return DEFAULT_TIMEOUT;
+  const defaultTimeout = 30000;
+
+  if (!process.env.TIMEOUT) {
+    return defaultTimeout;
+  }
 
   const parsed = parseInt(process.env.TIMEOUT, 10);
-  return isNaN(parsed) || parsed <= 0 ? DEFAULT_TIMEOUT : parsed;
+  return Number.isNaN(parsed) || parsed <= 0 ? defaultTimeout : parsed;
 }
 
-// Get browser type from env or default to chromium
+function getRetries(): number {
+  const defaultRetries = 3;
+
+  if (!process.env.RETRIES) {
+    return defaultRetries;
+  }
+
+  const parsed = parseInt(process.env.RETRIES, 10);
+  return Number.isNaN(parsed) || parsed < 0 ? defaultRetries : parsed;
+}
+
 function getBrowser(): BrowserType {
   const browser = process.env.BROWSER as BrowserType;
-  const validBrowsers: BrowserType[] = ['chromium', 'firefox', 'webkit'];
-  return validBrowsers.includes(browser) ? browser : 'chromium';
+  const validBrowsers: BrowserType[] = ['chromium', 'chrome', 'firefox', 'webkit'];
+
+  return validBrowsers.includes(browser) ? browser : 'chrome';
 }
 
-// Get browser console logs setting from env or default based on environment
 function getEnableBrowserConsoleLogs(env: Environment): boolean {
   if (process.env.ENABLE_BROWSER_CONSOLE_LOGS !== undefined) {
     return process.env.ENABLE_BROWSER_CONSOLE_LOGS === 'true';
@@ -107,7 +124,23 @@ function getEnableBrowserConsoleLogs(env: Environment): boolean {
   return env === 'test' || env === 'local-test';
 }
 
-// Build config for environment
+function getParallel(env: Environment): number {
+  if (process.env.PARALLEL !== undefined) {
+    const parsed = parseInt(process.env.PARALLEL, 10);
+    return Number.isNaN(parsed) || parsed < 1 ? 1 : parsed;
+  }
+
+  switch (env) {
+    case 'local':
+    case 'local-test':
+      return 3;
+    case 'test':
+      return 3; // Jenkins has 4 CPUs, use 3 parallel runners
+    default:
+      return 1;
+  }
+}
+
 function getConfigForEnv(env: Environment): Config {
   return {
     backend: {
@@ -117,12 +150,13 @@ function getConfigForEnv(env: Environment): Config {
       baseUrl: getDashboardUrl(env),
     },
     timeout: getTimeout(),
+    retries: getRetries(),
     headless: getHeadless(env),
     browser: getBrowser(),
     enableBrowserConsoleLogs: getEnableBrowserConsoleLogs(env),
+    parallel: getParallel(env),
   };
 }
 
-// Export environment and config
 export const environment = getEnvironment();
 export const config = getConfigForEnv(environment);

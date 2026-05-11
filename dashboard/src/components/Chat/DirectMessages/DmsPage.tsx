@@ -494,6 +494,7 @@ const DmsPage = (): ReactElement => {
                 Footer: () => <div className='pb-20' />,
               }}
               className='h-full'
+              data-testid='dm-list'
             />
           )}
         </div>
@@ -643,6 +644,7 @@ const DmsPage = (): ReactElement => {
                   endReached={loadMore}
                   itemContent={renderDmItem}
                   className='h-full'
+                  data-testid='dm-list'
                 />
               )}
             </div>

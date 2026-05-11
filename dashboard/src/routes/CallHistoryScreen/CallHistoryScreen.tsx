@@ -973,7 +973,10 @@ const CallHistoryScreen = (): ReactElement => {
                   <span className='font-mono text-muted-foreground text-sm leading-5 font-medium uppercase cursor-default'>
                     recents
                   </span>
-                  <div className='border border-border rounded-xl overflow-hidden'>
+                  <div
+                    className='border border-border rounded-xl overflow-hidden'
+                    data-testid='call-history-list'
+                  >
                     {searchQuery.trim() ? (
                       filteredRecentCalls.map((call, i) => (
                         <CallCard
