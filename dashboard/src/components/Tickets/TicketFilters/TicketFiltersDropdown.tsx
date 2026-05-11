@@ -810,15 +810,10 @@ export const TicketFiltersDropdown = ({
             sideOffset={6}
             className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
             onInteractOutside={e => {
-              // Prevent closing when clicking on the submenu
-              if (
-                submenuRef.current &&
-                e.target instanceof Node &&
-                submenuRef.current.contains(e.target)
-              ) {
+              const target = e.target;
+              if (target instanceof Element && target.closest('[data-filter-submenu="true"]')) {
                 e.preventDefault();
               } else {
-                // Close submenu when clicking outside
                 setActiveSubmenu(null);
               }
             }}
@@ -868,6 +863,7 @@ export const TicketFiltersDropdown = ({
           {activeSubmenu && menuItemRefs.current[activeSubmenu] && (
             <div
               ref={submenuRef}
+              data-filter-submenu='true'
               className='fixed z-[60]'
               style={{
                 left: (menuItemRefs.current[activeSubmenu]?.getBoundingClientRect().right || 0) + 4,
