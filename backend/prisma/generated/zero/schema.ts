@@ -71,6 +71,11 @@ export enum TicketReferenceRelation {
   DUPLICATE_POSSIBLE = "DUPLICATE_POSSIBLE",
 }
 
+export enum EmailMergeMode {
+  DISABLED = "DISABLED",
+  ENABLED = "ENABLED",
+}
+
 export enum UserResponsibility {
   MANAGER = "MANAGER",
   TEAM_LEAD = "TEAM_LEAD",
@@ -1412,6 +1417,7 @@ export const channelUserStatusTable = table("channel_user_status")
     isClosed: boolean(),
     unreadCount: number(),
     selectedBoardId: string().optional(),
+    conversationSeenCutoffAt: number().optional(),
     isRecapSubscribed: boolean(),
     lastSeenRecapDate: number().optional(),
     customRecapPrompt: string().optional(),
@@ -1518,11 +1524,12 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     assigneeUserGroupId: string().optional(),
     boardId: string().optional(),
     sendAsEmail: string().optional(),
+    defaultCc: string().optional(),
     classificationEnabled: boolean(),
     classificationPrompt: string().optional(),
     categoryField: string().optional(),
     subCategoryField: string().optional(),
-    defaultCc: string().optional(),
+    emailMergeMode: enumeration<EmailMergeMode>(),
   })
   .primaryKey("channelId");
 
@@ -2934,6 +2941,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["revokedBy"],
     destSchema: appIncomingWebhookTable,
+  }),
+  orgMember: one({
+    sourceField: ["orgMemberId"],
+    destField: ["memberId"],
+    destSchema: orgMemberTable,
   })
 }));
 
@@ -3085,11 +3097,16 @@ export const organizationTableRelationships = relationships(organizationTable, (
   })
 }));
 
-export const orgMemberTableRelationships = relationships(orgMemberTable, ({ one }) => ({
+export const orgMemberTableRelationships = relationships(orgMemberTable, ({ one, many }) => ({
   organization: one({
     sourceField: ["orgId"],
     destField: ["orgId"],
     destSchema: organizationTable,
+  }),
+  users: many({
+    sourceField: ["memberId"],
+    destField: ["orgMemberId"],
+    destSchema: userTable,
   })
 }));
 
@@ -3220,11 +3237,6 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ["id"],
     destField: ["boardId"],
     destSchema: userExpertiseMappingTable,
-  }),
-  slaPolicies: many({
-    sourceField: ["id"],
-    destField: ["boardId"],
-    destSchema: boardSlaPolicyTable,
   })
 }));
 
@@ -3371,14 +3383,6 @@ export const conversationParticipantTableRelationships = relationships(conversat
     sourceField: ["userId"],
     destField: ["id"],
     destSchema: userTable,
-  })
-}));
-
-export const boardSlaPolicyTableRelationships = relationships(boardSlaPolicyTable, ({ one }) => ({
-  board: one({
-    sourceField: ["boardId"],
-    destField: ["id"],
-    destSchema: boardTable,
   })
 }));
 
@@ -3751,7 +3755,6 @@ export const schema = createSchema(
       channelUserStatusTableRelationships,
       conversationTableRelationships,
       conversationParticipantTableRelationships,
-      boardSlaPolicyTableRelationships,
       messageTableRelationships,
       messageSearchTableRelationships,
       messageAttachmentTableRelationships,

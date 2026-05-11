@@ -11,6 +11,7 @@ import { decrypt, encrypt } from './encryptionService';
 import { redisService } from './redisService';
 import { db } from '../database/client';
 import { config } from '../config/env';
+import { EmailMergeMode } from '@prisma/client';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
 
@@ -299,6 +300,7 @@ export class MicrosoftDeskService {
           ownerUserId: channelData.userId,
           ...(channelData.assigneeUserGroupId && { assigneeUserGroupId: channelData.assigneeUserGroupId }),
           ...(board?.id && { boardId: board.id }), // Save boardId to EmailChannelPreference (new location)
+          emailMergeMode: config.emailMergeModeDefault as EmailMergeMode,
         },
       });
 

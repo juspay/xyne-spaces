@@ -13,6 +13,7 @@ import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { config as appConfig } from '@/config/env';
+import { EmailMergeMode } from '@prisma/client';
 
 function resolveFrontendUrl(req?: Request): string {
   if (req) {
@@ -451,6 +452,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             channelId: ch.id,
             ownerUserId: cd.userId,
             ...(cd.assigneeUserGroupId && { assigneeUserGroupId: cd.assigneeUserGroupId }),
+            emailMergeMode: appConfig.emailMergeModeDefault as EmailMergeMode,
           },
         });
 

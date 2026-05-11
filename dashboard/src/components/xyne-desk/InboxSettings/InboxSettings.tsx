@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Mail, Users } from 'lucide-react';
+import { Mail, Users, GitMerge } from 'lucide-react';
+import { EmailMergeMode } from '@xyne/shared';
 import { InboxOwnerSettings } from '../InboxOwnerSettings/InboxOwnerSettings';
 import { InboxAssigneeSettings } from '../InboxAssigneeSettings/InboxAssigneeSettings';
+import { Switch } from '../../ui/Switch';
 
 interface InboxSettingsProps {
   ownerUserId: string | null;
@@ -14,6 +16,8 @@ interface InboxSettingsProps {
   defaultCc?: string | null;
   onSaveDefaultCc?: (next: string | null) => void;
   isSavingDefaultCc?: boolean;
+  emailMergeMode?: EmailMergeMode;
+  onEmailMergeModeChange?: (next: EmailMergeMode) => void;
   disabled?: boolean;
 }
 
@@ -28,6 +32,8 @@ export const InboxSettings: React.FC<InboxSettingsProps> = ({
   defaultCc,
   onSaveDefaultCc,
   isSavingDefaultCc = false,
+  emailMergeMode = EmailMergeMode.DISABLED,
+  onEmailMergeModeChange,
   disabled = false,
 }) => {
   // Local draft for the Default CC input. Only committed to the backend when
@@ -133,6 +139,35 @@ export const InboxSettings: React.FC<InboxSettingsProps> = ({
           </div>
         )}
       </div>
+
+      {onEmailMergeModeChange && (
+        <div className='flex items-start gap-3 pt-2'>
+          <div className='pt-0.5 shrink-0'>
+            <Switch
+              id='inbox-enable-email-merge-demerge'
+              checked={emailMergeMode === EmailMergeMode.ENABLED}
+              onCheckedChange={next =>
+                onEmailMergeModeChange(next ? EmailMergeMode.ENABLED : EmailMergeMode.DISABLED)
+              }
+              disabled={disabled}
+            />
+          </div>
+          <div className='flex flex-col gap-1'>
+            <label
+              htmlFor='inbox-enable-email-merge-demerge'
+              className='flex items-center gap-2 text-sm cursor-pointer'
+            >
+              <GitMerge size={14} className='text-muted-foreground' />
+              <span className='font-medium text-foreground'>Auto-merge similar emails</span>
+            </label>
+            <p className='text-xs text-muted-foreground'>
+              When on, incoming emails with the same subject and sender are merged into the matching
+              open ticket. Leave off if every new email thread should always create a separate
+              ticket.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

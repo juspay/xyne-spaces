@@ -19,6 +19,7 @@ import {
   TicketPriority,
   ActivityType,
   TicketReferenceRelation,
+  EmailMergeMode,
   CanvasVisibility,
   CanvasRole,
   BookmarkEntityType,
@@ -9617,8 +9618,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           assigneeUserGroupId: z.string().optional().nullable(),
           sendAsEmail: z.string().optional().nullable(),
           defaultCc: z.string().optional().nullable(),
+          emailMergeMode: z.nativeEnum(EmailMergeMode).optional(),
         }),
-        async ({ tx, args: { channelId, ownerUserId, assigneeUserGroupId, sendAsEmail, defaultCc } }) => {
+        async ({
+          tx,
+          args: {
+            channelId,
+            ownerUserId,
+            assigneeUserGroupId,
+            sendAsEmail,
+            defaultCc,
+            emailMergeMode,
+          },
+        }) => {
           const existing = await tx.run(
             zql.email_channel_preferences.where('channelId', channelId).one(),
           );
@@ -9629,6 +9641,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
               ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
               ...(defaultCc !== undefined ? { defaultCc } : {}),
+              ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
             });
           } else {
             await tx.mutate.email_channel_preferences.insert({
@@ -9638,6 +9651,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               sendAsEmail: sendAsEmail ?? null,
               classificationEnabled: false,
               defaultCc: defaultCc ?? null,
+              emailMergeMode: emailMergeMode ?? EmailMergeMode.ENABLED,
             });
           }
         },

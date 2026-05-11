@@ -114,9 +114,10 @@ export class ExternalSourceCore {
     if (normalizedData.metadata.isReply) {
       const existingThread = await this.externalMessageRepo.findByThreadId(
         source.id,
-        normalizedData.externalThreadId
+        normalizedData.externalThreadId,
+        isEmailChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
       );
-      
+
       if (!existingThread) {
         logger.warn(`Blocking orphan reply for thread ${normalizedData.externalThreadId} - no parent conversation found`, {
           externalId: normalizedData.externalId,
@@ -259,10 +260,13 @@ export class ExternalSourceCore {
     if (!source.channelId) {
       throw new Error(`External source ${source.name} does not have a channel binding`);
     }
-    // Check if conversation exists for this external thread
+
+    // Keep merge scoped to the configured external source. All providers share
+    // this logic, but one source must not merge into another source's tickets.
     const existingExtMsg = await this.externalMessageRepo.findByThreadId(
       source.id,
-      normalizedData.externalThreadId
+      normalizedData.externalThreadId,
+      isEmailChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
     );
 
     if (existingExtMsg) {

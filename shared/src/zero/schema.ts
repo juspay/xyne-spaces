@@ -72,6 +72,12 @@ export enum TicketReferenceRelation {
 }
 
 // @ts-ignore TS1294
+export enum EmailMergeMode {
+  DISABLED = 'DISABLED',
+  ENABLED = 'ENABLED',
+}
+
+// @ts-ignore TS1294
 export enum UserResponsibility {
   MANAGER = 'MANAGER',
   TEAM_LEAD = 'TEAM_LEAD',
@@ -1778,6 +1784,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     categoryField: string().optional(),
     subCategoryField: string().optional(),
     defaultCc: string().optional(),
+    emailMergeMode: enumeration<EmailMergeMode>().optional(),
   })
   .primaryKey('channelId');
 

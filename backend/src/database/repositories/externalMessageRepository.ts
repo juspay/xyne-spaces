@@ -25,6 +25,7 @@ export class ExternalMessageRepository {
 
   /**
    * Find external messages by thread ID (to find existing conversation)
+   * Scoped to a specific external source
    */
   async findByThreadId(externalSourceId: string, externalThreadId: string, entityType?: ExternalEntityType) {
     return await this.db.externalMessage.findFirst({

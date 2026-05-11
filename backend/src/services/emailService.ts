@@ -36,7 +36,7 @@ import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, EmailMergeMode } from '@prisma/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
@@ -59,6 +59,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { v4 as uuidv4 } from 'uuid';
+import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { EmailClassificationService } from './emailClassificationService';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
 
@@ -1403,11 +1404,34 @@ export class EmailService {
       channelId,
     );
 
+    // Cross-thread duplicate check: same subject + sender in same channel.
+    // Gated by per-inbox setting — only runs when auto-merge is enabled for this channel.
+    let vespaMatchConversationId: string | null = null;
+    let preference: Awaited<
+      ReturnType<typeof this.emailChannelPreferenceRepository.findByChannelId>
+    > = null;
+    if (!existingFirstEmail) {
+      preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
+      if (preference?.emailMergeMode === EmailMergeMode.ENABLED) {
+        const duplicateCheck = await findDuplicateEmailConversation(
+          channelId,
+          firstEmail.from,
+          firstEmail.subject,
+        );
+        if (duplicateCheck.isDuplicate && duplicateCheck.match) {
+          vespaMatchConversationId = duplicateCheck.match.conversationId;
+          logger.info('[EmailService] ingestEmailThread: Vespa duplicate found, merging into existing conversation', {
+            conversationId: vespaMatchConversationId,
+            subject: firstEmail.subject,
+            from: firstEmail.from,
+          });
+        }
+      }
+    }
+
     let boardId: string | undefined;
     let groupId: string | null = null;
     if (!existingFirstEmail) {
-      const preference =
-        await this.emailChannelPreferenceRepository.findByChannelId(channelId);
       const externalSource = await this.prisma.externalSource.findUnique({
         where: { id: externalSourceId },
         select: { boardId: true },
@@ -1464,17 +1488,10 @@ export class EmailService {
         let ticketId: string | undefined;
         let ticketXyneId: string | undefined;
         let isNew: boolean;
+        let existingTicketLastEmailAt: Date | null = null;
+        let previousLatestEmailId: string | null = null;
 
-        if (existingFirstEmail) {
-          conversationId = existingFirstEmail.conversationId;
-          isNew = false;
-          const ticketRow = await tx.ticket.findFirst({
-            where: { conversationId },
-            select: { id: true, xyneId: true },
-          });
-          ticketId = ticketRow?.id;
-          ticketXyneId = ticketRow?.xyneId;
-        } else {
+        const createNewConversation = async () => {
           const stages = await tx.stage.findMany({
             where: { boardId: boardId! },
             orderBy: { sequenceNumber: 'asc' },
@@ -1495,7 +1512,6 @@ export class EmailService {
               }),
             },
           });
-          conversationId = conv.conversationId;
 
           const xyneId = await TicketIdService.generateTicketId(tx, projectId);
           const ticketTitle =
@@ -1507,7 +1523,7 @@ export class EmailService {
               description: firstEmail.body,
               createdBy: userId,
               updatedBy: userId,
-              conversationId,
+              conversationId: conv.conversationId,
               channelId,
               workspaceId: channel.workspaceId,
               xyneId,
@@ -1521,8 +1537,6 @@ export class EmailService {
               ...(firstEmail.receivedAt && { createdAt: firstEmail.receivedAt }),
             },
           });
-          ticketId = createdTicket.id;
-          ticketXyneId = createdTicket.xyneId;
           await syncConversationTicketMdFromPrismaTicket(tx, createdTicket);
 
           // Seed the conversation's initial message inside the same tx so we
@@ -1533,7 +1547,7 @@ export class EmailService {
           // permanent data-rot vector, not a transient blip.
           const initialMessage = await tx.message.create({
             data: {
-              conversationId,
+              conversationId: conv.conversationId,
               senderId: userId,
               content: '',
               hasAttachment: true,
@@ -1541,13 +1555,75 @@ export class EmailService {
             },
           });
           await tx.conversation.update({
-            where: { conversationId },
+            where: { conversationId: conv.conversationId },
             data: {
               initialMessageId: initialMessage.messageId,
               ticketId: createdTicket.id,
             },
           });
 
+          return {
+            conversationId: conv.conversationId,
+            ticketId: createdTicket.id,
+            ticketXyneId: createdTicket.xyneId,
+          };
+        };
+
+        if (existingFirstEmail) {
+          conversationId = existingFirstEmail.conversationId;
+          isNew = false;
+          const ticketRow = await tx.ticket.findFirst({
+            where: { conversationId },
+            select: { id: true, xyneId: true },
+          });
+          ticketId = ticketRow?.id;
+          ticketXyneId = ticketRow?.xyneId;
+        } else if (vespaMatchConversationId) {
+          let shouldCreateConversation = false;
+          conversationId = vespaMatchConversationId;
+          isNew = false;
+          const existingConversation = await tx.conversation.findUnique({
+            where: { conversationId },
+            select: { conversationId: true },
+          });
+          if (!existingConversation) {
+            logger.warn('[EmailService] ingestEmailThread: stale Vespa duplicate ignored, creating new conversation', {
+              conversationId,
+              channelId,
+              externalThreadId,
+              subject: firstEmail.subject,
+              from: firstEmail.from,
+            });
+            shouldCreateConversation = true;
+            vespaMatchConversationId = null;
+          } else {
+            const ticketRow = await tx.ticket.findFirst({
+              where: { conversationId },
+              select: { id: true, xyneId: true, lastEmailAt: true },
+            });
+            ticketId = ticketRow?.id;
+            ticketXyneId = ticketRow?.xyneId;
+            existingTicketLastEmailAt = ticketRow?.lastEmailAt ?? null;
+            const previousLatest = await tx.email.findFirst({
+              where: { conversationId },
+              orderBy: { createdAt: 'desc' },
+              select: { id: true },
+            });
+            previousLatestEmailId = previousLatest?.id ?? null;
+          }
+
+          if (shouldCreateConversation) {
+            const created = await createNewConversation();
+            conversationId = created.conversationId;
+            ticketId = created.ticketId;
+            ticketXyneId = created.ticketXyneId;
+            isNew = true;
+          }
+        } else {
+          const created = await createNewConversation();
+          conversationId = created.conversationId;
+          ticketId = created.ticketId;
+          ticketXyneId = created.ticketXyneId;
           isNew = true;
         }
 
@@ -1574,17 +1650,32 @@ export class EmailService {
           return acc && acc > e.receivedAt ? acc : e.receivedAt;
         }, null);
         if (ticketId && latestReceived) {
-          await tx.ticket.update({
-            where: { id: ticketId },
-            data: { lastEmailAt: latestReceived },
-          });
+          if (!vespaMatchConversationId || !existingTicketLastEmailAt || latestReceived > existingTicketLastEmailAt) {
+            await tx.ticket.update({
+              where: { id: ticketId },
+              data: { lastEmailAt: latestReceived },
+            });
+          }
         }
 
         if (emailInsert.count > 0) {
-          await tx.channelUserStatus.updateMany({
-            where: { channelId, isDeleted: false },
-            data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
-          });
+          if (vespaMatchConversationId && previousLatestEmailId && ticketId) {
+            const caughtUpUsers = await tx.emailRead.findMany({
+              where: { ticketId, lastReadEmailId: previousLatestEmailId },
+              select: { userId: true },
+            });
+            if (caughtUpUsers.length > 0) {
+              await tx.channelUserStatus.updateMany({
+                where: { channelId, userId: { in: caughtUpUsers.map(r => r.userId) }, isDeleted: false },
+                data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
+              });
+            }
+          } else {
+            await tx.channelUserStatus.updateMany({
+              where: { channelId, isDeleted: false },
+              data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
+            });
+          }
         }
 
         return {
