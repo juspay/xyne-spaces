@@ -19,6 +19,7 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { useUser } from '../../../hooks/useUsers';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
+import { StatusIndicator } from '../../ui/StatusIndicator';
 
 interface SearchResultItemProps {
   result: DisplaySearchResult;
@@ -113,6 +114,14 @@ const UserSearchResultItem = ({
           >
             {result.title}
           </span>
+          {!isDeactivated && (user?.statusEmoji || user?.statusContent) && (
+            <StatusIndicator
+              statusEmoji={user?.statusEmoji}
+              statusContent={user?.statusContent}
+              statusExpiryAt={user?.statusExpiryAt}
+              size='sm'
+            />
+          )}
           {isDeactivated && (
             <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
               Deactivated
