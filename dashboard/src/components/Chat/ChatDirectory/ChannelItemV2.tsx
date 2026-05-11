@@ -196,7 +196,6 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
                 statusExpiryAt={dmUser?.statusExpiryAt}
                 size='sm'
                 showOnHover={true}
-                hideCallEmoji={hasActiveCall}
               />
             )}
           </span>

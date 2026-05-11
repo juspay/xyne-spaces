@@ -21,41 +21,6 @@ class CallSideEffectService {
      * - Sends KILL_UI notifications
      * - Creates missed call activities
      */
-    /**
-     * Clears the "In a call" presence status for all participants who actually joined the call.
-     * This is the server-side safety net for cases where the client cleanup never fires
-     * (tab crash, page refresh, network drop while in call).
-     */
-    async clearCallStatusForParticipants(callId: string): Promise<void> {
-        const CALL_STATUS_EMOJI = '🎧';
-
-        const joinedParticipants = await db.callParticipant.findMany({
-            where: { callId, joinedAt: { not: null } },
-            select: { userId: true },
-        });
-
-        if (joinedParticipants.length === 0) {
-            this.logger.debug(`No joined participants found for call ${callId} — skipping presence cleanup`);
-            return;
-        }
-
-        const userIds = joinedParticipants.map(p => p.userId);
-
-        const { count } = await db.user.updateMany({
-            where: {
-                id: { in: userIds },
-                statusEmoji: CALL_STATUS_EMOJI,
-            },
-            data: {
-                statusEmoji: null,
-                statusContent: null,
-                statusExpiryAt: null,
-            },
-        });
-
-        this.logger.info(`Cleared "In a call" presence status for ${count}/${userIds.length} participants of call ${callId}`);
-    }
-
     async handleCallEnded(callId: string): Promise<void> {
         this.logger.info(`Handling Call Ended for call: ${callId}`);
 
