@@ -262,7 +262,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   useEffect(() => {
     if (isMobile) return;
     const rafId = requestAnimationFrame(() => {
-      searchInputRef.current?.focus();
+      searchInputRef.current?.focus({ preventScroll: true });
     });
     return (): void => cancelAnimationFrame(rafId);
   }, [activeFilter, isMobile]);
