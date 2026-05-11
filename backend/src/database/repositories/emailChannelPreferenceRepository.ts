@@ -4,7 +4,7 @@
  */
 
 import { DatabaseClient } from '../client';
-import { ChannelType, EmailChannelPreference } from '@prisma/client';
+import { ChannelType, EmailChannelPreference, EmailMergeMode } from '@prisma/client';
 
 export class EmailChannelPreferenceRepository {
   private db = DatabaseClient.getInstance();
@@ -49,6 +49,7 @@ export class EmailChannelPreferenceRepository {
     assigneeUserGroupId?: string;
     boardId?: string;
     sendAsEmail?: string | null;
+    emailMergeMode?: EmailMergeMode;
   }) {
     await this.validateEmailChannel(data.channelId);
 
@@ -68,6 +69,7 @@ export class EmailChannelPreferenceRepository {
       assigneeUserGroupId?: string;
       boardId?: string;
       sendAsEmail?: string | null;
+      emailMergeMode?: EmailMergeMode;
     }
   ) {
     await this.validateEmailChannel(channelId);
@@ -88,6 +90,7 @@ export class EmailChannelPreferenceRepository {
     assigneeUserGroupId?: string;
     boardId?: string;
     sendAsEmail?: string | null;
+    emailMergeMode?: EmailMergeMode;
   }) {
     await this.validateEmailChannel(data.channelId);
 
@@ -99,6 +102,9 @@ export class EmailChannelPreferenceRepository {
         ...(data.assigneeUserGroupId !== undefined && { assigneeUserGroupId: data.assigneeUserGroupId }),
         ...(data.boardId !== undefined && { boardId: data.boardId }),
         ...(data.sendAsEmail !== undefined && { sendAsEmail: data.sendAsEmail }),
+        ...(data.emailMergeMode !== undefined && {
+          emailMergeMode: data.emailMergeMode,
+        }),
       },
     });
   }

@@ -83,6 +83,12 @@ enum TicketReferenceRelation {
   @@schema("public")
 }
 
+enum EmailMergeMode {
+  DISABLED  // Every new email thread creates a separate ticket
+  ENABLED   // Auto-merge cross-thread duplicates and per-email demerge
+  @@schema("public")
+}
+
 enum UserResponsibility {
   MANAGER
   TEAM_LEAD
@@ -1867,16 +1873,17 @@ model EmailSignature {
 }
 
 model EmailChannelPreference {
-  channelId              String   @id // Channel ID (no FK constraint) - Primary key
-  ownerUserId            String?  // User ID who owns this preference (no FK constraint)
-  assigneeUserGroupId    String?  // User group ID for assignee (no FK constraint)
-  boardId                String?  // Target board for ticket creation (no FK constraint)
-  sendAsEmail            String?  // Optional alias email for outbound replies (e.g. support@...)
-  defaultCc              String?  // Comma-separated list of emails to pre-populate CC in compose
-  classificationEnabled  Boolean  @default(false)
-  classificationPrompt   String?  // Custom system prompt for the classification LLM
-  categoryField          String?  // Label for the top-level category
-  subCategoryField       String?  // Label for the sub-category
+  channelId                String   @id // Channel ID (no FK constraint) - Primary key
+  ownerUserId              String?  // User ID who owns this preference (no FK constraint)
+  assigneeUserGroupId      String?  // User group ID for assignee (no FK constraint)
+  boardId                  String?  // Target board for ticket creation (no FK constraint)
+  sendAsEmail              String?  // Optional alias email for outbound replies (e.g. support@...)
+  defaultCc                String?  // Comma-separated list of emails to pre-populate CC in compose
+  classificationEnabled    Boolean  @default(false)
+  classificationPrompt     String?  // Custom system prompt for the classification LLM
+  categoryField            String?  // Label for the top-level category
+  subCategoryField         String?  // Label for the sub-category
+  emailMergeMode           EmailMergeMode        @default(ENABLED) // Auto-merge similar emails (cross-thread duplicate merge + per-email demerge); enum so future variants (e.g. MERGE_ONLY) can be added
 
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])

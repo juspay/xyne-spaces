@@ -15,6 +15,7 @@ import {
   TicketStatusV2,
   TicketPriority,
   TicketReferenceRelation,
+  EmailMergeMode,
   CanvasVisibility,
   CanvasRole,
   BookmarkEntityType,
@@ -5767,8 +5768,20 @@ export const mutators = defineMutators({
         assigneeUserGroupId: z.string().optional().nullable(),
         sendAsEmail: z.string().optional().nullable(),
         defaultCc: z.string().optional().nullable(),
+        emailMergeMode: z.nativeEnum(EmailMergeMode).optional(),
       }),
-      async ({ tx, ctx, args: { channelId, ownerUserId, assigneeUserGroupId, sendAsEmail, defaultCc } }) => {
+      async ({
+        tx,
+        ctx,
+        args: {
+          channelId,
+          ownerUserId,
+          assigneeUserGroupId,
+          sendAsEmail,
+          defaultCc,
+          emailMergeMode,
+        },
+      }) => {
         const existing = await tx.run(
           zql.email_channel_preferences.where('channelId', channelId).one(),
         );
@@ -5779,6 +5792,7 @@ export const mutators = defineMutators({
             ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
             ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
             ...(defaultCc !== undefined ? { defaultCc } : {}),
+            ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
           });
         } else {
           await tx.mutate.email_channel_preferences.insert({
@@ -5788,6 +5802,7 @@ export const mutators = defineMutators({
             sendAsEmail: sendAsEmail ?? null,
             classificationEnabled: false,
             defaultCc: defaultCc ?? null,
+            emailMergeMode: emailMergeMode ?? EmailMergeMode.ENABLED,
           });
         }
       },

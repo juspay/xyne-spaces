@@ -15,7 +15,7 @@ import {
   ChevronsUpDown,
   LayoutGrid,
   List,
-  // Split,  // DISABLED: used by commented-out demerge-email button
+  Split,
   Paperclip,
   Link as LinkIcon,
   Settings,
@@ -31,7 +31,7 @@ import {
   CheckCheck,
   SquareCheck,
 } from 'lucide-react';
-import { ChannelVisibility } from '@xyne/shared';
+import { ChannelVisibility, EmailType, EmailMergeMode } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -108,6 +108,7 @@ import { useEmailDraft } from '../../hooks/useEmailDraft';
 import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
 import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
+import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
 import { InboxSettings } from '../../components/xyne-desk/InboxSettings/InboxSettings';
@@ -458,17 +459,14 @@ const EmailAttachmentsRow = ({
   );
 };
 
-// API response type for email demerge endpoint
-// DISABLED: demerge-email feature commented out — kept for easy re-enable.
-
-// interface DemergeEmailResponse {
-//   success: boolean;
-//   newTicket: {
-//     ticketId: string;
-//     xyneId: string;
-//     conversationId: string;
-//   };
-// }
+interface DemergeEmailResponse {
+  success: boolean;
+  newTicket: {
+    ticketId: string;
+    xyneId: string;
+    conversationId: string;
+  };
+}
 type TabType = 'messages' | 'details';
 
 type ViewMode = 'kanban' | 'list';
@@ -499,6 +497,8 @@ const SupportScreen = (): ReactElement => {
   const currentInboxAssigneeUserGroupId = emailChannelPreference?.assigneeUserGroupId ?? null;
   const currentInboxSendAsEmail = emailChannelPreference?.sendAsEmail ?? null;
   const currentInboxDefaultCc = emailChannelPreference?.defaultCc ?? null;
+  const currentInboxEmailMergeMode: EmailMergeMode =
+    emailChannelPreference?.emailMergeMode ?? EmailMergeMode.ENABLED;
   const [draftInboxOwnerUserId, setDraftInboxOwnerUserId] = useState<string | null>(
     currentInboxOwnerUserId,
   );
@@ -507,6 +507,9 @@ const SupportScreen = (): ReactElement => {
   );
   const [draftInboxSendAsEmail, setDraftInboxSendAsEmail] = useState<string | null>(
     currentInboxSendAsEmail,
+  );
+  const [draftInboxEmailMergeMode, setDraftInboxEmailMergeMode] = useState<EmailMergeMode>(
+    currentInboxEmailMergeMode,
   );
   const [isSavingInboxSettings, setIsSavingInboxSettings] = useState(false);
   const [isSavingDefaultCc, setIsSavingDefaultCc] = useState(false);
@@ -522,6 +525,10 @@ const SupportScreen = (): ReactElement => {
     setDraftInboxSendAsEmail(currentInboxSendAsEmail);
   }, [currentInboxSendAsEmail]);
 
+  useEffect(() => {
+    setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
+  }, [currentInboxEmailMergeMode]);
+
   const canEditSendAsEmail =
     !!userID &&
     !!selectedChannelForSettings &&
@@ -531,7 +538,8 @@ const SupportScreen = (): ReactElement => {
     !!selectedChannelId &&
     (draftInboxOwnerUserId !== currentInboxOwnerUserId ||
       draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId ||
-      (canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail));
+      (canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail) ||
+      draftInboxEmailMergeMode !== currentInboxEmailMergeMode);
 
   const handleSaveInboxSettings = useCallback(async () => {
     if (!selectedChannelId) {
@@ -550,11 +558,15 @@ const SupportScreen = (): ReactElement => {
         ...(canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail
           ? { sendAsEmail: draftInboxSendAsEmail }
           : {}),
+        ...(draftInboxEmailMergeMode !== currentInboxEmailMergeMode
+          ? { emailMergeMode: draftInboxEmailMergeMode }
+          : {}),
       });
     } catch (error) {
       setDraftInboxOwnerUserId(currentInboxOwnerUserId);
       setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
       setDraftInboxSendAsEmail(currentInboxSendAsEmail);
+      setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
       console.error('Failed to update email channel preference:', error);
     } finally {
       setIsSavingInboxSettings(false);
@@ -568,6 +580,8 @@ const SupportScreen = (): ReactElement => {
     canEditSendAsEmail,
     draftInboxSendAsEmail,
     currentInboxSendAsEmail,
+    draftInboxEmailMergeMode,
+    currentInboxEmailMergeMode,
     updateEmailChannelPreference,
   ]);
 
@@ -575,7 +589,13 @@ const SupportScreen = (): ReactElement => {
     setDraftInboxOwnerUserId(currentInboxOwnerUserId);
     setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
     setDraftInboxSendAsEmail(currentInboxSendAsEmail);
-  }, [currentInboxOwnerUserId, currentInboxAssigneeUserGroupId, currentInboxSendAsEmail]);
+    setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
+  }, [
+    currentInboxOwnerUserId,
+    currentInboxAssigneeUserGroupId,
+    currentInboxSendAsEmail,
+    currentInboxEmailMergeMode,
+  ]);
 
   const allUserGroups = useUserGroups();
 
@@ -1783,6 +1803,8 @@ const SupportScreen = (): ReactElement => {
                           defaultCc={currentInboxDefaultCc}
                           onSaveDefaultCc={value => void handleSaveDefaultCc(value)}
                           isSavingDefaultCc={isSavingDefaultCc}
+                          emailMergeMode={draftInboxEmailMergeMode}
+                          onEmailMergeModeChange={setDraftInboxEmailMergeMode}
                           disabled={isSavingInboxSettings}
                         />
                         <div className='border-t border-border' />
@@ -3224,6 +3246,7 @@ const EmailThread = ({
   deskEmail?: string | null | undefined;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
+  const rootEmail = sortedEmails[0];
   // Thread-level: upsert the current user's email_reads row with the id of
   // the newest email in this thread. `isRead` is derived by comparing that
   // stored id to the current latest email, so every email header in the
@@ -3252,6 +3275,7 @@ const EmailThread = ({
               onReply: (mode: 'reply' | 'replyAll') => onReplyToEmail(email.id, mode),
             })}
           deskEmail={deskEmail}
+          rootEmail={rootEmail}
         />
       ))}
     </div>
@@ -3266,6 +3290,7 @@ const EmailThreadItem = ({
   isRead = true,
   onReply,
   deskEmail,
+  rootEmail,
   threadAttachments,
 }: {
   email: Email;
@@ -3275,23 +3300,22 @@ const EmailThreadItem = ({
   isRead?: boolean;
   onReply?: (mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
+  rootEmail: Email | undefined;
   threadAttachments?: NonNullable<Email['attachments']>;
 }): ReactElement => {
+  const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
+  const navigate = useNavigate();
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
   const ccList = email.cc || [];
   const bccList = email.bcc || [];
 
-  // DISABLED: demerge-email feature commented out. Re-enable by uncommenting
-  // the block below and the `extras={demergeButton}` prop on EmailThreadHeader.
-  /*
   const [isDemerging, setIsDemerging] = useState(false);
 
   const handleDemerge = async (): Promise<void> => {
     if (isDemerging) return;
     setIsDemerging(true);
 
-    // Show loading toast
     const toastId = toast.loading('Demerging email...', {
       description: 'Creating new ticket from this email',
     });
@@ -3302,30 +3326,22 @@ const EmailThreadItem = ({
       });
 
       if (response.data?.success && response.data.newTicket) {
-        // Show success toast
         toast.success('Demerge Successful', {
           id: toastId,
           description: `Created new ticket ${response.data.newTicket.xyneId}`,
         });
 
-        // Navigate to the new ticket
-        const nextChannelId =
-          response.data.newTicket.channelId || channelIdParam;
-        if (nextChannelId) {
-          void navigate(
-            `/support/${nextChannelId}/${response.data.newTicket.xyneId}`,
-            {
-              state: {
-                conversationId: response.data.newTicket.conversationId,
-                title: email.subject,
-                ticketId: response.data.newTicket.ticketId,
-              },
+        if (channelIdParam) {
+          void navigate(`/support/${channelIdParam}/${response.data.newTicket.xyneId}`, {
+            state: {
+              conversationId: response.data.newTicket.conversationId,
+              title: email.subject,
+              ticketId: response.data.newTicket.ticketId,
             },
-          );
+          });
         }
       }
     } catch {
-      // Error handling without console
       toast.error('Demerge Failed', {
         id: toastId,
         description: 'Operation failed. Please try again.',
@@ -3335,30 +3351,32 @@ const EmailThreadItem = ({
     }
   };
 
-  const demergeButton =
+  const canDemerge =
     email.type === EmailType.DEFAULT &&
-    email.externalThreadId === email.externalMessageId &&
-    email.id !== firstEmail.id ? (
-      <button
-        onClick={e => {
-          e.stopPropagation();
-          void handleDemerge();
-        }}
-        disabled={isDemerging}
-        className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-        title='Demerge this email to a new ticket'
-        data-track-category='SUPPORT'
-        data-track-name='DemergeEmail'
-        data-track-metadata={JSON.stringify({
-          emailId: email.id,
-          conversationId: email.conversationId,
-        })}
-      >
-        <Split size={12} />
-        {isDemerging ? 'Demerging...' : 'Demerge'}
-      </button>
-    ) : null;
-  */
+    !!rootEmail &&
+    email.id !== rootEmail.id &&
+    email.externalThreadId === email.externalMessageId;
+
+  const demergeButton = canDemerge ? (
+    <button
+      onClick={e => {
+        e.stopPropagation();
+        void handleDemerge();
+      }}
+      disabled={isDemerging}
+      className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+      title='Demerge this email to a new ticket'
+      data-track-category='SUPPORT'
+      data-track-name='DemergeEmail'
+      data-track-metadata={JSON.stringify({
+        emailId: email.id,
+        conversationId: email.conversationId,
+      })}
+    >
+      <Split size={12} />
+      {isDemerging ? 'Demerging...' : 'Demerge'}
+    </button>
+  ) : null;
 
   const headerClickable = canCollapse && !!onToggleCollapse;
   const preview = stripHtml(email.body || '')
@@ -3401,7 +3419,7 @@ const EmailThreadItem = ({
           previewText={preview}
           isRead={isRead}
           deskEmail={deskEmail}
-          // extras={demergeButton}  // DISABLED: see commented handleDemerge block above
+          extras={demergeButton}
         />
       </div>
       {!isCollapsed && (

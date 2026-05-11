@@ -230,6 +230,7 @@ const envSchema = Joi.object({
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
+  EMAIL_MERGE_MODE_DEFAULT: Joi.string().valid('DISABLED', 'ENABLED').default('ENABLED'),
   // Docling Configuration
   DOCLING_ENABLED: Joi.boolean().default(false),
   DOCLING_BASE_URL: Joi.string().uri().allow('').default(''),
@@ -535,6 +536,7 @@ export const config = {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
     batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
   },
+  emailMergeModeDefault: envVars.EMAIL_MERGE_MODE_DEFAULT as 'DISABLED' | 'ENABLED',
   docling: {
     enabled: envVars.DOCLING_ENABLED as boolean,
     baseUrl: envVars.DOCLING_BASE_URL as string,

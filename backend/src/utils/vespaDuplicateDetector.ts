@@ -85,8 +85,9 @@ async function checkTicketMatch(
   normalizedSubject: string,
   incomingEmailDomain: string
 ): Promise<boolean> {
-  // Skip completed tickets
-  if (ticket.status === 'COMPLETED') return false;
+  // Skip terminal tickets — both COMPLETED (resolved) and CANCELLED (invalid/rejected)
+  // should not accept new emails via auto-merge.
+  if (ticket.status === 'COMPLETED' || ticket.status === 'CANCELLED') return false;
 
   // Check subject match
   if (normalizeEmailSubject(ticket.title) !== normalizedSubject) return false;
@@ -100,12 +101,13 @@ async function checkTicketMatch(
   if (!firstEmail) return false;
 
   const storedEmail = extractEmailFromAddress(firstEmail.from);
-  
-  // Check email match from email table
-  if (storedEmail.toLowerCase() !== emailFrom.toLowerCase()) return false;
+  const incomingEmail = extractEmailFromAddress(emailFrom);
 
-  // Check domain match
-  const firstEmailDomain = getEmailDomain(firstEmail.from);
+  // Check email match from email table
+  if (incomingEmail.toLowerCase() !== storedEmail.toLowerCase()) return false;
+
+  // Check domain match - use extracted email for consistent domain extraction
+  const firstEmailDomain = getEmailDomain(storedEmail);
 
   return Boolean(incomingEmailDomain && firstEmailDomain && incomingEmailDomain === firstEmailDomain);
 }
@@ -141,7 +143,9 @@ export async function findDuplicateEmailConversation(
     return { isDuplicate: false, reason: 'Empty subject after normalization' };
   }
 
-  const incomingEmailDomain = getEmailDomain(emailFrom);
+  // Extract clean email address from "Name <email>" format for consistent comparison
+  const extractedEmailFrom = extractEmailFromAddress(emailFrom);
+  const incomingEmailDomain = getEmailDomain(extractedEmailFrom);
 
   // Build and execute Vespa query with channelId filter for better performance
   const excludeCondition = excludeTicketId ? ` and docId != "${excludeTicketId}"` : '';
@@ -170,7 +174,7 @@ export async function findDuplicateEmailConversation(
       const isMatch = await checkTicketMatch(
         ticket,
         channelId,
-        emailFrom,
+        extractedEmailFrom,
         normalizedSubject,
         incomingEmailDomain
       );

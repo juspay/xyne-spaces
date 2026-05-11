@@ -1,6 +1,9 @@
 /**
  * Email Demerge Controller
  * Handles demerge operations to split auto-merged email threads
+ *
+ * Demerge keeps provider thread/message ids intact and only moves the selected
+ * provider-thread group into a new Xyne ticket.
  */
 
 import { Request, Response } from 'express';
@@ -47,14 +50,9 @@ export class EmailDemergeController {
         return res.status(404).json({ error: 'Email not found' });
       }
 
-      // Step 2: Validate eligibility (must be DEFAULT type and auto-merged condition)
-      // Auto-merged condition: type is DEFAULT AND externalThreadId === externalMessageId
+      // Step 2: Validate eligibility (must be DEFAULT type)
       if (email.type !== EmailType.DEFAULT) {
         return res.status(400).json({ error: 'Only DEFAULT type emails can be demerged' });
-      }
-
-      if (email.externalThreadId !== email.externalMessageId) {
-        return res.status(400).json({ error: 'Email is not marked as auto-merged (externalThreadId != externalMessageId)' });
       }
 
       // Step 3: Get all emails in the conversation ordered by createdAt
@@ -67,6 +65,15 @@ export class EmailDemergeController {
       const demergeIndex = allEmails.findIndex(e => e.id === emailId);
       if (demergeIndex === -1) {
         return res.status(404).json({ error: 'Email not found in conversation' });
+      }
+
+      const rootEmail = allEmails[0];
+      if (email.id === rootEmail.id) {
+        return res.status(400).json({ error: 'Root email cannot be demerged' });
+      }
+
+      if (email.externalThreadId !== email.externalMessageId) {
+        return res.status(400).json({ error: 'Email is not marked as auto-merged (externalThreadId != externalMessageId)' });
       }
 
       // Step 5: Get the original ticket
@@ -82,10 +89,22 @@ export class EmailDemergeController {
       if (!channel) {
         return res.status(404).json({ error: 'Channel not found' });
       }
+      // Demerge is intentionally NOT gated on the inbox's auto-merge setting —
+      // tickets that were auto-merged in the past must remain demerge-able even
+      // after the merchant disables the setting.
 
-      // Step 7: Create new conversation and ticket from demerged email
-      // Note: createConversationFromEmail handles its own internal transaction for ticket creation
-      // Creates only conversation, ticket, and message - no email entry
+      // Step 7: Move the selected provider-thread group. Provider thread ids
+      // must not be rewritten; future inbound mails use those ids for routing.
+      const selectedThreadId = email.externalThreadId;
+      const rootThreadId = rootEmail.externalThreadId;
+      const emailsToMove = allEmails.filter(e => e.externalThreadId === selectedThreadId);
+      const emailIdsToMove = emailsToMove.map(e => e.id);
+
+      if (emailIdsToMove.length === 0) {
+        return res.status(400).json({ error: 'No emails found for selected external thread' });
+      }
+
+      // Step 8: Create new conversation and ticket from demerged email
       const { conversation: newConversation, ticket: newTicket } = await emailService.createConversationFromEmail({
         channelId: originalTicket.channelId,
         userId: originalTicket.createdBy,
@@ -95,7 +114,7 @@ export class EmailDemergeController {
         emailFrom: email.from,
         emailCc: email.cc,
         emailBcc: email.bcc,
-        externalThreadId: email.externalThreadId,
+        externalThreadId: selectedThreadId,
         externalMessageId: email.externalMessageId,
         projectId: originalTicket.projectId,
         boardId: originalTicket.boardId,
@@ -103,14 +122,9 @@ export class EmailDemergeController {
         userGroupId: originalTicket.userGroupId ?? undefined,
       });
 
-      // Step 8: Move emails to new ticket in a transaction
-      // Filter all emails that share the same externalThreadId (parent and its replies)
-      const externalThreadId = email.externalThreadId;
-      const emailsToMove = allEmails.filter(e => e.externalThreadId === externalThreadId);
-      const emailIdsToMove = emailsToMove.map(e => e.id);
-      
+      // Step 9: Move emails in a transaction. external_message.entityId still
+      // points to these email ids, so no external_message rewrite is needed.
       await this.prisma.$transaction(async (tx) => {
-        // Step 8a: Move ALL emails with matching externalThreadId to new ticket
         await tx.email.updateMany({
           where: { id: { in: emailIdsToMove } },
           data: {
@@ -128,10 +142,12 @@ export class EmailDemergeController {
 
       logger.info('[EmailDemergeController] Successfully demerged email', {
         emailId,
+        selectedThreadId,
+        rootThreadId,
         oldTicketId: originalTicket.id,
         newTicketId: newTicket.id,
         emailsMoved: emailIdsToMove.length,
-        message: 'Demerged email moved to new ticket',
+        message: 'Demerged provider-thread group moved to new ticket',
       });
 
       return res.status(200).json({
@@ -144,10 +160,11 @@ export class EmailDemergeController {
         newTicket: {
           ticketId: newTicket.id,
           xyneId: newTicket.xyneId,
-          conversationId: newTicket.conversationId,
+          conversationId: newConversation.conversationId,
         },
         demergedEmailId: emailId,
         emailsMoved: emailIdsToMove.length,
+        splitThreadId: selectedThreadId,
       });
     } catch (error: any) {
       logger.error('[EmailDemergeController] Failed to demerge email:', error);
