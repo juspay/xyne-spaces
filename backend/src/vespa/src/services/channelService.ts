@@ -1,6 +1,12 @@
-import { YqlBuilder, type ILogger, type VespaConfig, type VespaDependencies } from '@xyne/vespa-ts';
+import {
+  YqlBuilder,
+  contains,
+  type ILogger,
+  type VespaConfig,
+  type VespaDependencies,
+} from '@xyne/vespa-ts';
 import type vespaClient from '../client';
-import { type VespaSearchResponse } from '../types';
+import { channelSchema, type VespaSearchResponse } from '../types';
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import { ErrorPerformingSearch } from '../error';
@@ -15,6 +21,34 @@ export class ChannelService {
     // Initialize Vespa clients
     this.vespa = vespaClient;
   }
+
+  getChannelParticipants = async (channelId: string, userId: string): Promise<string[]> => {
+    try {
+      const yql = YqlBuilder.create({
+        userId,
+        requirePermissions: true,
+        sources: [channelSchema],
+      })
+        .select('permissions')
+        .from(channelSchema)
+        .where(contains('docId', channelId))
+        .build();
+      const payload = {
+        yql,
+        hits: 1,
+        'ranking.profile': 'unranked',
+      };
+
+      const response = await this.vespa.search<VespaSearchResponse>(payload);
+      const fields = response.root?.children?.[0]?.fields as { permissions?: string[] } | undefined;
+      return fields?.permissions ?? [];
+    } catch (error) {
+      this.logger.error(
+        `Error fetching channel participants for ${channelId}: ${getErrorMessage(error)}`,
+      );
+      return [];
+    }
+  };
 
   searchChannels = async (query: string) => {
     try {

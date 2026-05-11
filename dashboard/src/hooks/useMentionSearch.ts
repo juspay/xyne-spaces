@@ -7,6 +7,7 @@ import { useSelf, useUsers, useUserSearch } from './useUsers';
 import type { User } from '../machines/stateMachine';
 import { useUserGroupSearch } from './useUserGroupSearch';
 import { getUserDisplayName } from '../utils/userDisplayName';
+import { useVespaChannelParticipants } from './useVespaChannelParticipants';
 
 interface UseMentionSearchResult {
   results: MentionResult[];
@@ -28,6 +29,7 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [isMentionRequested, setIsMentionRequested] = useState<boolean>(false);
   const shouldSearch = searchQuery.trim().length > 0;
   const usersData = useUserSearch(searchQuery, 10);
   const userGroupsData = useUserGroupSearch(searchQuery, 10);
@@ -51,6 +53,16 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
   // Determine if this is a DM or regular channel
   const isDMChannel = channel?.scopeType === ChannelScopeType.DM;
   const channelDataReady = channel && channel.id === channelId;
+
+  const vespaParticipantIds = useVespaChannelParticipants(
+    !isDMChannel ? channel?.id : undefined,
+    isMentionRequested,
+  );
+  const vespaParticipantIdSet = useMemo(
+    () => new Set(vespaParticipantIds ?? []),
+    [vespaParticipantIds],
+  );
+  const hasVespaParticipants = !!vespaParticipantIds?.length;
 
   // Get participants based on channel type when not searching
   const dmParticipants = channel?.name.split(',');
@@ -139,17 +151,21 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
         return baseUsers;
       }
 
-      // For regular channels, prioritize users who are in DMs with current user
+      // Rank: channel members (Vespa) → recent DM partners → rest.
+      // isChannelMember is only set once Vespa has responded, so the UI never
+      // shows "Not in channel" against users we haven't checked.
       const dmUserIds = new Set(cachedDMParticipants);
       return baseUsers
         .map(user => ({
           ...user,
           isInDM: dmUserIds.has(user.id),
+          ...(hasVespaParticipants && {
+            isChannelMember: vespaParticipantIdSet.has(user.id),
+          }),
         }))
         .sort((a, b) => {
-          // Sort users in DMs before others
-          if (a.isInDM && !b.isInDM) return -1;
-          if (!a.isInDM && b.isInDM) return 1;
+          if (!!a.isChannelMember !== !!b.isChannelMember) return a.isChannelMember ? -1 : 1;
+          if (a.isInDM !== b.isInDM) return a.isInDM ? -1 : 1;
           return 0;
         });
     }
@@ -173,19 +189,32 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
           })
           .filter((u): u is MentionResult => u !== null) || [];
     } else {
-      // For regular channels, initially use cached DM participants
-      sortedParticipants = cachedDMParticipants
-        .map(userId => {
-          const u = usersById.get(userId);
-          return u ? toMentionResult(u) : null;
-        })
-        .filter((u): u is MentionResult => u !== null)
-        .sort((a, b) => {
-          const userA = usersById.get(a.id);
-          const userB = usersById.get(b.id);
-          return (userB?.lastActiveAt || 0) - (userA?.lastActiveAt || 0);
-        })
-        .slice(0, 10);
+      // Regular channel empty-state. Before Vespa lands: recent DM partners.
+      // After: channel members + up to 10 DM partners not in the channel,
+      // tagged so the UI shows the "Not in channel" pill on the latter.
+      const buildList = (ids: string[], isChannelMember?: boolean): MentionResult[] =>
+        ids
+          .map(id => usersById.get(id))
+          .filter((u): u is User => !!u && u.id !== user?.id)
+          .sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))
+          .slice(0, 10)
+          .map(u =>
+            isChannelMember === undefined
+              ? toMentionResult(u)
+              : { ...toMentionResult(u), isChannelMember },
+          );
+
+      if (hasVespaParticipants && vespaParticipantIds) {
+        sortedParticipants = [
+          ...buildList(vespaParticipantIds, true),
+          ...buildList(
+            cachedDMParticipants.filter(id => !vespaParticipantIdSet.has(id)),
+            false,
+          ),
+        ];
+      } else {
+        sortedParticipants = buildList(cachedDMParticipants);
+      }
     }
 
     // Current user first, then other participants
@@ -201,6 +230,9 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
     toMentionResult,
     user?.id,
     context.userID,
+    vespaParticipantIds,
+    vespaParticipantIdSet,
+    hasVespaParticipants,
   ]);
 
   // Convert user groups to MentionResult format
@@ -263,11 +295,13 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
   const searchMentions = useCallback((query: string) => {
     setError(null);
     setSearchQuery(query);
+    setIsMentionRequested(true);
   }, []);
 
   const clearResults = useCallback(() => {
     setSearchQuery('');
     setError(null);
+    setIsMentionRequested(false);
   }, []);
 
   return {
