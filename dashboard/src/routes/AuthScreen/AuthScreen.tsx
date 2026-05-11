@@ -43,6 +43,7 @@ const AuthScreen = (): ReactElement => {
     user,
     userExistsButRemoved,
     signInWithMicrosoft,
+    logout,
   } = useAuth();
   const { data: providers } = useOAuthProviders();
   const [searchParams] = useSearchParams();
@@ -92,6 +93,11 @@ const AuthScreen = (): ReactElement => {
 
   const handleSelectWorkspace = (workspaceId: string): void => {
     selectWorkspace(workspaceId);
+  };
+
+  const handleTryDifferentAccount = (): void => {
+    logout();
+    window.location.reload();
   };
 
   const handleCreateOrg = (e: React.FormEvent): void => {
@@ -226,8 +232,9 @@ const AuthScreen = (): ReactElement => {
                   </div>
 
                   <button
-                    onClick={handleGoogleSignIn}
-                    className='text-sm text-muted-foreground hover:text-foreground text-center'
+                    type='button'
+                    onClick={handleTryDifferentAccount}
+                    className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
                     data-track-category='Auth'
                     data-track-name='TryDifferentAccount'
                   >

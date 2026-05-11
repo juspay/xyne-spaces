@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
+import { UserStatus } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
@@ -1233,6 +1234,15 @@ export class AuthV2Controller {
         authProvider: provider,
       });
 
+      // Check if user is inactive or has left the workspace
+      if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {
+        res.status(403).json({
+          error: 'User inactive',
+          message: 'Your account has been deactivated or you have left this workspace'
+        });
+        return;
+      }
+
       // Ensure user presence for workspace-scoped user
       await this.userService.ensureUserPresence(workspaceUser.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
@@ -1399,6 +1409,15 @@ export class AuthV2Controller {
         workspaceName,
         provider
       );
+
+      // Check if user is inactive or has left the workspace
+      if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {
+        res.status(403).json({
+          error: 'User inactive',
+          message: 'Your account has been deactivated or you have left this workspace'
+        });
+        return;
+      }
 
       // Ensure user presence for workspace-scoped user
       await this.userService.ensureUserPresence(workspaceUser.id);

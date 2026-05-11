@@ -2,6 +2,7 @@ import { ReactElement } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Building2, Mail, ArrowLeft } from 'lucide-react';
 import { ThemeProvider } from '@juspay/blend-design-system';
+import { useAuth } from '../../hooks/useAuth';
 
 /**
  * NoOrganizationAccessScreen - Shown when user is not part of any organization
@@ -14,10 +15,11 @@ import { ThemeProvider } from '@juspay/blend-design-system';
  */
 const NoOrganizationAccessScreen = (): ReactElement => {
   const [searchParams] = useSearchParams();
+  const { logout } = useAuth();
   const message = searchParams.get('message') || 'You are not part of any organisation.';
 
   const handleGoBack = (): void => {
-    // Clear the error and go back to auth screen
+    logout();
     window.location.href = '/auth';
   };
 

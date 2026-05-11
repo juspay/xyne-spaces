@@ -1,4 +1,4 @@
-import { PrismaClient, User, AccessType, UserPresenceStatus, AuthProvider, ProjectType } from '@prisma/client';
+import { PrismaClient, User, AccessType, UserPresenceStatus, AuthProvider, ProjectType, UserStatus } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
@@ -638,6 +638,7 @@ export class UserService {
       const workspaceUsers = await this.prisma.user.findMany({
         where: {
           email,
+          status: UserStatus.ACTIVE,
           leftAt: null,
         },
         include: {
@@ -683,6 +684,7 @@ export class UserService {
       const activeCount = await this.prisma.user.count({
         where: {
           email,
+          status: UserStatus.ACTIVE,
           leftAt: null,
         },
       });
