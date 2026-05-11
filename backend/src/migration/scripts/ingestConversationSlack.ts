@@ -90,14 +90,28 @@ export const findOrCreateUser = async (
   let user = await userRepo.findByEmail(userEmail, workspaceId);
 
   if (!user) {
-    // Fetch existing orgMember by email
-    const orgMember = await db.orgMember.findUnique({
+    let orgMember = await db.orgMember.findUnique({
       where: { email: userEmail },
-      select: { memberId: true }
+      select: { memberId: true },
     });
 
     if (!orgMember) {
-      throw new Error(`orgMember not found for email ${userEmail}. User must be invited to the organization first.`);
+      const workspace = await db.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { orgId: true },
+      });
+      if (!workspace) {
+        throw new Error(`Workspace ${workspaceId} not found`);
+      }
+      orgMember = await db.orgMember.create({
+        data: {
+          orgId: workspace.orgId,
+          email: userEmail,
+          role: 'MEMBER',
+        },
+        select: { memberId: true },
+      });
+      logger.info('[IngestSlack] OrgMember created for migration user', { userEmail });
     }
 
     user = await userRepo.create({
@@ -121,9 +135,10 @@ export const findOrCreateUser = async (
 // Helper: Find or create app user for a Slack bot (throws on failure)
 export const findOrCreateApp = async (
   botName: string,
-  botId: string,       
+  botId: string,
   botCache: UserInfoCache,
-  botUserId?: string, 
+  botUserId?: string,
+  workspaceId?: string
 ): Promise<string> => {
   if (botCache.has(botId)) {
     return botCache.get(botId)!.userId!;
@@ -138,9 +153,17 @@ export const findOrCreateApp = async (
     return existingUser.id;
   }
 
-  const creatorUser = await db.user.findFirst({ where: { email: 'john.doe@gmail.com' } });
+  const xyneUser = await db.user.findFirst({ where: { email: 'john.doe@gmail.com' } });
+  let creatorUser = xyneUser;
   if (!creatorUser) {
-    throw new Error('Creator user john.doe@gmail.com not found');
+    if (config.env === 'development' && workspaceId) {
+      creatorUser = await db.user.findFirst({ where: { workspaceId } });
+    } else {
+      throw new Error('Creator user john.doe@gmail.com not found');
+    }
+  }
+  if (!creatorUser) {
+    throw new Error('No fallback workspace user found for local migration');
   }
 
   const appRepo = new AppsRepository();
@@ -268,7 +291,6 @@ export async function ingestConversationSlack(
       return existingMessage?.conversationId || null;
     };
 
-
     // Helper: Ingest a single message (throws on failure)
     const ingestMessage = async (
       externalId: string,
@@ -283,14 +305,19 @@ export async function ingestConversationSlack(
       botId?: string,
       botName?: string,
       botUserId?: string,
-      isPinned?: boolean,
+      isPinned?: boolean
     ): Promise<MessageIngestionResult> => {
-
       let resolvedUserId = userId;
 
       if (!resolvedUserId) {
         if (botId) {
-          resolvedUserId = await findOrCreateApp(botName ?? botId, botId, botCache, botUserId);
+          resolvedUserId = await findOrCreateApp(
+            botName ?? botId,
+            botId,
+            botCache,
+            botUserId,
+            workspaceId
+          );
         } else {
           if (!userEmail || !userName) {
             throw new Error(
@@ -303,7 +330,7 @@ export async function ingestConversationSlack(
             isDeactivated,
             userRepo,
             userCache,
-          workspaceId
+            workspaceId
           );
         }
       }
@@ -339,7 +366,6 @@ export async function ingestConversationSlack(
         message = result.message;
         conversation = result.conversation;
         conversationId = conversation.conversationId;
-
       } else {
         // Add message to existing conversation (skip participant check since participants are added before migration)
         conversationId = existingConversationId;
@@ -358,7 +384,6 @@ export async function ingestConversationSlack(
         });
 
         message = result.message;
-
       }
 
       // Create external message tracking
@@ -406,7 +431,7 @@ export async function ingestConversationSlack(
             slackMessage.botId,
             slackMessage.botName,
             slackMessage.botUserId,
-            slackMessage.isPinned,
+            slackMessage.isPinned
           );
         }
 
@@ -439,7 +464,7 @@ export async function ingestConversationSlack(
                 reply.botId,
                 reply.botName,
                 reply.botUserId,
-                reply.isPinned,
+                reply.isPinned
               );
             } catch (error) {
               const errorMsg = `Failed to ingest reply ${reply.externalThreadId}: ${
@@ -493,5 +518,3 @@ export async function ingestConversationSlack(
     };
   }
 }
-
-

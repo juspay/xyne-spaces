@@ -76,7 +76,8 @@ router.post('/interactive', verifySlackRequest, async (req: Request, res: Respon
       const values = view.state.values || {};
 
       // Check if at least one field is filled
-      const allTicketsChecked = values.all_titles_checkbox?.all_titles_checkbox_action?.selected_options?.length > 0;
+      const allTicketsChecked =
+        values.all_titles_checkbox?.all_titles_checkbox_action?.selected_options?.length > 0;
       const syncDate = values.sync_date?.sync_date_picker?.selected_date;
       const xyneSpaceChannelId = values.xyne_space_channel_id?.xyne_space_channel_input?.value;
 
@@ -155,7 +156,9 @@ router.post('/interactive', verifySlackRequest, async (req: Request, res: Respon
       res.status(200).json({ response_action: 'clear' });
 
       Promise.resolve()
-        .then(() => runSyncParticipants({ slackChannelId: channelId, xyneSpaceChannelId, userId: user?.id }))
+        .then(() =>
+          runSyncParticipants({ slackChannelId: channelId, xyneSpaceChannelId, userId: user?.id })
+        )
         .catch((error) => {
           logger.error('[Migration] Error processing sync-participants', {
             error: error instanceof Error ? error.message : 'Unknown error',
