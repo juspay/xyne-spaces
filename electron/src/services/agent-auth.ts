@@ -38,6 +38,10 @@ class AgentAuthService {
   private sessions: Map<string, AuthSession> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
 
+  private getMcpBackendBaseUrl(): string {
+    return config.BACKEND_URL.replace(/\/+$/, '');
+  }
+
   /**
    * Start the agent authorization HTTP server
    */
@@ -121,6 +125,10 @@ class AgentAuthService {
         await this.handleInteract(req, res);
       } else if (req.method === 'GET' && url.pathname === '/search') {
         await this.handleSearch(req, res, url);
+      } else if (req.method === 'POST' && url.pathname === '/api/search') {
+        await this.handleMcpSearch(req, res, url);
+      } else if (req.method === 'POST' && url.pathname === '/api/conversation-ingest/upload') {
+        await this.handleMcpConversationIngestUpload(req, res);
       } else if (req.method === 'POST' && url.pathname === '/memory/search') {
         await this.handleMemorySearch(req, res);
       } else if (req.method === 'POST' && url.pathname === '/memory/upload') {
@@ -372,6 +380,149 @@ class AgentAuthService {
       this.sendJson(res, 500, { 
         error: 'Backend Request Failed',
         message: error.message 
+      });
+    }
+  }
+
+  /**
+   * MCP compatibility route: POST /api/search
+   * Proxies JSON payloads to backend /test/api/search using the logged-in Electron session token.
+   */
+  private async handleMcpSearch(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const agentToken = this.extractToken(req);
+    if (!agentToken || !this.validateToken(agentToken)) {
+      this.sendJson(res, 401, {
+        error: 'Unauthorized',
+        message: 'Invalid or missing agent authorization token',
+      });
+      return;
+    }
+
+    let body: any;
+    try {
+      body = await this.parseBody(req);
+    } catch {
+      this.sendJson(res, 400, {
+        error: 'Bad Request',
+        message: 'Invalid JSON in request body',
+      });
+      return;
+    }
+
+    if (!body || typeof body !== 'object') {
+      this.sendJson(res, 400, {
+        error: 'Bad Request',
+        message: 'Request body must be a JSON object',
+      });
+      return;
+    }
+
+    try {
+      const googleToken = await this.getGoogleAccessTokenFromSession();
+      if (!googleToken) {
+        this.sendJson(res, 401, {
+          error: 'Unauthorized',
+          message: 'No user access token found in session',
+        });
+        return;
+      }
+
+      const searchParams = new URLSearchParams(url.searchParams);
+      const qs = searchParams.toString();
+      const backendUrl = `${this.getMcpBackendBaseUrl()}/test/api/search${qs ? `?${qs}` : ''}`;
+      log.info(`[AgentAuth] Proxying MCP POST /api/search request to ${backendUrl}`);
+
+      const bodyBuffer = Buffer.from(JSON.stringify(body));
+
+      const backendResponse = await this.makeBackendRequestRaw({
+        url: backendUrl,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${googleToken}`,
+          'Content-Type': 'application/json',
+        },
+        bodyBuffer,
+      });
+
+      this.forwardRawBackendResponse(res, backendResponse);
+    } catch (error: any) {
+      log.error('[AgentAuth] MCP search proxy request failed:', error);
+      this.sendJson(res, 500, {
+        error: 'Backend Request Failed',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * MCP compatibility route: POST /api/conversation-ingest/upload
+   * Forwards multipart upload to backend /test/api/conversation-ingest/upload.
+   */
+  private async handleMcpConversationIngestUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const agentToken = this.extractToken(req);
+    if (!agentToken || !this.validateToken(agentToken)) {
+      this.sendJson(res, 401, {
+        error: 'Unauthorized',
+        message: 'Invalid or missing agent authorization token',
+      });
+      return;
+    }
+
+    const contentTypeHeader = req.headers['content-type'];
+    if (!contentTypeHeader) {
+      this.sendJson(res, 400, {
+        error: 'Bad Request',
+        message: 'Missing Content-Type header',
+      });
+      return;
+    }
+
+    try {
+      const googleToken = await this.getGoogleAccessTokenFromSession();
+      if (!googleToken) {
+        this.sendJson(res, 401, {
+          error: 'Unauthorized',
+          message: 'No user access token found in session',
+        });
+        return;
+      }
+
+      const contentTypeRaw = Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader;
+      const contentType = contentTypeRaw.split(',')[0]?.trim() ?? '';
+      if (!contentType) {
+        this.sendJson(res, 400, {
+          error: 'Bad Request',
+          message: 'Invalid Content-Type header',
+        });
+        return;
+      }
+
+      const backendUrl = `${this.getMcpBackendBaseUrl()}/test/api/conversation-ingest/upload`;
+      log.info(`[AgentAuth] Proxying MCP upload request to ${backendUrl}`);
+
+      const bodyBuffer = await this.readRequestBody(req);
+      log.info(
+        `[AgentAuth] MCP upload payload details contentType="${contentType}" bytes=${bodyBuffer.length}`,
+      );
+
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${googleToken}`,
+        'Content-Type': contentType,
+      };
+
+      const backendResponse = await this.makeBackendRequestRaw({
+        url: backendUrl,
+        method: 'POST',
+        headers,
+        bodyBuffer,
+      });
+
+      this.forwardRawBackendResponse(res, backendResponse);
+    } catch (error: any) {
+      log.error('[AgentAuth] MCP conversation ingest upload proxy failed:', error);
+      this.sendJson(res, 500, {
+        error: 'Backend Request Failed',
+        message: error.message,
       });
     }
   }
@@ -738,6 +889,105 @@ class AgentAuthService {
 
       request.end();
     });
+  }
+
+  /**
+   * Make backend request and return raw response bytes/headers unchanged.
+   * Used for passthrough proxy endpoints (e.g., multipart upload).
+   */
+  private async makeBackendRequestRaw(options: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    bodyBuffer?: Buffer;
+  }): Promise<{ statusCode: number; headers: Record<string, string | string[]>; body: Buffer }> {
+    return new Promise((resolve, reject) => {
+      const request = net.request({
+        url: options.url,
+        method: options.method,
+        useSessionCookies: false,
+      });
+
+      Object.entries(options.headers).forEach(([key, value]) => {
+        request.setHeader(key, value);
+      });
+
+      request.on('response', (response) => {
+        const chunks: Buffer[] = [];
+
+        response.on('data', (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+
+        response.on('end', () => {
+          resolve({
+            statusCode: response.statusCode ?? 500,
+            headers: response.headers as Record<string, string | string[]>,
+            body: Buffer.concat(chunks),
+          });
+        });
+
+        response.on('error', (error) => {
+          log.error('[AgentAuth] Raw response error:', error);
+          reject(error);
+        });
+      });
+
+      request.on('error', (error) => {
+        log.error('[AgentAuth] Raw request error:', error);
+        reject(error);
+      });
+
+      if (options.bodyBuffer) {
+        request.write(options.bodyBuffer);
+      }
+
+      request.end();
+    });
+  }
+
+  private async readRequestBody(req: IncomingMessage): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+
+      req.on('data', (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+
+      req.on('end', () => {
+        resolve(Buffer.concat(chunks));
+      });
+
+      req.on('error', (error) => {
+        reject(error);
+      });
+    });
+  }
+
+  private forwardRawBackendResponse(
+    res: ServerResponse,
+    backendResponse: { statusCode: number; headers: Record<string, string | string[]>; body: Buffer },
+  ): void {
+    const responseHeaders: Record<string, string | string[]> = {};
+    const contentType = backendResponse.headers['content-type'];
+    const contentLength = backendResponse.headers['content-length'];
+
+    if (contentType) {
+      responseHeaders['Content-Type'] = contentType;
+    }
+
+    if (contentLength) {
+      responseHeaders['Content-Length'] = contentLength;
+    }
+
+    res.writeHead(backendResponse.statusCode, responseHeaders);
+    res.end(backendResponse.body);
+  }
+
+  private async getGoogleAccessTokenFromSession(): Promise<string | null> {
+    const cookies = await session.defaultSession.cookies.get({});
+    const tokenCookie = cookies.find((cookie) => cookie.name === 'google_access_token');
+    return tokenCookie?.value ?? null;
   }
 
   /**
