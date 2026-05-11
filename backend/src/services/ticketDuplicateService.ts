@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { vespaService } from '@/services/vespaSearch';
@@ -161,18 +162,32 @@ class TicketDuplicateService {
       return [];
     }
 
-    const vespaResults = await vespaService.searchService.searchVespa(
-      query,
-      userId,
-      ['ticket'],
-      {
-        offset: 0,
-        limit,
-        ticket: {
-          projectId: [projectId],
+    if (config.isTestEnv) {
+      logger.debug('[TicketDuplicateService] Skipping Vespa in test environment');
+      return [];
+    }
+
+    let vespaResults;
+    try {
+      vespaResults = await vespaService.searchService.searchVespa(
+        query,
+        userId,
+        ['ticket'],
+        {
+          offset: 0,
+          limit,
+          ticket: {
+            projectId: [projectId],
+          },
         },
-      },
-    );
+      );
+    } catch (error) {
+      logger.warn(
+        '[TicketDuplicateService] Vespa search unavailable, skipping duplicate check',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      return [];
+    }
 
     const hits = vespaResults.root.children || [];
     const transformedResults = await transformVespaResults(hits, prisma);

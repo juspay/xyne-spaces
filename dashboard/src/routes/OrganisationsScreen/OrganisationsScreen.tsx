@@ -329,7 +329,10 @@ export const OrganisationsScreen = (): ReactElement => {
   };
 
   return (
-    <div className='h-full bg-muted flex flex-col md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'>
+    <div
+      data-testid='organisations-page'
+      className='h-full bg-muted flex flex-col md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'
+    >
       <div className='flex-1 overflow-y-auto p-6'>
         <div className='max-w-4xl mx-auto space-y-6'>
           {/* ── Header + Create button ── */}

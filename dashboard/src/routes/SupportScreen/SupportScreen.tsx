@@ -1282,7 +1282,10 @@ const SupportScreen = (): ReactElement => {
   }, [selectedChannelId, userID, composeInstances]);
 
   return (
-    <div className='h-full flex flex-col relative bg-background md:rounded-2xl overflow-hidden shadow-md'>
+    <div
+      data-testid='support-page'
+      className='h-full flex flex-col relative bg-background md:rounded-2xl overflow-hidden shadow-md'
+    >
       <PanelGroup
         direction='horizontal'
         className='flex-1 overflow-hidden'

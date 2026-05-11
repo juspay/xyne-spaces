@@ -254,6 +254,7 @@ const AnalyticsScreen = (): ReactElement => {
     >
       <div
         id='analytics-screen'
+        data-testid='analytics-page'
         data-component='AnalyticsScreen'
         className='flex overflow-y-auto no-scrollbar flex-col gap-4 md:gap-6 p-4 pb-20 md:p-6 h-full bg-background md:rounded-2xl overflow-hidden shadow-md'
       >

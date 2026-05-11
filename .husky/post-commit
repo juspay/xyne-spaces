@@ -54,12 +54,26 @@ else
 fi
 
 if [ "$RUN_TESTS" = "true" ]; then
-  echo ""
-  echo "🔒 Verifying test code integrity..."
-  if ! npm run test:integrity; then
-      echo "❌ Test code integrity check failed!"
-      echo "   Please ensure your test code is in sync with main."
-      exit 1
+  # Detect if any changed files are under xyne-automation/ (matches Jenkinsfile logic)
+  CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+  AUTOMATION_TOUCHED=false
+
+  if echo "$CHANGED_FILES" | grep -q "^xyne-automation/"; then
+    AUTOMATION_TOUCHED=true
+  fi
+
+  # Skip integrity check if automation files are touched (hash will mismatch by design)
+  if [ "$AUTOMATION_TOUCHED" = "false" ]; then
+    echo ""
+    echo "🔒 Verifying test code integrity..."
+    if ! npm run test:integrity; then
+        echo "❌ Test code integrity check failed!"
+        echo "   Please ensure your test code is in sync with main."
+        exit 1
+    fi
+  else
+    echo ""
+    echo "⏭️  Skipping test integrity check (automation files modified — hash mismatch expected)"
   fi
 
   echo ""

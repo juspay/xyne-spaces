@@ -1,0 +1,22 @@
+# Navigating to channel <channelAlias> for user <userAlias>
+* ensuring channel <channelAlias> exists in fixture for user <userAlias>
+* clicking on "[data-testid='nav-chat']"
+* clicking on stored channel <channelAlias> name for user <userAlias>
+* waiting for network to be idle
+
+# Creating channel <channelAlias> for user <userAlias> in project <projectAlias>
+* ensuring project <projectAlias> exists in fixture for user <userAlias>
+* clicking on "[data-testid='nav-chat']"
+* waiting for "[data-testid='create-new-channel']" to appear
+* clicking on "[data-testid='create-new-channel']"
+* waiting for "[data-testid='add-channel-form']" to appear
+* generating net-new channel details <channelAlias> for user <userAlias>
+* clicking on "[data-testid='project-select-trigger']"
+* selecting stored project <projectAlias> for user <userAlias> in dropdown
+* typing stored user <userAlias> channel <channelAlias> field "name" in "[data-testid='channel-name-input']"
+* waiting for "[data-testid='create-channel-button']" to be enabled
+* clicking on "[data-testid='create-channel-button']"
+* waiting for "[data-testid='add-channel-dialog']" to disappear
+* capturing created channel details for user <userAlias> channel <channelAlias>
+* clicking on selector "[role='dialog'] button" with text "Cancel" if visible
+* waiting for "[data-testid='channel-info-trigger']" to appear

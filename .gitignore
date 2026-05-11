@@ -206,6 +206,8 @@ lotus/ios/build/
 lotus/ios/lotus.xcodeproj/project.xcworkspace/
 
 # Agents
+.agents/
+skills-lock.json
 .sisyphus/
 .agents/
 skills-lock.json
@@ -214,3 +216,6 @@ skills-lock.json
 
 # Sandbox environments (agent worktrees)
 .sandboxes/
+
+# Playwright MCP server scratch logs
+.playwright-mcp/

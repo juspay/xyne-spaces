@@ -1,0 +1,34 @@
+{
+  "users": [
+    {
+      "alias": "admin-1",
+      "role": "admin",
+      "email": "test-admin-email-1@xyne-test.local"
+    },
+    {
+      "alias": "admin-2",
+      "role": "admin",
+      "email": "test-admin-email-2@xyne-test.local"
+    },
+    {
+      "alias": "user-1",
+      "role": "user",
+      "email": "test-user-email-1@xyne-test.local"
+    },
+    {
+      "alias": "user-2",
+      "role": "user",
+      "email": "test-user-email-2@xyne-test.local"
+    },
+    {
+      "alias": "user-3",
+      "role": "user",
+      "email": "test-user-email-3@xyne-test.local"
+    },
+    {
+      "alias": "user-4",
+      "role": "user",
+      "email": "test-user-email-4@xyne-test.local"
+    }
+  ]
+}

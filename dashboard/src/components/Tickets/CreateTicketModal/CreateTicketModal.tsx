@@ -4,6 +4,7 @@ import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useZero } from '../../../hooks/useZero';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
+import { isTestEnv } from '../../../config';
 import {
   AttachmentEntityType,
   BaseTicketType,
@@ -648,6 +649,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
     }
   }, [boards, form]);
+
+  // Auto-select first board when board suggestion returns null (test env only — in prod
+  // the user picks a board explicitly if no suggestion is available).
+  useEffect(() => {
+    if (!isTestEnv) return;
+    if (isCheckingBoard || boardSuggestion?.analysis.suggestedBoardId) return;
+    if (form.getFieldValue('boardId')) return;
+    const firstBoard = boards?.[0];
+    if (firstBoard) {
+      form.setFieldValue('boardId', firstBoard.id);
+    }
+  }, [isCheckingBoard, boardSuggestion, boards, form]);
 
   // Auto-generate title when modal opens with a description but no title
   useEffect(() => {

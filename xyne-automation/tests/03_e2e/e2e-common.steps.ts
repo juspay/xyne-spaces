@@ -1,196 +1,67 @@
-/**
- * Common step definitions for e2e tests that can be reused across all test types.
- */
+import assert from 'node:assert/strict';
+import { Step } from 'gauge-ts';
+import { config } from '@/config';
+import { testContext } from '@/tests/shared/runtime/test-context';
+import { assertValidUrlPath } from '@/tests/shared/support/literal-validation';
 
-import { Given, Then, When } from '@cucumber/cucumber';
-import { expect } from 'chai';
+export default class E2eCommonSteps {
+  @Step('ensuring user is not logged in')
+  public async ensureNotLoggedIn(): Promise<void> {
+    const page = testContext.activePage;
+    const context = testContext.currentSession.context;
+    const authUrl = `${config.dashboard.baseUrl}/auth`;
 
-import { e2eLogger } from '@/lib/logger';
+    testContext.lastResponse = null;
 
-import '@/fixtures/cucumber.parameters';
-import { CapturedApiResponse, ResponseFormat } from '@/fixtures/cucumber.types';
-import { CustomWorld } from '@/fixtures/cucumber.world';
-
-// ============================================
-// Authentication Steps
-// ============================================
-
-Given('I am not logged in', async function (this: CustomWorld) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  await this.page.goto(this.config.dashboard.baseUrl);
-
-  await this.page.evaluate(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-  });
-
-  await this.context?.clearCookies();
-
-  e2eLogger.info('[Auth] Cleared all authentication state (localStorage, sessionStorage, cookies)');
-});
-
-// ============================================
-// Navigation Assertions
-// ============================================
-
-Then(
-  'the user should be redirected to {string}',
-  async function (this: CustomWorld, urlPart: string) {
-    if (!this.page) throw new Error('Browser not initialized');
-
-    e2eLogger.info(`[Nav] Waiting for URL to contain "${urlPart}"`);
-
+    await context.clearCookies();
     try {
-      await this.page.waitForURL((url) => url.toString().includes(urlPart));
-      e2eLogger.info(`[Nav] Successfully redirected to "${urlPart}"`);
+      await page.goto(authUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000, // Increased timeout to 60s
+      });
     } catch (error) {
-      const currentUrl = this.page.url();
-      throw new Error(
-        `Expected to be redirected to "${urlPart}", but current URL is "${currentUrl}". Error: ${(error as Error).message}`
-      );
-    }
-  }
-);
+      if (!(error instanceof Error) || !error.message.includes('ERR_ABORTED')) {
+        throw error;
+      }
 
-Then('I wait for {string} to appear', async function (this: CustomWorld, selector: string) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  e2eLogger.info(`[UI] Waiting for element "${selector}" to appear`);
-
-  await this.page.waitForSelector(selector, {
-    state: 'visible',
-  });
-
-  e2eLogger.info(`[UI] Element "${selector}" appeared`);
-});
-
-Then('I wait for {string} to disappear', async function (this: CustomWorld, selector: string) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  e2eLogger.info(`[UI] Waiting for element "${selector}" to disappear`);
-
-  await this.page.waitForSelector(selector, {
-    state: 'hidden',
-  });
-
-  e2eLogger.info(`[UI] Element "${selector}" disappeared`);
-});
-
-// ============================================
-// API Response Steps
-// ============================================
-
-// Api Response Management
-When(
-  'I click the button with text {string} then wait for {string} request to be triggered and capture the response',
-  async function (this: CustomWorld, buttonText: string, endpoint: string) {
-    if (!this.page) throw new Error('Browser not initialized');
-
-    e2eLogger.info(`[API] Waiting for request to: ${endpoint}`);
-
-    const responsePromise = this.page.waitForResponse(
-      (response) => response.url().includes(endpoint) && response.request().method() === 'POST'
-    );
-
-    await this.page.click(`button:has-text("${buttonText}")`);
-
-    const response = await responsePromise;
-    const responseBody = await response.json().catch(() => null);
-
-    this.capturedResponse = {
-      status: response.status(),
-      statusText: response.statusText(),
-      headers: response.headers(),
-      body: responseBody,
-      url: response.url(),
-    } as CapturedApiResponse;
-
-    e2eLogger.info(
-      `[API] Captured response from ${endpoint}: ${this.capturedResponse.status} ${this.capturedResponse.statusText}`
-    );
-  }
-);
-
-// Api Assertions
-Then(
-  'the captured response status should be {int}',
-  async function (this: CustomWorld, statusCode: number) {
-    expect(this.capturedResponse).to.not.be.undefined;
-    expect(this.capturedResponse!.status).to.equal(statusCode);
-    e2eLogger.info(`[API] Verified response status: ${statusCode}`);
-  }
-);
-
-Then(
-  'the captured response should be {responseFormat}',
-  async function (this: CustomWorld, format: ResponseFormat) {
-    expect(this.capturedResponse).to.not.be.undefined;
-    expect(this.capturedResponse!.body).to.not.be.null;
-
-    switch (format) {
-      case 'json':
-        expect(this.capturedResponse!.body).to.be.an('object');
-        expect(this.capturedResponse!.body).to.not.be.an('array');
-        e2eLogger.info('[API] Verified response is JSON object');
-        break;
-      case 'array':
-        expect(this.capturedResponse!.body).to.be.an('array');
-        e2eLogger.info('[API] Verified response is array');
-        break;
-      case 'string':
-        expect(this.capturedResponse!.body).to.be.a('string');
-        e2eLogger.info('[API] Verified response is string');
-        break;
-      default:
-        throw new Error(`Unsupported response format: ${format}`);
-    }
-  }
-);
-
-Then(
-  'the captured response should contain property {string}',
-  async function (this: CustomWorld, property: string) {
-    expect(this.capturedResponse).to.not.be.undefined;
-    expect(this.capturedResponse!.body).to.not.be.null;
-    expect(this.capturedResponse!.body).to.have.property(property);
-    e2eLogger.info(`[API] Verified response has property: ${property}`);
-  }
-);
-
-// ============================================
-// User Data Storage Steps
-// ============================================
-
-Then(
-  'the user data should be stored in global context as {string}',
-  async function (this: CustomWorld, userName: string) {
-    expect(this.capturedResponse).to.not.be.undefined;
-    expect(this.capturedResponse!.body).to.not.be.null;
-    expect(this.capturedResponse!.body).to.have.property('user');
-
-    const responseBody = this.capturedResponse!.body!;
-    const user = responseBody.user!;
-    const sessionId = responseBody.sessionId!;
-
-    if (!this.activeContextName || !this.context || !this.page) {
-      throw new Error('Browser session not initialized');
+      await page.waitForURL(`**/auth**`);
     }
 
-    this.userData.set(userName, {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      isNewUser: user.isNewUser,
-      workspaceId: user.workspaceId,
-      sessionId: sessionId,
-      browserSession: this.activeContextName,
-      context: this.context,
-      page: this.page,
+    await page.waitForLoadState('domcontentloaded');
+
+    await page.evaluate(() => {
+      localStorage.clear();
+      sessionStorage.clear();
     });
+  }
 
-    e2eLogger.info(
-      `[User Data] Stored user data for "${userName}": ${user.email} (Browser: ${this.activeContextName})`
+  @Step('verifying user is redirected to <urlPath>')
+  public async assertRedirectToPath(urlPath: string): Promise<void> {
+    assertValidUrlPath(urlPath);
+    const page = testContext.activePage;
+
+    if (urlPath.endsWith('/*')) {
+      const prefix = urlPath.slice(0, -2);
+      // Longer timeout for parallel test execution under resource contention
+      await page.waitForURL(`**${prefix}**`, { timeout: 60000 });
+      const actualPath = new URL(page.url()).pathname;
+      assert.ok(
+        actualPath === prefix ||
+          actualPath.startsWith(`${prefix}/`) ||
+          actualPath.endsWith(prefix) ||
+          actualPath.includes(`${prefix}/`),
+        `Expected path to be "${prefix}" or start with "${prefix}/", got "${actualPath}"`
+      );
+      return;
+    }
+
+    // Longer timeout for parallel test execution under resource contention
+    await page.waitForURL(`**${urlPath}**`, { timeout: 60000 });
+    const currentUrl = new URL(page.url());
+    const actualPath = currentUrl.pathname;
+    assert.ok(
+      actualPath === urlPath || actualPath.endsWith(urlPath),
+      `Expected to be redirected to ${urlPath}, got ${actualPath}`
     );
   }
-);
+}

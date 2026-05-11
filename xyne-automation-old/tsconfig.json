@@ -1,52 +1,31 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2020",
     "module": "commonjs",
-    "lib": ["ES2022", "DOM"],
-    "outDir": "./dist",
-    "rootDir": ".",
+    "lib": ["ES2020"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "removeComments": false,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "strictFunctionTypes": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": false,
-    "exactOptionalPropertyTypes": false,
     "resolveJsonModule": true,
-    "allowSyntheticDefaultImports": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "types": ["node"],
-    "moduleResolution": "node",
-    "baseUrl": ".",
+    "declaration": false,
+    "declarationMap": false,
+    "outDir": "./dist",
+    "rootDir": "./",
     "paths": {
-      "@/*": ["src/*"],
-      "@framework/*": ["src/framework/*"],
-      "@types/*": ["src/types/*"],
-      "@utils/*": ["src/framework/utils/*"],
-      "@pages/*": ["src/framework/pages/*"],
-      "@config/*": ["config/*"]
-    }
+      "@/*": ["./*"],
+      "@/config": ["./config/index"],
+      "@/fixtures/*": ["./fixtures/*"],
+      "@/lib/*": ["./lib/*"]
+    },
+    "types": ["node", "@playwright/test"]
   },
   "include": [
-    "src/**/*",
-    "tests/**/*",
-    "config/**/*",
-    "playwright.config.ts",
-    "server.ts",
-    "server-with-ngrok.ts"
+    "config/**/*.ts",
+    "lib/**/*.ts",
+    "tests/**/*.ts",
+    "fixtures/**/*.ts",
+    "scripts/**/*.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "reports"
-  ]
+  "exclude": ["node_modules", "dist"]
 }

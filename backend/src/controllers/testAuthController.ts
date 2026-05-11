@@ -9,6 +9,16 @@ import { DatabaseClient } from '@/database/client';
 import { TestAuthSeeder } from '@/controllers/testAuthSeeder';
 import { AccessType, AuthProvider } from '@prisma/client';
 
+interface TestUserData {
+  googleId: string;
+  email: string;
+  name: string;
+  picture: string;
+  // Logical role for test setup (org membership, resource grants). NOT persisted to DB.
+  // Optional because fixed/sandbox/dev paths don't carry an explicit role.
+  role?: 'admin' | 'user';
+}
+
 /**
  * Test-only authentication endpoints that bypass Google OAuth.
  * @security NEVER expose in production!
@@ -16,17 +26,55 @@ import { AccessType, AuthProvider } from '@prisma/client';
 export class TestAuthController {
   private userService: UserService;
   private userSessionService: UserSessionService;
+  private static readonly TEST_USER_EMAIL_REGEX = /^test-(user|admin)-email-(\d+)@xyne-test\.local$/;
+
+  private static parseBooleanFlag(value: unknown): boolean | undefined {
+    if (value === true || value === 'true') {
+      return true;
+    }
+
+    if (value === false || value === 'false') {
+      return false;
+    }
+
+    return undefined;
+  }
+
+  // Auto-incrementing user index — starts from timestamp to avoid collisions after server restart.
+  private static userIndex = Date.now();
 
   // Shared org and workspace for all test users (created on first login)
   private static testOrgId: string | null = null;
   private static testWorkspaceId: string | null = null;
+
+  static generateTestUser(index: number, role: 'admin' | 'user' = 'user'): TestUserData {
+    return {
+      googleId: `test-${role}-id-${index}`,
+      email: `test-${role}-email-${index}@xyne-test.local`,
+      name: role === 'admin' ? `Test Admin ${index}` : `Test User ${index}`,
+      picture: `https://ui-avatars.com/api/?name=${role === 'admin' ? 'Admin' : 'User'}+${index}&background=random`,
+      role,
+    };
+  }
+
+  static getTestUserByEmail(email: string): TestUserData | null {
+    const match = email.match(TestAuthController.TEST_USER_EMAIL_REGEX);
+    if (!match) {
+      return null;
+    }
+
+    const role = match[1] as 'user' | 'admin';
+    const index = Number(match[2]);
+
+    return TestAuthController.generateTestUser(index, role);
+  }
 
   constructor() {
     this.userService = new UserService();
     this.userSessionService = new UserSessionService();
   }
 
-  private buildFixedTestUser() {
+  private buildFixedTestUser(): TestUserData {
     const email = process.env.TEST_AUTH_EMAIL || 'test-user@xyne-test.local';
     const name = process.env.TEST_AUTH_NAME || 'Test User';
 
@@ -52,14 +100,27 @@ export class TestAuthController {
         return;
       }
 
-      const isAdmin = req.body.isAdmin === true || req.query.isAdmin === 'true';
+      const setAsNewUser = TestAuthController.parseBooleanFlag(
+        req.query.setAsNewUser ?? req.body.setAsNewUser
+      );
+      const email = typeof req.query.email === 'string'
+        ? req.query.email
+        : typeof req.body.email === 'string'
+          ? req.body.email
+          : null;
+      const isAdminFlag = req.body.isAdmin === true || req.query.isAdmin === 'true';
       let useFixedUser = req.query.fixed === 'true' || req.body.fixed === true;
 
       if (config.isSandboxTestMode) {
         useFixedUser = true;
       }
 
-      let testUserData;
+      logger.info(
+        `[${requestId}] Test login initiated (email: ${email ?? 'auto'}, setAsNewUser: ${setAsNewUser ?? 'auto'}, fixed: ${useFixedUser})`
+      );
+
+      let testUserData: TestUserData;
+
       if (enableDevAuth && process.env.DEFAULT_ADMIN_EMAIL) {
         const adminEmail = process.env.DEFAULT_ADMIN_EMAIL;
         const emailUser = adminEmail.split('@')[0];
@@ -72,17 +133,28 @@ export class TestAuthController {
           email: adminEmail,
           name: name || 'Sandbox Admin',
           picture: 'https://ui-avatars.com/api/?name=Sandbox+Admin&background=random',
+          role: 'admin',
         };
+      } else if (email) {
+        // Gauge automation path: derive role + index from a regex-matched email.
+        const selectedTestUser = TestAuthController.getTestUserByEmail(email);
+
+        if (!selectedTestUser) {
+          res.status(400).json({
+            error: 'Invalid test user email',
+            message: 'Email must use the format test-(user|admin)-email-{n}@xyne-test.local',
+          });
+          return;
+        }
+
+        testUserData = selectedTestUser;
       } else if (useFixedUser) {
+        // Fixed test user (sandbox / explicit ?fixed=true).
         testUserData = this.buildFixedTestUser();
       } else {
-        const unique = Date.now();
-        testUserData = {
-          googleId: `test-user-id-${unique}`,
-          email: `test-user-email-${unique}@xyne-test.local`,
-          name: `Test User ${unique}`,
-          picture: `https://ui-avatars.com/api/?name=User+${unique}&background=random`,
-        };
+        // Auto-generated incrementing user.
+        TestAuthController.userIndex++;
+        testUserData = TestAuthController.generateTestUser(TestAuthController.userIndex);
       }
 
       let organization: any;
@@ -132,7 +204,7 @@ export class TestAuthController {
         TestAuthController.testOrgId = organization.orgId;
         TestAuthController.testWorkspaceId = workspace.id;
       } else {
-        // Subsequent test logins: reuse existing org + workspace, reuse fixed user
+        // Subsequent test logins: reuse existing org + workspace, reuse user if it already exists
         logger.info(`[${requestId}] Subsequent test login - adding user to existing org/workspace: ${testUserData.email}`);
 
         organization = await db.organization.findUnique({
@@ -184,13 +256,17 @@ export class TestAuthController {
         }
       }
 
-      logger.info(`[${requestId}] Org ${organization.orgId}, workspace ${workspace.id}, user ${user.id}`);
+      const effectiveIsNewUser = setAsNewUser ?? isNewUser;
+      logger.info(`[${requestId}] Org ${organization.orgId}, workspace ${workspace.id}, user ${user.id} (dbIsNew: ${isNewUser}, effectiveIsNew: ${effectiveIsNewUser})`);
 
       if (config.isSandboxTestMode) {
         await TestAuthSeeder.seedWorkspaceFixtures(workspace.id, user.id, requestId);
       }
 
-      if (isAdmin) {
+      // Grant admin access either when the resolved test user has admin role, or when an
+      // explicit isAdmin flag was passed in (matches main's body/query toggle).
+      const grantAdminAccess = testUserData.role === 'admin' || isAdminFlag;
+      if (grantAdminAccess) {
         try {
           // Grant admin access to all resources for comprehensive testing
           const essentialResources = [
@@ -204,6 +280,9 @@ export class TestAuthController {
             { name: 'SUPPORT', description: 'Support ticket management' },
             { name: 'PRODUCT-INSIGHTS', description: 'Product insights and analytics' },
             { name: 'PROJECTS', description: 'Project board management' },
+            { name: 'WORKSPACE', description: 'Workspace management access' },
+            { name: 'ORGANIZATIONS', description: 'Organization management access' },
+            { name: 'INSPECTOR', description: 'Inspector panel access' },
           ];
 
           for (const resourceData of essentialResources) {
@@ -322,7 +401,7 @@ export class TestAuthController {
         });
       }
 
-      if (isNewUser) {
+      if (effectiveIsNewUser) {
         res.cookie('is_new_user', 'true', {
           httpOnly: false,
           secure: false,
@@ -341,7 +420,7 @@ export class TestAuthController {
           id: user.id,
           email: user.email,
           name: user.name,
-          isNewUser,
+          isNewUser: effectiveIsNewUser,
           workspaceId: user.workspaceId,
           role: user.role,
           orgRole: orgMember.role,

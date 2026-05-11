@@ -321,6 +321,7 @@ const ChatList = ({
   return (
     <div
       data-component='ChatList'
+      data-testid='chat-list-loading'
       ref={scrollContainerRef}
       className={`flex-1 relative no-scrollbar min-h-0  ${isAnyEmojiPickerOpen ? 'overflow-hidden' : 'overflow-auto'}`}
     >

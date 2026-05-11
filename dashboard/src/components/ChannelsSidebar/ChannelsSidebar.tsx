@@ -100,7 +100,7 @@ const ChannelsSidebar = ({
             No channels available
           </div>
         ) : (
-          <div className='mt-2 space-y-0.5'>
+          <div className='mt-2 space-y-0.5' data-testid='channel-list'>
             {channels.map(channel => {
               const channelName = channel.name?.trim() || 'Unnamed Channel';
               return (

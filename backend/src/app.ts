@@ -551,46 +551,102 @@ export class App {
     // Initialize metrics
     initializeOpenTelemetry();
 
-    // Initialize database connection before starting server
-    await this.initializeDatabase();
+    // Phase 2 Optimization: Parallelize initialization in TEST environment only
+    const isTestEnv = config.isTestEnv || process.env.NODE_ENV === 'test';
 
-    // Initialize query service schema cache
-    logger.info('Initializing query service schema cache...');
-    await GenericFieldRegistry.initialize();
+    if (isTestEnv) {
+      logger.info('[TEST MODE] Starting parallel initialization of core services...');
 
-    // Initialize Redis connection
-    logger.info('Initializing Redis connection...');
-    await redisService.connect();
+      // Group 1: Parallelize independent operations (DB, Redis, Storage)
+      await Promise.all([
+        (async () => {
+          await this.initializeDatabase();
+        })(),
+        (async () => {
+          logger.info('Initializing Redis connection...');
+          await redisService.connect();
+        })(),
+        (async () => {
+          logger.info('Initializing storage bucket...');
+          await initStorage();
+        })(),
+      ]);
 
-    // Ensure storage bucket exists (required for fake-gcs-server in dev)
-    await initStorage();
+      logger.info('[TEST MODE] Core services initialized (DB, Redis, Storage)');
 
-    // Initialize and start metrics sync queue (Bull-based scheduling)
-    logger.info('Initializing metrics sync queue...');
-    await metricsSyncQueue.initialize();
-    await metricsSyncQueue.runInitialSync();
+      // Group 2: DB-dependent operations (run after DB is ready)
+      logger.info('Initializing query service schema cache...');
+      await GenericFieldRegistry.initialize();
 
-    // Initialize presence cleanup queue (Bull-based scheduling)
-    logger.info('Initializing presence cleanup queue...');
-    await presenceCleanupQueue.initialize();
+      // Group 3: Parallelize all Redis-dependent queue initializations
+      logger.info('[TEST MODE] Initializing queues in parallel...');
+      await Promise.all([
+        (async () => {
+          logger.info('Initializing metrics sync queue...');
+          await metricsSyncQueue.initialize();
+          await metricsSyncQueue.runInitialSync();
+        })(),
+        (async () => {
+          logger.info('Initializing presence cleanup queue...');
+          await presenceCleanupQueue.initialize();
+        })(),
+        (async () => {
+          logger.info('Initializing ETA deadline queue...');
+          await etaDeadlineQueue.initialize();
+        })(),
+        (async () => {
+          logger.info('Initializing stage ETA deadline queue...');
+          await stageEtaDeadlineQueue.initialize();
+        })(),
+        (async () => {
+          logger.info('Initializing assignment reactivation queue...');
+          await assignmentReactivationQueue.initialize();
+        })(),
+        (async () => {
+          logger.info('Initializing on-call rotation queue...');
+          await onCallRotationQueue.initialize();
+        })(),
+        (async () => {
+          logger.info('Initializing scheduled message queue...');
+          await scheduledMessageQueue.initialize();
+        })(),
+      ]);
 
-    logger.info('Initializing ETA deadline queue...');
-    await etaDeadlineQueue.initialize();
+      logger.info('[TEST MODE] All queues initialized');
+    } else {
+      // Production/Dev: Keep sequential initialization (proven stable)
+      await this.initializeDatabase();
 
-    logger.info('Initializing stage ETA deadline queue...');
-    await stageEtaDeadlineQueue.initialize();
+      logger.info('Initializing query service schema cache...');
+      await GenericFieldRegistry.initialize();
 
-    // Initialize assignment reactivation queue (Bull-based scheduling)
-    logger.info('Initializing assignment reactivation queue...');
-    await assignmentReactivationQueue.initialize();
+      logger.info('Initializing Redis connection...');
+      await redisService.connect();
 
-    // Initialize on-call rotation queue (Bull-based scheduling)
-    logger.info('Initializing on-call rotation queue...');
-    await onCallRotationQueue.initialize();
+      await initStorage();
 
-    // Initialize scheduled message queue (Bull-based scheduling)
-    logger.info('Initializing scheduled message queue...');
-    await scheduledMessageQueue.initialize();
+      logger.info('Initializing metrics sync queue...');
+      await metricsSyncQueue.initialize();
+      await metricsSyncQueue.runInitialSync();
+
+      logger.info('Initializing presence cleanup queue...');
+      await presenceCleanupQueue.initialize();
+
+      logger.info('Initializing ETA deadline queue...');
+      await etaDeadlineQueue.initialize();
+
+      logger.info('Initializing stage ETA deadline queue...');
+      await stageEtaDeadlineQueue.initialize();
+
+      logger.info('Initializing assignment reactivation queue...');
+      await assignmentReactivationQueue.initialize();
+
+      logger.info('Initializing on-call rotation queue...');
+      await onCallRotationQueue.initialize();
+
+      logger.info('Initializing scheduled message queue...');
+      await scheduledMessageQueue.initialize();
+    }
 
     // Initialize WebSocket server
     logger.info('Initializing WebSocket server...');

@@ -1,0 +1,17 @@
+# Creating channel canvas for user <userAlias>
+* Navigating to channel "channel-1" for user <userAlias>
+* waiting for "[data-testid='chat-list-loading']" to disappear
+* clicking on "[data-testid='channel-tab-canvas']"
+* clicking on text "New Canvas"
+* verifying user is redirected to "/canvas/*"
+* waiting for "[data-testid='canvas-editor']" to appear
+* storing current path as <userAlias> field "canvas-url"
+
+# Creating DM canvas for user <userAlias> with user <otherUserAlias>
+* Opening DM from user <otherUserAlias>
+* waiting for "[data-testid='chat-list-loading']" to disappear
+* clicking on "[data-testid='channel-tab-canvas']"
+* clicking on text "New Canvas"
+* verifying user is redirected to "/canvas/*"
+* waiting for "[data-testid='canvas-editor']" to appear
+* storing current path as <userAlias> field "canvas-dm-url"

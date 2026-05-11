@@ -1387,7 +1387,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [layoutView, availableColumns]);
 
   return (
-    <div className='flex flex-col h-full w-full bg-muted relative'>
+    <div
+      data-testid='projects-board-page'
+      className='flex flex-col h-full w-full bg-muted relative'
+    >
       {/* Header */}
       <div className='flex flex-col lg:flex-row flex-wrap lg:flex-nowrap lg:items-center justify-between px-4 py-3 bg-background flex-shrink-0 gap-3'>
         {/* Filters - Left Side */}

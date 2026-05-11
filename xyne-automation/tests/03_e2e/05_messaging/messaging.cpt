@@ -1,0 +1,58 @@
+# Creating DM with user <userAlias>
+* clicking on "[data-testid='nav-chat']"
+* clicking on "[data-testid='create-new-dm']"
+* waiting for "[data-testid='user-search-input']" to appear
+* typing stored user <userAlias> field "email" in "[data-testid='user-search-input']"
+* clicking on stored user <userAlias> field "name" in "[data-testid='user-search-results']"
+* waiting for "[data-testid='message-input']" to appear
+
+# Creating group DM with users <userAlias1> and <userAlias2>
+* clicking on "[data-testid='nav-chat']"
+* clicking on "[data-testid='create-new-dm']"
+* waiting for "[data-testid='user-search-input']" to appear
+* typing stored user <userAlias1> field "email" in "[data-testid='user-search-input']"
+* clicking on stored user <userAlias1> field "name" in "[data-testid='user-search-results']"
+* typing stored user <userAlias2> field "email" in "[data-testid='user-search-input']"
+* clicking on stored user <userAlias2> field "name" in "[data-testid='user-search-results']"
+* waiting for "[data-testid='message-input']" to appear
+
+# Opening group DM with users <userAlias1> and <userAlias2>
+* Creating group DM with users <userAlias1> and <userAlias2>
+
+# Sending stored message <messageAlias> in dm <dmAlias> for user <userAlias>
+* typing stored user <userAlias> dm <dmAlias> message <messageAlias> in "[data-testid='message-input']"
+* waiting for "[data-testid='send-message-button']" to be enabled
+* clicking on "[data-testid='send-message-button']"
+* waiting for stored user <userAlias> dm <dmAlias> message <messageAlias> to appear in "[data-testid='virtuoso-item-list']"
+
+# Verifying stored message <messageAlias> in dm <dmAlias> for user <userAlias> is visible in current conversation
+* waiting for network to be idle fast
+* waiting for "[data-testid='chat-list-loading']" to disappear fast
+* waiting for "[data-testid='virtuoso-item-list']" to appear fast
+* waiting for zero sync to settle fast
+* verifying stored user <userAlias> dm <dmAlias> message <messageAlias> is visible in "[data-testid='virtuoso-item-list']"
+
+# Sending stored message <messageAlias> in channel <channelAlias> for user <userAlias>
+* typing stored user <userAlias> channel <channelAlias> message <messageAlias> in "[data-testid='message-input']"
+* waiting for "[data-testid='send-message-button']" to be enabled
+* clicking on "[data-testid='send-message-button']"
+* waiting for stored user <userAlias> channel <channelAlias> message <messageAlias> to appear in "[data-testid='virtuoso-item-list']"
+
+# Navigating to chat
+* clicking on "[data-testid='nav-chat']"
+* waiting for "[data-testid='chat-list-loading']" to disappear fast
+
+# Opening DM from user <userAlias>
+* Navigating to chat
+* waiting for network to be idle fast
+* clicking on stored user <userAlias> field "name" in "[data-testid='dm-list']"
+* waiting for "[data-testid='message-input']" to appear fast
+* waiting for "[data-testid='chat-list-loading']" to disappear fast
+
+# Verifying stored message <messageAlias> in channel <channelAlias> for user <userAlias> is visible in current conversation
+* waiting for network to be idle fast
+* waiting for "[data-testid='chat-list-loading']" to disappear fast
+* waiting for "[data-testid='virtuoso-item-list']" to appear fast
+* waiting for zero sync to settle fast
+* verifying stored user <userAlias> channel <channelAlias> message <messageAlias> is visible in "[data-testid='virtuoso-item-list']"
+

@@ -16,6 +16,7 @@ export interface ActionMenuItem {
   disabled?: boolean;
   visible?: boolean;
   customContent?: ReactElement;
+  testId?: string;
 }
 
 interface CompactActionsMenuProps {
@@ -64,6 +65,7 @@ const CompactActionsMenu = ({
               }}
               disabled={item.disabled ?? false}
               className='justify-between'
+              data-testid={item.testId}
             >
               <span className='flex items-center'>
                 {item.icon && (

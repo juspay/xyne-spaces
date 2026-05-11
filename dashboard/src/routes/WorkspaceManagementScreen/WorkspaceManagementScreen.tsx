@@ -17,7 +17,7 @@ export const WorkspaceManagementScreen = (): ReactElement => {
   };
 
   return (
-    <div className='h-full bg-muted flex flex-col'>
+    <div data-testid='workspace-management-page' className='h-full bg-muted flex flex-col'>
       {/* Header */}
       <div className='flex items-center gap-4 px-6 py-4 bg-card border-b border-border'>
         <Button variant='ghost' size='sm' onClick={handleBack} className='gap-2'>

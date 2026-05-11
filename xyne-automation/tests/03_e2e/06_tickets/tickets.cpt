@@ -1,0 +1,185 @@
+# Setting up browser with user <userAlias> and admin <adminAlias>
+* Using browser
+* Logging in user <userAlias> on temp browser "user2-browser-1"
+* Ensuring user <adminAlias> is logged in
+
+# Setting up browser with admin <adminAlias>
+* Using browser
+* Ensuring user <adminAlias> is logged in
+
+# Setting up ticket test with user <userAlias> in channel <channelAlias> for admin <adminAlias>
+* Setting up browser with user <userAlias> and admin <adminAlias>
+* Navigating to channel <channelAlias> for user <adminAlias>
+
+# Setting up ticket test in channel <channelAlias> for admin <adminAlias>
+* Setting up browser with admin <adminAlias>
+* Navigating to channel <channelAlias> for user <adminAlias>
+
+# Setting up sub-ticket test with parent ticket <ticketAlias> for admin <adminAlias>
+* Setting up browser with user "user-2" and admin <adminAlias>
+* Creating ticket <ticketAlias> from chat for user <adminAlias>
+
+# Updating ticket <ticketAlias> status to <status> and priority to <priority> for user <userAlias>
+* clicking on stored user <userAlias> ticket <ticketAlias> card
+* clicking on "[data-testid='ticket-detail-status-selector']"
+* clicking on text <status> in "ul[role='listbox']"
+* clicking on "[data-testid='ticket-detail-priority-selector']"
+* clicking on text <priority> in "ul[role='listbox']"
+
+# Verifying ticket <ticketAlias> was created
+* clicking on "[data-testid='channel-tab-tickets']"
+* waiting for "[data-testid^='ticket-card-']" to appear
+
+# Creating ticket <ticketAlias> from chat for user <userAlias>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* Navigating to channel "channel-1" for user <userAlias>
+* waiting for "[data-testid='message-input']" to appear
+* typing "Bug report from chat for ticket creation flow" in "[data-testid='message-input']"
+* clicking on "[data-testid='send-options-menu']"
+* clicking on text "Create a ticket"
+* clicking on "[data-testid='send-message-button']"
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* typing stored user <userAlias> ticket <ticketAlias> field "description" in "[data-testid='ticket-description-input']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text "Medium" in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
+
+# Creating ticket <ticketAlias> from message hover for user <userAlias> with message <messageText> and priority <priority>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* waiting for "[data-testid='message-input']" to appear
+* typing <messageText> in "[data-testid='message-input']"
+* clicking on "[data-testid='send-message-button']"
+* waiting for message with text <messageText> to appear in virtuoso list
+* clicking hover action "[data-testid='hover-action-create-ticket']" on message with text <messageText>
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* clicking on "[data-testid='ticket-assignee-selector']"
+* typing stored user "user-2" field "name" in "[data-testid='ticket-assignee-selector-input']"
+* clicking on stored user "user-2" field "name" in "[data-testid='ticket-assignee-selector-options']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text <priority> in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-status-selector']"
+* clicking on text "Todo" in "[data-testid='ticket-status-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
+
+# Creating ticket <ticketAlias> from message hover with attachment for user <userAlias> with message <messageText> and priority <priority>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* waiting for "[data-testid='message-input']" to appear
+* typing <messageText> in "[data-testid='message-input']"
+* clicking on "[data-testid='send-message-button']"
+* waiting for message with text <messageText> to appear in virtuoso list
+* clicking hover action "[data-testid='hover-action-create-ticket']" on message with text <messageText>
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* attaching file to "[data-testid='ticket-attachment-input']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text <priority> in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-status-selector']"
+* clicking on text "Todo" in "[data-testid='ticket-status-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
+
+# Creating ticket <ticketAlias> from thread panel for user <userAlias> with message <messageText> and priority <priority>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* waiting for "[data-testid='message-input']" to appear
+* typing <messageText> in "[data-testid='message-input']"
+* clicking on "[data-testid='send-message-button']"
+* waiting for message with text <messageText> to appear in virtuoso list
+* clicking hover action "[data-testid='hover-action-reply-in-thread']" on message with text <messageText>
+* waiting for "[data-testid='thread-create-ticket-button']" to appear
+* clicking on "[data-testid='thread-create-ticket-button']"
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* typing stored user <userAlias> ticket <ticketAlias> field "description" in "[data-testid='ticket-description-input']"
+* clicking on "[data-testid='ticket-assignee-selector']"
+* typing stored user "user-2" field "name" in "[data-testid='ticket-assignee-selector-input']"
+* clicking on stored user "user-2" field "name" in "[data-testid='ticket-assignee-selector-options']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text <priority> in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-status-selector']"
+* clicking on text "Todo" in "[data-testid='ticket-status-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
+
+# Creating ticket <ticketAlias> from thread panel with attachment for user <userAlias> with message <messageText> and priority <priority>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* waiting for "[data-testid='message-input']" to appear
+* typing <messageText> in "[data-testid='message-input']"
+* clicking on "[data-testid='send-message-button']"
+* waiting for message with text <messageText> to appear in virtuoso list
+* clicking hover action "[data-testid='hover-action-reply-in-thread']" on message with text <messageText>
+* waiting for "[data-testid='thread-create-ticket-button']" to appear
+* clicking on "[data-testid='thread-create-ticket-button']"
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* typing stored user <userAlias> ticket <ticketAlias> field "description" in "[data-testid='ticket-description-input']"
+* attaching file to "[data-testid='ticket-attachment-input']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text <priority> in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-status-selector']"
+* clicking on text "Todo" in "[data-testid='ticket-status-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
+
+# Creating ticket <ticketAlias> from tickets tab for user <userAlias> with priority <priority>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* clicking on "[data-testid='channel-tab-tickets']"
+* clicking on "[data-testid='kanban-create-ticket-button']"
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* typing stored user <userAlias> ticket <ticketAlias> field "description" in "[data-testid='ticket-description-input']"
+* clicking on "[data-testid='ticket-assignee-selector']"
+* typing stored user "user-2" field "name" in "[data-testid='ticket-assignee-selector-input']"
+* clicking on stored user "user-2" field "name" in "[data-testid='ticket-assignee-selector-options']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text <priority> in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-status-selector']"
+* clicking on text "Todo" in "[data-testid='ticket-status-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
+
+# Creating ticket <ticketAlias> from tickets tab with attachment for user <userAlias> with priority <priority>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* clicking on "[data-testid='channel-tab-tickets']"
+* clicking on "[data-testid='kanban-create-ticket-button']"
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* typing stored user <userAlias> ticket <ticketAlias> field "description" in "[data-testid='ticket-description-input']"
+* attaching file to "[data-testid='ticket-attachment-input']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text <priority> in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-status-selector']"
+* clicking on text "Todo" in "[data-testid='ticket-status-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
+
+# Creating sub-ticket <ticketAlias> for user <userAlias> with priority <priority>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* clicking on "[data-testid='create-sub-ticket-button']"
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* typing stored user <userAlias> ticket <ticketAlias> field "description" in "[data-testid='ticket-description-input']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text <priority> in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-status-selector']"
+* clicking on text "Todo" in "[data-testid='ticket-status-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
+
+# Creating sub-ticket <ticketAlias> with attachment for user <userAlias> with priority <priority> and assignee <assigneeAlias>
+* ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* clicking on "[data-testid='create-sub-ticket-button']"
+* waiting for "[data-testid='ticket-title-input']" to appear
+* typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
+* typing stored user <userAlias> ticket <ticketAlias> field "description" in "[data-testid='ticket-description-input']"
+* clicking on "[data-testid='ticket-assignee-selector']"
+* typing stored user <assigneeAlias> field "name" in "[data-testid='ticket-assignee-selector-input']"
+* clicking on stored user <assigneeAlias> field "name" in "[data-testid='ticket-assignee-selector-options']"
+* attaching file to "[data-testid='ticket-attachment-input']"
+* clicking on "[data-testid='ticket-priority-selector']"
+* clicking on text <priority> in "[data-testid='ticket-priority-selector-options']"
+* clicking on "[data-testid='ticket-submit-button']"
+* waiting for "[data-testid='ticket-title-input']" to disappear
