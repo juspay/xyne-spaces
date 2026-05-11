@@ -262,7 +262,10 @@ export class AuthV2Controller {
         } catch (_e) {}
       }
 
-      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo, undefined, isNy);
+      // Get invitationId from query (for invitation flow)
+      const invitationId = req.query.invitationId as string | undefined;
+      
+      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo, undefined, isNy, invitationId);
 
       await pkceServiceV2.storeVerifier(state, codeVerifier);
 
@@ -339,10 +342,20 @@ export class AuthV2Controller {
         return;
       }
 
+      // For Electron: always relay code+state back to the Electron app without consuming the state,
+      // PKCE verifier, or auth code. The actual token exchange (and invitation handling) happens
+      // in exchangeElectronCode so the accept-invitation UI runs inside Electron, not the browser.
       if (stateData.platform === 'electron') {
-        const frontendUrl = this.getFrontendUrl(req);
-        const launchUrl = `${frontendUrl}/launch?code=${encodeURIComponent(code as string)}&state=${encodeURIComponent(state as string)}`;
-        logger.info(`[${requestId}] Redirecting to Frontend launch page`);
+        const frontendUrl = stateData.redirectTo ?? this.getFrontendUrl(req);
+        const launchParams = new URLSearchParams({
+          code: code as string,
+          state: state as string,
+        });
+        if (stateData.invitationId) {
+          launchParams.set('invitationId', stateData.invitationId);
+        }
+        const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
+        logger.info(`[${requestId}] Redirecting to Frontend launch page: ${launchUrl}`);
         res.redirect(launchUrl);
         return;
       }
@@ -411,7 +424,13 @@ export class AuthV2Controller {
       let workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       logger.info(`[${requestId}] [DEBUG] User has ${workspaces.length} workspace(s) before invitation check`);
 
-      const pendingInvitationId = req.cookies?.pending_invitation_id as string | undefined;
+      // Check for pending invitation from cookie (web) or OAuth state (electron/mobile)
+      const cookieInvitationId = req.cookies?.pending_invitation_id as string | undefined;
+      const stateInvitationId = stateData.invitationId;
+      
+      // At this point platform is always 'web' | 'mobile' (electron is handled above and returns early).
+      // Prefer cookie (set by the browser invite redirect) but fall back to state (set by mobile/other flows).
+      const pendingInvitationId = cookieInvitationId || stateInvitationId;
 
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
@@ -631,7 +650,7 @@ export class AuthV2Controller {
     try {
       logger.info(`[${requestId}] Electron code exchange initiated`);
 
-      const { code, state } = req.body;
+      const { code, state, invitationId } = req.body;
 
       if (!code || !state) {
         logger.error(`[${requestId}] Missing code or state`);
@@ -734,6 +753,36 @@ export class AuthV2Controller {
 
       const isProduction = process.env.NODE_ENV === 'production';
 
+      // If an invitation is pending: set google_access_token so the Electron renderer can later
+      // call acceptInvitation + loginWorkspace, then return a hasInvitation signal. The renderer
+      // will navigate to /invite?loginComplete=true inside the app — no browser involvement.
+      const effectiveInvitationId = stateData.invitationId || invitationId;
+      if (effectiveInvitationId) {
+        logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
+        res.cookie('google_access_token', JSON.stringify({
+          user: googleUserData,
+          provider: 'google',
+          refreshToken: refresh_token,
+          accessToken: access_token,
+        }), {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          path: '/',
+          maxAge: 10 * 60 * 1000,
+        });
+        res.status(200).json({
+          success: true,
+          hasInvitation: true,
+          invitationId: effectiveInvitationId,
+          loggedInEmail: googleUserData.email,
+          email: googleUserData.email,
+          name: googleUserData.name,
+          picture: googleUserData.picture,
+        });
+        return;
+      }
+
       /**
        * AUTO-LOGIN SINGLE WORKSPACE USERS (Electron)
        * Mirrors web and mobile behavior exactly - auto-login when user has exactly 1 workspace
@@ -802,7 +851,7 @@ export class AuthV2Controller {
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });
 
-      logger.info(`[${requestId}] Electron code exchange successful`);
+      logger.info(`[${requestId}] Electron code exchange successful (multi-workspace or new user)`);
       res.status(200).json({
         success: true,
         email: googleUserData.email,

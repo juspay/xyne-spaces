@@ -777,9 +777,23 @@ export const authMachine = createMachine(
 
         try {
           const isElectron = typeof window.electronAPI?.openExternal === 'function';
-          const loginUrl = isElectron
+
+          // Read invitationId from current URL (for invitation flow)
+          const urlParams = new URLSearchParams(window.location.search);
+          const urlInvitationId = urlParams.get('invitationId');
+
+          // Fallback to localStorage if not in URL (for Electron flow after authMachine navigation)
+          const storageInvitationId = localStorage.getItem('pending_invitation_id');
+          const invitationId = urlInvitationId || storageInvitationId;
+
+          let loginUrl = isElectron
             ? `${API_BASE_URL}/auth/login?platform=electron`
             : `${API_BASE_URL}/auth/login`;
+
+          // Add invitationId to login URL if present
+          if (invitationId) {
+            loginUrl += `${isElectron ? '&' : '?'}invitationId=${encodeURIComponent(invitationId)}`;
+          }
 
           if (isElectron && window.electronAPI) {
             window.electronAPI.openExternal(loginUrl);
@@ -807,9 +821,19 @@ export const authMachine = createMachine(
 
         try {
           const isElectron = typeof window.electronAPI?.openExternal === 'function';
-          const loginUrl = isElectron
+
+          // Read invitationId from current URL (for invitation flow)
+          const urlParams = new URLSearchParams(window.location.search);
+          const invitationId = urlParams.get('invitationId');
+
+          let loginUrl = isElectron
             ? `${API_BASE_URL}/v2/auth/microsoft/login?platform=electron`
             : `${API_BASE_URL}/v2/auth/microsoft/login`;
+
+          // Add invitationId to login URL if present
+          if (invitationId) {
+            loginUrl += `&invitationId=${encodeURIComponent(invitationId)}`;
+          }
 
           if (isElectron && window.electronAPI) {
             window.electronAPI.openExternal(loginUrl);
