@@ -51,6 +51,7 @@ type PageState =
   | { status: 'email_mismatch'; loggedInEmail: string; invitedEmail: string }
   | { status: 'ready'; invitation: InvitationDetails }
   | { status: 'accepting' }
+  | { status: 'accepted'; workspaceId: string; invitation: InvitationDetails }
   | { status: 'expired'; message: string }
   | { status: 'error'; message: string };
 
@@ -76,8 +77,10 @@ export const AcceptInvitation = (): ReactElement => {
     }
 
     document.cookie = `pending_invitation_id=${invitationId}; path=/; max-age=600; SameSite=Lax`;
+    // ALSO store in localStorage so it survives navigation
+    localStorage.setItem('pending_invitation_id', invitationId);
     authActor.send({ type: 'LOGOUT' });
-    void navigate('/auth');
+    void navigate(`/auth?invitationId=${invitationId}`);
   }, [loginComplete, invitationId, navigate]);
 
   // Post-OAuth return: verify invitation and check logged-in email matches
@@ -163,8 +166,13 @@ export const AcceptInvitation = (): ReactElement => {
       // switch) goes through the normal auth flow rather than hitting this stale invitation.
       Cookies.remove('pending_invitation_id', { path: '/' });
 
-      // Step 4: Full page reload directly to workspace — authMachine validates JWT via cookie
-      window.location.replace(`/${workspaceId}`);
+      // Show "Open in App" screen instead of redirecting immediately
+      // Include invitation data so we can show the success screen
+      if (state.status === 'ready') {
+        setState({ status: 'accepted', workspaceId, invitation: state.invitation });
+      } else {
+        setState({ status: 'accepted', workspaceId, invitation: {} as InvitationDetails });
+      }
     } catch (error) {
       if (axios.isAxiosError<ApiErrorResponse>(error)) {
         setState({
@@ -252,6 +260,20 @@ export const AcceptInvitation = (): ReactElement => {
         </div>
       </div>
     );
+  }
+
+  // state.status === 'accepted'
+  if (state.status === 'accepted') {
+    const isInElectron = typeof window.electronAPI?.openExternal === 'function';
+    if (isInElectron) {
+      // In Electron: JWT cookies are already set in session — go directly to the workspace.
+      // authMachine will run validateSession (user_id is in localStorage) and land authenticated.
+      window.location.href = `/${state.workspaceId}`;
+    } else {
+      // In browser: open Electron app via /launch deep-link so the user lands in the desktop app.
+      window.location.href = `/launch?path=${state.workspaceId}`;
+    }
+    return <></>;
   }
 
   // state.status === 'ready'

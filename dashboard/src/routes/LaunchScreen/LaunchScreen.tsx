@@ -17,7 +17,22 @@ const LaunchScreen = (): ReactElement => {
 
   const code = searchParams.get('code');
   const state = searchParams.get('state');
-  const path = searchParams.get('path'); // e.g. /chat/channel/123
+  const path = searchParams.get('path'); // e.g. /chat/channel/123 or invite?workspaceId=xxx&invitationId=yyy
+  const invitationIdParam = searchParams.get('invitationId');
+
+  // Parse invitationId from path if embedded (e.g., "invite?workspaceId=xxx&invitationId=yyy")
+  // The path might be URL-encoded, so we need to decode it first
+  let invitationId = invitationIdParam;
+  if (path) {
+    const decodedPath = decodeURIComponent(path);
+    if (decodedPath.includes('invitationId=')) {
+      const pathParams = new URLSearchParams(decodedPath.split('?')[1] || '');
+      const pathInvitationId = pathParams.get('invitationId');
+      if (pathInvitationId) {
+        invitationId = pathInvitationId;
+      }
+    }
+  }
 
   // Construct the deep link URL
   let deepLink = `${DEEP_LINK_PROTOCOL}://`;
@@ -25,6 +40,9 @@ const LaunchScreen = (): ReactElement => {
 
   if (code && state) {
     deepLink += `auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+    if (invitationId) {
+      deepLink += `&invitationId=${encodeURIComponent(invitationId)}`;
+    }
   } else if (path) {
     // Remove leading slash if present to avoid double slashes if protocol already has //
     // But xyne-spaces:// + /chat is xyne-spaces:///chat which is valid,

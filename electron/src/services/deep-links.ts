@@ -104,6 +104,9 @@ async function handleDeepLink(url: string): Promise<void> {
       const urlObj = new URL(url);
       const code = urlObj.searchParams.get('code');
       const state = urlObj.searchParams.get('state');
+      const invitationId = urlObj.searchParams.get('invitationId');
+
+      log.info('[DeepLinks] Auth callback received:', { code: !!code, state: !!state, invitationId });
 
       if (!code || !state) return;
 
@@ -114,7 +117,7 @@ async function handleDeepLink(url: string): Promise<void> {
         return;
       }
 
-      await exchangeAuthCode(code, state);
+      await exchangeAuthCode(code, state, invitationId);
     } catch (error) {
       Logger.logError(EnrollmentEvent.DEEP_LINK_HANDLING_FAILED, error);
       log.error('Failed to handle deep link:', error);
@@ -193,7 +196,97 @@ async function handleDeepLink(url: string): Promise<void> {
     return;
   }
 
-  // 3. Generic Navigation Case
+  // 3. Invite Deep Link Case
+  // e.g. xyne-spaces://invite?workspaceId=xxx&invitationId=yyy
+  if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://invite`)) {
+    try {
+      const urlObj = new URL(url);
+      const workspaceId = urlObj.searchParams.get('workspaceId');
+      const invitationId = urlObj.searchParams.get('invitationId');
+
+      log.info('[DeepLinks] Invite deep link received:', { workspaceId, invitationId });
+
+      // Wait for mainWindow to be available (app might be launching)
+      const waitForWindow = async (): Promise<BrowserWindow | null> => {
+        if (mainWindow) return mainWindow;
+        
+        // Wait up to 10 seconds for window to be created
+        for (let i = 0; i < 100; i++) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          if (mainWindow) return mainWindow;
+        }
+        return null;
+      };
+
+      const window = await waitForWindow();
+
+      if (!window) {
+        log.error('[DeepLinks] No window available after timeout for invite deep link');
+        return;
+      }
+
+      if (invitationId) {
+        // Set the invitation cookie directly in Electron
+        const cookie = {
+          url: config.BACKEND_URL,
+          name: 'pending_invitation_id',
+          value: invitationId,
+          httpOnly: true,
+          secure: config.BACKEND_URL.startsWith('https'),
+          sameSite: 'lax' as const,
+          expirationDate: Math.floor(Date.now() / 1000) + 600, // 10 minutes
+        };
+
+        try {
+          await session.defaultSession.cookies.set(cookie);
+          log.info('[DeepLinks] Set pending_invitation_id cookie successfully:', invitationId);
+          
+          // Verify the cookie was set
+          const cookies = await session.defaultSession.cookies.get({
+            url: config.BACKEND_URL,
+            name: 'pending_invitation_id'
+          });
+          log.info('[DeepLinks] Verified cookies:', cookies.map(c => c.name));
+        } catch (cookieError) {
+          log.error('[DeepLinks] Failed to set cookie:', cookieError);
+        }
+      }
+
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      
+      // Set invitationId in localStorage BEFORE navigation
+      // This ensures it's available even if auth redirect happens
+      if (invitationId) {
+        window.webContents.executeJavaScript(`
+          localStorage.setItem('pending_invitation_id', '${invitationId}');
+        `);
+      }
+      
+      // Navigate to invite page with params
+      const pathStr = invitationId 
+        ? `/invite?workspaceId=${workspaceId}&invitationId=${invitationId}`
+        : `/invite?workspaceId=${workspaceId}`;
+      
+      log.info('[DeepLinks] Navigating to:', pathStr);
+      window.webContents.send('navigate-to', pathStr);
+      
+      Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, {
+        url: 'invite',
+        workspaceId,
+        hasInvitationId: !!invitationId,
+      });
+    } catch (error) {
+      Logger.logError(EnrollmentEvent.DEEP_LINK_HANDLING_FAILED, error, {
+        type: 'invite',
+      });
+      log.error('[DeepLinks] Failed to handle invite deep link:', error);
+    }
+    return;
+  }
+
+  // 4. Generic Navigation Case
   // e.g. xyne-spaces://chat/123 or xyne-spaces:///chat/123
   if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://`)) {
     // Strip protocol
@@ -218,8 +311,9 @@ async function handleDeepLink(url: string): Promise<void> {
   }
 }
 
-function exchangeAuthCode(code: string, state: string): Promise<void> {
+function exchangeAuthCode(code: string, state: string, invitationId: string | null): Promise<void> {
   Logger.info(EnrollmentEvent.AUTH_EXCHANGE_START);
+  log.info('[exchangeAuthCode] Starting with invitationId:', invitationId);
   
   return new Promise(async (resolve) => {    
     const url = `${config.BACKEND_URL}/api/auth/exchange-electron`;
@@ -254,6 +348,27 @@ function exchangeAuthCode(code: string, state: string): Promise<void> {
           try {
             const responseBody = await parseResponseBody(response);
             Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS);
+
+            // If the backend signals a pending invitation, navigate the renderer to the
+            // in-app accept page. The accept page calls acceptInvitation + loginWorkspace
+            // which sets JWT cookies; the subsequent full-page reload completes auth normally.
+            if (responseBody.hasInvitation) {
+              const invitePath = `/invite?loginComplete=true&invitationId=${encodeURIComponent(responseBody.invitationId)}&loggedInEmail=${encodeURIComponent(responseBody.loggedInEmail)}`;
+              log.info('[exchangeAuthCode] Invitation flow — navigating renderer to:', invitePath);
+              // Use executeJavaScript to set window.location.href directly.
+              // We cannot use 'navigate-to' IPC here because NotificationHandler (which handles it)
+              // is only mounted inside ProtectedRoute and is unavailable during 'authenticating' state.
+              // A full-page reload cleanly resets authMachine to unauthenticated, after which
+              // React Router renders /invite?loginComplete=true and AcceptInvitation takes over.
+              mainWindow?.show();
+              mainWindow?.webContents.executeJavaScript(
+                `window.location.href = ${JSON.stringify(invitePath)}`
+              ).catch((err: Error) => {
+                log.error('[exchangeAuthCode] Failed to navigate to invite page:', err);
+              });
+              resolve();
+              return;
+            }
 
             log.info('[exchangeAuthCode] Auth exchange successful, notifying main window with workspace data.');
             setTimeout(() => {
@@ -292,7 +407,7 @@ function exchangeAuthCode(code: string, state: string): Promise<void> {
         resolve();
       });
 
-      request.write(JSON.stringify({ code, state }));
+      request.write(JSON.stringify({ code, state, invitationId }));
       request.end();
       
     } catch (error) {

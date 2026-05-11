@@ -11,6 +11,7 @@ interface OAuthState {
   createdAt: number;
   redirectTo?: string;
   isNy?: boolean;
+  invitationId?: string;
 }
 
 class OAuthStateService {
@@ -25,6 +26,7 @@ class OAuthStateService {
     redirectTo?: string,
     provider: OAuthProvider = 'google',
     isNy?: boolean,
+    invitationId?: string,
   ): Promise<string> {
     const { redisService } = await import('./redisService');
     const client = redisService.getClient();
@@ -39,6 +41,7 @@ class OAuthStateService {
       createdAt: Date.now(),
       ...(redirectTo !== undefined ? { redirectTo } : {}),
       ...(isNy ? { isNy } : {}),
+      ...(invitationId ? { invitationId } : {}),
     };
 
     await client.setex(
