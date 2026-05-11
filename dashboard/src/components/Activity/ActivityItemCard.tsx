@@ -1,5 +1,6 @@
 import React, { createContext, ReactElement, ReactNode, useContext } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { usePath } from '../../hooks/usePath';
 import { useZero } from '../../hooks/useZero';
 import { Activity, ChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
@@ -57,6 +58,9 @@ export const ActivityItemCard = ({
   const context = useAuthContextValues();
   const zero = useZero();
   const { isMobile } = usePlatform();
+  const location = useLocation();
+  const currentPathname = usePath();
+  const isSelectedPath = `${currentPathname}${location.search}${location.hash}` === targetPath;
   const nofocusRef = useContext(NofocusRefContext);
 
   const channel = useChannel(channelId || '');
@@ -122,6 +126,7 @@ export const ActivityItemCard = ({
           : !activity.isRead
             ? 'bg-muted hover:bg-accent'
             : 'bg-card hover:bg-muted',
+        isSelectedPath && 'bg-accent',
         className,
       )}
       data-activity-id={activity.id}
