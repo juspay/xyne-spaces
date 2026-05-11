@@ -2326,26 +2326,54 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
             </Button>
             <div className='flex items-center gap-3'>
-              <Button
-                type='submit'
-                loading={form.state.isSubmitting}
-                disabled={form.state.isSubmitting || !isFormReadyForSubmit}
-                className={cn(
-                  'px-3 rounded-lg h-8',
-                  'text-white text-sm font-medium bg-[var(--ticket-accent)] hover:bg-[var(--ticket-accent)]/90',
-                )}
-                data-testid='ticket-submit-button'
-                data-track-category='TICKETS'
-                data-track-name='SUBMIT_CREATE_TICKET_MODAL'
-                data-track-metadata={JSON.stringify({
-                  boardId: selectedBoardId,
-                  channelId,
-                  hasAttachments: allAttachments.length > 0,
-                  isFromAI,
-                })}
-              >
-                {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
-              </Button>
+              {!formValues?.boardId?.trim() ? (
+                <Tooltip content='Select a board first' side='top'>
+                  <span className='cursor-not-allowed'>
+                    <Button
+                      type='submit'
+                      loading={form.state.isSubmitting}
+                      disabled={form.state.isSubmitting || !isFormReadyForSubmit}
+                      className={cn(
+                        'px-3 rounded-lg h-8',
+                        'text-white text-sm font-medium bg-[var(--ticket-accent)] hover:bg-[var(--ticket-accent)]/90',
+                        'pointer-events-none',
+                      )}
+                      data-testid='ticket-submit-button'
+                      data-track-category='TICKETS'
+                      data-track-name='SUBMIT_CREATE_TICKET_MODAL'
+                      data-track-metadata={JSON.stringify({
+                        boardId: selectedBoardId,
+                        channelId,
+                        hasAttachments: allAttachments.length > 0,
+                        isFromAI,
+                      })}
+                    >
+                      {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button
+                  type='submit'
+                  loading={form.state.isSubmitting}
+                  disabled={form.state.isSubmitting || !isFormReadyForSubmit}
+                  className={cn(
+                    'px-3 rounded-lg h-8',
+                    'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
+                  )}
+                  data-testid='ticket-submit-button'
+                  data-track-category='TICKETS'
+                  data-track-name='SUBMIT_CREATE_TICKET_MODAL'
+                  data-track-metadata={JSON.stringify({
+                    boardId: selectedBoardId,
+                    channelId,
+                    hasAttachments: allAttachments.length > 0,
+                    isFromAI,
+                  })}
+                >
+                  {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
+                </Button>
+              )}
               {/* Hidden file input */}
               <input
                 ref={fileInputRef}
