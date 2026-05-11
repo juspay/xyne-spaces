@@ -7,6 +7,7 @@ import { useUsersPresence } from '../../../hooks/usePresence';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import Avatar from '../Avatar/Avatar';
 import Button from '../Button';
+import { StatusIndicator } from '../StatusIndicator';
 
 interface SearchParticipantsProps {
   options: User[];
@@ -282,6 +283,14 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                               <span className='w-1.5 h-1.5 bg-green-600 rounded-full'></span>
                             ) : (
                               <span className='w-1.5 h-1.5 border border-muted-foreground rounded-full'></span>
+                            )}
+                            {(user.statusEmoji || user.statusContent) && (
+                              <StatusIndicator
+                                statusEmoji={user.statusEmoji}
+                                statusContent={user.statusContent}
+                                statusExpiryAt={user.statusExpiryAt}
+                                size='sm'
+                              />
                             )}
                             <span
                               className={`text-sm ${deactivated ? 'text-muted-foreground' : 'text-muted-foreground'}`}

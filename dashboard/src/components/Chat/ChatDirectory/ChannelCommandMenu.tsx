@@ -56,7 +56,7 @@ import {
 } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import { useAllChannels } from '../../../hooks/useChannels';
-import { useUsers, useUserSearch } from '../../../hooks/useUsers';
+import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
@@ -66,6 +66,7 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 import { LexicalSearchInput } from './LexicalSearchInput';
+import { StatusIndicator } from '../../ui/StatusIndicator';
 import {
   useSearchMetrics,
   filterChannelsBySearchableNames,
@@ -102,9 +103,11 @@ const ChannelCommandItem = ({
 }): ReactElement | null => {
   const { displayName } = useChannelDisplayName(channel, currentUserID);
   const { isMobile } = usePlatform();
-
-  // No inline filter needed: both regular channels and DMs are pre-filtered upstream
-  // in useSearchMetrics (regular channels via fuzzy searchChannels, DMs via searchableNames).
+  const otherUserId = isOneToOneDMChannel(channel.scopeType)
+    ? (parseDMParticipantIds(channel).find(id => id !== currentUserID) ?? '')
+    : '';
+  const targetUser = useUser(otherUserId);
+  const hasStatus = targetUser && (targetUser.statusEmoji || targetUser.statusContent);
 
   return (
     <Command.Item
@@ -118,9 +121,19 @@ const ChannelCommandItem = ({
       <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
         {getChannelIcon(channel)}
       </div>
-      <span className='flex-1 min-w-0 text-left text-sm font-medium text-foreground truncate'>
-        {displayName}
-      </span>
+      <div className='flex-1 min-w-0 flex items-center gap-1'>
+        <span className='text-left text-sm font-medium text-foreground truncate'>
+          {displayName}
+        </span>
+        {hasStatus && (
+          <StatusIndicator
+            statusEmoji={targetUser.statusEmoji}
+            statusContent={targetUser.statusContent}
+            statusExpiryAt={targetUser.statusExpiryAt}
+            size='sm'
+          />
+        )}
+      </div>
       {isSelected ? (
         <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
           <Check size={10} />
