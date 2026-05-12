@@ -685,6 +685,14 @@ export enum DelayedMessageStatus {
   CANCELLED = 'CANCELLED',
 }
 
+// @ts-ignore TS1294
+export enum AttachmentUploadStatus {
+  PENDING = 'PENDING',
+  STARTED = 'STARTED',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+}
+
 // Define tables
 
 export const agentTable = table('agents')
@@ -1386,6 +1394,7 @@ export const messageAttachmentTable = table('message_attachments')
     conversationId: string().optional(),
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
+    uploadStatus: enumeration<AttachmentUploadStatus>(),
   })
   .primaryKey('id');
 

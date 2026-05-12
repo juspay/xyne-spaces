@@ -86,6 +86,12 @@ const getFileExtension = (name: string): string => {
   return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
 };
 import { preloadEmojiData } from '../../../utils/emojiLookup';
+import { useAuth } from '../../../hooks/useAuth';
+import { useSelf } from '../../../hooks/useUsers';
+import { addPendingMessage, removePendingMessage } from '../../../machines/pendingMessageMachine';
+import type { PendingAttachment } from '../../../machines/pendingMessageMachine';
+import { getFileDimensions } from '../utils/files';
+import { untrackUploadingIds } from '../../../utils/attachmentUploadTracker';
 
 const lowlight = createLowlight(common);
 
@@ -183,6 +189,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       addDroppedFiles: providerAddDroppedFiles,
       removeDroppedFile: providerRemoveDroppedFile,
       clearDroppedFiles: providerClearDroppedFiles,
+      clearDraftMessageOnly: providerClearDraftMessageOnly,
       getDroppedFilesForEntity,
     } = useDraftAttachments();
     const { enterSendsMessage } = useEnterSendsMessage();
@@ -195,11 +202,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       new Map(),
     );
 
+    // Ref to track if we're currently in the send process
+    const isSendingRef = useRef(false);
+    // Ref to skip onContentChange when clearing editor as part of send
+    const skipNextContentChangeRef = useRef(false);
+
     // Load attachments from provider when channelId or conversationId changes
     React.useEffect(() => {
       const loadAttachments = () => {
         if (!channelId) {
           setAttachmentsMap(new Map());
+          return;
+        }
+
+        // This prevents completed attachments from reappearing briefly
+        if (isSendingRef.current) {
           return;
         }
 
@@ -247,6 +264,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isCanvasAttachmentModalOpen, setIsCanvasAttachmentModalOpen] = useState(false);
 
     const { isMobile } = usePlatform();
+    const { user } = useAuth();
+    const selfUser = useSelf();
 
     const hasSendableContent = React.useMemo(
       () => !!content || allAttachments.length > 0 || !!attachedCanvas,
@@ -269,6 +288,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     const handleTyping = onTyping;
 
+    // Ref to track pending upload promises
+    const pendingUploadsRef = useRef<
+      Map<
+        string,
+        Promise<{
+          successful: Array<{ attachmentId: string; file: File }>;
+          failed: Array<{ attachmentId: string; file: File; fileName: string; error: string }>;
+          allSucceeded: boolean;
+        }>
+      >
+    >(new Map());
+
     // Helper function to upload a single file as draft attachment
     const addDraftAttachments = useCallback(
       async (files: File[]) => {
@@ -278,7 +309,27 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }
 
         try {
-          await providerAddDroppedFiles(files, channelId, conversationId);
+          const uploadPromise = providerAddDroppedFiles(files, channelId, conversationId);
+
+          // Store the promise so handleSend can await it
+          // We use a unique key for this batch
+          const batchId = `${Date.now()}-${Math.random()}`;
+          pendingUploadsRef.current.set(batchId, uploadPromise);
+
+          const result = await uploadPromise;
+
+          // Remove from pending once complete
+          pendingUploadsRef.current.delete(batchId);
+
+          // Show toast for partial failures
+          if (!result.allSucceeded && result.failed.length > 0) {
+            const failedNames = result.failed.map(f => f.fileName).join(', ');
+            toast.error(`Failed to upload: ${failedNames}`, {
+              description: 'Some files could not be uploaded. Please try again.',
+            });
+          }
+
+          return result;
         } catch (error) {
           console.error('Failed to upload file:', error);
           logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
@@ -289,6 +340,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           toast.error('Failed to upload file', {
             description: error instanceof Error ? error.message : 'Unknown error',
           });
+          throw error;
         }
       },
       [providerAddDroppedFiles, channelId, conversationId],
@@ -519,8 +571,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         handleTyping?.();
         notifyTyping(); // Notify the typing state context
 
-        const htmlContent = sanitizeHtmlContent(editor.getHTML());
-        onContentChange?.(htmlContent, editor.getText());
+        // Skip notifying parent when we're clearing as part of send
+        // to prevent race conditions with form state
+        if (!skipNextContentChangeRef.current) {
+          const htmlContent = sanitizeHtmlContent(editor.getHTML());
+          onContentChange?.(htmlContent, editor.getText());
+        }
 
         updateEmojiSizeClass(editor);
       },
@@ -856,31 +912,184 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       if (!hasSendableContent) return;
 
       setIsSending(true);
-      try {
-        // Filter to only send actual File objects
-        // UploadedFile metadata-only attachments are already stored and referenced by ID
-        const filesToSend = allAttachments
-          .map(a => a.file)
-          .filter((f): f is File => f instanceof File);
+      isSendingRef.current = true;
 
-        // Insert canvas link into editor if attached
-        if (attachedCanvas) {
-          const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.viewAccessId || attachedCanvas.id}`;
-          // Insert as plain link - platform will unfurl to show preview
-          editor?.commands.insertContent(` ${canvasLink}`);
+      const snapshotAttachments = [...allAttachments];
+
+      // Pass attachmentIds so mutators don't need to query draft
+      const attachmentIds = snapshotAttachments.map(a => a.attachmentId);
+
+      const fileAttachments = snapshotAttachments.filter(({ file }) => file instanceof File);
+
+      // Untrack all attachment IDs immediately when sending
+      // to ensure InitialStateLoader userDraft query doesn't make
+      // Pending attachments show up in InputBox after we've already pressed send
+      const attachmentIdsToUntrack = fileAttachments.map(a => a.attachmentId);
+      untrackUploadingIds(attachmentIdsToUntrack);
+
+      // Snapshot the final message content (including any canvas link) BEFORE
+      // clearing the editor to display it in the optimistic bubble.
+      let snapshotHtml = htmlContent;
+      let snapshotPlainText = plainText;
+      if (attachedCanvas) {
+        const canvasLink = `${window.location.origin}/chat/canvas/${attachedCanvas.viewAccessId || attachedCanvas.id}`;
+        snapshotHtml = `${htmlContent} ${canvasLink}`;
+        snapshotPlainText = `${plainText} ${canvasLink}`;
+      }
+
+      // Clear the editor immediately so user can compose new messages
+      skipNextContentChangeRef.current = true;
+      editor.commands.setContent('');
+      setContent('');
+      setAttachedCanvas(null);
+      setAttachmentsMap(new Map());
+      // Reset the flag after the update cycle
+      requestAnimationFrame(() => {
+        skipNextContentChangeRef.current = false;
+      });
+
+      // Clear only the draft message (not attachments) so new drafts don't get polluted.
+      // The attachments are kept in Zero so the mutator can transfer them to the sent message.
+      if (channelId) {
+        await providerClearDraftMessageOnly(channelId, conversationId ?? null);
+      }
+
+      // Release the composer lock immediately after clearing the draft
+      // so users can start composing their next message while uploads happen in background
+      setIsSending(false);
+
+      // Only show a pending bubble when there are file uploads AND we have a channelId
+      // to scope the optimistic entry. Text-only sends via Zero are effectively instant
+      // so they don't need an intermediate pending state.
+      const hasUploadsToWait = fileAttachments.length > 0 && !!channelId;
+
+      // Get pending upload promises for awaiting in the upload path
+      const pendingUploadPromises = Array.from(pendingUploadsRef.current.values());
+
+      let pendingMsgId: string | null = null;
+
+      if (hasUploadsToWait) {
+        pendingMsgId = uuidv4();
+
+        const filesWithDimensions = await Promise.all(
+          snapshotAttachments.map(async ({ attachmentId, file }) => {
+            const dimensions = file instanceof File ? await getFileDimensions(file) : null;
+            return { attachmentId, file, dimensions };
+          }),
+        );
+
+        const pendingAttachments: PendingAttachment[] = filesWithDimensions.map(
+          ({ attachmentId, file, dimensions }) => {
+            // Create object URL for images AND videos so thumbnails are visible
+            const objectUrl =
+              file instanceof File &&
+              (file.type.startsWith('image/') || file.type.startsWith('video/'))
+                ? URL.createObjectURL(file)
+                : undefined;
+            const size = file instanceof File ? file.size : file.fileSize;
+            return {
+              id: attachmentId,
+              name: file instanceof File ? file.name : file.originalName,
+              mimeType: file instanceof File ? file.type : file.mimeType,
+              ...(objectUrl !== undefined ? { objectUrl } : {}),
+              ...(size !== undefined ? { size } : {}),
+              ...(dimensions?.width !== undefined ? { width: dimensions.width } : {}),
+              ...(dimensions?.height !== undefined ? { height: dimensions.height } : {}),
+            };
+          },
+        );
+        // Use selfUser (from state machine) for name as it has full user data, fall back to auth user
+        const senderName =
+          selfUser?.name?.trim() || selfUser?.email || user?.name?.trim() || user?.email || 'You';
+
+        addPendingMessage({
+          id: pendingMsgId,
+          channelId,
+          conversationId: conversationId ?? null,
+          html: snapshotHtml,
+          createdAt: Date.now(),
+          senderId: selfUser?.id || user?.id || '',
+          senderName,
+          attachments: pendingAttachments,
+        });
+
+        try {
+          // Wait for all pending uploads to complete
+          const uploadResults = await Promise.all(pendingUploadPromises);
+
+          // Check if all uploads succeeded
+          const allSucceeded = uploadResults.every(result => result.allSucceeded);
+
+          if (!allSucceeded) {
+            toast.error('Failed to upload some files');
+            // Remove the pending message since we couldn't send
+            removePendingMessage(pendingMsgId);
+            setIsSending(false);
+            isSendingRef.current = false;
+            return;
+          }
+
+          const filesToSend = snapshotAttachments
+            .map(a => a.file)
+            .filter((f): f is File => f instanceof File);
+
+          await onSendMessage(
+            snapshotPlainText,
+            snapshotHtml,
+            filesToSend,
+            undefined,
+            attachmentIds,
+          );
+          editor.commands.focus();
+        } catch (error) {
+          toast.error('Failed to send message with attachments', {
+            description: error instanceof Error ? error.message : 'Unknown error',
+          });
+        } finally {
+          // Always remove the optimistic bubble, whether the send succeeded or failed.
+          removePendingMessage(pendingMsgId);
+          setIsSending(false);
+          isSendingRef.current = false;
         }
+        return;
+      }
 
-        // Get fresh content after inserting link
-        const finalHtmlContent = editor?.getHTML() || htmlContent;
-        const finalPlainText = editor?.getText().trim() || plainText;
+      // ----------------------------------------------------------------------------------
+      // Normal path: when there are no uploads to wait for or when statuses are COMPLETED.
+      // Behaviour is identical to the original implementation.
+      // ----------------------------------------------------------------------------------
+      else {
+        try {
+          const filesToSend = fileAttachments
+            .map(a => a.file)
+            .filter((f): f is File => f instanceof File);
 
-        await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
-        editor.commands.setContent('');
-        setContent('');
-        setAttachedCanvas(null);
-        editor.commands.focus();
-      } finally {
-        setIsSending(false);
+          let finalHtmlContent = snapshotHtml;
+          let finalPlainText = snapshotPlainText;
+
+          if (attachedCanvas) {
+            const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.viewAccessId || attachedCanvas.id}`;
+            finalHtmlContent = `${snapshotHtml} ${canvasLink}`;
+            finalPlainText = `${snapshotPlainText} ${canvasLink}`;
+          }
+
+          await onSendMessage(
+            finalPlainText,
+            finalHtmlContent,
+            filesToSend,
+            undefined,
+            attachmentIds,
+          );
+          editor.commands.focus();
+        } catch (error) {
+          toast.error('Failed to send message', {
+            description: error instanceof Error ? error.message : 'Unknown error',
+          });
+        } finally {
+          setIsSending(false);
+          isSendingRef.current = false;
+        }
+        return;
       }
     }, [
       editor,
@@ -890,6 +1099,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       attachedCanvas,
       hasSendableContent,
       sendDisabled,
+      channelId,
+      conversationId,
+      user,
+      providerClearDroppedFiles,
+      shareableOrigin,
+      selfUser,
     ]);
 
     // Canvas attachment handlers

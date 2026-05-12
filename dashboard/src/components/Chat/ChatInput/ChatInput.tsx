@@ -408,7 +408,13 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     );
 
     const handleSendMessage = useCallback(
-      (_plainText: string, html: string, files: File[]): void => {
+      (
+        _plainText: string,
+        html: string,
+        files: File[],
+        _videoThumbnails?: Map<File, Blob>,
+        attachmentIds?: string[],
+      ): void => {
         if (isOffline) {
           toast.warning("You're offline", {
             description: messageId
@@ -535,6 +541,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 timestamp: messageCreatedAt,
                 messageId: newMessageId,
                 ...(alsoSendToChannel && { childConversationId: uuidv4() }),
+                ...(attachmentIds && attachmentIds.length > 0 && { attachmentIds }),
               }),
             );
             saveDraft(lookupId, '', '');
@@ -593,6 +600,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 conversationId: newConversationId,
                 messageId: newMessageId,
                 timestamp: messageCreatedAt,
+                ...(attachmentIds && attachmentIds.length > 0 && { attachmentIds }),
               }),
             );
 

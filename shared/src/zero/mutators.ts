@@ -29,7 +29,7 @@ import {
   DocType,
   PRStatusEvent,
   RotationInterval,
-
+  AttachmentUploadStatus,
   ActivityClassification,
   AccessType,
   BoardType,
@@ -1325,36 +1325,32 @@ export const mutators = defineMutators({
         messageId: z.string(),
         timestamp: z.number(),
         type: z.nativeEnum(MessageType),
+        attachmentIds: z.array(z.string()).optional(),
       }),
       async ({
         tx,
         ctx,
-        args: { channelId, content, type, conversationId, messageId, timestamp },
+        args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds },
       }) => {
-        if (content === '') {
+        if (content === '' && (!attachmentIds || attachmentIds.length === 0)) {
           throw new Error('Message content or files are required to start a conversation');
         }
 
         const now = timestamp;
 
-        // Query for drafts first to determine hasAttachments before conversation insert
-        const channelDrafts = await tx.run(
-          zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
-        );
-        const draft = channelDrafts.find(d => d.conversationId === null);
-
+        // Use provided attachmentIds to get attachments directly from message_attachment table
         let hasAttachments = false;
-        if (draft) {
-          const draftAttachments = await tx.run(
+        if (attachmentIds && attachmentIds.length > 0) {
+          const attachments = await tx.run(
             zql.message_attachments
-              .where('entityId', draft.id)
-              .where('entityType', AttachmentEntityType.DRAFT),
+              .where('id', 'IN', attachmentIds)
+              .where('uploadStatus', '=', AttachmentUploadStatus.COMPLETED),
           );
 
-          if (draftAttachments.length > 0) {
+          if (attachments.length > 0) {
             hasAttachments = true;
-            // Transfer attachments from draft to message
-            for (const attachment of draftAttachments) {
+            // Transfer attachments to message
+            for (const attachment of attachments) {
               await tx.mutate.message_attachments.update({
                 id: attachment.id,
                 entityId: messageId,
@@ -1363,11 +1359,6 @@ export const mutators = defineMutators({
               });
             }
           }
-
-          // Delete the draft message after transferring
-          await tx.mutate.draft_messages.delete({
-            id: draft.id,
-          });
         }
 
         await tx.mutate.conversations.insert({
@@ -1682,6 +1673,7 @@ export const mutators = defineMutators({
                   mimetype?: string;
                   createdAt?: number;
                   storageProvider?: string;
+                  uploadStatus?: string;
                 };
                 // Generate a deterministic ID for the attachment mapping
                 const clonedAttId = `${clonedMessageId}-att-${j}`;
@@ -1701,6 +1693,7 @@ export const mutators = defineMutators({
                   createdBy: ctx.userID,
                   isDeleted: false,
                   workspaceId: ctx.workspaceId,
+                  uploadStatus: AttachmentUploadStatus.COMPLETED,
                 });
               }
             }
@@ -1830,6 +1823,7 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         messageId: z.string(),
         childConversationId: z.string().optional(),
+        attachmentIds: z.array(z.string()).optional(),
       }),
       async ({
         tx,
@@ -1842,9 +1836,10 @@ export const mutators = defineMutators({
           timestamp,
           messageId,
           childConversationId,
+          attachmentIds,
         },
       }) => {
-        if (content === '') {
+        if (content === '' && (!attachmentIds || attachmentIds.length === 0)) {
           throw new Error('Message content or files are required to start a conversation');
         }
 
@@ -1861,27 +1856,19 @@ export const mutators = defineMutators({
           throw new Error("Channel doesn't exists");
         }
 
-        // Query for drafts in this channel for this user (follows backend logic)
-        const channelDrafts = await tx.run(
-          zql.draft_messages.where('channelId', conversation.channelId).where('userId', ctx.userID),
-        );
-
-        // Find the draft for this specific conversation
-        const draft = channelDrafts.find(d => d.conversationId === conversationId);
-
-        // Transfer attachments from draft to message if found
+        // Use provided attachmentIds to get attachments directly from message_attachment table
         let hasAttachments = false;
-        if (draft) {
-          const draftAttachments = await tx.run(
+        if (attachmentIds && attachmentIds.length > 0) {
+          const attachments = await tx.run(
             zql.message_attachments
-              .where('entityId', draft.id)
-              .where('entityType', AttachmentEntityType.DRAFT),
+              .where('id', 'IN', attachmentIds)
+              .where('uploadStatus', '=', AttachmentUploadStatus.COMPLETED),
           );
 
-          if (draftAttachments.length > 0) {
+          if (attachments.length > 0) {
             hasAttachments = true;
-            // Transfer attachments from draft to message
-            for (const attachment of draftAttachments) {
+            // Transfer attachments to message
+            for (const attachment of attachments) {
               await tx.mutate.message_attachments.update({
                 id: attachment.id,
                 entityId: messageId,
@@ -1890,11 +1877,6 @@ export const mutators = defineMutators({
               });
             }
           }
-
-          // Delete the draft message after transferring
-          await tx.mutate.draft_messages.delete({
-            id: draft.id,
-          });
         }
 
         const message = {
@@ -2698,6 +2680,7 @@ export const mutators = defineMutators({
               metadata: attachmentMetadata,
               conversationId: conversationId || null,
               isDeleted: false,
+              uploadStatus: AttachmentUploadStatus.PENDING,
             });
           }
         }

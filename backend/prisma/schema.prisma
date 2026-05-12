@@ -151,6 +151,14 @@ enum AttachmentEntityType {
   @@schema("public")
 }
 
+enum AttachmentUploadStatus {
+  PENDING
+  STARTED
+  COMPLETED
+  FAILED
+  @@schema("public")
+}
+
 enum TicketEnvironment {
   DEVELOPMENT
   STAGING
@@ -2011,6 +2019,7 @@ model MessageAttachment {
   conversationId     String?                // Every message belongs to a conversation (no FK constraint)
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
+  uploadStatus       AttachmentUploadStatus? // Tracks upload state
 
   // Relations
   conversation       Conversation?          @relation(fields: [conversationId], references: [conversationId])
