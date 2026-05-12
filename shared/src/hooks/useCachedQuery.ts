@@ -280,6 +280,8 @@ export function useCachedQuery<
                 existingData as (Record<string, unknown> | typeof PAGE_BREAK_MARKER)[],
                 freshData as Record<string, unknown>[],
                 cursor,
+                limit,
+                direction,
                 orderBy,
               )
             : freshData;
@@ -324,6 +326,8 @@ export function useCachedQuery<
     updatedAtEnabled,
     cacheEntry,
     cursor,
+    limit,
+    direction,
     orderBy,
     shouldEnableDelta,
   ]);

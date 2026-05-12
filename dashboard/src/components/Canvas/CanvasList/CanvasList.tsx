@@ -34,7 +34,6 @@ import { queries } from '../../../zero/queries';
 import { CanvasParticipantsTray, type ParticipantItem } from '../CanvasParticipantsTray';
 import { useNavigate } from 'react-router-dom';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
-import { useQuery } from '../../../hooks/useQuery';
 import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
 import { useCachedQuery } from '@xyne/shared/hooks';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
@@ -135,7 +134,7 @@ const CanvasPageSubscription: React.FC<{
     });
   }, [activeFilter, channelId, cursor]);
 
-  const [page, pageDetails] = useQuery(query as unknown as Parameters<typeof useQuery>[0]);
+  const [page, pageDetails] = useCachedQuery(query as never, { cursorEnabled: true });
   const isLoading = pageDetails.type !== 'complete';
 
   useEffect(() => {
