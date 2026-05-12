@@ -121,7 +121,6 @@ const CanvasPageSubscription: React.FC<{
     if (channelId) {
       return queries.channelCanvasesPaginated({
         channelId,
-        includeQuartoDocs: false,
         limit: CANVAS_PAGE_SIZE,
         start: cursor,
       });

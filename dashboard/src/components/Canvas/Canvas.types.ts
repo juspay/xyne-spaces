@@ -1,5 +1,5 @@
 import type { PartialBlock } from '@blocknote/core';
-import { CanvasVisibility, CanvasRole, DocType } from '@xyne/shared';
+import { CanvasVisibility, CanvasRole, DocType, ChannelScopeType } from '@xyne/shared';
 
 export interface CanvasEditorRef {
   handlePresent: () => void;
@@ -54,11 +54,40 @@ export interface KnowledgeCanvasMetadata {
   knowledgeDocumentId?: string;
 }
 
+export interface CanvasProject {
+  id: string;
+  name: string;
+  code?: string;
+}
+
+export interface CanvasChannel {
+  id: string;
+  name: string;
+  projectId: string;
+  isArchived?: boolean;
+  scopeType?: ChannelScopeType;
+  project?: CanvasProject;
+}
+
+export interface CanvasFolder {
+  id: string;
+  name: string;
+  projectId?: string | null;
+  channelId?: string | null;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  project?: CanvasProject | null;
+  channel?: CanvasChannel | null;
+}
+
 export interface Canvas {
   id: string;
   title: string;
   content?: PartialBlock[];
   channelId?: string;
+  folderId?: string | null;
+  projectId?: string | null;
   createdBy: string;
   visibility: CanvasVisibility;
   isTemplate: boolean;
@@ -78,6 +107,9 @@ export interface Canvas {
   entryFile?: string;
   quartoDocumentType?: string;
   gcsPath?: string;
+  folder?: CanvasFolder | null;
+  channel?: CanvasChannel | null;
+  project?: CanvasProject | null;
 }
 
 export interface CanvasParticipant {

@@ -12,6 +12,7 @@ export {
   EmailDraftsACL,
   CallParticipantsACL,
   CallsACL,
+  CanvasFoldersACL,
   CanvasParticipantsACL,
   CanvasesACL,
   ChannelDailyRecapsACL,
@@ -44,4 +45,3 @@ export {
   WorkflowExecutionsACL,
   WorkflowsACL,
 } from './tables';
-

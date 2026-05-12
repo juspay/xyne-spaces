@@ -1525,6 +1525,8 @@ model Project {
   tickets  Ticket[]
   channels Channel[]
   boards   Board[]
+  canvasFolders CanvasFolder[]
+  canvases      Canvas[]
 
   @@unique([name, workspaceId])
   @@unique([code, workspaceId])
@@ -1621,16 +1623,17 @@ model Channel {
   isArchived      Boolean                @default(false)
 
   // Relations
-  conversations              Conversation[]
-  participants               ChannelParticipant[]
+  conversations      Conversation[]
+  participants       ChannelParticipant[]
   conversationParticipants   ConversationParticipant[]
-  participantsStatus         ChannelUserStatus[]
-  createdByUser              User                 @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
-  project                    Project              @relation(fields: [projectId], references: [id])
-  tickets                    Ticket[]             @relation("TicketChannel")
-  calls                      Call[]
-  channelStats               ChannelStats?
-  incomingWebhooks           AppIncomingWebhook[]
+  participantsStatus ChannelUserStatus[]
+  createdByUser      User                 @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
+  project            Project              @relation(fields: [projectId], references: [id])
+  tickets            Ticket[]             @relation("TicketChannel")
+  calls              Call[]
+  channelStats       ChannelStats?
+  incomingWebhooks   AppIncomingWebhook[]
+  canvasFolders      CanvasFolder[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -2544,11 +2547,39 @@ enum DocType {
   @@schema("public")
 }
 
+// Canvas folders for manual canvas organization within a project, a specific
+// channel, or a user's personal "My Canvases" scope.
+model CanvasFolder {
+  id        String   @id @default(cuid())
+  projectId String?
+  channelId String?
+  name      String
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project  Project? @relation(fields: [projectId], references: [id])
+  channel  Channel? @relation(fields: [channelId], references: [id])
+  canvases Canvas[] @relation("FolderCanvases")
+
+  // Prisma can model channel-scoped uniqueness; project-root and personal-root
+  // nullable uniqueness are enforced by partial unique indexes in the SQL migration.
+  @@unique([projectId, channelId, name], map: "canvas_folders_projectId_channelId_name_key")
+  @@index([projectId])
+  @@index([channelId])
+  @@index([projectId, channelId])
+  @@index([createdBy])
+  @@map("canvas_folders")
+  @@schema("public")
+}
+
 model Canvas {
   id           String           @id @default(cuid())
   title        String
   content      Json // BlockNote JSON block array
   channelId    String? // Optional: Link to a channel (no FK constraint)
+  folderId     String? // Optional: Link to a folder (NULL = ungrouped/personal)
+  projectId    String? // Direct project link for canvases not in folders
   createdBy    String // User ID (no FK constraint)
   viewAccessId String? @unique // Random ID for view-only access
   editAccessId String? @unique // Random ID for edit access
@@ -2566,6 +2597,8 @@ model Canvas {
 
   // Relations
   participants CanvasParticipant[]
+  folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
+  project      Project?      @relation(fields: [projectId], references: [id])
   // Quarto Doc fields - when docType is Quarto
   userRepo     String?          // Combined org/repo/branch identifier (for backward compatibility)
   repoId       String?          // Repo ID (no FK constraint) - for editing capability
@@ -2578,6 +2611,8 @@ model Canvas {
   @@unique([repoId, branchName]) // One doc per repo/branch combination (when repoId is set)
   @@index([createdBy])
   @@index([channelId])
+  @@index([folderId])
+  @@index([projectId])
   @@index([visibility])
   @@index([isTemplate])
   @@index([viewAccessId])

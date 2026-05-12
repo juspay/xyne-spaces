@@ -111,7 +111,7 @@ export class YSweetController {
 
   async getClientToken(req: Request, res: Response): Promise<void> {
     try {
-      const { docId, channelId, title, viewAccessId, editAccessId } = req.body;
+      const { docId, channelId, projectId, folderId, title, viewAccessId, editAccessId } = req.body;
 
       if (!docId || typeof docId !== 'string') {
         res.status(400).json({ 
@@ -147,6 +147,8 @@ export class YSweetController {
         try {
           await canvasAuthService.createCanvasForUser(docId, userId, {
             channelId: typeof channelId === 'string' ? channelId : undefined,
+            projectId: typeof projectId === 'string' ? projectId : undefined,
+            folderId: typeof folderId === 'string' ? folderId : undefined,
             title: typeof title === 'string' ? title : undefined,
             viewAccessId: typeof viewAccessId === 'string' ? viewAccessId : undefined,
             editAccessId: typeof editAccessId === 'string' ? editAccessId : undefined,

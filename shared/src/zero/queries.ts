@@ -30,6 +30,25 @@ import {
 
 export const zql = createBuilder(schema);
 
+const applyCanvasVisibilityQueryFilter = (
+  query: any,
+  userId: string,
+  requestedCanvasId?: string,
+) =>
+  query.where((helpers: any) =>
+    helpers.or(
+      helpers.cmp('createdBy', userId),
+      helpers.exists('participants', (participant: any) => participant.where('userId', userId)),
+      helpers.cmp('visibility', CanvasVisibility.PUBLIC),
+      ...(requestedCanvasId
+        ? [
+            helpers.cmp('viewAccessId', requestedCanvasId),
+            helpers.cmp('editAccessId', requestedCanvasId),
+          ]
+        : []),
+    ),
+  );
+
 
 export const queries = defineQueries({
   channelConversations: defineQuery(
@@ -886,7 +905,7 @@ export const queries = defineQueries({
       .where('userId', ctx.userID)
       .where('isClosed', false)
       .where('isDeleted', false)
-      .related('channel', ch => ch.related('channelStats'));
+      .related('channel', ch => ch.related('channelStats').related('project'));
   }),
   channelParticipants: defineQuery(
     z.object({ channelId: z.string() }),
@@ -940,6 +959,7 @@ export const queries = defineQueries({
       return query.limit(limit);
     },
   ),
+ 
   searchChannelParticipants: defineQuery(
     z.object({ channelId: z.string(), searchQuery: z.string() }),
     ({ args: { channelId, searchQuery } }) => {
@@ -1014,6 +1034,8 @@ export const queries = defineQueries({
   getUserProfile: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
     return zql.user_profiles.where('userId', userId).one();
   }),
+
+  
   userActiveCalls: defineQuery(() => {
     return zql.calls
       .where('status', CallStatus.ACTIVE)
@@ -1228,26 +1250,44 @@ export const queries = defineQueries({
       );
   }),
 
-  channelCanvases: defineQuery(
-    z.object({ channelId: z.string(), includeQuartoDocs: z.boolean().optional() }),
-    ({ ctx, args: { channelId, includeQuartoDocs } }) => {
-      let query = zql.canvases.where('channelId', channelId).where(helpers => {
-        return helpers.or(
-          helpers.cmp('createdBy', ctx.userID),
-          helpers.cmp('visibility', CanvasVisibility.PUBLIC),
-          helpers.exists('participants', p => p.where('userId', ctx.userID)),
-        );
-      });
+  channelCanvasFolders: defineQuery(
+    z.object({
+      channelId: z.string(),
+    }),
+    ({ args: { channelId } }) => {
+      return zql.canvas_folders.where('channelId', channelId).orderBy('name', 'asc');
+    },
+  ),
 
-      // By default, exclude Quarto docs from regular canvas list
-      // Also include docs with null docType (legacy data) as Canvas
+  projectCanvasFolders: defineQuery(
+    z.object({
+      projectId: z.string(),
+    }),
+    ({ args: { projectId } }) => {
+      return zql.canvas_folders
+        .where('projectId', projectId)
+        .where('channelId', 'IS', null)
+        .orderBy('name', 'asc');
+    },
+  ),
+  
+  projectFolderCanvases: defineQuery(
+    z.object({
+      folderId: z.string(),
+      projectId: z.string(),
+      includeQuartoDocs: z.boolean().optional(),
+    }),
+    ({ ctx, args: { folderId, projectId, includeQuartoDocs } }) => {
+      let query = zql.canvases
+        .where('folderId', folderId)
+        .where('projectId', projectId)
+        .where('channelId', 'IS', null);
+
       if (!includeQuartoDocs) {
-        query = query.where(helpers =>
-          helpers.or(helpers.cmp('docType', DocType.Canvas), helpers.cmp('docType', 'IS', null)),
-        );
+        query = query.where('docType', DocType.Canvas);
       }
 
-      return query.orderBy('updatedAt', 'desc').related('participants').related('channel');
+      return applyCanvasVisibilityQueryFilter(query, ctx.userID).orderBy('updatedAt', 'desc');
     },
   ),
   channelCanvasesPaginated: defineQuery(
@@ -1256,40 +1296,34 @@ export const queries = defineQueries({
       includeQuartoDocs: z.boolean().optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+      direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ ctx, args: { channelId, includeQuartoDocs, limit, start } }) => {
-      let query = zql.canvases.where('channelId', channelId).where(helpers => {
-        return helpers.or(
-          helpers.cmp('createdBy', ctx.userID),
-          helpers.cmp('visibility', CanvasVisibility.PUBLIC),
-          helpers.exists('participants', p => p.where('userId', ctx.userID)),
-        );
-      });
+    ({ ctx, args: { channelId, includeQuartoDocs, limit, start, direction } }) => {
+      const isBackward = direction === 'backward';
+      let query = zql.canvases.where('channelId', channelId);
 
       if (!includeQuartoDocs) {
-        query = query.where(helpers =>
-          helpers.or(helpers.cmp('docType', DocType.Canvas), helpers.cmp('docType', 'IS', null)),
+        query = query.where('docType', DocType.Canvas);
+      }
+
+      query = applyCanvasVisibilityQueryFilter(query, ctx.userID);
+
+      query = query.orderBy('updatedAt', isBackward ? 'asc' : 'desc').orderBy(
+        'id',
+        isBackward ? 'asc' : 'desc',
+      );
+
+      if (start) {
+        query = query.start(
+          { id: start.id, updatedAt: start.updatedAt },
+          { inclusive: !isBackward },
         );
       }
 
-      query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
-
-      if (start) {
-        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
-      }
-
-      return query.limit(limit).related('participants').related('channel');
+      return query.limit(limit).related('participants');
     },
   ),
-  // Query for Quarto docs in a channel
-  channelQuartoDocs: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
-    return zql.canvases
-      .where('channelId', channelId)
-      .where('docType', DocType.Quarto)
-      .orderBy('updatedAt', 'desc')
-      .related('participants')
-      .related('channel');
-  }),
+
   channelQuartoDocsPaginated: defineQuery(
     z.object({
       channelId: z.string(),
@@ -1310,6 +1344,7 @@ export const queries = defineQueries({
       return query.limit(limit).related('participants').related('channel');
     },
   ),
+
 
   // Query for links in a channel (shared + personal + shared with user)
   channelLinks: defineQuery(z.object({ channelId: z.string() }), ({ ctx, args: { channelId } }) => {
@@ -1334,9 +1369,11 @@ export const queries = defineQueries({
       .related('sharedWith')
       .orderBy('createdAt', 'desc');
   }),
+
   canvasParticipants: defineQuery(z.object({ canvasId: z.string() }), ({ args: { canvasId } }) => {
     return zql.canvas_participants.where('canvasId', canvasId).related('canvas');
   }),
+
   channelAndThreadMessages: defineQuery(
     z.object({ channelId: z.string() }),
     ({ ctx, args: { channelId } }) => {
@@ -1429,6 +1466,56 @@ export const queries = defineQueries({
   projectById: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
     return zql.projects.where('id', projectId).one();
   }),
+
+
+  personalCanvasFolders: defineQuery(({ ctx }) => {
+    return zql.canvas_folders
+      .where('projectId', 'IS', null)
+      .where('channelId', 'IS', null)
+      .where('createdBy', ctx.userID)
+      .orderBy('name', 'asc');
+  }),
+  hierarchyCanvases: defineQuery(
+    z.object({
+      scope: z.enum(['channel', 'channel_root', 'folder', 'personal_root']).optional(),
+      channelId: z.string().optional(),
+      folderId: z.string().optional(),
+      projectId: z.string().optional(),
+      includeQuartoDocs: z.boolean().optional(),
+    }).refine(args => {
+      const scope = args.scope ?? (args.folderId ? 'folder' : 'channel');
+      if (scope === 'folder') return Boolean(args.folderId) && !args.channelId;
+      if (scope === 'personal_root') return !args.folderId && !args.channelId;
+      return Boolean(args.channelId) && !args.folderId;
+    }, 'Provide folderId for folder scope or channelId for channel scope'),
+    ({ ctx, args: { scope, channelId, folderId, includeQuartoDocs } }) => {
+      const resolvedScope = scope ?? (folderId ? 'folder' : 'channel');
+      let query =
+        resolvedScope === 'folder'
+          ? zql.canvases.where('folderId', folderId as string)
+          : resolvedScope === 'personal_root'
+            ? zql.canvases.where(({ and, cmp }) =>
+                and(
+                  cmp('projectId', 'IS', null),
+                  cmp('channelId', 'IS', null),
+                  cmp('folderId', 'IS', null),
+                ),
+              )
+          : zql.canvases.where('channelId', channelId as string);
+
+      if (!includeQuartoDocs) {
+        query = query.where('docType', DocType.Canvas);
+      }
+
+      if (resolvedScope === 'channel_root') {
+        query = query.where('folderId', 'IS', null);
+      }
+
+      return applyCanvasVisibilityQueryFilter(query, ctx.userID).orderBy('updatedAt', 'desc');
+    },
+  ),
+
+  
   ticketsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
     return zql.tickets
       .where('projectId', projectId)
@@ -1454,7 +1541,8 @@ export const queries = defineQueries({
     return zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc');
   }),
   getCanvas: defineQuery(z.object({ canvasId: z.string() }), ({ ctx, args: { canvasId } }) => {
-    return zql.canvases
+    return applyCanvasVisibilityQueryFilter(
+      zql.canvases
       .where(helpers => {
         return helpers.or(
           helpers.cmp('id', canvasId),
@@ -1463,89 +1551,53 @@ export const queries = defineQueries({
           helpers.cmp('userRepo', canvasId), // Also allow lookup by userRepo
         );
       })
-      .where(helpers => {
-        return helpers.or(
-          helpers.cmp('createdBy', ctx.userID),
-          helpers.cmp('visibility', CanvasVisibility.PUBLIC),
-          helpers.exists('participants', p => p.where('userId', ctx.userID)),
-          helpers.cmp('viewAccessId', canvasId),
-          helpers.cmp('editAccessId', canvasId),
-        );
-      })
       .related('participants')
-      .related('channel')
-      .one();
+      .related('channel'),
+      ctx.userID,
+      canvasId,
+    ).one();
   }),
-  userCanvases: defineQuery(
-    z.object({ includeQuartoDocs: z.boolean().optional() }).optional(),
-    ({ ctx, args }) => {
-      let query = zql.canvases.where(helpers => {
-        return helpers.or(
-          helpers.cmp('createdBy', ctx.userID),
-          helpers.exists('participants', p => p.where('userId', ctx.userID)),
-        );
-      });
-
-      // By default, exclude Quarto docs from regular canvas list
-      // Also include docs with null docType (legacy data) as Canvas
-      if (!args?.includeQuartoDocs) {
-        query = query.where(helpers =>
-          helpers.or(helpers.cmp('docType', DocType.Canvas), helpers.cmp('docType', 'IS', null)),
-        );
-      }
-
-      return query.orderBy('updatedAt', 'desc').related('participants').related('channel');
-    },
-  ),
   userCanvasesPaginated: defineQuery(
     z.object({
       limit: z.number(),
       start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
       includeQuartoDocs: z.boolean().optional(),
+      direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ ctx, args: { includeQuartoDocs, limit, start } }) => {
-      let query = zql.canvases.where(helpers => {
-        return helpers.or(
-          helpers.cmp('createdBy', ctx.userID),
-          helpers.exists('participants', p => p.where('userId', ctx.userID)),
-        );
-      });
+    ({ ctx, args }) => {
+      const isBackward = args.direction === 'backward';
+      let query = applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID);
 
-      if (!includeQuartoDocs) {
-        query = query.where(helpers =>
-          helpers.or(helpers.cmp('docType', DocType.Canvas), helpers.cmp('docType', 'IS', null)),
+      if (!args.includeQuartoDocs) {
+        query = query.where('docType', DocType.Canvas);
+      }
+
+      query = query.orderBy('updatedAt', isBackward ? 'asc' : 'desc').orderBy(
+        'id',
+        isBackward ? 'asc' : 'desc',
+      );
+
+      if (args.start) {
+        query = query.start(
+          { id: args.start.id, updatedAt: args.start.updatedAt },
+          { inclusive: !isBackward },
         );
       }
 
-      query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
-
-      if (start) {
-        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
-      }
-
-      return query.limit(limit).related('participants');
+      return query
+        .limit(args.limit)
+        .related('participants');
     },
   ),
   // Query for user's Quarto docs
-  userQuartoDocs: defineQuery(({ ctx }) => {
-    return zql.canvases
-      .where('docType', DocType.Quarto)
-      .where(helpers => {
-        return helpers.or(
-          helpers.cmp('createdBy', ctx.userID),
-          helpers.exists('participants', p => p.where('userId', ctx.userID)),
-        );
-      })
-      .orderBy('updatedAt', 'desc')
-      .related('participants')
-      .related('channel');
-  }),
   userQuartoDocsPaginated: defineQuery(
     z.object({
       limit: z.number(),
       start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+      direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ ctx, args: { limit, start } }) => {
+    ({ ctx, args }) => {
+      const isBackward = args.direction === 'backward';
       let query = zql.canvases
         .where('docType', DocType.Quarto)
         .where(helpers => {
@@ -1554,14 +1606,19 @@ export const queries = defineQueries({
             helpers.exists('participants', p => p.where('userId', ctx.userID)),
           );
         })
-        .orderBy('updatedAt', 'desc')
-        .orderBy('id', 'desc');
+        .orderBy('updatedAt', isBackward ? 'asc' : 'desc')
+        .orderBy('id', isBackward ? 'asc' : 'desc');
 
-      if (start) {
-        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
+      if (args.start) {
+        query = query.start(
+          { id: args.start.id, updatedAt: args.start.updatedAt },
+          { inclusive: !isBackward },
+        );
       }
 
-      return query.limit(limit).related('participants');
+      return query
+        .limit(args.limit)
+        .related('participants');
     },
   ),
   // Query for all user groups with member counts

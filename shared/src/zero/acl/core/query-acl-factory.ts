@@ -9,6 +9,7 @@ import {
   BookmarksACL,
   CallParticipantsACL,
   CallsACL,
+  CanvasFoldersACL,
   CanvasParticipantsACL,
   CanvasesACL,
   ChannelDailyRecapsACL,
@@ -83,6 +84,8 @@ export class QueryACLFactory {
         return new CallParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'calls':
         return new CallsACL(ctx) as BaseQueryACL<TTable>;
+      case 'canvas_folders':
+        return new CanvasFoldersACL(ctx) as BaseQueryACL<TTable>;
       case 'canvas_participants':
         return new CanvasParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'canvases':

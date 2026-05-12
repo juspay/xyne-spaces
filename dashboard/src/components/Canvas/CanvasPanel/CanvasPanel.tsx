@@ -1,7 +1,8 @@
 import { ReactElement, useState, useRef, useCallback } from 'react';
-import { Outlet, useNavigate, useParams, Link } from 'react-router-dom';
-import { FileText, Plus, ArrowLeft, Info, Loader2 } from 'lucide-react';
+import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
+import { FileText, Plus, ArrowLeft, Info, Loader2, List, FolderTree } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
+import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import type { Canvas } from '../Canvas.types';
@@ -23,11 +24,12 @@ import { usePath } from '../../../hooks/usePath';
 import { canvasService } from '../../../services/Canvas/canvasService';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
+type ViewMode = 'list' | 'grouped';
 
 const CanvasPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
-  const { canvasId } = useParams<{ canvasId?: string }>();
+  const location = useLocation();
   const { user } = useAuth();
   const z = useZero();
 
@@ -35,8 +37,10 @@ const CanvasPanel = (): ReactElement => {
 
   const canvasPanelRef = useRef<ImperativePanelHandle>(null);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+  const [viewMode, setViewMode] = useState<ViewMode>('grouped');
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
 
   const handleCreateCanvas = useCallback(async () => {
     setIsCreatingCanvas(true);
@@ -109,14 +113,23 @@ const CanvasPanel = (): ReactElement => {
     [z],
   );
 
+  const handleCreateQuartoDoc = useCallback((): void => {
+    setShowPublishModal(true);
+  }, []);
+
   const handleDuplicateCanvas = useCallback(
-    (_id: string, canvas?: Canvas) => {
-      const originalCanvas = canvas;
+    (canvasOrId: Canvas | string, canvasFromList?: Canvas) => {
+      const originalCanvas = typeof canvasOrId === 'string' ? canvasFromList : canvasOrId;
       if (!originalCanvas) return;
 
       try {
         const newCanvasId = uuidv4();
         const viewAccessId = uuidv4();
+
+        const resolvedProjectId =
+          originalCanvas.projectId ??
+          originalCanvas.channel?.projectId ??
+          originalCanvas.folder?.project?.id;
 
         z.mutate(
           mutators.canvas.create({
@@ -125,6 +138,9 @@ const CanvasPanel = (): ReactElement => {
             content: originalCanvas.content as ReadonlyJSONValue,
             viewAccessId,
             visibility: originalCanvas.visibility,
+            ...(originalCanvas.channelId ? { channelId: originalCanvas.channelId } : {}),
+            ...(originalCanvas.folderId ? { folderId: originalCanvas.folderId } : {}),
+            ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
             timestamp: Date.now(),
             participantId: uuidv4(),
           }),
@@ -162,50 +178,92 @@ const CanvasPanel = (): ReactElement => {
             )}
             <h2 className='text-lg font-semibold text-foreground'>Canvases</h2>
           </div>
-          {activeFilter === 'quarto_docs' ? (
-            <Button
-              variant='default'
-              size='sm'
-              onClick={() => setShowPublishModal(true)}
-              data-track-category='CANVAS'
-              data-track-name='Publish_Doc_Instructions'
-            >
-              <Info size={16} className='mr-1' />
-              How to publish
-            </Button>
-          ) : (
-            <Button
-              variant='default'
-              size='sm'
-              onClick={() => void handleCreateCanvas()}
-              disabled={isCreatingCanvas}
-              data-track-category='CANVAS'
-              data-track-name='Create_Canvas'
-            >
-              {isCreatingCanvas ? (
-                <Loader2 size={16} className='mr-1 animate-spin' />
-              ) : (
-                <Plus size={16} className='mr-1' />
-              )}
-              {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
-            </Button>
-          )}
+          <div className='flex items-center gap-2'>
+            <div className='flex items-center border border-border rounded-md'>
+              <button
+                className={`p-1.5 rounded-l-md transition-colors ${
+                  viewMode === 'grouped'
+                    ? 'bg-accent text-foreground'
+                    : 'text-muted-foreground hover:bg-accent/50'
+                }`}
+                onClick={() => setViewMode('grouped')}
+                title='Group by project'
+                data-track-category='CANVAS'
+                data-track-name='VIEW_MODE_GROUPED'
+                data-testid='canvas-view-grouped'
+              >
+                <FolderTree size={16} />
+              </button>
+              <button
+                className={`p-1.5 rounded-r-md transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-accent text-foreground'
+                    : 'text-muted-foreground hover:bg-accent/50'
+                }`}
+                onClick={() => setViewMode('list')}
+                title='List view'
+                data-track-category='CANVAS'
+                data-track-name='VIEW_MODE_LIST'
+                data-testid='canvas-view-list'
+              >
+                <List size={16} />
+              </button>
+            </div>
+            {viewMode === 'list' && activeFilter === 'quarto_docs' ? (
+              <Button
+                variant='default'
+                size='sm'
+                onClick={handleCreateQuartoDoc}
+                data-track-category='CANVAS'
+                data-track-name='Publish_Doc_Instructions'
+              >
+                <Info size={16} className='mr-1' />
+                How to publish
+              </Button>
+            ) : (
+              <Button
+                variant='default'
+                size='sm'
+                onClick={() => void handleCreateCanvas()}
+                disabled={isCreatingCanvas}
+                data-track-category='CANVAS'
+                data-track-name='Create_Canvas'
+              >
+                {isCreatingCanvas ? (
+                  <Loader2 size={16} className='mr-1 animate-spin' />
+                ) : (
+                  <Plus size={16} className='mr-1' />
+                )}
+                {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Canvas List */}
-      <div className='flex-1 overflow-hidden'>
-        <CanvasList
-          onSelect={handleSelectCanvas}
-          onDelete={handleDeleteCanvas}
-          onDuplicate={handleDuplicateCanvas}
-          currentUserId={user?.id}
-          showQuartoDocsFilter={true}
-          paginated={true}
-          activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
-          {...(canvasId ? { selectedCanvasId: canvasId } : {})}
-        />
+      <div className='flex-1 min-h-0 overflow-auto'>
+        {viewMode === 'grouped' ? (
+          <CanvasListGrouped
+            onSelect={handleSelectCanvas}
+            currentUserId={user?.id}
+            selectedCanvasId={selectedCanvasId}
+            onDelete={handleDeleteCanvas}
+            onDuplicate={handleDuplicateCanvas}
+          />
+        ) : (
+          <CanvasList
+            paginated={true}
+            onSelect={handleSelectCanvas}
+            onDelete={handleDeleteCanvas}
+            onDuplicate={handleDuplicateCanvas}
+            currentUserId={user?.id}
+            showQuartoDocsFilter={true}
+            activeFilter={activeFilter}
+            onFilterChange={setActiveFilter}
+            {...(selectedCanvasId ? { selectedCanvasId } : {})}
+          />
+        )}
       </div>
       <PublishDocsModal isOpen={showPublishModal} onClose={() => setShowPublishModal(false)} />
     </div>

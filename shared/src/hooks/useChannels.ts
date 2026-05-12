@@ -10,6 +10,7 @@ import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
 
 export { type VisibleChannel } from '../machines/stateMachine.js';
+export type VisibleProject = NonNullable<VisibleChannel['project']>;
 
 const shallowEqualVisibleChannels = (a: VisibleChannel[], b: VisibleChannel[]): boolean => {
   if (a.length !== b.length) return false;
@@ -24,7 +25,10 @@ const shallowEqualVisibleChannels = (a: VisibleChannel[], b: VisibleChannel[]): 
       channel.channelStats?.lastActivityAt === otherChannel.channelStats?.lastActivityAt &&
       channel.channelStats?.participantCount === otherChannel.channelStats?.participantCount &&
       channel.channelStats?.addUserPolicy === otherChannel.channelStats?.addUserPolicy &&
-      channel.description === otherChannel.description
+      channel.description === otherChannel.description &&
+      channel.project?.id === otherChannel.project?.id &&
+      channel.project?.name === otherChannel.project?.name &&
+      channel.project?.code === otherChannel.project?.code
     );
   });
 };
@@ -76,6 +80,21 @@ export const useAllVisibleChannels = (): VisibleChannel[] => {
     shallowEqualVisibleChannels,
   );
   return useMemo(() => channels, [channels]);
+};
+
+export const useVisibleProjects = (): VisibleProject[] => {
+  const channels = useAllVisibleChannels();
+  return useMemo(() => {
+    const byId = new Map<string, VisibleProject>();
+
+    for (const channel of channels) {
+      const project = channel.project;
+      if (!project) continue;
+      byId.set(project.id, project);
+    }
+
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [channels]);
 };
 
 export const useChannel = (channelId: string): Channel | undefined => {

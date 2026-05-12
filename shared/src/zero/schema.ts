@@ -1609,12 +1609,26 @@ export const recurringCallSeriesTable = table('recurring_call_series')
   })
   .primaryKey('id');
 
+export const canvasFolderTable = table('canvas_folders' /* CanvasFolder */)
+  .columns({
+    id: string(),
+    projectId: string().optional(),
+    channelId: string().optional(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const canvasTable = table('canvases')
   .columns({
     id: string(),
     title: string(),
     content: json(),
     channelId: string().optional(),
+    folderId: string().optional(),
+    projectId: string().optional(),
     createdBy: string(),
     viewAccessId: string().optional(),
     editAccessId: string().optional(),
@@ -2489,6 +2503,16 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ['projectId'],
     destSchema: channelTable,
   }),
+  canvasFolders: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: canvasFolderTable,
+  }),
+  canvases: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: canvasTable,
+  }),
 }));
 
 export const boardTableRelationships = relationships(boardTable, ({ one, many }) => ({
@@ -2981,6 +3005,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelStatsTable,
   }),
+  canvasFolders: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: canvasFolderTable,
+  }),
 }));
 
 export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
@@ -3309,11 +3338,21 @@ export const recurringCallSeriesTableRelationships = relationships(
   }),
 );
 
-export const canvasTableRelationships = relationships(canvasTable, ({ one, many }) => ({
-  participants: many({
+export const canvasFolderTableRelationships = relationships(canvasFolderTable, ({ one, many }) => ({
+  canvases: many({
     sourceField: ['id'],
-    destField: ['canvasId'],
-    destSchema: canvasParticipantTable,
+    destField: ['folderId'],
+    destSchema: canvasTable,
+  }),
+  channelParticipants: many({
+    sourceField: ['channelId'],
+    destField: ['channelId'],
+    destSchema: channelParticipantTable,
+  }),
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
   }),
   channel: one({
     sourceField: ['channelId'],
@@ -3324,6 +3363,39 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     sourceField: ['createdBy'],
     destField: ['id'],
     destSchema: userTable,
+  }),
+}));
+
+export const canvasTableRelationships = relationships(canvasTable, ({ one, many }) => ({
+  participants: many({
+    sourceField: ['id'],
+    destField: ['canvasId'],
+    destSchema: canvasParticipantTable,
+  }),
+  channelParticipants: many({
+    sourceField: ['channelId'],
+    destField: ['channelId'],
+    destSchema: channelParticipantTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+  createdByUser: one({
+    sourceField: ['createdBy'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+  folder: one({
+    sourceField: ['folderId'],
+    destField: ['id'],
+    destSchema: canvasFolderTable,
+  }),
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
   }),
 }));
 
@@ -3901,6 +3973,7 @@ export const schema = createSchema({
     callTable,
     callParticipantTable,
     recurringCallSeriesTable,
+    canvasFolderTable,
     canvasTable,
     canvasParticipantTable,
     bookmarkTable,
@@ -3998,6 +4071,7 @@ export const schema = createSchema({
     callTableRelationships,
     callParticipantTableRelationships,
     recurringCallSeriesTableRelationships,
+    canvasFolderTableRelationships,
     canvasTableRelationships,
     canvasParticipantTableRelationships,
     pullRequestsTableRelationships,

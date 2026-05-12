@@ -20,3 +20,21 @@ export {
   filterAfterCursor,
   computeCachedWindow,
 } from './paginatedCacheUtils.js';
+export {
+  CanvasHierarchyResolutionError,
+  resolveCanvasHierarchy,
+} from './canvasHierarchy.js';
+export type {
+  CanvasHierarchyErrorCode,
+  ResolvedCanvasHierarchy,
+} from './canvasHierarchy.js';
+export {
+  CanvasDestinationAccessError,
+  assertCanvasDestinationAccess,
+} from './canvasDestinationAccess.js';
+export type { CanvasDestinationAccessErrorCode } from './canvasDestinationAccess.js';
+export {
+  getCanvasFolderNameConflictMessage,
+  isCanvasFolderNameConflictError,
+  rethrowCanvasFolderNameConflict,
+} from './canvasFolderNameConflict.js';

@@ -9,6 +9,7 @@ Feature: My Canvas View
     Given using browser "user1-browser"
     When I open the Xyne-Space at "/chat/canvas"
     And I wait for "[data-testid='chat-list-loading']" to disappear
+    And I click on "[data-testid='canvas-view-list']"
     Then I should see the element "[data-testid='canvas-list']"
 
   @my-canvas-list-all
@@ -16,6 +17,7 @@ Feature: My Canvas View
     Given using browser "user1-browser"
     When I open the Xyne-Space at "/chat/canvas"
     And I wait for "[data-testid='chat-list-loading']" to disappear
+    And I click on "[data-testid='canvas-view-list']"
     Then I should see the element "[data-testid='canvas-list']"
     And I should see "Channel Canvas Test" in the element "[data-testid='canvas-list']"
     And I should see "DM Canvas Test" in the element "[data-testid='canvas-list']"
@@ -25,6 +27,7 @@ Feature: My Canvas View
     Given using browser "user1-browser"
     When I open the Xyne-Space at "/chat/canvas"
     And I wait for "[data-testid='chat-list-loading']" to disappear
+    And I click on "[data-testid='canvas-view-list']"
     And I click on "[data-testid='canvas-filter-created-by-me']"
     Then I should see the element "[data-testid='canvas-list']"
     And I should see "Channel Canvas Test" in the element "[data-testid='canvas-list']"

@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { CanvasRole } from '@prisma/client';
+import { resolveCanvasHierarchy } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { websocketService } from '@/services/websocketService';
@@ -39,6 +40,8 @@ class CanvasAuthService {
           editAccessId: true,
           viewAccessId: true,
           channelId: true,
+          folderId: true,
+          projectId: true,
         },
       });
 
@@ -66,17 +69,29 @@ class CanvasAuthService {
       const hasEditAccessLink = canvas.editAccessId === canvasIdOrAccessId;
       const hasViewAccessLink = canvas.viewAccessId === canvasIdOrAccessId;
 
-      let isChannelMember = false;
-      if (canvas.channelId && canvas.visibility === 'PUBLIC') {
-        const membership = await db.channelParticipant.findUnique({
-          where: {
-            channelId_userId: {
-              channelId: canvas.channelId,
-              userId,
+      let hasPublicVisibilityAccess = false;
+      if (canvas.visibility === 'PUBLIC') {
+        if (canvas.channelId) {
+          const membership = await db.channelParticipant.findUnique({
+            where: {
+              channelId_userId: {
+                channelId: canvas.channelId,
+                userId,
+              },
             },
-          },
-        });
-        isChannelMember = !!membership;
+          });
+          hasPublicVisibilityAccess = !!membership;
+        } else if (canvas.projectId) {
+          const membership = await db.channelParticipant.findFirst({
+            where: {
+              userId,
+              channel: {
+                projectId: canvas.projectId,
+              },
+            },
+          });
+          hasPublicVisibilityAccess = !!membership;
+        }
       }
 
       const hasOwnerRole = participant?.role === CanvasRole.OWNER;
@@ -87,7 +102,7 @@ class CanvasAuthService {
         isCreator || hasOwnerRole || hasEditorRole || hasEditAccessLink;
 
       const canView =
-        canEdit || hasViewerRole || hasViewAccessLink || isChannelMember;
+        canEdit || hasViewerRole || hasViewAccessLink || hasPublicVisibilityAccess;
 
       const hasAccess = canView;
 
@@ -97,7 +112,7 @@ class CanvasAuthService {
         participantRole: participant?.role,
         hasEditAccessLink,
         hasViewAccessLink,
-        isChannelMember,
+        hasPublicVisibilityAccess,
         canEdit,
         canView,
       });
@@ -158,17 +173,49 @@ class CanvasAuthService {
     userId: string,
     options?: {
       channelId?: string;
+      projectId?: string;
+      folderId?: string;
       title?: string;
       viewAccessId?: string;
       editAccessId?: string;
     }
   ): Promise<void> {
     try {
-      if (options?.channelId) {
+      const { folderId, projectId: resolvedProjectId, channelId: resolvedChannelId } =
+        await resolveCanvasHierarchy({
+          folderId: options?.folderId,
+          projectId: options?.projectId,
+          channelId: options?.channelId,
+          loadFolder: folderId =>
+            db.canvasFolder.findUnique({
+              where: { id: folderId },
+              select: { projectId: true, channelId: true },
+            }),
+          loadChannel: channelId =>
+            db.channel.findUnique({
+              where: { id: channelId },
+              select: { projectId: true, isArchived: true },
+            }),
+        });
+
+      if (resolvedChannelId != null) {
+        const channel = await db.channel.findUnique({
+          where: { id: resolvedChannelId },
+          select: { isArchived: true },
+        });
+
+        if (!channel) {
+          throw new Error('Channel not found');
+        }
+
+        if (channel.isArchived) {
+          throw new Error('Channel is archived');
+        }
+
         const channelMembership = await db.channelParticipant.findUnique({
           where: {
             channelId_userId: {
-              channelId: options.channelId,
+              channelId: resolvedChannelId,
               userId,
             },
           },
@@ -176,6 +223,19 @@ class CanvasAuthService {
 
         if (!channelMembership) {
           throw new Error('User does not have permission to create canvas in this channel');
+        }
+      } else if (resolvedProjectId) {
+        const projectChannelMembership = await db.channelParticipant.findFirst({
+          where: {
+            userId,
+            channel: {
+              projectId: resolvedProjectId,
+            },
+          },
+        });
+
+        if (!projectChannelMembership) {
+          throw new Error('User does not have permission to create canvas in this project');
         }
       }
 
@@ -190,7 +250,9 @@ class CanvasAuthService {
             viewAccessId: options?.viewAccessId || uuidv4(),
             content: [],
             isCollaborative: true,
-            ...(options?.channelId ? { channelId: options.channelId } : {}),
+            ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
+            ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
+            ...(folderId ? { folderId } : {}),
           },
         }),
         db.canvasParticipant.create({
