@@ -67,6 +67,7 @@ export async function findOrCreateConversation(
         eventType: ChatEventType.MESSAGE_POSTED,
         conversationId: result.conversation.conversationId,
         messageId: result.message.messageId,
+        ticketId: result.conversation.ticketId || undefined,
       };
     } else {
       logger.info(`[INGEST-CONVERSATION] Creating new conversation in channel ${channelId}`);
@@ -94,6 +95,7 @@ export async function findOrCreateConversation(
         eventType: ChatEventType.MESSAGE_POSTED,
         conversationId: result.conversation.conversationId,
         messageId: result.message.messageId,
+        ticketId: result.conversation.ticketId || undefined,
       };
     }
   } catch (error) {
@@ -125,6 +127,7 @@ export async function updateConversation(
       eventType: ChatEventType.MESSAGE_UPDATED,
       conversationId: result.conversation.conversationId,
       messageId: result.message.messageId,
+      ticketId: result.conversation.ticketId || undefined,
     };
   } catch (error) {
     logger.error('[UPDATE-CONVERSATION] Error updating conversation:', error);
@@ -191,6 +194,12 @@ export async function getChannelHistory(
         continue;
       }
 
+      const fullConversation = await repositories.conversations.findById(conversation.conversationId);
+      if (!fullConversation) {
+        logger.warn(`[CHANNEL-HISTORY] Conversation details not found for ${conversation.conversationId}`);
+        continue;
+      }
+
       let cleanContent = message.content.replace(/<[^>]*>/g, '');
       if (!cleanContent.trim() && message.hasAttachment) {
         cleanContent = 'Sent an attachment';
@@ -207,6 +216,7 @@ export async function getChannelHistory(
         cleanContent: cleanContent,
         userId: message.senderId,
         createdAt: message.createdAt,
+        ticketId: fullConversation.ticketId || undefined,
       };
 
       if (attachments.length > 0) {
@@ -235,6 +245,7 @@ export async function getChannelHistory(
       items: paginationResult.items,
       nextCursor: paginationResult.nextCursor,
       hasMore: paginationResult.hasMore,
+      channelId,
     };
   } catch (error) {
     logger.error('[CHANNEL-HISTORY] Error fetching channel history:', error);
@@ -309,6 +320,7 @@ export async function getConversationReplies(
         cleanContent: cleanContent, 
         userId: message.senderId,
         createdAt: message.createdAt,
+        ticketId: conversation.ticketId || undefined,
       };
 
       if (attachments.length > 0) {
@@ -337,6 +349,7 @@ export async function getConversationReplies(
       items: paginationResult.items,
       nextCursor: paginationResult.nextCursor,
       hasMore: paginationResult.hasMore,
+      channelId,
     };
   } catch (error) {
     logger.error('[CONVERSATION-REPLIES] Error fetching conversation replies:', error);

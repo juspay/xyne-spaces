@@ -127,7 +127,9 @@ export interface BaseAppEvent {
 export interface ChatActionResponse {
     eventType: ChatEventType;
     conversationId: string;
-    messageId: string;    
+    messageId: string;
+    channelId?: string;
+    ticketId?: string;
 }
 
 /**
@@ -171,7 +173,7 @@ export interface PaginationRequest {
 }
 
 /**
- * Channel history item - represents a conversation with its initial message
+ * Channel history item - represents a message in a channel
  */
 export interface ChannelHistoryItem {
     initialMessageId: string;
@@ -180,6 +182,7 @@ export interface ChannelHistoryItem {
     cleanContent: string;
     userId: string;
     createdAt: Date;
+    ticketId?: string;
     attachments?: AppEventAttachment[];
 }
 
@@ -201,7 +204,9 @@ export interface ChannelHistoryRequest extends PaginationRequest {
 /**
  * Response type for channel history API endpoint
  */
-export interface ChannelHistoryResponse extends PaginatedResponse<ChannelHistoryItem> {}
+export interface ChannelHistoryResponse extends PaginatedResponse<ChannelHistoryItem> {
+    channelId: string;
+}
 
 /**
  * Conversation reply item - represents a message in a conversation
@@ -213,6 +218,7 @@ export interface ConversationRepliesItem {
     cleanContent: string;
     userId: string;
     createdAt: Date;
+    ticketId?: string;
     attachments?: AppEventAttachment[];
 }
 
@@ -267,7 +273,9 @@ export interface ConversationRepliesRequest extends PaginationRequest {
 /**
  * Response type for conversation replies API endpoint
  */
-export interface ConversationRepliesResponse extends PaginatedResponse<ConversationRepliesItem> {}
+export interface ConversationRepliesResponse extends PaginatedResponse<ConversationRepliesItem> {
+    channelId: string;
+}
 
 /**
  * Email reply item — one email in a thread

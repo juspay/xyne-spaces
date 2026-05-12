@@ -97,6 +97,13 @@ export class AppsService {
     await apiInstance.post(`/apps/incoming-webhooks/${webhookId}/revoke`);
   }
 
+  async getSigningSecret(appId: string): Promise<{ signingSecret: string }> {
+    const response = await apiInstance.post<{ signingSecret: string }>(
+      `/apps/signing-secret/${appId}`,
+    );
+    return response.data;
+  }
+
   async uploadBotPicture(appId: string, file: File): Promise<{ picture: string }> {
     const formData = new FormData();
     formData.append('picture', file);

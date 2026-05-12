@@ -39,6 +39,7 @@ interface AppsTableProps {
     data: { name?: string; description?: string; webhookUrl?: string },
   ) => Promise<void>;
   onGetJwtToken?: (appId: string) => Promise<string>;
+  onGetSigningSecret?: (appId: string) => Promise<string>;
   onUploadPicture?: (appId: string, file: File) => Promise<void>;
   userPermissions: Array<{ resourceName: string; accessType: string }>;
   isInstalling?: boolean;
@@ -51,6 +52,7 @@ export const AppsTable = ({
   onInstall,
   onUpdateApp,
   onGetJwtToken,
+  onGetSigningSecret,
   onUploadPicture,
   userPermissions,
   isInstalling = false,
@@ -129,6 +131,22 @@ export const AppsTable = ({
       toast.success('Token copied to clipboard');
     } catch (error) {
       toast.error('Failed to generate and copy JWT', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
+  const handleCopySigningSecret = async (appId: string) => {
+    if (!onGetSigningSecret) {
+      toast.error('Signing secret retrieval not available');
+      return;
+    }
+    try {
+      const signingSecret = await onGetSigningSecret(appId);
+      await copyTextToClipboard(signingSecret);
+      toast.success('Signing secret copied to clipboard');
+    } catch (error) {
+      toast.error('Failed to retrieve signing secret', {
         description: error instanceof Error ? error.message : 'Unknown error',
       });
     }
@@ -213,6 +231,41 @@ export const AppsTable = ({
               className='h-6 w-6 p-0'
               title={
                 canCopy ? 'Copy JWT to clipboard' : "You don't have permission to copy this token"
+              }
+            >
+              <Copy size={14} />
+            </Button>
+          </div>
+        );
+      },
+    },
+    {
+      field: 'signingSecret',
+      header: 'Signing Secret',
+      renderCell: (_value, app) => {
+        const status = getStatus(app);
+        const isInstalled = status === 'Installed';
+        const canCopy = hasAdminAccess || app.createdBy === currentUserId;
+
+        if (!isInstalled) {
+          return <span className='text-muted-foreground text-xs'>Install app first</span>;
+        }
+
+        return (
+          <div className='flex items-center gap-2'>
+            <code className='text-xs bg-muted px-2 py-1 rounded truncate max-w-[120px] font-mono'>
+              ****
+            </code>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => void handleCopySigningSecret(app.id)}
+              disabled={!canCopy}
+              className='h-6 w-6 p-0'
+              title={
+                canCopy
+                  ? 'Copy signing secret to clipboard'
+                  : 'Only admin or app creator can copy this secret'
               }
             >
               <Copy size={14} />

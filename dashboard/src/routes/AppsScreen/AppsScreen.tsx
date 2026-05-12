@@ -148,6 +148,18 @@ const AppsScreen = (): ReactElement => {
     return getJwtMutation.mutateAsync(appId);
   };
 
+  // Get signing secret mutation
+  const getSigningSecretMutation = useMutation({
+    mutationFn: async (appId: string): Promise<string> => {
+      const response = await appsService.getSigningSecret(appId);
+      return response.signingSecret;
+    },
+  });
+
+  const getSigningSecret = async (appId: string): Promise<string> => {
+    return getSigningSecretMutation.mutateAsync(appId);
+  };
+
   // Upload picture mutation
   const uploadPictureMutation = useMutation({
     mutationFn: async ({ appId, file }: { appId: string; file: File }) => {
@@ -224,6 +236,7 @@ const AppsScreen = (): ReactElement => {
                 onInstall={handleInstallApp}
                 onUpdateApp={handleUpdateApp}
                 onGetJwtToken={getJwtToken}
+                onGetSigningSecret={getSigningSecret}
                 onUploadPicture={handleUploadPicture}
                 userPermissions={permissions}
                 isInstalling={installAppMutation.isPending}
