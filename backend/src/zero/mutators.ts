@@ -3360,6 +3360,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
+          const channelCopies = await tx.run(zql.conversations
+            .where('initialMessageId', messageId));
+
+          for (const channelCopy of channelCopies) {
+            if (channelCopy.conversationId === conversation.conversationId) {
+              continue;
+            }
+
+            await tx.mutate.conversations.delete({
+              conversationId: channelCopy.conversationId,
+            });
+          }
+
           // 5. Final Delete Logic
           if (shouldSoftDelete) {
             // SCENARIO 1: Root Message + Has Replies -> Soft Delete
