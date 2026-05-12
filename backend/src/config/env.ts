@@ -143,6 +143,11 @@ const envSchema = Joi.object({
   XYNE_API_KEY: Joi.string().allow('').default(''),
   // Transcription Agent API Key (for S2S authentication)
   TRANSCRIPTION_AGENT_API_KEY: Joi.string().default(''),
+  // Mettle user sync webhook API Key (for S2S authentication)
+  METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
+  // Mettle API Configuration (for fetching employee details)
+  METTLE_API_BASE_URL: Joi.string().uri().default(''),
+  METTLE_TOKEN: Joi.string().allow('').default(''),
   // Superposition Configuration
   SUPERPOSITION_ENDPOINT: Joi.string().uri().default(''),
   SUPERPOSITION_TOKEN: Joi.string().allow('').default(''),
@@ -418,6 +423,9 @@ export const config = {
     apiKey: envVars.XYNE_API_KEY,
   },
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
+  mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
+  mettleApiBaseUrl: envVars.METTLE_API_BASE_URL,
+  mettleToken: envVars.METTLE_TOKEN,
   bitbucket: {
     webhookSecret: envVars.SCM_WEBHOOK_SECRET,
     apiToken: envVars.BITBUCKET_AUTH,
