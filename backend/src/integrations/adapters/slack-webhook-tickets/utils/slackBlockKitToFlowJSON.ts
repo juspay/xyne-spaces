@@ -188,8 +188,9 @@ export async function convertBlockKitToFlowJSON(
 
   const components: FlowComponent[] = [];
 
-  // Prepend plain text that accompanies a blocks payload
-  if (plainText && blocks?.length) {
+  // Prepend plain text — render whenever present, whether it accompanies
+  // modern blocks, legacy attachments, or both.
+  if (plainText) {
     components.push(mrkdwnToFlowComponent(plainText, slackToXyneMap));
   }
 
