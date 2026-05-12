@@ -114,6 +114,8 @@ import activityAliasesRoutes from '@/routes/activityAliases';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
 import samRoutes from '@/routes/sam';
+import mettleUserSyncRoutes from '@/routes/mettleUserSync';
+import mettleEmployeeDetailsRoutes from '@/routes/mettleEmployeeDetailsRoutes';
 import memoryRoutes from '@/routes/memory';
 import queueManagementRoutes from '@/routes/clearqueueManagement';
 import { initializeBotRegistry } from '@/bots/registry';
@@ -251,6 +253,12 @@ export class App {
 
     // SAM transcript ingestion route (API key auth - called by SAM/Pragati service)
     this.app.use('/api/sam/', samRoutes);
+
+    // Mettle user sync route (API key auth - called by Mettle)
+    this.app.use('/api/mettle', mettleUserSyncRoutes);
+
+    // Mettle employee details route (JWT auth - fetch employee information)
+    this.app.use('/api/mettle/employee', authMiddleware.authenticate, mettleEmployeeDetailsRoutes);
 
     // Bundle serving routes (public, no auth required - frontend static assets)
     this.app.use('/api/bundles', bundleRoutes);
