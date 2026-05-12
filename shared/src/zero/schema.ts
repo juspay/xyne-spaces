@@ -776,6 +776,7 @@ export const ticketTable = table('tickets')
     classificationData: json().optional(),
     aiCategory: string().optional(),
     aiSubCategory: string().optional(),
+    aiPriority: string().optional(),
     firstRespondedAt: number().optional(),
   })
   .primaryKey('id');
@@ -1736,6 +1737,7 @@ export const emailDraftTable = table('email_drafts')
     userId: string().optional(),
     channelId: string(),
     draftContent: string(),
+    attachmentIds: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1777,6 +1779,9 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     subCategoryField: string().optional(),
     defaultCc: string().optional(),
     emailMergeMode: enumeration<EmailMergeMode>().optional(),
+    priorityClassificationEnabled: boolean(),
+    priorityClassificationPrompt: string().optional(),
+    priorityClassificationThreshold: number(),
   })
   .primaryKey('channelId');
 
@@ -1840,6 +1845,7 @@ export const formFieldsTable = table('form_fields')
     fieldType: enumeration<FormFieldType>(),
     fieldEnum: json().optional(),
     isOptional: boolean().optional(),
+    sequenceNumber: number(),
     createdAt: number(),
     updatedAt: number(),
   })

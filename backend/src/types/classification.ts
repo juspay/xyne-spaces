@@ -2,6 +2,8 @@
  * Types for Email Classification feature
  */
 
+import { TicketPriority } from '@prisma/client';
+
 /** Raw output from AI — shape depends entirely on the channel's prompt */
 export type ClassificationRawOutput = Record<string, unknown>;
 
@@ -12,6 +14,13 @@ export interface ClassificationResult {
   rawOutput: ClassificationRawOutput;
 }
 
+/** Priority classification result from AI */
+export interface PriorityClassificationResult {
+  priority: TicketPriority;
+  confidence: number;
+  reasoning: string;
+}
+
 /** What gets stored on Ticket.classificationData */
 export interface TicketClassificationData {
   category: string;
@@ -20,6 +29,13 @@ export interface TicketClassificationData {
   isManualOverride: boolean;
   classifiedAt: string; // ISO string
   rawOutput: ClassificationRawOutput;
+}
+
+/** Extended classification data including priority */
+export interface TicketClassificationDataWithPriority extends TicketClassificationData {
+  priority?: TicketPriority;
+  priorityConfidence?: number;
+  priorityReasoning?: string;
 }
 
 /** Request body for saving config */
@@ -41,4 +57,17 @@ export interface SaveMappingBody {
 export interface ClassificationPreviewBody {
   emailSubject: string;
   emailBody: string;
+}
+
+/** Request body for priority preview */
+export interface PriorityClassificationPreviewBody {
+  emailSubject: string;
+  emailBody: string;
+}
+
+/** Request body for saving priority config */
+export interface SavePriorityClassificationConfigBody {
+  enabled: boolean;
+  priorityClassificationPrompt?: string | null;
+  priorityClassificationThreshold?: number;
 }

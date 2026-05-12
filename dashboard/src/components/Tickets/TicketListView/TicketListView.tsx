@@ -41,6 +41,12 @@ interface TicketListViewProps {
   className?: string;
   selectedIds?: ReadonlySet<string>;
   onToggleSelect?: (row: SelectableRow) => void;
+  stageOptions?: ReadonlyArray<string>;
+  onStageChange?: (
+    ticketId: string,
+    newStageName: string,
+    currentStageName: string | null | undefined,
+  ) => void;
 }
 
 export interface SelectableRow {
@@ -74,6 +80,8 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
       className,
       selectedIds,
       onToggleSelect,
+      stageOptions,
+      onStageChange,
     }: TicketListViewProps,
     ref,
   ): React.ReactElement {
@@ -313,6 +321,8 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
                       ticket={row as TicketListItem}
                       isActive={isActive}
                       showExtraFields={showExtraFields}
+                      {...(stageOptions ? { stageOptions } : {})}
+                      {...(onStageChange ? { onStageChange } : {})}
                       {...(onToggleSelect
                         ? {
                             isSelected: selectedIds?.has(row.id) ?? false,

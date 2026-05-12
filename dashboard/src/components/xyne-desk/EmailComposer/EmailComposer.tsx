@@ -10,6 +10,7 @@ import React, {
 import type { Editor } from '@tiptap/react';
 import {
   ArrowUp,
+  Minimize2,
   Paperclip,
   Pencil,
   RefreshCw,
@@ -32,6 +33,7 @@ import {
 import Tooltip from '../../ui/Tooltip';
 import { AttachmentPreview } from '../../ui/files/AttachmentPreview';
 import { MediaViewer } from '../../ui/files';
+import type { UploadedFile } from '../../ui/files/Files.types';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { cn } from '../../../utils/classNames';
 
@@ -138,10 +140,14 @@ const resolveFeatures = (
 interface EmailComposerProps {
   conversationId?: string | null | undefined;
   onClose?: () => void;
+  onDiscard?: () => void;
+  sendRequest?: { draftId: string; requestedAt: number } | null;
   isAIPanelOpen?: boolean;
   onToggleAIPanel?: () => void;
   channelId?: string;
   ticketId?: string | null | undefined;
+  replyDraftId?: string | null;
+  onReplyDraftCreated?: (draftId: string) => void;
   replyToEmailId?: string | null;
   replyMode?: 'reply' | 'replyAll';
   mode?: 'reply' | 'compose';
@@ -162,10 +168,14 @@ interface EmailComposerProps {
 export const EmailComposer = ({
   conversationId,
   onClose,
+  onDiscard,
+  sendRequest,
   isAIPanelOpen,
   onToggleAIPanel,
   channelId,
   ticketId,
+  replyDraftId,
+  onReplyDraftCreated,
   replyToEmailId,
   replyMode = 'reply',
   mode = 'reply',
@@ -197,8 +207,12 @@ export const EmailComposer = ({
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
   const deskContacts = useDeskContacts(channelId);
   // Use email draft hooks
-  const draftContent = useEmailDraft(conversationId);
-  const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId, channelId);
+  const draft = useEmailDraft(conversationId, isComposeMode ? null : replyDraftId);
+  const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(
+    conversationId,
+    channelId,
+    isComposeMode ? null : replyDraftId,
+  );
   const [emailContent, setEmailContent] = useState<string>('');
   // Subject is only meaningful in compose mode — reply inherits from the thread.
   const [composeSubject, setComposeSubject] = useState<string>('');
@@ -235,6 +249,8 @@ export const EmailComposer = ({
   );
   const composerNavigate = useNavigate();
   const signatureAutoAppend = localStorage.getItem('signature-auto-append-enabled') !== 'false';
+  const suppressNextReplyAutosaveRef = useRef(false);
+  const handledSendRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (
@@ -248,19 +264,62 @@ export const EmailComposer = ({
     }
   }, [signatures, signatureAutoAppend, selectedSignatureId]);
 
-  // Attachment state
-  const [attachments, setAttachments] = useState<File[]>([]);
+  type ComposerAttachment = {
+    file: File | UploadedFile;
+    attachmentId?: string;
+    tempId?: string;
+  };
+
+  type PersistedComposeAttachment = {
+    attachmentId: string;
+    originalName: string;
+    fileSize: number;
+    mimeType: string;
+  };
+
+  const toPersistedComposeAttachment = (
+    attachment: ComposerAttachment,
+  ): PersistedComposeAttachment | null => {
+    if (!attachment.attachmentId) return null;
+    return {
+      attachmentId: attachment.attachmentId,
+      originalName:
+        'originalName' in attachment.file ? attachment.file.originalName : attachment.file.name,
+      fileSize: 'fileSize' in attachment.file ? attachment.file.fileSize : attachment.file.size,
+      mimeType: 'mimeType' in attachment.file ? attachment.file.mimeType : attachment.file.type,
+    };
+  };
+
+  const toUploadedAttachmentFile = (attachment: PersistedComposeAttachment): UploadedFile => ({
+    id: attachment.attachmentId,
+    originalName: attachment.originalName,
+    fileName: attachment.originalName,
+    fileSize: attachment.fileSize,
+    mimeType: attachment.mimeType,
+    fileUrl: '',
+  });
+
+  const isBrowserFile = (file: File | UploadedFile): file is File => 'slice' in file;
+
+  // Attachment state - tracks files with their uploaded attachment IDs
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState<boolean>(false);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
+  // Tracks the replyDraftId for which we have already performed the initial
+  // attachment restore. Prevents subsequent Zero reactive updates (e.g. after
+  // an autosave changes `updatedAt`) from re-running the restore and clearing
+  // attachments the user has added during the current session.
+  const restoredAttachmentsForDraftRef = useRef<string | null>(null);
 
   // Reset all composer state when switching conversations
   useEffect(() => {
     setAttachments([]);
     setPreviewFile(null);
     setIsPreviewOpen(false);
+    restoredAttachmentsForDraftRef.current = null;
   }, [conversationId]);
 
   // Initialize email content from draft. The composer now stores HTML
@@ -268,8 +327,85 @@ export const EmailComposer = ({
   // Compose mode has no draft persistence — keep the field blank until typed.
   useEffect(() => {
     if (isComposeMode) return;
-    setEmailContent(draftContent || '');
-  }, [draftContent, conversationId, isComposeMode]);
+    // When a brand-new reply draft gets its first id, the parent switches this
+    // composer to that id immediately, but the draft row may not be back from
+    // Zero yet. In that brief window `draft` is undefined — don't clear the
+    // editor or the user sees their text disappear.
+    if (replyDraftId && !draft) return;
+    setEmailContent(draft?.draftContent || '');
+  }, [draft?.draftContent, conversationId, isComposeMode, replyDraftId, draft]);
+
+  // Restore attachments from draft on initial open.
+  //
+  // Zero's ZQL reactive cache does not propagate json() column values (such as
+  // attachmentIds) through optimistic updates — the column always reads as
+  // undefined until the server round-trip completes, and even then the value
+  // may not surface in the ZQL view store. As a workaround we persist
+  // attachmentIds to localStorage alongside recipients (same pattern) and read
+  // from there first.
+  //
+  // The ref gate ensures this effect only runs ONCE per replyDraftId. Without
+  // it, every autosave changes draft.updatedAt → draft becomes a new reference
+  // → effect re-runs → sees attachmentIds: undefined → clears the user's files
+  // → next save overwrites the draft without attachmentIds.
+  useEffect(() => {
+    if (isComposeMode) return;
+    if (!replyDraftId) {
+      restoredAttachmentsForDraftRef.current = null;
+      return;
+    }
+    // Don't clear attachments if draft is still loading from Zero
+    if (!draft) return;
+    // Only restore once per replyDraftId
+    if (restoredAttachmentsForDraftRef.current === replyDraftId) return;
+    restoredAttachmentsForDraftRef.current = replyDraftId;
+
+    // Prefer localStorage (reliable) over draft.attachmentIds (Zero ZQL json() limitation)
+    // Format: { id, name, mimeType }[] — older entries may be string[] (plain IDs only).
+    type StoredEntry = { id: string; name: string; mimeType: string };
+    let storedEntries: StoredEntry[] | undefined;
+    let attachmentIds: string[] | undefined;
+    try {
+      const stored = localStorage.getItem(`xyne:emailDraft:attachments:${replyDraftId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored) as StoredEntry[] | string[];
+        if (parsed.length > 0 && typeof parsed[0] === 'string') {
+          // Backward-compat: old format stored bare string[]
+          attachmentIds = parsed as string[];
+        } else {
+          storedEntries = parsed as StoredEntry[];
+          attachmentIds = storedEntries.map(e => e.id);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    // Fall back to whatever Zero returned (in case localStorage was cleared)
+    if (!attachmentIds || attachmentIds.length === 0) {
+      attachmentIds = draft.attachmentIds;
+    }
+
+    if (!attachmentIds || attachmentIds.length === 0) {
+      setAttachments([]);
+      return;
+    }
+
+    const restoredAttachments = attachmentIds.map((id, i) => {
+      const entry = storedEntries?.[i];
+      const file: File | UploadedFile = entry
+        ? {
+            id,
+            originalName: entry.name,
+            fileName: entry.name,
+            fileSize: 0,
+            mimeType: entry.mimeType,
+            fileUrl: '',
+          }
+        : new File([], `attachment-${id.slice(-8)}`);
+      return { file, attachmentId: id };
+    });
+    setAttachments(restoredAttachments);
+  }, [draft, isComposeMode, replyDraftId]);
 
   const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
   const hasInlineImages = useMemo(() => /\sdata-att-id=["']/i.test(emailContent), [emailContent]);
@@ -293,6 +429,111 @@ export const EmailComposer = ({
   const [bccEmails, setBccEmails] = useState<string[]>([]);
   const [showCc, setShowCc] = useState<boolean>(true);
   const [showBcc, setShowBcc] = useState<boolean>(false);
+
+  const persistRecipientsForDraft = useCallback(
+    (targetDraftId: string): void => {
+      try {
+        if (toEmails.length === 0 && ccEmails.length === 0 && bccEmails.length === 0) {
+          localStorage.removeItem(`xyne:emailDraft:recipients:${targetDraftId}`);
+          return;
+        }
+        localStorage.setItem(
+          `xyne:emailDraft:recipients:${targetDraftId}`,
+          JSON.stringify({ to: toEmails, cc: ccEmails, bcc: bccEmails }),
+        );
+      } catch {
+        /* ignore quota errors */
+      }
+    },
+    [toEmails, ccEmails, bccEmails],
+  );
+
+  const clearRecipientsForDraft = useCallback((targetDraftId: string | null | undefined): void => {
+    if (!targetDraftId) return;
+    try {
+      localStorage.removeItem(`xyne:emailDraft:recipients:${targetDraftId}`);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Persist / clear attachment metadata to localStorage so they survive the Zero
+  // reactive-cache limitation with json() columns (see restore effect above).
+  // Stores { id, name, mimeType } so the extension badge renders correctly on restore.
+  type PersistedReplyAttachment = { id: string; name: string; mimeType: string };
+
+  const persistAttachmentsForDraft = useCallback(
+    (targetDraftId: string, attachments: PersistedReplyAttachment[]): void => {
+      try {
+        if (attachments.length === 0) {
+          localStorage.removeItem(`xyne:emailDraft:attachments:${targetDraftId}`);
+          return;
+        }
+        localStorage.setItem(
+          `xyne:emailDraft:attachments:${targetDraftId}`,
+          JSON.stringify(attachments),
+        );
+      } catch {
+        /* ignore quota errors */
+      }
+    },
+    [],
+  );
+
+  const clearAttachmentsForDraft = useCallback((targetDraftId: string | null | undefined): void => {
+    if (!targetDraftId) return;
+    try {
+      localStorage.removeItem(`xyne:emailDraft:attachments:${targetDraftId}`);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const persistReplyDraft = useCallback(
+    (content: string): string | null => {
+      if (isComposeMode) return null;
+      // Extract attachmentIds from attachments state to save with draft
+      const attachmentIds = attachments
+        .map(att => att.attachmentId)
+        .filter((id): id is string => !!id);
+      const nextDraftId = saveDraft(content, attachmentIds.length > 0 ? attachmentIds : undefined);
+      if (nextDraftId) {
+        persistRecipientsForDraft(nextDraftId);
+        // Persist full metadata (id + name + mimeType) so the extension badge
+        // renders correctly when the draft is restored.
+        const persistedAttachments = attachments
+          .filter(att => att.attachmentId)
+          .map(att => ({
+            id: att.attachmentId!,
+            name: isBrowserFile(att.file) ? att.file.name : att.file.originalName,
+            mimeType: isBrowserFile(att.file) ? att.file.type : att.file.mimeType,
+          }));
+        persistAttachmentsForDraft(nextDraftId, persistedAttachments);
+        if (nextDraftId !== draftId) {
+          onReplyDraftCreated?.(nextDraftId);
+        }
+      }
+      return nextDraftId;
+    },
+    [
+      isComposeMode,
+      saveDraft,
+      draftId,
+      onReplyDraftCreated,
+      persistRecipientsForDraft,
+      persistAttachmentsForDraft,
+      attachments,
+    ],
+  );
+
+  const maybePersistReplyDraft = useCallback((): void => {
+    if (isComposeMode || (!hasEmailBody && attachments.length === 0)) return;
+    if (suppressNextReplyAutosaveRef.current) {
+      suppressNextReplyAutosaveRef.current = false;
+      return;
+    }
+    persistReplyDraft(emailContent);
+  }, [isComposeMode, hasEmailBody, attachments.length, persistReplyDraft, emailContent]);
 
   const currentUserEmail = users?.find(u => u.id === userID)?.email ?? null;
   const aiDraft = useDeskAIDraft({
@@ -401,9 +642,8 @@ export const EmailComposer = ({
     [moveRecipient],
   );
 
-  const recipientsStorageKey = conversationId
-    ? `xyne:emailDraft:recipients:${conversationId}`
-    : null;
+  const recipientsStorageKey =
+    !isComposeMode && draftId ? `xyne:emailDraft:recipients:${draftId}` : null;
 
   // Compose-mode draft is persisted in localStorage keyed by channelId — there's
   // no conversationId yet, so the DB-backed draft system can't help. Stores the
@@ -438,6 +678,7 @@ export const EmailComposer = ({
           to?: string[];
           cc?: string[];
           bcc?: string[];
+          attachments?: PersistedComposeAttachment[];
         };
         if (parsed.subject) setComposeSubject(parsed.subject);
         if (parsed.body) setEmailContent(parsed.body);
@@ -449,6 +690,14 @@ export const EmailComposer = ({
         if (parsed.bcc) {
           setBccEmails(parsed.bcc);
           if (parsed.bcc.length > 0) setShowBcc(true);
+        }
+        if (parsed.attachments && parsed.attachments.length > 0) {
+          setAttachments(
+            parsed.attachments.map(att => ({
+              attachmentId: att.attachmentId,
+              file: toUploadedAttachmentFile(att),
+            })),
+          );
         }
       }
     } catch {
@@ -498,27 +747,30 @@ export const EmailComposer = ({
   // Save compose draft on change (debounced via the natural batch of state updates)
   useEffect(() => {
     if (!composeDraftKey || !composeDraftLoaded) return;
+    const persistedAttachments = attachments
+      .map(toPersistedComposeAttachment)
+      .filter((attachment): attachment is PersistedComposeAttachment => attachment !== null);
     const isEmpty =
       composeSubject.trim().length === 0 &&
       stripHtml(emailContent).trim().length === 0 &&
       toEmails.length === 0 &&
       ccEmails.length === 0 &&
-      bccEmails.length === 0;
+      bccEmails.length === 0 &&
+      persistedAttachments.length === 0;
     try {
       if (isEmpty) {
         localStorage.removeItem(composeDraftKey);
         return;
       }
-      localStorage.setItem(
-        composeDraftKey,
-        JSON.stringify({
-          subject: composeSubject,
-          body: emailContent,
-          to: toEmails,
-          cc: ccEmails,
-          bcc: bccEmails,
-        }),
-      );
+      const payload = {
+        subject: composeSubject,
+        body: emailContent,
+        to: toEmails,
+        cc: ccEmails,
+        bcc: bccEmails,
+        attachments: persistedAttachments,
+      };
+      localStorage.setItem(composeDraftKey, JSON.stringify(payload));
     } catch {
       /* ignore quota */
     }
@@ -530,6 +782,7 @@ export const EmailComposer = ({
     toEmails,
     ccEmails,
     bccEmails,
+    attachments,
   ]);
 
   // Auto-grow the composer the first time the AI draft OR the rephrase
@@ -723,9 +976,25 @@ export const EmailComposer = ({
         ? `/email/channels/${channelId}/upload-attachments`
         : `/email/${conversationId}/upload-attachments`;
 
-      const response = await apiInstance.post<{ attachmentIds: string[] }>(url, formData, {
+      const response = await apiInstance.post<{
+        attachmentIds: string[];
+        failures?: Array<{ filename: string; error: string }>;
+      }>(url, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+
+      if (response.data?.failures && response.data.failures.length > 0) {
+        const message = response.data.failures
+          .map(failure => `${failure.filename}: ${failure.error}`)
+          .join('; ');
+        throw new Error(message);
+      }
+
+      if ((response.data?.attachmentIds?.length ?? 0) !== files.length) {
+        throw new Error(
+          `Attachment upload incomplete: expected ${files.length}, got ${response.data?.attachmentIds?.length ?? 0}`,
+        );
+      }
 
       return response.data?.attachmentIds || [];
     } catch (error) {
@@ -780,10 +1049,17 @@ export const EmailComposer = ({
     }
     setIsSending(true);
     try {
-      let regularAttachmentIds: string[] = [];
+      // Separate attachments: those with IDs already uploaded vs those needing upload
+      const attachmentsWithIds = attachments.filter(att => att.attachmentId);
+      const attachmentsWithoutIds = attachments.filter(att => !att.attachmentId);
 
-      if (hasAttachments) {
-        regularAttachmentIds = await uploadAttachments(attachments);
+      let regularAttachmentIds: string[] = attachmentsWithIds.map(att => att.attachmentId!);
+
+      if (attachmentsWithoutIds.length > 0) {
+        const newlyUploadedIds = await uploadAttachments(
+          attachmentsWithoutIds.map(att => att.file).filter(isBrowserFile),
+        );
+        regularAttachmentIds = [...regularAttachmentIds, ...newlyUploadedIds];
       }
 
       const inlineIdsFromBody = new Set<string>();
@@ -864,13 +1140,18 @@ export const EmailComposer = ({
         to: toEmails,
         cc: ccEmails,
         bcc: bccEmails,
+        ...(draftId ? { draftId } : {}),
         ...(attachmentIds.length > 0 && { attachmentIds }),
         ...(replyToEmailId && { replyToEmailId }),
         ...(ticketSubject?.trim() && { subject: ticketSubject.trim() }),
       });
 
       setEmailContent('');
-      deleteDraft();
+      if (draftId) {
+        deleteDraft(draftId);
+        clearRecipientsForDraft(draftId);
+        clearAttachmentsForDraft(draftId);
+      }
       setAttachments([]);
       setToEmails([]);
       setCcEmails([]);
@@ -896,63 +1177,181 @@ export const EmailComposer = ({
     }
   };
 
-  // Shared validation+append for file-input, paste, and drag-and-drop. Uses
-  // the latest `attachments` value via the setter callback to avoid stale
-  // closures when several drops/pastes fire in quick succession.
-  const addFilesToAttachments = useCallback((files: File[]): void => {
-    if (files.length === 0) return;
+  useEffect(() => {
+    if (isComposeMode) return;
+    if (!sendRequest) return;
+    if (handledSendRequestRef.current === sendRequest.requestedAt) return;
+    if (replyDraftId !== sendRequest.draftId) return;
+    if (draft?.id !== sendRequest.draftId) return;
+    if (!conversationId || isSending || aiDraft.isDraftActive) return;
+    if (!hasEmailBody || toEmails.length === 0) return;
 
-    const others: File[] = [];
-    const rejectedTooLarge: string[] = [];
-    for (const file of files) {
-      if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
-        rejectedTooLarge.push(file.name);
-        continue;
+    handledSendRequestRef.current = sendRequest.requestedAt;
+    void handleSendEmail();
+  }, [
+    isComposeMode,
+    sendRequest,
+    replyDraftId,
+    draft?.id,
+    conversationId,
+    isSending,
+    aiDraft.isDraftActive,
+    hasEmailBody,
+    toEmails.length,
+  ]);
+
+  const addFilesToAttachments = useCallback(
+    async (files: File[]): Promise<void> => {
+      if (files.length === 0) return;
+
+      const images: File[] = [];
+      const others: File[] = [];
+
+      const rejectedTooLarge: string[] = [];
+      for (const file of files) {
+        if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
+          rejectedTooLarge.push(file.name);
+          continue;
+        }
+        if (file.type.startsWith('image/')) images.push(file);
+        else others.push(file);
       }
-      others.push(file);
-    }
 
-    if (rejectedTooLarge.length > 0) {
-      toast.error(
-        `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
-      );
-    }
+      if (rejectedTooLarge.length > 0) {
+        toast.error(
+          `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
+        );
+      }
 
-    if (others.length > 0) {
-      setAttachments(prev => {
-        const accepted: File[] = [];
-        let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - prev.length;
+      if (others.length > 0) {
+        let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - attachments.length;
+        const acceptedFiles: File[] = [];
         let droppedForCount = 0;
+
         for (const file of others) {
           if (availableSlots <= 0) {
             droppedForCount++;
             continue;
           }
-          accepted.push(file);
+          acceptedFiles.push(file);
           availableSlots--;
         }
+
         if (droppedForCount > 0) {
           toast.error(
             `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
           );
         }
-        return accepted.length > 0 ? [...prev, ...accepted] : prev;
-      });
-    }
-  }, []);
+
+        if (acceptedFiles.length === 0) return;
+
+        // Generate temporary IDs to track which attachments we're adding
+        const tempIds = acceptedFiles.map(() => `temp-${Date.now()}-${Math.random()}`);
+
+        // Add files to state with temporary IDs
+        setAttachments(prev => [
+          ...prev,
+          ...acceptedFiles.map((file, i) => ({ file, tempId: tempIds[i]! })),
+        ]);
+
+        // Upload them immediately and update with real IDs
+        try {
+          const uploadedIds = await uploadAttachments(acceptedFiles);
+
+          // Compute the full set of attachment IDs for the draft save *before*
+          // calling setAttachments. `attachments` here is fresh (addFilesToAttachments
+          // is recreated every render since uploadAttachments is not memoized).
+          // We take the already-uploaded IDs from existing state and add the new ones.
+          const existingPersistedAttachments = attachments
+            .filter(att => att.attachmentId)
+            .map(att => ({
+              id: att.attachmentId!,
+              name: isBrowserFile(att.file) ? att.file.name : att.file.originalName,
+              mimeType: isBrowserFile(att.file) ? att.file.type : att.file.mimeType,
+            }));
+          const newPersistedAttachments = acceptedFiles.map((file, i) => ({
+            id: uploadedIds[i]!,
+            name: file.name,
+            mimeType: file.type,
+          }));
+          const allPersistedAttachments = [
+            ...existingPersistedAttachments,
+            ...newPersistedAttachments,
+          ];
+          const allAttachmentIds = allPersistedAttachments.map(a => a.id);
+
+          setAttachments(prev => {
+            let uploadIndex = 0;
+            return prev.map(att => {
+              // Match by tempId to ensure we update the right attachments
+              if (
+                'tempId' in att &&
+                att.tempId &&
+                tempIds.includes(att.tempId) &&
+                uploadIndex < uploadedIds.length
+              ) {
+                const { tempId: _, ...rest } = att;
+                return { ...rest, attachmentId: uploadedIds[uploadIndex++]! };
+              }
+              return att;
+            });
+          });
+
+          // Auto-save the reply draft after upload so attachment IDs are
+          // persisted even when the editor never re-blurs (the most common
+          // case: user clicks the attachment button → editor blurs before any
+          // file is attached → file selected → upload completes → no blur fires).
+          // We bypass persistReplyDraft because its `attachments` closure is
+          // stale at this point (setAttachments above hasn't re-rendered yet).
+          if (!isComposeMode && allAttachmentIds.length > 0) {
+            const nextDraftId = saveDraft(emailContent, allAttachmentIds);
+            if (nextDraftId) {
+              persistAttachmentsForDraft(nextDraftId, allPersistedAttachments);
+              if (nextDraftId !== draftId) {
+                onReplyDraftCreated?.(nextDraftId);
+              }
+            }
+          }
+        } catch {
+          // uploadAttachments already toasts; leave attachments without IDs
+          // Remove tempIds on failure
+          setAttachments(prev =>
+            prev.filter(att => !('tempId' in att && att.tempId && tempIds.includes(att.tempId))),
+          );
+        }
+      }
+
+      if (images.length > 0) {
+        void uploadAndInsertInlineImages(images);
+      }
+    },
+    [
+      uploadAndInsertInlineImages,
+      uploadAttachments,
+      isComposeMode,
+      attachments,
+      saveDraft,
+      emailContent,
+      persistAttachmentsForDraft,
+      draftId,
+      onReplyDraftCreated,
+    ],
+  );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
-    addFilesToAttachments(files);
+    void addFilesToAttachments(files);
   };
 
   const handleRemoveAttachment = (index: number): void => {
     setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handlePreviewAttachment = (file: File): void => {
-    setPreviewFile(file);
+  const handlePreviewAttachment = (attachment: ComposerAttachment): void => {
+    if (isBrowserFile(attachment.file)) {
+      setPreviewFile(attachment.file);
+    }
     setIsPreviewOpen(true);
   };
 
@@ -1090,7 +1489,7 @@ export const EmailComposer = ({
 
       e.preventDefault();
       e.stopPropagation();
-      if (hasEmailBody) saveDraft(emailContent);
+      if (hasEmailBody || attachments.length > 0) persistReplyDraft(emailContent);
       onClose();
     };
     document.addEventListener('keydown', handler, true);
@@ -1098,10 +1497,11 @@ export const EmailComposer = ({
   }, [
     onClose,
     emailContent,
-    saveDraft,
+    persistReplyDraft,
     isRephrasePromptOpen,
     setIsRephrasePromptOpen,
     hasEmailBody,
+    attachments,
   ]);
 
   const { isDraggingFiles, dragHandlers } = useComposerDragDrop(addFilesToAttachments);
@@ -1111,12 +1511,12 @@ export const EmailComposer = ({
       {attachments.length > 0 && (
         <div className='px-4 pb-3'>
           <div className='flex flex-wrap gap-2'>
-            {attachments.map((file, index) => (
+            {attachments.map((attachment, index) => (
               <AttachmentPreview
-                key={`${file.name}-${file.size}-${index}`}
-                file={file}
+                key={`${isBrowserFile(attachment.file) ? attachment.file.name : attachment.file.originalName}-${isBrowserFile(attachment.file) ? attachment.file.size : attachment.file.fileSize}-${index}`}
+                file={attachment.file}
                 onRemove={() => handleRemoveAttachment(index)}
-                onPreview={() => handlePreviewAttachment(file)}
+                onPreview={() => handlePreviewAttachment(attachment)}
                 isUploading={isUploadingAttachments && index === attachments.length - 1}
               />
             ))}
@@ -1358,7 +1758,7 @@ export const EmailComposer = ({
                     <button
                       type='button'
                       onClick={() => {
-                        if (hasEmailBody) saveDraft(emailContent);
+                        if (hasEmailBody || attachments.length > 0) persistReplyDraft(emailContent);
                         onClose();
                       }}
                       disabled={isSending}
@@ -1608,7 +2008,10 @@ export const EmailComposer = ({
                   void (async (): Promise<void> => {
                     const html = content ? await markdownToHtml(content) : '';
                     setEmailContent(html);
-                    if (html) saveDraft(html);
+                    if (html) {
+                      if (isComposeMode) saveDraft(html);
+                      else persistReplyDraft(html);
+                    }
                   })();
                 }}
                 onReject={() => {
@@ -1678,9 +2081,7 @@ export const EmailComposer = ({
                           void handleSendEmail();
                         }
                       }}
-                      onBlur={() => {
-                        if (!isComposeMode && hasEmailBody) saveDraft(emailContent);
-                      }}
+                      onBlur={maybePersistReplyDraft}
                       readOnly={aiDraft.isDraftActive}
                       disabled={isSending}
                       className='flex-1 min-h-0'
@@ -1725,9 +2126,7 @@ export const EmailComposer = ({
                     void handleSendEmail();
                   }
                 }}
-                onBlur={() => {
-                  if (!isComposeMode && hasEmailBody) saveDraft(emailContent);
-                }}
+                onBlur={maybePersistReplyDraft}
                 disabled={isSending}
                 className='flex-1 min-h-0'
                 footerSlot={composerFooter}
@@ -1896,11 +2295,49 @@ export const EmailComposer = ({
             {onClose && features.showDiscardButton && (
               <>
                 <div className='w-px h-4 bg-border mx-1' />
+                {features.showMinimizeButton && (
+                  <button
+                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+                    onClick={() => {
+                      if (hasEmailBody || attachments.length > 0) {
+                        if (isComposeMode) saveDraft(emailContent);
+                        else persistReplyDraft(emailContent);
+                      }
+                      onClose();
+                    }}
+                    disabled={isSending}
+                    aria-label='Minimize reply'
+                    title='Minimize (keeps draft)'
+                    data-track-category='Support'
+                    data-track-name='MinimizeReplyComposer'
+                  >
+                    <Minimize2 size={14} />
+                  </button>
+                )}
                 {features.showDiscardButton && (
                   <button
                     className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors'
+                    onMouseDown={() => {
+                      if (!isComposeMode) suppressNextReplyAutosaveRef.current = true;
+                    }}
                     onClick={() => {
-                      deleteDraft();
+                      if (!isComposeMode && draftId) {
+                        deleteDraft(draftId);
+                        clearRecipientsForDraft(draftId);
+                        clearAttachmentsForDraft(draftId);
+                      }
+                      if (!isComposeMode && !draftId) {
+                        setEmailContent('');
+                        setAttachments([]);
+                        setToEmails([]);
+                        setCcEmails([]);
+                        setBccEmails([]);
+                        onClose();
+                        return;
+                      }
+                      if (isComposeMode) {
+                        deleteDraft();
+                      }
                       // For compose mode, also remove the localStorage draft so
                       // the parent's onClose handler treats this as a discard
                       // (no content → silent delete) rather than saving as draft.
@@ -1916,7 +2353,11 @@ export const EmailComposer = ({
                       setToEmails([]);
                       setCcEmails([]);
                       setBccEmails([]);
-                      onClose();
+                      if (isComposeMode) {
+                        onDiscard?.();
+                      } else {
+                        onClose?.();
+                      }
                     }}
                     disabled={isSending}
                     aria-label='Discard draft'

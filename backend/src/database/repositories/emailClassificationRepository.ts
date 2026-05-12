@@ -4,7 +4,12 @@
  */
 
 import { DatabaseClient } from '../client';
-import { SaveClassificationConfigBody, SaveMappingBody } from '../../types/classification';
+import type { 
+  SaveClassificationConfigBody, 
+  SaveMappingBody, 
+  SavePriorityClassificationConfigBody,
+} from '../../types/classification.js';
+import { TicketPriority } from '@prisma/client';
 
 export class EmailClassificationRepository {
   private db = DatabaseClient.getInstance();
@@ -28,8 +33,28 @@ export class EmailClassificationRepository {
       classificationPrompt: pref.classificationPrompt ?? '',
       categoryField: pref.categoryField ?? 'Query Type',
       subCategoryField: pref.subCategoryField ?? null,
+      priorityClassificationEnabled: pref.priorityClassificationEnabled ?? false,
+      priorityClassificationPrompt: pref.priorityClassificationPrompt ?? null,
+      priorityClassificationThreshold: pref.priorityClassificationThreshold ?? 0.5,
       mappings,
     };
+  }
+
+  async findRawPreferenceByChannelId(channelId: string) {
+    return this.db.emailChannelPreference.findUnique({
+      where: { channelId },
+      select: {
+        channelId: true,
+        ownerUserId: true,
+        classificationEnabled: true,
+        classificationPrompt: true,
+        categoryField: true,
+        subCategoryField: true,
+        priorityClassificationEnabled: true,
+        priorityClassificationPrompt: true,
+        priorityClassificationThreshold: true,
+      },
+    });
   }
 
   async upsertConfig(channelId: string, data: SaveClassificationConfigBody) {
@@ -85,15 +110,46 @@ export class EmailClassificationRepository {
     return this.db.classificationMapping.findUnique({ where: { id: mappingId } });
   }
 
+  // ─── Priority Classification Config ───────────────────────────────────────
+
+  async upsertPriorityConfig(
+    channelId: string,
+    data: SavePriorityClassificationConfigBody
+  ) {
+    const existing = await this.db.emailChannelPreference.findUnique({
+      where: { channelId },
+      select: { channelId: true },
+    });
+
+    if (!existing) {
+      throw new Error('Email channel preference does not exist for this channel');
+    }
+
+    await this.db.emailChannelPreference.update({
+      where: { channelId },
+      data: {
+        priorityClassificationEnabled: data.enabled,
+        priorityClassificationPrompt: data.priorityClassificationPrompt ?? null,
+        priorityClassificationThreshold: data.priorityClassificationThreshold ?? 0.5,
+      },
+    });
+
+    return this.findConfigByChannelId(channelId);
+  }
+
   // ─── Ticket classification data ───────────────────────────────────────────
 
-  async updateTicketClassificationData(ticketId: string, classificationData: object & { category?: string; subCategory?: string | null }) {
+  async updateTicketClassificationData(
+    ticketId: string,
+    classificationData: object & { category?: string; subCategory?: string | null; priority?: TicketPriority }
+  ) {
     return this.db.ticket.update({
       where: { id: ticketId },
       data: {
         classificationData,
         ...(classificationData.category !== undefined ? { aiCategory: classificationData.category } : {}),
         ...(classificationData.subCategory !== undefined ? { aiSubCategory: classificationData.subCategory ?? null } : {}),
+        ...(classificationData.priority !== undefined ? { aiPriority: classificationData.priority } : {}),
       },
     });
   }

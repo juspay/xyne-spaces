@@ -10,6 +10,7 @@ interface ComposeEmailModalProps {
   minimized?: boolean;
   onMinimizedChange?: (next: boolean) => void;
   onClose: () => void;
+  onDiscard?: () => void;
   /**
    * Unique identifier for this compose instance, used to scope the
    * localStorage draft key. When not provided, the draft is keyed by
@@ -46,6 +47,7 @@ export const ComposeEmailModal = ({
   minimized: minimizedProp,
   onMinimizedChange,
   onClose,
+  onDiscard,
   draftId,
 }: ComposeEmailModalProps): ReactElement | null => {
   const [internalMinimized, setInternalMinimized] = useState(false);
@@ -179,6 +181,7 @@ export const ComposeEmailModal = ({
             mode='compose'
             channelId={channelId}
             onClose={onClose}
+            {...(onDiscard ? { onDiscard } : {})}
             {...(draftId ? { composeDraftId: draftId } : {})}
           />
         </div>

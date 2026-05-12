@@ -6,5 +6,7 @@ const controller = new FormController();
 
 // Form routes
 router.post('/', controller.createForm);
+router.get('/:id', controller.getFormById);
+router.put('/:id', controller.updateForm);
 
 export default router;

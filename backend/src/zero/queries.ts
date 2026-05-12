@@ -636,7 +636,8 @@ export const queries = defineQueries({
     ({ ctx, args: { conversationId } }) => {
       return zql.email_drafts
         .where('conversationId', conversationId)
-        .where('userId', ctx.userID);
+        .where('userId', ctx.userID)
+        .orderBy('updatedAt', 'desc');
     }
   ),
 
@@ -2166,8 +2167,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     return zql.forms.orderBy('createdAt', 'desc');
   }),
   // Query for form fields by form ID
+  // Order by sequenceNumber first; fall back to createdAt for rows where all sequenceNumbers are 0 (e.g. legacy data before backfill)
   getFormFieldsByFormId: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {
-    return zql.form_fields.where('formId', formId).orderBy('createdAt', 'asc');
+    return zql.form_fields.where('formId', formId).orderBy('sequenceNumber', 'asc').orderBy('createdAt', 'asc');
   }),
 
   // Generic query to fetch all form fields (name and value) for a given entity

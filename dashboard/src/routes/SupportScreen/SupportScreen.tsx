@@ -24,6 +24,7 @@ import {
   Sparkles,
   Loader2,
   Pencil,
+  Trash2,
   Users2,
   Lock,
   Hash,
@@ -89,8 +90,10 @@ import {
   groupTicketsByStage,
   createTagsByTicketIdMap,
 } from '../KanbanBoardScreen/KanbanBoardScreen.utils';
-import { TicketPriority } from '@xyne/shared';
-import type { Ticket, BoardMetadata } from '@xyne/shared';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import type { Ticket, BoardMetadata, TicketStageRequest } from '@xyne/shared';
+import type { Stage } from '../KanbanBoardScreen/KanbanBoardScreen.types';
+import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
 import { getDraft } from '../../hooks/useDraft';
 import { useShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
@@ -104,7 +107,8 @@ import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/Comp
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
-import { useEmailDraft } from '../../hooks/useEmailDraft';
+import { formatEmailHeaderDate } from '../../components/xyne-desk/EmailBody/emailHeaderUtils';
+import { useEmailDrafts, type EmailDraftRecord } from '../../hooks/useEmailDraft';
 import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
 import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
@@ -113,6 +117,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
 import { InboxSettings } from '../../components/xyne-desk/InboxSettings/InboxSettings';
 import { ClassificationSettings } from '../../components/xyne-desk/ClassificationSettings/ClassificationSettings';
+import { PrioritySettings } from '../../components/xyne-desk/PrioritySettings';
 import { useUserGroups } from '../../hooks/useUserGroup';
 import { DeskIntegrationCard } from '../../components/xyne-desk/DeskIntegrationCard/DeskIntegrationCard';
 import {
@@ -150,6 +155,9 @@ const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: numbe
   color: getStageColor(stage.name.toLowerCase().replace(/\s+/g, '_')),
   ...(stage.sequenceNumber !== undefined && { sequenceNumber: stage.sequenceNumber }),
 });
+
+const getStageOptions = (stages: ReadonlyArray<{ name: string }> | undefined): string[] =>
+  stages?.map(stage => stage.name) ?? [];
 
 const ChannelInfoModal = ({
   channelId,
@@ -245,6 +253,7 @@ const instanceHasDraft = (userId: string, instanceId: string): boolean => {
       to?: string[];
       cc?: string[];
       bcc?: string[];
+      attachments?: Array<{ attachmentId: string }>;
     };
     const bodyText = parsed.body ? stripHtml(parsed.body) : '';
     return (
@@ -252,7 +261,8 @@ const instanceHasDraft = (userId: string, instanceId: string): boolean => {
       bodyText.trim().length > 0 ||
       (parsed.to?.length ?? 0) > 0 ||
       (parsed.cc?.length ?? 0) > 0 ||
-      (parsed.bcc?.length ?? 0) > 0
+      (parsed.bcc?.length ?? 0) > 0 ||
+      (parsed.attachments?.length ?? 0) > 0
     );
   } catch {
     return false;
@@ -271,10 +281,13 @@ const readDraftPreview = (
       subject?: string;
       body?: string;
       to?: string[];
+      attachments?: Array<{ originalName?: string }>;
     };
     const bodySnippet = parsed.body
       ? stripHtml(parsed.body).replace(/\s+/g, ' ').trim().slice(0, 120)
-      : '';
+      : parsed.attachments?.[0]?.originalName
+        ? `Attachment: ${parsed.attachments[0].originalName}`
+        : '';
     return {
       subject: parsed.subject?.trim() ?? '',
       to: parsed.to ?? [],
@@ -756,6 +769,24 @@ const SupportScreen = (): ReactElement => {
     [userID],
   );
 
+  /** Close a compose window and explicitly discard any persisted draft state. */
+  const discardCompose = useCallback(
+    (instanceId: string): void => {
+      setComposeInstances(prev => {
+        const target = prev.find(i => i.id === instanceId);
+        if (target && userID) {
+          clearInstanceStorage(userID, instanceId, target.channelId);
+          writePersistedInstances(
+            userID,
+            readPersistedInstances(userID).filter(p => p.id !== instanceId),
+          );
+        }
+        return prev.filter(i => i.id !== instanceId);
+      });
+    },
+    [userID],
+  );
+
   /** Permanently discard a saved draft (from the Drafts list). */
   const discardDraft = useCallback(
     (instanceId: string): void => {
@@ -1060,6 +1091,60 @@ const SupportScreen = (): ReactElement => {
   // Stages fetched dynamically from the board configured in EmailChannelPreference.
   // Empty if no board is configured — dropdown and kanban will show no stages.
   const stageColumns = useMemo(() => stages?.map(toStageColumn) ?? [], [stages]);
+  const stageOptions = useMemo(() => getStageOptions(stages), [stages]);
+
+  // Full stage objects (with formId and approvers) used for drag-and-drop and form checks.
+  const stagesForDragDrop = useMemo<Stage[]>(() => {
+    if (!stages) return [];
+    return stages.map(stage => {
+      const formId =
+        stage.formContextMappings?.find(
+          (m: { contextType: string; entityType: string; formId: string }) =>
+            m.contextType === 'STAGE' && m.entityType === 'TICKET',
+        )?.formId ?? null;
+      return {
+        id: stage.id,
+        name: stage.name,
+        color: getStageColor(stage.name.toLowerCase().replace(/\s+/g, '_')),
+        ...(stage.sequenceNumber !== undefined ? { sequenceNumber: stage.sequenceNumber } : {}),
+        ...(stage.defaultTicketStatusV2 !== undefined
+          ? { defaultTicketStatusV2: stage.defaultTicketStatusV2 }
+          : {}),
+        ...(formId ? { formId } : {}),
+        ...(stage.approvers ? { approvers: stage.approvers } : {}),
+      } satisfies Stage;
+    });
+  }, [stages]);
+
+  // Map of stageId -> formId for quick lookup during drag-and-drop.
+  const stageFormMap = useMemo(() => {
+    const map = new Map<string, string>();
+    stagesForDragDrop.forEach(stage => {
+      if (stage.formId) {
+        map.set(stage.id, stage.formId);
+      }
+    });
+    return map;
+  }, [stagesForDragDrop]);
+
+  // Stage form modal state — shown when moving a ticket to a stage that has a form.
+  const [stageFormModal, setStageFormModal] = useState<{
+    ticket: Ticket;
+    targetStage: Stage;
+    sourceStageName: string;
+    formId: string;
+    hasApprovers: boolean;
+    existingRequest?: TicketStageRequest | null;
+  } | null>(null);
+
+  // Backward movement confirmation dialog state.
+  const [showBackwardConfirmDialog, setShowBackwardConfirmDialog] = useState(false);
+  const [backwardStageChange, setBackwardStageChange] = useState<{
+    stageName: string;
+    fromSequenceNumber: number;
+    newStatus?: TicketStatusV2;
+    ticketId: string;
+  } | null>(null);
 
   useEffect(() => {
     if (displayedTickets) {
@@ -1090,13 +1175,110 @@ const SupportScreen = (): ReactElement => {
 
   const tagsByTicketId = useMemo(() => createTagsByTicketIdMap([]), []);
 
+  // Handler for when a stage transition requires a form to be filled out.
+  const handleStageFormRequired = useCallback(
+    async (data: { ticket: Ticket; targetStage: Stage; formId: string; hasApprovers: boolean }) => {
+      const sourceStage = stagesForDragDrop.find(s => s.name === data.ticket.stageName);
+      const ticketRequests = await zero.run(
+        queries.getTicketStageRequests({ ticketId: data.ticket.id }),
+        { type: 'complete' },
+      );
+      const existingRequest = ticketRequests?.find(
+        (r: TicketStageRequest) => r.stageId === data.targetStage.id,
+      );
+      setStageFormModal({
+        ...data,
+        sourceStageName: sourceStage?.name || data.ticket.stageName || '',
+        existingRequest: existingRequest || null,
+      });
+    },
+    [stagesForDragDrop, zero],
+  );
+
+  // Handler for backward stage movement — shows a confirmation dialog.
+  const handleBackwardStageChange = useCallback(
+    (data: {
+      ticket: Ticket;
+      stageName: string;
+      fromSequenceNumber: number;
+      newStatus?: TicketStatusV2;
+    }) => {
+      setBackwardStageChange({
+        stageName: data.stageName,
+        fromSequenceNumber: data.fromSequenceNumber,
+        ...(data.newStatus !== undefined && { newStatus: data.newStatus }),
+        ticketId: data.ticket.id,
+      });
+      setShowBackwardConfirmDialog(true);
+    },
+    [],
+  );
+
+  // Handler for list-view StagePicker — mirrors the form-check logic used by drag-and-drop.
+  const handleListViewStageChange = useCallback(
+    async (ticketId: string, newStageName: string, currentStageName: string | null | undefined) => {
+      const targetStage = stagesForDragDrop.find(s => s.name === newStageName);
+      const currentStage = stagesForDragDrop.find(s => s.name === currentStageName);
+
+      if (!targetStage) {
+        // Fallback: no stage info, do a direct update
+        void zero.mutate(
+          mutators.ticket.update({ id: ticketId, stageName: newStageName, updatedAt: Date.now() }),
+        );
+        return;
+      }
+
+      // Check for backward movement
+      if (
+        currentStage &&
+        targetStage.sequenceNumber !== undefined &&
+        currentStage.sequenceNumber !== undefined &&
+        targetStage.sequenceNumber < currentStage.sequenceNumber
+      ) {
+        setBackwardStageChange({
+          stageName: newStageName,
+          fromSequenceNumber: currentStage.sequenceNumber,
+          ticketId,
+        });
+        setShowBackwardConfirmDialog(true);
+        return;
+      }
+
+      // Check if target stage has a form
+      const targetStageFormId = stageFormMap.get(targetStage.id);
+      if (targetStageFormId) {
+        const hasApprovers = stagesForDragDrop.some(s => s.approvers && s.approvers.length > 0);
+        // Fetch the ticket to pass to the form modal
+        const ticket = localTickets.find(t => t.id === ticketId);
+        if (ticket) {
+          await handleStageFormRequired({
+            ticket,
+            targetStage,
+            formId: targetStageFormId,
+            hasApprovers,
+          });
+          return;
+        }
+      }
+
+      // No form required — direct update
+      void zero.mutate(
+        mutators.ticket.update({ id: ticketId, stageName: newStageName, updatedAt: Date.now() }),
+      );
+    },
+    [stagesForDragDrop, stageFormMap, zero, localTickets, handleStageFormRequired],
+  );
+
   const { activeTicket, handleDragStart, handleDragEnd } = useDragAndDrop({
     localTickets,
     setLocalTickets,
     zero,
-    stages: stageColumns,
+    stages: stagesForDragDrop,
     mode: 'stage',
     canReorder: false,
+    onStageFormRequired: handleStageFormRequired,
+    onBackwardStageChange: handleBackwardStageChange,
+    stageFormMap,
   });
 
   const sensors = useSensors(
@@ -1823,6 +2005,11 @@ const SupportScreen = (): ReactElement => {
                           canManage={canEditSendAsEmail}
                         />
                         <div className='border-t border-border' />
+                        <PrioritySettings
+                          channelId={selectedChannelId}
+                          canManage={canEditSendAsEmail}
+                        />
+                        <div className='border-t border-border' />
                       </>
                     )}
                     <SignatureEditor />
@@ -1951,6 +2138,10 @@ const SupportScreen = (): ReactElement => {
                         activeTicketId={ticketId}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
+                        stageOptions={stageOptions}
+                        onStageChange={(ticketId, newStageName, currentStageName) =>
+                          void handleListViewStageChange(ticketId, newStageName, currentStageName)
+                        }
                         onTicketClick={ticket => {
                           void navigate(`/support/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
@@ -2016,6 +2207,73 @@ const SupportScreen = (): ReactElement => {
           }}
         />
       )}
+
+      {/* Stage Form Modal — shown when a ticket is moved to a stage that has a form */}
+      {stageFormModal && (
+        <StageFormModal
+          isOpen={!!stageFormModal}
+          onClose={() => setStageFormModal(null)}
+          ticket={stageFormModal.ticket}
+          targetStage={stageFormModal.targetStage}
+          sourceStageName={stageFormModal.sourceStageName}
+          existingRequest={stageFormModal.existingRequest ?? null}
+          formId={stageFormModal.formId}
+          hasApprovers={stageFormModal.hasApprovers ?? false}
+          onSuccess={() => setStageFormModal(null)}
+        />
+      )}
+
+      {/* Backward stage movement confirmation dialog */}
+      {backwardStageChange && (
+        <Dialog
+          open={showBackwardConfirmDialog}
+          onOpenChange={setShowBackwardConfirmDialog}
+          title='Confirm Stage Change'
+        >
+          <div className='p-6'>
+            <p className='text-sm text-muted-foreground mb-6'>
+              Moving to a previous stage will clear all status change requests for status after this
+              one. These requests will need to be submitted again. Do you want to continue?
+            </p>
+            <div className='flex justify-end gap-3'>
+              <Button
+                variant='secondary'
+                onClick={() => setShowBackwardConfirmDialog(false)}
+                data-track-category='Support'
+                data-track-name='CancelBackwardStageChange'
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (backwardStageChange) {
+                    void zero.mutate(
+                      mutators.cleanupStageApprovals({
+                        ticketId: backwardStageChange.ticketId,
+                        fromSequenceNumber: backwardStageChange.fromSequenceNumber,
+                      }),
+                    );
+                    void zero.mutate(
+                      mutators.ticket.update({
+                        id: backwardStageChange.ticketId,
+                        stageName: backwardStageChange.stageName,
+                        updatedAt: Date.now(),
+                      }),
+                    );
+                  }
+                  setShowBackwardConfirmDialog(false);
+                  setBackwardStageChange(null);
+                }}
+                data-track-category='Support'
+                data-track-name='ConfirmBackwardStageChange'
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
       {/* Multi-compose scrollable strip — fixed at the bottom, spans full width.
           Windows are laid out right-to-left (flex-row-reverse) so the newest
           window always sits at the right edge. When there are more windows than
@@ -2042,6 +2300,7 @@ const SupportScreen = (): ReactElement => {
                   minimized={inst.minimized}
                   onMinimizedChange={next => setComposeMinimized(inst.id, next)}
                   onClose={() => closeCompose(inst.id)}
+                  onDiscard={() => discardCompose(inst.id)}
                 />
               ))}
           </div>
@@ -2052,6 +2311,7 @@ const SupportScreen = (): ReactElement => {
 
 const TicketMetaRow = ({
   ticket,
+  stageOptions,
 }: {
   ticket:
     | {
@@ -2062,6 +2322,7 @@ const TicketMetaRow = ({
       }
     | undefined
     | null;
+  stageOptions: ReadonlyArray<string>;
 }): ReactElement | null => {
   const resolvedAssigneeId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
   const assignee = useUser(resolvedAssigneeId);
@@ -2075,8 +2336,163 @@ const TicketMetaRow = ({
   return (
     <div className='flex items-center gap-1.5 flex-wrap min-h-[24px]'>
       <PriorityPicker ticketId={ticket.id} priority={ticket.priority} />
-      <StagePicker ticketId={ticket.id} stageName={ticket.stageName} stageLabel={stage} />
+      <StagePicker
+        ticketId={ticket.id}
+        stageName={ticket.stageName}
+        stageLabel={stage}
+        stageOptions={stageOptions}
+      />
       <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} label={assigneeName} />
+    </div>
+  );
+};
+
+const readReplyDraftRecipients = (
+  draftId: string,
+): { to: string[]; cc: string[]; bcc: string[] } => {
+  try {
+    const raw = localStorage.getItem(`xyne:emailDraft:recipients:${draftId}`);
+    if (!raw) return { to: [], cc: [], bcc: [] };
+    const parsed = JSON.parse(raw) as {
+      to?: string[];
+      cc?: string[];
+      bcc?: string[];
+    };
+    return {
+      to: parsed.to ?? [],
+      cc: parsed.cc ?? [],
+      bcc: parsed.bcc ?? [],
+    };
+  } catch {
+    return { to: [], cc: [], bcc: [] };
+  }
+};
+
+const ReplyDraftThreadItem = ({
+  draft,
+  isActive,
+  deskEmail: _deskEmail,
+  onEdit,
+  onSend,
+  onDiscard,
+}: {
+  draft: EmailDraftRecord;
+  isActive: boolean;
+  deskEmail?: string | null | undefined;
+  onEdit: () => void;
+  onSend: () => void;
+  onDiscard: () => void;
+}): ReactElement => {
+  const recipients = useMemo(() => readReplyDraftRecipients(draft.id), [draft.id]);
+  const createdAt = formatEmailHeaderDate(draft.updatedAt);
+
+  return (
+    <div className={cn('w-full scroll-mt-20 transition-colors py-6', isActive && 'bg-muted/30')}>
+      <div className='px-6'>
+        <div className='w-full flex items-start gap-3'>
+          <div className='size-8 shrink-0 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center'>
+            <Pencil size={14} />
+          </div>
+          <div className='flex-1 min-w-0'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='flex-1 min-w-0'>
+                <div className='flex items-center gap-2 flex-wrap'>
+                  <span className='inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700'>
+                    Draft
+                  </span>
+                  {isActive && (
+                    <span className='inline-flex rounded-full bg-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-background'>
+                      Editing
+                    </span>
+                  )}
+                </div>
+                <div className='mt-1 space-y-1 text-sm'>
+                  <div className='flex gap-3 items-start'>
+                    <span className='text-muted-foreground w-14 shrink-0'>to:</span>
+                    <span className='text-foreground break-words flex-1 min-w-0'>
+                      {recipients.to.length > 0 ? recipients.to.join(', ') : 'No recipients'}
+                    </span>
+                  </div>
+                  {recipients.cc.length > 0 && (
+                    <div className='flex gap-3 items-start'>
+                      <span className='text-muted-foreground w-14 shrink-0'>cc:</span>
+                      <span className='text-foreground break-words flex-1 min-w-0'>
+                        {recipients.cc.join(', ')}
+                      </span>
+                    </div>
+                  )}
+                  {recipients.bcc.length > 0 && (
+                    <div className='flex gap-3 items-start'>
+                      <span className='text-muted-foreground w-14 shrink-0'>bcc:</span>
+                      <span className='text-foreground break-words flex-1 min-w-0'>
+                        {recipients.bcc.join(', ')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div
+                className='text-xs text-muted-foreground shrink-0 whitespace-nowrap'
+                title={createdAt.full}
+              >
+                {createdAt.short}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className='flex items-start gap-3 mt-4'>
+          <div className='size-8 shrink-0' aria-hidden='true' />
+          <div className='flex-1 min-w-0'>
+            <div className='text-sm text-foreground leading-relaxed'>
+              {draft.draftContent ? (
+                <EmailBodyRenderer body={draft.draftContent} emailId={`draft-${draft.id}`} />
+              ) : (
+                <span className='text-muted-foreground italic'>No content</span>
+              )}
+            </div>
+            <div className='mt-3 flex items-center justify-between gap-3'>
+              <div className='text-xs text-muted-foreground' title={createdAt.full}>
+                Last edited {createdAt.short}
+              </div>
+              <div className='flex items-center gap-1.5'>
+                <button
+                  type='button'
+                  onClick={onEdit}
+                  className='inline-flex items-center justify-center h-7 w-7 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+                  title='Edit draft'
+                  aria-label='Edit draft'
+                  data-track-category='Support'
+                  data-track-name='OpenReplyDraft'
+                >
+                  <Pencil size={12} />
+                </button>
+                <button
+                  type='button'
+                  onClick={onDiscard}
+                  className='inline-flex items-center justify-center h-7 w-7 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+                  title='Discard draft'
+                  aria-label='Discard draft'
+                  data-track-category='Support'
+                  data-track-name='DiscardDraft'
+                >
+                  <Trash2 size={12} />
+                </button>
+                <button
+                  type='button'
+                  onClick={onSend}
+                  className='inline-flex items-center justify-center h-7 w-7 rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors cursor-pointer select-none'
+                  title='Send draft'
+                  aria-label='Send draft'
+                  data-track-category='Support'
+                  data-track-name='SendReplyDraft'
+                >
+                  <ArrowUp size={12} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -2093,6 +2509,11 @@ const SupportTicketDetail = (): ReactElement => {
     snapshot => snapshot.context.xyneAIState === 'open',
   );
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
+  const [activeReplyDraftId, setActiveReplyDraftId] = useState<string | null>(null);
+  const [sendDraftRequest, setSendDraftRequest] = useState<{
+    draftId: string;
+    requestedAt: number;
+  } | null>(null);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {
@@ -2176,6 +2597,12 @@ const SupportTicketDetail = (): ReactElement => {
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
+  const emailChannelPreference = useEmailChannelPreference(channelId || null);
+  const boardId = emailChannelPreference?.boardId ?? null;
+  const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: boardId || '' }), {
+    enabled: !!boardId,
+  });
+  const stageOptions = useMemo(() => getStageOptions(stages), [stages]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -2210,16 +2637,32 @@ const SupportTicketDetail = (): ReactElement => {
     previewText: title || 'Ticket conversation',
   });
   const conversation = ticket?.conversation;
-  const ticketDraftContent = useEmailDraft(conversationId ?? null);
+  const replyDrafts = useEmailDrafts(conversationId ?? null);
   const draftAutoOpenedConversationRef = useRef<string | null>(null);
   useEffect(() => {
     if (!conversationId) return;
     if (draftAutoOpenedConversationRef.current === conversationId) return;
-    if (ticketDraftContent && ticketDraftContent.trim()) {
+    const latestDraft = replyDrafts[0];
+    if (latestDraft?.draftContent?.trim()) {
+      setActiveReplyDraftId(latestDraft.id);
       setComposerOpen(true);
       draftAutoOpenedConversationRef.current = conversationId;
     }
-  }, [conversationId, ticketDraftContent]);
+  }, [conversationId, replyDrafts, setComposerOpen]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      setActiveReplyDraftId(null);
+      return;
+    }
+    if (!activeReplyDraftId) {
+      return;
+    }
+    if (replyDrafts.some(draft => draft.id === activeReplyDraftId)) {
+      return;
+    }
+    setActiveReplyDraftId(null);
+  }, [activeReplyDraftId, conversationId, replyDrafts]);
 
   // Prev / next cursor queries — each returns at most 1 adjacent ticket in the
   // EMAIL-channel scope ordered by lastEmailAt desc. Served from IVM when
@@ -2664,7 +3107,7 @@ const SupportTicketDetail = (): ReactElement => {
               </div>
               <div className='flex items-center gap-2 flex-shrink-0'>
                 <div className='pl-9'>
-                  <TicketMetaRow ticket={ticket} />
+                  <TicketMetaRow ticket={ticket} stageOptions={stageOptions} />
                 </div>
               </div>
             </div>
@@ -2865,12 +3308,72 @@ const SupportTicketDetail = (): ReactElement => {
                     }
                     onReplyToEmail={(emailId, mode) => {
                       clearStoredRecipients(conversationId);
+                      setActiveReplyDraftId(null);
                       setReplyToEmailId(emailId);
                       setReplyMode(mode);
                       setComposerOpen(true);
                     }}
                     deskEmail={deskEmail}
                   />
+                </div>
+              )}
+              {replyDrafts.length > 0 && (
+                <div className='px-6 pb-3 space-y-2'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <div className='flex items-center gap-2'>
+                      <span className='inline-flex h-6 items-center rounded-full border border-border/70 bg-muted/40 px-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground'>
+                        Drafts
+                      </span>
+                      <span className='text-xs text-muted-foreground'>
+                        {replyDrafts.length} saved
+                      </span>
+                    </div>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setReplyToEmailId(null);
+                        setReplyMode('reply');
+                        setActiveReplyDraftId(null);
+                        setComposerOpen(true);
+                      }}
+                      className='inline-flex items-center rounded-full border border-dashed border-border px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors'
+                      data-track-category='Support'
+                      data-track-name='NewDraftClick'
+                    >
+                      New draft
+                    </button>
+                  </div>
+                  <div className='overflow-hidden rounded-2xl border border-border/80 bg-background'>
+                    {replyDrafts.map(draft => (
+                      <ReplyDraftThreadItem
+                        key={draft.id}
+                        draft={draft}
+                        isActive={draft.id === activeReplyDraftId}
+                        deskEmail={deskEmail}
+                        onEdit={() => {
+                          setReplyToEmailId(null);
+                          setReplyMode('reply');
+                          setActiveReplyDraftId(draft.id);
+                          setComposerOpen(true);
+                        }}
+                        onSend={() => {
+                          setReplyToEmailId(null);
+                          setReplyMode('reply');
+                          setActiveReplyDraftId(draft.id);
+                          setComposerOpen(true);
+                          setSendDraftRequest({ draftId: draft.id, requestedAt: Date.now() });
+                        }}
+                        onDiscard={() => {
+                          if (draft.id === activeReplyDraftId) {
+                            setComposerOpen(false);
+                            setReplyToEmailId(null);
+                            setActiveReplyDraftId(null);
+                          }
+                          void zero.mutate(mutators.emailDraft.delete({ id: draft.id }));
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -2892,6 +3395,9 @@ const SupportTicketDetail = (): ReactElement => {
                   }}
                   channelId={channelId}
                   ticketId={ticketId}
+                  replyDraftId={activeReplyDraftId}
+                  onReplyDraftCreated={setActiveReplyDraftId}
+                  sendRequest={sendDraftRequest}
                   replyToEmailId={replyToEmailId}
                   replyMode={replyMode}
                   ticketSubject={title}
@@ -2913,7 +3419,7 @@ const SupportTicketDetail = (): ReactElement => {
                     <button
                       type='button'
                       onClick={() => {
-                        clearStoredRecipients(conversationId);
+                        setActiveReplyDraftId(null);
                         setReplyToEmailId(null);
                         setReplyMode('reply');
                         setComposerOpen(true);
@@ -2941,7 +3447,7 @@ const SupportTicketDetail = (): ReactElement => {
                     <button
                       type='button'
                       onClick={() => {
-                        clearStoredRecipients(conversationId);
+                        setActiveReplyDraftId(null);
                         setReplyToEmailId(null);
                         setReplyMode('replyAll');
                         setComposerOpen(true);

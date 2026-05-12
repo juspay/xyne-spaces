@@ -181,8 +181,14 @@ export class ZohoUploadController {
     const failures: UploadOutcome['failures'] = [];
     settled.forEach((r, i) => {
       const filename = ctx.files[i]?.originalname ?? '<unknown>';
-      if (r.status === 'fulfilled' && r.value) ids.push(r.value);
-      else if (r.status === 'rejected') {
+      if (r.status === 'fulfilled' && r.value) {
+        ids.push(r.value);
+      } else if (r.status === 'fulfilled' && !r.value) {
+        failures.push({
+          filename,
+          error: 'Zoho upload returned no attachment id',
+        });
+      } else if (r.status === 'rejected') {
         failures.push({
           filename,
           error: r.reason instanceof Error ? r.reason.message : 'unknown',

@@ -5644,6 +5644,7 @@ export const mutators = defineMutators({
                   formId: string;
                   fieldName: string;
                   fieldType: FormFieldType;
+                  sequenceNumber: number;
                   updatedAt: number;
                   fieldEnum?: ReadonlyJSONValue;
                   isOptional?: boolean;
@@ -5652,6 +5653,7 @@ export const mutators = defineMutators({
                   formId,
                   fieldName: field.fieldName.trim(),
                   fieldType: field.fieldType,
+                  sequenceNumber: index + 1,
                   updatedAt: timestamp,
                 };
 
@@ -5676,6 +5678,7 @@ export const mutators = defineMutators({
                   formId: string;
                   fieldName: string;
                   fieldType: FormFieldType;
+                  sequenceNumber: number;
                   createdAt: number;
                   updatedAt: number;
                   fieldEnum?: ReadonlyJSONValue;
@@ -5685,6 +5688,7 @@ export const mutators = defineMutators({
                   formId,
                   fieldName: field.fieldName.trim(),
                   fieldType: field.fieldType,
+                  sequenceNumber: index + 1,
                   createdAt: timestamp,
                   updatedAt: timestamp,
                 };
@@ -5715,6 +5719,7 @@ export const mutators = defineMutators({
                 formId,
                 fieldName: field.fieldName.trim(),
                 fieldType: field.fieldType,
+                sequenceNumber: index + 1,
                 createdAt: timestamp,
                 updatedAt: timestamp,
               });
@@ -5993,17 +5998,23 @@ export const mutators = defineMutators({
         conversationId: z.string(),
         channelId: z.string(),
         draftContent: z.string(),
+        attachmentIds: z.array(z.string()).optional(),
         updatedAt: z.number(),
       }),
-      async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, updatedAt } }) => {
+      async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, attachmentIds, updatedAt } }) => {
         const existing = await tx.run(
           zql.email_drafts
-            .where('conversationId', conversationId)
+            .where('id', id)
             .where('userId', ctx.userID)
             .one(),
         );
         if (existing) {
-          await tx.mutate.email_drafts.update({ id: existing.id, draftContent, updatedAt });
+          await tx.mutate.email_drafts.update({
+            id: existing.id,
+            draftContent,
+            ...(attachmentIds !== undefined && { attachmentIds }),
+            updatedAt,
+          });
         } else {
           await tx.mutate.email_drafts.insert({
             id,
@@ -6011,6 +6022,7 @@ export const mutators = defineMutators({
             channelId,
             userId: ctx.userID,
             draftContent,
+            ...(attachmentIds !== undefined && { attachmentIds }),
             createdAt: updatedAt,
             updatedAt,
           });
@@ -6019,12 +6031,12 @@ export const mutators = defineMutators({
     ),
     delete: defineMutator(
       z.object({
-        conversationId: z.string(),
+        id: z.string(),
       }),
-      async ({ tx, ctx, args: { conversationId } }) => {
+      async ({ tx, ctx, args: { id } }) => {
         const existing = await tx.run(
           zql.email_drafts
-            .where('conversationId', conversationId)
+            .where('id', id)
             .where('userId', ctx.userID)
             .one(),
         );
@@ -6132,10 +6144,17 @@ export const mutators = defineMutators({
             channelId,
             ownerUserId: ownerUserId ?? ctx.userID,
             assigneeUserGroupId: assigneeUserGroupId ?? null,
+            boardId: null,
             sendAsEmail: sendAsEmail ?? null,
             classificationEnabled: false,
+            classificationPrompt: null,
+            categoryField: null,
+            subCategoryField: null,
             defaultCc: defaultCc ?? null,
             emailMergeMode: emailMergeMode ?? EmailMergeMode.ENABLED,
+            priorityClassificationEnabled: false,
+            priorityClassificationPrompt: null,
+            priorityClassificationThreshold: 0.5,
           });
         }
       },
@@ -6165,10 +6184,55 @@ export const mutators = defineMutators({
           await tx.mutate.email_channel_preferences.insert({
             channelId,
             ownerUserId: ctx.userID,
+            assigneeUserGroupId: null,
+            boardId: null,
+            sendAsEmail: null,
             classificationEnabled,
             classificationPrompt,
             categoryField,
             subCategoryField: subCategoryField ?? null,
+            defaultCc: null,
+            priorityClassificationEnabled: false,
+            priorityClassificationPrompt: null,
+            priorityClassificationThreshold: 0.5,
+          });
+        }
+      },
+    ),
+    upsertPriorityClassificationConfig: defineMutator(
+      z.object({
+        channelId: z.string(),
+        priorityClassificationEnabled: z.boolean(),
+        priorityClassificationPrompt: z.string().optional().nullable(),
+        priorityClassificationThreshold: z.number().optional(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const { channelId, priorityClassificationEnabled, priorityClassificationPrompt, priorityClassificationThreshold } = args;
+        const existing = await tx.run(
+          zql.email_channel_preferences.where('channelId', channelId).one(),
+        );
+        if (existing) {
+          await tx.mutate.email_channel_preferences.update({
+            channelId,
+            priorityClassificationEnabled,
+            priorityClassificationPrompt: priorityClassificationPrompt ?? null,
+            priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
+          });
+        } else {
+          await tx.mutate.email_channel_preferences.insert({
+            channelId,
+            ownerUserId: ctx.userID,
+            assigneeUserGroupId: null,
+            boardId: null,
+            sendAsEmail: null,
+            classificationEnabled: false,
+            classificationPrompt: null,
+            categoryField: null,
+            subCategoryField: null,
+            defaultCc: null,
+            priorityClassificationEnabled,
+            priorityClassificationPrompt: priorityClassificationPrompt ?? null,
+            priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
           });
         }
       },
