@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { useMachine } from '@xstate/react';
@@ -49,6 +49,7 @@ const WorkflowScreen: React.FC = () => {
   const { ticketId, workflowId } = useParams<{ ticketId: string; workflowId?: string }>();
   const [searchParams] = useSearchParams();
   const workflowNumber = searchParams.get('workflowNumber');
+  const navigate = useNavigate();
 
   const [ticketData, ticketQueryDetails] = useCachedQuery(
     queries.ticketById({ ticketId: ticketId ?? '' }),
@@ -592,7 +593,10 @@ const WorkflowScreen: React.FC = () => {
       <div className='h-screen bg-background flex flex-col rounded-2xl overflow-hidden'>
         <div className='h-14 border-b border-border flex items-center px-4'>
           <button
-            onClick={() => window.history.back()}
+            onClick={() => {
+              sessionStorage.removeItem(LAST_WORKFLOW_PATH_KEY);
+              void navigate('/tickets');
+            }}
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors'
             data-track-category='Workflow'
             data-track-name='BackFromTicketNotFound'
@@ -611,7 +615,10 @@ const WorkflowScreen: React.FC = () => {
               be found.
             </p>
             <button
-              onClick={() => window.history.back()}
+              onClick={() => {
+                sessionStorage.removeItem(LAST_WORKFLOW_PATH_KEY);
+                void navigate('/tickets');
+              }}
               className='px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors'
               data-track-category='Workflow'
               data-track-name='GoBackButton'
