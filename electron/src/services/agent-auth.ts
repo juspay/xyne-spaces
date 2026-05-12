@@ -127,6 +127,8 @@ class AgentAuthService {
         await this.handleSearch(req, res, url);
       } else if (req.method === 'POST' && url.pathname === '/api/search') {
         await this.handleMcpSearch(req, res, url);
+      } else if (req.method === 'POST' && url.pathname === '/api/ingest/turn') {
+        await this.handleMcpIngestTurn(req, res, url);
       } else if (req.method === 'POST' && url.pathname === '/api/conversation-ingest/upload') {
         await this.handleMcpConversationIngestUpload(req, res);
       } else if (req.method === 'POST' && url.pathname === '/memory/search') {
@@ -447,6 +449,76 @@ class AgentAuthService {
       this.forwardRawBackendResponse(res, backendResponse);
     } catch (error: any) {
       log.error('[AgentAuth] MCP search proxy request failed:', error);
+      this.sendJson(res, 500, {
+        error: 'Backend Request Failed',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * MCP compatibility route: POST /api/ingest/turn
+   * Proxies JSON payloads to backend /test/api/ingest/turn using the logged-in Electron session token.
+   */
+  private async handleMcpIngestTurn(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const agentToken = this.extractToken(req);
+    if (!agentToken || !this.validateToken(agentToken)) {
+      this.sendJson(res, 401, {
+        error: 'Unauthorized',
+        message: 'Invalid or missing agent authorization token',
+      });
+      return;
+    }
+
+    let body: any;
+    try {
+      body = await this.parseBody(req);
+    } catch {
+      this.sendJson(res, 400, {
+        error: 'Bad Request',
+        message: 'Invalid JSON in request body',
+      });
+      return;
+    }
+
+    if (!body || typeof body !== 'object') {
+      this.sendJson(res, 400, {
+        error: 'Bad Request',
+        message: 'Request body must be a JSON object or array',
+      });
+      return;
+    }
+
+    try {
+      const googleToken = await this.getGoogleAccessTokenFromSession();
+      if (!googleToken) {
+        this.sendJson(res, 401, {
+          error: 'Unauthorized',
+          message: 'No user access token found in session',
+        });
+        return;
+      }
+
+      const searchParams = new URLSearchParams(url.searchParams);
+      const qs = searchParams.toString();
+      const backendUrl = `${this.getMcpBackendBaseUrl()}/test/api/ingest/turn${qs ? `?${qs}` : ''}`;
+      log.info(`[AgentAuth] Proxying MCP POST /api/ingest/turn request to ${backendUrl}`);
+
+      const bodyBuffer = Buffer.from(JSON.stringify(body));
+
+      const backendResponse = await this.makeBackendRequestRaw({
+        url: backendUrl,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${googleToken}`,
+          'Content-Type': 'application/json',
+        },
+        bodyBuffer,
+      });
+
+      this.forwardRawBackendResponse(res, backendResponse);
+    } catch (error: any) {
+      log.error('[AgentAuth] MCP ingest turn proxy request failed:', error);
       this.sendJson(res, 500, {
         error: 'Backend Request Failed',
         message: error.message,
