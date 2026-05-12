@@ -392,7 +392,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                   }}
                   placeholder='Enter team name'
                   maxLength={20}
-                  className='flex-1 px-2 py-1 text-lg border border-input rounded focus:outline-none focus:border-ring'
+                  className='flex-1 px-2 py-1 text-lg border border-input rounded focus:outline-none focus:border-ring bg-background text-foreground'
                   autoFocus={!isMobile}
                 />
                 <button
