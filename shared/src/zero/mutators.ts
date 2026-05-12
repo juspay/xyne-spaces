@@ -2383,6 +2383,18 @@ export const mutators = defineMutators({
           }
         }
 
+        const channelCopies = await tx.run(zql.conversations.where('initialMessageId', messageId));
+
+        for (const channelCopy of channelCopies) {
+          if (channelCopy.conversationId === conversation.conversationId) {
+            continue;
+          }
+
+          await tx.mutate.conversations.delete({
+            conversationId: channelCopy.conversationId,
+          });
+        }
+
         // 5. Final Delete Logic
         if (shouldSoftDelete) {
           // SCENARIO 1: Root Message + Has Replies -> Soft Delete
@@ -2398,7 +2410,13 @@ export const mutators = defineMutators({
           await updateInitialMessageMdField(
             tx,
             { messageId },
-            { isDeleted: true, content: '', hasAttachment: false, edited: false, link_preview_md: '' },
+            {
+              isDeleted: true,
+              content: '',
+              hasAttachment: false,
+              edited: false,
+              link_preview_md: ''
+            },
           );
         } else {
           // SCENARIO 2: Hard Delete (Reply OR Root with no replies)
