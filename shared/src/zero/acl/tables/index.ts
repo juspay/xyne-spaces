@@ -9,6 +9,7 @@ export { EmailChannelPreferencesACL } from './email-channel-preferences-acl';
 export { BoardSlaPoliciesACL } from './board-sla-policies-acl';
 export { CallParticipantsACL } from './call-participants-acl';
 export { CallsACL } from './calls-acl';
+export { CanvasFoldersACL } from './canvas-folders-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';
 export { CanvasesACL } from './canvases-acl';
 export { ChannelParticipantsACL } from './channel-participants-acl';

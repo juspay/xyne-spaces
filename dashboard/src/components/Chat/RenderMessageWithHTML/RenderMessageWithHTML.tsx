@@ -68,6 +68,12 @@ const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
   }
 };
 
+const getOptionalStringProperty = (value: unknown, key: string): string | undefined => {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const propertyValue = (value as Record<string, unknown>)[key];
+  return typeof propertyValue === 'string' ? propertyValue : undefined;
+};
+
 const InternalXyneLink = ({
   href,
   children,
@@ -110,7 +116,12 @@ const InternalXyneLink = ({
     });
   };
 
-  const linkLabel = getInternalLinkLabel(parsedLink, channel?.name, ticket?.xyneId, canvas?.title);
+  const linkLabel = getInternalLinkLabel(
+    parsedLink,
+    getOptionalStringProperty(channel, 'name'),
+    getOptionalStringProperty(ticket, 'xyneId'),
+    getOptionalStringProperty(canvas, 'title'),
+  );
   const leadingIcon = getInternalLinkIcon(parsedLink.kind);
 
   if (!shouldReplaceWithSemanticLabel(children, resolvedHref)) {

@@ -7,6 +7,8 @@ import { logger, Event } from '../../utils/logger';
 export interface YSweetAuthRequest {
   docId: string;
   channelId?: string;
+  projectId?: string;
+  folderId?: string;
   title?: string;
   viewAccessId?: string;
   editAccessId?: string;
@@ -16,6 +18,8 @@ export interface CreateCollaborativeCanvasRequest {
   id: string;
   title?: string;
   channelId?: string;
+  projectId?: string;
+  folderId?: string;
   viewAccessId?: string;
   editAccessId?: string;
 }
@@ -52,6 +56,8 @@ export class CanvasService {
     const response = await apiInstance.post<YSweetAuthToken>('/ysweet/auth', {
       docId: request.id,
       channelId: request.channelId,
+      projectId: request.projectId,
+      folderId: request.folderId,
       title: request.title || 'Untitled Canvas',
       viewAccessId: request.viewAccessId,
       editAccessId: request.editAccessId,

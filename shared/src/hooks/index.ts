@@ -15,6 +15,7 @@ export {
   searchChannels,
   useAllChannels,
   useAllVisibleChannels,
+  useVisibleProjects,
   useChannel,
   useVisibleChannel,
   useChannelByName,
@@ -28,7 +29,7 @@ export {
   useGetChannelConversations,
   useGetLatestConversation,
 } from './useChannels.js';
-export type { VisibleChannel } from './useChannels.js';
+export type { VisibleChannel, VisibleProject } from './useChannels.js';
 
 export {
   usePermissions,

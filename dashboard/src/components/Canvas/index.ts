@@ -1,5 +1,7 @@
 export { CanvasEditor } from './CanvasEditor';
+export { ChannelCanvasList } from './ChannelCanvasList';
 export { CanvasList } from './CanvasList';
+export { CanvasListGrouped } from './CanvasListGrouped';
 export { CanvasPanel } from './CanvasPanel';
 export { CanvasPreview } from './CanvasPreview';
 export { CanvasShareModal } from './CanvasShareModal';

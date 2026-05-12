@@ -60,6 +60,10 @@ import {
   Status,
   OrgRole,
   DelayedMessageStatus,
+  assertCanvasDestinationAccess,
+  getCanvasFolderNameConflictMessage,
+  rethrowCanvasFolderNameConflict,
+  resolveCanvasHierarchy,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
@@ -175,6 +179,24 @@ async function reopenClosedDmParticipants(
       isClosed: false,
       updatedAt: timestamp,
     });
+  }
+}
+
+async function assertCanvasChannelNotArchived(
+  tx: Transaction<Schema>,
+  channelId: string | null | undefined,
+): Promise<void> {
+  if (!channelId) {
+    return;
+  }
+
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (!channel) {
+    throw new Error('Channel not found');
+  }
+
+  if (channel.isArchived) {
+    throw new Error('Channel is archived');
   }
 }
 
@@ -6202,6 +6224,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           id: z.string(),
           title: z.string(),
           channelId: z.string().optional(),
+          folderId: z.string().optional(),
+          projectId: z.string().optional(),
           viewAccessId: z.string().optional(),
           editAccessId: z.string().optional(),
           visibility: z.nativeEnum(CanvasVisibility).optional(),
@@ -6209,14 +6233,28 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
           participantId: z.string(),
         }),
-        async ({ tx, args: { id, title, channelId, viewAccessId, editAccessId, visibility, content, timestamp, participantId } }) => {
+        async ({ tx, args: { id, title, channelId, folderId, projectId, viewAccessId, editAccessId, visibility, content, timestamp, participantId } }) => {
           const now = timestamp;
+          const {
+            projectId: resolvedProjectId,
+            channelId: resolvedChannelId,
+          } = await resolveCanvasHierarchy({
+            folderId,
+            projectId,
+            channelId,
+            loadFolder: folderId => tx.run(zql.canvas_folders.where('id', folderId).one()),
+            loadChannel: channelId => tx.run(zql.channels.where('id', channelId).one()),
+          });
+
+          await assertCanvasChannelNotArchived(tx, resolvedChannelId);
 
           await tx.mutate.canvases.insert({
             id,
             title,
             content: content || [],
-            channelId,
+            channelId: resolvedChannelId,
+            folderId,
+            projectId: resolvedProjectId,
             createdBy: authData.sub,
             viewAccessId,
             editAccessId,
@@ -6444,6 +6482,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           content: z.any().optional(),
           visibility: z.nativeEnum(CanvasVisibility).optional(),
           isCollaborative: z.boolean().optional(),
+          folderId: z.string().nullable().optional(),
+          projectId: z.string().nullable().optional(),
+          channelId: z.string().nullable().optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args: params }) => {
@@ -6454,6 +6495,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           const isEditLink = params.editAccessId && canvas.editAccessId === params.editAccessId;
+          const isMoveOperation =
+            params.folderId !== undefined ||
+            params.projectId !== undefined ||
+            params.channelId !== undefined;
 
           if (!isEditLink) {
             const participant = await tx.run(zql.canvas_participants
@@ -6461,14 +6506,67 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('userId', authData.sub)
               .one());
 
+            const currentFolder = canvas.folderId
+              ? await tx.run(zql.canvas_folders.where('id', canvas.folderId).one())
+              : null;
+            const currentChannelId = canvas.channelId ?? currentFolder?.channelId ?? null;
+            const isChannelAdmin = currentChannelId
+              ? Boolean(
+                  await tx.run(
+                    zql.channel_participants
+                      .where('channelId', currentChannelId)
+                      .where('userId', authData.sub)
+                      .where('role', ChannelRole.ADMIN)
+                      .one(),
+                  ),
+                )
+              : false;
+
             const canEdit =
               canvas.createdBy === authData.sub ||
               (participant &&
                 (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER));
 
-            if (!canEdit) {
+            if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
               throw new Error('You do not have permission to edit this canvas');
             }
+          }
+
+          const {
+            projectId: resolvedProjectId,
+            channelId: resolvedChannelId,
+          } = await resolveCanvasHierarchy({
+            folderId: params.folderId,
+            projectId: params.projectId,
+            channelId: params.channelId,
+            loadFolder: folderId => tx.run(zql.canvas_folders.where('id', folderId).one()),
+            loadChannel: channelId => tx.run(zql.channels.where('id', channelId).one()),
+          });
+
+          if (isMoveOperation) {
+            await assertCanvasDestinationAccess({
+              projectId: resolvedProjectId,
+              channelId: resolvedChannelId,
+              loadChannel: channelId => tx.run(zql.channels.where('id', channelId).one()),
+              isChannelMember: async channelId =>
+                Boolean(
+                  await tx.run(
+                    zql.channel_participants
+                      .where('channelId', channelId)
+                      .where('userId', authData.sub)
+                      .one(),
+                  ),
+                ),
+              isProjectMember: async projectId =>
+                Boolean(
+                  await tx.run(
+                    zql.channels
+                      .where('projectId', projectId)
+                      .whereExists('participants', p => p.where('userId', authData.sub))
+                      .one(),
+                  ),
+                ),
+            });
           }
 
           await tx.mutate.canvases.update({
@@ -6480,6 +6578,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(params.content !== undefined && { content: params.content }),
             ...(params.visibility !== undefined && { visibility: params.visibility }),
             ...(params.isCollaborative !== undefined && { isCollaborative: params.isCollaborative }),
+            ...(params.folderId !== undefined && { folderId: params.folderId }),
+            ...(resolvedProjectId !== undefined && { projectId: resolvedProjectId }),
+            ...(resolvedChannelId !== undefined && { channelId: resolvedChannelId }),
           });
 
           // Track user activity using Redis Set - O(1) operation, no DB query
@@ -6505,6 +6606,214 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.canvases.delete({ id });
+        },
+      ),
+    },
+    canvasFolder: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          projectId: z.string().nullable().optional(),
+          channelId: z.string().optional(),
+          name: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, name, projectId, channelId, timestamp } }) => {
+          const cleanName = name.trim();
+          if (!cleanName) {
+            throw new Error('Folder name is required');
+          }
+
+          if (!projectId && channelId) {
+            throw new Error('Channel folders must belong to a project');
+          }
+
+          if (projectId) {
+            const project = await tx.run(zql.projects.where('id', projectId).one());
+            if (!project) {
+              throw new Error('Project not found');
+            }
+
+            if (channelId) {
+              const channel = await tx.run(zql.channels.where('id', channelId).one());
+              if (!channel) {
+                throw new Error('Channel not found');
+              }
+
+              if (channel.isArchived) {
+                throw new Error('Channel is archived');
+              }
+
+              if (channel.projectId !== projectId) {
+                throw new Error('Channel does not belong to project');
+              }
+            }
+          }
+
+          const duplicateNameMessage = getCanvasFolderNameConflictMessage(channelId, projectId);
+          const existingFolder = await tx.run(
+            zql.canvas_folders
+            .where('name', cleanName)
+            .where(({ and, cmp }) =>
+              channelId
+                ? and(cmp('projectId', '=', projectId as string), cmp('channelId', '=', channelId))
+                : projectId
+                  ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
+                  : and(
+                      cmp('projectId', 'IS', null),
+                      cmp('channelId', 'IS', null),
+                      cmp('createdBy', '=', authData.sub),
+                    ),
+            )
+            .one(),
+        );
+          if (existingFolder) {
+            throw new Error(duplicateNameMessage);
+          }
+
+          try {
+            await tx.mutate.canvas_folders.insert({
+              id,
+              ...(projectId ? { projectId } : {}),
+              ...(channelId ? { channelId } : {}),
+              name: cleanName,
+              createdBy: authData.sub,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          } catch (error) {
+            rethrowCanvasFolderNameConflict(error, channelId, projectId);
+          }
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().optional(),
+          timestamp: z.number().optional(),
+        }),
+        async ({ tx, args: { id, name, timestamp } }) => {
+          const folder = await tx.run(zql.canvas_folders.where('id', id).one());
+          if (!folder) {
+            throw new Error('Folder not found');
+          }
+
+          const isProjectDefaultFolder =
+            folder.projectId != null && folder.channelId == null && folder.name === 'Default';
+          if (isProjectDefaultFolder) {
+            throw new Error('Default project folder cannot be renamed');
+          }
+
+          const isChannelAdmin = folder.channelId
+            ? Boolean(
+                await tx.run(
+                  zql.channel_participants
+                    .where('channelId', folder.channelId)
+                    .where('userId', authData.sub)
+                    .where('role', ChannelRole.ADMIN)
+                    .one(),
+                ),
+              )
+            : false;
+
+          if (folder.createdBy !== authData.sub && !isChannelAdmin) {
+            throw new Error(
+              folder.channelId
+                ? 'Only the creator or a channel admin can update this folder'
+                : 'Only the creator can update this folder',
+            );
+          }
+
+          const updates: { name?: string; updatedAt: number } = { updatedAt: timestamp || Date.now() };
+          if (name !== undefined) {
+            const cleanName = name.trim();
+            if (!cleanName) {
+              throw new Error('Folder name is required');
+            }
+
+            const duplicateNameMessage = getCanvasFolderNameConflictMessage(
+              folder.channelId,
+              folder.projectId,
+            );
+            const existingFolder = await tx.run(
+              zql.canvas_folders
+                .where('name', cleanName)
+                .where(({ and, cmp }) =>
+                  folder.channelId
+                    ? and(
+                        cmp('projectId', '=', folder.projectId as string),
+                        cmp('channelId', '=', folder.channelId),
+                      )
+                    : folder.projectId
+                      ? and(
+                          cmp('projectId', '=', folder.projectId),
+                          cmp('channelId', 'IS', null),
+                        )
+                      : and(
+                          cmp('projectId', 'IS', null),
+                          cmp('channelId', 'IS', null),
+                          cmp('createdBy', '=', folder.createdBy),
+                        ),
+                )
+                .one(),
+            );
+            if (existingFolder && existingFolder.id !== id) {
+              throw new Error(duplicateNameMessage);
+            }
+
+            updates.name = cleanName;
+          }
+
+          try {
+            await tx.mutate.canvas_folders.update({
+              id,
+              ...updates,
+            });
+          } catch (error) {
+            rethrowCanvasFolderNameConflict(error, folder.channelId, folder.projectId);
+          }
+        },
+      ),
+      delete: defineMutator(
+        z.object({ id: z.string() }),
+        async ({ tx, args: { id } }) => {
+          const folder = await tx.run(zql.canvas_folders.where('id', id).one());
+          if (!folder) {
+            throw new Error('Folder not found');
+          }
+
+          const isProjectDefaultFolder =
+            folder.projectId != null && folder.channelId == null && folder.name === 'Default';
+          if (isProjectDefaultFolder) {
+            throw new Error('Default project folder cannot be deleted');
+          }
+
+          const isChannelAdmin = folder.channelId
+            ? Boolean(
+                await tx.run(
+                  zql.channel_participants
+                    .where('channelId', folder.channelId)
+                    .where('userId', authData.sub)
+                    .where('role', ChannelRole.ADMIN)
+                    .one(),
+                ),
+              )
+            : false;
+
+          if (folder.createdBy !== authData.sub && !isChannelAdmin) {
+            throw new Error(
+              folder.channelId
+                ? 'Only the creator or a channel admin can delete this folder'
+                : 'Only the creator can delete this folder',
+            );
+          }
+
+          const canvasesInFolder = await tx.run(zql.canvases.where('folderId', id));
+          if (canvasesInFolder.length > 0) {
+            throw new Error('Cannot delete folder with canvases. Move or delete canvases first.');
+          }
+
+          await tx.mutate.canvas_folders.delete({ id });
         },
       ),
     },
