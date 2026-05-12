@@ -102,9 +102,10 @@ export function insertPageWithBreaks<T>(
   existing: (T | typeof PAGE_BREAK_MARKER)[] | undefined,
   incoming: T[],
   cursor: unknown,
+  limit: number,
+  direction: 'forward' | 'backward' | undefined,
   orderBy?: { field: string; direction: 'asc' | 'desc' }[],
 ): (T | typeof PAGE_BREAK_MARKER)[] {
-  console.log('[lgs] insertPageWithBreaks called with cursor:', orderBy);
   const fields = orderBy?.map(o => o.field) ?? [];
   // Filter out existing breaks to get real items
   const existingItems = existing?.filter((item): item is T => !isPageBreak(item)) ?? [];
@@ -114,15 +115,15 @@ export function insertPageWithBreaks<T>(
   const isContiguous = cursor !== null && cursorIndex !== -1;
 
   // cursor === null means "fetch from the very beginning" (initial or reset load).
-  // This is always the freshest data and has no gap relative to the existing cache,
-  // so merge cleanly without inserting a PAGE_BREAK_MARKER.
+  // This page is authoritative for the refreshed window, so remove stale rows
+  // from that window before merging incoming rows back into the accumulated cache.
   if (cursor === null || cursor === undefined) {
-    return mergeById(existingItems, incoming, orderBy);
+    return replaceCachedWindow(existing, incoming, cursor, limit, direction, orderBy);
   }
 
   if (isContiguous) {
-    // Contiguous: merge without breaks, remove any existing breaks
-    return mergeById(existingItems, incoming, orderBy);
+    // Contiguous: refresh this cached window, remove any existing breaks.
+    return replaceCachedWindow(existing, incoming, cursor, limit, direction, orderBy);
   }
 
   // Non-contiguous (jump): need to insert with break
@@ -162,6 +163,32 @@ export function insertPageWithBreaks<T>(
 
   // Deduplicate and clean up consecutive/trailing breaks
   return dedupeAndCleanBreaks(result);
+}
+
+/**
+ * Replaces the currently requested cached window with fresh rows.
+ * This lets deletions/moves be reflected lazily when that cursor window is
+ * refreshed, without needing per-page metadata.
+ */
+function replaceCachedWindow<T>(
+  existing: (T | typeof PAGE_BREAK_MARKER)[] | undefined,
+  incoming: T[],
+  cursor: unknown,
+  limit: number,
+  direction: 'forward' | 'backward' | undefined,
+  orderBy?: { field: string; direction: 'asc' | 'desc' }[],
+): T[] {
+  const existingItems = existing?.filter((item): item is T => !isPageBreak(item)) ?? [];
+  const windowItems = filterAfterCursor(existing ?? [], cursor, limit, direction, orderBy);
+  const windowIds = new Set(windowItems.map(getId).filter((id): id is string => !!id));
+  const incomingIds = new Set(incoming.map(getId).filter((id): id is string => !!id));
+  const prunedExisting = existingItems.filter(item => {
+    const id = getId(item);
+    if (!id) return true;
+    return !windowIds.has(id) || incomingIds.has(id);
+  });
+
+  return mergeById(prunedExisting, incoming, orderBy);
 }
 
 /**

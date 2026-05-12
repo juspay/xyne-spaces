@@ -45,7 +45,6 @@ import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { mutators } from '../../../zero/mutators';
 import Button from '../../ui/Button';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useQuery } from '../../../hooks/useQuery';
 import { logger, Event } from '../../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 
@@ -324,15 +323,20 @@ const ActivityListView = (): ReactElement => {
   const currentTypes = useMemo(() => getActivityTypes(activeTab), [activeTab]);
   const classificationFilter = useMemo(() => getClassificationFilter(activeTab), [activeTab]);
 
-  // Query with pagination - only fetches when fetchCursor changes
-  const [activitiesPage, activitiesDetails] = useQuery(
-    queries.userActivitiesPaginatedV2({
-      limit: PAGE_SIZE,
-      start: fetchCursor,
-      types: currentTypes,
-      classification: classificationFilter,
-    }),
+  const activitiesQuery = useMemo(
+    () =>
+      queries.userActivitiesPaginatedV2({
+        limit: PAGE_SIZE,
+        start: fetchCursor,
+        types: currentTypes,
+        classification: classificationFilter,
+      }),
+    [PAGE_SIZE, fetchCursor, currentTypes, classificationFilter],
   );
+
+  const [activitiesPage, activitiesDetails] = useCachedQuery(activitiesQuery, {
+    cursorEnabled: true,
+  });
 
   // Accumulate results when query completes
   useEffect(() => {
