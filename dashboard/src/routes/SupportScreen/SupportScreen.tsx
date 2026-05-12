@@ -849,6 +849,8 @@ const SupportScreen = (): ReactElement => {
     if (!xyneId) return;
     const params = new URLSearchParams();
     if (deeplinkMessageId) params.set('messageId', deeplinkMessageId);
+    const mailId = searchParams.get('mail');
+    if (mailId) params.set('mail', mailId);
     const qs = params.toString();
     void navigate(`/support/${selectedChannelId}/${xyneId}${qs ? `?${qs}` : ''}`, {
       replace: true,
@@ -2892,6 +2894,7 @@ const SupportTicketDetail = (): ReactElement => {
                   ticketId={ticketId}
                   replyToEmailId={replyToEmailId}
                   replyMode={replyMode}
+                  ticketSubject={title}
                 />
               ) : (
                 <div className='px-6 py-3 flex items-center gap-2'>

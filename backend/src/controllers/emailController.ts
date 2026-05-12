@@ -38,6 +38,7 @@ interface ReplyEmailRequest {
   bcc?: string[];
   attachmentIds?: string[];
   replyToEmailId?: string;
+  subject?: string;
 }
 
 export class EmailController {
@@ -62,7 +63,7 @@ export class EmailController {
   replyToEmail = async (req: Request, res: Response) => {
     try {
       const { conversationId } = req.params;
-      const { body, type, to: customTo, cc: customCc, bcc: customBcc, replyToEmailId } =
+      const { body, type, to: customTo, cc: customCc, bcc: customBcc, replyToEmailId, subject: requestSubject } =
         req.body as ReplyEmailRequest;
       const attachmentIds: string[] = Array.isArray(req.body.attachmentIds) ? req.body.attachmentIds : [];
 
@@ -235,6 +236,11 @@ export class EmailController {
       // messageId (optional) is the per-message unique id from the provider —
       // used for the email row's externalMessageId + webhook dedup. Falls back
       // to threadId for providers (Zoho/Microsoft) that don't expose one.
+      const baseSubject = requestSubject?.trim()
+        ? requestSubject.trim().replace(/^(re:\s*)+/i, '').trim()
+        : initialEmail.subject.replace(/^(re:\s*)+/i, '').trim();
+      const replySubject = `Re: ${baseSubject}`;
+
       let result: { threadId: string; messageId?: string };
 
       if (externalSource.sourceType === ExternalSourcePlatform.MICROSOFT) {
@@ -242,9 +248,9 @@ export class EmailController {
           externalSource.credentials,
           externalSource.id
         );
-        result = await sender.replyToConversation({
+         result = await sender.replyToConversation({
           content: outboundBody,
-          subject: initialEmail.subject,
+          subject: replySubject,
           to: toRecipients,
           cc: ccRecipients,
           bcc: bccRecipients,
@@ -261,7 +267,7 @@ export class EmailController {
         try {
           result = await sender.replyToConversation({
             content: outboundBody,
-            subject: initialEmail.subject,
+            subject: replySubject,
             to: toRecipients,
             cc: ccRecipients,
             bcc: bccRecipients,
@@ -315,7 +321,7 @@ export class EmailController {
       const emailType = type === 'REPLY' ? EmailType.REPLY : EmailType.REPLY_ALL;
       const newEmail = await this.emailRepo.create({
         type: emailType,
-        subject: `Re: ${initialEmail.subject}`,
+        subject: replySubject,
         body: outboundBody,
         to: toRecipients,
         from: fromEmailAddress,

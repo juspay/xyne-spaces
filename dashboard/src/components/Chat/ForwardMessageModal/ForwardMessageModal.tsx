@@ -23,6 +23,7 @@ import {
   ChannelScopeType,
   MessageType,
   parseForwardedMessageXml,
+  parseTicketMd,
 } from '@xyne/shared';
 import { channelService } from '../../../services/Chat/channelService';
 import { useNavigate } from 'react-router-dom';
@@ -37,6 +38,8 @@ import { getDMParticipantIdsToFetch } from '../ChatDirectory/ChatDirectory.utils
 import { Combobox } from '../../ui/Combobox/Combobox';
 import { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { queries } from '../../../zero/queries';
+import { useQuery } from '../../../hooks/useQuery';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { logger, Event } from '../../../utils/logger';
 
@@ -61,6 +64,16 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const inputBoxRef = useRef<InputBoxHandle>(null);
   const navigate = useNavigate();
   const zero = useZero();
+
+  // Query the source conversation to get ticket_md — used as a content fallback
+  // for desk-ticket messages whose message.content is stored as '' (email body
+  // lives in the email table, not in message.content).
+  // Only fire the query when message.content is empty; pass '' otherwise so Zero
+  const [sourceConversation] = useQuery(
+    queries.getConversationById({
+      conversationId: message.content ? '' : message.conversationId,
+    }),
+  );
 
   // Synchronously assign the combobox input to initialFocusRef so it's
   // available when Dialog's onOpenAutoFocus fires (which runs before useEffects).
@@ -244,8 +257,16 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       }
       return forwardedMessageData.content;
     }
+    if (message.content) {
+      return message.content;
+    }
+    // Desk ticket messages store content as '' — fall back to ticket title from ticket_md.
+    if (sourceConversation?.ticket_md) {
+      const ticketSummary = parseTicketMd(sourceConversation.ticket_md);
+      if (ticketSummary?.title) return ticketSummary.title;
+    }
     return message.content;
-  }, [useOptionalText, forwardedMessageData, message.content]);
+  }, [useOptionalText, forwardedMessageData, message.content, sourceConversation]);
 
   const allVisibleChannels = useAllVisibleChannels();
   const allChannels = useAllChannels().map(

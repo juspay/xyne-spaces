@@ -11,6 +11,7 @@ import {
   isForwardedMessageXml,
   parseReactionsMd,
   ReactionsData,
+  parseTicketMd,
 } from '@xyne/shared';
 import {
   formatFullTimestamp,
@@ -21,6 +22,7 @@ import {
 } from '../../../utils/dateUtils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
+import { useQuery } from '../../../hooks/useQuery';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
@@ -448,6 +450,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     return null;
   }, [isForwardedMessage, message.content]);
+
+  // Query the original conversation only when this is a forwarded desk-ticket
+  // message with empty content (email body lives in the email table, not in
+  // message.content). Pass '' when not needed so Zero makes no real subscription.
+  const forwardedQueryConversationId =
+    forwardedMessageData && !forwardedMessageData.content?.trim()
+      ? (forwardedMessageData.originalConversationId ?? '')
+      : '';
+  const [forwardedOriginalConversation] = useQuery(
+    queries.getConversationById({ conversationId: forwardedQueryConversationId }),
+  );
+
+  // Resolve the displayable content for the forwarded message block.
+  // If the XML content is empty (desk ticket case), fall back to the ticket title.
+  const resolvedForwardedContent = useMemo(() => {
+    if (!forwardedMessageData) return '';
+    if (forwardedMessageData.content?.trim()) return forwardedMessageData.content;
+    // Empty content — fall back to ticket title from original conversation's ticket_md
+    if (forwardedOriginalConversation?.ticket_md) {
+      const parsed = parseTicketMd(forwardedOriginalConversation.ticket_md);
+      if (parsed?.title) return parsed.title;
+    }
+    return forwardedMessageData.content;
+  }, [forwardedMessageData, forwardedOriginalConversation]);
+
   const systemMessageStyles: React.CSSProperties = {
     color: 'hsl(var(--muted-foreground))',
     opacity: 0.5,
@@ -1077,18 +1104,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     ) : (
                       <>
                         <div
-                          className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(forwardedMessageData.content)}`}
+                          className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(resolvedForwardedContent)}`}
                         >
                           {isMobile ? (
                             <ExpandableMessage
-                              message={forwardedMessageData.content}
+                              message={resolvedForwardedContent}
                               showEdited={false}
                               maxHeight={500}
                             />
                           ) : (
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
-                                message={forwardedMessageData.content}
+                                message={resolvedForwardedContent}
                                 showEdited={false}
                               />
                             </div>

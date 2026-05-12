@@ -9,7 +9,8 @@ import { parseTicketMd } from '@xyne/shared';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface BotBubbleProps {
   messageId?: string;
@@ -61,7 +62,7 @@ const TicketDisplayModeV2: React.FC<{
   // of bouncing them into the Chat ticket URL, flip the right panel to the
   // Details tab via a `?selectedTab=details` URL param. SupportTicketDetail
   // watches this param reactively.
-  const isDeskView = location.pathname.startsWith('/support');
+  const isDeskView = location.pathname.includes('/support');
 
   const handleClick = (e: React.MouseEvent | KeyboardEvent): void => {
     if (isDeskView) {

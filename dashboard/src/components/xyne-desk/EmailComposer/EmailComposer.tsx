@@ -145,6 +145,8 @@ interface EmailComposerProps {
   replyToEmailId?: string | null;
   replyMode?: 'reply' | 'replyAll';
   mode?: 'reply' | 'compose';
+  /** Ticket title from Xyne Desk — sent as the reply subject so Gmail reflects the current ticket name. */
+  ticketSubject?: string | null;
   /** Override individual feature toggles. Defaults are derived from `mode`. */
   features?: Partial<EmailComposerFeatures>;
   /**
@@ -169,6 +171,7 @@ export const EmailComposer = ({
   mode = 'reply',
   features: featureOverrides,
   composeDraftId,
+  ticketSubject,
 }: EmailComposerProps): ReactElement => {
   const isComposeMode = mode === 'compose';
   const features = resolveFeatures(mode, featureOverrides);
@@ -288,7 +291,7 @@ export const EmailComposer = ({
   const [toEmails, setToEmails] = useState<string[]>([]);
   const [ccEmails, setCcEmails] = useState<string[]>([]);
   const [bccEmails, setBccEmails] = useState<string[]>([]);
-  const [showCc, setShowCc] = useState<boolean>(false);
+  const [showCc, setShowCc] = useState<boolean>(true);
   const [showBcc, setShowBcc] = useState<boolean>(false);
 
   const currentUserEmail = users?.find(u => u.id === userID)?.email ?? null;
@@ -566,7 +569,7 @@ export const EmailComposer = ({
             setToEmails(parsed.to);
             setCcEmails(parsed.cc ?? []);
             setBccEmails(parsed.bcc ?? []);
-            setShowCc((parsed.cc ?? []).length > 0);
+            setShowCc(true);
             setShowBcc((parsed.bcc ?? []).length > 0);
             return;
           }
@@ -671,7 +674,7 @@ export const EmailComposer = ({
         setCcEmails(nextCc);
         setBccEmails(nextBcc);
 
-        setShowCc(nextCc.length > 0);
+        setShowCc(true);
         setShowBcc(nextBcc.length > 0);
       }
     }
@@ -732,6 +735,33 @@ export const EmailComposer = ({
       setIsUploadingAttachments(false);
     }
   };
+
+  const uploadAndInsertInlineImages = useCallback(
+    async (images: File[]): Promise<void> => {
+      if (images.length === 0) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      try {
+        const ids = await uploadAttachments(images);
+        if (ids.length === 0) return;
+        let chain = editor.chain().focus();
+        ids.forEach((id, i) => {
+          const file = images[i];
+          chain = chain.setImage({
+            src: `${BASE_URL}/attachments/${id}/download`,
+            alt: file?.name ?? 'image',
+            dataAttId: id,
+            width: 480,
+          });
+        });
+        chain.run();
+        editor.commands.splitBlock();
+      } catch {
+        // uploadAttachments already toasts on error; nothing else to do here.
+      }
+    },
+    [uploadAttachments, isComposeMode, channelId, conversationId], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const handleSendEmail = async (): Promise<void> => {
     const hasContent = hasEmailBody;
@@ -836,6 +866,7 @@ export const EmailComposer = ({
         bcc: bccEmails,
         ...(attachmentIds.length > 0 && { attachmentIds }),
         ...(replyToEmailId && { replyToEmailId }),
+        ...(ticketSubject?.trim() && { subject: ticketSubject.trim() }),
       });
 
       setEmailContent('');
@@ -864,88 +895,50 @@ export const EmailComposer = ({
     }
   };
 
-  const uploadAndInsertInlineImages = useCallback(
-    async (images: File[]): Promise<void> => {
-      if (images.length === 0) return;
-      const editor = editorRef.current;
-      if (!editor) return;
-      try {
-        const ids = await uploadAttachments(images);
-        if (ids.length === 0) return;
-        let chain = editor.chain().focus();
-        ids.forEach((id, i) => {
-          const file = images[i];
-          chain = chain.setImage({
-            src: `${BASE_URL}/attachments/${id}/download`,
-            alt: file?.name ?? 'image',
-            // @ts-expect-error custom attributes added via Image.extend()
-            dataAttId: id,
-            width: 480,
-          });
-        });
-        chain.run();
-        editor.commands.splitBlock();
-      } catch {
-        // uploadAttachments already toasts; nothing to do here.
-      }
-    },
-
-    [channelId, conversationId, isComposeMode], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
   // Shared validation+append for file-input, paste, and drag-and-drop. Uses
   // the latest `attachments` value via the setter callback to avoid stale
   // closures when several drops/pastes fire in quick succession.
-  const addFilesToAttachments = useCallback(
-    (files: File[]): void => {
-      if (files.length === 0) return;
+  const addFilesToAttachments = useCallback((files: File[]): void => {
+    if (files.length === 0) return;
 
-      const images: File[] = [];
-      const others: File[] = [];
-      const rejectedTooLarge: string[] = [];
-      for (const file of files) {
-        if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
-          rejectedTooLarge.push(file.name);
-          continue;
+    const others: File[] = [];
+    const rejectedTooLarge: string[] = [];
+    for (const file of files) {
+      if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
+        rejectedTooLarge.push(file.name);
+        continue;
+      }
+      others.push(file);
+    }
+
+    if (rejectedTooLarge.length > 0) {
+      toast.error(
+        `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
+      );
+    }
+
+    if (others.length > 0) {
+      setAttachments(prev => {
+        const accepted: File[] = [];
+        let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - prev.length;
+        let droppedForCount = 0;
+        for (const file of others) {
+          if (availableSlots <= 0) {
+            droppedForCount++;
+            continue;
+          }
+          accepted.push(file);
+          availableSlots--;
         }
-        if (file.type.startsWith('image/')) images.push(file);
-        else others.push(file);
-      }
-
-      if (rejectedTooLarge.length > 0) {
-        toast.error(
-          `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
-        );
-      }
-
-      if (others.length > 0) {
-        setAttachments(prev => {
-          const accepted: File[] = [];
-          let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - prev.length;
-          let droppedForCount = 0;
-          for (const file of others) {
-            if (availableSlots <= 0) {
-              droppedForCount++;
-              continue;
-            }
-            accepted.push(file);
-            availableSlots--;
-          }
-          if (droppedForCount > 0) {
-            toast.error(
-              `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
-            );
-          }
-          return accepted.length > 0 ? [...prev, ...accepted] : prev;
-        });
-      }
-
-      if (images.length > 0) {
-        void uploadAndInsertInlineImages(images);
-      }
-    },
-    [uploadAndInsertInlineImages],
-  );
+        if (droppedForCount > 0) {
+          toast.error(
+            `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
+          );
+        }
+        return accepted.length > 0 ? [...prev, ...accepted] : prev;
+      });
+    }
+  }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(e.target.files || []);
@@ -1667,6 +1660,7 @@ export const EmailComposer = ({
                       value={emailContent}
                       onChange={setEmailContent}
                       onAddFiles={addFilesToAttachments}
+                      uploadAndInsertInlineImages={uploadAndInsertInlineImages}
                       onEditorReady={editor => {
                         editorRef.current = editor;
                       }}
@@ -1713,6 +1707,7 @@ export const EmailComposer = ({
                 value={emailContent}
                 onChange={setEmailContent}
                 onAddFiles={addFilesToAttachments}
+                uploadAndInsertInlineImages={uploadAndInsertInlineImages}
                 onEditorReady={editor => {
                   editorRef.current = editor;
                 }}
