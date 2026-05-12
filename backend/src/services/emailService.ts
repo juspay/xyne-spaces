@@ -120,6 +120,7 @@ export interface CreateConversationFromEmailParams {
   boardId: string;
   stageName: string;
   userGroupId?: string;
+  ticketMetadata?: Record<string, unknown>;
 }
 
 export interface IngestEmailThreadParams {
@@ -1084,6 +1085,7 @@ export class EmailService {
       boardId,
       stageName,
       userGroupId,
+      ticketMetadata,
     } = params;
 
     // Check if channel exists
@@ -1133,6 +1135,7 @@ export class EmailService {
           priority: ticketPriority,
           ...(slaResolutionDue && { eta: slaResolutionDue }),
           ...(userGroupId && { userGroupId }),
+          ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
           lastEmailAt: new Date(),
         }
       });

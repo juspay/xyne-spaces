@@ -120,6 +120,9 @@ export class EmailDemergeController {
         boardId: originalTicket.boardId,
         stageName: originalTicket.stageName,
         userGroupId: originalTicket.userGroupId ?? undefined,
+        ticketMetadata: {
+          fromEmailAddress: email.from,
+        },
       });
 
       // Step 9: Move emails in a transaction. external_message.entityId still
