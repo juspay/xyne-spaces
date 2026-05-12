@@ -9,19 +9,15 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
-import { CollectionItemType, UploadStatus } from '@prisma/client';
-import { CollectionRepository } from '@/database/repositories/collectionRepository';
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
 	private isInitialized = false;
 	private isInitializing = false;
 	private namespace: string;
-	private collectionRepository: CollectionRepository;
 
 	constructor(namespace: string = NAMESPACE) {
 		this.namespace = namespace;
-		this.collectionRepository = new CollectionRepository();
 	}
 
 	async initialize(): Promise<void> {
@@ -158,42 +154,6 @@ export class VespaWorker {
 			});
 
 			logger.info(`[VESPA_WORKER] ✓ Recorded failed job ${job.id} in database`);
-
-			// If this is a file upload job that failed, update the status and broadcast
-			// Only update status for FILE items, not FOLDER items (folders should remain NONE)
-			if (entityType === 'file') {
-				// Get the item to access collectionId and parentId
-				const item = await db.collectionItem.findUnique({
-					where: { id: entityId },
-					select: { 
-						id: true, 
-						collectionId: true, 
-						parentId: true,
-						uploadStatus: true,
-						type: true
-					}
-				});
-
-				// Only update status for FILE items, not FOLDER items
-				if (item && item.type === CollectionItemType.FILE) {
-					const oldStatus = item.uploadStatus;
-					
-					// Update status with counter updates
-					await this.collectionRepository.updateFileUploadStatusWithCounters(
-						entityId,
-						oldStatus,
-						UploadStatus.FAILED
-					);
-					
-					// Update status message separately (not part of counter logic)
-					await db.collectionItem.update({
-						where: { id: entityId },
-						data: { 
-							statusMessage: error.message 
-						},
-					});
-				}
-			}
 		} catch (dbError) {
 			logger.error(`[VESPA_WORKER] Failed to record job ${job.id} failure in database:`, dbError);
 		}
@@ -235,35 +195,7 @@ export class VespaWorker {
 				logger.info(`[VESPA_WORKER] Using pre-transformed data for SAM transcript ${docId}`);
 				mappedData = preTransformedData as InsertDocument;
 			} else {
-				// For File Schema feed jobs, update status to PROCESSING and broadcast
-			// This happens BEFORE chunking/processing starts
-			// Only update status for FILE items, not FOLDER items (folders should remain NONE)
-			if (schema === 'file' && jobType === 'feed') {
-				const item = await db.collectionItem.findUnique({
-					where: { id: docId },
-					select: { 
-						id: true, 
-						collectionId: true, 
-						parentId: true,
-						uploadStatus: true,
-						type: true
-					}
-				});
-
-				// Only update status for FILE items, not FOLDER items
-				if (item && item.type === CollectionItemType.FILE) {
-					const oldStatus = item.uploadStatus;
-					
-					// Update status with counter updates
-					await this.collectionRepository.updateFileUploadStatusWithCounters(
-						docId,
-						oldStatus,
-						UploadStatus.PROCESSING
-					);
-				}
-			}
-
-			logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);
+				logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);
 				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app);
 			}
 
@@ -303,35 +235,6 @@ export class VespaWorker {
 		const [result] = await vespaClient.crudService.insert([data], schema);
 		if (!result.success) {
 			throw new Error(`Failed to insert ${data.docId}: ${result.error}`);
-		}
-		// For File Schema we have to update the status also
-		// Only update status for collection items (FILE type), not FOLDER items or non-collection files (chat attachments etc.)
-		if (schema === 'file') {
-			const item = await db.collectionItem.findUnique({
-				where: { id: data.docId },
-				select: { 
-					id: true, 
-					collectionId: true, 
-					parentId: true,
-					uploadStatus: true,
-					type: true
-				}
-			});
-
-			if (!item) {
-				// Not a collection item (e.g., chat attachment, ticket attachment) - no status update needed
-				logger.info(`[Vespa-Worker] Item ${data.docId} not a collection item, skipping status update`);
-			} else if (item.type === CollectionItemType.FILE) {
-				// Only update status for FILE items, not FOLDER items
-				const oldStatus = item.uploadStatus;
-				
-				// Update status with counter updates
-				await this.collectionRepository.updateFileUploadStatusWithCounters(
-					data.docId,
-					oldStatus,
-					UploadStatus.COMPLETED
-				);
-			}
 		}
 	}
 

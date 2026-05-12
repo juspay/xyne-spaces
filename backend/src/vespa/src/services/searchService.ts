@@ -12,7 +12,7 @@ import {
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import config from '../config';
-import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type CollectionFilters, type MailFilters } from '../utils/YqlBuilder';
+import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters } from '../utils/YqlBuilder';
 import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
@@ -62,7 +62,6 @@ interface SearchOptions {
   meeting?: MeetingFilters;
   mail?: MailFilters;
   prefixBoostWeight?: number;
-  collectionFilters?: CollectionFilters;
   presentationSummary?: string;
 }
 
@@ -118,7 +117,6 @@ export class SearchService {
         meeting = {},
         mail = {},
         prefixBoostWeight = 0.2,
-        collectionFilters = undefined,
         presentationSummary,
       } = options;
 
@@ -180,8 +178,7 @@ export class SearchService {
           meeting,
           userId,
           mail,
-          useFuzzy,
-          collectionFilters
+          useFuzzy
         );
 
         return {
@@ -230,7 +227,7 @@ export class SearchService {
       this.logger.info(`Exact search returned ${exactResultCount} results, expected ${expectedCount}`);
       
       const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
-      if(exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !collectionFilters){
+      if(exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly){
       const fallbackResult = await executeFuzzyFallback(
         response,
         async () => {

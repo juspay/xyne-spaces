@@ -1824,8 +1824,7 @@ const SummarizerContent = ({
                           keyPoint.citation.externalUrl ||
                           keyPoint.citation.canvasId ||
                           keyPoint.citation.entityType === 'recording' ||
-                          keyPoint.citation.entityType === 'attachment' ||
-                          keyPoint.citation.entityType === 'knowledge_base') &&
+                          keyPoint.citation.entityType === 'attachment') &&
                         !message.isStreaming && (
                           <>
                             {' '}

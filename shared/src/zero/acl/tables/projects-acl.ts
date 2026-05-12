@@ -1,5 +1,5 @@
 import type { Query } from '@rocicorp/zero';
-import { type Schema, type Context , ChannelVisibility } from '../../schema';
+import { type Schema, type Context, ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 export class ProjectsACL extends BaseQueryACL<'projects'> {
   constructor(ctx: Context) {

@@ -15,8 +15,6 @@ const entityIcon = (type: DisplayEntityType): React.ReactElement => {
       return <Paperclip size={12} className='flex-shrink-0 text-muted-foreground' />;
     case 'user':
       return <User size={12} className='flex-shrink-0 text-muted-foreground' />;
-    case 'collection':
-      return <Paperclip size={12} className='flex-shrink-0 text-gray-500' />;
   }
 };
 

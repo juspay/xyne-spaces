@@ -73,10 +73,6 @@ export const navigateToSearchResult = async (
       }
       break;
 
-    case 'collection':
-      navigateToCollection(result, navigate);
-      break;
-
     default:
       console.warn('[SEARCH-NAVIGATION] Unknown result type:', result.type);
   }
@@ -558,54 +554,4 @@ export const openSearchResult = async (
   // Web: open the regular route in a new browser tab (full app chrome).
   // No theme param needed — same origin = same localStorage = same theme.
   window.open(url, '_blank', 'noopener,noreferrer');
-};
-
-/**
- * Navigate to a collection document
- *
- * Logic:
- * 1. If slideUrl exists, open it in a new tab
- * 2. Otherwise, navigate to knowledge base viewer with docId, collectionId, page, and highlight parameters
- */
-export const navigateToCollection = (
-  result: DisplaySearchResult,
-  navigate: NavigateFunction,
-): void => {
-  const {
-    projectId,
-    docId,
-    collectionId,
-    folderId,
-    pageNumber,
-    chunkContent,
-    chunkIndex,
-    slideUrl,
-  } = result.searchContext || {};
-
-  // If slideUrl exists, open it in a new tab
-  if (slideUrl) {
-    window.open(slideUrl, '_blank', 'noopener,noreferrer');
-    return;
-  }
-
-  // Navigate to knowledge base file viewer
-  if (!projectId || !collectionId || !docId) {
-    console.warn(
-      '[SEARCH-NAVIGATION] Cannot navigate to collection: missing projectId, collectionId, or docId',
-    );
-    return;
-  }
-
-  // Use '_' sentinel for root-level files (no parent folder), matching KB convention
-  const folder = folderId || '_';
-
-  const params = new URLSearchParams();
-  if (pageNumber) params.set('page', String(pageNumber));
-  if (chunkContent) params.set('highlight', btoa(encodeURIComponent(chunkContent)));
-  if (chunkIndex !== undefined) params.set('chunkIndex', String(chunkIndex));
-
-  const queryString = params.toString();
-  const path = `/knowledge-base/${projectId}/${collectionId}/${folder}/${docId}`;
-
-  void navigate(queryString ? `${path}?${queryString}` : path);
 };
