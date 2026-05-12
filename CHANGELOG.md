@@ -1,3 +1,38 @@
+## [1.140.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.139.0...v1.140.0) (2026-05-12)
+
+
+### Features
+
+* add-redirect-to-ticket-screen-if-not-found ([649b5ae](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/649b5ae7834b159b4282c6aec47858ce075b7a72)), closes [#6152](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6152)
+* added all canvas in the hierarchical ways ([27de0f5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/27de0f5a8eca804d052a648b537c81265ba65287)), closes [#6203](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6203)
+* added linkedConversationId check to enable cutoff ([22b8d86](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/22b8d865ae5ab8e51f8d2fe1d9d22523acb3823c)), closes [#6208](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6208)
+* Changes for Notification caching native ([1a658a0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1a658a0ce2f89dca0b5b3ae8a9f106c9f489e8b5)), closes [#5982](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5982)
+* electron ingestion api ([25f6270](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/25f6270ddd8ee1844e20a66360cf6d5bcb5745c2)), closes [#6163](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6163)
+* electron proxy for memory ([6674824](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/66748246c810bd601cafe0bc02a8e9d2016a073d)), closes [#6138](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6138)
+* enabled caching for canvases and activities ([1b57194](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1b5719447cbe5138da8dfd794e491026b5c3d225)), closes [#6173](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6173)
+* fixed render of fallback text ([a16b00e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a16b00e00ad1675918714db174eb4812990c2d26))
+* Large attachment uploads ([01fc18e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/01fc18e2a56e11d315c059d4d00a455b3c49556b)), closes [#4836](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4836)
+* memory plugins ([57bee6f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/57bee6fba60d75168d10d3d5cbb47fb3b7863b66)), closes [#6214](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6214)
+* mettle user webhook and location wrapper ([1b24c92](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1b24c92d1a64f921ce57a0d74e4dc33770cfa661)), closes [#6120](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6120)
+* Showing ChannelParticipants From Vespa Mention User Component ([12a2748](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/12a2748a31f8c7915a0d41ab7434125ec3d74ed4)), closes [#6147](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6147)
+
+
+### Bug Fixes
+
+* FIX DELETE SENT TO CHANNEL ([fa1745c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fa1745c4308b009d9f4f65e2955daf7e0553d629))
+* Fix login via invitation for external users in Electron app ([bced218](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bced218c29a193619a1662cc90af9a3c5f70a774))
+* fixed dark mode issue ([8c273ec](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8c273ecef8ec1087d718c34d2fb2a9f8fbaee873))
+* highlight active activity item in activity list panel ([7577191](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75771915cf49a4c9c71f9490dc782189df3ac553)), closes [#5859](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5859)
+* inactive check on login ([f7675ec](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f7675ec23ee1a71c477548c074a62875d2c94ee7)), closes [#6161](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6161)
+* Jiraffe migration fixes ([6ba1a82](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6ba1a82a53db664dbc377bb018f62c178b560ad1)), closes [#5131](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5131)
+* mention user fix ([f2845e4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f2845e4ea117e81f34980079608164e82ceaeb3e)), closes [#6184](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6184)
+* restore message to input box when server-side mutation fails ([dcfa7e0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dcfa7e057aef0a6b6a29e7b40341293788112c7b)), closes [#6189](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6189)
+* Revert knowledge base with Ask AI. ([f270f7d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f270f7d88eb9c74de3e958aa3410bf51c4b991b2)), closes [#6129](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6129) [#5751](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5751)
+* revert pr for in a call ([2ef7075](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2ef70755bca3b0da6169e8ee542b164e654f0d91)), closes [#6140](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6140) [#4365](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4365) [#5757](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5757)
+* show CC by default and sync ticket subject on email reply ([3e0e764](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3e0e764b75f480a50b2ec5783b0176970b5739de)), closes [#6106](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6106)
+* ticket preview ui fix ([1fd2d8f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1fd2d8fcfb170c7488cfcd2ef51d8c013c28ddb0)), closes [#5968](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5968)
+* user profile acl fix ([3abec7f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3abec7fcdfbef779766f8db9324ddbfbe272789e)), closes [#6149](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6149)
+
 ## [1.139.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.138.0...v1.139.0) (2026-05-11)
 
 
