@@ -876,6 +876,7 @@ export const EmailComposer = ({
       setCcEmails([]);
       setBccEmails([]);
       toast.success('Reply sent');
+      onClose?.();
     } catch (error) {
       // Surface the backend's error.response.data.message when present;
       // fall back to the generic Error message; final fallback is a stock
