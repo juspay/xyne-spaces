@@ -7566,7 +7566,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
 
-            for (const field of fields) {
+            for (const [index, field] of fields.entries()) {
               if (field.id) {
                 // Check if field actually exists in the database
                 const existingField = existingFields.find(f => f.id === field.id);
@@ -7578,6 +7578,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     formId: string;
                     fieldName: string;
                     fieldType: FormFieldType;
+                    sequenceNumber: number;
                     updatedAt: number;
                     fieldEnum?: ReadonlyJSONValue;
                     isOptional?: boolean;
@@ -7586,6 +7587,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     formId,
                     fieldName: field.fieldName.trim(),
                     fieldType: field.fieldType,
+                    sequenceNumber: index + 1,
                     updatedAt: now,
                   };
 
@@ -7610,6 +7612,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     formId: string;
                     fieldName: string;
                     fieldType: FormFieldType;
+                    sequenceNumber: number;
                     createdAt: number;
                     updatedAt: number;
                     fieldEnum?: ReadonlyJSONValue;
@@ -7619,6 +7622,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     formId: formId,
                     fieldName: field.fieldName.trim(),
                     fieldType: field.fieldType,
+                    sequenceNumber: index + 1,
                     createdAt: now,
                     updatedAt: now,
                   };
@@ -7641,15 +7645,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
               } else {
                 // Create new field
-                const newFieldId = fieldIds[existingFields.length];
+                const newFieldId = fieldIds[index];
                 if (!newFieldId) {
-                  throw new Error(`fieldId is required for new field at index ${existingFields.length}`);
+                  throw new Error(`fieldId is required for new field at index ${index}`);
                 }
                 const insertData: {
                   id: string;
                   formId: string;
                   fieldName: string;
                   fieldType: FormFieldType;
+                  sequenceNumber: number;
                   createdAt: number;
                   updatedAt: number;
                   fieldEnum?: ReadonlyJSONValue;
@@ -7659,6 +7664,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   formId: formId,
                   fieldName: field.fieldName.trim(),
                   fieldType: field.fieldType,
+                  sequenceNumber: index + 1,
                   createdAt: now,
                   updatedAt: now,
                 };
@@ -7917,17 +7923,23 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           conversationId: z.string(),
           channelId: z.string(),
           draftContent: z.string(),
+          attachmentIds: z.array(z.string()).optional(),
           updatedAt: z.number(),
         }),
-        async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, updatedAt } }) => {
+        async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, attachmentIds, updatedAt } }) => {
           const existing = await tx.run(
             zql.email_drafts
-              .where('conversationId', conversationId)
+              .where('id', id)
               .where('userId', ctx.userID)
               .one(),
           );
           if (existing) {
-            await tx.mutate.email_drafts.update({ id: existing.id, draftContent, updatedAt });
+            await tx.mutate.email_drafts.update({
+              id: existing.id,
+              draftContent,
+              ...(attachmentIds !== undefined && { attachmentIds }),
+              updatedAt,
+            });
           } else {
             await tx.mutate.email_drafts.insert({
               id,
@@ -7935,6 +7947,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               channelId,
               userId: ctx.userID,
               draftContent,
+              ...(attachmentIds !== undefined && { attachmentIds }),
               createdAt: updatedAt,
               updatedAt,
             });
@@ -7943,12 +7956,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
       delete: defineMutator(
         z.object({
-          conversationId: z.string(),
+          id: z.string(),
         }),
-        async ({ tx, ctx, args: { conversationId } }) => {
+        async ({ tx, ctx, args: { id } }) => {
           const existing = await tx.run(
             zql.email_drafts
-              .where('conversationId', conversationId)
+              .where('id', id)
               .where('userId', ctx.userID)
               .one(),
           );
@@ -9951,10 +9964,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               channelId,
               ownerUserId: ownerUserId ?? authData.sub,
               assigneeUserGroupId: assigneeUserGroupId ?? null,
+              boardId: null,
               sendAsEmail: sendAsEmail ?? null,
               classificationEnabled: false,
+              classificationPrompt: null,
+              categoryField: null,
+              subCategoryField: null,
               defaultCc: defaultCc ?? null,
               emailMergeMode: emailMergeMode ?? EmailMergeMode.ENABLED,
+              priorityClassificationEnabled: false,
+              priorityClassificationPrompt: null,
+              priorityClassificationThreshold: 0.5,
             });
           }
         },
@@ -9981,13 +10001,58 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               subCategoryField: subCategoryField ?? null,
             });
           } else {
-            await tx.mutate.email_channel_preferences.insert({
+          await tx.mutate.email_channel_preferences.insert({
+            channelId,
+            ownerUserId: ctx.userID,
+            assigneeUserGroupId: null,
+            boardId: null,
+            sendAsEmail: null,
+            classificationEnabled,
+            classificationPrompt,
+            categoryField,
+            subCategoryField: subCategoryField ?? null,
+            defaultCc: null,
+            priorityClassificationEnabled: false,
+            priorityClassificationPrompt: null,
+            priorityClassificationThreshold: 0.5,
+          });
+        }
+        },
+      ),
+      upsertPriorityClassificationConfig: defineMutator(
+        z.object({
+          channelId: z.string(),
+          priorityClassificationEnabled: z.boolean(),
+          priorityClassificationPrompt: z.string().optional().nullable(),
+          priorityClassificationThreshold: z.number().optional(),
+        }),
+        async ({ tx, ctx, args }) => {
+          const { channelId, priorityClassificationEnabled, priorityClassificationPrompt, priorityClassificationThreshold } = args;
+          const existing = await tx.run(
+            zql.email_channel_preferences.where('channelId', channelId).one(),
+          );
+          if (existing) {
+            await tx.mutate.email_channel_preferences.update({
               channelId,
-              ownerUserId: ctx.userID,
-              classificationEnabled,
-              classificationPrompt,
-              categoryField,
-              subCategoryField: subCategoryField ?? null,
+              priorityClassificationEnabled,
+              priorityClassificationPrompt: priorityClassificationPrompt ?? null,
+              priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
+            });
+          } else {
+          await tx.mutate.email_channel_preferences.insert({
+            channelId,
+            ownerUserId: ctx.userID,
+            assigneeUserGroupId: null,
+            boardId: null,
+            sendAsEmail: null,
+            classificationEnabled: false,
+            classificationPrompt: null,
+            categoryField: null,
+            subCategoryField: null,
+            defaultCc: null,
+            priorityClassificationEnabled,
+            priorityClassificationPrompt: priorityClassificationPrompt ?? null,
+            priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
             });
           }
         },

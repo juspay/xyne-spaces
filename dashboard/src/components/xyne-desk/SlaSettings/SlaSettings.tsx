@@ -42,9 +42,52 @@ const COMMON_TIMEZONES = [
   'Australia/Sydney',
 ];
 
+interface TimeValue {
+  hours: number; // 1-12
+  minutes: number; // 0-59
+  period: 'AM' | 'PM';
+}
+
+// Utility functions for 12-hour to decimal conversion
+function decimalToTimeValue(decimalHours: number): TimeValue {
+  const totalMinutes = Math.round(decimalHours * 60);
+  const hours24 = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  const period: 'AM' | 'PM' = hours24 >= 12 ? 'PM' : 'AM';
+  let hours12 = hours24 % 12;
+  if (hours12 === 0) hours12 = 12;
+
+  return { hours: hours12, minutes, period };
+}
+
+function timeValueToDecimal(timeValue: TimeValue): number {
+  let hours24 = timeValue.hours;
+  if (timeValue.period === 'PM' && hours24 !== 12) {
+    hours24 += 12;
+  } else if (timeValue.period === 'AM' && hours24 === 12) {
+    hours24 = 0;
+  }
+  return hours24 + timeValue.minutes / 60;
+}
+
+function formatDurationInWords(decimalHours: number): string {
+  const totalMinutes = Math.round(decimalHours * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) {
+    return `${minutes} min${minutes !== 1 ? 's' : ''}`;
+  } else if (minutes === 0) {
+    return `${hours} hr${hours !== 1 ? 's' : ''}`;
+  } else {
+    return `${hours} hr${hours !== 1 ? 's' : ''} ${minutes} min${minutes !== 1 ? 's' : ''}`;
+  }
+}
+
 interface DraftValues {
-  responseHours: number;
-  resolutionHours: number;
+  responseTime: TimeValue;
+  resolutionTime: TimeValue;
   businessHoursOnly: boolean;
   timezone: string;
   workdayStart: number;
@@ -54,15 +97,22 @@ interface DraftValues {
 function buildDefaultDraft(priority: Priority, existing?: BoardSlaPolicy): DraftValues {
   if (existing) {
     return {
-      responseHours: existing.responseHours,
-      resolutionHours: existing.resolutionHours,
+      responseTime: decimalToTimeValue(existing.responseHours),
+      resolutionTime: decimalToTimeValue(existing.resolutionHours),
       businessHoursOnly: existing.businessHoursOnly,
       timezone: existing.timezone,
       workdayStart: existing.workdayStart,
       workdayEnd: existing.workdayEnd,
     };
   }
-  return { ...DEFAULT_SLA[priority], timezone: 'UTC', workdayStart: 9, workdayEnd: 18 };
+  return {
+    responseTime: decimalToTimeValue(DEFAULT_SLA[priority].responseHours),
+    resolutionTime: decimalToTimeValue(DEFAULT_SLA[priority].resolutionHours),
+    businessHoursOnly: DEFAULT_SLA[priority].businessHoursOnly,
+    timezone: 'Asia/Kolkata',
+    workdayStart: 9,
+    workdayEnd: 18,
+  };
 }
 
 function buildAllDefaultDrafts(existingPolicies: BoardSlaPolicy[]): Record<Priority, DraftValues> {
@@ -116,7 +166,16 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
       if (!boardId) return;
       const newActive = !getIsActive(priority);
       const draft = drafts[priority];
-      upsertPolicy({ boardId, priority, ...draft, isActive: newActive });
+      // Exclude responseTime/resolutionTime objects, send only decimal hours
+      const { responseTime, resolutionTime, ...restDraft } = draft;
+      upsertPolicy({
+        boardId,
+        priority,
+        ...restDraft,
+        responseHours: timeValueToDecimal(responseTime),
+        resolutionHours: timeValueToDecimal(resolutionTime),
+        isActive: newActive,
+      });
       if (newActive) setExpandedPriority(priority);
       else if (expandedPriority === priority) setExpandedPriority(null);
     },
@@ -127,14 +186,21 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
     (priority: Priority) => {
       if (!boardId) return;
       const draft = drafts[priority];
-      // Clamp resolutionHours so it can't be less than responseHours.
-      // The input's `min` attribute doesn't catch the case where responseHours
-      // is increased after resolutionHours was already set.
-      const safeDraft = {
-        ...draft,
-        resolutionHours: Math.max(draft.resolutionHours, draft.responseHours),
-      };
-      upsertPolicy({ boardId, priority, ...safeDraft, isActive: true });
+      // Convert time values back to decimal hours for backend
+      const responseHours = timeValueToDecimal(draft.responseTime);
+      let resolutionHours = timeValueToDecimal(draft.resolutionTime);
+      // Clamp resolutionHours so it can't be less than responseHours
+      resolutionHours = Math.max(resolutionHours, responseHours);
+      // Exclude responseTime/resolutionTime objects, send only decimal hours
+      const { responseTime: _rt, resolutionTime: _rst, ...restDraft } = draft;
+      upsertPolicy({
+        boardId,
+        priority,
+        ...restDraft,
+        responseHours,
+        resolutionHours,
+        isActive: true,
+      });
       setExpandedPriority(null);
     },
     [boardId, drafts, upsertPolicy],
@@ -207,7 +273,9 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                       </p>
                       {isActive && (
                         <p className='text-xs text-muted-foreground mt-0.5'>
-                          Response: {draft.responseHours}h · Resolution: {draft.resolutionHours}h ·{' '}
+                          Response: {formatDurationInWords(timeValueToDecimal(draft.responseTime))}{' '}
+                          · Resolution:{' '}
+                          {formatDurationInWords(timeValueToDecimal(draft.resolutionTime))} ·{' '}
                           {draft.businessHoursOnly ? 'Business hrs' : '24×7'}
                         </p>
                       )}
@@ -234,52 +302,123 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
               {isActive && isExpanded && (
                 <div className='px-4 pb-4 border-t border-border pt-3 flex flex-col gap-3'>
                   <div className='flex items-end gap-3 flex-wrap'>
-                    {/* Response hours */}
+                    {/* Response time - 12h format with minutes */}
                     <div className='flex flex-col gap-1'>
-                      <span className='text-xs text-muted-foreground'>Response (hrs)</span>
-                      <div className='relative flex items-center'>
+                      <span className='text-xs text-muted-foreground'>Response</span>
+                      <div className='flex items-center gap-1'>
                         <input
                           type='number'
-                          min={0}
-                          step={1}
-                          value={draft.responseHours}
+                          min={1}
+                          max={12}
+                          value={draft.responseTime.hours}
                           onChange={e => {
-                            const v = parseFloat(e.target.value);
-                            if (!isNaN(v) && v >= 0) updateDraft(priority, { responseHours: v });
+                            let v = parseInt(e.target.value, 10) || 1;
+                            v = Math.max(1, Math.min(12, v));
+                            updateDraft(priority, {
+                              responseTime: { ...draft.responseTime, hours: v },
+                            });
                           }}
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESPONSE_HOURS'
-                          className='w-20 h-8 px-2 pr-7 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
-                        <span className='absolute right-3 text-[10px] text-muted-foreground pointer-events-none'>
-                          hrs
-                        </span>
+                        <span className='text-xs text-muted-foreground'>:</span>
+                        <input
+                          type='number'
+                          min={0}
+                          max={59}
+                          value={draft.responseTime.minutes.toString().padStart(2, '0')}
+                          onChange={e => {
+                            let v = parseInt(e.target.value, 10) || 0;
+                            v = Math.max(0, Math.min(59, v));
+                            updateDraft(priority, {
+                              responseTime: { ...draft.responseTime, minutes: v },
+                            });
+                          }}
+                          disabled={disabled}
+                          data-track-category='BOARD_SLA_SETTINGS'
+                          data-track-name='EDIT_RESPONSE_MINUTES'
+                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                        />
+                        <select
+                          value={draft.responseTime.period}
+                          onChange={e => {
+                            updateDraft(priority, {
+                              responseTime: {
+                                ...draft.responseTime,
+                                period: e.target.value as 'AM' | 'PM',
+                              },
+                            });
+                          }}
+                          disabled={disabled}
+                          data-track-category='BOARD_SLA_SETTINGS'
+                          data-track-name='EDIT_RESPONSE_PERIOD'
+                          className='h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer'
+                        >
+                          <option value='AM'>AM</option>
+                          <option value='PM'>PM</option>
+                        </select>
                       </div>
                     </div>
 
-                    {/* Resolution hours */}
+                    {/* Resolution time - 12h format with minutes */}
                     <div className='flex flex-col gap-1'>
-                      <span className='text-xs text-muted-foreground'>Resolution (hrs)</span>
-                      <div className='relative flex items-center'>
+                      <span className='text-xs text-muted-foreground'>Resolution</span>
+                      <div className='flex items-center gap-1'>
                         <input
                           type='number'
-                          min={draft.responseHours}
-                          step={1}
-                          value={draft.resolutionHours}
+                          min={1}
+                          max={12}
+                          value={draft.resolutionTime.hours}
                           onChange={e => {
-                            const v = parseFloat(e.target.value);
-                            if (!isNaN(v) && v >= draft.responseHours)
-                              updateDraft(priority, { resolutionHours: v });
+                            let v = parseInt(e.target.value, 10) || 1;
+                            v = Math.max(1, Math.min(12, v));
+                            updateDraft(priority, {
+                              resolutionTime: { ...draft.resolutionTime, hours: v },
+                            });
                           }}
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESOLUTION_HOURS'
-                          className='w-20 h-8 px-2 pr-7 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
-                        <span className='absolute right-3 text-[10px] text-muted-foreground pointer-events-none'>
-                          hrs
-                        </span>
+                        <span className='text-xs text-muted-foreground'>:</span>
+                        <input
+                          type='number'
+                          min={0}
+                          max={59}
+                          value={draft.resolutionTime.minutes.toString().padStart(2, '0')}
+                          onChange={e => {
+                            let v = parseInt(e.target.value, 10) || 0;
+                            v = Math.max(0, Math.min(59, v));
+                            updateDraft(priority, {
+                              resolutionTime: { ...draft.resolutionTime, minutes: v },
+                            });
+                          }}
+                          disabled={disabled}
+                          data-track-category='BOARD_SLA_SETTINGS'
+                          data-track-name='EDIT_RESOLUTION_MINUTES'
+                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                        />
+                        <select
+                          value={draft.resolutionTime.period}
+                          onChange={e => {
+                            updateDraft(priority, {
+                              resolutionTime: {
+                                ...draft.resolutionTime,
+                                period: e.target.value as 'AM' | 'PM',
+                              },
+                            });
+                          }}
+                          disabled={disabled}
+                          data-track-category='BOARD_SLA_SETTINGS'
+                          data-track-name='EDIT_RESOLUTION_PERIOD'
+                          className='h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer'
+                        >
+                          <option value='AM'>AM</option>
+                          <option value='PM'>PM</option>
+                        </select>
                       </div>
                     </div>
 

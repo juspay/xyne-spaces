@@ -38,6 +38,17 @@ export class EmailDraftRepository {
       where: {
         conversationId,
       },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+    });
+  }
+
+  async deleteById(id: string): Promise<void> {
+    await this.db.emailDraft.deleteMany({
+      where: {
+        id,
+      },
     });
   }
 
@@ -49,4 +60,3 @@ export class EmailDraftRepository {
     });
   }
 }
-

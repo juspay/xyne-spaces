@@ -712,6 +712,7 @@ export const ticketTable = table("tickets")
     classificationData: json().optional(),
     aiCategory: string().optional(),
     aiSubCategory: string().optional(),
+    aiPriority: string().optional(),
   })
   .primaryKey("id");
 
@@ -1489,6 +1490,7 @@ export const emailDraftTable = table("email_drafts")
     userId: string().optional(),
     channelId: string(),
     draftContent: string(),
+    attachmentIds: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1530,6 +1532,9 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     categoryField: string().optional(),
     subCategoryField: string().optional(),
     emailMergeMode: enumeration<EmailMergeMode>(),
+    priorityClassificationEnabled: boolean(),
+    priorityClassificationPrompt: string().optional(),
+    priorityClassificationThreshold: number(),
   })
   .primaryKey("channelId");
 
@@ -2021,6 +2026,7 @@ export const formFieldsTable = table("form_fields")
     fieldType: enumeration<FormFieldType>(),
     fieldEnum: json().optional(),
     isOptional: boolean(),
+    sequenceNumber: number(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3509,6 +3515,22 @@ export const canvasParticipantTableRelationships = relationships(canvasParticipa
   })
 }));
 
+export const formTableRelationships = relationships(formTable, ({ many }) => ({
+  fields: many({
+    sourceField: ["id"],
+    destField: ["formId"],
+    destSchema: formFieldsTable,
+  })
+}));
+
+export const formFieldsTableRelationships = relationships(formFieldsTable, ({ one }) => ({
+  form: one({
+    sourceField: ["formId"],
+    destField: ["id"],
+    destSchema: formTable,
+  })
+}));
+
 export const appsTableRelationships = relationships(appsTable, ({ one, many }) => ({
   createdByUser: one({
     sourceField: ["createdBy"],
@@ -3766,6 +3788,8 @@ export const schema = createSchema(
       recurringCallSeriesTableRelationships,
       canvasTableRelationships,
       canvasParticipantTableRelationships,
+      formTableRelationships,
+      formFieldsTableRelationships,
       appsTableRelationships,
       installedAppsTableRelationships,
       appIncomingWebhookTableRelationships,

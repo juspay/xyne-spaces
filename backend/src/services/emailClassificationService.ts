@@ -15,9 +15,39 @@ import type {
   ClassificationRawOutput,
   ClassificationResult,
   TicketClassificationData,
+  TicketClassificationDataWithPriority,
+  PriorityClassificationResult,
 } from '../types/classification.js';
+import { TicketPriority } from '@prisma/client';
 
 const AGENT_NAME = 'EmailClassification';
+const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
+const AI_FORM_FIELD_SKIP_KEYS = new Set(['summary', 'parse_reason', 'priority', 'confidence', 'reasoning']);
+
+/** Default prompt for priority classification */
+const DEFAULT_PRIORITY_PROMPT = `You are an expert support ticket prioritizer for a customer support desk.
+
+Analyze the email and assign a priority level based on:
+- Urgency indicators (outage, critical, urgent, down, broken, failure, crash, emergency)
+- Business impact (revenue loss, customer blocked, production affected, payment failing)
+- Time sensitivity (ASAP, immediately, deadline, expires, today, now)
+- Number of affected customers (many, widespread, everyone, multiple clients)
+- Security concerns (security breach, vulnerability, hack, attack)
+- Severity descriptors (major issue, completely down, severe, catastrophic)
+- Escalation indicators (escalate, manager, supervisor, urgent attention)
+
+IMPORTANT: Your response must be ONLY a valid JSON object with no markdown formatting.
+
+Email Subject: {subject}
+
+Email Body: {body}
+
+Respond with this exact JSON structure:
+{
+  "priority": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+  "confidence": number between 0.0 and 1.0,
+  "reasoning": "Brief explanation of why this priority was chosen"
+}`;
 
 export class EmailClassificationService {
   private repo = new EmailClassificationRepository();
@@ -27,13 +57,17 @@ export class EmailClassificationService {
   /**
    * Run classification on an email using the channel's configured prompt.
    * Returns category, subCategory, rawOutput, and the config for downstream use.
+   * Now also includes priority classification when enabled.
    */
   async classify(
     channelId: string,
     emailSubject: string,
     emailBody: string,
     { ignoreEnabled = false, agentsConfig }: { ignoreEnabled?: boolean; agentsConfig?: AgentsConfig } = {}
-  ): Promise<{ result: ClassificationResult; config: any } | null> {
+  ): Promise<{ 
+    result: ClassificationResult & { priority?: PriorityClassificationResult }; 
+    config: any 
+  } | null> {
     const config = await this.repo.findConfigByChannelId(channelId);
     if (!config || (!config.enabled && !ignoreEnabled)) {
       return null;
@@ -44,25 +78,114 @@ export class EmailClassificationService {
     const userMessage = `Subject: ${emailSubject}\n\n${emailBody}`;
 
     try {
-      const rawOutput = await this.runClassificationAgent(
+      // Run category and priority classification in PARALLEL
+      const categoryPromise = this.runClassificationAgent(
         config.classificationPrompt,
         userMessage,
         modelName
       );
+
+      const priorityPromise = config.priorityClassificationEnabled
+        ? this.classifyPriority(
+            channelId,
+            emailSubject,
+            emailBody,
+            config.priorityClassificationPrompt,
+            modelName
+          )
+        : Promise.resolve(null);
+
+      const [rawOutput, priorityResult] = await Promise.all([
+        categoryPromise,
+        priorityPromise,
+      ]);
 
       const category = this.extractField(rawOutput, config.categoryField) ?? 'Other';
       const subCategory = config.subCategoryField
         ? (this.extractField(rawOutput, config.subCategoryField) ?? null)
         : null;
 
-      return { result: { category, subCategory, rawOutput }, config };
+      const result: ClassificationResult & { priority?: PriorityClassificationResult } = {
+        category,
+        subCategory,
+        rawOutput,
+      };
+
+      if (priorityResult) {
+        result.priority = priorityResult;
+      }
+
+      return { result, config };
     } catch (error) {
       logger.error('[Classification] AI classification failed', {
         channelId,
-        error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+        error: error instanceof Error ? error.message : error,
       });
       return null;
     }
+  }
+
+  /**
+   * Run priority classification on an email.
+   * Uses the channel's custom prompt if available, otherwise uses default prompt.
+   */
+  async classifyPriority(
+    channelId: string,
+    emailSubject: string,
+    emailBody: string,
+    customPrompt: string | null | undefined,
+    modelName: string
+  ): Promise<PriorityClassificationResult | null> {
+    logger.info('[PriorityClassification] classifyPriority STARTED', {
+      channelId,
+      hasCustomPrompt: !!customPrompt,
+      modelName,
+    });
+
+    const prompt = customPrompt?.trim() 
+      ? this.prepareCustomPrompt(customPrompt, emailSubject, emailBody)
+      : DEFAULT_PRIORITY_PROMPT
+          .replace('{subject}', emailSubject)
+          .replace('{body}', emailBody);
+
+    logger.info('[PriorityClassification] Prompt prepared', {
+      isCustomPrompt: !!customPrompt?.trim(),
+    });
+
+    try {
+      const rawOutput = await this.runPriorityClassificationAgent(prompt, modelName);
+      const result = this.parsePriorityOutput(rawOutput);
+      logger.info('[PriorityClassification] parsePriorityOutput completed', {
+        hasResult: !!result,
+        result: result ? {
+          priority: result.priority,
+          confidence: result.confidence,
+        } : null,
+      });
+      
+      return result;
+    } catch (error) {
+      logger.error('[PriorityClassification] ERROR in classifyPriority', {
+        channelId,
+        error: error instanceof Error ? error.message : error,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Prepare custom prompt by replacing placeholders.
+   */
+  private prepareCustomPrompt(
+    customPrompt: string,
+    emailSubject: string,
+    emailBody: string
+  ): string {
+    return customPrompt
+      .replace(/\{\{subject\}\}/gi, emailSubject)
+      .replace(/\{\{body\}\}/gi, emailBody)
+      .replace(/\{subject\}/gi, emailSubject)
+      .replace(/\{body\}/gi, emailBody);
   }
 
   /**
@@ -99,10 +222,11 @@ export class EmailClassificationService {
   /**
    * Store classification result on the ticket.
    * Respects isManualOverride — if already manually overridden, updates rawOutput but not resolvedGroupId.
+   * Also stores priority classification data if available.
    */
   async storeOnTicket(
     ticketId: string,
-    result: ClassificationResult,
+    result: ClassificationResult & { priority?: PriorityClassificationResult },
     resolvedGroupId: string | null
   ): Promise<void> {
     const ticket = await this.repo.findTicketById(ticketId);
@@ -111,7 +235,7 @@ export class EmailClassificationService {
     const existing = ticket.classificationData as TicketClassificationData | null;
     const isManualOverride = existing?.isManualOverride ?? false;
 
-    const classificationData: TicketClassificationData = {
+    const classificationData: TicketClassificationDataWithPriority = {
       category: result.category,
       subCategory: result.subCategory,
       resolvedGroupId: isManualOverride ? (existing?.resolvedGroupId ?? resolvedGroupId) : resolvedGroupId,
@@ -119,6 +243,13 @@ export class EmailClassificationService {
       classifiedAt: new Date().toISOString(),
       rawOutput: result.rawOutput,
     };
+
+    // Include priority data if available
+    if (result.priority) {
+      classificationData.priority = result.priority.priority;
+      classificationData.priorityConfidence = result.priority.confidence;
+      classificationData.priorityReasoning = result.priority.reasoning;
+    }
 
     await this.repo.updateTicketClassificationData(ticketId, classificationData);
 
@@ -213,42 +344,9 @@ export class EmailClassificationService {
     if (formFields.length === 0) return;
 
     const now = new Date();
-    const existingFieldNames = new Set(formFields.map(f => f.fieldName));
+    const writableFields = formFields.filter(field => !AI_FORM_FIELD_SKIP_KEYS.has(field.fieldName));
 
-    // Dynamically create form fields for AI output keys that don't exist yet
-    const skippedKeys = new Set(['summary', 'parse_reason']);
-    const unmatchedKeys = Object.keys(rawOutput).filter(
-      k => !skippedKeys.has(k) && !existingFieldNames.has(k)
-    );
-
-    for (const key of unmatchedKeys) {
-      const aiValue = rawOutput[key];
-      if (aiValue === undefined || aiValue === null || aiValue === 'null' || aiValue === '') continue;
-      try {
-        const newField = await db.formFields.upsert({
-          where: { formId_fieldName: { formId: formMapping.formId, fieldName: key } },
-          create: {
-            id: randomUUID(),
-            formId: formMapping.formId,
-            fieldName: key,
-            fieldType: 'STRING',
-            isOptional: true,
-            createdAt: now,
-            updatedAt: now,
-          },
-          update: {},
-        });
-        formFields.push(newField);
-      } catch (err) {
-        logger.warn('[Classification] Failed to create dynamic form field', {
-          ticketId,
-          fieldName: key,
-          error: err instanceof Error ? err.message : err,
-        });
-      }
-    }
-
-    for (const field of formFields) {
+    for (const field of writableFields) {
       const aiValue = rawOutput[field.fieldName];
       if (aiValue === undefined || aiValue === null || aiValue === 'null' || aiValue === '') continue;
 
@@ -300,9 +398,8 @@ export class EmailClassificationService {
       ticketId,
       boardId: ticket.boardId,
       formId: formMapping.formId,
-      fieldsMatched: formFields.filter(f => rawOutput[f.fieldName] != null).length,
-      dynamicFieldsCreated: unmatchedKeys.length,
-      totalFields: formFields.length,
+      fieldsMatched: writableFields.filter(f => rawOutput[f.fieldName] != null).length,
+      totalFields: writableFields.length,
     });
   }
 
@@ -379,5 +476,140 @@ export class EmailClassificationService {
     const value = rawOutput[fieldName.trim()];
     if (value === undefined || value === null || value === 'null') return null;
     return String(value).trim() || null;
+  }
+
+  // ─── Priority Classification Helpers ──────────────────────────────────────
+
+  private async runPriorityClassificationAgent(
+    systemPrompt: string,
+    modelName: string
+  ): Promise<ClassificationRawOutput> {
+    // Validate configuration
+    if (!envConfig.litellm.apiKey) {
+      logger.error('[PriorityClassification] LiteLLM API key is not configured');
+      throw new Error('LiteLLM API key not configured');
+    }
+    
+    if (!envConfig.litellm.baseUrl) {
+      logger.error('[PriorityClassification] LiteLLM base URL is not configured');
+      throw new Error('LiteLLM base URL not configured');
+    }
+
+    logger.info('[PriorityClassification] Starting LLM call', {
+      modelName,
+    });
+
+    // Create fresh LLM client (following codebase pattern - no caching)
+    const llmClient = new LLMClient({
+      provider: {
+        type: 'litellm',
+        config: {
+          apiKey: envConfig.litellm.apiKey,
+          baseUrl: envConfig.litellm.baseUrl,
+          timeout: 120000,
+          retries: 1,
+        },
+      },
+      defaultModel: modelName,
+      temperature: 0.1,
+    });
+
+    logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'LITELLM_API_KEY');
+    try {
+      const response = await llmClient.generate({
+        messages: [createUserMessage('Analyze email and determine priority.')],
+        systemPrompt,
+        parameters: {
+          temperature: 0.1,
+          maxTokens: 4096,
+        },
+        extraBody: {
+          chat_template_kwargs: {
+            enable_thinking: false,
+          },
+        },
+      });
+
+      logger.info('[PriorityClassification] LLM call successful', {
+        hasContent: !!response.content,
+      });
+      return this.parseClassificationOutput(response.content);
+    } catch (error) {
+      logLLMError(PRIORITY_AGENT_NAME, error);
+      logger.error('[PriorityClassification] LLM call failed', {
+        error: error instanceof Error ? error.message : error,
+        modelName,
+      });
+      throw error;
+    }
+  }
+
+  private parsePriorityOutput(rawOutput: ClassificationRawOutput): PriorityClassificationResult | null {
+    logger.info('[PriorityClassification] parsePriorityOutput STARTED', {
+      rawOutputKeys: Object.keys(rawOutput),
+    });
+
+    const priorityRaw = rawOutput['priority'];
+    const confidenceRaw = rawOutput['confidence'];
+    const reasoningRaw = rawOutput['reasoning'];
+
+    logger.info('[PriorityClassification] Extracted fields', {
+      hasPriority: priorityRaw !== undefined && priorityRaw !== null,
+      hasConfidence: confidenceRaw !== undefined && confidenceRaw !== null,
+      hasReasoning: reasoningRaw !== undefined && reasoningRaw !== null,
+    });
+
+    if (!priorityRaw) {
+      logger.error('[PriorityClassification] ERROR: priority field is missing or null');
+      return null;
+    }
+
+    // Parse and validate priority
+    const priorityStr = String(priorityRaw).trim().toUpperCase();
+    logger.info('[PriorityClassification] Parsed priority string', {
+      original: priorityRaw,
+      parsed: priorityStr,
+    });
+
+    const validPriorities: TicketPriority[] = [
+      TicketPriority.LOW,
+      TicketPriority.MEDIUM,
+      TicketPriority.HIGH,
+      TicketPriority.CRITICAL,
+    ];
+
+    const priority = validPriorities.find(p => p === priorityStr);
+    if (!priority) {
+      logger.error('[PriorityClassification] ERROR: Invalid priority value', { 
+        priorityStr,
+      });
+      return null;
+    }
+
+    // Parse confidence (default to 0.5 if invalid)
+    let confidence = 0.5;
+    if (confidenceRaw !== undefined && confidenceRaw !== null) {
+      const confidenceNum = Number(confidenceRaw);
+      if (!isNaN(confidenceNum)) {
+        confidence = Math.max(0, Math.min(1, confidenceNum));
+        logger.info('[PriorityClassification] Parsed confidence', { parsed: confidence });
+      } else {
+        logger.warn('[PriorityClassification] Confidence is not a valid number, using default');
+      }
+    } else {
+      logger.info('[PriorityClassification] Confidence not provided, using default 0.5');
+    }
+
+    // Parse reasoning (default to empty string)
+    const reasoning = reasoningRaw ? String(reasoningRaw).trim() : '';
+    logger.info('[PriorityClassification] Parsed reasoning', { hasReasoning: reasoning.length > 0 });
+
+    logger.info('[PriorityClassification] parsePriorityOutput SUCCESS', {
+      priority,
+      confidence,
+      reasoningLength: reasoning.length,
+    });
+
+    return { priority, confidence, reasoning };
   }
 }

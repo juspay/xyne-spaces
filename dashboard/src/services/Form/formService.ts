@@ -2,6 +2,7 @@ import { apiInstance } from '../clients/apiClient';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 export interface CreateFormField {
+  fieldId?: string;
   fieldName: string;
   fieldType: FormFieldType;
   fieldEnum?: string[];
@@ -16,6 +17,10 @@ export interface CreateFormRequest {
   fields: CreateFormField[];
 }
 
+export interface UpdateFormRequest extends CreateFormRequest {
+  formId: string;
+}
+
 export interface CreateFormResponse {
   id: string;
   formName: string;
@@ -27,9 +32,44 @@ export interface CreateFormResponse {
   updatedAt: number;
 }
 
+export interface FormFieldResponse {
+  id: string;
+  formId: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+  fieldEnum: string[] | null;
+  isOptional: boolean;
+  sequenceNumber: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FormDetailResponse {
+  id: string;
+  formName: string;
+  formDescription: string | null;
+  entityType: FormEntityType;
+  contextType: FormContextType;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  fields: FormFieldResponse[];
+}
+
 export class FormService {
   async createForm(data: CreateFormRequest): Promise<CreateFormResponse> {
     const response = await apiInstance.post<CreateFormResponse>('/forms', data);
+    return response.data;
+  }
+
+  async getFormById(formId: string): Promise<FormDetailResponse> {
+    const response = await apiInstance.get<FormDetailResponse>(`/forms/${formId}`);
+    return response.data;
+  }
+
+  async updateForm(data: UpdateFormRequest): Promise<CreateFormResponse> {
+    const { formId, ...updateData } = data;
+    const response = await apiInstance.put<CreateFormResponse>(`/forms/${formId}`, updateData);
     return response.data;
   }
 }

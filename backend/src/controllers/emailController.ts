@@ -39,6 +39,7 @@ interface ReplyEmailRequest {
   attachmentIds?: string[];
   replyToEmailId?: string;
   subject?: string;
+  draftId?: string;
 }
 
 export class EmailController {
@@ -65,6 +66,9 @@ export class EmailController {
       const { conversationId } = req.params;
       const { body, type, to: customTo, cc: customCc, bcc: customBcc, replyToEmailId, subject: requestSubject } =
         req.body as ReplyEmailRequest;
+      const {
+        draftId,
+      } = req.body as ReplyEmailRequest;
       const attachmentIds: string[] = Array.isArray(req.body.attachmentIds) ? req.body.attachmentIds : [];
 
       // Validate input — body OR at least one attachment is required.
@@ -394,11 +398,13 @@ export class EmailController {
         }
       }
 
-      try {
-        await this.emailDraftRepo.deleteByConversationId(conversationId);
-        logger.info(`[EmailController] Draft deleted for conversation: ${conversationId}`);
-      } catch (error) {
-        logger.warn(`[EmailController] Failed to delete draft for conversation ${conversationId}:`, error);
+      if (draftId) {
+        try {
+          await this.emailDraftRepo.deleteById(draftId);
+          logger.info(`[EmailController] Draft deleted after send: ${draftId}`);
+        } catch (error) {
+          logger.warn(`[EmailController] Failed to delete draft ${draftId}:`, error);
+        }
       }
 
       // 8. Store Zoho attachment references in MessageAttachment table for UI display.

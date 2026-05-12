@@ -10,21 +10,39 @@ interface StagePickerProps {
   ticketId: string;
   stageName: string | null | undefined;
   stageLabel: string;
+  stageOptions?: ReadonlyArray<string>;
+  /** When provided, called instead of directly mutating zero — allows the parent to intercept and show a form. */
+  onStageChange?: (
+    ticketId: string,
+    newStageName: string,
+    currentStageName: string | null | undefined,
+  ) => void;
 }
 
 const SUPPORT_STAGES: ReadonlyArray<string> = ['Backlog', 'To Do', 'In Progress', 'Review', 'Done'];
 
-export function StagePicker({ ticketId, stageName, stageLabel }: StagePickerProps): ReactElement {
+export function StagePicker({
+  ticketId,
+  stageName,
+  stageLabel,
+  stageOptions,
+  onStageChange,
+}: StagePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const zero = useZero();
 
   const currentStage = stageName ?? '';
+  const availableStages = stageOptions && stageOptions.length > 0 ? stageOptions : SUPPORT_STAGES;
 
   const setStage = (next: string): void => {
     if (next !== currentStage) {
-      void zero.mutate(
-        mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
-      );
+      if (onStageChange) {
+        onStageChange(ticketId, next, stageName);
+      } else {
+        void zero.mutate(
+          mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
+        );
+      }
     }
     setOpen(false);
   };
@@ -64,7 +82,7 @@ export function StagePicker({ ticketId, stageName, stageLabel }: StagePickerProp
       className='p-1 w-44'
     >
       <div className='flex flex-col'>
-        {SUPPORT_STAGES.map(stage => (
+        {availableStages.map(stage => (
           <button
             key={stage}
             type='button'

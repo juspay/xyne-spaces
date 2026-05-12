@@ -59,6 +59,10 @@ export const CreateFormSlideOut = ({
   isOpen,
   onClose,
   onSave,
+  onUpdate,
+  formId,
+  initialData,
+  title = 'Create Form',
 }: CreateFormSlideOutProps): ReactElement | null => {
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
@@ -66,10 +70,25 @@ export const CreateFormSlideOut = ({
   const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
   const fieldInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   const fieldsContainerRef = useRef<HTMLDivElement>(null);
+  // Track whether we've already seeded the form with initialData for this open session
+  const hasSeededRef = useRef(false);
 
-  // Initialize form with first field when opening
+  // When the panel opens, seed with initialData (if provided) or a blank first field
   useEffect(() => {
-    if (isOpen && fields.length === 0) {
+    if (!isOpen) {
+      // Reset seed flag when closed so next open starts fresh
+      hasSeededRef.current = false;
+      return;
+    }
+    if (hasSeededRef.current) return;
+    hasSeededRef.current = true;
+
+    if (initialData) {
+      setFormName(initialData.formName);
+      setFormDescription(initialData.formDescription);
+      setFields(initialData.fields);
+      setExpandedFieldId(null);
+    } else if (fields.length === 0) {
       const firstField: FormField = {
         id: uuidv4(),
         fieldName: '',
@@ -78,12 +97,12 @@ export const CreateFormSlideOut = ({
       };
       setFields([firstField]);
       setExpandedFieldId(firstField.id);
-      // Focus the field name input after a short delay
       setTimeout(() => {
         fieldInputRefs.current[firstField.id]?.focus();
       }, 100);
     }
-  }, [isOpen, fields.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // Handle click outside to close expanded field
   useEffect(() => {
@@ -158,17 +177,28 @@ export const CreateFormSlideOut = ({
   const handleSave = (): void => {
     if (!formName.trim() || fields.length === 0) return;
 
-    onSave({
+    const formData = {
       formName: formName.trim(),
       formDescription: formDescription.trim(),
       fields,
-    });
+    };
+
+    // If formId is provided, we're in edit mode
+    if (formId && onUpdate) {
+      onUpdate({
+        formId,
+        ...formData,
+      });
+    } else {
+      onSave(formData);
+    }
 
     // Reset form
     setFormName('');
     setFormDescription('');
     setFields([]);
     setExpandedFieldId(null);
+    hasSeededRef.current = false;
   };
 
   // Check if form is valid
@@ -186,7 +216,7 @@ export const CreateFormSlideOut = ({
       <div className='w-[500px] h-full bg-background rounded-[12px] shadow-[0px_0px_4px_0px_rgba(0,0,0,0.14),0px_8px_24px_0px_rgba(43,45,47,0.08)] flex flex-col overflow-hidden relative'>
         {/* Header */}
         <div className='flex items-center justify-between px-[16px] pt-[14px]'>
-          <h2 className='text-[14px] font-medium text-foreground'>Create Form</h2>
+          <h2 className='text-[14px] font-medium text-foreground'>{title}</h2>
           <Button
             type='button'
             onClick={onClose}

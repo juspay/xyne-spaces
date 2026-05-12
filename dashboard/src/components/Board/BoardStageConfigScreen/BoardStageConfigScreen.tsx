@@ -8,6 +8,7 @@ import {
   MoreVertical,
   ChevronLeft,
   Clock,
+  Pencil,
 } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
@@ -126,6 +127,27 @@ const BoardStageConfigScreen = ({
   // ── Create Form Panel State ──────────────────────────────────────────────────
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
   const [pendingFormCondition, setPendingFormCondition] = useState<StageCondition | null>(null);
+
+  // ── Direct Transition Form State (per-stage, no ConditionBuilder needed) ────
+  const [isDirectFormOpen, setIsDirectFormOpen] = useState(false);
+  const [selectedStageForDirectForm, setSelectedStageForDirectForm] = useState<number | null>(null);
+
+  // ── Edit Form State ──────────────────────────────────────────────────────────
+  const [isEditFormOpen, setIsEditFormOpen] = useState(false);
+  const [editingFormId, setEditingFormId] = useState<string | null>(null);
+  const [editingFormData, setEditingFormData] = useState<{
+    formName: string;
+    formDescription: string;
+    fields: Array<{
+      id: string;
+      persistedFieldId?: string;
+      fieldName: string;
+      fieldType: FormFieldType;
+      isOptional: boolean;
+      fieldEnum?: string[];
+    }>;
+  } | null>(null);
+  const [selectedStageForEditForm, setSelectedStageForEditForm] = useState<number | null>(null);
 
   // ── Transfer Toggle State ────────────────────────────────────────────────────
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
@@ -685,6 +707,190 @@ const BoardStageConfigScreen = ({
     [pendingFormCondition, projectId, selectedStageForCondition],
   );
 
+  // ── Direct Transition Form Handlers ─────────────────────────────────────────
+
+  /** Open the form builder directly for a stage (no ConditionBuilder detour). */
+  const handleOpenDirectForm = useCallback((stageTempId: number) => {
+    setSelectedStageForDirectForm(stageTempId);
+    setIsDirectFormOpen(true);
+  }, []);
+
+  const handleCloseDirectForm = useCallback(() => {
+    setIsDirectFormOpen(false);
+    setSelectedStageForDirectForm(null);
+  }, []);
+
+  // ── Edit Form Handlers ───────────────────────────────────────────────────────
+
+  /**
+   * Open form editor for an existing form.
+   */
+  const handleOpenEditForm = useCallback(async (stageTempId: number, formId: string) => {
+    try {
+      const formDetails = await formService.getFormById(formId);
+
+      setEditingFormId(formId);
+      setEditingFormData({
+        formName: formDetails.formName,
+        formDescription: formDetails.formDescription || '',
+        fields: formDetails.fields.map(field => ({
+          id: field.id,
+          persistedFieldId: field.id,
+          fieldName: field.fieldName,
+          fieldType: field.fieldType,
+          isOptional: field.isOptional,
+          ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
+        })),
+      });
+      setSelectedStageForEditForm(stageTempId);
+      setIsEditFormOpen(true);
+    } catch (error) {
+      toast.error('Failed to load form details', {
+        description: error instanceof Error ? error.message : 'An unexpected error occurred',
+      });
+    }
+  }, []);
+
+  const handleCloseEditForm = useCallback(() => {
+    setIsEditFormOpen(false);
+    setEditingFormId(null);
+    setEditingFormData(null);
+    setSelectedStageForEditForm(null);
+  }, []);
+
+  /**
+   * Save updated form and refresh local state.
+   */
+  const handleEditFormSave = useCallback(
+    async (formData: {
+      formId: string;
+      formName: string;
+      formDescription: string;
+      fields: Array<{
+        id: string;
+        persistedFieldId?: string;
+        fieldName: string;
+        fieldType: FormFieldType;
+        isOptional: boolean;
+        fieldEnum?: string[];
+      }>;
+    }) => {
+      if (!projectId) return;
+
+      try {
+        await formService.updateForm({
+          formId: formData.formId,
+          formName: formData.formName,
+          formDescription: formData.formDescription,
+          contextType: FormContextType.STAGE,
+          entityType: FormEntityType.TICKET,
+          fields: formData.fields.map(f => ({
+            ...(f.persistedFieldId ? { fieldId: f.persistedFieldId } : {}),
+            fieldName: f.fieldName,
+            fieldType: f.fieldType,
+            ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
+            isOptional: f.isOptional,
+          })),
+        });
+
+        toast.success(`Form "${formData.formName}" updated successfully`);
+
+        // Update the form map with the new name
+        setEditingFormId(null);
+        setEditingFormData(null);
+        setSelectedStageForEditForm(null);
+        setIsEditFormOpen(false);
+      } catch (error) {
+        toast.error('Failed to update form', {
+          description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        });
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId],
+  );
+
+  /**
+   * Create a new form and attach it directly to the target stage.
+   * The form will appear when a ticket is moved INTO that stage.
+   */
+  const handleDirectFormSave = useCallback(
+    async (formData: {
+      formName: string;
+      formDescription: string;
+      fields: Array<{
+        id: string;
+        fieldName: string;
+        fieldType: string;
+        isOptional: boolean;
+        fieldEnum?: string[];
+      }>;
+    }) => {
+      if (!projectId || selectedStageForDirectForm === null) return;
+
+      try {
+        const createdForm = await formService.createForm({
+          formName: formData.formName,
+          formDescription: formData.formDescription,
+          contextType: FormContextType.STAGE,
+          entityType: FormEntityType.TICKET,
+          fields: formData.fields.map(f => ({
+            fieldName: f.fieldName,
+            fieldType: f.fieldType as FormFieldType,
+            ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
+            isOptional: f.isOptional,
+          })),
+        });
+
+        toast.success(`Transition form "${formData.formName}" added`);
+
+        // Attach the form directly to the stage
+        setStages(prev =>
+          prev.map(stage =>
+            stage.tempId === selectedStageForDirectForm
+              ? { ...stage, formId: createdForm.id }
+              : stage,
+          ),
+        );
+
+        setIsDirectFormOpen(false);
+        setSelectedStageForDirectForm(null);
+      } catch (error) {
+        toast.error('Failed to create transition form', {
+          description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        });
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, selectedStageForDirectForm],
+  );
+
+  /** Remove the transition form from a stage. */
+  const handleRemoveStageForm = useCallback((stageTempId: number) => {
+    setStages(prev =>
+      prev.map(stage => {
+        if (stage.tempId !== stageTempId) return stage;
+        // Remove formId and any form-trigger conditions referencing this stage
+        const { formId: _removed, ...rest } = stage;
+        return {
+          ...rest,
+          conditions: (stage.conditions || []).filter(c => c.thenField !== 'form'),
+        };
+      }),
+    );
+    // Also clean up any form conditions on OTHER stages that pointed to this stage
+    setStages(prev => {
+      const targetStage = prev.find(s => s.tempId === stageTempId);
+      if (!targetStage) return prev;
+      return prev.map(stage => ({
+        ...stage,
+        conditions: (stage.conditions || []).filter(
+          c => !(c.thenField === 'form' && c.whenValue === targetStage.name),
+        ),
+      }));
+    });
+  }, []);
+
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     if (!boardId) return;
@@ -828,7 +1034,7 @@ const BoardStageConfigScreen = ({
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
       <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         {/* ── Header ── */}
-        <div className='flex items-center justify-between px-[18px] py-4'>
+        <div className='flex items-center justify-between px-[18px] py-4 flex-shrink-0 border-b border-border'>
           <div className='flex items-center gap-2'>
             <Button
               onClick={() => (onBack ? onBack() : onClose())}
@@ -861,161 +1067,150 @@ const BoardStageConfigScreen = ({
           </div>
         </div>
 
-        {/* ── Title Section ── */}
-        <div className='px-6 py-3 flex-shrink-0 flex items-start justify-between'>
-          <div>
-            <h1 className='text-[18px] font-semibold text-foreground'>Configure Board</h1>
-            <p className='text-[14px] text-muted-foreground mt-1 leading-[20px]'>
-              Configure the workflow stages for your board. Each card represents a stage in your
-              workflow.
-            </p>
-          </div>
-          {/* Three Dot Menu Button with Dropdown */}
-          <div className='relative'>
-            <Button
-              onClick={() => setIsTransferModalOpen(v => !v)}
-              variant='ghost'
-              size='iconSm'
-              className='p-2 hover:bg-muted rounded-lg transition-colors'
-              data-track-category='board_config'
-              data-track-name='open_transfer_settings'
-            >
-              <MoreVertical size={20} className='text-muted-foreground' />
-            </Button>
+        {/* ── Scrollable Content Area ── */}
+        <div className='flex-1 overflow-y-auto overflow-x-hidden'>
+          {/* ── Title Section ── */}
+          <div className='px-6 py-3 flex items-start justify-between'>
+            <div>
+              <h1 className='text-[18px] font-semibold text-foreground'>Configure Board</h1>
+              <p className='text-[14px] text-muted-foreground mt-1 leading-[20px]'>
+                Configure the workflow stages for your board. Each card represents a stage in your
+                workflow.
+              </p>
+            </div>
+            {/* Three Dot Menu Button with Dropdown */}
+            <div className='relative'>
+              <Button
+                onClick={() => setIsTransferModalOpen(v => !v)}
+                variant='ghost'
+                size='iconSm'
+                className='p-2 hover:bg-muted rounded-lg transition-colors'
+                data-track-category='board_config'
+                data-track-name='open_transfer_settings'
+              >
+                <MoreVertical size={20} className='text-muted-foreground' />
+              </Button>
 
-            {/* Dropdown Menu */}
-            {isTransferModalOpen && (
-              <div className='absolute right-0 top-full mt-2 w-[280px] bg-background rounded-lg shadow-lg border border-border z-50 py-2'>
-                <div className='px-4 py-3'>
-                  <div className='flex items-start justify-between gap-3'>
-                    <div>
-                      <label
-                        htmlFor='allow-transfer-toggle'
-                        className='text-[13px] font-medium text-foreground block'
-                      >
-                        Allow Ticket Transfer
-                      </label>
-                      <p className='text-[11px] text-muted-foreground mt-0.5 leading-[14px]'>
-                        Only Manager and Team Lead can transfer tickets
-                      </p>
-                    </div>
-                    <button
-                      id='allow-transfer-toggle'
-                      onClick={() => setIsAllowedToTransfer(v => !v)}
-                      className={`w-[36px] h-[20px] rounded-full relative transition-colors flex-shrink-0 ${
-                        isAllowedToTransfer ? 'bg-[#6276be]' : 'bg-muted'
-                      }`}
-                      data-track-category='board_config'
-                      data-track-name='toggle_allow_transfer'
-                      type='button'
-                    >
-                      <span
-                        className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
-                          isAllowedToTransfer ? 'left-[18px]' : 'left-[2px]'
+              {/* Dropdown Menu */}
+              {isTransferModalOpen && (
+                <div className='absolute right-0 top-full mt-2 w-[280px] bg-background rounded-lg shadow-lg border border-border z-50 py-2'>
+                  <div className='px-4 py-3'>
+                    <div className='flex items-start justify-between gap-3'>
+                      <div>
+                        <label
+                          htmlFor='allow-transfer-toggle'
+                          className='text-[13px] font-medium text-foreground block'
+                        >
+                          Allow Ticket Transfer
+                        </label>
+                        <p className='text-[11px] text-muted-foreground mt-0.5 leading-[14px]'>
+                          Only Manager and Team Lead can transfer tickets
+                        </p>
+                      </div>
+                      <button
+                        id='allow-transfer-toggle'
+                        onClick={() => setIsAllowedToTransfer(v => !v)}
+                        className={`w-[36px] h-[20px] rounded-full relative transition-colors flex-shrink-0 ${
+                          isAllowedToTransfer ? 'bg-[#6276be]' : 'bg-muted'
                         }`}
-                      />
-                    </button>
+                        data-track-category='board_config'
+                        data-track-name='toggle_allow_transfer'
+                        type='button'
+                      >
+                        <span
+                          className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
+                            isAllowedToTransfer ? 'left-[18px]' : 'left-[2px]'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                  <div className='px-4 py-3 border-t border-border'>
+                    <div className='flex items-start justify-between gap-3'>
+                      <div>
+                        <label
+                          htmlFor='full-role-assignment-toggle'
+                          className='text-[13px] font-medium text-foreground block'
+                        >
+                          Full Role Assignment
+                        </label>
+                        <p className='text-[11px] text-muted-foreground mt-0.5 leading-[14px]'>
+                          Auto-assign Manager, Team Lead, Dev, PR Reviewer &amp; QA when a ticket is
+                          assigned to a user group
+                        </p>
+                      </div>
+                      <button
+                        id='full-role-assignment-toggle'
+                        onClick={() => setFullRoleAssignment(v => !v)}
+                        className={`w-[36px] h-[20px] rounded-full relative transition-colors flex-shrink-0 ${
+                          fullRoleAssignment ? 'bg-[#6276be]' : 'bg-muted'
+                        }`}
+                        data-track-category='board_config'
+                        data-track-name='toggle_full_role_assignment'
+                        type='button'
+                      >
+                        <span
+                          className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
+                            fullRoleAssignment ? 'left-[18px]' : 'left-[2px]'
+                          }`}
+                        />
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className='px-4 py-3 border-t border-border'>
-                  <div className='flex items-start justify-between gap-3'>
-                    <div>
-                      <label
-                        htmlFor='full-role-assignment-toggle'
-                        className='text-[13px] font-medium text-foreground block'
-                      >
-                        Full Role Assignment
-                      </label>
-                      <p className='text-[11px] text-muted-foreground mt-0.5 leading-[14px]'>
-                        Auto-assign Manager, Team Lead, Dev, PR Reviewer &amp; QA when a ticket is
-                        assigned to a user group
-                      </p>
-                    </div>
-                    <button
-                      id='full-role-assignment-toggle'
-                      onClick={() => setFullRoleAssignment(v => !v)}
-                      className={`w-[36px] h-[20px] rounded-full relative transition-colors flex-shrink-0 ${
-                        fullRoleAssignment ? 'bg-[#6276be]' : 'bg-muted'
-                      }`}
-                      data-track-category='board_config'
-                      data-track-name='toggle_full_role_assignment'
-                      type='button'
-                    >
-                      <span
-                        className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
-                          fullRoleAssignment ? 'left-[18px]' : 'left-[2px]'
-                        }`}
-                      />
-                    </button>
-                  </div>
-                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Priority-based SLA Toggle ── */}
+          <div className='px-6 py-3 border-t border-border'>
+            <div className='flex items-center justify-between gap-4'>
+              {/* Left: label + context */}
+              <div className='flex items-center gap-2 min-w-0'>
+                <Clock size={14} className='text-muted-foreground flex-shrink-0' />
+                <span className='text-[13px] font-medium text-foreground whitespace-nowrap'>
+                  Enable Priority-based SLA
+                </span>
+                <span className='text-[12px] text-muted-foreground truncate hidden sm:block'>
+                  When enabled, ticket deadlines are based on priority policies (Stage ETAs are
+                  ignored)
+                </span>
+              </div>
+
+              {/* Right: toggle switch */}
+              <button
+                type='button'
+                role='switch'
+                aria-checked={slaPolicyType === 'priority'}
+                onClick={() =>
+                  setSlaPolicyType(slaPolicyType === 'priority' ? 'stages' : 'priority')
+                }
+                data-track-category='board_config'
+                data-track-name='toggle_priority_sla'
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                  slaPolicyType === 'priority' ? 'bg-[#6276be]' : 'bg-muted'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform duration-200 ${
+                    slaPolicyType === 'priority' ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Priority SLA settings panel — appears above stages when enabled */}
+            {slaPolicyType === 'priority' && (
+              <div className='mt-3 rounded-[10px] border border-border bg-muted/30 px-4 py-3'>
+                <SlaSettings boardId={boardId} />
               </div>
             )}
           </div>
-        </div>
 
-        {/* ── SLA Mode Selector ── */}
-        <div className='px-6 py-3 border-t border-border flex-shrink-0'>
-          <div className='flex items-center justify-between gap-4'>
-            {/* Left: label + context */}
-            <div className='flex items-center gap-2 min-w-0'>
-              <Clock size={14} className='text-muted-foreground flex-shrink-0' />
-              <span className='text-[13px] font-medium text-foreground whitespace-nowrap'>
-                SLA Mode
-              </span>
-              <span className='text-[12px] text-muted-foreground truncate hidden sm:block'>
-                {slaPolicyType === 'priority'
-                  ? '— deadlines set by per-priority policy'
-                  : '— deadlines set by per-stage ETA'}
-              </span>
-            </div>
-
-            {/* Right: segmented control */}
-            <div className='flex items-center bg-muted rounded-[8px] p-[3px] gap-[2px] flex-shrink-0'>
-              <button
-                type='button'
-                onClick={() => setSlaPolicyType('stages')}
-                data-track-category='board_config'
-                data-track-name='sla_mode_stages'
-                className={`flex items-center gap-[6px] px-3 py-[5px] rounded-[6px] text-[12px] font-medium transition-all duration-150 ${
-                  slaPolicyType === 'stages'
-                    ? 'bg-background text-foreground shadow-sm border border-border'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Timer size={12} className='flex-shrink-0' />
-                Stage ETAs
-              </button>
-              <button
-                type='button'
-                onClick={() => setSlaPolicyType('priority')}
-                data-track-category='board_config'
-                data-track-name='sla_mode_priority'
-                className={`flex items-center gap-[6px] px-3 py-[5px] rounded-[6px] text-[12px] font-medium transition-all duration-150 ${
-                  slaPolicyType === 'priority'
-                    ? 'bg-[#6276BE] text-white shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Clock size={12} className='flex-shrink-0' />
-                Priority SLA
-              </button>
-            </div>
-          </div>
-
-          {/* Inline SLA settings panel — expands when Priority SLA is active */}
-          {slaPolicyType === 'priority' && (
-            <div className='mt-3 rounded-[10px] border border-border bg-muted/30 px-4 py-3'>
-              <SlaSettings boardId={boardId} />
-            </div>
-          )}
-        </div>
-
-        {/* ── Stages Area — hidden when Priority SLA mode is active ── */}
-        {slaPolicyType !== 'priority' && (
-          <div className='flex-1 overflow-hidden px-6 pt-3 pb-6'>
+          {/* ── Stages Area — always visible for transition form configuration ── */}
+          <div className='px-6 pt-3 pb-6'>
             {/* Rounded container with columns background */}
-            <div className='h-full w-full rounded-[16px] bg-muted/50 overflow-x-auto overflow-y-hidden'>
+            <div className='h-[500px] min-h-[500px] w-full rounded-[16px] bg-muted/50 overflow-x-auto overflow-y-hidden'>
               {/* Stage Cards Row - centered when few, scrollable when many */}
               <div className='h-full flex items-stretch justify-center min-w-max relative'>
                 {/* Dotted grid pattern background - at top level */}
@@ -1220,6 +1415,62 @@ const BoardStageConfigScreen = ({
                               <GitBranch size={14} className='text-[#6276be]' />
                               <span>Add Condition</span>
                             </Button>
+
+                            {/* ── Transition Form Section ── */}
+                            {/* Hide for the first stage since there's no previous stage to transition from */}
+                            {index > 0 && (
+                              <div className='mt-2 pt-2 border-t border-border'>
+                                <p className='text-[10px] font-medium text-muted-foreground uppercase tracking-[0.5px] mb-1.5'>
+                                  Transition Form
+                                </p>
+                                {stage.formId ? (
+                                  <div className='flex items-center justify-between bg-muted/60 rounded-[8px] px-2 py-1.5'>
+                                    <span
+                                      className='text-[12px] text-foreground truncate max-w-[140px]'
+                                      title={formMap.get(stage.formId) || 'Form'}
+                                    >
+                                      {formMap.get(stage.formId) || 'Transition Form'}
+                                    </span>
+                                    <div className='flex items-center gap-0.5'>
+                                      <Button
+                                        onClick={() =>
+                                          void handleOpenEditForm(stage.tempId, stage.formId!)
+                                        }
+                                        variant='ghost'
+                                        size='iconSm'
+                                        className='text-muted-foreground hover:text-foreground flex-shrink-0 h-5 w-5 p-0.5'
+                                        data-track-category='board_config'
+                                        data-track-name='edit_stage_form'
+                                      >
+                                        <Pencil size={10} />
+                                      </Button>
+                                      <Button
+                                        onClick={() => handleRemoveStageForm(stage.tempId)}
+                                        variant='ghost'
+                                        size='iconSm'
+                                        className='text-muted-foreground hover:text-red-500 flex-shrink-0'
+                                        data-track-category='board_config'
+                                        data-track-name='remove_stage_form'
+                                      >
+                                        <X size={12} />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    onClick={() => handleOpenDirectForm(stage.tempId)}
+                                    variant='ghost'
+                                    size='sm'
+                                    className='flex items-center gap-[6px] text-[13px] font-medium text-muted-foreground hover:text-foreground p-[4px] rounded-[6px] h-auto'
+                                    data-track-category='board_config'
+                                    data-track-name='configure_transition_form'
+                                  >
+                                    <Plus size={13} />
+                                    <span>Configure Transition Form</span>
+                                  </Button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1254,6 +1505,35 @@ const BoardStageConfigScreen = ({
                           />
                         </div>
                       )}
+
+                      {/* Direct Transition Form Slide Out - opened from "Configure Transition Form" button */}
+                      {isDirectFormOpen && selectedStageForDirectForm === stage.tempId && (
+                        <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                          <CreateFormSlideOut
+                            isOpen={true}
+                            onClose={handleCloseDirectForm}
+                            onSave={formData => void handleDirectFormSave(formData)}
+                            title='Configure Transition Form'
+                          />
+                        </div>
+                      )}
+
+                      {/* Edit Form Slide Out - opened from pencil/edit icon */}
+                      {isEditFormOpen &&
+                        selectedStageForEditForm === stage.tempId &&
+                        editingFormData && (
+                          <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                            <CreateFormSlideOut
+                              isOpen={true}
+                              onClose={handleCloseEditForm}
+                              onSave={() => {}}
+                              onUpdate={formData => void handleEditFormSave(formData)}
+                              {...(editingFormId ? { formId: editingFormId } : {})}
+                              initialData={editingFormData}
+                              title='Edit Transition Form'
+                            />
+                          </div>
+                        )}
 
                       {/* Black line on top of where colored backgrounds meet */}
                       {!isLast && (
@@ -1295,7 +1575,7 @@ const BoardStageConfigScreen = ({
               </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

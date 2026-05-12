@@ -101,6 +101,7 @@ import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
 import emailRoutes from '@/routes/email';
 import emailDemergeRoutes from '@/routes/emailDemerge';
 import emailClassificationRoutes from '@/routes/emailClassification';
+import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
 import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
@@ -247,6 +248,7 @@ export class App {
     this.app.use('/api/email', emailRoutes);
     this.app.use('/api/email', emailDemergeRoutes);
     this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
+    this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);

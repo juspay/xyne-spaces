@@ -17,6 +17,12 @@ interface TicketListRowProps {
   showExtraFields?: boolean;
   isSelected?: boolean;
   onToggleSelect?: () => void;
+  stageOptions?: ReadonlyArray<string>;
+  onStageChange?: (
+    ticketId: string,
+    newStageName: string,
+    currentStageName: string | null | undefined,
+  ) => void;
 }
 
 const formatStatusText = (status: string): string => {
@@ -72,6 +78,8 @@ export const TicketListRow = ({
   showExtraFields = false,
   isSelected = false,
   onToggleSelect,
+  stageOptions,
+  onStageChange,
 }: TicketListRowProps): ReactElement => {
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const containerRef = useRef<HTMLDivElement>(null);
@@ -229,7 +237,13 @@ export const TicketListRow = ({
         )}
       </div>
       <div className='flex items-center justify-center gap-3 flex-shrink-0'>
-        <StagePicker ticketId={ticket.id} stageName={ticket.stageName} stageLabel={statusLabel} />
+        <StagePicker
+          ticketId={ticket.id}
+          stageName={ticket.stageName}
+          stageLabel={statusLabel}
+          {...(stageOptions ? { stageOptions } : {})}
+          {...(onStageChange ? { onStageChange } : {})}
+        />
         <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} />
         <Tooltip delayDuration={300} content={formatDateTime(dueDate)} side='top'>
           <span

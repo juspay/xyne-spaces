@@ -19,7 +19,7 @@ interface UseComposerDragDropReturn {
  * files through `onAddFiles`.
  */
 export const useComposerDragDrop = (
-  onAddFiles: (files: File[]) => void,
+  onAddFiles: (files: File[]) => void | Promise<void>,
 ): UseComposerDragDropReturn => {
   const [isDraggingFiles, setIsDraggingFiles] = useState<boolean>(false);
   const dragDepthRef = useRef<number>(0);
@@ -52,7 +52,7 @@ export const useComposerDragDrop = (
     dragDepthRef.current = 0;
     setIsDraggingFiles(false);
     const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) onAddFiles(files);
+    if (files.length > 0) void onAddFiles(files);
   };
 
   return {

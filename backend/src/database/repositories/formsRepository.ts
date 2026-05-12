@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Form, FormFields, Prisma } from '@prisma/client';
@@ -89,12 +90,13 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
 
       // Create form fields
       await tx.formFields.createMany({
-        data: data.fields.map(field => ({
+        data: data.fields.map((field, index) => ({
           formId: form.id,
           fieldName: field.fieldName.trim(),
           fieldType: field.fieldType,
           fieldEnum: field.fieldEnum,
           isOptional: field.isOptional,
+          sequenceNumber: index + 1,
         })),
       });
 
@@ -128,6 +130,147 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         contextType: context,
         entityType: entity,
       },
+    });
+  }
+
+  /**
+   * Get form with fields by form ID
+   */
+  async findFormWithFields(id: string): Promise<(Form & { fields: FormFields[] }) | null> {
+    return await this.db.form.findUnique({
+      where: { id },
+      include: {
+        fields: {
+          orderBy: {
+            sequenceNumber: 'asc',
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Update form with fields while preserving existing field IDs when possible.
+   */
+  async updateWithFields(
+    id: string,
+    data: {
+      formName: string;
+      formDescription?: string;
+      fields: Array<{
+        fieldId?: string;
+        fieldName: string;
+        fieldType: FormFieldType;
+        fieldEnum?: Prisma.InputJsonValue;
+        isOptional?: boolean;
+      }>;
+    }
+  ): Promise<Form> {
+    await this.validateString(data.formName, 'formName', 100);
+
+    // Validate that at least one field is provided
+    if (!data.fields || data.fields.length === 0) {
+      throw new Error('At least one field is required');
+    }
+
+    // Validate all fields have names
+    const invalidFields = data.fields.filter(field => !field.fieldName || !field.fieldName.trim());
+    if (invalidFields.length > 0) {
+      throw new Error('All fields must have a name');
+    }
+
+    // Validate all fields have valid field types
+    const validFieldTypes = Object.values(FormFieldType);
+    const invalidFieldTypes = data.fields.filter(field => !validFieldTypes.includes(field.fieldType));
+    if (invalidFieldTypes.length > 0) {
+      throw new Error(
+        `Invalid field type(s): ${invalidFieldTypes.map(f => f.fieldType).join(', ')}. Valid types: ${validFieldTypes.join(', ')}`
+      );
+    }
+
+    const providedFieldIds = data.fields
+      .map(field => field.fieldId)
+      .filter((fieldId): fieldId is string => typeof fieldId === 'string' && fieldId.length > 0);
+
+    if (providedFieldIds.length !== new Set(providedFieldIds).size) {
+      throw new Error('Duplicate field IDs are not allowed');
+    }
+
+    const normalizedFieldNames = data.fields.map(field => field.fieldName.trim().toLowerCase());
+    if (normalizedFieldNames.length !== new Set(normalizedFieldNames).size) {
+      throw new Error('Duplicate field names are not allowed');
+    }
+
+    return await this.db.$transaction(async (tx) => {
+      const existingFields = await tx.formFields.findMany({
+        where: { formId: id },
+        orderBy: { sequenceNumber: 'asc' },
+      });
+
+      const existingFieldIds = new Set(existingFields.map(field => field.id));
+      const invalidFieldId = providedFieldIds.find(fieldId => !existingFieldIds.has(fieldId));
+      if (invalidFieldId) {
+        throw new Error(`Field ${invalidFieldId} does not belong to this form`);
+      }
+
+      // Update the form
+      const form = await tx.form.update({
+        where: { id },
+        data: {
+          formName: data.formName.trim(),
+          formDescription: data.formDescription?.trim() || null,
+        },
+      });
+
+      const incomingFieldIds = new Set(providedFieldIds);
+      const fieldIdsToDelete = existingFields
+        .filter(field => !incomingFieldIds.has(field.id))
+        .map(field => field.id);
+
+      if (fieldIdsToDelete.length > 0) {
+        const referencedValues = await tx.formEntityValues.count({
+          where: {
+            formId: id,
+            fieldId: { in: fieldIdsToDelete },
+          },
+        });
+
+        if (referencedValues > 0) {
+          throw new Error('Cannot delete form fields that already contain saved values');
+        }
+
+        await tx.formFields.deleteMany({
+          where: { id: { in: fieldIdsToDelete } },
+        });
+      }
+
+      for (const [index, field] of data.fields.entries()) {
+        const baseData = {
+          formId: id,
+          fieldName: field.fieldName.trim(),
+          fieldType: field.fieldType,
+          fieldEnum: field.fieldEnum,
+          isOptional: field.isOptional ?? false,
+          sequenceNumber: index + 1,
+        };
+
+        if (field.fieldId) {
+          await tx.formFields.update({
+            where: { id: field.fieldId },
+            data: baseData,
+          });
+          continue;
+        }
+
+        await tx.formFields.create({
+          data: {
+            id: randomUUID(),
+            ...baseData,
+          },
+        });
+      }
+
+      return form;
     });
   }
 

@@ -702,6 +702,27 @@ export class EmailService {
           });
           logger.info(`[Classification] Fell back to default group ${groupId} for ticket ${ticket.id}`);
         }
+
+        // Apply priority classification if available and meets threshold
+        if (result.priority) {
+          const threshold = config.priorityClassificationThreshold ?? 0.5;
+          if (result.priority.confidence >= threshold) {
+            await this.prisma.ticket.update({
+              where: { id: ticket.id },
+              data: {
+                priority: result.priority.priority,
+                aiPriority: result.priority.priority,
+              },
+            });
+            logger.info(
+              `[PriorityClassification] Auto-set priority to ${result.priority.priority} for ticket ${ticket.id} (confidence: ${(result.priority.confidence * 100).toFixed(1)}%)`
+            );
+          } else {
+            logger.info(
+              `[PriorityClassification] Priority ${result.priority.priority} not applied (confidence: ${(result.priority.confidence * 100).toFixed(1)}% < threshold: ${(threshold * 100).toFixed(1)}%)`
+            );
+          }
+        }
       })
       .catch((err) => {
         logger.error(`[Classification] Background classification failed for ticket ${ticket.id}`, err);

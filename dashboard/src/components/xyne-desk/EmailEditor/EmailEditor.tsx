@@ -4,7 +4,13 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
-import { EditorToolbar } from '../../ui/EditorToolbar';
+import { TextStyle, FontSize } from '@tiptap/extension-text-style';
+import Color from '@tiptap/extension-color';
+import Highlight from '@tiptap/extension-highlight';
+import Underline from '@tiptap/extension-underline';
+import FontFamily from '@tiptap/extension-font-family';
+import TextAlign from '@tiptap/extension-text-align';
+import { EmailEditorToolbar } from './EmailEditorToolbar';
 import { TableExtensions } from '../../ui/TipTapExtensions';
 import { InlineImageNodeView } from './InlineImageNodeView';
 
@@ -64,7 +70,7 @@ const InlineImage = Image.extend({
 interface EmailEditorProps {
   value: string;
   onChange: (html: string) => void;
-  onAddFiles?: (files: File[]) => void;
+  onAddFiles?: (files: File[]) => void | Promise<void>;
   uploadAndInsertInlineImages?: (images: File[]) => void | Promise<void>;
   onSendShortcut?: () => void;
   onBlur?: () => void;
@@ -128,6 +134,11 @@ export const EmailEditor = ({
               'border-left: 3px solid #d0d7de; padding-left: 12px; margin: 0.5em 0; color: #57606a;',
           },
         },
+        strike: {
+          HTMLAttributes: {
+            style: 'text-decoration: line-through;',
+          },
+        },
       }),
       LinkExtension.configure({ openOnClick: false }),
       Placeholder.configure({ placeholder }),
@@ -137,6 +148,19 @@ export const EmailEditor = ({
         HTMLAttributes: {
           style: 'max-width: 100%; height: auto; vertical-align: middle;',
         },
+      }),
+      TextStyle,
+      FontSize,
+      Color.configure({
+        types: ['textStyle'],
+      }),
+      Highlight.configure({
+        multicolor: true,
+      }),
+      Underline,
+      FontFamily,
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
       }),
       ...TableExtensions,
     ],
@@ -181,7 +205,7 @@ export const EmailEditor = ({
         }
         if (nonImages.length > 0 && cb.current.onAddFiles) {
           event.preventDefault();
-          cb.current.onAddFiles(nonImages);
+          void cb.current.onAddFiles(nonImages);
         }
         return files.length > 0;
       },
@@ -211,8 +235,8 @@ export const EmailEditor = ({
 
   return (
     <div className={`flex flex-col min-h-0 ${className}`}>
-      <div className='flex-shrink-0 border-b border-border px-2 py-1'>
-        <EditorToolbar editor={editor} />
+      <div className='flex-shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
+        <EmailEditorToolbar editor={editor} />
       </div>
       {/* Padding lives on the ProseMirror element (via editorProps class)
           so clicks anywhere in the visible area land on the editor and

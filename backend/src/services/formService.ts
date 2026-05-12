@@ -1,5 +1,5 @@
 import { FormsRepository, CreateFormWithFieldsInput } from '../database/repositories/formsRepository';
-import { FormContextType, FormEntityType } from '@xyne/shared';
+import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { Prisma } from '@prisma/client';
 
 export class FormService {
@@ -44,6 +44,33 @@ export class FormService {
 
   async findFormByContextAndEntity(context: FormContextType, entity: FormEntityType) {
     return await this.formsRepository.findFormByContextAndEntity(context, entity);
+  }
+
+  /**
+   * Get form with fields by ID
+   */
+  async findFormWithFields(formId: string) {
+    return await this.formsRepository.findFormWithFields(formId);
+  }
+
+  /**
+   * Update form with fields
+   */
+  async updateFormWithFields(
+    formId: string,
+    data: {
+      formName: string;
+      formDescription?: string;
+      fields: Array<{
+        fieldId?: string;
+        fieldName: string;
+        fieldType: FormFieldType;
+        fieldEnum?: Prisma.InputJsonValue;
+        isOptional?: boolean;
+      }>;
+    }
+  ) {
+    return await this.formsRepository.updateWithFields(formId, data);
   }
 
 }

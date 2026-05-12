@@ -404,6 +404,7 @@ model Ticket {
   classificationData   Json?             // Full AI classification output (rawOutput, resolvedGroupId, isManualOverride, classifiedAt)
   aiCategory           String?           // Top-level category from AI classification (indexed for querying)
   aiSubCategory        String?           // Sub-category from AI classification
+  aiPriority           String?           // Priority detected by AI (LOW, MEDIUM, HIGH, CRITICAL)
 
   // Relations
   createdByUser      User                   @relation("TicketCreatedBy", fields: [createdBy], references: [id])
@@ -1833,10 +1834,10 @@ model EmailDraft {
   userId String?
   channelId String
   draftContent String
+  attachmentIds Json? // Array of attachment IDs for draft attachments
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, conversationId])
   @@index([userId, conversationId, id])
   @@index([conversationId])
   @@index([channelId])
@@ -1874,17 +1875,20 @@ model EmailSignature {
 }
 
 model EmailChannelPreference {
-  channelId                String   @id // Channel ID (no FK constraint) - Primary key
-  ownerUserId              String?  // User ID who owns this preference (no FK constraint)
-  assigneeUserGroupId      String?  // User group ID for assignee (no FK constraint)
-  boardId                  String?  // Target board for ticket creation (no FK constraint)
-  sendAsEmail              String?  // Optional alias email for outbound replies (e.g. support@...)
-  defaultCc                String?  // Comma-separated list of emails to pre-populate CC in compose
-  classificationEnabled    Boolean  @default(false)
-  classificationPrompt     String?  // Custom system prompt for the classification LLM
-  categoryField            String?  // Label for the top-level category
-  subCategoryField         String?  // Label for the sub-category
-  emailMergeMode           EmailMergeMode        @default(ENABLED) // Auto-merge similar emails (cross-thread duplicate merge + per-email demerge); enum so future variants (e.g. MERGE_ONLY) can be added
+  channelId                    String   @id // Channel ID (no FK constraint) - Primary key
+  ownerUserId                  String?  // User ID who owns this preference (no FK constraint)
+  assigneeUserGroupId          String?  // User group ID for assignee (no FK constraint)
+  boardId                      String?  // Target board for ticket creation (no FK constraint)
+  sendAsEmail                  String?  // Optional alias email for outbound replies (e.g. support@...)
+  defaultCc                    String?  // Comma-separated list of emails to pre-populate CC in compose
+  classificationEnabled        Boolean  @default(false)
+  classificationPrompt         String?  // Custom system prompt for the classification LLM
+  categoryField                String?  // Label for the top-level category
+  subCategoryField             String?  // Label for the sub-category
+  emailMergeMode               EmailMergeMode @default(ENABLED) // Auto-merge similar emails (cross-thread duplicate merge + per-email demerge); enum so future variants can be added
+  priorityClassificationEnabled Boolean @default(false)
+  priorityClassificationPrompt String?  // Custom system prompt for the priority classification LLM
+  priorityClassificationThreshold Float @default(0.5) // Minimum confidence threshold (0.0 - 1.0) to auto-apply priority
 
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
@@ -2848,6 +2852,9 @@ model Form {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
+  // Relations
+  fields FormFields[]
+
   @@index([createdBy])
   @@index([entityType, contextType])
 
@@ -2877,8 +2884,12 @@ model FormFields {
   fieldType  FormFieldType
   fieldEnum  Json?
   isOptional Boolean  @default(false)
+  sequenceNumber Int @default(0) // Order of fields in the form
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  // Relations
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
 
   @@unique([formId, fieldName]) // Prevent duplicate fields per form
   @@index([formId])
