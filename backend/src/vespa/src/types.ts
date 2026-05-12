@@ -116,7 +116,6 @@ export enum SubApp {
   RCA = "RCA",
   CANVAS = "CANVAS",
   TRANSCRIPT = "TRANSCRIPT",
-  COLLECTIONS = "COLLECTIONS",
   CHAT_ATTACHMENT = "CHAT_ATTACHMENT",
   TICKET_ATTACHMENT = "TICKET_ATTACHMENT",
 }
@@ -298,12 +297,6 @@ export interface VespaUserDocument extends VespaDocument {
   personalizationLastUpdated?: number;
 }
 
-export interface VespaEntityTags {
-  people: string[];
-  merchants: string[];
-  productSpecs: string[];
-}
-
 export interface VespaChunkMeta {
   chunk_index: number;
   page_numbers: number[];
@@ -318,7 +311,6 @@ export interface VespaFileDocument extends VespaDocument {
   chunks_map?: VespaChunkMeta[];
   image_chunks: string[];
   image_chunks_pos: string[];
-  slideUrl: string[];
   image_chunks_map?: VespaChunkMeta[];
   metadata: string;
   createdBy: string;
@@ -334,10 +326,6 @@ export interface VespaFileDocument extends VespaDocument {
   subApp: string,
   channelRef?: string;
   conversationId?: string;
-  clId: string,
-  clFd: string,
-  projectId?: string,
-  tags?: VespaEntityTags;
   messageId?: string;
   ticketId?: string;
   callType?: string;

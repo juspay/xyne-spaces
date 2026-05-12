@@ -8,7 +8,7 @@
  * Both backend's Citation and frontend's SummarizerCitation satisfy this shape.
  */
 export interface CitationUrlInput {
-  entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search' | 'knowledge_base' | string;
+  entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search' | string;
   channelId?: string;
   conversationId?: string;
   messageId?: string;
@@ -59,11 +59,6 @@ export function buildCitationUrl(citation: CitationUrlInput): string | null {
 
     case 'web_search':
       return externalUrl || null;
-
-    case 'knowledge_base':
-      // KB files are collection items - return download URL as fallback
-      // Primary flow opens them in the attachment viewer modal instead
-      return entityId ? `/collections/items/${entityId}/download` : null;
 
     default:
       return null;

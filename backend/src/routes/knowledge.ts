@@ -5,8 +5,6 @@ import {
   getCanvasByViewAccessId,
   convertBlockNoteToMarkdown,
 } from '@/services/canvasService';
-import { uploadMultiple } from '@/middleware/upload';
-import { gcsService } from '@/services/gcsService';
 import { logger } from '@/utils/logger';
 
 const router = Router();
@@ -245,83 +243,6 @@ router.post('/convert', async (req: Request, res: Response): Promise<void> => {
     logger.error('[Knowledge] Error converting to markdown:', error);
     res.status(500).json({
       error: 'Failed to convert content',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * POST /api/knowledge/collections
- * Upload files to GCS for a knowledge collection
- */
-router.post('/collections', uploadMultiple, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      res.status(401).json({ error: 'Unauthorized - user not authenticated' });
-      return;
-    }
-
-    const { title, description, projectId } = req.body;
-
-    if (!title || typeof title !== 'string' || !title.trim()) {
-      res.status(400).json({ error: 'title is required' });
-      return;
-    }
-
-    if (!projectId || typeof projectId !== 'string') {
-      res.status(400).json({ error: 'projectId is required' });
-      return;
-    }
-
-    const reqFiles = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
-    const files = reqFiles?.['files'] || [];
-
-    if (files.length === 0) {
-      res.status(400).json({ error: 'At least one file is required' });
-      return;
-    }
-
-    // Upload each file to GCS
-    const uploadedFiles = await Promise.all(
-      files.map(async (file: Express.Multer.File) => {
-        const gcsResult = await gcsService.uploadFile(file.buffer, {
-          filename: file.originalname,
-          contentType: file.mimetype,
-          metadata: {
-            originalName: file.originalname,
-            projectId,
-            uploadedBy: userId,
-          },
-          scopeType: 'KNOWLEDGE',
-          scopeId: projectId,
-        });
-
-        return {
-          originalName: file.originalname,
-          fileName: gcsResult.filename,
-          fileSize: gcsResult.size,
-          mimeType: file.mimetype,
-          gcsPath: gcsResult.gcsPath,
-        };
-      }),
-    );
-
-    logger.info(`[KnowledgeCollections] User ${userId} uploaded ${uploadedFiles.length} files for project ${projectId}`);
-
-    res.status(201).json({
-      collection: {
-        title: title.trim(),
-        description: description?.trim() || null,
-        projectId,
-        fileCount: uploadedFiles.length,
-        files: uploadedFiles,
-      },
-    });
-  } catch (error) {
-    logger.error('[KnowledgeCollections] Error uploading files:', error);
-    res.status(500).json({
-      error: 'Failed to upload files',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

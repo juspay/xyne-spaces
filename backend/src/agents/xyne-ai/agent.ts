@@ -101,9 +101,7 @@ async function buildAgentPrompt(
   hasThreadContext?: boolean,
   userId?: string,
   promptName?: string,
-  providedContexts?: ProvidedContexts,
-  hasChannels?: boolean,
-  knowledgeBaseEnabled?: boolean
+  providedContexts?: ProvidedContexts
 ): Promise<string> {
   // Fetch user skills if userId is provided
   const skills = userId ? await fetchUserSkills(userId) : [];
@@ -119,9 +117,7 @@ async function buildAgentPrompt(
     customInstruction,
     hasThreadContext,
     skills,
-    providedContexts,
-    hasChannels, 
-    knowledgeBaseEnabled
+    providedContexts
   );
 
   // 'ask-ai' is the agent identifier; the Langfuse prompt is still registered as 'xyne-ai'
@@ -247,12 +243,6 @@ export async function createAgentRunner(
   
   // Determine if we have thread context (conversationId is present)
   const hasThreadContext = !!context.conversationId;
-  
-  // Determine if we have channels selected
-  const hasChannels = !!(context.channelIds && context.channelIds.length > 0);
-
-  // Enable knowledge base tool if collectionIds are provided
-  const knowledgeBaseEnabled = !!(context.collectionIds && context.collectionIds.length > 0);
 
   // If a systemPromptOverride is provided (e.g. draft mode), use it directly
   // and skip the standard prompt-builder logic.
@@ -271,11 +261,8 @@ export async function createAgentRunner(
         hasThreadContext,
         context.userId,
         context.agentName,
-        providedContexts,
-    hasChannels,
-    knowledgeBaseEnabled
+        providedContexts
       );
-  
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, context.deepResearchEnabled, hasThreadContext, context.memoryEnabled);
   const agentRegistry = createAgentRegistry(agent);
   const runConfig = createRunConfig(agentRegistry, modelName, apiKey, onEvent);

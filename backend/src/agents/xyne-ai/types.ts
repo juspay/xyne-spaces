@@ -33,7 +33,6 @@ export interface XyneAIRequest {
   query: string;
   sessionId?: string;
   channelIds: string[];
-  collectionIds?: string[];
   conversationId?: string;
   canvasViewAccessId?: string;  // Canvas context when Ask AI is triggered from canvas
   selectionContexts?: SelectionContext[];  // Selected text contexts from canvases
@@ -68,7 +67,7 @@ export interface Citation {
   prefixedRef: string;
   isTicket?: boolean; // Distinguishes ticket citations from message citations
   url?: string; // URL from web search results for this citation
-  entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search'| 'knowledge_base';
+  entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search';
   entityId?: string;
   canvasId?: string;
   externalUrl?: string;

@@ -82,8 +82,6 @@ interface XyneAISidebarProps {
   onClose?: () => void;
   initialConversationId?: string;
   onConversationChange?: (conversationId: string) => void;
-  kbCollectionId?: string;
-  kbProjectId?: string;
 }
 
 const XyneAISidebar = ({
@@ -95,8 +93,6 @@ const XyneAISidebar = ({
   onClose,
   initialConversationId,
   onConversationChange,
-  kbCollectionId: kbCollectionIdProp,
-  kbProjectId: kbProjectIdProp,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -113,7 +109,6 @@ const XyneAISidebar = ({
   );
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
   const [showContextModal, setShowContextModal] = useState(false);
-  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -349,6 +344,7 @@ const XyneAISidebar = ({
   // Web search stays enabled for the session to allow follow-up questions
   useEffect(() => {
     if (browserContext && webSearchAccessible && !webSearchEnabled) {
+      console.log('[XyneAISidebar] Auto-enabling web search for browser context');
       setWebSearchEnabled(true);
     }
   }, [browserContext, webSearchAccessible, webSearchEnabled]);
@@ -358,25 +354,10 @@ const XyneAISidebar = ({
     ? ['Summarize this channel', 'Notes shared last week', 'SR trend today']
     : ['How can I help you?', 'Ask me anything', 'General assistance'];
 
-  // Debug: Log collection IDs when they change
-  useEffect(() => {}, [selectedCollectionIds]);
-
-  // Auto-add KB collection to selected collections when context is available
-  // Only auto-add when there's an actual KB context (not empty strings)
-  useEffect(() => {
-    const collectionId = kbCollectionIdProp;
-    const projectId = kbProjectIdProp;
-
-    if (collectionId && projectId && !selectedCollectionIds.includes(collectionId)) {
-      setSelectedCollectionIds(prev => [...prev, collectionId]);
-    }
-  }, [kbCollectionIdProp, kbProjectIdProp, selectedCollectionIds]);
-
   // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
-    collectionIds: selectedCollectionIds ?? [],
     conversationId,
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
@@ -421,19 +402,15 @@ const XyneAISidebar = ({
       // Abort any existing streams for this thread
       abortCurrentRequest();
 
-      // Only reset the flag in the machine for non-KB instances (AppRoot sidebar)
-      // KB inline sidebar doesn't use xstate, so skip this
-      if (channelId !== null) {
-        // Only update the xstate machine in sidebar mode (fullscreen manages its own lifecycle)
-        if (!isFullscreen) {
-          xyneAIActor.send({
-            type: 'OPEN',
-            ...(channelId && { channelId }),
-            ...(threadInfo && { threadInfo }),
-            ...(canvasInfo && { canvasInfo }),
-            startFreshChat: false,
-          });
-        }
+      // Only update the xstate machine in sidebar mode (fullscreen manages its own lifecycle)
+      if (!isFullscreen) {
+        xyneAIActor.send({
+          type: 'OPEN',
+          ...(channelId && { channelId }),
+          ...(threadInfo && { threadInfo }),
+          ...(canvasInfo && { canvasInfo }),
+          startFreshChat: false,
+        });
       }
     }
   }, [startFreshChat, channelId, threadInfo, canvasInfo, abortCurrentRequest, isFullscreen]);
@@ -1047,19 +1024,10 @@ const XyneAISidebar = ({
   // Handle Summarizer citation clicks
   const handleSummarizerCitationClick = useCallback(
     (citation: SummarizerCitation): void => {
-      // Attachment & Knowledge Base citations: open the file directly in the viewer modal
-      if (
-        (citation.entityType === 'attachment' || citation.entityType === 'knowledge_base') &&
-        citation.entityId
-      ) {
-        // KB files are served from /collections/items/:itemId/download (not /attachments/:id/download)
-        // fetchFile's resolveUrl passes through paths starting with '/', so we use the full path
-        const attachmentId =
-          citation.entityType === 'knowledge_base'
-            ? `/collections/items/${citation.entityId}/download`
-            : citation.entityId;
+      // Attachment citations: open the file directly in the viewer modal
+      if (citation.entityType === 'attachment' && citation.entityId) {
         attachmentCitationPreviewStore.open({
-          attachmentId,
+          attachmentId: citation.entityId,
           fileName: citation.fileName ?? citation.entityId,
           mimeType: citation.mimeType ?? 'application/octet-stream',
           ...(citation.chunkPos !== undefined && { initialPage: citation.chunkPos }),
@@ -1256,13 +1224,8 @@ const XyneAISidebar = ({
 
     // Set the channel ID for this conversation if not already set
     // This ensures the conversation is saved to the correct channel even if user switches channels
-    // For KB context (channelId is null), use kbCollectionId for storage
-    if (!conversationChannelId) {
-      if (channelId) {
-        setConversationChannelId(channelId);
-      } else if (kbCollectionIdProp) {
-        setConversationChannelId(kbCollectionIdProp);
-      }
+    if (!conversationChannelId && channelId) {
+      setConversationChannelId(channelId);
     }
 
     // Scroll immediately after clearing input, before query is submitted
@@ -1298,7 +1261,6 @@ const XyneAISidebar = ({
     displayMessages,
     abortCurrentRequest,
     isLegacyConversation,
-    kbCollectionIdProp,
   ]);
 
   // Shared props for XyneAIInputSection
@@ -1660,8 +1622,6 @@ const XyneAISidebar = ({
                   isStreaming={messages.some(m => m.isStreaming)}
                   contextPanelPosition='bottom'
                   {...sharedInputSectionProps}
-                  kbCollectionId={kbCollectionIdProp}
-                  onSelectedCollectionsChange={setSelectedCollectionIds}
                 />
               </div>
             </div>

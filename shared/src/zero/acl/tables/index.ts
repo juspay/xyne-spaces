@@ -1,7 +1,4 @@
 export { ActivitiesACL } from './activities-acl';
-export { CollectionsACL } from './collections-acl';
-export { CollectionItemsACL } from './collection-items-acl';
-export { CollectionPermissionsACL } from './collection-permissions-acl';
 export { BoardComplexityScoresACL } from './board-complexity-scores-acl';
 export { BoardsACL } from './boards-acl';
 export { BookmarksACL } from './bookmarks-acl';

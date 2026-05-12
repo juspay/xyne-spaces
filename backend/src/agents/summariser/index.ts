@@ -93,7 +93,7 @@ export interface Citation {
   readonly channelId?: string;    // Channel ID for navigation
 
   // NEW: Multi-entity support
-  readonly entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search' | 'email' | 'knowledge_base';
+  readonly entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search' | 'email';
   readonly entityId?: string;
   readonly canvasId?: string;
   readonly callId?: string;

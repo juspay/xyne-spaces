@@ -17,10 +17,10 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Apps to search (comma-separated)
   apps: Joi.string()
-    .pattern(/^(chat|ticket|user|file|collection|mail)(,(chat|ticket|user|file|collection|mail))*$/)
+    .pattern(/^(chat|ticket|user|file|mail)(,(chat|ticket|user|file|mail))*$/)
     .default('chat,ticket,user,file,mail')
     .messages({
-      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file, collection, mail'
+      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file, mail'
     }),
 
   // Pagination
@@ -164,9 +164,9 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'Assignee must be a string'
   }),
 
-  subApp: Joi.string().valid('canvas', 'transcript', 'recording', 'rca', 'collections').optional().messages({
+  subApp: Joi.string().valid('canvas', 'transcript', 'recording', 'rca').optional().messages({
     'string.base': 'SubApp must be a string',
-    'any.only': 'SubApp must be one of: canvas, transcript, recording, rca, collections'
+    'any.only': 'SubApp must be one of: canvas, transcript, recording, rca'
   }),
 
   callType: Joi.string().optional().messages({

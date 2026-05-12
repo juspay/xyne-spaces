@@ -685,28 +685,6 @@ export enum DelayedMessageStatus {
   CANCELLED = 'CANCELLED',
 }
 
-// @ts-ignore TS1294
-export enum CollectionRole {
-  OWNER = 'OWNER',
-  EDITOR = 'EDITOR',
-  VIEWER = 'VIEWER',
-}
-
-// @ts-ignore TS1294
-export enum CollectionItemType {
-  FOLDER = 'FOLDER',
-  FILE = 'FILE',
-}
-
-// @ts-ignore TS1294
-export enum UploadStatus {
-  NONE = 'NONE',
-  PENDING = 'PENDING',
-  PROCESSING = 'PROCESSING',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
-}
-
 // Define tables
 
 export const agentTable = table('agents')
@@ -2150,96 +2128,6 @@ export const savedUserConfigurationValueTable = table('saved_user_configuration_
   })
   .primaryKey('id');
 
-
-// Knowledge Base / Collection tables
-
-export const collectionTable = table('collections')
-  .columns({
-    id: string(),
-    ownerId: string(),
-    name: string(),
-    projectId: string(),
-    description: string().optional(),
-    vespaDocId: string(),
-    isPrivate: boolean(),
-    totalItems: number(),
-    lastUpdatedByEmail: string().optional(),
-    lastUpdatedById: string().optional(),
-    metadata: json(),
-    createdAt: number(),
-    updatedAt: number(),
-    deletedAt: number().optional(),
-  })
-  .primaryKey('id');
-
-export const collectionItemTable = table('collection_items')
-  .columns({
-    id: string(),
-    collectionId: string(),
-    parentId: string().optional(),
-    ownerId: string(),
-    name: string(),
-    type: enumeration<CollectionItemType>(),
-    path: string(),
-    position: number(),
-    vespaDocId: string().optional(),
-    totalFileCount: number(),
-    totalFiles: number().optional(),
-    pendingFiles: number().optional(),
-    processingFiles: number().optional(),
-    completedFiles: number().optional(),
-    failedFiles: number().optional(),
-    storageKey: string().optional(),
-    mimeType: string().optional(),
-    fileSize: number().optional(),
-    checksum: string().optional(),
-    uploadedByEmail: string().optional(),
-    uploadedById: string().optional(),
-    processingInfo: json(),
-    processedAt: number().optional(),
-    uploadStatus: enumeration<UploadStatus>(),
-    statusMessage: string().optional(),
-    retryCount: number(),
-    currentVersionNumber: number(),
-    versionCount: number(),
-    metadata: json(),
-    createdAt: number(),
-    updatedAt: number(),
-    deletedAt: number().optional(),
-  })
-  .primaryKey('id');
-
-export const collectionItemVersionTable = table('collection_item_versions') // Prisma model: CollectionItemVersion
-  .columns({
-    id: string(),
-    itemId: string(),
-    versionNumber: number(),
-    storageKey: string(),
-    mimeType: string(),
-    fileSize: number(),
-    checksum: string(),
-    uploadedById: string(),
-    uploadedByEmail: string(),
-    restoredFromVersionId: string().optional(),
-    metadata: json(),
-    createdAt: number(),
-  })
-  .primaryKey('id');
-
-export const collectionPermissionTable = table('collection_permissions')
-  .columns({
-    id: string(),
-    collectionId: string(),
-    userId: string().optional(),
-    userGroupId: string().optional(),
-    role: enumeration<CollectionRole>(),
-    canShare: boolean(),
-    grantedBy: string().optional(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey('id');
-
 // Define relationships
 
 export const merchantTable = table('merchants')
@@ -2836,11 +2724,6 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ one,
     destField: ['userGroupId'],
     destSchema: userGroupMappingTable,
   }),
-  collectionPermissions: many({
-    sourceField: ['id'],
-    destField: ['userGroupId'],
-    destSchema: collectionPermissionTable,
-  }),
 }));
 
 export const userTableRelationships = relationships(userTable, ({ one, many }) => ({
@@ -2913,75 +2796,6 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ['id'],
     destField: ['userId'],
     destSchema: installedAppsTable,
-  }),
-  collectionPermissions: many({
-    sourceField: ['id'],
-    destField: ['userId'],
-    destSchema: collectionPermissionTable,
-  }),
-}));
-
-// Knowledge Base / Collection relationships
-
-export const collectionTableRelationships = relationships(collectionTable, ({ many }) => ({
-  items: many({
-    sourceField: ['id'],
-    destField: ['collectionId'],
-    destSchema: collectionItemTable,
-  }),
-  permissions: many({
-    sourceField: ['id'],
-    destField: ['collectionId'],
-    destSchema: collectionPermissionTable,
-  }),
-}));
-
-export const collectionItemTableRelationships = relationships(collectionItemTable, ({ one, many }) => ({
-  collection: one({
-    sourceField: ['collectionId'],
-    destField: ['id'],
-    destSchema: collectionTable,
-  }),
-  parent: one({
-    sourceField: ['parentId'],
-    destField: ['id'],
-    destSchema: collectionItemTable,
-  }),
-  children: many({
-    sourceField: ['id'],
-    destField: ['parentId'],
-    destSchema: collectionItemTable,
-  }),
-  versions: many({
-    sourceField: ['id'],
-    destField: ['itemId'],
-    destSchema: collectionItemVersionTable,
-  }),
-}));
-
-export const collectionItemVersionTableRelationships = relationships(collectionItemVersionTable, ({ one }) => ({
-  item: one({
-    sourceField: ['itemId'],
-    destField: ['id'],
-    destSchema: collectionItemTable,
-  }),
-}));
-
-export const collectionPermissionTableRelationships = relationships(collectionPermissionTable, ({ one }) => ({
-  collection: one({
-    sourceField: ['collectionId'],
-    destField: ['id'],
-    destSchema: collectionTable,
-  }),
-  user: one({
-    sourceField: ['userId'],
-    destField: ['id'],
-    destSchema: userTable,
-  }),
-  userGroup: one({
-    sourceField: ['userGroupId'],
-    destField: ['id'],
-    destSchema: userGroupTable,
   }),
 }));
 
@@ -4133,11 +3947,6 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTable,
     savedUserConfigurationValueTable,
-    // Knowledge Base
-    collectionTable,
-    collectionItemTable,
-    collectionItemVersionTable,
-    collectionPermissionTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -4238,11 +4047,6 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTableRelationships,
     savedUserConfigurationValueTableRelationships,
-    // Knowledge Base
-    collectionTableRelationships,
-    collectionItemTableRelationships,
-    collectionItemVersionTableRelationships,
-    collectionPermissionTableRelationships,
   ],
 });
 
@@ -4354,12 +4158,6 @@ export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 // Saved Views Types
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
-
-// Knowledge Base Types
-export type Collection = Row<typeof schema.tables.collections>;
-export type CollectionItem = Row<typeof schema.tables.collection_items>;
-export type CollectionItemVersion = Row<typeof schema.tables.collection_item_versions>;
-export type CollectionPermission = Row<typeof schema.tables.collection_permissions>;
 
 export type Context = {
   userID: string;

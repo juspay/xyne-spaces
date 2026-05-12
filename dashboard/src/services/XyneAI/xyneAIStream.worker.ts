@@ -13,7 +13,6 @@ export interface WorkerStartStreamMessage {
       query: string;
       displayQuery?: string;
       channelIds: string[];
-      collectionIds?: string[];
       canvasIds?: string[];
       ticketIds?: string[];
       callIds?: string[];
@@ -117,8 +116,6 @@ async function executeStream(
         ...(requestBody.displayQuery && { display_query: requestBody.displayQuery }),
         /* eslint-disable @typescript-eslint/naming-convention */
         channel_ids: requestBody.channelIds,
-        ...(requestBody.collectionIds &&
-          requestBody.collectionIds.length > 0 && { collection_ids: requestBody.collectionIds }),
         ...(requestBody.canvasIds &&
           requestBody.canvasIds.length > 0 && { canvas_ids: requestBody.canvasIds }),
         ...(requestBody.ticketIds &&

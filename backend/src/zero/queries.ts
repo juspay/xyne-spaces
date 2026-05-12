@@ -2348,34 +2348,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
-  collectionItems: defineQuery(
-    z.object({ collectionId: z.string() }),
-    ({ args: { collectionId } }) => {
-      return zql.collection_items
-        .where('collectionId', collectionId)
-        .where('deletedAt', 'IS', null)
-        .orderBy('createdAt', 'asc');
-    },
-  ),
-
-  projectCollections: defineQuery(
-    z.object({ projectId: z.string() }),
-    ({ ctx, args: { projectId } }) => {
-      return zql.collections
-        .where('projectId', projectId)
-        .where('deletedAt', 'IS', null)
-        .related('permissions', p => p.where('userId', ctx.userID))
-        .orderBy('createdAt', 'asc');
-    },
-  ),
-
-  allUserCollections: defineQuery(({ ctx }) => {
-    return zql.collections
-      .where('deletedAt', 'IS', null)
-      .related('permissions', p => p.where('userId', ctx.userID))
-      .orderBy('createdAt', 'asc');
-  }),
-
   messageNudges: defineQuery(
     z.object({
       messageId: z.string(),
