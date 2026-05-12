@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { repositories } from '@/database/repositories';
 import { CreateAppInput } from '@/database/repositories/appsRepository';
 import { logger } from '@/utils/logger';
-import { installApp, configureWebhook, regenerateJwt } from '../core/appUtils';
+import { installApp, configureWebhook, regenerateJwt, getSigningSecret } from '../core/appUtils';
 import { UserManagementService } from '@/services/userManagementService';
 
 const CreateAppBodySchema = z.object({
@@ -225,6 +225,62 @@ export class AppController {
         res.status(404).json({
           error: error.message,
           code: 'INSTALLED_APP_NOT_FOUND',
+        });
+        return;
+      }
+
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Get signing secret for an installed app
+   * POST /api/apps/signing-secret/:appId
+   * Only app creator or ADMIN can access this.
+   */
+  getSigningSecret = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const paramsResult = AppIdParamsSchema.safeParse(req.params);
+
+      if (!paramsResult.success) {
+        res.status(400).json({
+          error: `Validation error`,
+          code: 'VALIDATION_ERROR',
+          details: paramsResult.error.errors
+        });
+        return;
+      }
+
+      const { appId } = paramsResult.data;
+      const userId = req.user?.id;
+      const isAdmin = req.user?.role === 'admin';
+
+      if (!userId) {
+        res.status(401).json({
+          error: 'Authentication required',
+          code: 'UNAUTHORIZED'
+        });
+        return;
+      }
+
+      const result = await getSigningSecret(appId, userId, isAdmin);
+
+      res.status(200).json(result);
+    } catch (error) {
+      logger.error('Error getting signing secret:', error);
+
+      if (error instanceof Error && error.message.includes('Unauthorized')) {
+        res.status(403).json({
+          error: error.message,
+          code: 'FORBIDDEN',
+        });
+        return;
+      }
+
+      if (error instanceof Error && error.message.includes('not found')) {
+        res.status(404).json({
+          error: error.message,
+          code: 'NOT_FOUND',
         });
         return;
       }

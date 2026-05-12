@@ -177,3 +177,47 @@ export async function regenerateJwt(appId: string) {
     throw error;
   }
 }
+
+/**
+ * Get decrypted signing secret for an installed app
+ * Only app creator or ADMIN can access this.
+ *
+ * @param appId - The ID of the app
+ * @param userId - The ID of the user requesting the secret
+ * @param isAdmin - Whether the user is an admin
+ * @returns The decrypted signing secret
+ */
+export async function getSigningSecret(appId: string, userId: string, isAdmin: boolean) {
+  try {
+    // Get the app to check ownership
+    const app = await repositories.apps.findById(appId);
+    if (!app) {
+      throw new Error(`[GET-SIGNING-SECRET] App with ID ${appId} not found`);
+    }
+
+    // Check if user is admin or app creator
+    if (!isAdmin && app.createdBy !== userId) {
+      throw new Error(`[GET-SIGNING-SECRET] Unauthorized: Only admin or app creator can access signing secret`);
+    }
+
+    const installedApp = await repositories.installedApps.findFirst({
+      where: { appId: appId }
+    });
+
+    if (!installedApp) {
+      throw new Error(`[GET-SIGNING-SECRET] Installed app with appId ${appId} not found`);
+    }
+
+    // Decrypt the signing secret
+    const signingSecret = decrypt(installedApp.signingSecret);
+
+    logger.info(`[GET-SIGNING-SECRET] Retrieved signing secret for app ${appId} by user ${userId}`);
+
+    return {
+      signingSecret: signingSecret,
+    };
+  } catch (error) {
+    logger.error(`[GET-SIGNING-SECRET] Error retrieving signing secret for app ${appId}:`, error);
+    throw error;
+  }
+}

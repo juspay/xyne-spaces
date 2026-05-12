@@ -232,11 +232,12 @@ export async function resolveSlackIds(
 }
 
 
-function resolveSpecialMentions(text: string): string {
+function resolveSpecialMentions(text: string, isStringified: boolean = false): string {
   const broadcastRegex = /<!channel>|<!here>|<!everyone>|@channel|@here|@everyone/g;
+  const quote = isStringified ? "'" : '"';
   text = text.replace(broadcastRegex, (match: string) => {
     const display = match.startsWith('<!') ? `@${match.slice(2, -1)}` : match;
-    return `<span class="chat-input-special-mention" data-mention-type="${display}">${display}</span>`;
+    return `<span class=${quote}chat-input-special-mention${quote} data-mention-type=${quote}${display}${quote}>${display}</span>`;
   });
 
   return text;
@@ -250,7 +251,7 @@ export async function resolveSlackMentions(
   const userIds = extractAllSlackIds(text, true);
   const groupIds = extractAllSlackIds(text, false);
   if (userIds.length === 0 && groupIds.length === 0) {
-    return resolveSpecialMentions(text);
+    return resolveSpecialMentions(text, isStringified);
   }
 
   // Use provided workspaceId or fall back to default
@@ -299,5 +300,5 @@ export async function resolveSlackMentions(
       }
     }
   }
-  return resolveSpecialMentions(text);
+  return resolveSpecialMentions(text, isStringified);
 }
