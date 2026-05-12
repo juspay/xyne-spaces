@@ -40,7 +40,11 @@ const ChatView = (): ReactElement => {
   const chatViewContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { channelId, conversationId } = useParams<{ channelId: string; conversationId?: string }>();
+  const { channelId, conversationId, workspaceId } = useParams<{
+    channelId: string;
+    conversationId?: string;
+    workspaceId?: string;
+  }>();
   const { userId } = useParams<{ userId?: string }>();
   const context = useAuthContextValues();
   const zero = useZero();
@@ -185,8 +189,8 @@ const ChatView = (): ReactElement => {
     void navigate('/chat', { replace: true });
   }
 
-  if (channel?.type === ChannelType.EMAIL && channelId) {
-    return <Navigate to={`/support/${channelId}`} replace />;
+  if (channel?.type === ChannelType.EMAIL && channelId && workspaceId) {
+    return <Navigate to={`/${workspaceId}/support/${channelId}`} replace />;
   }
 
   // Check for the problematic URL pattern on mobile:

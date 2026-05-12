@@ -1,11 +1,11 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
 import { Hash, Lock, MessageSquare, CornerUpRight } from 'lucide-react';
 import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
 import { Tooltip } from '../Tooltip';
 import { useQuery } from '../../../hooks/useQuery';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface PostedInLinkProps {
   originalChannelId: string;
@@ -78,6 +78,21 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
   // Handle click navigation
   const handleClick = (): void => {
     if (!hasAccess) return;
+
+    // EMAIL channels live in the support screen, not the chat view.
+    // Navigate directly to /support/:channelId/:xyneId to avoid the
+    // ChatView → <Navigate to="/support/:channelId"> redirect which loses
+    // the workspace prefix.
+    // SupportScreen expects :ticketId to be the xyneId (e.g. XYNE-123),
+    // not the internal CUID — use conversation.ticket.xyneId.
+    if (channel?.type === ChannelType.EMAIL) {
+      const xyneId = originalConversation?.ticket?.xyneId;
+      const path = xyneId
+        ? `/support/${originalChannelId}/${xyneId}`
+        : `/support/${originalChannelId}`;
+      void navigate(path);
+      return;
+    }
 
     if (isThreadReply && originalMessageId) {
       // Thread reply: navigate with conversation in path and messageId in hash to open thread panel

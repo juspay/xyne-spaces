@@ -8,6 +8,14 @@ import { EditorToolbar } from '../../ui/EditorToolbar';
 import { TableExtensions } from '../../ui/TipTapExtensions';
 import { InlineImageNodeView } from './InlineImageNodeView';
 
+// Extend TipTap's SetImageOptions to include our custom dataAttId attribute
+// which is registered via Image.extend() below.
+declare module '@tiptap/extension-image' {
+  interface SetImageOptions {
+    dataAttId?: string | null;
+  }
+}
+
 const InlineImage = Image.extend({
   addAttributes() {
     return {
@@ -57,6 +65,7 @@ interface EmailEditorProps {
   value: string;
   onChange: (html: string) => void;
   onAddFiles?: (files: File[]) => void;
+  uploadAndInsertInlineImages?: (images: File[]) => void | Promise<void>;
   onSendShortcut?: () => void;
   onBlur?: () => void;
   onEditorReady?: (editor: Editor) => void;
@@ -71,6 +80,7 @@ export const EmailEditor = ({
   value,
   onChange,
   onAddFiles,
+  uploadAndInsertInlineImages,
   onSendShortcut,
   onBlur,
   onEditorReady,
@@ -80,8 +90,22 @@ export const EmailEditor = ({
   className = '',
   footerSlot,
 }: EmailEditorProps): ReactElement => {
-  const cb = useRef({ onChange, onAddFiles, onSendShortcut, onBlur, onEditorReady });
-  cb.current = { onChange, onAddFiles, onSendShortcut, onBlur, onEditorReady };
+  const cb = useRef({
+    onChange,
+    onAddFiles,
+    uploadAndInsertInlineImages,
+    onSendShortcut,
+    onBlur,
+    onEditorReady,
+  });
+  cb.current = {
+    onChange,
+    onAddFiles,
+    uploadAndInsertInlineImages,
+    onSendShortcut,
+    onBlur,
+    onEditorReady,
+  };
   const lastEmittedRef = useRef('');
 
   const editor = useEditor({
@@ -147,13 +171,19 @@ export const EmailEditor = ({
         return false;
       },
       handlePaste: (_view, event) => {
-        const files = event.clipboardData?.files;
-        if (files && files.length > 0 && cb.current.onAddFiles) {
+        const files = Array.from(event.clipboardData?.files ?? []);
+        if (files.length === 0) return false;
+        const images = files.filter(f => f.type.startsWith('image/'));
+        const nonImages = files.filter(f => !f.type.startsWith('image/'));
+        if (images.length > 0 && cb.current.uploadAndInsertInlineImages) {
           event.preventDefault();
-          cb.current.onAddFiles(Array.from(files));
-          return true;
+          void cb.current.uploadAndInsertInlineImages(images);
         }
-        return false;
+        if (nonImages.length > 0 && cb.current.onAddFiles) {
+          event.preventDefault();
+          cb.current.onAddFiles(nonImages);
+        }
+        return files.length > 0;
       },
       handleDrop: (_view, event) => {
         const files = event.dataTransfer?.files;

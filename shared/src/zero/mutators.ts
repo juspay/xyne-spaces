@@ -56,7 +56,7 @@ import {
 } from './schema.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 import { getNudgeActionBehavior } from '../nudges.js';
-import { serializeInitialMessageMd, serializeParentMessageMd } from '../utils/activityMetadataParser.js';
+import { serializeInitialMessageMd, serializeParentMessageMd, parseTicketMd } from '../utils/activityMetadataParser.js';
 import type { MessageType as MessageTypeEnum } from './schema.js';
 import { extractAllMentions } from '../utils/mentionParser.js';
 import { z } from 'zod';
@@ -1519,6 +1519,14 @@ export const mutators = defineMutators({
           } else if (parsedForwarded?.content) {
             forwardedContent = parsedForwarded.content;
           }
+        }
+
+        // Desk-ticket messages store content as '' (body lives in the email table).
+        // Fall back to the ticket title from ticket_md so the forwarded bubble
+        // shows something meaningful instead of a blank preview.
+        if (!isReForwarding && !forwardedContent?.trim() && originalConversation?.ticket_md) {
+          const parsed = parseTicketMd(originalConversation.ticket_md);
+          if (parsed?.title) forwardedContent = parsed.title;
         }
         const forwardedHasAttachment = useOptionalText ? false : originalMessage.hasAttachment;
 
