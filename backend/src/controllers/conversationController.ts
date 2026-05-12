@@ -34,6 +34,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { replaceTicketSuggestionWithCreated } from '../utils/ticketSuggestionMarkdownGenerator';
 import { markPulseItemAsSent as rewritePulseItemAsSent, updatePulseMerchant as rewritePulseMerchant } from '../utils/markPulseItemAsSent';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
+import { ConversationV3Repository } from '../database/repositories/conversationV3Repository';
+import { serializeConversationV3Row } from '../serializers/conversationV3Serializer';
 
 // Local type definitions
 interface UserInfo {
@@ -62,6 +64,7 @@ export class ConversationController {
   private reactionRepository: ReactionRepository;
   private userRepository: UserRepository;
   private channelUserStatusRespository: ChannelUserStatusRepository;
+  private conversationV3Repository: ConversationV3Repository;
 
   constructor() {
     this.conversationRepository = new ConversationRepository();
@@ -72,7 +75,41 @@ export class ConversationController {
     this.reactionRepository = new ReactionRepository();
     this.userRepository = new UserRepository();
     this.channelUserStatusRespository = new ChannelUserStatusRepository();
+    this.conversationV3Repository = new ConversationV3Repository();
   }
+
+
+  /**
+   * Get a conversation by message ID with its initialMessageAttachments and initialMessageNudgeCounts.
+   * Mirrors the ZQL channelConversationsPaginatedV3 query response format.
+   * Used for mobile background prefetch of conversation data.
+   * GET /api/conversations/by-message/:messageId
+   */
+  getConversationByMessageId = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { messageId } = req.params;
+
+      if (!messageId) {
+        res.status(400).json({ error: 'Message ID is required' });
+        return;
+      }
+
+      const result = await this.conversationV3Repository.getConversationByMessageId(messageId);
+
+      if (!result) {
+        res.status(404).json({ error: 'Conversation not found for this message' });
+        return;
+      }
+
+      const { conversation, attachments, nudgeCounts } = result;
+      const serialized = serializeConversationV3Row(conversation, attachments, nudgeCounts);
+
+      res.status(200).json(serialized);
+    } catch (error) {
+      logger.error('Error fetching conversation by message ID:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 
   // Helper method to get user info
   private async getUserInfo(userId: string): Promise<UserInfo> {

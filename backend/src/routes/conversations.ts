@@ -8,6 +8,9 @@ const conversationController = new ConversationController();
 // Keep replyToConversation for file upload handling
 router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);
 
+// Get conversation by message ID (for mobile background prefetch, mirrors ZQL channelConversationsPaginatedV3)
+router.get('/by-message/:messageId', conversationController.getConversationByMessageId);
+
 // Read current ephemeral agent-progress signals for a conversation (dashboard rehydrate on thread open)
 router.get('/:conversationId/agent-progress', conversationController.getAgentProgress);
 
