@@ -425,7 +425,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             ? channel.scopeType
             : 'Channel';
 
-        // Handles client mutation rejection: restores draft + editor content on failure
+        // Handles client and server mutation rejection: restores draft + editor content on failure
         const handleMutationResult = (
           result: ReturnType<typeof zero.mutate>,
           onReject: () => void,
@@ -452,6 +452,31 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 logger.error(Event.MESSAGE_SEND_FAILED, {
                   ...logMeta,
                   error: 'Client mutation promise rejected',
+                });
+              }
+            });
+
+          result.server
+            .then(serverResult => {
+              if (serverResult.type === 'error') {
+                onReject();
+                if (logMeta) {
+                  logger.error(Event.MESSAGE_SEND_FAILED, {
+                    ...logMeta,
+                    error: serverResult.error.message,
+                    errorType: serverResult.error.type,
+                    stage: 'server',
+                  });
+                }
+              }
+            })
+            .catch(() => {
+              onReject();
+              if (logMeta) {
+                logger.error(Event.MESSAGE_SEND_FAILED, {
+                  ...logMeta,
+                  error: 'Server mutation promise rejected',
+                  stage: 'server',
                 });
               }
             });
