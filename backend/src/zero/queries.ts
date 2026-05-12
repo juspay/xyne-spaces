@@ -18,6 +18,7 @@ import {
   schema,
   ChannelRole,
   AttachmentEntityType,
+  AttachmentUploadStatus,
   ChannelType,
   ActivityClassification, LinkVisibility,
   NudgeState,
@@ -1103,7 +1104,9 @@ export const queries = defineQueries({
   }),
 
   userDrafts: defineQuery(({ ctx }) => {
-    return zql.draft_messages.where('userId', ctx.userID).related('attachments');
+    return zql.draft_messages
+      .where('userId', ctx.userID)
+      .related('attachments', a => a.where('uploadStatus', '!=', AttachmentUploadStatus.FAILED));
   }),
 
   userActivitiesPaginated: defineQuery(

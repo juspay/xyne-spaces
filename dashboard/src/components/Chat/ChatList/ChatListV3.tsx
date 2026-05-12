@@ -25,6 +25,8 @@ import LoadingAnimation from '../Loader/Loader';
 import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
+import { pendingMessageMachine } from '../../../machines/pendingMessageMachine';
+import PendingMessageBubble from '../PendingMessageBubble';
 
 export type ChatListProps = {
   channelId: string;
@@ -271,11 +273,32 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const isNearBottomRef = useRef(false);
   const dateObserverRef = useRef<IntersectionObserver | null>(null);
   const visibleDatesRef = useRef<Map<Element, { timestamp: number; rect: DOMRect }>>(new Map());
+  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+  const isFetchingRef = useRef(false);
+
+  // Optimistic pending messages — shown while file uploads are settling.
+  // Scoped to this channel's main thread (conversationId === null).
+  const [pendingMessages, setPendingMessages] = useState(() =>
+    pendingMessageMachine
+      .getState()
+      .filter(m => m.channelId === channelId && m.conversationId === null),
+  );
+  useEffect(() => {
+    return pendingMessageMachine.subscribe(() => {
+      setPendingMessages(
+        pendingMessageMachine
+          .getState()
+          .filter(m => m.channelId === channelId && m.conversationId === null),
+      );
+    });
+  }, [channelId]);
+
   const { isMobile } = usePlatform();
   const { combinedMessages, itemHeights } = useCombinedMesseges(
     conversations,
     isMobile,
     newConversationBoundary?.index ?? -1,
+    pendingMessages,
   );
   const lastConversationAutoScrollKey = useMemo(() => {
     const lastConversation = conversations[conversations.length - 1];
@@ -283,8 +306,6 @@ const ChatListV3: React.FC<ChatListProps> = ({
     return `${lastConversation.conversationId}:${lastConversation.initial_message_md ?? ''}`;
   }, [conversations]);
 
-  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
-  const isFetchingRef = useRef(false);
   const shouldUseCutoffQuery =
     channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
 
@@ -1101,13 +1122,27 @@ const ChatListV3: React.FC<ChatListProps> = ({
         initialTopMostItemIndex={initialTopMostItemIndex}
         data={combinedMessages}
         minOverscanItemCount={20}
-        computeItemKey={(_, item) => item.data.conversationId}
+        computeItemKey={(_, item) => {
+          if (item.type === 'pending') {
+            return `pending-${item.data.id}`;
+          }
+          return item.data.conversationId;
+        }}
         itemContent={itemIndex => {
           // Convert virtual index to array index
           const arrayIndex = itemIndex - firstItemIndex;
           const item = combinedMessages[arrayIndex];
 
           if (!item) return null;
+
+          // Handle pending messages
+          if (item.type === 'pending') {
+            return (
+              <div data-item-timestamp={item.createdAt.getTime()} ref={itemRef}>
+                <PendingMessageBubble msg={item.data} />
+              </div>
+            );
+          }
 
           const prevItem = arrayIndex > 0 ? combinedMessages[arrayIndex - 1] : null;
           const dateText = formatDatePill(item.createdAt);
