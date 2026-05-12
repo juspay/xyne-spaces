@@ -285,7 +285,8 @@ const ChatListV3: React.FC<ChatListProps> = ({
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const isFetchingRef = useRef(false);
-  const shouldUseCutoffQuery = channelParticipation?.conversationSeenCutoffAt !== null && isMember;
+  const shouldUseCutoffQuery =
+    channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
 
   const [updatedConversations, updatedConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
