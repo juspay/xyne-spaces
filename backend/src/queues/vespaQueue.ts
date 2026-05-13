@@ -89,42 +89,50 @@ class VespaQueue {
 	}
 
 	/**
-	 * Determine the target queue based on schema type
-	 * File schemas go to vespa-files queue, everything else goes to vespa-ingestion
+	 * Add a job to the appropriate queue(s) based on schema type
+	 * - File schemas go only to vespa-files queue
+	 * - Non-file schemas go to all queues EXCEPT vespa-files (broadcast to vespa-ingestion, vespa-ingestion-kube, etc.)
 	 */
-	private getTargetQueueName(schema: string): string {
-		// File schemas (files, attachments, etc.) go to dedicated file queue
-		if (schema === fileSchema) {
-			return process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
-		}
-		// All other schemas (messages, tickets, etc.) go to default ingestion queue
-		return 'vespa-ingestion';
-	}
-
-	/**
-	 * Add a job to the appropriate queue based on schema type
-	 */
-	async addJob(vespaJob: VespaJob): Promise<Bull.Job<VespaJob>> {
+	async addJob(vespaJob: VespaJob): Promise<Bull.Job<VespaJob>[]> {
 		if (this.queues.size === 0 || !this.isInitialized) {
 			throw new Error('Vespa queue not initialized Properly');
 		}
 
 		const { schema, jobType, docId } = vespaJob;
+		const fileQueueName = process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
+		
 		try {
-			const targetQueueName = this.getTargetQueueName(schema as string);
-			const targetQueue = this.queues.get(targetQueueName);
-
-			if (!targetQueue) {
-				throw new Error(`Target queue '${targetQueueName}' not found. Available queues: ${[...this.queues.keys()].join(', ')}`);
-			}
-
 			const jobData: VespaJob = vespaJob;
 			const jobOpts = { priority: jobType === 'delete' ? 1 : 5 };
+			
+			let targetQueues: Bull.Queue<VespaJob>[];
 
-			const job = await targetQueue.add(`vespa-${schema}`, jobData, jobOpts);
+			if (schema === fileSchema) {
+				// File jobs → only file queue
+				const fq = this.queues.get(fileQueueName);
+				if (!fq) {
+					throw new Error(`File queue '${fileQueueName}' not found. Available queues: ${[...this.queues.keys()].join(', ')}`);
+				}
+				targetQueues = [fq];
+			} else {
+				// Non-file jobs → all queues EXCEPT file queue (broadcast behavior)
+				targetQueues = [...this.queues.entries()]
+					.filter(([name, _]) => name !== fileQueueName)
+					.map(([_, queue]) => queue);
+				
+				if (targetQueues.length === 0) {
+					throw new Error(`No non-file queues available. File queue: '${fileQueueName}', Available: ${[...this.queues.keys()].join(', ')}`);
+				}
+			}
 
-			logger.info(`Queued ${schema} job to ${targetQueueName}: ${schema}/${jobType}/${docId}`);
-			return job;
+			// Broadcast to all target queues
+			const jobs = await Promise.all(
+				targetQueues.map(q => q.add(`vespa-${schema}`, jobData, jobOpts))
+			);
+
+			const queueNames = targetQueues.map(q => q.name);
+			logger.info(`Queued ${schema} job to ${targetQueues.length} queue(s) (${queueNames.join(', ')}): ${schema}/${jobType}/${docId}`);
+			return jobs;
 		} catch (error) {
 			logger.error(
 				`Failed to add Vespa job: ${schema}/${jobType}/${docId}`,
