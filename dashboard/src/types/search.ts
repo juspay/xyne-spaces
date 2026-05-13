@@ -159,6 +159,9 @@ export interface VespaSearchFilters {
 
   // Cmd-K "Include bot messages" toggle. Default off → backend excludes BOT messages.
   includeBotMessages?: boolean;
+
+  // Override Vespa grouping. Empty string => flat ranked list (no grouping).
+  groupBy?: string;
 }
 
 export interface VespaSearchGroup {

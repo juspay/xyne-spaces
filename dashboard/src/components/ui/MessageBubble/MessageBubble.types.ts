@@ -3,7 +3,6 @@ import {
   MessageAttachment,
   Reaction,
   ReactionCount,
-  User,
   ChannelScopeType,
   Conversation,
   ConversationParticipant,
@@ -49,7 +48,7 @@ export interface ConversationWithTicket extends Conversation {
 export interface MessageBubbleProps {
   isHovered?: boolean;
   message: MessageWithOptionalNudgeCounts;
-  onUserClick?: (user: User) => void;
+  onUserClick?: (userId: string) => void;
   renderActions?: (message: Message) => React.ReactNode;
   showAvatar?: boolean | undefined;
   isPinned?: boolean | undefined;
@@ -69,4 +68,5 @@ export interface MessageBubbleProps {
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
   showLinkPreview?: boolean;
+  searchItemView?: boolean;
 }

@@ -194,6 +194,11 @@ export const vespaSearchQuerySchema = Joi.object({
   searchId: Joi.string().optional().messages({
     'string.base': 'Search ID must be a string'
   }),
+
+  // Grouping override. Empty string disables grouping (flat ranked list).
+  groupBy: Joi.string().allow('').optional().messages({
+    'string.base': 'groupBy must be a string'
+  }),
 }).messages({
   'object.unknown': 'Unknown query parameter: {{#label}}'
 });

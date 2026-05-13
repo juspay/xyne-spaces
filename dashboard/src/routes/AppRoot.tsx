@@ -54,6 +54,7 @@ import { xyneAIActor, setXyneAIPanelRefs } from '../machines/xyneAIMachine';
 import { browserPanelActor, setBrowserPanelRefs } from '../machines/browserPanelMachine';
 import ActivityListView from '../components/Activity/ActivityListView/ActivityListView';
 import Search from '../components/Chat/Search/Search';
+import SearchResults from '../components/Chat/SearchResults/SearchResults';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
 import DraftsAndSentPage from '../pages/DraftsAndSentPage';
@@ -865,6 +866,10 @@ export const router = createBrowserRouter([
                     <TicketsScreen />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                path: 'search-results',
+                element: <SearchResults />,
               },
               {
                 path: 'product-insights',
