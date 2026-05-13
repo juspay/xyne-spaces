@@ -126,10 +126,10 @@ const UserThreads = (): ReactElement => {
 
     const lastItem = allConversations[allConversations.length - 1]!;
     setCursor(
-      lastItem.conversation?.lastActivityAt
+      lastItem.lastReplyAt
         ? {
-            lastReplyAt: lastItem.conversation.lastActivityAt,
-            id: lastItem.conversationId,
+            lastReplyAt: lastItem.lastReplyAt,
+            id: lastItem.id,
           }
         : null,
     );
