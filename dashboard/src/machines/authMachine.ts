@@ -824,7 +824,11 @@ export const authMachine = createMachine(
 
           // Read invitationId from current URL (for invitation flow)
           const urlParams = new URLSearchParams(window.location.search);
-          const invitationId = urlParams.get('invitationId');
+          const urlInvitationId = urlParams.get('invitationId');
+
+          // Fallback to localStorage if not in URL (for Electron flow after authMachine navigation)
+          const storageInvitationId = localStorage.getItem('pending_invitation_id');
+          const invitationId = urlInvitationId || storageInvitationId;
 
           let loginUrl = isElectron
             ? `${API_BASE_URL}/v2/auth/microsoft/login?platform=electron`
@@ -832,7 +836,7 @@ export const authMachine = createMachine(
 
           // Add invitationId to login URL if present
           if (invitationId) {
-            loginUrl += `&invitationId=${encodeURIComponent(invitationId)}`;
+            loginUrl += `${isElectron ? '&' : '?'}invitationId=${encodeURIComponent(invitationId)}`;
           }
 
           if (isElectron && window.electronAPI) {

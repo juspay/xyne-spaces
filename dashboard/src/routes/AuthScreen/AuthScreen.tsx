@@ -1,5 +1,6 @@
 import { ReactElement, useEffect, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
+import Cookies from 'js-cookie';
 import { useAuth } from '../../hooks/useAuth';
 import { useOAuthProviders } from '../../hooks/useOAuthProviders';
 import { ElectronEnrollmentSteps } from '../../components/Auth/ElectronEnrollmentSteps';
@@ -110,6 +111,17 @@ const AuthScreen = (): ReactElement => {
   if (isAuthenticated) {
     const dest = user?.workspaceId ? `/${user.workspaceId}` : '/';
     return <Navigate to={dest} replace={true}></Navigate>;
+  }
+
+  const pendingInvitationId =
+    localStorage.getItem('pending_invitation_id') ?? Cookies.get('pending_invitation_id');
+  if (pendingInvitationId && (isSelectingWorkspace || isCreatingOrg)) {
+    return (
+      <Navigate
+        to={`/invite?invitationId=${encodeURIComponent(pendingInvitationId)}&loginComplete=true`}
+        replace={true}
+      />
+    );
   }
 
   if (isCreatingOrg && !userExistsButRemoved) {

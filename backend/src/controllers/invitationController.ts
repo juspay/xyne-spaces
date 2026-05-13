@@ -163,8 +163,8 @@ export class InvitationController {
 
   /**
    * POST /api/invitations/:id/accept
-   * Accept an invitation — identity is taken from the google_access_token cookie
-   * (set by handleCallback after OAuth login), NOT from a session JWT.
+   * Accept an invitation — identity is taken from the oauth_token cookie
+   * (set by OAuth handlers after login), NOT from a session JWT.
    */
   acceptInvitation = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -183,7 +183,7 @@ export class InvitationController {
       }
 
       let pendingAuth: {
-        user: { email: string; googleId: string; name: string; picture?: string };
+        user: { email: string; googleId?: string; providerUserId?: string; name: string; picture?: string };
         provider: string;
         refreshToken: string | null;
         accessToken: string | null;
@@ -196,7 +196,17 @@ export class InvitationController {
         return;
       }
 
-      const { user: googleUser } = pendingAuth;
+      const { user: oauthUser, provider } = pendingAuth;
+
+      // Support both Google (googleId) and Microsoft (providerUserId)
+      const providerUserId = oauthUser.googleId || oauthUser.providerUserId;
+      if (!providerUserId) {
+        res.status(401).json({ error: 'Invalid user data. Please login again.' });
+        return;
+      }
+
+      // Normalize auth provider
+      const authProvider = provider?.toUpperCase() === 'MICROSOFT' ? 'MICROSOFT' : 'GOOGLE';
 
       // Fetch invitation to verify email before accepting
       const invitation = await invitationService.getInvitationByInvitationId(id);
@@ -205,9 +215,9 @@ export class InvitationController {
         return;
       }
 
-      if (invitation.email.toLowerCase() !== googleUser.email.toLowerCase()) {
+      if (invitation.email.toLowerCase() !== oauthUser.email.toLowerCase()) {
         res.status(403).json({
-          error: `This invitation is for ${invitation.email}, but you are logged in as ${googleUser.email}.`,
+          error: `This invitation is for ${invitation.email}, but you are logged in as ${oauthUser.email}.`,
         });
         return;
       }
@@ -215,20 +225,20 @@ export class InvitationController {
       await invitationService.acceptInvitation({
         invitationId: id,
         userData: {
-          id: googleUser.googleId,
-          email: googleUser.email,
-          name: googleUser.name,
-          providerUserId: googleUser.googleId,
-          authProvider: 'GOOGLE',
+          id: providerUserId,
+          email: oauthUser.email,
+          name: oauthUser.name,
+          providerUserId: providerUserId,
+          authProvider: authProvider,
         },
       });
 
       res.status(200).json({
         success: true,
         workspaceId: invitation.workspaceId,
-        email: googleUser.email,
-        name: googleUser.name,
-        picture: googleUser.picture ?? '',
+        email: oauthUser.email,
+        name: oauthUser.name,
+        picture: oauthUser.picture ?? '',
       });
     } catch (error) {
       logger.error('[InvitationController] Failed to accept invitation:', error);
