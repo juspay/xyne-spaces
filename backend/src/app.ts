@@ -83,6 +83,7 @@ import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
 import externalSourceDisplayNameBackfillRoutes from '@/routes/externalSourceDisplayNameBackfill';
 import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
 import channelRecapBackfillRoutes from '@/routes/channelRecapBackfill';
+import channelRecapToRecapBackfillRoutes from '@/routes/channelRecapToRecapBackfill';
 import emailChannelUnreadBackfillRoutes from '@/routes/emailChannelUnreadBackfill';
 import setUpdatedAtTimeRoutes from '@/routes/setUpdatedAtTime';
 import ticketMetadataBackfillRoutes from '@/routes/ticketMetadataBackfill';
@@ -296,6 +297,8 @@ export class App {
     this.app.use('/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
     this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);
     this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);
+    this.app.use('/migrate/api/admin/channel-recap-to-recap-backfill', channelRecapToRecapBackfillRoutes);
+    this.app.use('/api/admin/channel-recap-to-recap-backfill', channelRecapToRecapBackfillRoutes);
     this.app.use('/migrate/api/admin/email-channel-unread-backfill', emailChannelUnreadBackfillRoutes);
     this.app.use('/api/admin/email-channel-unread-backfill', emailChannelUnreadBackfillRoutes);
     this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);

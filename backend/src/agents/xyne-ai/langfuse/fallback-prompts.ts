@@ -1748,6 +1748,78 @@ const GET_PAGE_CONTENT_FALLBACK = `Retrieve the exact text content of specific p
  * Fallback description for get_document_outline tool
  */
 const GET_DOCUMENT_OUTLINE_FALLBACK = `Retrieve the outline or table of contents of a document to understand its structure and navigate it effectively. Use a semantic query to find relevant documents, or pass docIds directly (from search_files). After receiving the outline: if an entry includes a page number like "(Page N)", call get_page_content with that page number; if an entry has NO page number, call search_files with the section title as the query to find the relevant content.`;
+// ─── Project Recap prompts ────────────────────────────────────────────────────
+// Langfuse prompt names: "project-recap-channel-summary", "project-recap-aggregator"
+// Template variables use {{double_braces}} syntax.
+
+/**
+ * Pass 1 — verbose per-channel summarization.
+ * Variables: project_name, channel_name, date, message_count, messages
+ */
+const PROJECT_RECAP_CHANNEL_SUMMARY_FALLBACK = `You are analyzing messages from a project channel for a nightly activity recap.
+
+Project: {{project_name}}
+Channel: {{channel_name}}
+Date: {{date}}
+Total messages: {{message_count}}
+
+Your task: Write a comprehensive, paragraph-style narrative of ALL notable activity in this channel today. This intermediate summary will be consumed by a second LLM pass — write verbosely, not as bullet points. Cover everything significant.
+
+Your narrative MUST include:
+- Every significant discussion topic, decision, and outcome
+- Who raised issues and what was resolved vs. still open
+- Specific names, numbers, metrics, and concrete details from the messages
+- Progress updates, blockers, and escalations
+- Action items and follow-ups mentioned
+
+Write in flowing paragraphs only. Be thorough and specific — this is raw material for a higher-level project summary.
+
+MESSAGES:
+{{messages}}`;
+
+/**
+ * Pass 2 — meta-aggregation into grouped good/bad key points.
+ * Variables: project_name, date, channel_count, channel_summaries, citations_map
+ */
+const PROJECT_RECAP_AGGREGATOR_FALLBACK = `You are creating the final daily project recap for {{project_name}} covering {{date}}.
+
+You have detailed channel-level summaries below. Synthesize them into 14-18 key points total, grouped into HIGHLIGHTS (positive, forward-moving) and CONCERNS (blockers, issues, risks).
+
+CHANNEL SUMMARIES:
+{{channel_summaries}}
+
+CITATION MAP (channel index → channelId and name, use for citationIndex):
+{{citations_map}}
+
+REQUIREMENTS:
+- Produce 14-18 total points across both lists (aim for 8-10 highlights, 5-7 concerns)
+- Each point is 1-2 specific sentences — name people, numbers, and concrete outcomes
+- Every point MUST include channelId and channelName from the citation map
+- HIGHLIGHTS: accomplishments, shipped features, resolved issues, decisions made, positive momentum, progress updates, notable contributions, design/architecture choices made, successful integrations, performance improvements
+- CONCERNS: blockers, open issues, delays, risks, unresolved discussions, pending reviews, unclear ownership, technical debt flagged, escalations, items awaiting response
+- Always surface at least 5 concerns — include cautionary notes or "watch out" items if hard blockers are absent
+- Use real names and specifics from the summaries; avoid vague generalities
+
+OUTPUT: Respond with ONLY valid JSON. No markdown fences. No extra text:
+{
+  "overallSummary": "2-3 sentence narrative overview of project activity today",
+  "highlights": [
+    {
+      "point": "Specific positive observation with concrete details",
+      "channelName": "exact channel name from citation map",
+      "channelId": "exact channel id from citation map",
+      "citationIndex": 1
+    }
+  ],
+  "concerns": [
+    {
+      "point": "Specific issue or concern with concrete details",
+      "channelName": "exact channel name from citation map",
+      "channelId": "exact channel id from citation map",
+      "citationIndex": 2
+    }
+  ]
+}`;
 
 /**
  * Fallback description for generate_image tool
@@ -1839,6 +1911,8 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'get_page_content': GET_PAGE_CONTENT_FALLBACK,
   'get_document_outline': GET_DOCUMENT_OUTLINE_FALLBACK,
   'summarize_email_thread': SUMMARIZE_EMAIL_THREAD_FALLBACK,
+  'project-recap-channel-summary': PROJECT_RECAP_CHANNEL_SUMMARY_FALLBACK,
+  'project-recap-aggregator': PROJECT_RECAP_AGGREGATOR_FALLBACK,
 };
 
 /**

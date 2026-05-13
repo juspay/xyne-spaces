@@ -111,6 +111,12 @@ enum EntityType {
   @@schema("public")
 }
 
+enum RecapEntityType {
+  PROJECT
+  CHANNEL
+  @@schema("public")
+}
+
 enum ActivityType {
   TITLE
   DESCRIPTION
@@ -3307,6 +3313,23 @@ model ReleaseAttribution {
 // RECAP FEATURE MODELS
 // ============================================================================
 
+model Recap {
+  id          String         @id @default(cuid())
+  entityType  RecapEntityType
+  entityId    String
+  recapDate   DateTime
+  summary     String
+  userId      String?
+
+  @@unique([entityType, entityId, userId, recapDate])
+  @@index([entityId])
+  @@index([recapDate])
+  @@index([userId])
+  @@index([entityType])
+  @@map("recaps")
+  @@schema("public")
+}
+
 // @deprecated Use ChannelRecap instead. This table is kept for backward compatibility.
 // Stores daily AI-generated summaries for each channel
 // userId = "" for base recaps, userId = actual user ID for custom recaps
@@ -3336,6 +3359,7 @@ model ChannelRecap {
   @@map("channel_recaps")
   @@schema("public")
 }
+
 
 // ============================================================================
 // SURFACE NUDGE FRAMEWORK

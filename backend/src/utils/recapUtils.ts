@@ -58,9 +58,10 @@ export async function calculateUnreadCount(userId: string): Promise<number> {
     const yesterday = new Date(`${yesterdayDateStr}T00:00:00Z`);
 
     // Check if there are any recaps for yesterday - use exact date match since recapDate is normalized to midnight IST
-    const recaps = await db.channelRecap.findMany({
+    const recaps = await db.recap.findMany({
       where: {
-        channelId: { in: channelIds },
+        entityType: 'CHANNEL',
+        entityId: { in: channelIds },
         recapDate: yesterday,
       },
     });
@@ -72,7 +73,7 @@ export async function calculateUnreadCount(userId: string): Promise<number> {
     // Count unread recaps
     let unreadCount = 0;
     for (const recap of recaps) {
-      const subscription = subscriptions.find((sub: any) => sub.channelId === recap.channelId);
+      const subscription = subscriptions.find((sub: any) => sub.channelId === recap.entityId);
       if (subscription) {
         if (!subscription.lastSeenRecapDate) {
           unreadCount++;

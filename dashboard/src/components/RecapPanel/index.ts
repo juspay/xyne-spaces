@@ -3,6 +3,7 @@
  */
 
 export { default, default as RecapPanel } from './RecapPanel';
+export { default as ProjectRecapPanel } from './ProjectRecapPanel';
 export type {
   RecapCard,
   RecapSubscription,

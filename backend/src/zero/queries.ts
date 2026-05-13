@@ -27,6 +27,7 @@ import {
   ProjectType,
   TicketPriority,
   DelayedMessageStatus,
+  RecapEntityType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -2500,6 +2501,19 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // Recap Queries
+  projectRecaps: defineQuery(
+    z.object({
+      recapDate: z.number(),
+    }),
+    ({ ctx, args: { recapDate } }) => {
+      return zql.recaps
+        .where('recapDate', recapDate)
+        .where('entityType', RecapEntityType.PROJECT)
+        .where('userId', '=', ctx.userID);
+    },
+  ),
+
   channelRecaps: defineQuery(
     z.object({
       channelIds: z.array(z.string()),
@@ -2507,21 +2521,19 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     }),
     ({ ctx, args: { channelIds, recapDate } }) => {
       if (channelIds.length === 0) {
-        return zql.channel_recaps.limit(0);
+        return zql.recaps.limit(0);
       }
 
-      return zql.channel_recaps
-        .where('recapDate', recapDate)
-        .where((helpers) =>
-          helpers.or(...channelIds.map((id) => helpers.cmp('channelId', id)))
-        )
-        // Fetch both base recaps (userId IS NULL) and this user's custom recaps
-        .where((helpers) =>
-          helpers.or(
-            helpers.cmp('userId', 'IS', null),
-            helpers.cmp('userId', '=', ctx.userID)
+      return (
+        zql.recaps
+          .where('recapDate', recapDate)
+          .where('entityType', RecapEntityType.CHANNEL)
+          .where(helpers => helpers.or(...channelIds.map(id => helpers.cmp('entityId', id))))
+          // Fetch both base recaps (userId IS NULL) and this user's custom recaps
+          .where(helpers =>
+            helpers.or(helpers.cmp('userId', 'IS', null), helpers.cmp('userId', '=', ctx.userID)),
           )
-        );
+      );
     },
   ),
 

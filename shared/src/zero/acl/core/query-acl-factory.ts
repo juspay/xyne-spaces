@@ -14,6 +14,7 @@ import {
   CanvasesACL,
   ChannelDailyRecapsACL,
   ChannelRecapsACL,
+  RecapsACL,
   ChannelParticipantsACL,
   ChannelsACL,
   ChannelStatsACL,
@@ -118,6 +119,8 @@ export class QueryACLFactory {
         return new OrgMembersACL(ctx) as BaseQueryACL<TTable>;
       case 'organizations':
         return new OrganizationsACL(ctx) as BaseQueryACL<TTable>;
+      case 'recaps':
+        return new RecapsACL(ctx) as unknown as BaseQueryACL<TTable>;
       case 'projects':
         return new ProjectsACL(ctx) as BaseQueryACL<TTable>;
       case 'pull_requests':

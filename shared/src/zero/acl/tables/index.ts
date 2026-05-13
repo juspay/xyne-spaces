@@ -50,6 +50,7 @@ export { WorkflowsACL } from './workflows-acl';
 /** @deprecated Use ChannelRecapsACL instead */
 export { ChannelDailyRecapsACL } from './channel-daily-recaps-acl';
 export { ChannelRecapsACL } from './channel-recaps-acl';
+export { RecapsACL } from './recaps-acl';
 export { SavedUserConfigurationsACL } from './saved-user-configurations-acl';
 export { TicketAssignmentsACL } from './ticket-assignments-acl';
 export { TicketStageEtaACL } from './ticket-stage-eta-acl';
