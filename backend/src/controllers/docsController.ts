@@ -9,10 +9,23 @@ import { logger } from '@/utils/logger.js';
 
 // XYNE-1287: Parse userRepo path from URL
 // Format: org/repo/branch (3+ parts) or repo/branch (2 parts) where branch can contain slashes
+// URL path: /{workspaceId}/docs/{org}/{repo}/{branch} - the 'docs/' is part of route, not repo path
 function parseQuartoRepoPath(path: string): string | null {
-    const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+    const cleanPath = path.replace(/^\/+/, '');
     const parts = cleanPath.split('/');
-    
+
+    // Skip workspaceId if present (UUID or CUID format) - docs lookup doesn't use it
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const cuidRegex = /^c[a-z0-9]{24,25}$/i;  // CUIDs start with 'c' followed by 24-25 alphanumeric chars
+    if (parts.length > 0 && (uuidRegex.test(parts[0]!) || cuidRegex.test(parts[0]!))) {
+        parts.shift();
+    }
+
+    // Skip 'docs' segment if present - it's part of the route, not the repo path
+    if (parts.length > 0 && parts[0] === 'docs') {
+        parts.shift();
+    }
+
     if (parts.length < 2) {
         return null;
     }
@@ -95,6 +108,7 @@ export class DocsController {
 
             const result = await docsService.publishDocs({
                 userId,
+                workspaceId: req.user!.workspaceId!,
                 userRepo,
                 repoId: repoId || undefined,
                 branchName: branchName || undefined,
