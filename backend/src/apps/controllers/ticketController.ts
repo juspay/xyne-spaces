@@ -331,4 +331,40 @@ export class TicketController {
       });
     }
   };
+
+  /**
+   * Get ticket information by ID
+   * GET /:ticketId
+   */
+  getInfo = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId } = req.params;
+
+      if (!ticketId) {
+        res.status(400).json({
+          error: 'Ticket ID is required',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      const ticket = await repositories.tickets.getTicketById(ticketId);
+
+      if (!ticket) {
+        res.status(404).json({
+          error: `Ticket with ID ${ticketId} not found`,
+          code: 'TICKET_NOT_FOUND',
+        });
+        return;
+      }
+
+      res.status(200).json(ticket);
+    } catch (error) {
+      logger.error('[TicketController] Error fetching ticket info:', error);
+      res.status(500).json({
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  };
 }
