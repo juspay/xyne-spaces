@@ -1,90 +1,67 @@
-import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
+import { ReactElement, useState, useRef, useEffect, useMemo } from 'react';
 import {
   X,
   SmilePlus,
-  Copy,
-  PauseCircle,
-  Mail,
-  Clock,
+  User,
+  Settings2,
   ChevronDown,
   Check,
   Bell,
   BellOff,
   Calendar,
-  Mic,
-  CheckCircle2,
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { DateTimePicker } from '../../ui/DateTimePicker/DateTimePicker';
+import { Popover } from '../../ui/Popover/Popover';
 import { useZero } from '../../../hooks/useZero';
 import { useAuth } from '../../../hooks/useAuth';
-import { Link } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useChannelByName } from '../../../hooks/useChannels';
 import Avatar from '../../ui/Avatar/Avatar';
 import { StatusIndicator } from '../../ui/StatusIndicator';
-import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { Button } from '../../ui/Button/Button';
-import { useCurrentUserAssignmentState } from '../../../hooks/useAssignmentState';
-import { useTheme } from '../../../hooks/useTheme';
-import { useDebugSettings } from '../../../hooks/useDebugSettings';
-import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
-import { isElectronApp } from '../../../utils/electronApp';
 import { cn } from '../../../utils/classNames';
 import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
-import { Switch } from '../../ui/Switch';
-import { webviewActor } from '../../../machines/webviewMachine';
 import { useSelf } from '../../../hooks/useUsers';
 import { mutators } from '../../../zero/mutators';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
-import { apiInstance } from '../../../services/clients/apiClient';
-import { logger } from '../../../utils/logger';
-import { toast } from 'sonner';
-import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
-import { SelectedStatusData } from './SetStatusView';
-import { formatDistanceToNow, format } from 'date-fns';
 import { useUserPresence } from '../../../hooks/usePresence';
-import { DateTimePicker } from '../../ui/DateTimePicker/DateTimePicker';
-import { detectReactNativeWebView, reactNativeBridge } from '../../../utils/reactNativeBridge';
+import { SelectedStatusData } from './SetStatusView';
 
 type ViewType = 'default' | 'status-suggestions' | 'status-edit';
 
 const ProfileView = ({
   setView,
+  onClose,
+  onOpenPreferences,
 }: {
   setView: (view: ViewType, data?: SelectedStatusData) => void;
+  onClose?: () => void;
+  onOpenPreferences?: () => void;
 }): ReactElement => {
   const { logout } = useAuth();
   const user = useSelf();
-  const { theme, changeTheme } = useTheme();
-  const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
-  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [isPresenceDropdownOpen, setIsPresenceDropdownOpen] = useState(false);
-  const [isNotificationDropdownOpen, setIsNotificationDropdownOpen] = useState(false);
+  const presenceDropdownRef = useRef<HTMLDivElement>(null);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState<Date | null>(null);
-  const notificationDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Voice signature state
-  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
-  const [userProfile] = useCachedQuery(queries.getUserProfile({ userId: user?.id ?? '' }), {
-    enabled: !!user?.id,
-  });
-  const hasVoiceSignature = userProfile?.hasVoiceSignature ?? false;
   const zero = useZero();
+  const navigate = useNavigate();
+  const { channelId } = useParams<{ channelId?: string }>();
+  const generalChannel = useChannelByName('general');
 
-  // Handle click outside to close notification dropdown
+  // Handle click outside to close presence dropdown
   useEffect(() => {
-    if (!isNotificationDropdownOpen) {
+    if (!isPresenceDropdownOpen) {
       return undefined;
     }
 
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        notificationDropdownRef.current &&
-        !notificationDropdownRef.current.contains(event.target as Node)
+        presenceDropdownRef.current &&
+        !presenceDropdownRef.current.contains(event.target as Node)
       ) {
-        setIsNotificationDropdownOpen(false);
-        setShowCustomDatePicker(false);
-        setCustomDate(null);
+        setIsPresenceDropdownOpen(false);
       }
     };
 
@@ -92,52 +69,33 @@ const ProfileView = ({
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isNotificationDropdownOpen]);
+  }, [isPresenceDropdownOpen]);
 
-  // Get assignment availability for current user
-  const { isCurrentlyUnavailable, unavailableUntil, isActiveInAtLeastOneGroup } =
-    useCurrentUserAssignmentState();
-  // Get live presence status from Socket.IO
-  const { status: livePresenceStatus, setStatus: setLivePresenceStatus } = useUserPresence(
-    user?.id ?? '',
-  );
-  const handleLogout = (): void => {
-    logout();
-  };
-
-  const handleResumeAssignment = (e: React.MouseEvent<HTMLButtonElement>): void => {
-    e.stopPropagation();
-    if (!user?.id) return;
-
-    void apiInstance.post('/user-assignment-state/toggle', { isUnavailable: false }).then(() => {
-      // Update Zero immediately so UI is in sync
-      zero.mutate(
-        mutators.userPresence.upsert({
-          assignmentUnavailableUntil: null,
-          timestamp: Date.now(),
-          presenceId: uuidv4(),
-        }),
-      );
-    });
-  };
-
-  // Notification pause handlers
   const notificationsPausedUntil = user?.notificationsPausedUntil;
   const isNotificationsPaused = useMemo(() => {
     return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
   }, [notificationsPausedUntil]);
 
+  const pauseOptions = useMemo(
+    () => [
+      { label: '30 minutes', minutes: 30 },
+      { label: '1 hour', minutes: 60 },
+      { label: '4 hours', minutes: 240 },
+      { label: 'Until tomorrow', minutes: 1440 },
+      { label: 'Until next week', minutes: 10080 },
+    ],
+    [],
+  );
+
   const handlePauseNotifications = (durationMinutes: number): void => {
     if (!user?.id) return;
-    const pausedUntil = Date.now() + durationMinutes * 60 * 1000;
     zero.mutate(
       mutators.userPresence.upsert({
-        notificationsPausedUntil: pausedUntil,
+        notificationsPausedUntil: Date.now() + durationMinutes * 60 * 1000,
         timestamp: Date.now(),
         presenceId: uuidv4(),
       }),
     );
-    setIsNotificationDropdownOpen(false);
   };
 
   const handlePauseNotificationsUntil = (untilDate: Date): void => {
@@ -151,7 +109,6 @@ const ProfileView = ({
     );
     setShowCustomDatePicker(false);
     setCustomDate(null);
-    setIsNotificationDropdownOpen(false);
   };
 
   const handleResumeNotifications = (e: React.MouseEvent<HTMLButtonElement>): void => {
@@ -166,16 +123,22 @@ const ProfileView = ({
     );
   };
 
-  const pauseOptions = useMemo(
-    () => [
-      { label: '30 minutes', minutes: 30 },
-      { label: '1 hour', minutes: 60 },
-      { label: '4 hours', minutes: 240 },
-      { label: 'Until tomorrow', minutes: 1440 },
-      { label: 'Until next week', minutes: 10080 },
-    ],
-    [],
+  // Get live presence status from Socket.IO
+  const { status: livePresenceStatus, setStatus: setLivePresenceStatus } = useUserPresence(
+    user?.id ?? '',
   );
+
+  const handleLogout = (): void => {
+    logout();
+  };
+
+  const handleProfileClick = (): void => {
+    if (channelId) {
+      void navigate(`/chat/dir/${channelId}/profile/${user?.id}`);
+    } else if (generalChannel) {
+      void navigate(`/chat/dir/${generalChannel.id}/profile/${user?.id}`);
+    }
+  };
 
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
@@ -184,7 +147,9 @@ const ProfileView = ({
   const handleStatusClick = (): void => {
     if (hasValidStatus) {
       setView('status-edit');
-    } else setView('status-suggestions');
+    } else {
+      setView('status-suggestions');
+    }
   };
 
   const handleClearStatus = (e: React.MouseEvent): void => {
@@ -202,51 +167,9 @@ const ProfileView = ({
     }
   };
 
-  // TODO: Figure out a way to automatically
-  // extract themes from the useTheme hook
-  const themes: Array<{ id: 'classic' | 'midnight' | 'summer_breeze'; label: string; bg: string }> =
-    [
-      {
-        id: 'classic',
-        label: 'Classic',
-        bg: `linear-gradient(180deg, #E2EEFB 0%, #EAEFDB 100%)`,
-      },
-      {
-        id: 'summer_breeze',
-        label: 'Summer Breeze',
-        bg: `linear-gradient(
-          180deg,
-          #72a2c6 0%,
-          #a1a1a9 50.96%,
-          #c3bac9 69.71%,
-          #7c80a5 78.85%,
-          #6274a6 100%
-        )`,
-      },
-      {
-        id: 'midnight',
-        label: 'Midnight',
-        bg: '#0a0a0a',
-      },
-    ];
-
-  const handleOpenChangelog = (e: React.MouseEvent): void => {
-    const changelogUrl = import.meta.env.VITE_API_URL.replace('/api', '/changelog');
-    if (isElectronApp()) {
-      if (e.metaKey || e.ctrlKey) {
-        window.electronAPI?.openExternal?.(changelogUrl);
-      } else {
-        webviewActor.send({ type: 'ADD_TAB', url: changelogUrl });
-        webviewActor.send({ type: 'OPEN' });
-      }
-    } else {
-      // In browser: open in new tab
-      window.open(changelogUrl, '_blank', 'noopener,noreferrer');
-    }
-  };
-
   return (
     <div className='flex flex-col gap-4 p-6 w-full'>
+      {/* User identity section */}
       <div className='flex items-start gap-3'>
         <div className='flex-shrink-0'>
           <Avatar userId={user?.id || ''} size='lg' showActiveStatus={true} />
@@ -255,7 +178,7 @@ const ProfileView = ({
           <p className='text-sm font-medium text-foreground truncate'>{user?.name || 'User'}</p>
 
           {/* Presence Status Dropdown - inline for mobile compatibility */}
-          <div className='relative'>
+          <div className='relative' ref={presenceDropdownRef}>
             <button
               onClick={() => setIsPresenceDropdownOpen(!isPresenceDropdownOpen)}
               className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
@@ -385,346 +308,132 @@ const ProfileView = ({
         )}
       </div>
 
-      {/* Global Notification Pause Section */}
-      {isNotificationsPaused ? (
-        <div className='mt-2 space-y-1'>
-          <div
-            className={cn(
-              'px-2 py-1 rounded-lg border border-border bg-transparent hover:bg-accent transition-colors w-full flex items-center justify-between gap-2',
-            )}
-            data-track-category='PROFILE'
-            data-track-name='ResumeNotificationsArea'
-          >
-            <div className='flex items-center gap-2 min-w-0 flex-1'>
-              <BellOff className='size-4 flex-shrink-0 text-muted-foreground' />
-              <div className='text-sm font-medium text-foreground truncate'>
-                Notifications paused
-              </div>
-            </div>
-            <Button
-              variant='ghost'
-              size='lg'
-              className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
-              title='Resume notifications'
-              onClick={handleResumeNotifications}
-              data-track-category='PROFILE'
-              data-track-name='ResumeNotifications'
-            >
-              <X className='size-3 text-muted-foreground' />
-            </Button>
-          </div>
-          {notificationsPausedUntil && (
-            <div className='text-xs text-muted-foreground px-2'>
-              Until {format(new Date(notificationsPausedUntil), 'dd/MM/yyyy hh:mm a')}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className='mt-2 space-y-1'>
-          {/* Notification Pause Dropdown - inline for mobile compatibility */}
-          <div className='relative' ref={notificationDropdownRef}>
-            <button
-              onClick={() => setIsNotificationDropdownOpen(!isNotificationDropdownOpen)}
-              className='w-full px-2 py-1 rounded-lg border border-border bg-muted/50 hover:bg-secondary transition-colors flex items-center justify-between gap-2'
-              data-track-category='PROFILE'
-              data-track-name='OpenPauseNotificationsMenu'
-            >
-              <div className='flex items-center p-1 gap-2 text-muted-foreground'>
-                <Bell className='size-4 flex-shrink-0' />
-                <span className='text-xs truncate'>Pause notifications for: </span>
-              </div>
-              <ChevronDown
-                className={cn(
-                  'size-4 text-muted-foreground transition-transform',
-                  isNotificationDropdownOpen && 'rotate-180',
-                )}
-              />
-            </button>
-
-            {isNotificationDropdownOpen && (
-              <div
-                className={cn(
-                  'absolute left-0 top-full mt-1 p-1 bg-popover rounded-md border border-border shadow-md z-10',
-                  showCustomDatePicker ? 'w-auto max-h-[40vh]' : 'w-44',
-                )}
-              >
-                {!showCustomDatePicker ? (
-                  <div className='space-y-0.5'>
-                    {pauseOptions.map(option => (
-                      <button
-                        key={option.minutes}
-                        onClick={e => {
-                          e.stopPropagation();
-                          handlePauseNotifications(option.minutes);
-                        }}
-                        className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
-                        data-track-category='PROFILE'
-                        data-track-name='PauseNotifications'
-                        data-track-metadata={JSON.stringify({ duration: option.minutes })}
-                      >
-                        <span>{option.label}</span>
-                      </button>
-                    ))}
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        setShowCustomDatePicker(true);
-                      }}
-                      className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
-                      data-track-category='PROFILE'
-                      data-track-name='PauseNotificationsCustom'
-                    >
-                      <span>Custom</span>
-                      <Calendar className='size-4 text-muted-foreground' />
-                    </button>
-                  </div>
-                ) : (
-                  <div className='overflow-auto max-h-[calc(70vh-2rem)]'>
-                    <DateTimePicker
-                      value={customDate}
-                      onChange={setCustomDate}
-                      onConfirm={date => handlePauseNotificationsUntil(date)}
-                      inline
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Assignment Status Section */}
-      {(isActiveInAtLeastOneGroup || isCurrentlyUnavailable) && (
-        <div className='mt-2 space-y-1'>
-          <div
-            className={cn(
-              'px-2 py-1 rounded-lg border transition-colors w-full flex items-center justify-between gap-2',
-              isCurrentlyUnavailable
-                ? 'border-border bg-transparent hover:bg-muted'
-                : 'border-border bg-muted hover:bg-border cursor-pointer',
-            )}
-            onClick={() => {
-              if (!isCurrentlyUnavailable) {
-                setIsAssignmentModalOpen(true);
-              }
-            }}
-            onKeyDown={e => {
-              if (!isCurrentlyUnavailable && (e.key === 'Enter' || e.key === ' ')) {
-                e.preventDefault();
-                setIsAssignmentModalOpen(true);
-              }
-            }}
-            role='button'
-            tabIndex={0}
-            title={
-              isCurrentlyUnavailable ? 'Paused from assignment' : 'Click to pause from assignment'
-            }
-            data-track-category='PROFILE'
-            data-track-name={isCurrentlyUnavailable ? 'ResumeAssignmentArea' : 'PauseAssignment'}
-          >
-            {isCurrentlyUnavailable ? (
+      {/* Pause notifications */}
+      <div className='space-y-1'>
+        {isNotificationsPaused ? (
+          <div className='space-y-1'>
+            <div className='px-2 py-1 rounded-lg border border-border bg-transparent w-full flex items-center justify-between gap-2'>
               <div className='flex items-center gap-2 min-w-0 flex-1'>
-                <PauseCircle className='size-4 flex-shrink-0 text-muted-foreground' />
-                <div className='text-sm font-medium text-foreground truncate'>
-                  Paused from ticket assignment
-                </div>
+                <BellOff className='size-4 flex-shrink-0 text-muted-foreground' />
+                <span className='text-sm font-medium text-foreground truncate'>
+                  Notifications paused
+                </span>
               </div>
-            ) : (
-              <div className='flex items-center p-1 gap-2 text-muted-foreground'>
-                <PauseCircle className='size-4 flex-shrink-0' />
-                <span className='text-xs truncate'>Pause from ticket assignment</span>
-              </div>
-            )}
-
-            {isCurrentlyUnavailable && (
               <Button
                 variant='ghost'
                 size='lg'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
-                title='Resume ticket assignment'
-                onClick={handleResumeAssignment}
+                title='Resume notifications'
+                onClick={handleResumeNotifications}
                 data-track-category='PROFILE'
-                data-track-name='ResumeAssignment'
+                data-track-name='ResumeNotifications'
               >
                 <X className='size-3 text-muted-foreground' />
               </Button>
+            </div>
+            {notificationsPausedUntil && (
+              <div className='text-xs text-muted-foreground px-2'>
+                Until {format(new Date(notificationsPausedUntil), 'dd/MM/yyyy hh:mm a')}
+              </div>
             )}
           </div>
-          {isCurrentlyUnavailable && unavailableUntil && (
-            <div className='text-xs text-muted-foreground px-2'>
-              Until {format(new Date(unavailableUntil), 'dd/MM/yyyy hh:mm a')}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className='py-1'>
-        <div className='flex items-center gap-3'>
-          <div className='p-2 bg-muted rounded'>
-            <Mail className='size-5' />
-          </div>
-          <div>
-            <p className='text-sm text-muted-foreground'>Mail</p>
-            <Link to={`mailto:${user?.email}`} className='text-sm tracking-wide'>
-              {user?.email}
-            </Link>
-          </div>
-        </div>
-        {user?.createdAt && (
-          <div className='mt-4 flex items-center gap-2'>
-            <div className='p-2 bg-muted rounded'>
-              <Clock className='size-5' />
-            </div>
-            <div>
-              <p className='text-sm text-muted-foreground'>Joined On</p>
-              <p className='text-sm tracking-wide'>
-                {format(user.createdAt, 'MMM d, yyyy')} (
-                {formatDistanceToNow(user.createdAt, { addSuffix: true })})
-              </p>
-            </div>
-          </div>
+        ) : (
+          <Popover
+            trigger={
+              <button
+                className='w-full px-2 py-1 rounded-lg border border-border bg-muted/50 hover:bg-secondary transition-colors flex items-center justify-between gap-2'
+                data-track-category='PROFILE'
+                data-track-name='OpenPauseNotificationsMenu'
+              >
+                <div className='flex items-center p-1 gap-2 text-muted-foreground'>
+                  <Bell className='size-4 flex-shrink-0' />
+                  <span className='text-xs truncate'>Pause notifications for:</span>
+                </div>
+                <ChevronDown className='size-4 text-muted-foreground' />
+              </button>
+            }
+            align='start'
+            className={cn('p-1', showCustomDatePicker ? 'w-auto' : 'w-44')}
+            onOpenChange={open => {
+              if (!open) {
+                setShowCustomDatePicker(false);
+                setCustomDate(null);
+              }
+            }}
+          >
+            {!showCustomDatePicker ? (
+              <div className='space-y-0.5'>
+                {pauseOptions.map(option => (
+                  <button
+                    key={option.minutes}
+                    onClick={e => {
+                      e.stopPropagation();
+                      handlePauseNotifications(option.minutes);
+                    }}
+                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
+                    data-track-category='PROFILE'
+                    data-track-name='PauseNotifications'
+                    data-track-metadata={JSON.stringify({ duration: option.minutes })}
+                  >
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    setShowCustomDatePicker(true);
+                  }}
+                  className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
+                  data-track-category='PROFILE'
+                  data-track-name='PauseNotificationsCustom'
+                >
+                  <span>Custom</span>
+                  <Calendar className='size-4 text-muted-foreground' />
+                </button>
+              </div>
+            ) : (
+              <DateTimePicker
+                value={customDate}
+                onChange={setCustomDate}
+                onConfirm={date => handlePauseNotificationsUntil(date)}
+                inline
+              />
+            )}
+          </Popover>
         )}
       </div>
 
-      <hr className='border-transparent w-full' />
+      <hr className='border-border w-full' />
 
-      {/* ── Voice Signature Section ────────────────────────────── */}
-      <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-2.5'>
-          <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0'>
-            <Mic className='size-4 text-muted-foreground' />
-          </div>
-          <div>
-            <p className='text-sm font-medium text-foreground'>Voice Signature</p>
-            <p className='text-xs text-muted-foreground'>
-              {hasVoiceSignature ? (
-                <span className='flex items-center gap-1 text-green-600 dark:text-green-400'>
-                  <CheckCircle2 className='size-3' />
-                  Signature stored
-                </span>
-              ) : (
-                'Not set'
-              )}
-            </p>
-          </div>
-        </div>
+      {/* Navigation links */}
+      <div className='space-y-1'>
         <button
           type='button'
-          onClick={() => setIsVoiceModalOpen(true)}
-          className='text-xs px-3 py-1.5 rounded-md bg-muted border border-border text-foreground hover:bg-border transition-colors'
+          onClick={handleProfileClick}
+          className='w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors text-left'
           data-track-category='PROFILE'
-          data-track-name='OpenVoiceSignatureModal'
+          data-track-name='OpenProfile'
         >
-          {hasVoiceSignature ? 'Update' : 'Set up'}
+          <User className='size-4 text-muted-foreground flex-shrink-0' />
+          <span className='text-sm text-foreground'>Profile</span>
         </button>
-      </div>
 
-      <VoiceSignatureModal
-        open={isVoiceModalOpen}
-        onOpenChange={setIsVoiceModalOpen}
-        hasVoiceSignature={hasVoiceSignature}
-      />
-
-      <hr className='border-transparent w-full' />
-
-      {/* Theme Selection Section */}
-      <div className='space-y-2'>
-        <p className='text-sm font-medium text-foreground'>Appearance</p>
-        <div className='flex gap-2 w-full flex-wrap'>
-          {themes.map(themeOption => (
-            <button
-              key={themeOption.id}
-              onClick={() => changeTheme(themeOption.id)}
-              className='flex-1 w-25 space-y-1'
-              data-track-category='PROFILE'
-              data-track-name='SelectTheme'
-              data-track-metadata={JSON.stringify({ themeId: themeOption.id })}
-            >
-              <div
-                className='w-25 h-[70px] rounded-md relative overflow-clip'
-                style={{
-                  background: themeOption.bg,
-                  border:
-                    theme === themeOption.id
-                      ? '1px solid var(--sidebar-badge-accent)'
-                      : '1px solid transparent',
-                }}
-              >
-                <div className='absolute left-1/3 top-1/3 w-full h-full bg-muted rounded-md border border-border shadow-3xl'>
-                  <div className='w-fit px-1 py-0.5'>Aa</div>
-                </div>
-              </div>
-              <div
-                className={cn(
-                  'text-xs text-center',
-                  theme === themeOption.id ? 'text-primary' : 'text-muted-foreground',
-                )}
-              >
-                {themeOption.label}
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <hr className='border-transparent w-full' />
-
-      {/* Changelog Section */}
-      <div className='space-y-2'>
         <button
-          onClick={handleOpenChangelog}
-          className='w-full flex items-center gap-2 px-2 py-2 rounded-lg border border-border bg-transparent hover:bg-muted transition-colors text-left group'
+          type='button'
+          onClick={() => {
+            onClose?.();
+            onOpenPreferences?.();
+          }}
+          className='w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors text-left'
           data-track-category='PROFILE'
-          data-track-name='OpenChangelog'
+          data-track-name='OpenPreferences'
         >
-          <div className='flex-1 min-w-0'>
-            <p className='text-sm font-medium text-foreground'>Changelog</p>
-          </div>
-          <span className='inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400'>
-            NEW
-          </span>
+          <Settings2 className='size-4 text-muted-foreground flex-shrink-0' />
+          <span className='text-sm text-foreground'>Preferences</span>
         </button>
       </div>
 
-      <hr className='border-transparent w-full' />
-      <div className='space-y-2'>
-        <p className='text-sm font-medium text-foreground'>Developer Settings</p>
-        <div className='space-y-2'>
-          <Switch
-            id='show-send-indicators'
-            checked={debugSettings.showSendIndicators}
-            onCheckedChange={toggleSendIndicators}
-            label='Show send indicators'
-          />
-          {detectReactNativeWebView() && (
-            <Button
-              type='button'
-              variant='outline'
-              className='w-full rounded-3xl h-[44px] border-border'
-              onClick={() => {
-                reactNativeBridge.requestNativeShell('profile_menu');
-              }}
-              data-track-category='PROFILE'
-              data-track-name='RequestNativeShell'
-            >
-              Switch to native app
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {isElectronApp() && (
-        <>
-          <hr className='border-transparent w-full' />
-          <div className='space-y-2'>
-            <p className='text-sm font-medium text-foreground'>Notifications</p>
-            <MeetingDetectionToggle />
-          </div>
-        </>
-      )}
-
-      <hr className='border-transparent w-full' />
+      <hr className='border-border w-full' />
 
       <div className='space-y-2'>
         <Button
@@ -737,58 +446,6 @@ const ProfileView = ({
           Sign out
         </Button>
       </div>
-
-      <div className='text-xs flex flex-col gap-1 text-muted-foreground'>
-        <div>Version: {__APP_VERSION__}</div>
-        {logger.zeroClientId && (
-          <button
-            onClick={() => {
-              navigator.clipboard
-                .writeText(logger.zeroClientId!)
-                .then(() => {
-                  toast.success('Client ID copied to clipboard');
-                })
-                .catch(() => {
-                  toast.error('Failed to copy Client ID');
-                });
-            }}
-            className='flex items-center gap-1 hover:text-muted-foreground transition-colors cursor-pointer text-left'
-            data-track-category='PROFILE'
-            data-track-name='CopyClientId'
-          >
-            <span>Client ID: {logger.zeroClientId}</span>
-            <Copy className='size-3' />
-          </button>
-        )}
-        {logger.zeroClientGroupId && (
-          <button
-            onClick={() => {
-              navigator.clipboard
-                .writeText(logger.zeroClientGroupId!)
-                .then(() => {
-                  toast.success('Client Group ID copied to clipboard');
-                })
-                .catch(() => {
-                  toast.error('Failed to copy Client Group ID');
-                });
-            }}
-            className='flex items-center gap-1 hover:text-muted-foreground transition-colors cursor-pointer text-left'
-            data-track-category='PROFILE'
-            data-track-name='CopyClientGroupId'
-          >
-            <span>Client Group ID: {logger.zeroClientGroupId}</span>
-            <Copy className='size-3' />
-          </button>
-        )}
-      </div>
-
-      {/* Assignment Status Modal */}
-      {(isActiveInAtLeastOneGroup || isCurrentlyUnavailable) && (
-        <UpdateAssignmentStatusModal
-          isOpen={isAssignmentModalOpen}
-          onClose={() => setIsAssignmentModalOpen(false)}
-        />
-      )}
     </div>
   );
 };

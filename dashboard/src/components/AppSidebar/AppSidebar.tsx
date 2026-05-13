@@ -51,6 +51,7 @@ import {
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
 import SettingsContent from '../Settings/Settings';
+import Preferences from '../Settings/Preferences';
 import { useSelf } from '../../hooks/useUsers';
 import { isStatusExpired } from '../../utils/statusUtils';
 import { UpdateStatusModal } from './UpdateStatusModal';
@@ -190,6 +191,13 @@ const AppSidebar = (): ReactElement => {
   );
 
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+
+  const handleOpenPreferences = (): void => {
+    setIsSettingsPopoverOpen(false);
+    setIsPreferencesOpen(true);
+  };
 
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
@@ -456,14 +464,21 @@ const AppSidebar = (): ReactElement => {
               </div>
             )
           }
+          open={isSettingsPopoverOpen}
+          onOpenChange={setIsSettingsPopoverOpen}
           side='right'
           sideOffset={8}
           align='end'
           collisionPadding={12}
           className='max-h-[calc(100vh-24px)] overflow-y-auto overscroll-contain no-scrollbar'
         >
-          <SettingsContent />
+          <SettingsContent
+            onClose={() => setIsSettingsPopoverOpen(false)}
+            onOpenPreferences={handleOpenPreferences}
+          />
         </Popover>
+
+        <Preferences open={isPreferencesOpen} onClose={() => setIsPreferencesOpen(false)} />
       </div>
 
       {/* Status Update Modal */}

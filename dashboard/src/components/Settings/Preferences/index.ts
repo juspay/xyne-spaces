@@ -1,0 +1,26 @@
+import type { ReactElement } from 'react';
+
+export type PreferenceSection =
+  | 'appearance'
+  | 'notifications'
+  | 'availability'
+  | 'voice'
+  | 'messaging'
+  | 'launch'
+  | 'developer';
+
+export interface PreferencesProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export interface NavItem {
+  id: PreferenceSection;
+  label: string;
+  icon: ReactElement;
+  desktopOnly?: boolean;
+}
+
+export { default } from './Preferences';
+export { default as Preferences } from './Preferences';
+export type { PreferencesState } from '../../../hooks/usePreferencesState';
