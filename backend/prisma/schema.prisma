@@ -1852,6 +1852,7 @@ model EmailDraft {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([userId, conversationId])
   @@index([userId, conversationId, id])
   @@index([conversationId])
   @@index([channelId])

@@ -7970,22 +7970,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
     },
     emailDraft: {
-      upsert: defineMutator(
-        z.object({
-          id: z.string(),
-          conversationId: z.string(),
-          channelId: z.string(),
+    upsert: defineMutator(
+      z.object({
+        id: z.string(),
+        conversationId: z.string(),
+        channelId: z.string(),
           draftContent: z.string(),
           attachmentIds: z.array(z.string()).optional(),
-          updatedAt: z.number(),
-        }),
-        async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, attachmentIds, updatedAt } }) => {
-          const existing = await tx.run(
-            zql.email_drafts
-              .where('id', id)
-              .where('userId', ctx.userID)
-              .one(),
-          );
+        updatedAt: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, attachmentIds, updatedAt } }) => {
+        const existing = await tx.run(
+          zql.email_drafts
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
           if (existing) {
             await tx.mutate.email_drafts.update({
               id: existing.id,
@@ -8007,17 +8007,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         },
       ),
-      delete: defineMutator(
-        z.object({
-          id: z.string(),
-        }),
-        async ({ tx, ctx, args: { id } }) => {
-          const existing = await tx.run(
-            zql.email_drafts
-              .where('id', id)
-              .where('userId', ctx.userID)
-              .one(),
-          );
+    delete: defineMutator(
+      z.object({
+        conversationId: z.string(),
+      }),
+      async ({ tx, ctx, args: { conversationId } }) => {
+        const existing = await tx.run(
+          zql.email_drafts
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
           if (existing) {
             await tx.mutate.email_drafts.delete({ id: existing.id });
           }

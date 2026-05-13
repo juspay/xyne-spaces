@@ -6005,7 +6005,7 @@ export const mutators = defineMutators({
       async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, attachmentIds, updatedAt } }) => {
         const existing = await tx.run(
           zql.email_drafts
-            .where('id', id)
+            .where('conversationId', conversationId)
             .where('userId', ctx.userID)
             .one(),
         );
@@ -6032,12 +6032,12 @@ export const mutators = defineMutators({
     ),
     delete: defineMutator(
       z.object({
-        id: z.string(),
+        conversationId: z.string(),
       }),
-      async ({ tx, ctx, args: { id } }) => {
+      async ({ tx, ctx, args: { conversationId } }) => {
         const existing = await tx.run(
           zql.email_drafts
-            .where('id', id)
+            .where('conversationId', conversationId)
             .where('userId', ctx.userID)
             .one(),
         );

@@ -1,6 +1,3 @@
--- Support multiple email drafts per user in the same conversation.
-DROP INDEX IF EXISTS "public"."email_drafts_userId_conversationId_key";
-
 -- Add priority classification fields used by ticket ingest and channel settings.
 ALTER TABLE "public"."email_channel_preferences"
   ADD COLUMN IF NOT EXISTS "priorityClassificationEnabled" BOOLEAN NOT NULL DEFAULT false,
