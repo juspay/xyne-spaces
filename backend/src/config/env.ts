@@ -135,6 +135,11 @@ const envSchema = Joi.object({
   GENIUS_API_URL: Joi.string().uri().default(''),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
   QUERY_ROUTING_KEY: Joi.string().allow('').default(''),
+  // Outage Verification API Configuration
+  OUTAGE_VERIFICATION_AUTH_KEY: Joi.string().allow('').default(''),
+  OUTAGE_VERIFICATION_EMAIL: Joi.string().allow('').default(''),
+  // Channel ID for the global outage alerts channel
+  OUTAGE_ALERT_CHANNEL_ID: Joi.string().allow('').default(''),
   // UPI Analytics Bot API Configuration
   GENIUS_UPI_ANALYTICS_API_URL: Joi.string().uri().default(''),
   GENIUS_UPI_ANALYTICS_API_KEY: Joi.string().allow('').default(''),
@@ -413,6 +418,11 @@ export const config = {
     apiUrl: envVars.GENIUS_API_URL,
     apiKey: envVars.GENIUS_API_KEY,
     queryRoutingKey: envVars.QUERY_ROUTING_KEY,
+  },
+  outageVerification: {
+    authKey: envVars.OUTAGE_VERIFICATION_AUTH_KEY,
+    email: envVars.OUTAGE_VERIFICATION_EMAIL,
+    channelId: envVars.OUTAGE_ALERT_CHANNEL_ID,
   },
   geniusUpiAnalytics: {
     apiUrl: envVars.GENIUS_UPI_ANALYTICS_API_URL,

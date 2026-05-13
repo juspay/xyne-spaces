@@ -7,6 +7,8 @@ import { encrypt, decrypt } from '@/services/encryptionService';
 import { findOrCreateConversation } from '../core/conversationUtils';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { MessageType } from '@xyne/shared';
+import { outageAlertService } from '@/services/outageAlertService';
+import { config } from '@/config/env';
 
 const WEBHOOK_NAME_MAX_LENGTH = 84;
 
@@ -171,7 +173,8 @@ class IncomingWebhookController {
 
       const content = this.blockKitParser.parse({ text, blocks, attachments });
 
-      await findOrCreateConversation(
+      // Post the message to the channel
+      const messageResult = await findOrCreateConversation(
         channelId,
         installedApp.userId,
         content,
@@ -182,7 +185,40 @@ class IncomingWebhookController {
         {},
       );
 
+      // Respond immediately — outage verification runs async and can take up to ~2 minutes
       res.status(200).send('ok');
+
+      // Only run outage verification for the configured outage alerts channel
+      if (config.outageVerification.channelId && channelId === config.outageVerification.channelId) {
+        outageAlertService.processOutageAlert(text, messageResult.conversationId)
+          .then(async (result) => {
+            if (result.uploadedFile) {
+              try {
+                // Extract mention spans directly from the original webhook text
+                const mentionSpans = (text.match(/<span[^>]*data-mention-type="user"[^>]*>.*?<\/span>/gi) ?? []).join(' ');
+                const replyContent = mentionSpans ? `${mentionSpans} False Outage Report` : 'False Outage Report';
+
+                await findOrCreateConversation(
+                  channelId,
+                  installedApp.userId,
+                  replyContent,
+                  false,
+                  messageResult.conversationId,
+                  [result.uploadedFile],
+                  MessageType.BOT,
+                  {},
+                );
+
+                logger.info('[Incoming-Webhook] Posted false outage PDF report in thread', {
+                  sessionId: result.sessionId,
+                });
+              } catch (reportError) {
+                logger.error('[Incoming-Webhook] Error posting PDF report in thread', { reportError });
+              }
+            }
+          })
+          .catch((err) => logger.error('[Incoming-Webhook] Outage alert processing failed', { err }));
+      }
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling incoming webhook', {
         params: req.params,
