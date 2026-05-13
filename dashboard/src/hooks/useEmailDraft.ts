@@ -15,28 +15,21 @@ export interface EmailDraftRecord {
   updatedAt: number;
 }
 
-export function useEmailDrafts(conversationId: string | null | undefined): EmailDraftRecord[] {
+/**
+ * Returns the current draft for a conversation from Zero cache.
+ */
+export function useEmailDraft(
+  conversationId: string | null | undefined,
+): EmailDraftRecord | undefined {
   const [dbDrafts] = useCachedQuery(
     queries.getDraftForConversation({ conversationId: conversationId || '' }),
     { enabled: !!conversationId },
   );
-  return (dbDrafts as unknown as EmailDraftRecord[] | undefined) ?? [];
+  return (dbDrafts as unknown as EmailDraftRecord[] | undefined)?.[0];
 }
 
 /**
- * Returns a specific saved draft for a conversation.
- */
-export function useEmailDraft(
-  conversationId: string | null | undefined,
-  draftId: string | null | undefined,
-): EmailDraftRecord | undefined {
-  const drafts = useEmailDrafts(conversationId);
-  if (!draftId) return undefined;
-  return drafts.find(draft => draft.id === draftId);
-}
-
-/**
- * Provides save/delete for a single email draft within a conversation.
+ * Provides save/delete for the email draft of a conversation.
  * Call saveDraft on blur, not on every keystroke, to minimise DB writes.
  *
  * `channelId` is required by the `emailDraft.upsert` mutator (email_drafts now
@@ -47,19 +40,14 @@ export function useEmailDraft(
 export function useEmailDraftOperations(
   conversationId: string | null | undefined,
   channelId: string | null | undefined,
-  draftId: string | null | undefined,
 ) {
   const zero = useZero();
-  const draft = useEmailDraft(conversationId, draftId);
+  const draft = useEmailDraft(conversationId);
 
-  const deleteDraft = useCallback(
-    (targetDraftId?: string | null) => {
-      const nextDraftId = targetDraftId ?? draft?.id ?? draftId;
-      if (!nextDraftId) return;
-      void zero.mutate(mutators.emailDraft.delete({ id: nextDraftId }));
-    },
-    [draft?.id, draftId, zero],
-  );
+  const deleteDraft = useCallback(() => {
+    if (!conversationId) return;
+    void zero.mutate(mutators.emailDraft.delete({ conversationId }));
+  }, [conversationId, zero]);
 
   const saveDraft = useCallback(
     (content: string, attachmentIds?: string[]): string | null => {
@@ -68,13 +56,11 @@ export function useEmailDraftOperations(
       // persisted draft so the ticket-list "Draft" chip disappears and we don't
       // keep stale content around. Only fires a delete when a draft actually exists.
       if (!content.trim() && (!attachmentIds || attachmentIds.length === 0)) {
-        if (draft?.id ?? draftId) {
-          deleteDraft(draft?.id ?? draftId);
-        }
+        if (draft?.id) deleteDraft();
         return null;
       }
       if (!channelId) return null;
-      const nextDraftId = draft?.id ?? draftId ?? uuidv4();
+      const nextDraftId = draft?.id ?? uuidv4();
       void zero.mutate(
         mutators.emailDraft.upsert({
           id: nextDraftId,
@@ -87,8 +73,8 @@ export function useEmailDraftOperations(
       );
       return nextDraftId;
     },
-    [conversationId, channelId, draft?.id, draftId, zero, deleteDraft],
+    [conversationId, channelId, draft?.id, zero, deleteDraft],
   );
 
-  return { saveDraft, deleteDraft, draftId: draft?.id ?? draftId ?? null, draft };
+  return { saveDraft, deleteDraft, draftId: draft?.id ?? null, draft };
 }

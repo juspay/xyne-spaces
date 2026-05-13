@@ -24,7 +24,6 @@ import {
   Sparkles,
   Loader2,
   Pencil,
-  Trash2,
   Users2,
   Lock,
   Hash,
@@ -107,8 +106,7 @@ import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/Comp
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
-import { formatEmailHeaderDate } from '../../components/xyne-desk/EmailBody/emailHeaderUtils';
-import { useEmailDrafts, type EmailDraftRecord } from '../../hooks/useEmailDraft';
+import { useEmailDraft } from '../../hooks/useEmailDraft';
 import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
 import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
@@ -2347,156 +2345,6 @@ const TicketMetaRow = ({
   );
 };
 
-const readReplyDraftRecipients = (
-  draftId: string,
-): { to: string[]; cc: string[]; bcc: string[] } => {
-  try {
-    const raw = localStorage.getItem(`xyne:emailDraft:recipients:${draftId}`);
-    if (!raw) return { to: [], cc: [], bcc: [] };
-    const parsed = JSON.parse(raw) as {
-      to?: string[];
-      cc?: string[];
-      bcc?: string[];
-    };
-    return {
-      to: parsed.to ?? [],
-      cc: parsed.cc ?? [],
-      bcc: parsed.bcc ?? [],
-    };
-  } catch {
-    return { to: [], cc: [], bcc: [] };
-  }
-};
-
-const ReplyDraftThreadItem = ({
-  draft,
-  isActive,
-  deskEmail: _deskEmail,
-  onEdit,
-  onSend,
-  onDiscard,
-}: {
-  draft: EmailDraftRecord;
-  isActive: boolean;
-  deskEmail?: string | null | undefined;
-  onEdit: () => void;
-  onSend: () => void;
-  onDiscard: () => void;
-}): ReactElement => {
-  const recipients = useMemo(() => readReplyDraftRecipients(draft.id), [draft.id]);
-  const createdAt = formatEmailHeaderDate(draft.updatedAt);
-
-  return (
-    <div className={cn('w-full scroll-mt-20 transition-colors py-6', isActive && 'bg-muted/30')}>
-      <div className='px-6'>
-        <div className='w-full flex items-start gap-3'>
-          <div className='size-8 shrink-0 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center'>
-            <Pencil size={14} />
-          </div>
-          <div className='flex-1 min-w-0'>
-            <div className='flex items-start justify-between gap-3'>
-              <div className='flex-1 min-w-0'>
-                <div className='flex items-center gap-2 flex-wrap'>
-                  <span className='inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700'>
-                    Draft
-                  </span>
-                  {isActive && (
-                    <span className='inline-flex rounded-full bg-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-background'>
-                      Editing
-                    </span>
-                  )}
-                </div>
-                <div className='mt-1 space-y-1 text-sm'>
-                  <div className='flex gap-3 items-start'>
-                    <span className='text-muted-foreground w-14 shrink-0'>to:</span>
-                    <span className='text-foreground break-words flex-1 min-w-0'>
-                      {recipients.to.length > 0 ? recipients.to.join(', ') : 'No recipients'}
-                    </span>
-                  </div>
-                  {recipients.cc.length > 0 && (
-                    <div className='flex gap-3 items-start'>
-                      <span className='text-muted-foreground w-14 shrink-0'>cc:</span>
-                      <span className='text-foreground break-words flex-1 min-w-0'>
-                        {recipients.cc.join(', ')}
-                      </span>
-                    </div>
-                  )}
-                  {recipients.bcc.length > 0 && (
-                    <div className='flex gap-3 items-start'>
-                      <span className='text-muted-foreground w-14 shrink-0'>bcc:</span>
-                      <span className='text-foreground break-words flex-1 min-w-0'>
-                        {recipients.bcc.join(', ')}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div
-                className='text-xs text-muted-foreground shrink-0 whitespace-nowrap'
-                title={createdAt.full}
-              >
-                {createdAt.short}
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className='flex items-start gap-3 mt-4'>
-          <div className='size-8 shrink-0' aria-hidden='true' />
-          <div className='flex-1 min-w-0'>
-            <div className='text-sm text-foreground leading-relaxed'>
-              {draft.draftContent ? (
-                <EmailBodyRenderer body={draft.draftContent} emailId={`draft-${draft.id}`} />
-              ) : (
-                <span className='text-muted-foreground italic'>No content</span>
-              )}
-            </div>
-            <div className='mt-3 flex items-center justify-between gap-3'>
-              <div className='text-xs text-muted-foreground' title={createdAt.full}>
-                Last edited {createdAt.short}
-              </div>
-              <div className='flex items-center gap-1.5'>
-                <button
-                  type='button'
-                  onClick={onEdit}
-                  className='inline-flex items-center justify-center h-7 w-7 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                  title='Edit draft'
-                  aria-label='Edit draft'
-                  data-track-category='Support'
-                  data-track-name='OpenReplyDraft'
-                >
-                  <Pencil size={12} />
-                </button>
-                <button
-                  type='button'
-                  onClick={onDiscard}
-                  className='inline-flex items-center justify-center h-7 w-7 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                  title='Discard draft'
-                  aria-label='Discard draft'
-                  data-track-category='Support'
-                  data-track-name='DiscardDraft'
-                >
-                  <Trash2 size={12} />
-                </button>
-                <button
-                  type='button'
-                  onClick={onSend}
-                  className='inline-flex items-center justify-center h-7 w-7 rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors cursor-pointer select-none'
-                  title='Send draft'
-                  aria-label='Send draft'
-                  data-track-category='Support'
-                  data-track-name='SendReplyDraft'
-                >
-                  <ArrowUp size={12} />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const SupportTicketDetail = (): ReactElement => {
   const { channelId: channelIdParam, ticketId: ticketIdParam } = useParams<{
     channelId?: string;
@@ -2509,11 +2357,6 @@ const SupportTicketDetail = (): ReactElement => {
     snapshot => snapshot.context.xyneAIState === 'open',
   );
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
-  const [activeReplyDraftId, setActiveReplyDraftId] = useState<string | null>(null);
-  const [sendDraftRequest, setSendDraftRequest] = useState<{
-    draftId: string;
-    requestedAt: number;
-  } | null>(null);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {
@@ -2637,32 +2480,16 @@ const SupportTicketDetail = (): ReactElement => {
     previewText: title || 'Ticket conversation',
   });
   const conversation = ticket?.conversation;
-  const replyDrafts = useEmailDrafts(conversationId ?? null);
+  const ticketDraft = useEmailDraft(conversationId ?? null);
   const draftAutoOpenedConversationRef = useRef<string | null>(null);
   useEffect(() => {
     if (!conversationId) return;
     if (draftAutoOpenedConversationRef.current === conversationId) return;
-    const latestDraft = replyDrafts[0];
-    if (latestDraft?.draftContent?.trim()) {
-      setActiveReplyDraftId(latestDraft.id);
+    if (ticketDraft?.draftContent?.trim()) {
       setComposerOpen(true);
       draftAutoOpenedConversationRef.current = conversationId;
     }
-  }, [conversationId, replyDrafts, setComposerOpen]);
-
-  useEffect(() => {
-    if (!conversationId) {
-      setActiveReplyDraftId(null);
-      return;
-    }
-    if (!activeReplyDraftId) {
-      return;
-    }
-    if (replyDrafts.some(draft => draft.id === activeReplyDraftId)) {
-      return;
-    }
-    setActiveReplyDraftId(null);
-  }, [activeReplyDraftId, conversationId, replyDrafts]);
+  }, [conversationId, ticketDraft, setComposerOpen]);
 
   // Prev / next cursor queries — each returns at most 1 adjacent ticket in the
   // EMAIL-channel scope ordered by lastEmailAt desc. Served from IVM when
@@ -3308,72 +3135,12 @@ const SupportTicketDetail = (): ReactElement => {
                     }
                     onReplyToEmail={(emailId, mode) => {
                       clearStoredRecipients(conversationId);
-                      setActiveReplyDraftId(null);
                       setReplyToEmailId(emailId);
                       setReplyMode(mode);
                       setComposerOpen(true);
                     }}
                     deskEmail={deskEmail}
                   />
-                </div>
-              )}
-              {replyDrafts.length > 0 && (
-                <div className='px-6 pb-3 space-y-2'>
-                  <div className='flex items-center justify-between gap-3'>
-                    <div className='flex items-center gap-2'>
-                      <span className='inline-flex h-6 items-center rounded-full border border-border/70 bg-muted/40 px-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground'>
-                        Drafts
-                      </span>
-                      <span className='text-xs text-muted-foreground'>
-                        {replyDrafts.length} saved
-                      </span>
-                    </div>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setReplyToEmailId(null);
-                        setReplyMode('reply');
-                        setActiveReplyDraftId(null);
-                        setComposerOpen(true);
-                      }}
-                      className='inline-flex items-center rounded-full border border-dashed border-border px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors'
-                      data-track-category='Support'
-                      data-track-name='NewDraftClick'
-                    >
-                      New draft
-                    </button>
-                  </div>
-                  <div className='overflow-hidden rounded-2xl border border-border/80 bg-background'>
-                    {replyDrafts.map(draft => (
-                      <ReplyDraftThreadItem
-                        key={draft.id}
-                        draft={draft}
-                        isActive={draft.id === activeReplyDraftId}
-                        deskEmail={deskEmail}
-                        onEdit={() => {
-                          setReplyToEmailId(null);
-                          setReplyMode('reply');
-                          setActiveReplyDraftId(draft.id);
-                          setComposerOpen(true);
-                        }}
-                        onSend={() => {
-                          setReplyToEmailId(null);
-                          setReplyMode('reply');
-                          setActiveReplyDraftId(draft.id);
-                          setComposerOpen(true);
-                          setSendDraftRequest({ draftId: draft.id, requestedAt: Date.now() });
-                        }}
-                        onDiscard={() => {
-                          if (draft.id === activeReplyDraftId) {
-                            setComposerOpen(false);
-                            setReplyToEmailId(null);
-                            setActiveReplyDraftId(null);
-                          }
-                          void zero.mutate(mutators.emailDraft.delete({ id: draft.id }));
-                        }}
-                      />
-                    ))}
-                  </div>
                 </div>
               )}
             </div>
@@ -3395,9 +3162,6 @@ const SupportTicketDetail = (): ReactElement => {
                   }}
                   channelId={channelId}
                   ticketId={ticketId}
-                  replyDraftId={activeReplyDraftId}
-                  onReplyDraftCreated={setActiveReplyDraftId}
-                  sendRequest={sendDraftRequest}
                   replyToEmailId={replyToEmailId}
                   replyMode={replyMode}
                   ticketSubject={title}
@@ -3419,7 +3183,6 @@ const SupportTicketDetail = (): ReactElement => {
                     <button
                       type='button'
                       onClick={() => {
-                        setActiveReplyDraftId(null);
                         setReplyToEmailId(null);
                         setReplyMode('reply');
                         setComposerOpen(true);
@@ -3447,7 +3210,6 @@ const SupportTicketDetail = (): ReactElement => {
                     <button
                       type='button'
                       onClick={() => {
-                        setActiveReplyDraftId(null);
                         setReplyToEmailId(null);
                         setReplyMode('replyAll');
                         setComposerOpen(true);
