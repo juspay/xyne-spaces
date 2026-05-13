@@ -68,11 +68,13 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   // Query the source conversation to get ticket_md — used as a content fallback
   // for desk-ticket messages whose message.content is stored as '' (email body
   // lives in the email table, not in message.content).
-  // Only fire the query when message.content is empty; pass '' otherwise so Zero
+  // Only fire when content is empty; disabled otherwise to avoid unnecessary subscriptions.
+  const needsConversationQuery = !message.content;
   const [sourceConversation] = useQuery(
     queries.getConversationById({
-      conversationId: message.content ? '' : message.conversationId,
+      conversationId: message.conversationId,
     }),
+    { enabled: needsConversationQuery },
   );
 
   // Synchronously assign the combobox input to initialFocusRef so it's
