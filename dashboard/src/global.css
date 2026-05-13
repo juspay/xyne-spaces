@@ -3,6 +3,21 @@
 @tailwind utilities;
 
 @layer base {
+  /* Theme preview swatches — used by the Preferences theme picker so
+     all themes render their preview regardless of which is active. */
+  :root {
+    --theme-preview-classic: linear-gradient(180deg, #e2eefb 0%, #eaefdb 100%);
+    --theme-preview-summer_breeze: linear-gradient(
+      180deg,
+      #72a2c6 0%,
+      #a1a1a9 50.96%,
+      #c3bac9 69.71%,
+      #7c80a5 78.85%,
+      #6274a6 100%
+    );
+    --theme-preview-midnight: #0a0a0a;
+  }
+
   /* Classic theme - default light theme */
   [data-theme="classic"] {
     --root-bg: linear-gradient(180deg, #e2eefb 0%, #eaefdb 100%);

@@ -1,118 +1,109 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement, useState, useMemo } from 'react';
 import {
   X,
   User,
   SmilePlus,
-  Copy,
-  PauseCircle,
   ChevronDown,
   Check,
+  Settings2,
   Bell,
   BellOff,
   Calendar,
 } from 'lucide-react';
-import { useZero } from '../../hooks/useZero';
+import { format } from 'date-fns';
+import { DateTimePicker } from '../ui/DateTimePicker/DateTimePicker';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useMemo } from 'react';
 import Avatar from '../ui/Avatar/Avatar';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { UpdateStatusModal } from '../AppSidebar/UpdateStatusModal';
-import { UpdateAssignmentStatusModal } from '../AppSidebar/UpdateAssignmentStatusModal';
 import { Button } from '../ui/Button/Button';
-import { useCurrentUserAssignmentState } from '../../hooks/useAssignmentState';
-import { useTheme } from '../../hooks/useTheme';
-import { useAILandingDefault } from '../../hooks/useAILandingDefault';
-import { useEnterSendsMessage } from '../../hooks/useEnterSendsMessage';
-import { useDebugSettings } from '../../hooks/useDebugSettings';
-import { useAskAIVersion } from '../../hooks/useAskAIVersion';
-import { MeetingDetectionToggle } from './MeetingDetectionToggle';
-import { isElectronApp } from '../../utils/electronApp';
 import { cn } from '../../utils/classNames';
 import { isStatusExpired, formatExpiryTime } from '../../utils/statusUtils';
-import { Switch } from '../ui/Switch';
 import { useChannelByName } from '../../hooks/useChannels';
 import { useSelf } from '../../hooks/useUsers';
 import { mutators } from '../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
-import { apiInstance } from '../../services/clients/apiClient';
-import { logger } from '../../utils/logger';
-import { toast } from 'sonner';
+import { useZero } from '../../hooks/useZero';
 import { Popover } from '../ui/Popover/Popover';
 import { useUserPresence } from '../../hooks/usePresence';
-import { DateTimePicker } from '../ui/DateTimePicker/DateTimePicker';
-import { format } from 'date-fns';
-import { webviewActor } from '../../machines/webviewMachine';
 
-const Settings = (): ReactElement => {
+interface SettingsProps {
+  onClose: () => void;
+  onOpenPreferences: () => void;
+}
+
+const Settings = ({ onClose, onOpenPreferences }: SettingsProps): ReactElement => {
   const { logout } = useAuth();
   const user = useSelf();
-  const { theme, changeTheme } = useTheme();
-  const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
-  const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
-  const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
-  const { askAIVersion, setAskAIVersion } = useAskAIVersion();
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
+  const [customDate, setCustomDate] = useState<Date | null>(null);
   const zero = useZero();
 
-  // Get assignment availability for current user
-  const { isCurrentlyUnavailable, unavailableUntil, isActiveInAtLeastOneGroup } =
-    useCurrentUserAssignmentState();
   const generalChannel = useChannelByName('general');
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
-  // Get live presence status from Socket.IO
+
   const { status: livePresenceStatus, setStatus: setLivePresenceStatus } = useUserPresence(
     user?.id ?? '',
   );
+
   const handleLogout = (): void => {
     logout();
   };
 
-  const handleResumeAssignment = (e: React.MouseEvent<HTMLButtonElement>): void => {
-    e.stopPropagation();
-    if (!user?.id) return;
+  const hasValidStatus =
+    user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
 
-    void apiInstance.post('/user-assignment-state/toggle', { isUnavailable: false }).then(() => {
-      // Update Zero immediately so UI is in sync
+  const handleStatusClick = (): void => {
+    setIsStatusModalOpen(true);
+  };
+
+  const handleStatusModalClose = (): void => {
+    setIsStatusModalOpen(false);
+  };
+
+  const handleClearStatus = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    if (user?.id) {
       zero.mutate(
         mutators.userPresence.upsert({
-          assignmentUnavailableUntil: null,
+          statusEmoji: null,
+          statusContent: null,
+          statusExpiryAt: null,
           timestamp: Date.now(),
           presenceId: uuidv4(),
         }),
       );
-    });
+    }
   };
 
-  // Notification pause state
-  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
-  const [customDate, setCustomDate] = useState<Date | null>(null);
-
-  // Check if notifications are globally paused
   const notificationsPausedUntil = user?.notificationsPausedUntil;
   const isNotificationsPaused = useMemo(() => {
     return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
   }, [notificationsPausedUntil]);
 
+  const pauseOptions = useMemo(
+    () => [
+      { label: '30 minutes', minutes: 30 },
+      { label: '1 hour', minutes: 60 },
+      { label: '4 hours', minutes: 240 },
+      { label: 'Until tomorrow', minutes: 1440 },
+      { label: 'Until next week', minutes: 10080 },
+    ],
+    [],
+  );
+
   const handlePauseNotifications = (durationMinutes: number): void => {
-    if (!user?.id) {
-      return;
-    }
-    const pausedUntil = Date.now() + durationMinutes * 60 * 1000;
-
-    const mutationPayload = {
-      notificationsPausedUntil: pausedUntil,
-      timestamp: Date.now(),
-      presenceId: uuidv4(),
-    };
-
-    try {
-      zero.mutate(mutators.userPresence.upsert(mutationPayload));
-    } catch (error) {
-      console.error('Mutation failed:', error);
-    }
+    if (!user?.id) return;
+    zero.mutate(
+      mutators.userPresence.upsert({
+        notificationsPausedUntil: Date.now() + durationMinutes * 60 * 1000,
+        timestamp: Date.now(),
+        presenceId: uuidv4(),
+      }),
+    );
   };
 
   const handlePauseNotificationsUntil = (untilDate: Date): void => {
@@ -140,48 +131,9 @@ const Settings = (): ReactElement => {
     );
   };
 
-  const pauseOptions = useMemo(
-    () => [
-      { label: '30 minutes', minutes: 30 },
-      { label: '1 hour', minutes: 60 },
-      { label: '4 hours', minutes: 240 },
-      { label: 'Until tomorrow', minutes: 1440 },
-      { label: 'Until next week', minutes: 10080 },
-    ],
-    [],
-  );
-
-  // Check if user has a valid (non-expired) status
-  const hasValidStatus =
-    user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
-
-  const handleStatusClick = (): void => {
-    setIsStatusModalOpen(true);
-  };
-
-  const handleStatusModalClose = (): void => {
-    setIsStatusModalOpen(false);
-  };
-
-  const handleClearStatus = (e: React.MouseEvent): void => {
-    e.stopPropagation();
-    if (user?.id) {
-      zero.mutate(
-        mutators.userPresence.upsert({
-          statusEmoji: null,
-          statusContent: null,
-          statusExpiryAt: null,
-          timestamp: Date.now(),
-          presenceId: uuidv4(),
-        }),
-      );
-    }
-  };
-
   const handleProfileClick = (): void => {
-    // Use useParams to get channelId from React Router
+    onClose();
     if (channelId) {
-      // We're in a chat, use the current channel in dir
       void navigate(`/chat/dir/${channelId}/profile/${user?.id}`);
     } else {
       if (generalChannel) {
@@ -190,51 +142,9 @@ const Settings = (): ReactElement => {
     }
   };
 
-  // TODO: Figure out a way to automatically
-  // extract themes from the useTheme hook
-  const themes: Array<{ id: 'classic' | 'midnight' | 'summer_breeze'; label: string; bg: string }> =
-    [
-      {
-        id: 'classic',
-        label: 'Classic',
-        bg: `linear-gradient(180deg, #E2EEFB 0%, #EAEFDB 100%)`,
-      },
-      {
-        id: 'summer_breeze',
-        label: 'Summer Breeze',
-        bg: `linear-gradient(
-          180deg,
-          #72a2c6 0%,
-          #a1a1a9 50.96%,
-          #c3bac9 69.71%,
-          #7c80a5 78.85%,
-          #6274a6 100%
-        )`,
-      },
-      {
-        id: 'midnight',
-        label: 'Midnight (WIP)',
-        bg: '#0a0a0a',
-      },
-    ];
-
-  const handleOpenChangelog = (e: React.MouseEvent): void => {
-    const changelogUrl = import.meta.env.VITE_API_URL.replace('/api', '/changelog');
-    if (isElectronApp()) {
-      if (e.metaKey || e.ctrlKey) {
-        window.electronAPI?.openExternal?.(changelogUrl);
-      } else {
-        webviewActor.send({ type: 'ADD_TAB', url: changelogUrl });
-        webviewActor.send({ type: 'OPEN' });
-      }
-    } else {
-      // In browser: open in new tab
-      window.open(changelogUrl, '_blank', 'noopener,noreferrer');
-    }
-  };
-
   return (
     <div className='flex flex-col gap-4 min-w-[280px] max-w-[320px] w-full'>
+      {/* User identity section */}
       <div className='flex items-start gap-3'>
         <div className='flex-shrink-0'>
           <Avatar userId={user?.id || ''} size='lg' showActiveStatus={false} />
@@ -360,107 +270,36 @@ const Settings = (): ReactElement => {
         )}
       </div>
 
-      {/* Assignment Status Section */}
-      {(isActiveInAtLeastOneGroup || isCurrentlyUnavailable) && (
-        <div className='mt-2 space-y-1'>
-          <div
-            className={cn(
-              'px-2 py-1 rounded-lg border transition-colors w-full flex items-center justify-between gap-2',
-              isCurrentlyUnavailable
-                ? 'border-border bg-transparent hover:bg-muted'
-                : 'border-border bg-muted hover:bg-border cursor-pointer',
-            )}
-            onClick={() => {
-              if (!isCurrentlyUnavailable) {
-                setIsAssignmentModalOpen(true);
-              }
-            }}
-            onKeyDown={e => {
-              if (!isCurrentlyUnavailable && (e.key === 'Enter' || e.key === ' ')) {
-                e.preventDefault();
-                setIsAssignmentModalOpen(true);
-              }
-            }}
-            role='button'
-            tabIndex={0}
-            title={
-              isCurrentlyUnavailable ? 'Paused from assignment' : 'Click to pause from assignment'
-            }
-            data-track-category='Settings'
-            data-track-name='OpenAssignmentModal'
-          >
-            {isCurrentlyUnavailable ? (
+      {/* Pause notifications */}
+      <div className='space-y-1'>
+        {isNotificationsPaused ? (
+          <div className='space-y-1'>
+            <div className='px-2 py-1 rounded-lg border border-border bg-transparent w-full flex items-center justify-between gap-2'>
               <div className='flex items-center gap-2 min-w-0 flex-1'>
-                <PauseCircle className='size-4 flex-shrink-0 text-muted-foreground' />
-                <div className='text-sm font-medium text-foreground truncate'>
-                  Paused from ticket assignment
-                </div>
+                <BellOff className='size-4 flex-shrink-0 text-muted-foreground' />
+                <span className='text-sm font-medium text-foreground truncate'>
+                  Notifications paused
+                </span>
               </div>
-            ) : (
-              <div className='flex items-center p-1 gap-2 text-muted-foreground'>
-                <PauseCircle className='size-4 flex-shrink-0' />
-                <span className='text-xs truncate'>Pause from ticket assignment</span>
-              </div>
-            )}
-
-            {isCurrentlyUnavailable && (
               <Button
                 variant='ghost'
                 size='lg'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
-                title='Resume ticket assignment'
-                onClick={handleResumeAssignment}
+                title='Resume notifications'
+                onClick={handleResumeNotifications}
                 data-track-category='Settings'
-                data-track-name='ResumeAssignment'
+                data-track-name='ResumeNotifications'
               >
                 <X className='size-3 text-muted-foreground' />
               </Button>
-            )}
-          </div>
-          {isCurrentlyUnavailable && unavailableUntil && (
-            <div className='text-xs text-muted-foreground'>
-              Until {format(new Date(unavailableUntil), 'dd/MM/yyyy hh:mm a')}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Global Notification Pause Section */}
-      {isNotificationsPaused ? (
-        <div className='mt-2 space-y-1'>
-          <div
-            className={cn(
-              'px-2 py-1 rounded-lg border border-border bg-transparent hover:bg-accent transition-colors w-full flex items-center justify-between gap-2',
-            )}
-            data-track-category='Settings'
-            data-track-name='ResumeNotificationsArea'
-          >
-            <div className='flex items-center gap-2 min-w-0 flex-1'>
-              <BellOff className='size-4 flex-shrink-0 text-muted-foreground' />
-              <div className='text-sm font-medium text-foreground truncate'>
-                Notifications paused
+            {notificationsPausedUntil && (
+              <div className='text-xs text-muted-foreground px-2'>
+                Until {format(new Date(notificationsPausedUntil), 'dd/MM/yyyy hh:mm a')}
               </div>
-            </div>
-            <Button
-              variant='ghost'
-              size='lg'
-              className='flex-shrink-0 p-1 h-auto hover:bg-gray-300 min-w-[20px]'
-              title='Resume notifications'
-              onClick={handleResumeNotifications}
-              data-track-category='Settings'
-              data-track-name='ResumeNotifications'
-            >
-              <X className='size-3 text-muted-foreground' />
-            </Button>
+            )}
           </div>
-          {notificationsPausedUntil && (
-            <div className='text-xs text-muted-foreground'>
-              Until {format(new Date(notificationsPausedUntil), 'dd/MM/yyyy hh:mm a')}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className='mt-2 space-y-1'>
+        ) : (
           <Popover
             trigger={
               <button
@@ -491,7 +330,6 @@ const Settings = (): ReactElement => {
                     key={option.minutes}
                     onClick={e => {
                       e.stopPropagation();
-                      e.preventDefault();
                       handlePauseNotifications(option.minutes);
                     }}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
@@ -505,7 +343,6 @@ const Settings = (): ReactElement => {
                 <button
                   onClick={e => {
                     e.stopPropagation();
-                    e.preventDefault();
                     setShowCustomDatePicker(true);
                   }}
                   className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
@@ -525,198 +362,40 @@ const Settings = (): ReactElement => {
               />
             )}
           </Popover>
-        </div>
-      )}
-
-      <Button
-        type='button'
-        variant='ghost'
-        className='w-full text-left hover:bg-muted rounded-md justify-start gap-2'
-        onClick={handleProfileClick}
-        data-track-category='Settings'
-        data-track-name='OpenProfile'
-      >
-        <User className='size-4' />
-        Profile
-      </Button>
-
-      <hr className='border-border w-full' />
-
-      {/* Theme Selection Section */}
-      <div className='space-y-2'>
-        <p className='text-sm font-medium text-foreground'>Appearance</p>
-        <div className='flex gap-2 w-full flex-wrap'>
-          {themes.map(themeOption => (
-            <button
-              key={themeOption.id}
-              onClick={() => changeTheme(themeOption.id)}
-              className='flex-1 w-25 space-y-1'
-              data-track-category='Settings'
-              data-track-name='SelectTheme'
-              data-track-metadata={JSON.stringify({ themeId: themeOption.id })}
-              data-testid={`theme-btn-${themeOption.id}`}
-            >
-              <div
-                className='w-25 h-[70px] rounded-md relative overflow-clip'
-                style={{
-                  background: themeOption.bg,
-                  border:
-                    theme === themeOption.id
-                      ? '1px solid var(--sidebar-badge-accent)'
-                      : '1px solid transparent',
-                }}
-              >
-                <div className='absolute left-1/3 top-1/3 w-full h-full bg-muted rounded-md border border-border shadow-3xl'>
-                  <div className='w-fit px-1 py-0.5'>Aa</div>
-                </div>
-              </div>
-              <div
-                className={cn(
-                  'text-xs text-center whitespace-nowrap',
-                  theme === themeOption.id ? 'text-primary' : 'text-muted-foreground',
-                )}
-              >
-                {themeOption.label}
-              </div>
-            </button>
-          ))}
-        </div>
+        )}
       </div>
 
       <hr className='border-border w-full' />
-      {/* AI Launch preference — desktop only */}
-      <div className='space-y-3'>
-        <p className='text-sm font-medium text-foreground'>Launch</p>
-        <div className='flex items-center justify-between gap-3'>
-          <div className='flex-1 min-w-0'>
-            <p className='text-sm text-foreground'>Open AI on launch</p>
-            <p className='text-xs text-muted-foreground mt-0.5'>
-              Start with the Xyne AI landing page instead of chat
-            </p>
-          </div>
-          <Switch
-            id='ai-landing-default'
-            checked={aiLandingDefault}
-            onCheckedChange={setAiLandingDefault}
-          />
-        </div>
-      </div>
 
-      <hr className='border-border w-full' />
-      {/* Messaging preferences */}
-      <div className='space-y-3'>
-        <p className='text-sm font-medium text-foreground'>Messaging</p>
-        <div className='flex items-center justify-between gap-3'>
-          <div className='flex-1 min-w-0'>
-            <p className='text-sm text-foreground'>Press Enter to send</p>
-            <p className='text-xs text-muted-foreground mt-0.5'>
-              {enterSendsMessage
-                ? 'Shift + Enter starts a new line'
-                : 'Shift + Enter sends the message'}
-            </p>
-          </div>
-          <Switch
-            id='enter-sends-message'
-            checked={enterSendsMessage}
-            onCheckedChange={setEnterSendsMessage}
-          />
-        </div>
-      </div>
-
-      <hr className='border-border w-full' />
-      {/* Changelog Section */}
-      <div className='space-y-2'>
-        <button
-          onClick={handleOpenChangelog}
-          className='w-full flex items-center gap-2 px-2 py-2 rounded-lg bg-transparent hover:bg-muted transition-colors text-left group'
-          data-track-category='SETTINGS'
-          data-track-name='OpenChangelog'
+      {/* Navigation links */}
+      <div className='space-y-1'>
+        <Button
+          type='button'
+          variant='ghost'
+          className='w-full text-left hover:bg-muted rounded-md justify-start gap-2'
+          onClick={handleProfileClick}
+          data-track-category='Settings'
+          data-track-name='OpenProfile'
         >
-          <div className='flex-1 min-w-0'>
-            <p className='text-sm font-medium text-foreground'>Changelog</p>
-          </div>
-          <span className='inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400'>
-            NEW
-          </span>
-        </button>
+          <User className='size-4' />
+          Profile
+        </Button>
+
+        <Button
+          type='button'
+          variant='ghost'
+          className='w-full text-left hover:bg-muted rounded-md justify-start gap-2'
+          onClick={onOpenPreferences}
+          data-track-category='Settings'
+          data-track-name='OpenPreferences'
+        >
+          <Settings2 className='size-4' />
+          Preferences
+        </Button>
       </div>
 
       <hr className='border-border w-full' />
-      <div className='space-y-2'>
-        <p className='text-sm font-medium text-foreground'>Developer Settings</p>
-        <div className='space-y-2'>
-          <Switch
-            id='show-send-indicators'
-            checked={debugSettings.showSendIndicators}
-            onCheckedChange={toggleSendIndicators}
-            label='Show send indicators'
-          />
-          <Switch
-            id='ask-ai-version'
-            checked={askAIVersion === 'v2'}
-            onCheckedChange={checked => setAskAIVersion(checked ? 'v2' : 'v1')}
-            label='Use Ask AI v2'
-          />
-        </div>
-      </div>
 
-      {isElectronApp() && (
-        <>
-          <hr className='border-border w-full' />
-          <div className='space-y-2'>
-            <p className='text-sm font-medium text-foreground'>Notifications</p>
-            <MeetingDetectionToggle />
-          </div>
-        </>
-      )}
-
-      <hr className='border-border w-full' />
-
-      <div className='text-xs flex flex-col gap-1 text-muted-foreground'>
-        <div>Version: {__APP_VERSION__}</div>
-        {logger.zeroClientId && (
-          <button
-            onClick={() => {
-              navigator.clipboard
-                .writeText(logger.zeroClientId!)
-                .then(() => {
-                  toast.success('Client ID copied to clipboard');
-                })
-                .catch(() => {
-                  toast.error('Failed to copy Client ID');
-                });
-            }}
-            className='flex items-center gap-1 hover:text-muted-foreground transition-colors cursor-pointer text-left'
-            data-track-category='Settings'
-            data-track-name='CopyClientId'
-          >
-            <span>Client ID: {logger.zeroClientId}</span>
-            <Copy className='size-3' />
-          </button>
-        )}
-        {logger.zeroClientGroupId && (
-          <button
-            onClick={() => {
-              navigator.clipboard
-                .writeText(logger.zeroClientGroupId!)
-                .then(() => {
-                  toast.success('Client Group ID copied to clipboard');
-                })
-                .catch(() => {
-                  toast.error('Failed to copy Client Group ID');
-                });
-            }}
-            className='flex items-center gap-1 hover:text-muted-foreground transition-colors cursor-pointer text-left'
-            data-track-category='Settings'
-            data-track-name='CopyClientGroupId'
-          >
-            <span>Client Group ID: {logger.zeroClientGroupId}</span>
-            <Copy className='size-3' />
-          </button>
-        )}
-      </div>
-
-      <hr className='border-border w-full' />
       <div className='space-y-2'>
         <Button
           type='button'
@@ -744,14 +423,6 @@ const Settings = (): ReactElement => {
             : null
         }
       />
-
-      {/* Assignment Status Modal */}
-      {(isActiveInAtLeastOneGroup || isCurrentlyUnavailable) && (
-        <UpdateAssignmentStatusModal
-          isOpen={isAssignmentModalOpen}
-          onClose={() => setIsAssignmentModalOpen(false)}
-        />
-      )}
     </div>
   );
 };

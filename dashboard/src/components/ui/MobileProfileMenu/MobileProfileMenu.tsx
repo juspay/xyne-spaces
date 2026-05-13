@@ -2,6 +2,7 @@ import { ReactElement, useMemo, useState, useCallback, Ref } from 'react';
 import Avatar from '../Avatar/Avatar';
 import { Drawer } from 'vaul';
 import ProfileView from '../../Settings/Views/ProfileView';
+import Preferences from '../../Settings/Preferences';
 import {
   StatusSuggestionsView,
   StatusEditView,
@@ -21,9 +22,11 @@ type ViewType = 'default' | 'status-suggestions' | 'status-edit';
 
 export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElement => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState<boolean>(false);
   const [view, setView] = useState<ViewType>('default');
   const [statusData, setStatusData] = useState<SelectedStatusData | undefined>(undefined);
   const [elementRef, bounds] = useMeasure();
+
   const handleSetView = useCallback((newView: ViewType, data?: SelectedStatusData) => {
     setView(newView);
     setStatusData(data);
@@ -37,7 +40,13 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
   const content = useMemo(() => {
     switch (view) {
       case 'default':
-        return <ProfileView setView={handleSetView} />;
+        return (
+          <ProfileView
+            setView={handleSetView}
+            onClose={() => setIsOpen(false)}
+            onOpenPreferences={() => setIsPreferencesOpen(true)}
+          />
+        );
       case 'status-suggestions':
         return <StatusSuggestionsView setView={handleSetView} />;
       case 'status-edit':
@@ -106,6 +115,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
           </Drawer.Content>
         </Drawer.Portal>
       </Drawer.Root>
+      <Preferences open={isPreferencesOpen} onClose={() => setIsPreferencesOpen(false)} />
     </>
   );
 };
