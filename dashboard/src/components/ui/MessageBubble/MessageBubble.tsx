@@ -453,13 +453,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   // Query the original conversation only when this is a forwarded desk-ticket
   // message with empty content (email body lives in the email table, not in
-  // message.content). Pass '' when not needed so Zero makes no real subscription.
-  const forwardedQueryConversationId =
-    forwardedMessageData && !forwardedMessageData.content?.trim()
-      ? (forwardedMessageData.originalConversationId ?? '')
-      : '';
+  // message.content). Use enabled:false otherwise to avoid unnecessary subscriptions.
+  const needsForwardedConversationQuery =
+    !!forwardedMessageData && !forwardedMessageData.content?.trim();
   const [forwardedOriginalConversation] = useQuery(
-    queries.getConversationById({ conversationId: forwardedQueryConversationId }),
+    queries.getConversationById({
+      conversationId: forwardedMessageData?.originalConversationId ?? '',
+    }),
+    { enabled: needsForwardedConversationQuery },
   );
 
   // Resolve the displayable content for the forwarded message block.
