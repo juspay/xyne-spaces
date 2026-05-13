@@ -124,11 +124,16 @@ export class MicrosoftAuthController {
         const codeVerifier = pkceServiceV2.generateCodeVerifier();
         const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
 
+        // Get invitationId from query (for invitation flow)
+        const invitationId = req.query.invitationId as string | undefined;
+
         const state = await oauthStateServiceV2.generateState(
           platform,
           codeChallenge,
           undefined,
           'microsoft',
+          undefined,
+          invitationId,
         );
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
@@ -464,6 +469,7 @@ export class MicrosoftAuthController {
 
       const code = (req.body?.code as string | undefined)?.trim();
       const state = (req.body?.state as string | undefined)?.trim();
+      const bodyInvitationId = (req.body?.invitationId as string | undefined)?.trim();
 
       if (!code || !state) {
         logger.error(`[${requestId}] Missing code or state`);
@@ -508,6 +514,8 @@ export class MicrosoftAuthController {
         return;
       }
 
+
+
       const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state);
       if (!codeVerifier) {
         logger.error(`[${requestId}] PKCE verifier not found`);
@@ -531,7 +539,6 @@ export class MicrosoftAuthController {
         ...( codeVerifier ? { code_verifier: codeVerifier } : {}),
       } as Parameters<typeof this.oauthClient.getToken>[0]);
       const { token } = tokenResult;
-
       const accessToken = token.access_token as string;
       if (!accessToken) {
         throw new Error('No access token received from Microsoft');
@@ -563,9 +570,181 @@ export class MicrosoftAuthController {
       }
 
       const workspaces = await this.userService.getWorkspacesByEmail(email);
-      logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
+      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
+      logger.info(`[${requestId}] User has ${workspaces.length} workspace(s), userExistsButRemoved: ${userExistsButRemoved}`);
+
+      const isProduction = process.env.NODE_ENV === 'production';
+
+      // If user has no workspaces and is not invited (not in org_members), redirect to no-access
+      // This mirrors Google SSO behavior for unauthorized users
+      if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
+        logger.info(`[${requestId}] User has no workspaces and no invitation - redirecting to no-access`);
+        res.status(200).json({
+          success: true,
+          workspaces: [],
+          userExistsButRemoved: false,
+          email,
+          name: profile.displayName,
+          picture: undefined,
+        });
+        return;
+      }
+
+      // If an invitation is pending: set google_access_token so the Electron renderer can later
+      // call acceptInvitation + loginWorkspace, then return a hasInvitation signal. The renderer
+      // will navigate to /invite?loginComplete=true inside the app — no browser involvement.
+      // Combine state and body invitation IDs (same as Google flow)
+      const effectiveInvitationId = stateData.invitationId || bodyInvitationId;
+      logger.info(`[${requestId}] DEBUG invitation: stateData.invitationId=${stateData.invitationId || 'NULL'}, body.invitationId=${bodyInvitationId || 'NULL'}, effective=${effectiveInvitationId || 'NULL'}`);
+      if (effectiveInvitationId) {
+        logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
+        // Use sameSite: 'lax' for Electron invitation flow - cookies need to be sent
+        // from the renderer (localhost:5173) to backend (localhost:3001)
+        // Note: Only store essential user info, NOT tokens (too large for cookies)
+        res.cookie('google_access_token', JSON.stringify({
+          user: {
+            providerUserId: profile.id,
+            email,
+            name: profile.displayName,
+            picture: undefined,
+          },
+          provider: 'microsoft',
+        }), {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          path: '/',
+          maxAge: 10 * 60 * 1000,
+        });
+        logger.info(`[${requestId}] Cookie set: google_access_token (sameSite=lax, secure=${isProduction}, size=minimal)`);
+        res.status(200).json({
+          success: true,
+          hasInvitation: true,
+          invitationId: effectiveInvitationId,
+          loggedInEmail: email,
+          email,
+          name: profile.displayName,
+          picture: undefined,
+        });
+        return;
+      }
 
       logger.info(`[${requestId}] Finding/creating user: ${email}`);
+      
+      /**
+       * AUTO-LOGIN SINGLE WORKSPACE USERS (Electron)
+       * Mirrors Google behavior - auto-login when user has exactly 1 workspace
+       */
+      if (workspaces.length === 1) {
+        const workspaceId = workspaces[0]!.id;
+        logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
+        
+        const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
+          provider: AuthProvider.MICROSOFT,
+          providerUserId: profile.id,
+          email,
+          name: profile.displayName,
+          picture: undefined,
+        }, workspaceId);
+
+        await this.userService.ensureUserPresence(user.id);
+
+        logger.info(
+          `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
+        );
+
+        const customToken = jwtService.generateToken({
+          sub: user.id,
+          email: user.email,
+          name: user.name,
+          picture: user.picture ?? undefined,
+          workspaceId: user.workspaceId ?? undefined,
+          memberId: user.orgMemberId ?? undefined,
+        });
+
+        let sessionId: string | null = null;
+        const refreshToken = token.refresh_token as string | undefined;
+
+        if (refreshToken) {
+          try {
+            const refreshTokenExpiry = new Date();
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+
+            const session = await this.userSessionService.createSession({
+              userId: user.id,
+              refreshToken,
+              refreshTokenExpiry,
+              accessToken,
+              accessTokenExpiry: token.expires_at
+                ? new Date(token.expires_at as string)
+                : undefined,
+              deviceInfo: JSON.stringify({
+                userAgent: req.headers['user-agent'],
+                acceptLanguage: req.headers['accept-language'],
+                timestamp: new Date().toISOString(),
+                platform: 'electron',
+              }),
+              ipAddress: req.ip || req.socket.remoteAddress || undefined,
+            });
+
+            sessionId = session.id;
+            logger.info(`[${requestId}] Session created: ${sessionId}`);
+          } catch (sessionError) {
+            logger.error(`[${requestId}] Error creating user session:`, sessionError);
+            // Continue without session creation - not critical for login
+          }
+        }
+
+        const cookieOptions = {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          path: '/',
+        };
+
+        res.cookie('xyne_last_workspace', workspaceId, {
+          ...cookieOptions,
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+
+        res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
+          ...cookieOptions,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        if (sessionId) {
+          res.cookie('user_session_id', sessionId, {
+            ...cookieOptions,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+          });
+        }
+
+        if (isNewUser) {
+          res.cookie('is_new_user', 'true', {
+            httpOnly: false,
+            secure: isProduction,
+            sameSite: 'strict',
+            path: '/',
+            maxAge: 24 * 60 * 60 * 1000,
+          });
+        }
+
+        logger.info(`[${requestId}] Electron auto-login complete - cookies set: user_session_id`);
+
+        // Return JSON with workspaces (Electron expects this for renderer to handle)
+        res.status(200).json({
+          success: true,
+          email: user.email,
+          name: user.name,
+          picture: user.picture ?? undefined,
+          workspaces,
+          userExistsButRemoved: false,
+        });
+        return;
+      }
+
+      // Multiple workspaces (or new user): create user without workspace assignment
+      // Return workspaces array so Electron can show workspace selector
       const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
         provider: AuthProvider.MICROSOFT,
         providerUserId: profile.id,
@@ -577,7 +756,7 @@ export class MicrosoftAuthController {
       await this.userService.ensureUserPresence(user.id);
 
       logger.info(
-        `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
+        `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser}, workspaces: ${workspaces.length})`
       );
 
       const customToken = jwtService.generateToken({
@@ -589,6 +768,7 @@ export class MicrosoftAuthController {
         memberId: user.orgMemberId ?? undefined,
       });
 
+      // Create session for multi-workspace users too (same as single workspace)
       let sessionId: string | null = null;
       const refreshToken = token.refresh_token as string | undefined;
 
@@ -622,27 +802,21 @@ export class MicrosoftAuthController {
         }
       }
 
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions: {
-        httpOnly: boolean;
-        secure: boolean;
-        sameSite: 'strict' | 'lax' | 'none';
-        path: string;
-      } = {
+      // Store pending auth data for later loginWorkspace call (multi-workspace case)
+      res.cookie('google_access_token', customToken, {
         httpOnly: true,
         secure: isProduction,
-        sameSite: 'strict',
+        sameSite: 'strict' as const,
         path: '/',
-      };
-
-      res.cookie('google_access_token', customToken, {
-        ...cookieOptions,
         maxAge: config.jwt.expirationSeconds * 1000,
       });
 
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
-          ...cookieOptions,
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict',
+          path: '/',
           maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
         });
       }
@@ -657,10 +831,14 @@ export class MicrosoftAuthController {
         });
       }
 
-      logger.info(`[${requestId}] Electron code exchange successful`);
+      logger.info(`[${requestId}] Multiple workspaces (${workspaces.length}) detected - returning to selector`);
       res.status(200).json({
         success: true,
-        message: 'Authentication successful',
+        email: user.email,
+        name: user.name,
+        picture: user.picture ?? undefined,
+        workspaces,
+        userExistsButRemoved: workspaces.length === 0,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

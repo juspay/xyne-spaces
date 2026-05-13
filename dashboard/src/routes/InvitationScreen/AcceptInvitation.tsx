@@ -162,9 +162,10 @@ export const AcceptInvitation = (): ReactElement => {
         setLastActiveWorkspaceId(user.email, workspaceId);
       }
 
-      // Clear pending invitation cookie so a subsequent re-login (e.g. after workspace
-      // switch) goes through the normal auth flow rather than hitting this stale invitation.
+      // Clear pending invitation cookie + localStorage so a subsequent re-login (e.g. after
+      // workspace switch) goes through the normal auth flow rather than hitting this stale invitation.
       Cookies.remove('pending_invitation_id', { path: '/' });
+      localStorage.removeItem('pending_invitation_id');
 
       // Show "Open in App" screen instead of redirecting immediately
       // Include invitation data so we can show the success screen
@@ -174,6 +175,8 @@ export const AcceptInvitation = (): ReactElement => {
         setState({ status: 'accepted', workspaceId, invitation: {} as InvitationDetails });
       }
     } catch (error) {
+      Cookies.remove('pending_invitation_id', { path: '/' });
+      localStorage.removeItem('pending_invitation_id');
       if (axios.isAxiosError<ApiErrorResponse>(error)) {
         setState({
           status: 'error',
@@ -186,6 +189,8 @@ export const AcceptInvitation = (): ReactElement => {
   };
 
   const handleGoHome = (): void => {
+    Cookies.remove('pending_invitation_id', { path: '/' });
+    localStorage.removeItem('pending_invitation_id');
     void navigate('/');
   };
 
