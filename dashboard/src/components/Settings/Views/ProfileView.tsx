@@ -9,10 +9,13 @@ import {
   Bell,
   BellOff,
   Calendar,
+  Camera,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { DateTimePicker } from '../../ui/DateTimePicker/DateTimePicker';
 import { Popover } from '../../ui/Popover/Popover';
+import { useQueryClient } from '@tanstack/react-query';
+import { uploadProfilePicture } from '../../../services/userProfile/userProfileService';
 import { useZero } from '../../../hooks/useZero';
 import { useAuth } from '../../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -41,10 +44,40 @@ const ProfileView = ({
 }): ReactElement => {
   const { logout } = useAuth();
   const user = useSelf();
+  const queryClient = useQueryClient();
   const [isPresenceDropdownOpen, setIsPresenceDropdownOpen] = useState(false);
   const presenceDropdownRef = useRef<HTMLDivElement>(null);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState<Date | null>(null);
+  const [isUploadingPicture, setIsUploadingPicture] = useState(false);
+  const pictureInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePictureClick = (): void => {
+    if (!isUploadingPicture) {
+      pictureInputRef.current?.click();
+    }
+  };
+
+  const handlePictureChange = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingPicture(true);
+    try {
+      await uploadProfilePicture(file);
+      void queryClient.invalidateQueries({
+        queryKey: ['user', user?.id],
+        exact: false,
+      });
+    } catch {
+      // Error is already handled by toast in the service
+    } finally {
+      setIsUploadingPicture(false);
+      if (pictureInputRef.current) {
+        pictureInputRef.current.value = '';
+      }
+    }
+  };
   const zero = useZero();
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
@@ -172,7 +205,34 @@ const ProfileView = ({
       {/* User identity section */}
       <div className='flex items-start gap-3'>
         <div className='flex-shrink-0'>
-          <Avatar userId={user?.id || ''} size='lg' showActiveStatus={true} />
+          <div
+            className='relative group cursor-pointer'
+            onClick={handlePictureClick}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                handlePictureClick();
+              }
+            }}
+            role='button'
+            tabIndex={0}
+            data-track-category='PROFILE'
+            data-track-name='ChangePicture'
+          >
+            <Avatar userId={user?.id || ''} size='lg' showActiveStatus={true} />
+            <div className='absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity'>
+              <Camera className='size-4 text-white' />
+            </div>
+            <input
+              ref={pictureInputRef}
+              type='file'
+              accept='image/jpeg,image/png,image/webp'
+              onChange={e => {
+                void handlePictureChange(e);
+              }}
+              className='hidden'
+              disabled={isUploadingPicture}
+            />
+          </div>
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
           <p className='text-sm font-medium text-foreground truncate'>{user?.name || 'User'}</p>
