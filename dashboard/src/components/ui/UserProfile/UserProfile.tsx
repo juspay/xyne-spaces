@@ -16,6 +16,7 @@ import {
   Hash,
   Mic,
   CheckCircle2,
+  MapPin,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../Avatar/Avatar';
@@ -46,6 +47,7 @@ import { uploadProfilePicture } from '../../../services/userProfile/userProfileS
 import { VoiceSignatureModal } from '../../Settings/VoiceSignatureModal/VoiceSignatureModal';
 import { queryClient } from '../../../services/clients/queryClient';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useMettleEmployeeDetails } from '../../../hooks/useMettleEmployeeDetails';
 
 interface UserProfileProps {
   userId: string;
@@ -61,6 +63,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
 
   const [userProfile] = useCachedQuery(queries.getUserProfile({ userId }));
   const user = useUser(userId);
+  const { data: employeeLocationDetailsViaMettle } = useMettleEmployeeDetails(user?.email);
   // Get live presence status from Socket.IO (not stale Zero data)
   const { status: livePresenceStatus } = useUserPresence(userId);
   const users = useUsers();
@@ -415,15 +418,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           ) : userProfile?.team ? (
             <div className='flex items-center gap-2 mt-1'>
               <div className='text-lg text-muted-foreground'>{userProfile.team}</div>
-              {isOwnProfile && (
-                <button
-                  onClick={() => handleStartEdit('team', userProfile.team)}
-                  className='text-muted-foreground hover:text-muted-foreground'
-                  title='Edit team'
-                >
-                  <Edit2 className='size-3' />
-                </button>
-              )}
             </div>
           ) : isOwnProfile ? (
             <button
@@ -559,18 +553,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
         <div className='px-6 py-4'>
           <div className='flex items-center gap-2 mb-3'>
             <h3 className='text-sm font-semibold text-foreground'>Manager</h3>
-            {isOwnProfile && managerUser && editingField !== 'manager' && (
-              <button
-                onClick={() => {
-                  setEditingField('manager');
-                  setSelectedManagerUsers([managerUser]);
-                }}
-                className='text-muted-foreground hover:text-muted-foreground'
-                title='Edit manager'
-              >
-                <Edit2 className='size-3' />
-              </button>
-            )}
           </div>
           {editingField === 'manager' && isOwnProfile ? (
             <div className='space-y-2'>
@@ -915,6 +897,30 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
               </div>
             </div>
           ) : null}
+
+          {/* Current Location */}
+          {(employeeLocationDetailsViaMettle?.current_location || employeeLocationDetailsViaMettle?.current_landmark) && (
+            <div className='flex items-start gap-3'>
+              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+                <MapPin className='size-4 text-muted-foreground' />
+              </div>
+              <div className='flex-1'>
+                <div className='text-sm font-semibold text-foreground leading-tight'>
+                  Current Location
+                </div>
+                {employeeLocationDetailsViaMettle?.current_location && (
+                  <div className='text-sm text-foreground mt-1'>
+                    {employeeLocationDetailsViaMettle.current_location}
+                  </div>
+                )}
+                {employeeLocationDetailsViaMettle?.current_landmark && (
+                  <div className='text-xs text-muted-foreground mt-1'>
+                    Landmark: {employeeLocationDetailsViaMettle.current_landmark}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
