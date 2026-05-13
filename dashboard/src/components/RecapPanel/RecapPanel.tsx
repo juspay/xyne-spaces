@@ -19,9 +19,13 @@ import { RecapSubscription, RecapCard } from './RecapPanel.types';
 import { getYesterdayIST, formatRecapDate } from './RecapPanel.utils';
 import RecapSettings from './RecapSettings';
 import { RecapCalendarView } from './RecapCalendarView';
+import ProjectRecapPanel from './ProjectRecapPanel';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useCacConfig } from '../../hooks/useCacConfig';
+
+type RecapTab = 'channel' | 'project';
 
 // Random greetings for the recap header
 const RECAP_GREETINGS = [
@@ -49,12 +53,19 @@ const RecapPanel = (): ReactElement => {
   const params = useParams<{ channelId?: string; conversationId?: string }>();
   const zero = useZero();
   const { isMobile } = usePlatform();
+  const { config: projectRecapEnabled } = useCacConfig<boolean>({
+    key: 'project_recap_enabled',
+    fallbackConfig: false,
+  });
 
   // Show right panel when a cited thread is open
   const showThreadPanel = !!params.channelId;
 
   // Use the cached recap data hook
   const { recapData, subscriptions, isLoadingSubscriptions, isFirstTime } = useRecapData();
+
+  // Active tab: channel or project
+  const [activeTab, setActiveTab] = useState<RecapTab>('channel');
 
   // Settings modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -593,10 +604,11 @@ const RecapPanel = (): ReactElement => {
     );
   };
 
-  // Show channel selection for first-time users - show welcome screen with button
-  if (isFirstTime && !isLoadingSubscriptions) {
-    return (
-      <>
+  // Render first-time welcome content for channel tab
+  const renderChannelContent = (): ReactElement => {
+    // First-time users see the welcome screen
+    if (isFirstTime && !isLoadingSubscriptions) {
+      return (
         <div className='flex flex-col items-center justify-center h-full p-8 text-center bg-background'>
           <Clock className='text-muted-foreground mb-4' size={48} />
           <h2 className='text-xl font-semibold text-foreground mb-2'>
@@ -616,14 +628,12 @@ const RecapPanel = (): ReactElement => {
             Choose Channels
           </button>
         </div>
-        <RecapSettings
-          isOpen={isSettingsOpen}
-          onClose={handleCloseSettings}
-          onSaved={handleSettingsSaved}
-        />
-      </>
-    );
-  }
+      );
+    }
+
+    // Returning users see their recap cards
+    return renderRecapCards();
+  };
 
   // Main content — split when channel panel is open
   return (
@@ -651,63 +661,96 @@ const RecapPanel = (): ReactElement => {
                 )}
                 <h3 className='font-bold text-foreground text-xl'>Recap</h3>
                 <Sparkles size={20} className='text-blue-500' />
+                {/* Channel / Project toggle — only shown when project recap is enabled */}
+                {projectRecapEnabled && (
+                  <div className='flex items-center gap-0.5 ml-2 bg-muted rounded-md p-0.5'>
+                    <button
+                      onClick={() => setActiveTab('channel')}
+                      className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
+                        activeTab === 'channel'
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      data-track-category='RECAP_PANEL'
+                      data-track-name='TAB_CHANNEL'
+                    >
+                      Channel
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('project')}
+                      className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
+                        activeTab === 'project'
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      data-track-category='RECAP_PANEL'
+                      data-track-name='TAB_PROJECT'
+                    >
+                      Project
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className='flex items-center gap-1'>
-                {/* Calendar Button with Dropdown */}
-                <div className='relative'>
-                  <button
-                    onClick={() => setShowCalendar(!showCalendar)}
-                    className={`p-1.5 rounded-md transition-colors duration-200 ${
-                      showCalendar
-                        ? 'text-blue-500 bg-blue-500/10'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                    }`}
-                    aria-label='View past recaps'
-                    title='View past recaps'
-                    data-track-category='RECAP_PANEL'
-                    data-track-name='OPEN_CALENDAR'
-                  >
-                    <Calendar size={18} />
-                  </button>
+              {!isFirstTime && (
+                <div className='flex items-center gap-1'>
+                  {/* Calendar Button with Dropdown */}
+                  <div className='relative'>
+                    <button
+                      onClick={() => setShowCalendar(!showCalendar)}
+                      className={`p-1.5 rounded-md transition-colors duration-200 ${
+                        showCalendar
+                          ? 'text-blue-500 bg-blue-500/10'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                      }`}
+                      aria-label='View past recaps'
+                      title='View past recaps'
+                      data-track-category='RECAP_PANEL'
+                      data-track-name='OPEN_CALENDAR'
+                    >
+                      <Calendar size={18} />
+                    </button>
 
-                  {/* Calendar Dropdown - positioned below the button */}
-                  {showCalendar && (
-                    <div className='absolute top-full mt-2 right-0 z-50 w-[300px]'>
-                      <div className='bg-background rounded-xl shadow-2xl border border-border overflow-hidden'>
-                        <RecapCalendarView
-                          onDateSelect={dateStr => {
-                            const todayStr = getTodayDateStr();
-                            if (dateStr === null || dateStr === todayStr) {
-                              handleBackToCurrent();
-                            } else {
-                              void handleSelectDate(dateStr);
-                            }
-                            setShowCalendar(false);
-                          }}
-                          selectedDate={selectedDate}
-                          onClose={() => setShowCalendar(false)}
-                        />
+                    {/* Calendar Dropdown - positioned below the button */}
+                    {showCalendar && (
+                      <div className='absolute top-full mt-2 right-0 z-50 w-[300px]'>
+                        <div className='bg-background rounded-xl shadow-2xl border border-border overflow-hidden'>
+                          <RecapCalendarView
+                            onDateSelect={dateStr => {
+                              const todayStr = getTodayDateStr();
+                              if (dateStr === null || dateStr === todayStr) {
+                                handleBackToCurrent();
+                              } else {
+                                void handleSelectDate(dateStr);
+                              }
+                              setShowCalendar(false);
+                            }}
+                            selectedDate={selectedDate}
+                            onClose={() => setShowCalendar(false)}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
 
-                <button
-                  onClick={handleOpenSettings}
-                  className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200'
-                  aria-label='Settings'
-                  title='Manage channels'
-                  data-track-category='RECAP_PANEL'
-                  data-track-name='OPEN_SETTINGS'
-                >
-                  <Settings size={18} />
-                </button>
-              </div>
+                  <button
+                    onClick={handleOpenSettings}
+                    className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200'
+                    aria-label='Settings'
+                    title='Manage channels'
+                    data-track-category='RECAP_PANEL'
+                    data-track-name='OPEN_SETTINGS'
+                  >
+                    <Settings size={18} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Scrollable recap cards */}
-          <div className='flex-1 overflow-hidden bg-muted/30'>{renderRecapCards()}</div>
+          <div className='flex-1 overflow-y-auto bg-muted/30'>
+            {activeTab === 'channel' ? renderChannelContent() : <ProjectRecapPanel />}
+          </div>
         </div>
 
         {/* Right: Thread panel — full screen on mobile, half width on desktop */}

@@ -4,7 +4,7 @@ import { useCachedQuery } from './useCachedQuery';
 import { queries } from '../zero/queries';
 import { useAllChannels, useUserChannelStatuses } from './useChannels';
 import { useAuth } from './useAuth';
-import { ChannelUserStatus, ChannelRecap } from '@xyne/shared';
+import { ChannelUserStatus, Recap } from '@xyne/shared';
 import { subDays } from 'date-fns';
 
 // Type definitions for recap summary data structure
@@ -168,7 +168,7 @@ const parseSummaryData = (
 
 // Process raw recap data into cards, merging base and custom recaps per channel
 const processRecapCards = (
-  recaps: ChannelRecap[],
+  recaps: Recap[],
   channelMap: Map<string, string>,
   currentUserId: string,
 ): { cards: RecapCard[]; totalMessages: number; totalRecapWords: number } => {
@@ -177,8 +177,8 @@ const processRecapCards = (
 
   // Separate base recaps (userId IS NULL) from custom recaps (userId = currentUserId)
   const baseRecaps = recaps.filter(r => r.userId === null || r.userId === undefined);
-  const customRecapMap = new Map<string, ChannelRecap>(
-    recaps.filter(r => r.userId === currentUserId).map(r => [r.channelId, r]),
+  const customRecapMap = new Map<string, Recap>(
+    recaps.filter(r => r.userId === currentUserId).map(r => [r.entityId, r]),
   );
 
   const cards = baseRecaps
@@ -192,8 +192,8 @@ const processRecapCards = (
         totalRecapWords += recapWords;
 
         const card: RecapCard = {
-          channelId: recap.channelId,
-          channelName: channelMap.get(recap.channelId) || 'Unknown Channel',
+          channelId: recap.entityId,
+          channelName: channelMap.get(recap.entityId) || 'Unknown Channel',
           summary: summaryPoints,
           messageCount: summaryData.messageCount || 0,
           drilldown: drilldownInfo,
@@ -202,7 +202,7 @@ const processRecapCards = (
         };
 
         // Merge custom recap if available for this channel
-        const customRecap = customRecapMap.get(recap.channelId);
+        const customRecap = customRecapMap.get(recap.entityId);
         if (customRecap) {
           try {
             const customData: SummaryData = JSON.parse(customRecap.summary) as SummaryData;
@@ -335,7 +335,7 @@ export const useRecapData = (dateOverride?: string | null) => {
     if (!dailyRecapsData || dailyRecapsData.length === 0) {
       return { cards: [], totalMessages: 0, totalRecapWords: 0 };
     }
-    return processRecapCards(dailyRecapsData as ChannelRecap[], channelMap, currentUserId);
+    return processRecapCards(dailyRecapsData as Recap[], channelMap, currentUserId);
   }, [dailyRecapsData, channelMap, currentUserId]);
 
   // Calculate time saved
@@ -363,10 +363,8 @@ export const useRecapData = (dateOverride?: string | null) => {
     if (!subscriptionsData || subscriptionsData.length === 0) return 0;
     if (!dailyRecapsData || dailyRecapsData.length === 0) return 0;
 
-    // Get channel IDs that have recaps for the target date
-    const recapChannelIds = new Set(
-      (dailyRecapsData as ChannelRecap[]).map(recap => recap.channelId),
-    );
+    // Get channel IDs that have recaps for yesterday
+    const recapChannelIds = new Set((dailyRecapsData as Recap[]).map(recap => recap.entityId));
 
     // Count subscriptions where:
     // 1. Channel has a recap for the target date

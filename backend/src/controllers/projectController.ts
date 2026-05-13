@@ -6,6 +6,8 @@ import { projectSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
+import { projectRecapGenerationService } from '@/services/projectRecapGenerationService';
+import { CacConfigService } from '@/services/cacConfigService';
 
 export class ProjectController {
   private projectRepository: ProjectRepository;
@@ -124,6 +126,35 @@ export class ProjectController {
         return;
       }
 
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getProjectRecap = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      const email = req.user?.email;
+
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const enabled = await CacConfigService.fetch(
+        'project_recap_enabled',
+        email ? { email } : undefined,
+      );
+      if (!enabled) {
+        res.status(403).json({ error: 'Feature not available' });
+        return;
+      }
+
+      const recaps = await projectRecapGenerationService.getProjectRecapsForUser(userId);
+
+      res.status(200).json({ success: true, recaps });
+    } catch (error) {
+      logger.error('Error fetching project recaps:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

@@ -219,6 +219,9 @@ export class WorkerScheduler {
                 logger.warn(`[WORKER_SCHEDULER] Recap cleanup will not be automatically scheduled. Manual triggers will still work.`);
                 // Continue without crashing the entire worker
             }
+            // Note: Project recap generation is now integrated into the channel recap generation job
+            // It runs automatically after all channel recaps complete successfully
+            logger.info('[WORKER_SCHEDULER] Project recap generation is integrated with channel recap generation');
         } else {
             logger.info('[WORKER_SCHEDULER] Recap scheduler is disabled (ENABLE_RECAP_SCHEDULER=false)');
         }

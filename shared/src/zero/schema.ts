@@ -100,6 +100,12 @@ export enum EntityType {
 }
 
 // @ts-ignore TS1294
+export enum RecapEntityType {
+  CHANNEL = 'CHANNEL',
+  PROJECT = 'PROJECT',
+}
+
+// @ts-ignore TS1294
 export enum AttachmentEntityType {
   TICKET = 'TICKET',
   CHAT = 'CHAT',
@@ -2104,6 +2110,17 @@ export const channelRecapTable = table('channel_recaps')
     channelId: string(),
     recapDate: number(),
     summary: string(),
+    userId: string().optional(),// null for base recap, actual userId for custom recap
+      })
+  .primaryKey('id');
+
+export const recapsTable = table('recaps')
+  .columns({
+    id: string(),
+    recapDate: number(),
+    entityType: enumeration<RecapEntityType>(),
+    entityId: string(),
+    summary: string(),
     userId: string().optional(), // null for base recap, actual userId for custom recap
   })
   .primaryKey('id');
@@ -3913,6 +3930,14 @@ export const channelRecapTableRelationships = relationships(channelRecapTable, (
   }),
 }));
 
+export const recapsTableRelationships = relationships(recapsTable, ({ one }) => ({
+  channel: one({
+    sourceField: ['entityId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+}));
+
 export const savedUserConfigurationValueTableRelationships = relationships(
   savedUserConfigurationValueTable,
   ({ one }) => ({
@@ -4029,6 +4054,8 @@ export const schema = createSchema({
     channelDailyRecapTable,
     // Channel Recaps
     channelRecapTable,
+    // Recaps
+    recapsTable,
     // Apps
     appsTable,
     installedAppsTable,
@@ -4130,6 +4157,8 @@ export const schema = createSchema({
     channelDailyRecapTableRelationships,
     // Channel Recaps
     channelRecapTableRelationships,
+    // Recaps
+    recapsTableRelationships,
     // Apps
     appsTableRelationships,
     installedAppsTableRelationships,
@@ -4240,6 +4269,9 @@ export type ChannelDailyRecap = Row<typeof schema.tables.channel_daily_recaps>;
 
 // Channel Recaps Types
 export type ChannelRecap = Row<typeof schema.tables.channel_recaps>;
+
+// Recaps Types
+export type Recap = Row<typeof schema.tables.recaps>;
 
 // Apps Types
 export type Apps = Row<typeof schema.tables.apps>;
