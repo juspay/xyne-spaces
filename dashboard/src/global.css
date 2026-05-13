@@ -1701,7 +1701,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 .bot-markdown-content ol,
 .bot-markdown-content-call-summary ol {
-  padding-left: 20px !important;
+  /* Enough inline space for 2–3 digit markers (10+) — default outside markers + narrow
+     padding were clipped by sidebar/message overflow-x-hidden + overflow-hidden. */
+  padding-left: 32px !important;
   margin: 8px 0 !important;
   list-style-type: decimal !important;
   color: hsl(var(--foreground)) !important;
