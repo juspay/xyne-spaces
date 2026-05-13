@@ -157,7 +157,15 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       if (call.startsAt && new Date(call.startsAt).getTime() <= now) {
         return false;
       }
-      return call.endsAt && new Date(call.endsAt).getTime() > now;
+      if (!(call.endsAt && new Date(call.endsAt).getTime() > now)) {
+        return false;
+      }
+      // Only show calls where the user is an actual participant. This filters out
+      // broadcast-channel calls (post call updates mode) where call.channelId is a
+      // large channel but only a subset of members are real participants.
+      const isParticipant = call.participants?.some(p => p.userId === userId);
+      if (!isParticipant) return false;
+      return true;
     });
 
     // Sort by start time ascending
@@ -168,7 +176,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     });
 
     return filtered;
-  }, [allScheduledCalls, activeCalls]);
+  }, [allScheduledCalls, activeCalls, userId]);
 
   const recentCalls = useMemo(() => {
     // When searching, use the full dataset; otherwise use accumulated (paginated) calls
