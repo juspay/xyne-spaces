@@ -16,7 +16,6 @@ const analyticsController = new AnalyticsController();
 
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);
-router.get('/:ticketId/info', ticketController.getInfo);
 
 // Workflow metrics for tickets dashboard
 router.get('/workflow-metrics', analyticsController.getWorkflowMetrics);
