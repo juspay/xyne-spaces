@@ -31,10 +31,14 @@ import { useReactions } from '../../../hooks/useReaction';
 import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTheme } from '../../../hooks/useTheme';
+import { useChannel } from '../../../hooks/useChannels';
+import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import ChatLock from '../../icons/ChatLock';
 import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { Bookmark, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
+import { Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
 import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
@@ -343,6 +347,7 @@ const getMessageBubbleClassName = (
   context?: 'channel' | 'thread',
   isFirstInThread?: boolean,
   isCallNoTranscript?: boolean,
+  searchItemView?: boolean,
 ): string => {
   const classes = [
     isCallNoTranscript
@@ -353,12 +358,14 @@ const getMessageBubbleClassName = (
       !isPrivateSystemNotice &&
       !isBookmarked &&
       !isShowInChannel &&
+      !searchItemView &&
       'hover:bg-accent/50',
     variant !== 'pinned' &&
       !isActiveCall &&
       !isPrivateSystemNotice &&
       !isBookmarked &&
       !isShowInChannel &&
+      !searchItemView &&
       'active:bg-accent/50 transition-colors',
     variant !== 'pinned' &&
       isHovered &&
@@ -366,6 +373,7 @@ const getMessageBubbleClassName = (
       !isPrivateSystemNotice &&
       !isBookmarked &&
       !isShowInChannel &&
+      !searchItemView &&
       'bg-muted/50',
     isActiveCall && 'bg-stage-completed active-call-highlight rounded-md',
     isShowInChannel &&
@@ -431,6 +439,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   allThreadAttachments,
   workflowNumber,
   showLinkPreview: shouldRenderLinkPreview = true,
+  searchItemView = false,
+  onUserClick,
 }) => {
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
@@ -519,6 +529,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const { user } = useAuth();
 
+  const searchChannel = useChannel(searchItemView ? channelId || '' : '');
+  const searchChannelDisplay = useChannelDisplayName(searchChannel, user?.id ?? '');
+  const isSearchPrivateChannel = searchChannel?.visibility === ChannelVisibility.PRIVATE;
+  const isSearchDM = searchChannel?.scopeType === ChannelScopeType.DM;
+
   const hasAppActions = metadata?.['hasAppActions'] === true;
   const parsedAppActions = useMemo(() => {
     if (!hasAppActions) {
@@ -553,6 +568,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   );
 
   const handleUserClick = (userId: string): void => {
+    if (onUserClick) {
+      onUserClick(userId);
+      return;
+    }
     void navigate(`${baseRoute}/${channelId}/profile/${userId}`);
   };
 
@@ -613,6 +632,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     context,
     isFirstInThread,
     isCallNoTranscript,
+    searchItemView,
   );
   return (
     <>
@@ -926,11 +946,25 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </h3>
               )}
 
+              {searchItemView && searchChannel && (
+                <span
+                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground inline-flex items-center gap-1 truncate min-w-0`}
+                >
+                  {!isSearchDM &&
+                    (isSearchPrivateChannel ? (
+                      <ChatLock color='hsl(var(--muted-foreground))' />
+                    ) : (
+                      <Hash size={12} className='shrink-0' />
+                    ))}
+                  <span className='truncate'>{searchChannelDisplay.displayName}</span>
+                </span>
+              )}
+
               <Tooltip content={formatFullTimestamp(message.createdAt)} side={TooltipSide.TOP}>
                 <h3
-                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-all duration-150 visual-regression-hide`}
+                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-all duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
                 >
-                  {context === 'thread'
+                  {searchItemView || context === 'thread'
                     ? formatThreadTimestamp(message.createdAt)
                     : formatTimeAmPm(message.createdAt)}
                 </h3>

@@ -2030,6 +2030,23 @@ const ChannelCommandMenu = ({
             </Tabs.Root>
           </div>
 
+          {searchText.trim() && (
+            <button
+              type='button'
+              onClick={() => {
+                onOpenChange(false);
+                void navigate(`/search-results?query=${encodeURIComponent(searchText.trim())}`);
+              }}
+              className='flex w-full items-center gap-2 px-4 py-2 text-sm text-muted-foreground border-b border-border hover:bg-muted transition-colors text-left'
+            >
+              <Search size={14} className='shrink-0' />
+              <span className='truncate'>
+                Show results for:{' '}
+                <span className='text-foreground'>{`"${searchText.trim()}"`}</span>
+              </span>
+            </button>
+          )}
+
           {/* Results */}
           <Command.List
             className={cn(

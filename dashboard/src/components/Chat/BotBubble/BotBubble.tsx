@@ -1,4 +1,4 @@
-import React, { ReactElement } from 'react';
+import React, { ReactElement, useContext } from 'react';
 import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { useChannel } from '../../../hooks/useChannels';
@@ -10,6 +10,7 @@ import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.typ
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation } from 'react-router-dom';
+import { SearchResultsContext } from '../SearchResults/SearchResultsContext';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface BotBubbleProps {
@@ -49,6 +50,7 @@ const TicketDisplayModeV2: React.FC<{
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
   const location = useLocation();
+  const { onSelectThread: onSelectSearchThread } = useContext(SearchResultsContext);
 
   const resolvedChannelId = ticket.channelId || channelId;
   const resolvedConversationId = ticket.conversationId || conversationId;
@@ -78,6 +80,14 @@ const TicketDisplayModeV2: React.FC<{
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
       const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
       window.open(ticketUrl, '_blank');
+      return;
+    }
+
+    if (onSelectSearchThread) {
+      onSelectSearchThread({
+        channelId: resolvedChannelId,
+        conversationId: resolvedConversationId,
+      });
       return;
     }
 

@@ -114,6 +114,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       callType,   // Call type filter (e.g. HEADLESS for recordings)
       presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
       includeBotMessages,  // 'true'|'false' string from cmd-K toggle; default behavior excludes BOT messages
+      groupBy,    // Override Vespa grouping. Empty string => flat ranked list (no grouping).
       // Note: subApp was moved up to be with other frontend filters
     } = req.query;
 
@@ -141,6 +142,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     
      if (rankProfile) {
       options.rankProfile = rankProfile as string;
+    }
+
+    if (typeof groupBy === 'string') {
+      options.groupBy = groupBy;
     }
 
     // Checks if "search" is in the string and extracts the last number

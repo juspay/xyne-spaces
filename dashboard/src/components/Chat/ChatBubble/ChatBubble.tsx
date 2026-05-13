@@ -114,6 +114,8 @@ interface ChatBubbleProps {
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
   disableAskAI?: boolean;
+  searchItemView?: boolean;
+  onUserClick?: (userId: string) => void;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -134,6 +136,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   allThreadAttachments,
   workflowNumber,
   disableAskAI = false,
+  searchItemView = false,
+  onUserClick,
 }) => {
   const { user } = useAuthContext();
   const { copyImage } = useClipboard();
@@ -1019,6 +1023,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             channelScopeType={channelScopeType}
             isFirstInThread={isFirstInThread}
             showLinkPreview={false}
+            searchItemView={searchItemView}
+            {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
             {...(conversation && { conversation: conversation })}
@@ -1036,7 +1042,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               })}
           />
 
-          {!isMobile && (
+          {!isMobile && !searchItemView && (
             <HoverActionsToolbar
               isVisible={showHoverActions && variant !== 'pinned' && !isMentionUserAddition}
               showEditAction={canEditMessage}
@@ -1108,7 +1114,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             />
           )}
           {/* Mobile Actions Drawer */}
-          {isMobile && (
+          {isMobile && !searchItemView && (
             <MessageActionsDrawer
               open={isActionsDrawerOpen}
               onOpenChange={handleActionsDrawerOpenChange}

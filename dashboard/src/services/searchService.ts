@@ -453,6 +453,10 @@ export class SearchService {
       params['includeBotMessages'] = filters.includeBotMessages.toString();
     }
 
+    if (filters.groupBy !== undefined) {
+      params['groupBy'] = filters.groupBy;
+    }
+
     return params;
   }
 }
