@@ -29,6 +29,7 @@ export interface DocsPublishResult {
 
 export interface DocsPublishRequest {
     userId: string;
+    workspaceId: string; // Workspace ID for URL generation
     userRepo: string; // Combined org/repo/branch identifier (e.g., "juspay/xyne-spaces/main")
     repoId?: string;  // Optional Repo ID for editing capability
     branchName?: string; // Branch name for editing capability
@@ -395,7 +396,7 @@ export class DocsService {
 
             // XYNE-1287 Wrap database operations in a transaction for consistency
             const { channelName } = await prisma.$transaction(async (tx) => {
-                await tx.canvas.upsert({
+                const canvas = await tx.canvas.upsert({
                     where: {
                         userRepo: safeUserRepo,
                     },
@@ -438,10 +439,10 @@ export class DocsService {
                     chName = channel?.name || channelId;
                 }
 
-                return { channelName: chName };
+                return { channelName: chName, canvasId: canvas.id };
             });
 
-            const docsUrl = this.generateDocsUrl(baseUrl, safeUserRepo);
+            const docsUrl = this.generateDocsUrl(baseUrl, request.workspaceId, safeUserRepo);
 
             // Create DM message with the docs link
             await this.createDocsNotification(userId, title, docsUrl, userRepo, channelId || null, channelName);
@@ -501,8 +502,8 @@ export class DocsService {
         }
     }
 
-    private generateDocsUrl(baseUrl: string, userRepo: string): string {
-        return `${baseUrl}/docs/${userRepo}`;
+    private generateDocsUrl(baseUrl: string, workspaceId: string, userRepo: string): string {
+        return `${baseUrl}/${workspaceId}/docs/${userRepo}`;
     }
 
     /**
