@@ -111,7 +111,6 @@ type UserIdentity = {
   id: string;
   email: string;
   name: string;
-  displayName: string | null;
 };
 
 type EnsureUserOptions = {
@@ -140,7 +139,6 @@ export class MettleUserSyncService {
         id: true,
         email: true,
         name: true,
-        displayName: true,
       },
     });
 
@@ -170,14 +168,12 @@ export class MettleUserSyncService {
     const updatedUser = await db.user.update({
       where: { id: createdUser.id },
       data: {
-        ...(name ? { displayName: name } : {}),
         ...(status ? { status } : {}),
       },
       select: {
         id: true,
         email: true,
         name: true,
-        displayName: true,
       },
     });
 
@@ -224,7 +220,6 @@ export class MettleUserSyncService {
         id: true,
         email: true,
         name: true,
-        displayName: true,
       },
     });
 
@@ -282,7 +277,7 @@ export class MettleUserSyncService {
         await db.user.update({
           where: { id: user.id },
           data: {
-            ...(hasUserNameUpdate ? { name: employee.name, displayName: employee.name } : {}),
+            ...(hasUserNameUpdate ? { name: employee.name } : {}),
             ...(hasUserStatusUpdate ? { status: userStatus } : {}),
           },
         });
