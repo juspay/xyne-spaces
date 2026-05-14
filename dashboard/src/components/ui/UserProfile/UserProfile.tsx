@@ -899,7 +899,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           ) : null}
 
           {/* Current Location */}
-          {(employeeLocationDetailsViaMettle?.current_location || employeeLocationDetailsViaMettle?.current_landmark) && (
+          {(employeeLocationDetailsViaMettle?.current_location ||
+            employeeLocationDetailsViaMettle?.current_landmark) && (
             <div className='flex items-start gap-3'>
               <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
                 <MapPin className='size-4 text-muted-foreground' />

@@ -46,6 +46,18 @@ interface UserInfo {
   picture?: string;
 }
 
+/**
+ * Replace custom emoji shortcodes in message content.
+ * Skips replacement for FlowJSON content to avoid corrupting the
+ * data-flow-json HTML attribute with unescaped quote characters.
+ * Emoji shortcodes inside FlowJSON text nodes are rendered by the
+ * frontend's own text-node pipeline.
+ */
+async function replaceEmojisInContent(content: string): Promise<string> {
+  if (content.includes('data-flow-json')) return content;
+  return replaceCustomEmojiShortcodesWithImg(content);
+}
+
 export function extractMentionedUserIdsFromContent(content?: string | null): string[] {
   if (!content) return [];
 
@@ -324,7 +336,7 @@ export class ConversationService {
       processedFiles.push(...uploadedFiles);
     }
 
-    const messageContent = await replaceCustomEmojiShortcodesWithImg(content?.trim() || '');
+    const messageContent = await replaceEmojisInContent(content?.trim() || '');
 
     // First create the message
     const messageData: CreateMessageInput = {
@@ -528,7 +540,7 @@ export class ConversationService {
       processedFiles.push(...uploadedFiles);
     }
 
-    const messageContent = await replaceCustomEmojiShortcodesWithImg(content?.trim() || '');
+    const messageContent = await replaceEmojisInContent(content?.trim() || '');
 
     // Create message
     // Generate child conversation ID if replyBroadcast is true
@@ -745,7 +757,7 @@ export class ConversationService {
     const updateData: UpdateData = {};
 
     if (content !== undefined) {
-      updateData.content = await replaceCustomEmojiShortcodesWithImg(content.trim());
+      updateData.content = await replaceEmojisInContent(content.trim());
     }
 
     if (metadata !== undefined) {

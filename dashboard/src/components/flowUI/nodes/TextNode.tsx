@@ -9,6 +9,7 @@ import {
 } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { useChannel } from '../../../hooks/useChannels';
+import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 
 // ---------------------------------------------------------------------------
 // Inline content parser
@@ -36,11 +37,12 @@ type InlinePart =
   | { type: 'user'; value: string }
   | { type: 'channel'; value: string }
   | { type: 'broadcast'; range: string }
-  | { type: 'group'; value: string; name: string; alias: string };
+  | { type: 'group'; value: string; name: string; alias: string }
+  | { type: 'emoji'; name: string };
 
 // Order of alternations is match priority.
 const INLINE_RE =
-  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>/g;
+  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>|:([a-zA-Z0-9_+-]{1,50}):/g;
 
 function parseInlineContent(content: string): InlinePart[] {
   const parts: InlinePart[] = [];
@@ -71,6 +73,8 @@ function parseInlineContent(content: string): InlinePart[] {
       parts.push({ type: 'link', href: match[7], label: match[8] });
     } else if (match[9] !== undefined) {
       parts.push({ type: 'link', href: match[9], label: match[9] });
+    } else if (match[10] !== undefined) {
+      parts.push({ type: 'emoji', name: match[10] });
     }
 
     lastIndex = INLINE_RE.lastIndex;
@@ -108,6 +112,13 @@ const FlowChannelMention: React.FC<{ channelId: string }> = ({ channelId }) => {
 };
 
 export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
+  const { data: customEmojis } = useCustomEmojis();
+  const emojiMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    customEmojis?.forEach(e => e.names.forEach(n => map.set(n, e.imgUrl)));
+    return map;
+  }, [customEmojis]);
+
   const props = node.props as
     | {
         content: string;
@@ -200,6 +211,23 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
             {part.label}
           </a>
         );
+      case 'emoji': {
+        const imgUrl = emojiMap.get(part.name);
+        if (imgUrl) {
+          return (
+            <img
+              key={key}
+              src={imgUrl}
+              alt={`:${part.name}:`}
+              title={part.name}
+              data-emoji='true'
+              className='inline-emoji inline-block w-5 h-5 object-contain align-middle'
+            />
+          );
+        }
+        // Not a custom emoji — leave as raw shortcode text
+        return <span key={key}>:{part.name}:</span>;
+      }
       default:
         return <span key={key}>{(part as { value: string }).value}</span>;
     }

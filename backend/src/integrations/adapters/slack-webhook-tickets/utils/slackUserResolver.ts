@@ -60,8 +60,13 @@ export interface SlackGroupInfo {
   users: string[];
 }
 
+// Slack-native IDs are uppercase (e.g. U099FJD9QC8); xyne DB CUIDs are lowercase (e.g. cmp4d91bd005uvldnmch36fll)
+function isSlackNativeId(id: string): boolean {
+  return /^[A-Z][A-Z0-9]+$/.test(id);
+}
+
 export function extractAllSlackIds(text: string, isUser: boolean): string[] {
-  const regex = isUser ? /<@([A-Z0-9]+)>/g : /<!subteam\^([A-Z0-9]+)>/g;
+  const regex = isUser ? /<@([A-Za-z0-9]+)>/g : /<!subteam\^([A-Za-z0-9]+)>/g;
   const matches = text.matchAll(new RegExp(regex, 'g'));
   const ids = Array.from(matches, (match) => match[1]);
   return [...new Set(ids)];
@@ -193,7 +198,9 @@ export async function resolveSlackIds(
   const dbResults = await Promise.allSettled(
     slackUserId.map((slackId) =>
       type === 'user'
-        ? userRepo.findByMetadataField('slackId', slackId)
+        ? isSlackNativeId(slackId)
+          ? userRepo.findByMetadataField('slackId', slackId)
+          : userRepo.findById(slackId)
         : groupRepo.findByMetadataField('slackGroupId', slackId)
     )
   );
@@ -204,8 +211,10 @@ export async function resolveSlackIds(
     const result = dbResults[i];
     if (result.status === 'fulfilled' && result.value) {
       userMapper.set(slackId, { dbId: result.value.id });
-    } else {
+    } else if (type !== 'user' || isSlackNativeId(slackId)) {
       slackIdsToFetch.push(slackId);
+    } else {
+      userMapper.set(slackId, {});
     }
   });
 
