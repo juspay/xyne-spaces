@@ -27,11 +27,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { useZero } from '../../hooks/useZero';
 import { Popover } from '../ui/Popover/Popover';
 import { useUserPresence } from '../../hooks/usePresence';
-import { Switch } from '../ui/Switch';
-import { useDebugSettings } from '../../hooks/useDebugSettings';
-import { useAskAIVersion } from '../../hooks/useAskAIVersion';
-import { apiInstance } from '../../services/clients/apiClient';
-import { toast } from 'sonner';
 
 interface SettingsProps {
   onClose: () => void;
@@ -44,13 +39,6 @@ const Settings = ({ onClose, onOpenPreferences }: SettingsProps): ReactElement =
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState<Date | null>(null);
-  const serverCalendarVisibility = (user as { calendarVisibility?: string } | null)
-    ?.calendarVisibility;
-  const [calendarVisibility, setCalendarVisibility] = useState<string | undefined>(
-    serverCalendarVisibility,
-  );
-  const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
-  const { askAIVersion, setAskAIVersion } = useAskAIVersion();
   const zero = useZero();
 
   const generalChannel = useChannelByName('general');
@@ -404,49 +392,6 @@ const Settings = ({ onClose, onOpenPreferences }: SettingsProps): ReactElement =
           <Settings2 className='size-4' />
           Preferences
         </Button>
-      </div>
-
-      <hr className='border-border w-full' />
-
-      <div className='space-y-2'>
-        <p className='text-sm font-medium text-foreground'>Calendar</p>
-        <div className='space-y-2'>
-          <Switch
-            id='call-visibility'
-            checked={(calendarVisibility ?? serverCalendarVisibility) !== 'PRIVATE'}
-            onCheckedChange={(checked: boolean) => {
-              const next = checked ? 'PUBLIC' : 'PRIVATE';
-              setCalendarVisibility(next);
-              void apiInstance
-                .patch('/users/me/calendar-visibility', { visibility: next })
-                .catch(() => {
-                  setCalendarVisibility(calendarVisibility);
-                  toast.error('Failed to update calendar visibility');
-                });
-            }}
-            label='Calendar visibility'
-          />
-        </div>
-      </div>
-
-      <hr className='border-border w-full' />
-
-      <div className='space-y-2'>
-        <p className='text-sm font-medium text-foreground'>Developer Settings</p>
-        <div className='space-y-2'>
-          <Switch
-            id='show-send-indicators'
-            checked={debugSettings.showSendIndicators}
-            onCheckedChange={toggleSendIndicators}
-            label='Show send indicators'
-          />
-          <Switch
-            id='ask-ai-version'
-            checked={askAIVersion === 'v2'}
-            onCheckedChange={checked => setAskAIVersion(checked ? 'v2' : 'v1')}
-            label='Use Ask AI v2'
-          />
-        </div>
       </div>
 
       <hr className='border-border w-full' />

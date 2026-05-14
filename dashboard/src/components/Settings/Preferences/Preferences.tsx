@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Calendar,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -47,6 +48,7 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
+  { id: 'calendar', label: 'Calendar', icon: <Calendar className='size-4' /> },
   { id: 'developer', label: 'Developer', icon: <Code2 className='size-4' /> },
 ];
 
@@ -258,6 +260,24 @@ const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
   </div>
 );
 
+// ─── Calendar ───────────────────────────────────────────────────────────────
+const CalendarSection: FC<{ state: PreferencesState }> = ({ state }) => (
+  <div className='space-y-4'>
+    <SectionHeader title='Calendar' subtitle='Configure your calendar visibility' />
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Calendar visibility</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>Make your calendar visible to others</p>
+      </div>
+      <Switch
+        id='call-visibility'
+        checked={(state.calendarVisibility ?? state.serverCalendarVisibility) !== 'PRIVATE'}
+        onCheckedChange={state.updateCalendarVisibility}
+      />
+    </div>
+  </div>
+);
+
 // ─── Developer ──────────────────────────────────────────────────────────────
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   const { isMobile } = usePlatform();
@@ -348,6 +368,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   voice: VoiceSection,
   messaging: MessagingSection,
   launch: LaunchSection,
+  calendar: CalendarSection,
   developer: DeveloperSection,
 };
 

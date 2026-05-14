@@ -21,6 +21,11 @@ import { apiInstance } from '../services/clients/apiClient';
 export function usePreferencesState(enabled: boolean) {
   const user = useSelf();
   const zero = useZero();
+  const serverCalendarVisibility = (user as { calendarVisibility?: string } | null)
+    ?.calendarVisibility;
+  const [calendarVisibility, setCalendarVisibilityState] = useState<string | undefined>(
+    serverCalendarVisibility,
+  );
   const { theme, changeTheme } = useTheme();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
@@ -75,6 +80,16 @@ export function usePreferencesState(enabled: boolean) {
       .catch(() => toast.error(`Failed to copy ${label}`));
   };
 
+  const updateCalendarVisibility = (checked: boolean): void => {
+    const next = checked ? 'PUBLIC' : 'PRIVATE';
+    const prev = calendarVisibility;
+    setCalendarVisibilityState(next);
+    void apiInstance.patch('/users/me/calendar-visibility', { visibility: next }).catch(() => {
+      setCalendarVisibilityState(prev);
+      toast.error('Failed to update calendar visibility');
+    });
+  };
+
   return {
     user,
     theme,
@@ -98,6 +113,9 @@ export function usePreferencesState(enabled: boolean) {
     resumeAssignment,
     openChangelog,
     copyClientId,
+    calendarVisibility,
+    serverCalendarVisibility,
+    updateCalendarVisibility,
   };
 }
 

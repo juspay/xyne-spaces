@@ -7,6 +7,7 @@ export type PreferenceSection =
   | 'voice'
   | 'messaging'
   | 'launch'
+  | 'calendar'
   | 'developer';
 
 export interface PreferencesProps {

@@ -34,7 +34,7 @@ export const Switch: React.FC<SwitchProps> = ({
         />
       </button>
       {label && (
-        <label htmlFor={id} className='cursor-pointer select-none text-sm'>
+        <label htmlFor={id} className='cursor-pointer select-none text-sm text-foreground'>
           {label}
         </label>
       )}
