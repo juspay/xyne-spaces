@@ -103,6 +103,12 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const createdBy = params.getAll('createdBy');
   if (createdBy.length) filters.createdBy = createdBy;
 
+  const prReviewers = params.getAll('prReviewers');
+  if (prReviewers.length) filters.prReviewers = prReviewers;
+
+  const qaAssigned = params.getAll('qaAssigned');
+  if (qaAssigned.length) filters.qaAssigned = qaAssigned;
+
   const tags = params.getAll('tags');
   if (tags.length) filters.tags = tags;
 
@@ -172,6 +178,8 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   params.delete('assignee');
   params.delete('userGroups');
   params.delete('createdBy');
+  params.delete('prReviewers');
+  params.delete('qaAssigned');
   params.delete('tags');
   params.delete('stages');
   params.delete('dueDateStart');
@@ -194,6 +202,8 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   filters.assignee?.forEach((a: string) => params.append('assignee', a));
   filters.userGroups?.forEach((g: string) => params.append('userGroups', g));
   filters.createdBy?.forEach((u: string) => params.append('createdBy', u));
+  filters.prReviewers?.forEach((u: string) => params.append('prReviewers', u));
+  filters.qaAssigned?.forEach((u: string) => params.append('qaAssigned', u));
   filters.tags?.forEach((t: string) => params.append('tags', t));
   filters.stages?.forEach((s: string) => params.append('stages', s));
 
