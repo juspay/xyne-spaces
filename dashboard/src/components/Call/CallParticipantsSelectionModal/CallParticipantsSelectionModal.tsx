@@ -156,11 +156,13 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     initiateCallWithParticipants,
     currentUser?.id,
   ]);
-
   // Pre-populate selected participants with thread participants when conversationId is provided.
   // Uses hasUserModifiedRef instead of a one-shot flag so that Zero cache updates (e.g. a
   // newly-mentioned user being added to participants) are reflected while the modal is open,
   // as long as the user hasn't manually changed the selection themselves.
+  // NOTE: Only include participants with a valid participationType (AUTHOR or MENTIONED).
+  // Exclude participants with null participationType (users who were auto-added via
+  // markActivityAsRead or other side effects but haven't explicitly engaged with the thread).
   useEffect(() => {
     if (
       isOpen &&
@@ -170,6 +172,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       channel?.scopeType !== ChannelScopeType.DM
     ) {
       const threadParticipantIds = conversation.participants
+        .filter(p => p.participationType !== null && p.participationType !== undefined)
         .map(p => p.userId)
         .filter(userId => userId !== currentUser?.id);
       const preSelected = threadParticipantIds.map(userId => `user:${userId}`);
