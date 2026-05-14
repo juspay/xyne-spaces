@@ -114,12 +114,19 @@ export function hasMediaDimensions(mimetype: string): boolean {
  * @param url - GCS path (e.g., "attachments/..." or "gs://bucket/path")
  * @returns { bucketName, filePath }
  */
-function parseGcsUrl(url: string): { bucketName: string; filePath: string } {
+function parseGcsUrl(url: string, attachment?: MessageAttachment): { bucketName: string; filePath: string } {
     // Handle gs://bucket/path format
     if (url.startsWith('gs://')) {
         const match = url.match(/^gs:\/\/([^\/]+)\/(.+)$/);
         if (match) {
             return { bucketName: match[1], filePath: match[2] };
+        }
+    }
+    // Transcript attachments stored as relative paths live in the transcription bucket
+    if (attachment) {
+        const meta = attachment.metadata as { type?: string } | null;
+        if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
+            return { bucketName: config.gcs.transcriptionBucketName, filePath: url };
         }
     }
     // Regular path - use default bucket from config
@@ -179,7 +186,7 @@ export async function convertToBase64(
 
     try {
         // Parse GCS URL
-        const { bucketName, filePath } = parseGcsUrl(urlToFetch);
+        const { bucketName, filePath } = parseGcsUrl(urlToFetch, attachment);
 
         // Get appropriate GCS service (cached globally to prevent resource leaks)
         const gcs = getStorageService(bucketName);
