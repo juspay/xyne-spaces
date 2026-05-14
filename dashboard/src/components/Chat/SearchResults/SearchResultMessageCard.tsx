@@ -65,7 +65,12 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
 
   return (
     <div
+      role='button'
+      tabIndex={0}
       onClick={handleCardClick}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click();
+      }}
       className='group border border-border rounded-xl overflow-hidden bg-card shadow-sm hover:bg-accent/50 transition-colors cursor-pointer'
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_SEARCH_MESSAGE'
