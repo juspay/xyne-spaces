@@ -16,6 +16,8 @@ interface SearchParticipantsProps {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   ref?: React.RefObject<HTMLInputElement | null>;
+  onEnterQuerySubmit?: (query: string) => boolean;
+  helperText?: React.ReactNode;
 }
 
 export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
@@ -25,6 +27,8 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   searchQuery,
   setSearchQuery,
   ref,
+  onEnterQuerySubmit,
+  helperText,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
     new Map(),
@@ -89,6 +93,11 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     return selectedValues.some(v => v.startsWith('channel:'));
   }, [selectedValues]);
 
+  const isEmailLikeQuery = useMemo(() => {
+    const query = searchQuery.trim();
+    return query.includes('@');
+  }, [searchQuery]);
+
   const toggleValue = (value: string) => {
     const isChannel = value.startsWith('channel:');
 
@@ -150,10 +159,12 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
 
   // Open the popover if there is a search query and no channel is selected
   useEffect(() => {
-    if (searchQuery.trim() && !hasChannelSelected) {
+    if (isEmailLikeQuery) {
+      setIsOpen(false);
+    } else if (searchQuery.trim() && !hasChannelSelected) {
       setIsOpen(true);
     }
-  }, [searchQuery, hasChannelSelected]);
+  }, [searchQuery, hasChannelSelected, isEmailLikeQuery]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (hasChannelSelected) return;
@@ -177,6 +188,10 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
 
       case 'Enter':
         e.preventDefault();
+        if (searchQuery.trim() && onEnterQuerySubmit?.(searchQuery.trim())) {
+          setIsOpen(false);
+          break;
+        }
         if (filteredOptions.length > 0 && filteredOptions[index]) {
           toggleValue(filteredOptions[index].value);
         }
@@ -229,8 +244,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           <Input
             type='text'
             role='combobox'
-            maxLength={56}
-            ref={ref}
+            ref={inputRef}
             placeholder='Search by user or channel name'
             value={!hasChannelSelected ? searchQuery : ''}
             disabled={hasChannelSelected}
@@ -257,7 +271,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       <Popover.Root
         open={isOpen}
         onOpenChange={open => {
-          if (open && hasChannelSelected) return;
+          if (open && (hasChannelSelected || isEmailLikeQuery)) return;
           setIsOpen(open);
         }}
       >
@@ -330,7 +344,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                 })}
               </ul>
             )}
-            {filteredOptions.length === 0 && (
+            {filteredOptions.length === 0 && !isEmailLikeQuery && (
               <div className='px-3 py-2 text-sm text-foreground'>No results found</div>
             )}
           </Popover.Content>
@@ -369,6 +383,8 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           Only one channel selection is allowed
         </p>
       )}
+
+      {helperText && <div className='text-xs text-muted-foreground mt-1 px-1'>{helperText}</div>}
     </div>
   );
 };
