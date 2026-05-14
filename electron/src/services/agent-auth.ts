@@ -271,11 +271,8 @@ class AgentAuthService {
     }
 
     try {
-      // Get access token from cookies
-      const cookies = await session.defaultSession.cookies.get({});
-      const accessTokenCookie = cookies.find(c => c.name === 'google_access_token');
-      
-      if (!accessTokenCookie) {
+      const accessToken = await this.getUserAccessTokenFromSession();
+      if (!accessToken) {
         this.sendJson(res, 401, { 
           error: 'Unauthorized',
           message: 'No user access token found in session' 
@@ -292,7 +289,7 @@ class AgentAuthService {
         url: backendUrl,
         method,
         headers: {
-          'Authorization': `Bearer ${accessTokenCookie.value}`,
+          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
         data
@@ -346,11 +343,8 @@ class AgentAuthService {
     }
 
     try {
-      // Get access token from cookies
-      const cookies = await session.defaultSession.cookies.get({});
-      const accessTokenCookie = cookies.find(c => c.name === 'google_access_token');
-      
-      if (!accessTokenCookie) {
+      const accessToken = await this.getUserAccessTokenFromSession();
+      if (!accessToken) {
         this.sendJson(res, 401, { 
           error: 'Unauthorized',
           message: 'No user access token found in session' 
@@ -368,7 +362,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessTokenCookie.value}`,
+          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         }
       });
@@ -420,8 +414,8 @@ class AgentAuthService {
     }
 
     try {
-      const googleToken = await this.getGoogleAccessTokenFromSession();
-      if (!googleToken) {
+      const accessToken = await this.getUserAccessTokenFromSession();
+      if (!accessToken) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -440,7 +434,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${googleToken}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
         bodyBuffer,
@@ -490,8 +484,8 @@ class AgentAuthService {
     }
 
     try {
-      const googleToken = await this.getGoogleAccessTokenFromSession();
-      if (!googleToken) {
+      const accessToken = await this.getUserAccessTokenFromSession();
+      if (!accessToken) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -510,7 +504,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${googleToken}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
         bodyBuffer,
@@ -550,8 +544,8 @@ class AgentAuthService {
     }
 
     try {
-      const googleToken = await this.getGoogleAccessTokenFromSession();
-      if (!googleToken) {
+      const accessToken = await this.getUserAccessTokenFromSession();
+      if (!accessToken) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -578,7 +572,7 @@ class AgentAuthService {
       );
 
       const headers: Record<string, string> = {
-        Authorization: `Bearer ${googleToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Content-Type': contentType,
       };
 
@@ -837,7 +831,7 @@ class AgentAuthService {
 
   /**
    * Generic write proxy — validates the agent token, parses the JSON body,
-   * retrieves the user's google_access_token from the Electron session cookies,
+   * retrieves the user's active workspace access token from Electron session cookies,
    * and forwards the POST request to the backend.
    */
   private async handleProxyPost(
@@ -867,11 +861,9 @@ class AgentAuthService {
     }
 
     try {
-      // 3. Retrieve the user's google_access_token from session cookies
-      const cookies = await session.defaultSession.cookies.get({});
-      const googleToken = cookies.find(c => c.name === 'google_access_token');
-
-      if (!googleToken) {
+      // 3. Retrieve the user's active access token from workspace-scoped cookies
+      const accessToken = await this.getUserAccessTokenFromSession();
+      if (!accessToken) {
         this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
         return;
       }
@@ -884,7 +876,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${googleToken.value}`,
+          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
         data: body
@@ -1056,10 +1048,30 @@ class AgentAuthService {
     res.end(backendResponse.body);
   }
 
-  private async getGoogleAccessTokenFromSession(): Promise<string | null> {
+  private async getUserAccessTokenFromSession(): Promise<string | null> {
     const cookies = await session.defaultSession.cookies.get({});
-    const tokenCookie = cookies.find((cookie) => cookie.name === 'google_access_token');
-    return tokenCookie?.value ?? null;
+    const readCookie = (name: string): string | undefined =>
+      cookies.find((cookie) => cookie.name === name)?.value;
+
+    // Prefer authV2 workspace cookies:
+    // 1) pointer cookie `xyne_last_workspace`
+    // 2) token cookie `xyne_ws_<workspaceId>_token`
+    const lastWorkspace = readCookie('xyne_last_workspace');
+    if (lastWorkspace) {
+      const workspaceToken = readCookie(`xyne_ws_${lastWorkspace}_token`);
+      if (workspaceToken) {
+        return workspaceToken;
+      }
+    }
+
+    // Backward compatibility fallback: old `google_access_token` cookie.
+    // Accept only JWT-shaped values to avoid using pending-auth JSON blobs.
+    const legacy = readCookie('google_access_token');
+    if (legacy && legacy.split('.').length === 3) {
+      return legacy;
+    }
+
+    return null;
   }
 
   /**
