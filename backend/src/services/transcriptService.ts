@@ -39,6 +39,11 @@ CRITICAL RULES:
 - Use neutral, professional language
 - This will be rendered directly in the UI
 
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
+
 MARKDOWN TEMPLATE (FOLLOW EXACTLY):
 
 ## Summary:
@@ -74,6 +79,11 @@ CRITICAL RULES:
 - No quotes, no labels, no bullet points, no explanations
 - Write in plain, natural language
 
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
+
 Generate a 1-line description for this call:
 {transcript}
 `;
@@ -93,6 +103,11 @@ CRITICAL RULES:
 - Prioritize based on urgency indicators in the call
 - Keep titles concise and action-oriented (5-10 words)
 - Keep descriptions clear and context-rich (2-3 sentences)
+
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
 JSON STRUCTURE (FOLLOW EXACTLY):
 {
@@ -137,6 +152,11 @@ MERCHANT NAME MATCHING:
 - Common errors: phonetic errors, abbreviations, partial names
 - Examples: "Zypto" → "Zepto", "Swiggy Insta" → "Swiggy"
 - Make sure the surrounding context is about merchant only
+
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
 REFERENCE_MERCHANTS:
 {merchantList}
