@@ -94,6 +94,15 @@ export const shortcuts = {
     useKey: true,
   },
 
+  'composer.voiceInput': {
+    keys: 'mod+shift+m',
+    scope: 'global',
+    allowInInputs: true,
+    priority: 100,
+    description: 'Toggle voice input in composer',
+    category: 'Composer',
+    preventDefault: true,
+  },
   'global.openInspector': {
     keys: 'mod+shift+i',
     scope: 'global',

@@ -57,6 +57,7 @@ import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import callLobbyRoutes from '@/routes/callLobby';
+import voiceInputRoutes from '@/routes/voiceInput';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
@@ -387,7 +388,8 @@ export class App {
 
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
-    
+    this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
+
     // App routes
     this.app.use('/api/apps', appRoutes);
 

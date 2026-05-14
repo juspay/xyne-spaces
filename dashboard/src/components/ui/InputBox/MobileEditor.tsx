@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { EditorContent } from '@tiptap/react';
 import type { Editor } from '@tiptap/react';
-import { ArrowUp, AtSign, Paperclip } from 'lucide-react';
+import { ArrowUp, AtSign, Paperclip, Mic, Loader2 } from 'lucide-react';
 import { MobileEditorToolbar } from '../EditorToolbar/MobileEditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
 import type { EmojiClickData } from 'emoji-picker-react';
@@ -27,6 +27,10 @@ export interface MobileEditorProps {
   attachmentPreviewComponent?: React.ReactNode | undefined;
   hideSendButton?: boolean;
   showAttachButton?: boolean;
+  showVoiceInput?: boolean;
+  isVoiceRecording?: boolean;
+  isVoiceTranscribing?: boolean;
+  onVoiceToggle?: (() => void) | undefined;
 }
 
 /**
@@ -50,6 +54,10 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
   placeholder,
   hideSendButton = false,
   showAttachButton = true,
+  showVoiceInput = false,
+  isVoiceRecording = false,
+  isVoiceTranscribing = false,
+  onVoiceToggle,
   showMentions = false,
   onMentionClick,
   onChannelClick,
@@ -136,11 +144,25 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
           role='button'
           tabIndex={0}
         >
-          {isEmpty && (
-            <div className='absolute inset-0 px-3 py-3.5 text-muted-foreground text-[15px] leading-relaxed pointer-events-none select-none'>
-              {placeholder}
-            </div>
-          )}
+          {isEmpty &&
+            (isVoiceRecording ? (
+              <div className='absolute inset-0 px-3 py-3.5 pointer-events-none select-none flex items-center gap-3'>
+                <div className='flex items-end gap-[3px]' style={{ height: 20 }}>
+                  {([0, 120, 60, 180, 90] as const).map((delay, i) => (
+                    <div
+                      key={i}
+                      className='voice-wave-bar'
+                      style={{ height: [11, 20, 15, 20, 11][i], animationDelay: `${delay}ms` }}
+                    />
+                  ))}
+                </div>
+                <span className='text-[14px] text-muted-foreground'>Listening...</span>
+              </div>
+            ) : (
+              <div className='absolute inset-0 px-3 py-3.5 text-muted-foreground text-[15px] leading-relaxed pointer-events-none select-none'>
+                {placeholder}
+              </div>
+            ))}
           <EditorContent
             editor={editor}
             className={`
@@ -160,7 +182,10 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
       {isCollapsed && (
         <div
           className='flex items-center gap-2 px-3 py-2 min-h-[52px] cursor-text'
-          onClick={handleEditorClick}
+          onClick={e => {
+            if ((e.target as HTMLElement).closest('button')) return;
+            handleEditorClick();
+          }}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
@@ -184,9 +209,47 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
             <Paperclip className='h-5 w-5' />
           </button>
 
-          <div className='flex-1 text-muted-foreground text-[15px] leading-relaxed truncate cursor-text'>
-            {placeholder}
-          </div>
+          {isVoiceRecording ? (
+            <div className='flex-1 flex items-center gap-3 pointer-events-none select-none'>
+              <div className='flex items-end gap-[3px]' style={{ height: 20 }}>
+                {([0, 120, 60, 180, 90] as const).map((delay, i) => (
+                  <div
+                    key={i}
+                    className='voice-wave-bar'
+                    style={{ height: [11, 20, 15, 20, 11][i], animationDelay: `${delay}ms` }}
+                  />
+                ))}
+              </div>
+              <span className='text-[14px] text-muted-foreground'>Listening...</span>
+            </div>
+          ) : (
+            <div className='flex-1 text-muted-foreground text-[15px] leading-relaxed truncate cursor-text'>
+              {placeholder}
+            </div>
+          )}
+
+          {showVoiceInput && onVoiceToggle && (
+            <button
+              type='button'
+              onClick={e => {
+                e.stopPropagation();
+                onVoiceToggle();
+              }}
+              disabled={disabled || isSending || isVoiceTranscribing}
+              className={`p-2 rounded-full transition-colors flex-shrink-0 ${
+                isVoiceRecording
+                  ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                  : 'text-foreground hover:text-muted-foreground'
+              }`}
+              aria-label={isVoiceRecording ? 'Stop voice input' : 'Start voice input'}
+            >
+              {isVoiceTranscribing ? (
+                <Loader2 className='h-5 w-5 animate-spin' />
+              ) : (
+                <Mic className='h-5 w-5' />
+              )}
+            </button>
+          )}
 
           <button
             type='button'
@@ -284,6 +347,26 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   onMouseDown={e => e.preventDefault()}
                 >
                   <span className='text-muted-foreground font-semibold text-xl'>#</span>
+                </button>
+              )}
+
+              {showVoiceInput && onVoiceToggle && (
+                <button
+                  type='button'
+                  onClick={onVoiceToggle}
+                  disabled={disabled || isSending || isVoiceTranscribing}
+                  className={`p-2 rounded-full transition-colors ${
+                    isVoiceRecording
+                      ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                      : 'hover:bg-accent active:bg-accent text-muted-foreground'
+                  }`}
+                  aria-label={isVoiceRecording ? 'Stop voice input' : 'Start voice input'}
+                >
+                  {isVoiceTranscribing ? (
+                    <Loader2 className='h-5 w-5 animate-spin' />
+                  ) : (
+                    <Mic className='h-5 w-5' />
+                  )}
                 </button>
               )}
 

@@ -10,7 +10,17 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
-import { Extension, InputRule, textblockTypeInputRule } from '@tiptap/core';
+import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
+
+const VoiceShimmerMark = Mark.create({
+  name: 'voiceShimmer',
+  parseHTML() {
+    return [];
+  },
+  renderHTML() {
+    return ['span', { class: 'voice-shimmer' }, 0];
+  },
+});
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
@@ -76,6 +86,8 @@ import type { Canvas } from '../../Canvas';
 import { CanvasVisibility } from '@xyne/shared';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
+import { VoiceInput } from './VoiceInput';
+import type { VoiceInputHandle } from './VoiceInput';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, Event } from '../../../utils/logger';
 import { ScheduleMessageDialog } from '../ScheduleMessageDialog/ScheduleMessageDialog';
@@ -148,6 +160,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       onContentChange,
       onCancel,
       mentionItems = [],
+      voiceMentionItems = [],
       onMentionSearch,
       onMentionSelect,
       channelItems = [],
@@ -247,7 +260,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isInCodeBlock, setIsInCodeBlock] = useState(false);
     const [content, setContent] = useState('');
     const [isSending, setIsSending] = useState(false);
+    // Voice recording state — driven by VoiceInput component via onStateChange
+    const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+    const [isVoiceTranscribing, setIsVoiceTranscribing] = useState(false);
+    const voiceInputRef = React.useRef<VoiceInputHandle>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
     const [sendMode, setSendMode] = useState<'message' | 'ticket'>('message');
     const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
@@ -271,6 +289,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       () => !!content || allAttachments.length > 0 || !!attachedCanvas,
       [content, allAttachments.length, attachedCanvas],
     );
+
     const { notifyTyping } = useTypingState();
 
     useScope('composer', isFocused && !disabled && !isSending);
@@ -285,6 +304,20 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         enabled: Boolean(features.fileAttachments) && !disabled && !isSending,
       },
     );
+
+    useShortcutById('composer.voiceInput', () => voiceInputRef.current?.toggle());
+
+    useEffect(() => {
+      if (!isVoiceRecording) return;
+      const onKeyDown = (e: KeyboardEvent): void => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          voiceInputRef.current?.toggle();
+        }
+      };
+      document.addEventListener('keydown', onKeyDown, true);
+      return () => document.removeEventListener('keydown', onKeyDown, true);
+    }, [isVoiceRecording]);
 
     const handleTyping = onTyping;
 
@@ -552,6 +585,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         ChannelMentionExtension,
         CommandsExtension,
         EmojiSelectorExtension,
+        VoiceShimmerMark,
         ...TableExtensions,
       ],
       content: value || '',
@@ -1330,396 +1364,521 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         )}
 
         <div
-          className={`
+          className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
+          style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
+        >
+          <div
+            className={`
             overflow-hidden transition-all flex flex-col relative
             ${isMobile ? 'bg-muted rounded-[26px] text-foreground shadow-sm' : 'bg-card rounded-2xl border text-foreground shadow-none'}
             ${!isMobile && isFocused ? 'border-ring' : !isMobile ? 'border-input' : ''}
             ${isSending ? 'opacity-60 pointer-events-none' : ''}
           `}
-        >
-          {/* Desktop: Editor Toolbar */}
-          {features.richText && !isMobile && <EditorToolbar editor={editor} />}
+          >
+            {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
+            {isMobile && (
+              <VoiceInput
+                ref={voiceInputRef}
+                headless
+                editor={editor}
+                content={content}
+                mentionItems={mentionItems}
+                voiceMentionItems={voiceMentionItems}
+                disabled={disabled}
+                isSending={isSending}
+                onStateChange={({ isRecording, isTranscribing }) => {
+                  setIsVoiceRecording(isRecording);
+                  setIsVoiceTranscribing(isTranscribing);
+                }}
+              />
+            )}
 
-          {/* Conditionally render mobile or desktop layout */}
-          {isMobile ? (
-            <MobileEditor
-              editor={editor}
-              content={content}
-              allAttachments={allAttachments
-                .map(a => a.file)
-                .filter((f): f is File => f instanceof File)}
-              isSending={isSending}
-              disabled={disabled}
-              emojiSizeClass={emojiSizeClass}
-              onAttachClick={handleAttachClick}
-              onSend={() => void handleSend()}
-              placeholder={placeholder}
-              showMentions={features.mentions}
-              showFormattingToolbar={showMobileFormattingToolbar}
-              onMentionClick={() => {
-                editor?.chain().focus().run();
-              }}
-              onChannelClick={() => {
-                editor?.chain().focus().run();
-              }}
-              onShowFormattingToolbar={() => setShowMobileFormattingToolbar(true)}
-              onCloseFormattingToolbar={() => setShowMobileFormattingToolbar(false)}
-              showEmojiPicker={features.emojiPicker}
-              onEmojiSelect={handleEmojiSelect}
-              hideSendButton={hideSendButton}
-              showAttachButton={!!features.fileAttachments}
-              attachmentPreviewComponent={
-                (features.fileAttachments && allAttachments.length > 0) || attachedCanvas ? (
-                  <div className='px-3 pb-2 flex flex-wrap gap-3'>
-                    {allAttachments.map(({ attachmentId, file }, index) => (
-                      <AttachmentPreview
-                        key={`file-${attachmentId}-${index}`}
-                        file={file}
-                        onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                        onPreview={() => handlePreview(file)}
-                        isUploading={false}
-                      />
-                    ))}
-                    {attachedCanvas && (
-                      <CanvasLinkPreview
-                        canvas={attachedCanvas}
-                        onRemove={handleRemoveAttachedCanvas}
-                      />
-                    )}
-                  </div>
-                ) : undefined
-              }
-            />
-          ) : (
-            <div
-              className={`
+            {/* Desktop: Editor Toolbar */}
+            {features.richText && !isMobile && <EditorToolbar editor={editor} />}
+
+            {/* Conditionally render mobile or desktop layout */}
+            {isMobile ? (
+              <MobileEditor
+                editor={editor}
+                content={content}
+                allAttachments={allAttachments
+                  .map(a => a.file)
+                  .filter((f): f is File => f instanceof File)}
+                isSending={isSending}
+                disabled={disabled}
+                emojiSizeClass={emojiSizeClass}
+                onAttachClick={handleAttachClick}
+                onSend={() => void handleSend()}
+                placeholder={placeholder}
+                showMentions={features.mentions}
+                showFormattingToolbar={showMobileFormattingToolbar}
+                onMentionClick={() => {
+                  editor?.chain().focus().run();
+                }}
+                onChannelClick={() => {
+                  editor?.chain().focus().run();
+                }}
+                onShowFormattingToolbar={() => setShowMobileFormattingToolbar(true)}
+                onCloseFormattingToolbar={() => setShowMobileFormattingToolbar(false)}
+                showEmojiPicker={features.emojiPicker}
+                onEmojiSelect={handleEmojiSelect}
+                hideSendButton={hideSendButton}
+                showAttachButton={!!features.fileAttachments}
+                showVoiceInput={true}
+                isVoiceRecording={isVoiceRecording}
+                isVoiceTranscribing={isVoiceTranscribing}
+                onVoiceToggle={() => voiceInputRef.current?.toggle()}
+                attachmentPreviewComponent={
+                  (features.fileAttachments && allAttachments.length > 0) || attachedCanvas ? (
+                    <div className='px-3 pb-2 flex flex-wrap gap-3'>
+                      {allAttachments.map(({ attachmentId, file }, index) => (
+                        <AttachmentPreview
+                          key={`file-${attachmentId}-${index}`}
+                          file={file}
+                          onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
+                          onPreview={() => handlePreview(file)}
+                          isUploading={false}
+                        />
+                      ))}
+                      {attachedCanvas && (
+                        <CanvasLinkPreview
+                          canvas={attachedCanvas}
+                          onRemove={handleRemoveAttachedCanvas}
+                        />
+                      )}
+                    </div>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <div
+                className={`
                 relative py-2 px-3
                 ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
               `}
-            >
-              <EditorContent
-                editor={editor}
-                className={`
+              >
+                <EditorContent
+                  editor={editor}
+                  className={`
                   chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-6 break-words
                   text-foreground placeholder:text-muted-foreground
                   [&_a]:pointer-events-none
                   [&_p.is-editor-empty:before]:hidden
                   ${emojiSizeClass}
                 `}
-              />
-              {!content &&
-                !isInCodeBlock &&
-                !editor?.isActive('bulletList') &&
-                !editor?.isActive('orderedList') &&
-                !editor?.isActive('blockquote') && (
-                  <div className='absolute inset-0 px-3 py-2 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto'>
-                    {placeholder}
-                  </div>
+                />
+                {!content &&
+                  !isInCodeBlock &&
+                  !editor?.isActive('bulletList') &&
+                  !editor?.isActive('orderedList') &&
+                  !editor?.isActive('blockquote') &&
+                  (isVoiceRecording ? (
+                    <div className='absolute inset-0 px-3 py-2 pointer-events-none select-none flex items-center gap-3 h-fit my-auto'>
+                      <div className='flex items-end gap-[3px]' style={{ height: 18 }}>
+                        {([0, 120, 60, 180, 90] as const).map((delay, i) => (
+                          <div
+                            key={i}
+                            className='voice-wave-bar'
+                            style={{
+                              height: [10, 18, 14, 18, 10][i],
+                              animationDelay: `${delay}ms`,
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <span className='text-[13px] text-muted-foreground'>Listening...</span>
+                    </div>
+                  ) : (
+                    <div className='absolute inset-0 px-3 py-2 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto'>
+                      {placeholder}
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {/* Desktop: Render attachments after editor content */}
+            {!isMobile && features.fileAttachments && allAttachments.length > 0 && (
+              <div className='px-3 pb-2 flex flex-wrap gap-3'>
+                {allAttachments.map(({ attachmentId, file }) => (
+                  <AttachmentPreview
+                    key={attachmentId}
+                    file={file}
+                    onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
+                    onPreview={() => handlePreview(file)}
+                    isUploading={false}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Attached Canvas Preview */}
+            {attachedCanvas && (
+              <div className='px-3 pb-2'>
+                <CanvasLinkPreview canvas={attachedCanvas} onRemove={handleRemoveAttachedCanvas} />
+              </div>
+            )}
+
+            {/* Full-screen Viewer - Use MediaViewer for File objects, FilePreviewModal for UploadedFile */}
+            {selectedFile && (
+              <>
+                {selectedFile instanceof File ? (
+                  <MediaViewer
+                    file={selectedFile}
+                    isOpen={isViewerOpen}
+                    onClose={handleCloseViewer}
+                  />
+                ) : (
+                  <FilePreviewModal
+                    isOpen={isViewerOpen}
+                    onClose={handleCloseViewer}
+                    fileName={selectedFile.originalName}
+                    fileUrl={`/attachments/${selectedFile.id}/download`}
+                    mimeType={selectedFile.mimeType}
+                    fileSize={selectedFile.fileSize}
+                    attachmentId={selectedFile.id}
+                  />
                 )}
-            </div>
-          )}
+              </>
+            )}
 
-          {/* Desktop: Render attachments after editor content */}
-          {!isMobile && features.fileAttachments && allAttachments.length > 0 && (
-            <div className='px-3 pb-2 flex flex-wrap gap-3'>
-              {allAttachments.map(({ attachmentId, file }) => (
-                <AttachmentPreview
-                  key={attachmentId}
-                  file={file}
-                  onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                  onPreview={() => handlePreview(file)}
-                  isUploading={false}
+            {/* Show checkbox for "also send to channel" functionality */}
+            {onAlsoSendToChannelChange && (
+              <div className='flex items-center space-x-1.5 px-3 py-1'>
+                <input
+                  type='checkbox'
+                  id='also-send-to-channel'
+                  checked={alsoSendToChannelChecked}
+                  onChange={e => {
+                    onAlsoSendToChannelChange(e.target.checked);
+                  }}
+                  className='h-3 w-3 text-primary focus:ring-ring border-input rounded'
+                  disabled={disabled || isSending}
                 />
-              ))}
-            </div>
-          )}
+                <label
+                  htmlFor='also-send-to-channel'
+                  className='text-xs text-muted-foreground cursor-pointer'
+                >
+                  Also send to channel
+                </label>
+              </div>
+            )}
 
-          {/* Attached Canvas Preview */}
-          {attachedCanvas && (
-            <div className='px-3 pb-2'>
-              <CanvasLinkPreview canvas={attachedCanvas} onRemove={handleRemoveAttachedCanvas} />
-            </div>
-          )}
-
-          {/* Full-screen Viewer - Use MediaViewer for File objects, FilePreviewModal for UploadedFile */}
-          {selectedFile && (
-            <>
-              {selectedFile instanceof File ? (
-                <MediaViewer
-                  file={selectedFile}
-                  isOpen={isViewerOpen}
-                  onClose={handleCloseViewer}
-                />
-              ) : (
-                <FilePreviewModal
-                  isOpen={isViewerOpen}
-                  onClose={handleCloseViewer}
-                  fileName={selectedFile.originalName}
-                  fileUrl={`/attachments/${selectedFile.id}/download`}
-                  mimeType={selectedFile.mimeType}
-                  fileSize={selectedFile.fileSize}
-                  attachmentId={selectedFile.id}
-                />
-              )}
-            </>
-          )}
-
-          {/* Show checkbox for "also send to channel" functionality */}
-          {onAlsoSendToChannelChange && (
-            <div className='flex items-center space-x-1.5 px-3 py-1'>
+            {/* Hidden file input - always rendered for both mobile and desktop */}
+            {features.fileAttachments && (
               <input
-                type='checkbox'
-                id='also-send-to-channel'
-                checked={alsoSendToChannelChecked}
-                onChange={e => {
-                  onAlsoSendToChannelChange(e.target.checked);
-                }}
-                className='h-3 w-3 text-primary focus:ring-ring border-input rounded'
-                disabled={disabled || isSending}
+                ref={fileInputRef}
+                type='file'
+                multiple
+                onChange={handleFileSelect}
+                className='hidden'
+                aria-label='File attachment input'
               />
-              <label
-                htmlFor='also-send-to-channel'
-                className='text-xs text-muted-foreground cursor-pointer'
-              >
-                Also send to channel
-              </label>
-            </div>
-          )}
+            )}
 
-          {/* Hidden file input - always rendered for both mobile and desktop */}
-          {features.fileAttachments && (
-            <input
-              ref={fileInputRef}
-              type='file'
-              multiple
-              onChange={handleFileSelect}
-              className='hidden'
-              aria-label='File attachment input'
-            />
-          )}
+            {/* Desktop Footer Actions */}
+            {!isMobile && (
+              <div className='flex items-center justify-between p-2'>
+                <div className='flex items-center gap-1'>
+                  {features.fileAttachments && (
+                    <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type='button'
+                          className='p-1.5 bg-muted hover:bg-accent transition-all duration-200 ease-in-out rounded-full'
+                          aria-label='Add content'
+                          disabled={disabled || isSending}
+                        >
+                          <Plus className='h-4 w-4 text-muted-foreground' />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent side='top' align='start'>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            handleAttachClick();
+                            setIsPlusMenuOpen(false);
+                          }}
+                        >
+                          <Plus className='h-4 w-4' /> Upload Files
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setIsTranscriptSelectorOpen(true);
+                            setIsPlusMenuOpen(false);
+                          }}
+                        >
+                          <FileText className='h-4 w-4' /> Add Call Summary
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setIsCanvasAttachmentModalOpen(true);
+                            setIsPlusMenuOpen(false);
+                          }}
+                        >
+                          <FileText className='h-4 w-4' /> Canvas
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
 
-          {/* Desktop Footer Actions */}
-          {!isMobile && (
-            <div className='flex items-center justify-between p-2'>
-              <div className='flex items-center gap-1'>
-                {features.fileAttachments && (
-                  <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
-                    <DropdownMenuTrigger asChild>
+                  <Dialog
+                    open={isTranscriptSelectorOpen}
+                    onOpenChange={setIsTranscriptSelectorOpen}
+                    className='max-w-[900px] w-full !p-0 border-none bg-transparent shadow-none overflow-visible'
+                  >
+                    <CallTranscriptSelector
+                      onSelect={transcript => {
+                        if (onTranscriptSelect) {
+                          onTranscriptSelect(transcript);
+                        } else {
+                          editor?.commands.insertContent(transcript);
+                        }
+                        setIsTranscriptSelectorOpen(false);
+                      }}
+                      onAttach={file => {
+                        void addDraftAttachments([file]);
+                        setIsTranscriptSelectorOpen(false);
+                        editor?.commands.focus();
+                      }}
+                      onClose={() => setIsTranscriptSelectorOpen(false)}
+                    />
+                  </Dialog>
+
+                  <div className='h-3 w-px bg-border mx-1' aria-hidden='true' />
+
+                  {features.emojiPicker && (
+                    // Inside InputBox.tsx -> EmojiPickerButton component
+                    <EmojiPickerButton
+                      onEmojiSelect={handleEmojiSelect}
+                      disabled={disabled || isSending}
+                    />
+                  )}
+
+                  {features.mentions && (
+                    <Tooltip content='Mention user (@)' side={TooltipSide.TOP}>
                       <button
                         type='button'
-                        className='p-1.5 bg-muted hover:bg-accent transition-all duration-200 ease-in-out rounded-full'
-                        aria-label='Add content'
+                        onClick={() => {
+                          editor?.chain().focus().insertContent('@').run();
+                        }}
+                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        aria-label='Mention user'
+                        data-testid='mention-user-btn'
                         disabled={disabled || isSending}
                       >
-                        <Plus className='h-4 w-4 text-muted-foreground' />
+                        <AtSign className='h-4 w-4 text-muted-foreground' />
                       </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent side='top' align='start'>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          handleAttachClick();
-                          setIsPlusMenuOpen(false);
-                        }}
-                      >
-                        <Plus className='h-4 w-4' /> Upload Files
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          setIsTranscriptSelectorOpen(true);
-                          setIsPlusMenuOpen(false);
-                        }}
-                      >
-                        <FileText className='h-4 w-4' /> Add Call Summary
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          setIsCanvasAttachmentModalOpen(true);
-                          setIsPlusMenuOpen(false);
-                        }}
-                      >
-                        <FileText className='h-4 w-4' /> Canvas
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                    </Tooltip>
+                  )}
 
-                <Dialog
-                  open={isTranscriptSelectorOpen}
-                  onOpenChange={setIsTranscriptSelectorOpen}
-                  className='max-w-[900px] w-full !p-0 border-none bg-transparent shadow-none overflow-visible'
-                >
-                  <CallTranscriptSelector
-                    onSelect={transcript => {
-                      if (onTranscriptSelect) {
-                        onTranscriptSelect(transcript);
-                      } else {
-                        editor?.commands.insertContent(transcript);
-                      }
-                      setIsTranscriptSelectorOpen(false);
-                    }}
-                    onAttach={file => {
-                      void addDraftAttachments([file]);
-                      setIsTranscriptSelectorOpen(false);
-                      editor?.commands.focus();
-                    }}
-                    onClose={() => setIsTranscriptSelectorOpen(false)}
-                  />
-                </Dialog>
-
-                <div className='h-3 w-px bg-border mx-1' aria-hidden='true' />
-
-                {features.emojiPicker && (
-                  // Inside InputBox.tsx -> EmojiPickerButton component
-                  <EmojiPickerButton
-                    onEmojiSelect={handleEmojiSelect}
-                    disabled={disabled || isSending}
-                  />
-                )}
-
-                {features.mentions && (
-                  <Tooltip content='Mention user (@)' side={TooltipSide.TOP}>
+                  <Tooltip content='Mention channel (#)' side={TooltipSide.TOP}>
                     <button
                       type='button'
                       onClick={() => {
-                        editor?.chain().focus().insertContent('@').run();
+                        editor?.chain().focus().insertContent('#').run();
                       }}
                       className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                      aria-label='Mention user'
-                      data-testid='mention-user-btn'
+                      aria-label='Mention channel'
                       disabled={disabled || isSending}
                     >
-                      <AtSign className='h-4 w-4 text-muted-foreground' />
+                      <span className='text-muted-foreground font-semibold text-sm'>#</span>
                     </button>
                   </Tooltip>
-                )}
+                </div>
 
-                <Tooltip content='Mention channel (#)' side={TooltipSide.TOP}>
-                  <button
-                    type='button'
-                    onClick={() => {
-                      editor?.chain().focus().insertContent('#').run();
-                    }}
-                    className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                    aria-label='Mention channel'
-                    disabled={disabled || isSending}
-                  >
-                    <span className='text-muted-foreground font-semibold text-sm'>#</span>
-                  </button>
-                </Tooltip>
-              </div>
-
-              <div className='flex gap-2'>
-                {onCancel && (
-                  <Tooltip content='Cancel editing' side={TooltipSide.TOP}>
-                    <button
-                      type='button'
-                      onClick={onCancel}
-                      className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                      aria-label='Cancel editing'
-                    >
-                      <X className='h-4 w-4' />
-                    </button>
-                  </Tooltip>
-                )}
-
-                {!hideSendButton && (
-                  <div className='relative flex items-center'>
-                    {onCreateTicket ? (
-                      <div
-                        className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
-                          (hasSendableContent || sendMode === 'ticket') && !sendDisabled
-                            ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                            : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-                        }`}
+                <div className='flex items-center gap-2'>
+                  {onCancel && (
+                    <Tooltip content='Cancel editing' side={TooltipSide.TOP}>
+                      <button
+                        type='button'
+                        onClick={onCancel}
+                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                        aria-label='Cancel editing'
                       >
-                        <Tooltip
-                          content={sendMode === 'message' ? 'Send message' : 'Create ticket'}
-                          side={TooltipSide.TOP}
-                        >
-                          <button
-                            type='button'
-                            onClick={() => {
-                              if (sendMode === 'message') {
-                                void handleSend();
-                              } else {
-                                // Pass current editor content as description for the ticket
-                                const currentContent = editor?.getText().trim() || '';
-                                setSendMode('message');
-                                onCreateTicket(currentContent);
-                              }
-                            }}
-                            disabled={
-                              disabled ||
-                              sendDisabled ||
-                              isSending ||
-                              (sendMode === 'message' && !hasSendableContent)
-                            }
-                            className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                            aria-label={sendMode === 'message' ? 'Send message' : 'Create ticket'}
-                            data-testid='send-message-button'
-                            data-track-category='CHAT_INPUT'
-                            data-track-name={
-                              sendMode === 'message' ? 'SEND_MESSAGE' : 'CREATE_TICKET_FROM_MESSAGE'
-                            }
-                            data-track-metadata={JSON.stringify({
-                              ...(conversationId !== null ? { conversationId } : { channelId }),
-                              message: editor?.getText().trim() || '',
-                              hasAttachments: allAttachments.length > 0,
-                            })}
-                          >
-                            {isSending ? (
-                              <Loader2 className='h-4 w-4 animate-spin' />
-                            ) : sendMode === 'message' ? (
-                              <ArrowUp className='h-4 w-4' />
-                            ) : (
-                              <div className='flex items-center gap-2 px-1'>
-                                <span className='text-xs font-medium whitespace-nowrap'>
-                                  Create Ticket
-                                </span>
-                              </div>
-                            )}
-                          </button>
-                        </Tooltip>
+                        <X className='h-4 w-4' />
+                      </button>
+                    </Tooltip>
+                  )}
+
+                  <VoiceInput
+                    ref={voiceInputRef}
+                    editor={editor}
+                    content={content}
+                    mentionItems={mentionItems}
+                    voiceMentionItems={voiceMentionItems}
+                    disabled={disabled}
+                    isSending={isSending}
+                    onStateChange={({ isRecording, isTranscribing }) => {
+                      setIsVoiceRecording(isRecording);
+                      setIsVoiceTranscribing(isTranscribing);
+                    }}
+                  />
+
+                  {!hideSendButton && (
+                    <div className='relative flex items-center'>
+                      {onCreateTicket ? (
                         <div
-                          className={`w-px h-4 ${
-                            hasSendableContent || sendMode === 'ticket'
-                              ? 'bg-background/20'
-                              : 'bg-muted-foreground/20'
+                          className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                            (hasSendableContent || sendMode === 'ticket') && !sendDisabled
+                              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                              : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                           }`}
-                        ></div>
-                        <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
-                          <DropdownMenuTrigger asChild>
+                        >
+                          <Tooltip
+                            content={sendMode === 'message' ? 'Send message' : 'Create ticket'}
+                            side={TooltipSide.TOP}
+                          >
                             <button
                               type='button'
-                              disabled={disabled || sendDisabled || isSending}
-                              className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                              data-testid='send-options-menu'
-                            >
-                              <ChevronDown className='h-3 w-3' />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent side='top' align='end'>
-                            {sendMode === 'message' && !(hasTicket || ticketCreated) && (
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setSendMode('ticket');
-                                  setIsSendMenuOpen(false);
-                                }}
-                              >
-                                <Ticket className='h-4 w-4' /> Create a ticket
-                              </DropdownMenuItem>
-                            )}
-                            {sendMode === 'ticket' && (
-                              <DropdownMenuItem
-                                onClick={() => {
+                              onClick={() => {
+                                if (sendMode === 'message') {
+                                  void handleSend();
+                                } else {
+                                  // Pass current editor content as description for the ticket
+                                  const currentContent = editor?.getText().trim() || '';
                                   setSendMode('message');
+                                  onCreateTicket(currentContent);
+                                }
+                              }}
+                              disabled={
+                                disabled ||
+                                sendDisabled ||
+                                isSending ||
+                                (sendMode === 'message' && !hasSendableContent)
+                              }
+                              className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              aria-label={sendMode === 'message' ? 'Send message' : 'Create ticket'}
+                              data-testid='send-message-button'
+                              data-track-category='CHAT_INPUT'
+                              data-track-name={
+                                sendMode === 'message'
+                                  ? 'SEND_MESSAGE'
+                                  : 'CREATE_TICKET_FROM_MESSAGE'
+                              }
+                              data-track-metadata={JSON.stringify({
+                                ...(conversationId !== null ? { conversationId } : { channelId }),
+                                message: editor?.getText().trim() || '',
+                                hasAttachments: allAttachments.length > 0,
+                              })}
+                            >
+                              {isSending ? (
+                                <Loader2 className='h-4 w-4 animate-spin' />
+                              ) : sendMode === 'message' ? (
+                                <ArrowUp className='h-4 w-4' />
+                              ) : (
+                                <div className='flex items-center gap-2 px-1'>
+                                  <span className='text-xs font-medium whitespace-nowrap'>
+                                    Create Ticket
+                                  </span>
+                                </div>
+                              )}
+                            </button>
+                          </Tooltip>
+                          <div
+                            className={`w-px h-4 ${
+                              hasSendableContent || sendMode === 'ticket'
+                                ? 'bg-background/20'
+                                : 'bg-muted-foreground/20'
+                            }`}
+                          ></div>
+                          <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type='button'
+                                disabled={disabled || sendDisabled || isSending}
+                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                                data-testid='send-options-menu'
+                              >
+                                <ChevronDown className='h-3 w-3' />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent side='top' align='end'>
+                              {sendMode === 'message' && !(hasTicket || ticketCreated) && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setSendMode('ticket');
+                                    setIsSendMenuOpen(false);
+                                  }}
+                                >
+                                  <Ticket className='h-4 w-4' /> Create a ticket
+                                </DropdownMenuItem>
+                              )}
+                              {sendMode === 'ticket' && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setSendMode('message');
+                                    setIsSendMenuOpen(false);
+                                  }}
+                                >
+                                  <ArrowUp className='h-4 w-4' /> Send as message
+                                </DropdownMenuItem>
+                              )}
+                              {onScheduleSend && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setIsSendMenuOpen(false);
+                                    openScheduleDialog();
+                                  }}
+                                >
+                                  <Clock className='h-4 w-4' /> Schedule message
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      ) : onScheduleSend ? (
+                        // No ticket creation but schedule send is available — split button
+                        <div
+                          className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                            hasSendableContent
+                              ? 'bg-primary text-white hover:bg-primary/90'
+                              : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
+                          }`}
+                        >
+                          <Tooltip content='Send message' side={TooltipSide.TOP}>
+                            <button
+                              type='button'
+                              onClick={() => void handleSend()}
+                              disabled={disabled || isSending || !hasSendableContent}
+                              className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              aria-label='Send message'
+                              data-testid='send-message-button'
+                              data-track-category='CHAT_INPUT'
+                              data-track-name='SEND_MESSAGE'
+                              data-track-metadata={JSON.stringify({
+                                ...(conversationId !== null ? { conversationId } : { channelId }),
+                                hasAttachments: allAttachments.length > 0,
+                              })}
+                            >
+                              {isSending ? (
+                                <Loader2 className='h-4 w-4 animate-spin' />
+                              ) : (
+                                <ArrowUp className='h-4 w-4' />
+                              )}
+                            </button>
+                          </Tooltip>
+                          <div
+                            className={`w-px h-4 ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
+                          ></div>
+                          <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type='button'
+                                disabled={disabled || isSending}
+                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                                data-testid='send-options-menu'
+                              >
+                                <ChevronDown className='h-3 w-3' />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent side='top' align='end'>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  void handleSend();
                                   setIsSendMenuOpen(false);
                                 }}
                               >
-                                <ArrowUp className='h-4 w-4' /> Send as message
+                                <ArrowUp className='h-4 w-4' /> Send now
                               </DropdownMenuItem>
-                            )}
-                            {onScheduleSend && (
                               <DropdownMenuItem
                                 onClick={() => {
                                   setIsSendMenuOpen(false);
@@ -1728,29 +1887,26 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               >
                                 <Clock className='h-4 w-4' /> Schedule message
                               </DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    ) : onScheduleSend ? (
-                      // No ticket creation but schedule send is available — split button
-                      <div
-                        className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
-                          hasSendableContent
-                            ? 'bg-primary text-white hover:bg-primary/90'
-                            : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
-                        }`}
-                      >
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      ) : (
                         <Tooltip content='Send message' side={TooltipSide.TOP}>
                           <button
                             type='button'
                             onClick={() => void handleSend()}
-                            disabled={disabled || isSending || !hasSendableContent}
-                            className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                            disabled={disabled || sendDisabled || isSending || !hasSendableContent}
+                            className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
+                              hasSendableContent && !disabled && !sendDisabled
+                                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
+                            }`}
                             aria-label='Send message'
                             data-testid='send-message-button'
                             data-track-category='CHAT_INPUT'
-                            data-track-name='SEND_MESSAGE'
+                            data-track-name={
+                              sendMode === 'message' ? 'SEND_MESSAGE' : 'CREATE_TICKET_FROM_MESSAGE'
+                            }
                             data-track-metadata={JSON.stringify({
                               ...(conversationId !== null ? { conversationId } : { channelId }),
                               hasAttachments: allAttachments.length > 0,
@@ -1763,75 +1919,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             )}
                           </button>
                         </Tooltip>
-                        <div
-                          className={`w-px h-4 ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
-                        ></div>
-                        <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
-                          <DropdownMenuTrigger asChild>
-                            <button
-                              type='button'
-                              disabled={disabled || isSending}
-                              className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                              data-testid='send-options-menu'
-                            >
-                              <ChevronDown className='h-3 w-3' />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent side='top' align='end'>
-                            <DropdownMenuItem
-                              onClick={() => {
-                                void handleSend();
-                                setIsSendMenuOpen(false);
-                              }}
-                            >
-                              <ArrowUp className='h-4 w-4' /> Send now
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setIsSendMenuOpen(false);
-                                openScheduleDialog();
-                              }}
-                            >
-                              <Clock className='h-4 w-4' /> Schedule message
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    ) : (
-                      <Tooltip content='Send message' side={TooltipSide.TOP}>
-                        <button
-                          type='button'
-                          onClick={() => void handleSend()}
-                          disabled={disabled || sendDisabled || isSending || !hasSendableContent}
-                          className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
-                            hasSendableContent && !disabled && !sendDisabled
-                              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                              : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
-                          }`}
-                          aria-label='Send message'
-                          data-testid='send-message-button'
-                          data-track-category='CHAT_INPUT'
-                          data-track-name={
-                            sendMode === 'message' ? 'SEND_MESSAGE' : 'CREATE_TICKET_FROM_MESSAGE'
-                          }
-                          data-track-metadata={JSON.stringify({
-                            ...(conversationId !== null ? { conversationId } : { channelId }),
-                            hasAttachments: allAttachments.length > 0,
-                          })}
-                        >
-                          {isSending ? (
-                            <Loader2 className='h-4 w-4 animate-spin' />
-                          ) : (
-                            <ArrowUp className='h-4 w-4' />
-                          )}
-                        </button>
-                      </Tooltip>
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Typing Indicator - Always reserve space to prevent layout shift */}

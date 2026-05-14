@@ -30,6 +30,7 @@ export interface InputBoxProps {
   onContentChange?: (html: string, text: string) => void;
   onCancel?: () => void;
   mentionItems?: import('../Selectors/Selectors.types').MentionResult[];
+  voiceMentionItems?: import('../Selectors/Selectors.types').MentionResult[];
   onMentionSearch?: (query: string) => void;
   onMentionSelect?: (mention: import('../Selectors/Selectors.types').MentionResult) => void;
   channelItems?: import('../Selectors/Selectors.types').ChannelResult[];

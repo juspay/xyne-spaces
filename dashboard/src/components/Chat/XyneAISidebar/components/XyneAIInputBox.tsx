@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import React, { type ReactElement } from 'react';
 import {
   useState,
   useRef,
@@ -26,11 +26,24 @@ import {
   Hash,
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { Mark } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
+
+const VoiceShimmerMark = Mark.create({
+  name: 'voiceShimmer',
+  parseHTML() {
+    return [];
+  },
+  renderHTML() {
+    return ['span', { class: 'voice-shimmer' }, 0];
+  },
+});
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import { LinkSyncPlugin } from '../../../ui/TipTapExtensions/LinkSyncPlugin';
 import { toast } from 'sonner';
+import { VoiceInput } from '../../../ui/InputBox/VoiceInput';
+import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
 import {
   ChannelMentionExtension,
@@ -209,6 +222,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     }, [onOpenContextModal]);
     const { isMobile } = usePlatform();
     const navigate = useNavigate();
+
+    // Voice input
+    const voiceInputRef = React.useRef<VoiceInputHandle>(null);
+    const [isVoiceRecording, setIsVoiceRecording] = useState(false);
 
     // Get user mentions using the existing hook
     const { results: mentionResults, searchMentions } = useMentionSearch(channelId ?? undefined);
@@ -481,6 +498,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           groupActions: [],
         }),
         ChannelMentionExtension,
+        VoiceShimmerMark,
       ],
       content: '',
       onUpdate: ({ editor }) => {
@@ -1159,573 +1177,601 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         />
 
         <div
-          className={`bg-card border border-input focus-within:border-ring ${isMobile ? 'rounded-[26px]' : 'rounded-2xl'} py-2 px-2 flex flex-col gap-3 transition-colors relative`}
+          className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
+          style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
         >
-          {/* Selector Buttons and Pills Row */}
-          {!isOnboarding && (
-            <div
-              className='flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 pb-2'
-              style={{
-                scrollbarWidth: 'thin',
-                scrollbarColor: 'hsl(var(--border)) transparent',
-              }}
-            >
-              {/* "/" Button to open unified context modal */}
-              <button
-                type='button'
-                onClick={() => onOpenContextModal?.()}
-                className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0`}
-                aria-label='Add context'
-                title='Add context'
-                data-track-category='XyneAI'
-                data-track-name='OPEN_CONTEXT_MODAL'
+          <div
+            className={`bg-card border border-input focus-within:border-ring ${isMobile ? 'rounded-[26px]' : 'rounded-2xl'} py-2 px-2 flex flex-col gap-3 transition-colors relative`}
+          >
+            {/* Selector Buttons and Pills Row */}
+            {!isOnboarding && (
+              <div
+                className='flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 pb-2'
+                style={{
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: 'hsl(var(--border)) transparent',
+                }}
               >
-                <span className='text-muted-foreground font-semibold text-sm'>/</span>
-              </button>
-
-              {/* Research Agent Button - only show if no research is selected */}
-              {!selectedResearch && (
+                {/* "/" Button to open unified context modal */}
                 <button
                   type='button'
-                  onClick={handleResearchButtonClick}
-                  disabled={isResearchLoading}
-                  className={`flex h-7 py-1 px-2 justify-center items-center ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0 ${isResearchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  aria-label='Select product or repository for research'
-                  title='Deep Research'
+                  onClick={() => onOpenContextModal?.()}
+                  className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0`}
+                  aria-label='Add context'
+                  title='Add context'
                   data-track-category='XyneAI'
-                  data-track-name='OPEN_RESEARCH_SELECTOR'
+                  data-track-name='OPEN_CONTEXT_MODAL'
                 >
-                  <Search className='w-4 h-4 text-muted-foreground' />
-                </button>
-              )}
-
-              {/* Thread Context Pill */}
-              {activeThreadInfo && (
-                <div
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                >
-                  <button
-                    type='button'
-                    onClick={handleThreadPillClick}
-                    className='flex items-center gap-1 cursor-pointer hover:bg-accent transition-colors bg-transparent border-0 p-0'
-                    aria-label={`Navigate to thread from ${activeThreadInfo.senderName}`}
-                    data-track-category='XYNE_AI'
-                    data-track-name='ClickThreadContextPill'
-                    data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
-                  >
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
-                      {activeThreadInfo.senderName} • {activeThreadInfo.previewText}
-                    </span>
-                  </button>
-                  <button
-                    type='button'
-                    onClick={handleRemoveThreadInfo}
-                    className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label='Remove thread context'
-                    data-track-category='XYNE_AI'
-                    data-track-name='RemoveThreadContext'
-                    data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              )}
-
-              {/* Canvas Context Pill */}
-              {activeCanvasInfo && (
-                <div
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                >
-                  <button
-                    type='button'
-                    onClick={handleCanvasPillClick}
-                    className='flex items-center gap-1 cursor-pointer hover:bg-accent transition-colors bg-transparent border-0 p-0'
-                    aria-label={`Navigate to canvas: ${activeCanvasInfo.title || 'Untitled Canvas'}`}
-                    data-track-category='XYNE_AI'
-                    data-track-name='ClickCanvasContextPill'
-                    data-track-metadata={JSON.stringify({
-                      canvasId: activeCanvasInfo.viewAccessId,
-                    })}
-                  >
-                    <FileText className='w-3.5 h-3.5 text-muted-foreground' />
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
-                      {activeCanvasInfo.title || 'Untitled Canvas'}
-                    </span>
-                  </button>
-                  <button
-                    type='button'
-                    onClick={handleRemoveCanvasInfo}
-                    className='hover:bg-secondary rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label='Remove canvas context'
-                    data-track-category='XYNE_AI'
-                    data-track-name='RemoveCanvasContext'
-                    data-track-metadata={JSON.stringify({
-                      canvasId: activeCanvasInfo.viewAccessId,
-                    })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              )}
-
-              {/* Selection Context Pills (multiple) */}
-              {activeSelectionInfos.map((selection, index) => (
-                <div
-                  key={`${selection.canvasViewAccessId}-${index}`}
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
-                >
-                  <button
-                    type='button'
-                    onClick={() => handleSelectionPillClick(selection)}
-                    className='flex items-center gap-1 cursor-pointer hover:bg-muted transition-colors bg-transparent border-0 p-0'
-                    aria-label={`Navigate to canvas with selection: ${selection.preview}`}
-                    data-track-category='XYNE_AI'
-                    data-track-name='ClickSelectionContextPill'
-                    data-track-metadata={JSON.stringify({
-                      canvasId: selection.canvasViewAccessId,
-                    })}
-                  >
-                    <FileText className='w-3.5 h-3.5 text-primary' />
-                    <span className="text-primary font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[150px] truncate">
-                      {selection.preview}
-                    </span>
-                  </button>
-                  <button
-                    type='button'
-                    onClick={() => handleRemoveSelectionInfo(index)}
-                    className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label='Remove selection context'
-                    data-track-category='XYNE_AI'
-                    data-track-name='RemoveSelectionContext'
-                    data-track-metadata={JSON.stringify({
-                      canvasId: selection.canvasViewAccessId,
-                    })}
-                  >
-                    <X className='w-3 h-3 text-primary' />
-                  </button>
-                </div>
-              ))}
-
-              {/* Browser Context Pill */}
-              {browserContext && (
-                <div
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
-                >
-                  <button
-                    type='button'
-                    onClick={handleBrowserContextClick}
-                    className='flex items-center gap-1 cursor-pointer hover:bg-muted transition-colors bg-transparent border-0 p-0 rounded px-1'
-                    aria-label={`Open ${browserContext.domain}`}
-                    title={`${browserContext.title}\n${browserContext.url}`}
-                    data-track-category='XYNE_AI'
-                    data-track-name='ClickBrowserContextPill'
-                    data-track-metadata={JSON.stringify({
-                      url: browserContext.url,
-                      domain: browserContext.domain,
-                    })}
-                  >
-                    <Globe className='w-3.5 h-3.5 text-primary flex-shrink-0' />
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
-                      {browserContext.text.slice(0, 50)}
-                      {browserContext.text.length > 50 ? '...' : ''} • {browserContext.domain}
-                    </span>
-                  </button>
-                  <button
-                    type='button'
-                    onClick={handleRemoveBrowserContext}
-                    className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label='Remove browser context'
-                    data-track-category='XYNE_AI'
-                    data-track-name='RemoveBrowserContext'
-                    data-track-metadata={JSON.stringify({ url: browserContext.url })}
-                  >
-                    <X className='w-3 h-3 text-primary' />
-                  </button>
-                </div>
-              )}
-
-              {/* Channel Pills */}
-              {selectedChannels.map(channel => (
-                <div
-                  key={channel.id}
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                >
-                  <div className='flex items-center gap-1'>
-                    <div className='flex-shrink-0'>
-                      {channel.isPrivate ? (
-                        <Lock className='h-3.5 w-3.5 text-muted-foreground' />
-                      ) : (
-                        <HashIcon />
-                      )}
-                    </div>
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
-                      {channel.name}
-                    </span>
-                  </div>
-                  {/* Show X button for all channels */}
-                  <button
-                    onClick={() => onRemoveChannel?.(channel.id)}
-                    className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label={`Remove ${channel.name}`}
-                    data-track-category='XyneAI'
-                    data-track-name='REMOVE_CHANNEL'
-                    data-track-metadata={JSON.stringify({ channelId: channel.id })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              ))}
-
-              {/* Research Context Pill */}
-              {selectedResearch && (
-                <div
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                >
-                  <div className='flex items-center gap-1'>
-                    <div className='flex-shrink-0'>
-                      {selectedResearch.type === 'product' ? (
-                        <Package className='w-3.5 h-3.5 text-muted-foreground' />
-                      ) : (
-                        <Code2 className='w-3.5 h-3.5 text-muted-foreground' />
-                      )}
-                    </div>
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
-                      {selectedResearch.name}
-                    </span>
-                  </div>
-                  <button
-                    onClick={handleRemoveResearch}
-                    className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label={`Remove ${selectedResearch.name}`}
-                    data-track-category='XyneAI'
-                    data-track-name='REMOVE_RESEARCH'
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              )}
-
-              {/* Attachment Pills */}
-              {selectedAttachments.map(attachment => (
-                <div
-                  key={attachment.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-muted flex-shrink-0'
-                >
-                  <div className='flex items-center gap-1'>
-                    <div className='flex-shrink-0'>
-                      <FileText className='w-3.5 h-3.5 text-muted-foreground' />
-                    </div>
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                      {attachment.name}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => handleRemoveAttachment(attachment.id)}
-                    className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label={`Remove ${attachment.name}`}
-                    data-track-category='XyneAI'
-                    data-track-name='REMOVE_ATTACHMENT'
-                    data-track-metadata={JSON.stringify({ attachmentId: attachment.id })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              ))}
-
-              {/* Ticket Context Pills */}
-              {selectedTickets.map(ticket => (
-                <div
-                  key={ticket.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
-                >
-                  <div className='flex items-center gap-1'>
-                    <div className='flex-shrink-0'>
-                      <Ticket className='w-3.5 h-3.5 text-muted-foreground' />
-                    </div>
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                      {ticket.xyneId ? `${ticket.xyneId}` : ticket.title}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => onRemoveTicket?.(ticket.id)}
-                    className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label={`Remove ticket ${ticket.title}`}
-                    data-track-category='XyneAI'
-                    data-track-name='REMOVE_TICKET'
-                    data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              ))}
-
-              {/* Canvas Pills */}
-              {selectedCanvases.map(canvas => (
-                <div
-                  key={canvas.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
-                >
-                  <div className='flex items-center gap-1'>
-                    <div className='flex-shrink-0'>
-                      <FileText className='w-3.5 h-3.5 text-muted-foreground' />
-                    </div>
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                      {canvas.title}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => onRemoveCanvas?.(canvas.id)}
-                    className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label={`Remove canvas ${canvas.title}`}
-                    data-track-category='XyneAI'
-                    data-track-name='REMOVE_CANVAS'
-                    data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              ))}
-
-              {/* Transcript Pills */}
-              {selectedTranscripts.map(transcript => (
-                <div
-                  key={transcript.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
-                >
-                  <div className='flex items-center gap-1'>
-                    <div className='flex-shrink-0'>
-                      <Phone className='w-3.5 h-3.5 text-muted-foreground' />
-                    </div>
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                      {transcript.title}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => onRemoveTranscript?.(transcript.id)}
-                    className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label={`Remove transcript ${transcript.title}`}
-                    data-track-category='XyneAI'
-                    data-track-name='REMOVE_TRANSCRIPT'
-                    data-track-metadata={JSON.stringify({ transcriptId: transcript.id })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              ))}
-
-              {/* Recording Pills */}
-              {selectedRecordings.map(recording => (
-                <div
-                  key={recording.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
-                >
-                  <div className='flex items-center gap-1'>
-                    <div className='flex-shrink-0'>
-                      <Mic className='w-3.5 h-3.5 text-muted-foreground' />
-                    </div>
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                      {recording.title}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => onRemoveRecording?.(recording.id)}
-                    className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label={`Remove recording ${recording.title}`}
-                    data-track-category='XyneAI'
-                    data-track-name='REMOVE_RECORDING'
-                    data-track-metadata={JSON.stringify({ recordingId: recording.id })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              ))}
-
-              {/* Activity Pills */}
-              {selectedActivities.length > 0 && (
-                <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-background flex-shrink-0'>
-                  <div className='flex items-center gap-1'>
-                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
-                      {selectedActivities.length}{' '}
-                      {selectedActivities.length === 1 ? 'activity' : 'activities'}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => onActivitiesChange?.([])}
-                    className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                    aria-label='Remove all activities'
-                    data-track-category='XYNE_AI'
-                    data-track-name='RemoveAllActivities'
-                    data-track-metadata={JSON.stringify({
-                      activityCount: selectedActivities.length,
-                    })}
-                  >
-                    <X className='w-3 h-3' />
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Input Area - Text only */}
-          <div className='relative'>
-            <EditorContent
-              editor={editor}
-              className="bg-transparent outline-none text-foreground p-2 placeholder:text-muted-foreground text-sm font-['Inter']"
-            />
-          </div>
-
-          {/* Bottom buttons - Context menu, Web Search Toggle and Submit */}
-          {!isOnboarding && (
-            <div className='flex items-center justify-between gap-2 px-2'>
-              <div className='flex items-center gap-2'>
-                {/* Hidden file input */}
-                <input
-                  ref={fileInputRef}
-                  type='file'
-                  multiple
-                  onChange={e => void handleFileChange(e)}
-                  className='hidden'
-                  aria-label='Upload files'
-                />
-                {/* Attach files button */}
-                <button
-                  type='button'
-                  onClick={handleAttachFiles}
-                  className='p-1.5 -ml-1.5 rounded-lg hover:bg-accent transition-colors'
-                  aria-label='Attach files'
-                  title='Attach files'
-                  data-track-category='XyneAI'
-                  data-track-name='ATTACH_FILES'
-                >
-                  <Plus className='w-4 h-4 text-muted-foreground' />
+                  <span className='text-muted-foreground font-semibold text-sm'>/</span>
                 </button>
 
-                {/* Divider line */}
-                {onWebSearchToggle && <div className='h-4 w-px bg-muted' />}
-
-                {/* Web Search Toggle Button */}
-                {onWebSearchToggle && (
+                {/* Research Agent Button - only show if no research is selected */}
+                {!selectedResearch && (
                   <button
                     type='button'
-                    onClick={() => {
-                      if (webSearchAccessible) {
-                        onWebSearchToggle();
-                      }
-                    }}
-                    disabled={!webSearchAccessible}
-                    className={`p-1.5 rounded-lg transition-colors ${
-                      webSearchEnabled
-                        ? 'bg-muted text-status-success hover:bg-accent'
-                        : 'hover:bg-accent text-muted-foreground'
-                    } ${!webSearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    aria-label={
-                      webSearchAccessible
-                        ? webSearchEnabled
-                          ? 'Disable web search'
-                          : 'Enable web search'
-                        : 'Web search not available'
-                    }
-                    title={
-                      webSearchAccessible
-                        ? webSearchEnabled
-                          ? 'Web search enabled'
-                          : 'Enable web search'
-                        : "You don't have access to web search."
-                    }
+                    onClick={handleResearchButtonClick}
+                    disabled={isResearchLoading}
+                    className={`flex h-7 py-1 px-2 justify-center items-center ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0 ${isResearchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    aria-label='Select product or repository for research'
+                    title='Deep Research'
                     data-track-category='XyneAI'
-                    data-track-name='TOGGLE_WEB_SEARCH'
-                    data-track-metadata={JSON.stringify({ enabled: webSearchEnabled })}
+                    data-track-name='OPEN_RESEARCH_SELECTOR'
                   >
-                    <Globe className='w-4 h-4' />
+                    <Search className='w-4 h-4 text-muted-foreground' />
                   </button>
                 )}
 
-                {/* Divider line */}
-                {onDeepResearchToggle && <div className='h-4 w-px bg-muted' />}
-
-                {/* Deep Research Toggle Button */}
-                {onDeepResearchToggle && (
-                  <button
-                    type='button'
-                    onClick={() => {
-                      if (deepResearchAccessible) {
-                        onDeepResearchToggle();
-                      }
-                    }}
-                    disabled={!deepResearchAccessible}
-                    className={`p-1.5 rounded-lg transition-colors ${
-                      deepResearchEnabled
-                        ? 'bg-muted text-status-pending hover:bg-accent'
-                        : 'hover:bg-accent text-muted-foreground'
-                    } ${!deepResearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    aria-label={
-                      deepResearchAccessible
-                        ? deepResearchEnabled
-                          ? 'Disable deep research'
-                          : 'Enable deep research'
-                        : 'Deep research not available'
-                    }
-                    title={
-                      deepResearchAccessible
-                        ? deepResearchEnabled
-                          ? 'Deep research enabled'
-                          : 'Enable deep research'
-                        : "You don't have access to deep research."
-                    }
-                    data-track-category='XyneAI'
-                    data-track-name='TOGGLE_DEEP_RESEARCH'
-                    data-track-metadata={JSON.stringify({ enabled: deepResearchEnabled })}
+                {/* Thread Context Pill */}
+                {activeThreadInfo && (
+                  <div
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                   >
-                    <Microscope className='w-4 h-4' />
-                  </button>
+                    <button
+                      type='button'
+                      onClick={handleThreadPillClick}
+                      className='flex items-center gap-1 cursor-pointer hover:bg-accent transition-colors bg-transparent border-0 p-0'
+                      aria-label={`Navigate to thread from ${activeThreadInfo.senderName}`}
+                      data-track-category='XYNE_AI'
+                      data-track-name='ClickThreadContextPill'
+                      data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
+                    >
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                        {activeThreadInfo.senderName} • {activeThreadInfo.previewText}
+                      </span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={handleRemoveThreadInfo}
+                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label='Remove thread context'
+                      data-track-category='XYNE_AI'
+                      data-track-name='RemoveThreadContext'
+                      data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
                 )}
 
-                {/* Divider line */}
-                {onCreateCanvasToggle && <div className='h-4 w-px bg-border' />}
-
-                {/* Create Canvas Toggle Button */}
-                {onCreateCanvasToggle && (
-                  <button
-                    type='button'
-                    onClick={onCreateCanvasToggle}
-                    className={`p-1.5 rounded-lg transition-colors ${
-                      createCanvasEnabled
-                        ? 'bg-muted text-primary hover:bg-accent'
-                        : 'hover:bg-accent text-muted-foreground'
-                    }`}
-                    aria-label={createCanvasEnabled ? 'Disable create canvas' : 'Create canvas'}
-                    title={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}
-                    data-track-category='XyneAI'
-                    data-track-name='TOGGLE_CREATE_CANVAS'
-                    data-track-metadata={JSON.stringify({ enabled: createCanvasEnabled })}
+                {/* Canvas Context Pill */}
+                {activeCanvasInfo && (
+                  <div
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                   >
-                    <File className='w-4 h-4' />
-                  </button>
+                    <button
+                      type='button'
+                      onClick={handleCanvasPillClick}
+                      className='flex items-center gap-1 cursor-pointer hover:bg-accent transition-colors bg-transparent border-0 p-0'
+                      aria-label={`Navigate to canvas: ${activeCanvasInfo.title || 'Untitled Canvas'}`}
+                      data-track-category='XYNE_AI'
+                      data-track-name='ClickCanvasContextPill'
+                      data-track-metadata={JSON.stringify({
+                        canvasId: activeCanvasInfo.viewAccessId,
+                      })}
+                    >
+                      <FileText className='w-3.5 h-3.5 text-muted-foreground' />
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                        {activeCanvasInfo.title || 'Untitled Canvas'}
+                      </span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={handleRemoveCanvasInfo}
+                      className='hover:bg-secondary rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label='Remove canvas context'
+                      data-track-category='XYNE_AI'
+                      data-track-name='RemoveCanvasContext'
+                      data-track-metadata={JSON.stringify({
+                        canvasId: activeCanvasInfo.viewAccessId,
+                      })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                )}
+
+                {/* Selection Context Pills (multiple) */}
+                {activeSelectionInfos.map((selection, index) => (
+                  <div
+                    key={`${selection.canvasViewAccessId}-${index}`}
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
+                  >
+                    <button
+                      type='button'
+                      onClick={() => handleSelectionPillClick(selection)}
+                      className='flex items-center gap-1 cursor-pointer hover:bg-muted transition-colors bg-transparent border-0 p-0'
+                      aria-label={`Navigate to canvas with selection: ${selection.preview}`}
+                      data-track-category='XYNE_AI'
+                      data-track-name='ClickSelectionContextPill'
+                      data-track-metadata={JSON.stringify({
+                        canvasId: selection.canvasViewAccessId,
+                      })}
+                    >
+                      <FileText className='w-3.5 h-3.5 text-primary' />
+                      <span className="text-primary font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[150px] truncate">
+                        {selection.preview}
+                      </span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => handleRemoveSelectionInfo(index)}
+                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label='Remove selection context'
+                      data-track-category='XYNE_AI'
+                      data-track-name='RemoveSelectionContext'
+                      data-track-metadata={JSON.stringify({
+                        canvasId: selection.canvasViewAccessId,
+                      })}
+                    >
+                      <X className='w-3 h-3 text-primary' />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Browser Context Pill */}
+                {browserContext && (
+                  <div
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
+                  >
+                    <button
+                      type='button'
+                      onClick={handleBrowserContextClick}
+                      className='flex items-center gap-1 cursor-pointer hover:bg-muted transition-colors bg-transparent border-0 p-0 rounded px-1'
+                      aria-label={`Open ${browserContext.domain}`}
+                      title={`${browserContext.title}\n${browserContext.url}`}
+                      data-track-category='XYNE_AI'
+                      data-track-name='ClickBrowserContextPill'
+                      data-track-metadata={JSON.stringify({
+                        url: browserContext.url,
+                        domain: browserContext.domain,
+                      })}
+                    >
+                      <Globe className='w-3.5 h-3.5 text-primary flex-shrink-0' />
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                        {browserContext.text.slice(0, 50)}
+                        {browserContext.text.length > 50 ? '...' : ''} • {browserContext.domain}
+                      </span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={handleRemoveBrowserContext}
+                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label='Remove browser context'
+                      data-track-category='XYNE_AI'
+                      data-track-name='RemoveBrowserContext'
+                      data-track-metadata={JSON.stringify({ url: browserContext.url })}
+                    >
+                      <X className='w-3 h-3 text-primary' />
+                    </button>
+                  </div>
+                )}
+
+                {/* Channel Pills */}
+                {selectedChannels.map(channel => (
+                  <div
+                    key={channel.id}
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        {channel.isPrivate ? (
+                          <Lock className='h-3.5 w-3.5 text-muted-foreground' />
+                        ) : (
+                          <HashIcon />
+                        )}
+                      </div>
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                        {channel.name}
+                      </span>
+                    </div>
+                    {/* Show X button for all channels */}
+                    <button
+                      onClick={() => onRemoveChannel?.(channel.id)}
+                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label={`Remove ${channel.name}`}
+                      data-track-category='XyneAI'
+                      data-track-name='REMOVE_CHANNEL'
+                      data-track-metadata={JSON.stringify({ channelId: channel.id })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Research Context Pill */}
+                {selectedResearch && (
+                  <div
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        {selectedResearch.type === 'product' ? (
+                          <Package className='w-3.5 h-3.5 text-muted-foreground' />
+                        ) : (
+                          <Code2 className='w-3.5 h-3.5 text-muted-foreground' />
+                        )}
+                      </div>
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                        {selectedResearch.name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleRemoveResearch}
+                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label={`Remove ${selectedResearch.name}`}
+                      data-track-category='XyneAI'
+                      data-track-name='REMOVE_RESEARCH'
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                )}
+
+                {/* Attachment Pills */}
+                {selectedAttachments.map(attachment => (
+                  <div
+                    key={attachment.id}
+                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-muted flex-shrink-0'
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        <FileText className='w-3.5 h-3.5 text-muted-foreground' />
+                      </div>
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                        {attachment.name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveAttachment(attachment.id)}
+                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label={`Remove ${attachment.name}`}
+                      data-track-category='XyneAI'
+                      data-track-name='REMOVE_ATTACHMENT'
+                      data-track-metadata={JSON.stringify({ attachmentId: attachment.id })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Ticket Context Pills */}
+                {selectedTickets.map(ticket => (
+                  <div
+                    key={ticket.id}
+                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        <Ticket className='w-3.5 h-3.5 text-muted-foreground' />
+                      </div>
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                        {ticket.xyneId ? `${ticket.xyneId}` : ticket.title}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => onRemoveTicket?.(ticket.id)}
+                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label={`Remove ticket ${ticket.title}`}
+                      data-track-category='XyneAI'
+                      data-track-name='REMOVE_TICKET'
+                      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Canvas Pills */}
+                {selectedCanvases.map(canvas => (
+                  <div
+                    key={canvas.id}
+                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        <FileText className='w-3.5 h-3.5 text-muted-foreground' />
+                      </div>
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                        {canvas.title}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => onRemoveCanvas?.(canvas.id)}
+                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label={`Remove canvas ${canvas.title}`}
+                      data-track-category='XyneAI'
+                      data-track-name='REMOVE_CANVAS'
+                      data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Transcript Pills */}
+                {selectedTranscripts.map(transcript => (
+                  <div
+                    key={transcript.id}
+                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        <Phone className='w-3.5 h-3.5 text-muted-foreground' />
+                      </div>
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                        {transcript.title}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => onRemoveTranscript?.(transcript.id)}
+                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label={`Remove transcript ${transcript.title}`}
+                      data-track-category='XyneAI'
+                      data-track-name='REMOVE_TRANSCRIPT'
+                      data-track-metadata={JSON.stringify({ transcriptId: transcript.id })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Recording Pills */}
+                {selectedRecordings.map(recording => (
+                  <div
+                    key={recording.id}
+                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        <Mic className='w-3.5 h-3.5 text-muted-foreground' />
+                      </div>
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                        {recording.title}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => onRemoveRecording?.(recording.id)}
+                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label={`Remove recording ${recording.title}`}
+                      data-track-category='XyneAI'
+                      data-track-name='REMOVE_RECORDING'
+                      data-track-metadata={JSON.stringify({ recordingId: recording.id })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Activity Pills */}
+                {selectedActivities.length > 0 && (
+                  <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-background flex-shrink-0'>
+                    <div className='flex items-center gap-1'>
+                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                        {selectedActivities.length}{' '}
+                        {selectedActivities.length === 1 ? 'activity' : 'activities'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => onActivitiesChange?.([])}
+                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label='Remove all activities'
+                      data-track-category='XYNE_AI'
+                      data-track-name='RemoveAllActivities'
+                      data-track-metadata={JSON.stringify({
+                        activityCount: selectedActivities.length,
+                      })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
                 )}
               </div>
+            )}
 
-              {/* Submit/Stop button */}
-              <button
-                onClick={isStreaming ? onAbort : onSubmit}
-                disabled={!isStreaming && !inputValue.trim()}
-                className={`absolute ${isMobile ? 'bottom-[5px] mr-1 mb-1' : 'bottom-2'} right-2 p-2 rounded-full transition-colors ${
-                  isStreaming
-                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                    : inputValue.trim()
-                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                      : 'bg-muted text-muted-foreground cursor-not-allowed'
-                }`}
-                data-track-category='XyneAI'
-                data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SUBMIT_MESSAGE'}
-              >
-                {isStreaming ? (
-                  <StopIcon className='w-2.5 h-2.5' />
-                ) : (
-                  <ArrowUp className='w-4 h-4' />
-                )}
-              </button>
+            {/* Input Area - Text only */}
+            <div className='relative'>
+              <EditorContent
+                editor={editor}
+                className={`bg-transparent outline-none text-foreground p-2 placeholder:text-muted-foreground text-sm font-['Inter'] ${isVoiceRecording && !inputValue ? 'invisible' : ''}`}
+              />
+              {isVoiceRecording && !inputValue && (
+                <div className='absolute inset-0 p-2 pointer-events-none select-none flex items-center gap-3'>
+                  <div className='flex items-end gap-[3px]' style={{ height: 18 }}>
+                    {([0, 120, 60, 180, 90] as const).map((delay, i) => (
+                      <div
+                        key={i}
+                        className='voice-wave-bar'
+                        style={{ height: [10, 18, 14, 18, 10][i], animationDelay: `${delay}ms` }}
+                      />
+                    ))}
+                  </div>
+                  <span className='text-[13px] text-muted-foreground'>Listening...</span>
+                </div>
+              )}
             </div>
-          )}
+
+            {/* Bottom buttons - Context menu, Web Search Toggle and Submit */}
+            {!isOnboarding && (
+              <div className='flex items-center justify-between gap-2 px-2'>
+                <div className='flex items-center gap-2'>
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type='file'
+                    multiple
+                    onChange={e => void handleFileChange(e)}
+                    className='hidden'
+                    aria-label='Upload files'
+                  />
+                  {/* Attach files button */}
+                  <button
+                    type='button'
+                    onClick={handleAttachFiles}
+                    className='p-1.5 -ml-1.5 rounded-lg hover:bg-accent transition-colors'
+                    aria-label='Attach files'
+                    title='Attach files'
+                    data-track-category='XyneAI'
+                    data-track-name='ATTACH_FILES'
+                  >
+                    <Plus className='w-4 h-4 text-muted-foreground' />
+                  </button>
+
+                  {/* Divider line */}
+                  {onWebSearchToggle && <div className='h-4 w-px bg-muted' />}
+
+                  {/* Web Search Toggle Button */}
+                  {onWebSearchToggle && (
+                    <button
+                      type='button'
+                      onClick={() => {
+                        if (webSearchAccessible) {
+                          onWebSearchToggle();
+                        }
+                      }}
+                      disabled={!webSearchAccessible}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        webSearchEnabled
+                          ? 'bg-muted text-status-success hover:bg-accent'
+                          : 'hover:bg-accent text-muted-foreground'
+                      } ${!webSearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      aria-label={
+                        webSearchAccessible
+                          ? webSearchEnabled
+                            ? 'Disable web search'
+                            : 'Enable web search'
+                          : 'Web search not available'
+                      }
+                      title={
+                        webSearchAccessible
+                          ? webSearchEnabled
+                            ? 'Web search enabled'
+                            : 'Enable web search'
+                          : "You don't have access to web search."
+                      }
+                      data-track-category='XyneAI'
+                      data-track-name='TOGGLE_WEB_SEARCH'
+                      data-track-metadata={JSON.stringify({ enabled: webSearchEnabled })}
+                    >
+                      <Globe className='w-4 h-4' />
+                    </button>
+                  )}
+
+                  {/* Divider line */}
+                  {onDeepResearchToggle && <div className='h-4 w-px bg-muted' />}
+
+                  {/* Deep Research Toggle Button */}
+                  {onDeepResearchToggle && (
+                    <button
+                      type='button'
+                      onClick={() => {
+                        if (deepResearchAccessible) {
+                          onDeepResearchToggle();
+                        }
+                      }}
+                      disabled={!deepResearchAccessible}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        deepResearchEnabled
+                          ? 'bg-muted text-status-pending hover:bg-accent'
+                          : 'hover:bg-accent text-muted-foreground'
+                      } ${!deepResearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      aria-label={
+                        deepResearchAccessible
+                          ? deepResearchEnabled
+                            ? 'Disable deep research'
+                            : 'Enable deep research'
+                          : 'Deep research not available'
+                      }
+                      title={
+                        deepResearchAccessible
+                          ? deepResearchEnabled
+                            ? 'Deep research enabled'
+                            : 'Enable deep research'
+                          : "You don't have access to deep research."
+                      }
+                      data-track-category='XyneAI'
+                      data-track-name='TOGGLE_DEEP_RESEARCH'
+                      data-track-metadata={JSON.stringify({ enabled: deepResearchEnabled })}
+                    >
+                      <Microscope className='w-4 h-4' />
+                    </button>
+                  )}
+
+                  {/* Divider line */}
+                  {onCreateCanvasToggle && <div className='h-4 w-px bg-border' />}
+
+                  {/* Create Canvas Toggle Button */}
+                  {onCreateCanvasToggle && (
+                    <button
+                      type='button'
+                      onClick={onCreateCanvasToggle}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        createCanvasEnabled
+                          ? 'bg-muted text-primary hover:bg-accent'
+                          : 'hover:bg-accent text-muted-foreground'
+                      }`}
+                      aria-label={createCanvasEnabled ? 'Disable create canvas' : 'Create canvas'}
+                      title={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}
+                      data-track-category='XyneAI'
+                      data-track-name='TOGGLE_CREATE_CANVAS'
+                      data-track-metadata={JSON.stringify({ enabled: createCanvasEnabled })}
+                    >
+                      <File className='w-4 h-4' />
+                    </button>
+                  )}
+                </div>
+
+                {/* Right side: mic + submit */}
+                <div className='flex items-center gap-1'>
+                  <VoiceInput
+                    ref={voiceInputRef}
+                    editor={editor}
+                    content={inputValue}
+                    disabled={isStreaming}
+                    onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
+                  />
+                  <button
+                    onClick={isStreaming ? onAbort : onSubmit}
+                    disabled={!isStreaming && !inputValue.trim()}
+                    className={`p-2 rounded-full transition-colors ${
+                      isStreaming
+                        ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                        : inputValue.trim()
+                          ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                          : 'bg-muted text-muted-foreground cursor-not-allowed'
+                    }`}
+                    data-track-category='XyneAI'
+                    data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SUBMIT_MESSAGE'}
+                  >
+                    {isStreaming ? (
+                      <StopIcon className='w-2.5 h-2.5' />
+                    ) : (
+                      <ArrowUp className='w-4 h-4' />
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Research Agent Dropdown */}

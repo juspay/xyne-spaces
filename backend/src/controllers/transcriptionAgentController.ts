@@ -359,6 +359,24 @@ class TranscriptionAgentController {
    * Called by the Python agent at runtime instead of reading from room metadata,
    * so there is no 64 KB LiveKit metadata limit and the list stays up-to-date.
    */
+  getUserNames = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const db = DatabaseClient.getInstance();
+      const users = await db.user.findMany({
+        select: { name: true },
+        orderBy: { name: 'asc' },
+      });
+      const names = users
+        .map(u => (u.name || '').trim())
+        .filter(n => n.length > 0);
+      logger.info(`[UserNames] Returning ${names.length} user display names to agent`);
+      res.json({ success: true, names });
+    } catch (error) {
+      logger.error('[UserNames] Failed to fetch user names:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch user names' });
+    }
+  };
+
   getVoiceprints = async (_req: Request, res: Response): Promise<void> => {
     try {
       const db = DatabaseClient.getInstance();
