@@ -85,6 +85,7 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/listProjects', label: 'List Projects', icon: Folder },
   { path: '/resource-access', label: 'User Management', icon: ShieldUser, iconSize: 18 },
   { path: '/jira-migration', label: 'Jira Migration', icon: ArrowRightLeft, iconSize: 18 },
+  { path: '/migration/confluence', label: 'Confluence Migration', icon: BookOpen, iconSize: 18 },
   { path: '/support', label: 'Support', icon: LifeBuoy },
   { path: '/browser', label: 'Browser', icon: Globe },
   { path: '/forms', label: 'Forms', icon: Clipboard },
@@ -181,6 +182,7 @@ const AppSidebar = (): ReactElement => {
     if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
     if (pathname.startsWith('/chat/sent')) return '/chat/sent';
     if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
+    if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
     return '/' + (pathname.split('/')[1] || '');
   };
 

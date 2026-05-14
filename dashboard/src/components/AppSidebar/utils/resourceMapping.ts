@@ -10,6 +10,7 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/listProjects': 'LISTPROJECTS',
   '/resource-access': 'USERS',
   '/jira-migration': 'TICKET-MIGRATION',
+  '/migration/confluence': 'CONFLUENCE-MIGRATION',
   '/forms': 'FORMS',
   '/support': 'SUPPORT',
   '/product-insights': 'PRODUCT-INSIGHTS',
