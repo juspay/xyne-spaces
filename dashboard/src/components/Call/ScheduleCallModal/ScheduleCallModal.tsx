@@ -2264,7 +2264,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                           placeholder='Select channel'
                           data-track-category='calls'
                           data-track-name='channel-picker-search'
-                          className='flex-1 min-w-0 text-sm bg-transparent outline-none placeholder:text-muted-foreground'
+                          className='flex-1 min-w-0 text-sm text-foreground bg-transparent outline-none placeholder:text-muted-foreground'
                         />
                         {updateChannelId && (
                           <button
@@ -2301,7 +2301,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                 }}
                                 data-track-category='calls'
                                 data-track-name='select-post-call-channel'
-                                className='w-full flex items-center gap-2 mx-1 px-2 py-1.5 text-sm cursor-pointer hover:bg-accent rounded-md'
+                                className='w-full flex items-center gap-2 mx-1 px-2 py-1.5 text-sm text-popover-foreground cursor-pointer hover:bg-accent rounded-md'
                               >
                                 {item.leftSlot}
                                 {item.label}
@@ -2345,7 +2345,7 @@ const SubmitFooter: React.FC<{
         size='sm'
         type='submit'
         disabled={disabled}
-        className='rounded-lg text-[13px] px-4 h-9 text-white bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+        className='rounded-lg text-[13px] px-4 h-9 text-primary-foreground bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
       >
         {label}
       </Button>
