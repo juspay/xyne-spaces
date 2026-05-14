@@ -96,15 +96,22 @@ buildYql(
   userId: string,
   mailFilters: MailFilters = {},
   useFuzzy: boolean = false,
+  useSemanticAnyway: boolean = true,
 ): string {
   const schemaNames = schemas.join(', ');
   const whereConditions: string[] = [];
 
-    //Build search condition
-    const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
-    if (query && query.trim() && query !== '*') {
-      if (useFuzzy) {
-        // Fuzzy: use text_fuzzy index
+  //Build search condition
+  const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
+  const queryLength = query?.length ?? 0;
+
+  // Optimization: Skip semantic search for short queries (< 3 chars) - lexical only
+  const useSemantic = useSemanticAnyway && queryLength > 3;
+
+  if (query && query !== '*') {
+    if (useFuzzy) {
+      if (useSemantic) {
+        // Hybrid: fuzzy lexical + semantic
         whereConditions.push(`(
       ({defaultIndex: "text_fuzzy"} userInput(@query))
       or ({defaultIndex: "username"} userInput(@query))
@@ -136,7 +143,39 @@ buildYql(
       or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
       or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
     )`);
-      } else if (isTranscriptOnly) {
+      } else {
+        // Lexical only: short query, skip semantic
+        whereConditions.push(`(
+      ({defaultIndex: "text_fuzzy"} userInput(@query))
+      or ({defaultIndex: "username"} userInput(@query))
+      or ({defaultIndex: "mentionChannelName"} userInput(@query))
+      or ({defaultIndex: "mentions"} userInput(@query))
+      or ({defaultIndex: "title"} userInput(@query))
+      or ({defaultIndex: "description"} userInput(@query))
+      or ({defaultIndex: "title_fuzzy"} userInput(@query))
+      or ({defaultIndex: "description_fuzzy"} userInput(@query))
+      or ({defaultIndex: "initialMessage_fuzzy"} userInput(@query))
+      or ({defaultIndex: "eta"} userInput(@query))
+      or ({defaultIndex: "channelName"} userInput(@query))
+      or ({defaultIndex: "boardName"} userInput(@query))
+      or ({defaultIndex: "xyneId"} userInput(@query))
+      or ({defaultIndex: "tags"} userInput(@query))
+      or ({defaultIndex: "createdByName"} userInput(@query))
+      or ({defaultIndex: "assignedToName"} userInput(@query))
+      or ({defaultIndex: "closedByName"} userInput(@query))
+      or ({defaultIndex: "projectName"} userInput(@query))
+      or ({defaultIndex: "ticketMentions"} userInput(@query))
+      or ({defaultIndex: "threadMentions"} userInput(@query))
+      or ({defaultIndex: "threadSenders"} userInput(@query))
+      or ({defaultIndex: "parentTicketXyneId"} userInput(@query))
+      or ({defaultIndex: "childTicketXyneIds"} userInput(@query))
+      or ({defaultIndex: "stage"} userInput(@query))
+      or ({defaultIndex: "status"} userInput(@query))
+      or ({defaultIndex: "subject_fuzzy"} userInput(@query))
+      or ({defaultIndex: "chunks_fuzzy"} userInput(@query))
+    )`);
+      }
+    } else if (isTranscriptOnly) {
         // sam_transcript schema uses its own embedding fields; text_embeddings/chunk_embeddings don't exist on it
         whereConditions.push(`(
         (userInput(@query))
@@ -146,15 +185,20 @@ buildYql(
       or ({targetHits:${limit}} nearestNeighbor(others_embeddings, e))
       or ({targetHits:${limit}} nearestNeighbor(qna_embeddings, e))
     )`);
-      } else {
-        // Standard: no defaultIndex - include both raw (for special chars) and default (for tokenization)
+    } else {
+      // Lexical only: short query 
+      if  (useSemantic){
         whereConditions.push(`(
-        (userInput(@query))
-      or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
-      or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
-    )`);
+          (userInput(@query))
+        or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
+        or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
+        )`);
+      }
+      else{
+        whereConditions.push(`(userInput(@query))`);
       }
     }
+  }
     // Build app-specific conditions
     const appConditions: string[] = [];
 

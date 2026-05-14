@@ -124,6 +124,7 @@ class SearchMetricsService {
     scrollDepth?: number;
     resultUrl?: string;
     tab: TabType;
+    relevanceScore?: number;
   }): void {
     const words = countWords(params.queryText);
     // Log structured event
@@ -139,6 +140,7 @@ class SearchMetricsService {
       ...(params.channel && { channel: params.channel }),
       ...(params.scrollDepth !== undefined && { scroll_depth: params.scrollDepth }),
       ...(params.resultUrl && { result_url: params.resultUrl }),
+      ...(params.relevanceScore !== undefined && { relevance_score: params.relevanceScore }),
     };
     logger.info(Event.VESPA_SEARCH_CLICK, event as unknown as Record<string, unknown>);
     // Record metrics - increment click counter

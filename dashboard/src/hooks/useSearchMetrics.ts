@@ -512,6 +512,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       rankPosition: number;
       channel?: string;
       resultUrl?: string;
+      relevanceScore?: number;
       isPreview?: boolean;
     }) => {
       if (!searchSessionId) {
@@ -530,6 +531,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...(params.channel && { channel: params.channel }),
         ...(scrollDepth !== undefined && { scrollDepth }),
         ...(params.resultUrl && { resultUrl: params.resultUrl }),
+        ...(params.relevanceScore !== undefined && { relevanceScore: params.relevanceScore }),
         tab: previousTabRef.current,
       });
       sudoQueryService.track('search_click', {
@@ -541,6 +543,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...(params.channel && { channel: params.channel }),
         ...(scrollDepth !== undefined && { scrollDepth }),
         ...(params.resultUrl && { resultUrl: params.resultUrl }),
+        ...(params.relevanceScore !== undefined && { relevanceScore: params.relevanceScore }),
         tab: previousTabRef.current,
         isPreview: params.isPreview ?? false,
       });
@@ -604,6 +607,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         rankPosition,
         ...(channelId !== undefined ? { channel: channelId } : {}),
         ...(resultUrl !== undefined ? { resultUrl } : {}),
+        ...(result.relevanceScore !== undefined ? { relevanceScore: result.relevanceScore } : {}),
         isPreview: isPreview ?? false,
       });
     },
@@ -1107,8 +1111,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     [searchSessionId, markSearchStart, resetSearchState, includeBotMessages],
   );
 
-  // Track the last search text to avoid duplicate calls for trailing spaces
-  const lastSearchedTextRef = useRef('');
+  // Track the last search text and tab to avoid duplicate calls
+  const lastSearchedParamsRef = useRef<{ text: string; activeTab: TabType }>({
+    text: '',
+    activeTab: TabType.ALL,
+  });
 
   // Debounced backend search with pagination reset
   useEffect(() => {
@@ -1125,14 +1132,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // "sak" and "sak   " should trigger the same search
     const normalizedText = text.trimEnd();
 
-    // Skip if the normalized text is the same as the last searched text
+    // Skip if both text and tab are the same as last search
     // This prevents unnecessary API calls when typing only spaces
-    if (normalizedText === lastSearchedTextRef.current && normalizedText !== '') {
+    if (
+      normalizedText === lastSearchedParamsRef.current.text &&
+      activeTab === lastSearchedParamsRef.current.activeTab &&
+      normalizedText !== ''
+    ) {
       return;
     }
 
     const timer = setTimeout(() => {
-      lastSearchedTextRef.current = normalizedText;
+      lastSearchedParamsRef.current = { text: normalizedText, activeTab };
       void performSearch(
         text,
         activeTab,
