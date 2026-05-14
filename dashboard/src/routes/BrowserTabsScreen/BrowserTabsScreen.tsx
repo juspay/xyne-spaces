@@ -382,12 +382,12 @@ export function BrowserTabsScreen({
   }, [activeTabId, activeTab?.url]);
 
   useEffect(() => {
-    if (isMobile || !activeTabId) return;
+    if (isMobile || !activeTabId || !areControlsVisible) return;
     const rafId = requestAnimationFrame(() => {
       urlInputRef.current?.focus();
     });
     return () => cancelAnimationFrame(rafId);
-  }, [activeTabId, isMobile]);
+  }, [activeTabId, isMobile, areControlsVisible]);
 
   const handleCreateTab = (url?: string) => {
     const targetUrl = url || normalizeUrl(urlInput);

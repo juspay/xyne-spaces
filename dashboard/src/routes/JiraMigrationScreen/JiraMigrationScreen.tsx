@@ -1,5 +1,6 @@
 import { type ChangeEvent, ReactElement, useEffect, useMemo, useState } from 'react';
 import { useChannelsByProjectId } from '../../hooks/useChannels';
+import { usePlatform } from '../../hooks/usePlatform';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import {
@@ -129,6 +130,7 @@ const clearPersistedJiraMigrationJob = (): void => {
 };
 
 const JiraMigrationScreen = (): ReactElement => {
+  const { isMobile } = usePlatform();
   const [projects] = useCachedQuery(queries.getAllProjects());
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [selectedBoardId, setSelectedBoardId] = useState('');
@@ -610,6 +612,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     </label>
                     <Input
                       id='jira-project-key'
+                      autoFocus={!isMobile}
                       value={jiraProjectKey}
                       onChange={(e: ChangeEvent<HTMLInputElement>) => {
                         setJiraProjectKey(e.target.value.toUpperCase());

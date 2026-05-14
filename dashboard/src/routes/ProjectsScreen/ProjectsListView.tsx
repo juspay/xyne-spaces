@@ -1,4 +1,4 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement, useState, useRef, useEffect } from 'react';
 import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
 import { Button, ButtonType, Modal } from '@juspay/blend-design-system';
@@ -16,7 +16,7 @@ const ProjectsListView = (): ReactElement => {
   const [editingProject, setEditingProject] = useState<ZeroProject | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const { isMobile } = usePlatform();
-
+  const searchInputRef = useRef<HTMLInputElement>(null);
   // Fetch all projects using zero
   const [projects] = useCachedQuery(queries.getAllProjects());
 
@@ -71,6 +71,14 @@ const ProjectsListView = (): ReactElement => {
     }
   };
 
+  useEffect(() => {
+    if (isMobile || editingProject || showCreateModal) return;
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isMobile, editingProject, showCreateModal]);
+
   if (loading) {
     return (
       <div className='h-full bg-background flex items-center justify-center'>
@@ -100,11 +108,11 @@ const ProjectsListView = (): ReactElement => {
           <p className='text-xs text-muted-foreground'>Manage your projects</p>
           <div className='mt-3'>
             <input
+              ref={searchInputRef}
               type='text'
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder='Search by name or project code...'
-              autoFocus={!isMobile}
               className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='Projects'
               data-track-name='SearchProjects'

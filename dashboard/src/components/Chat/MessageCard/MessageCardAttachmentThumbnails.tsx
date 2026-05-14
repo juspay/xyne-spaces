@@ -229,8 +229,6 @@ export function MessageCardAttachmentThumbnails({
   return (
     <div
       className={cn('flex flex-wrap gap-1', className)}
-      onClick={e => e.stopPropagation()}
-      onKeyDown={e => e.stopPropagation()}
       role='presentation'
       data-track-category={trackCategory}
       data-track-name='MESSAGE_CARD_ATTACHMENTS_STRIP'

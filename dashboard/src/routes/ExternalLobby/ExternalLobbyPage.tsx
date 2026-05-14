@@ -14,6 +14,7 @@ import {
 import { toast } from 'sonner';
 import { CallType } from '@xyne/shared';
 import { callLobbyService, type CallInfo } from '../../services/Call/callLobbyService';
+import { usePlatform } from '../../hooks/usePlatform';
 import { ExternalCallView } from './ExternalCallView';
 
 // ---------------------------------------------------------------------------
@@ -366,6 +367,16 @@ export function ExternalLobbyPage() {
   // Submit "Join"
   // -------------------------------------------------------------------------
   const hasSession = state.callInfo?.hasSession;
+  const { isMobile } = usePlatform();
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isMobile || state.stage !== 'PRE_JOIN' || hasSession) return;
+    const rafId = requestAnimationFrame(() => {
+      nameInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [state.stage, hasSession, isMobile]);
 
   const handleJoin = useCallback(() => {
     if (state.stage !== 'PRE_JOIN') return;
@@ -616,6 +627,7 @@ export function ExternalLobbyPage() {
                 Your name
               </label>
               <input
+                ref={nameInputRef}
                 data-track-category='CALLS'
                 data-track-name='EXTERNAL_NAME_INPUT'
                 id='lobby-name'

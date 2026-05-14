@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo } from 'react';
+import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
 import { UserListView } from '../../components/ResourceAccess';
 import { ResourceAccessModal } from '../../components/ResourceAccess';
 import { useUsers, searchUsers } from '../../hooks/useUsers';
@@ -24,6 +24,7 @@ export const ResourceAccessScreen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Filter users based on debounced search query
   const filteredUsers = useMemo(() => {
@@ -32,6 +33,14 @@ export const ResourceAccessScreen = (): ReactElement => {
   }, [users, debouncedSearchQuery]);
 
   const loading = users === undefined;
+
+  useEffect(() => {
+    if (isMobile || editingUser) return;
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isMobile, editingUser]);
 
   return (
     <div
@@ -54,9 +63,9 @@ export const ResourceAccessScreen = (): ReactElement => {
               <Search size={18} className='text-muted-foreground' />
             </div>
             <Input
+              ref={searchInputRef}
               type='text'
               placeholder='Search users by name or email...'
-              autoFocus={!isMobile}
               value={searchQuery}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
               className='pl-10 w-full'

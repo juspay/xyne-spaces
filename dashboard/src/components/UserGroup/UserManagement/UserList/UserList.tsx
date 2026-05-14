@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Search, Trash2 } from 'lucide-react';
 import { useUserSearch } from '../../../../hooks/useUsers';
 import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
+import { usePlatform } from '../../../../hooks/usePlatform';
 
 interface UserListProps {
   users: User[];
@@ -39,7 +40,7 @@ export const UserList = ({
   const [, forceUpdate] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const isCreateMode = !userGroupId;
-
+  const { isMobile } = usePlatform();
   // Get users matching search query (for adding)
   const searchResults = useUserSearch(searchTerm, 10);
 
@@ -140,6 +141,7 @@ export const UserList = ({
             className='w-full pl-10 pr-4 h-9 text-sm'
             disabled={disabled}
             data-testid='search-members-input'
+            autoFocus={!isMobile}
           />
         </div>
       </div>

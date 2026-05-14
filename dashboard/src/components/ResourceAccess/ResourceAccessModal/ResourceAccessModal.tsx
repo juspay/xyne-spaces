@@ -18,6 +18,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { AccessType, UserStatus } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { userActivationApi } from '../../../api/userActivationApi';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface ResourceAccessModalProps {
   userId: string | null;
@@ -52,7 +53,7 @@ export const ResourceAccessModal = ({
 }: ResourceAccessModalProps): ReactElement => {
   const zero = useZero();
   const selectedUser = useUser(userId ?? '');
-
+  const { isMobile } = usePlatform();
   // Fetch all resources
   const [resources] = useCachedQuery(queries.getAllResources());
 
@@ -342,6 +343,7 @@ export const ResourceAccessModal = ({
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               className='w-full pl-10 pr-4 h-9 text-sm'
+              autoFocus={!isMobile}
             />
           </div>
         </div>
