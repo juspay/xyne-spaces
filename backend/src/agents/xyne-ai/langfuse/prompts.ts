@@ -188,6 +188,8 @@ export const PROMPT_NAMES = {
   GET_PAGE_CONTENT: 'get_page_content',
   GET_DOCUMENT_OUTLINE: 'get_document_outline',
   SUMMARIZE_EMAIL_THREAD: 'summarize_email_thread',
+  PROJECT_RECAP_CHANNEL_SUMMARY: 'project-recap-channel-summary',
+  PROJECT_RECAP_AGGREGATOR: 'project-recap-aggregator',
 } as const;
 
 export type PromptName = typeof PROMPT_NAMES[keyof typeof PROMPT_NAMES];
