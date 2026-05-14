@@ -48,6 +48,24 @@ export interface CreateIncomingWebhookRequest {
   name: string;
 }
 
+export interface AppCommand {
+  id: string;
+  appId: string;
+  commandName: string;
+  description: string;
+  isForThread: boolean;
+  isForChat: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertCommandRequest {
+  commandName: string;
+  description: string;
+  isForThread?: boolean;
+  isForChat?: boolean;
+}
+
 export class AppsService {
   async createApp(data: CreateAppRequest): Promise<App> {
     const response = await apiInstance.post<App>('/apps/create', data);
@@ -117,6 +135,46 @@ export class AppsService {
       },
     );
     return response.data;
+  }
+
+  async getCommands(appId: string): Promise<AppCommand[]> {
+    const response = await apiInstance.get<AppCommand[]>(`/apps/${appId}/commands`);
+    return response.data;
+  }
+
+  async upsertCommand(appId: string, data: UpsertCommandRequest): Promise<AppCommand> {
+    const response = await apiInstance.put<AppCommand>(`/apps/${appId}/commands`, data);
+    return response.data;
+  }
+
+  async deleteCommand(appId: string, commandName: string): Promise<void> {
+    await apiInstance.delete(`/apps/${appId}/commands/${commandName}`);
+  }
+
+  async getChannelCommands(
+    channelId: string,
+    filter?: { isForThread?: boolean; isForChat?: boolean },
+  ): Promise<AppCommand[]> {
+    const params: Record<string, string> = {};
+    if (filter?.isForThread) params['isForThread'] = 'true';
+    if (filter?.isForChat) params['isForChat'] = 'true';
+    const response = await apiInstance.get<AppCommand[]>(`/apps/channel/${channelId}/commands`, {
+      params,
+    });
+    return response.data;
+  }
+
+  async executeCommandAction(
+    channelId: string,
+    commandName: string,
+    conversationId?: string | null,
+    text?: string,
+  ): Promise<void> {
+    await apiInstance.post(`/apps/channel/${channelId}/command`, {
+      commandName,
+      conversationId: conversationId ?? null,
+      text: text ?? null,
+    });
   }
 }
 

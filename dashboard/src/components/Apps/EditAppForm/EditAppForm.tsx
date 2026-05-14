@@ -24,8 +24,213 @@ import {
   appsService,
   type BotChannel,
   type IncomingWebhook,
+  type AppCommand,
+  type UpsertCommandRequest,
 } from '../../../services/Apps/appsService';
 import { APPS_PUBLIC_BASE_URL } from '../../../config';
+
+// ─── Inline command row ───────────────────────────────────────────────────────
+
+interface CommandRowProps {
+  command: AppCommand;
+  onEdit: (command: AppCommand) => void;
+  onDelete: (commandName: string) => void;
+}
+
+const CommandRow = ({ command, onEdit, onDelete }: CommandRowProps): ReactElement => (
+  <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
+    <div className='flex-1 min-w-0'>
+      <div className='flex items-center gap-2'>
+        <span className='text-sm font-mono font-medium text-foreground'>
+          /{command.commandName}
+        </span>
+        <div className='flex gap-1'>
+          {command.isForChat && (
+            <span className='text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'>
+              chat
+            </span>
+          )}
+          {command.isForThread && (
+            <span className='text-[10px] px-1 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'>
+              thread
+            </span>
+          )}
+        </div>
+      </div>
+      <p className='text-xs text-muted-foreground truncate mt-0.5'>{command.description}</p>
+    </div>
+    <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
+      <Button
+        type='button'
+        variant='ghost'
+        size='sm'
+        className='h-7 w-7 p-0'
+        onClick={() => onEdit(command)}
+        title='Edit command'
+      >
+        <Pencil size={13} />
+      </Button>
+      <Button
+        type='button'
+        variant='ghost'
+        size='sm'
+        className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+        onClick={() => onDelete(command.commandName)}
+        title='Delete command'
+      >
+        <Trash2 size={13} />
+      </Button>
+    </div>
+  </div>
+);
+
+// ─── Inline add / edit form ───────────────────────────────────────────────────
+
+interface CommandFormInlineProps {
+  appId: string;
+  initial?: AppCommand | null;
+  onSaved: (cmd: AppCommand) => void;
+  onCancel: () => void;
+}
+
+const CommandFormInline = ({
+  appId,
+  initial,
+  onSaved,
+  onCancel,
+}: CommandFormInlineProps): ReactElement => {
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState(initial?.commandName ?? '');
+  const [desc, setDesc] = useState(initial?.description ?? '');
+  const [forChat, setForChat] = useState(initial?.isForChat ?? true);
+  const [forThread, setForThread] = useState(initial?.isForThread ?? true);
+  const [nameError, setNameError] = useState('');
+
+  const handleSave = async () => {
+    const trimmed = name.trim().toLowerCase();
+    if (!trimmed) {
+      setNameError('Command name is required');
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(trimmed)) {
+      setNameError('Only lowercase letters, numbers, and hyphens');
+      return;
+    }
+    if (!desc.trim()) {
+      toast.error('Description is required');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: UpsertCommandRequest = {
+        commandName: trimmed,
+        description: desc.trim(),
+        isForChat: forChat,
+        isForThread: forThread,
+      };
+      const saved = await appsService.upsertCommand(appId, payload);
+      onSaved(saved);
+    } catch (e) {
+      toast.error('Failed to save command', {
+        description: e instanceof Error ? e.message : 'Unknown error',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className='p-3 rounded-md border border-ring bg-muted/20 space-y-2'>
+      <div className='flex gap-2'>
+        <div className='flex-1 space-y-1'>
+          <label htmlFor='command-name' className='text-xs font-medium text-foreground'>
+            Command name
+          </label>
+          <div className='relative'>
+            <span className='absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm'>
+              /
+            </span>
+            <Input
+              id='command-name'
+              className='pl-5 text-sm h-8'
+              placeholder='e.g. sell'
+              value={name}
+              onChange={e => {
+                setName(e.target.value);
+                setNameError('');
+              }}
+              disabled={!!initial || saving}
+            />
+          </div>
+          {nameError && <p className='text-xs text-destructive'>{nameError}</p>}
+        </div>
+      </div>
+      <div className='space-y-1'>
+        <label htmlFor='command-description' className='text-xs font-medium text-foreground'>
+          Description
+        </label>
+        <Input
+          id='command-description'
+          className='text-sm h-8'
+          placeholder='What does this command do?'
+          value={desc}
+          onChange={e => setDesc(e.target.value)}
+          disabled={saving}
+        />
+      </div>
+      <div className='flex gap-4'>
+        <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
+          <input
+            type='checkbox'
+            checked={forChat}
+            onChange={e => setForChat(e.target.checked)}
+            disabled={saving}
+            className='rounded'
+            data-track-category='app-command'
+            data-track-name='toggle-for-chat'
+          />
+          Available in chat
+        </label>
+        <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
+          <input
+            type='checkbox'
+            checked={forThread}
+            onChange={e => setForThread(e.target.checked)}
+            disabled={saving}
+            className='rounded'
+            data-track-category='app-command'
+            data-track-name='toggle-for-thread'
+          />
+          Available in threads
+        </label>
+      </div>
+      <div className='flex gap-2 justify-end pt-1'>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-7'
+          onClick={onCancel}
+          disabled={saving}
+        >
+          <X size={13} className='mr-1' /> Cancel
+        </Button>
+        <Button
+          type='button'
+          size='sm'
+          className='h-7'
+          onClick={() => void handleSave()}
+          disabled={saving}
+        >
+          <Check size={13} className='mr-1' />
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+// ─── Main edit form ───────────────────────────────────────────────────────────
 
 interface EditAppFormData {
   description: string;
@@ -211,6 +416,51 @@ export const EditAppForm = ({
     if (!fullUrl) return;
     void copyTextToClipboard(fullUrl);
     toast.success('Webhook URL copied to clipboard');
+  };
+
+  // ── Commands state ──
+  const [commands, setCommands] = useState<AppCommand[]>([]);
+  const [commandsLoading, setCommandsLoading] = useState(false);
+  const [showCommandForm, setShowCommandForm] = useState(false);
+  const [editingCommand, setEditingCommand] = useState<AppCommand | null>(null);
+
+  useEffect(() => {
+    setCommandsLoading(true);
+    appsService
+      .getCommands(appId)
+      .then(setCommands)
+      .catch(() => toast.error('Failed to load commands'))
+      .finally(() => setCommandsLoading(false));
+  }, [appId]);
+
+  const handleCommandSaved = (saved: AppCommand) => {
+    setCommands(prev => {
+      const idx = prev.findIndex(c => c.commandName === saved.commandName);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = saved;
+        return next;
+      }
+      return [...prev, saved].sort((a, b) => a.commandName.localeCompare(b.commandName));
+    });
+    setShowCommandForm(false);
+    setEditingCommand(null);
+    toast.success(`Command /${saved.commandName} saved`);
+  };
+
+  const handleDeleteCommand = async (commandName: string) => {
+    try {
+      await appsService.deleteCommand(appId, commandName);
+      setCommands(prev => prev.filter(c => c.commandName !== commandName));
+      toast.success(`Command /${commandName} deleted`);
+    } catch {
+      toast.error('Failed to delete command');
+    }
+  };
+
+  const handleEditCommand = (command: AppCommand) => {
+    setEditingCommand(command);
+    setShowCommandForm(true);
   };
 
   const {
@@ -653,6 +903,61 @@ export const EditAppForm = ({
             )}
           </div>
         )}
+
+        {/* Commands */}
+        <div className='space-y-2'>
+          <div className='flex items-center justify-between'>
+            <label htmlFor='app-commands' className='block text-sm font-medium text-foreground'>
+              Commands
+            </label>
+            {!showCommandForm && (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                className='gap-1 h-7 text-xs'
+                onClick={() => {
+                  setEditingCommand(null);
+                  setShowCommandForm(true);
+                }}
+              >
+                <Plus size={12} /> Add Command
+              </Button>
+            )}
+          </div>
+
+          {showCommandForm && (
+            <CommandFormInline
+              appId={appId}
+              initial={editingCommand}
+              onSaved={handleCommandSaved}
+              onCancel={() => {
+                setShowCommandForm(false);
+                setEditingCommand(null);
+              }}
+            />
+          )}
+
+          {commandsLoading ? (
+            <p className='text-xs text-muted-foreground py-2'>Loading commands…</p>
+          ) : commands.length === 0 && !showCommandForm ? (
+            <p className='text-xs text-muted-foreground py-2'>
+              No commands yet. Add one to let users trigger actions with{' '}
+              <span className='font-mono'>/commandname</span>.
+            </p>
+          ) : (
+            <div className='space-y-1.5'>
+              {commands.map(cmd => (
+                <CommandRow
+                  key={cmd.commandName}
+                  command={cmd}
+                  onEdit={handleEditCommand}
+                  onDelete={commandName => void handleDeleteCommand(commandName)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className='flex gap-2 justify-end p-6 border-t border-border bg-background'>

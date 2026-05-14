@@ -3442,8 +3442,9 @@ model Apps {
   updatedAt DateTime
 
   // Relations
-  createdByUser User           @relation("AppsCreatedBy", fields: [createdBy], references: [id])
-  installations InstalledApps[]
+  createdByUser   User            @relation("AppsCreatedBy", fields: [createdBy], references: [id])
+  installations   InstalledApps[]
+  commands        AppCommand[]
 
   @@index([name])
   @@index([createdBy])
@@ -3493,6 +3494,24 @@ model AppIncomingWebhook {
   @@index([secret])
   @@map("app_incoming_webhooks")
   @@schema("workflow")
+}
+
+model AppCommand {
+  id          String   @id @default(cuid())
+  appId       String
+  commandName String   // e.g. "sell", "send", "todo"
+  description String   // shown in the / dropdown
+  isForThread Boolean  @default(true)
+  isForChat   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  app         Apps     @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@unique([appId, commandName])
+  @@index([appId])
+  @@map("app_commands")
+  @@schema("public")
 }
 
 // Saved Views Enums

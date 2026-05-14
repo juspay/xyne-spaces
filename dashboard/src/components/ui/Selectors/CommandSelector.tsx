@@ -9,17 +9,12 @@ export const CommandSelector: React.FC<CommandSelectorProps> = ({
   editor,
   commandItems,
   isLoadingCommands = false,
-  onCommandSelect,
 }) => {
   const [query, setQuery] = React.useState('');
 
   const filteredCommands = useMemo(() => {
     if (!query.trim()) return commandItems;
-    return commandItems.filter(
-      cmd =>
-        cmd.name.toLowerCase().includes(query.toLowerCase()) ||
-        cmd.description.toLowerCase().includes(query.toLowerCase()),
-    );
+    return commandItems.filter(cmd => cmd.name.toLowerCase().includes(query.toLowerCase()));
   }, [commandItems, query]);
 
   const detectTriggerWithQuery = useCallback((ed: Editor) => {
@@ -36,32 +31,21 @@ export const CommandSelector: React.FC<CommandSelectorProps> = ({
     (command: CommandItem) => {
       if (!editor) return;
 
-      const { state } = editor;
-      const { selection } = state;
-      const { from } = selection;
+      const trigger = detectCommandTrigger(editor);
+      if (!trigger) return;
 
-      let commandStart = from;
-      const textBefore = state.doc.textBetween(Math.max(0, from - 50), from);
-      const lastSlashIndex = textBefore.lastIndexOf('/');
-
-      if (lastSlashIndex !== -1) {
-        commandStart = from - (textBefore.length - lastSlashIndex);
-      }
-
+      // Replace the typed /query with just /{commandName} so the user can
+      // review it in the input box. Dispatch happens when they press Enter/send.
       editor
         .chain()
         .focus()
-        .deleteRange({ from: commandStart, to: from })
-        .insertContent(`/${command.name} `)
+        .deleteRange({ from: trigger.triggerStart, to: trigger.triggerEnd })
+        .insertContent(`/${command.name}`)
         .run();
-
-      if (onCommandSelect) {
-        void onCommandSelect(command);
-      }
 
       setQuery('');
     },
-    [editor, onCommandSelect],
+    [editor],
   );
 
   const renderItem = useCallback(
@@ -102,6 +86,7 @@ export const CommandSelector: React.FC<CommandSelectorProps> = ({
         </div>
       }
       isLoading={isLoadingCommands}
+      triggerChar='/'
       className='w-80'
     />
   );

@@ -38,6 +38,7 @@ export interface InputBoxProps {
   commandItems?: import('../Selectors/Selectors.types').CommandItem[];
   onCommandSelect?: (
     command: import('../Selectors/Selectors.types').CommandItem,
+    text?: string,
   ) => void | Promise<void>;
   isLoadingCommands?: boolean;
   onTyping?: () => void;
