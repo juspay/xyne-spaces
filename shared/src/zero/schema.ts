@@ -151,6 +151,12 @@ export enum ChannelVisibility {
 }
 
 // @ts-ignore TS1294
+export enum CalendarVisibility {
+  PUBLIC = 'PUBLIC',
+  PRIVATE = 'PRIVATE',
+}
+
+// @ts-ignore TS1294
 export enum ChannelAddUserPolicy {
   EVERYONE = 'EVERYONE',
   ADMINS_ONLY = 'ADMINS_ONLY',
@@ -1087,6 +1093,7 @@ export const userTable = table('users')
     notificationsPausedUntil: number().optional(),
     /** Assignment availability promoted from user_presence for query performance (dual-written) */
     assignmentUnavailableUntil: number().optional(),
+    calendarVisibility: enumeration<CalendarVisibility>(),
   })
   .primaryKey('id');
 

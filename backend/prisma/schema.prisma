@@ -207,6 +207,12 @@ enum ChannelVisibility {
   @@schema("public")
 }
 
+enum CalendarVisibility {
+  PUBLIC
+  PRIVATE
+  @@schema("public")
+}
+
 enum ChannelAddUserPolicy {
   EVERYONE
   ADMINS_ONLY
@@ -1002,6 +1008,7 @@ model User {
   lastActiveAt   DateTime?    // @see user_presence.lastActiveAt
   notificationsPausedUntil DateTime? // @see user_presence.notificationsPausedUntil
   assignmentUnavailableUntil DateTime? // @see user_presence.assignmentUnavailableUntil
+  calendarVisibility CalendarVisibility @default(PUBLIC)
 
   // Relations
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])

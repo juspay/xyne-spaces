@@ -68,6 +68,8 @@ interface ScheduleCallModalProps {
    *  participant picker, and routes the submit through Step 2 (invitation
    *  preview) when at least one guest is added. */
   enableExternalInvitees?: boolean;
+  /** Pre-fill participants when opening in create mode (e.g. from "Meet With" users). */
+  initialParticipants?: string[] | null;
 }
 
 interface ScheduleCallFormData {
@@ -168,6 +170,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   conversationId: threadConversationId,
   initialTitle,
   enableExternalInvitees = false,
+  initialParticipants,
 }) => {
   const user = useSelf();
   const allUsers = useUsers();
@@ -517,12 +520,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const displayName = getUserDisplayName(user);
       const start = initialStartsAt ?? defaultStart;
       const end = initialEndsAt ?? new Date(start.getTime() + 60 * 60 * 1000);
+      const prefilledParticipants = initialParticipants?.map(id => `user:${id}`) ?? [];
       if (displayName !== 'Unknown') {
         reset({
           title: initialTitle ?? `${displayName.split(' ')[0]}'s Call`,
           startsAt: start,
           endsAt: end,
-          participants: [],
+          participants: prefilledParticipants,
         });
       }
       setRecurringStartTime(toHHMM(start));
@@ -721,6 +725,17 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         });
     }
 
+    // Inject initialParticipants (create mode pre-fill from "Meet With" panel)
+    if (!isEditMode && initialParticipants) {
+      initialParticipants.forEach(id => {
+        const alreadyIncluded = userOptions.some(u => u.value === `user:${id}`);
+        if (!alreadyIncluded) {
+          const fullUser = allUsers.find(u => u.id === id);
+          if (fullUser) userOptions.push(buildUserOption(fullUser));
+        }
+      });
+    }
+
     return [...userOptions, ...channelOptions].sort((a, b) => a.label.localeCompare(b.label));
   }, [
     users,
@@ -728,6 +743,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     user?.id,
     isEditMode,
     initialCall,
+    initialParticipants,
     allVisibleChannels,
     allUsers,
     channelParticipantUserIds,

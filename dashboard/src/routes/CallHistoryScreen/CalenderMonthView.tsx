@@ -14,6 +14,48 @@ import {
   getCurrentUserMeetingStatus,
 } from './CalenderViewUtils';
 import { usePlatform } from '../../hooks/usePlatform';
+import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
+
+function MonthOtherUserEventRow({
+  color,
+  title,
+  startsAt,
+  variant = 'cell',
+}: {
+  color: string;
+  title: string | undefined;
+  startsAt: number | undefined;
+  variant?: 'cell' | 'overflow';
+}) {
+  if (variant === 'overflow') {
+    return (
+      <div className='flex items-center gap-2 w-full px-4 py-2'>
+        <div className={`w-0.5 h-4 rounded-full shrink-0 bg-[${color}]`} />
+        <span className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'>
+          {title ?? 'Busy'}
+        </span>
+        {startsAt && (
+          <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
+            {formatTime(startsAt)}
+          </span>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className='flex items-center gap-1 text-left w-full px-1 py-0.5 rounded'>
+      <div className={`w-0.5 h-3.5 rounded-full shrink-0 bg-[${color}]`} />
+      <span className='truncate flex-1 min-w-0 leading-tight text-foreground text-[12px] font-medium'>
+        {title ?? 'Busy'}
+      </span>
+      {startsAt && (
+        <span className='shrink-0 tabular-nums ml-1 text-muted-foreground text-[10px] opacity-70'>
+          {formatTime(startsAt)}
+        </span>
+      )}
+    </div>
+  );
+}
 
 interface CalendarMonthViewProps {
   calls: Call[];
@@ -25,11 +67,11 @@ interface CalendarMonthViewProps {
   onEditClick?: (call: Call) => void;
   onDeleteClick?: (call: Call) => void;
   onCreateCall?: (date: Date) => void;
+  otherUsersCalls?: OtherUserCalls[];
 }
 
 const DAYS_OF_WEEK = DAY_NAMES;
 const MAX_EVENTS_PER_CELL = 4;
-const MAX_EVENTS_PER_CELL_MOBILE = 2;
 
 function formatDayLabel(date: Date): string {
   return `${DAY_NAMES[date.getDay()]} ${date.getDate()}`;
@@ -59,9 +101,9 @@ const CalendarMonthView = ({
   onEditClick,
   onDeleteClick,
   onCreateCall,
+  otherUsersCalls = [],
 }: CalendarMonthViewProps): ReactElement => {
   const { isMobile } = usePlatform();
-  const maxEventsPerCell = isMobile ? MAX_EVENTS_PER_CELL_MOBILE : MAX_EVENTS_PER_CELL;
 
   const today = new Date();
   const year = currentMonth.getFullYear();
@@ -72,7 +114,17 @@ const CalendarMonthView = ({
   const [openOverflowDay, setOpenOverflowDay] = useState<string | null>(null);
   const [openOverflowCallId, setOpenOverflowCallId] = useState<string | null>(null);
 
-  // Group calls by day-of-month for the current month
+  type OwnEvent = { kind: 'own'; call: Call; startsAt: number };
+  type OtherEvent = {
+    kind: 'other';
+    slot: { startsAt: number; endsAt: number | null; title?: string };
+    color: string;
+    userName: string;
+    startsAt: number;
+  };
+  type DayEvent = OwnEvent | OtherEvent;
+
+  // Group own calls by day
   const callsByDay = new Map<number, Call[]>();
   calls.forEach(call => {
     if (!call.startsAt) return;
@@ -83,11 +135,34 @@ const CalendarMonthView = ({
     callsByDay.get(day)!.push(call);
   });
 
-  callsByDay.forEach(dayCalls => {
-    dayCalls.sort(
-      (a, b) => new Date(a.startsAt ?? 0).getTime() - new Date(b.startsAt ?? 0).getTime(),
-    );
-  });
+  // Build merged sorted event list per day
+  const eventsByDay = new Map<number, DayEvent[]>();
+  for (let d = 1; d <= new Date(year, month + 1, 0).getDate(); d++) {
+    const own: OwnEvent[] = (callsByDay.get(d) ?? []).map(call => ({
+      kind: 'own',
+      call,
+      startsAt:
+        typeof call.startsAt === 'number' ? call.startsAt : new Date(call.startsAt ?? 0).getTime(),
+    }));
+    const others: OtherEvent[] = [];
+    otherUsersCalls.forEach(({ user, color, calls: uc }) => {
+      uc.forEach(slot => {
+        if (!slot.startsAt) return;
+        const sd = new Date(slot.startsAt);
+        if (sd.getFullYear() === year && sd.getMonth() === month && sd.getDate() === d) {
+          others.push({
+            kind: 'other',
+            slot,
+            color,
+            userName: user.name ?? user.email ?? 'Someone',
+            startsAt: slot.startsAt,
+          });
+        }
+      });
+    });
+    const merged = [...own, ...others].sort((a, b) => a.startsAt - b.startsAt);
+    eventsByDay.set(d, merged);
+  }
 
   return (
     <div className='w-full border border-border rounded-xl overflow-hidden'>
@@ -109,9 +184,9 @@ const CalendarMonthView = ({
           <div key={wi} className='grid grid-cols-7 border-b last:border-b-0 border-border'>
             {week.map((day, di) => {
               const isToday = day ? isSameDay(day, today) : false;
-              const dayCalls = day ? (callsByDay.get(day.getDate()) ?? []) : [];
-              const visible = dayCalls.slice(0, maxEventsPerCell);
-              const overflow = dayCalls.length - visible.length;
+              const dayEvents = day ? (eventsByDay.get(day.getDate()) ?? []) : [];
+              const visible = dayEvents.slice(0, MAX_EVENTS_PER_CELL);
+              const overflow = dayEvents.length - visible.length;
               const dayKey = day ? `${year}-${month}-${day.getDate()}` : null;
 
               return (
@@ -147,9 +222,21 @@ const CalendarMonthView = ({
                 >
                   {day && (
                     <>
-                      {/* Events */}
+                      {/* Events — own and other users' merged and sorted by time */}
                       <div className='flex flex-col gap-0.5 flex-1'>
-                        {visible.map(call => {
+                        {visible.map((event, ei) => {
+                          if (event.kind === 'other') {
+                            return (
+                              <MonthOtherUserEventRow
+                                key={`other-${event.startsAt}-${ei}`}
+                                color={event.color}
+                                title={event.slot.title}
+                                startsAt={event.slot.startsAt}
+                              />
+                            );
+                          }
+
+                          const { call } = event;
                           const isEnded = call.status === CallStatus.ENDED;
                           const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
                           const isDeclined = meetingStatus === MeetingStatus.DECLINED;
@@ -309,7 +396,7 @@ const CalendarMonthView = ({
                                       {formatDayLabel(day)}
                                     </span>
                                     <span className='text-xs text-muted-foreground'>
-                                      · {dayCalls.length} Calls
+                                      · {dayEvents.length} Events
                                     </span>
                                   </div>
                                   <button
@@ -325,9 +412,22 @@ const CalendarMonthView = ({
                                   </button>
                                 </div>
 
-                                {/* Call list */}
+                                {/* Event list */}
                                 <div className='flex flex-col pb-3'>
-                                  {dayCalls.map(call => {
+                                  {dayEvents.map((event, ei) => {
+                                    if (event.kind === 'other') {
+                                      return (
+                                        <MonthOtherUserEventRow
+                                          key={`overflow-other-${event.startsAt}-${ei}`}
+                                          color={event.color}
+                                          title={event.slot.title}
+                                          startsAt={event.slot.startsAt}
+                                          variant='overflow'
+                                        />
+                                      );
+                                    }
+
+                                    const { call } = event;
                                     const meetingStatus = getCurrentUserMeetingStatus(
                                       call,
                                       currentUserId,

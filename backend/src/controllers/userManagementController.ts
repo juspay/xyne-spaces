@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
-import { AccessType } from '@prisma/client';
+import { AccessType, CalendarVisibility } from '@prisma/client';
 import { logger } from '../utils/logger';
 
 const storageService = getStorageService();
@@ -1006,6 +1006,26 @@ export class UserManagementController {
     } catch (error) {
       logger.error('Error deleting voice signature:', error);
       res.status(500).json({ error: 'Failed to delete voice signature' });
+    }
+  };
+
+  updateCalendarVisibility = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { visibility } = req.body;
+      if (visibility !== CalendarVisibility.PUBLIC && visibility !== CalendarVisibility.PRIVATE) {
+        res.status(400).json({ error: 'visibility must be PUBLIC or PRIVATE' });
+        return;
+      }
+      await userManagementService.updateUser(userId, { calendarVisibility: visibility });
+      res.json({ success: true, calendarVisibility: visibility });
+    } catch (error) {
+      logger.error('Error updating calendar visibility:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   };
 

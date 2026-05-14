@@ -958,6 +958,58 @@ export class ScheduleCallController {
       res.status(500).json({ success: false, error: 'Failed to cancel recurring series' });
     }
   };
+
+  // GET /api/calls/user/:userId/scheduled
+  getOtherUserScheduledCalls = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const requesterId = req.user?.id;
+      if (!requesterId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const { userId } = req.params;
+      const { from, to } = req.query;
+
+      if (!from || !to) {
+        res.status(400).json({ success: false, error: '`from` and `to` query params are required' });
+        return;
+      }
+
+      const fromDate = new Date(from as string);
+      const toDate = new Date(to as string);
+
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+        res.status(400).json({ success: false, error: '`from` and `to` must be valid ISO dates' });
+        return;
+      }
+
+      const targetUser = await repositories.users.findById(userId!);
+      if (!targetUser) {
+        res.status(404).json({ success: false, error: 'User not found' });
+        return;
+      }
+
+      if (targetUser.workspaceId !== req.user!.workspaceId!) {
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+
+      const calls = await repositories.calls.getScheduledCallsForUser(userId!, fromDate, toDate);
+
+      if (targetUser.calendarVisibility === 'PRIVATE') {
+        const busySlots = calls.map(c => ({ startsAt: c.startsAt, endsAt: c.endsAt }));
+        res.json({ success: true, calendarVisibility: 'PRIVATE', calls: busySlots });
+        return;
+      }
+
+      const safeCalls = calls.map(({ roomLink, transcript, aiSummary, metadata, ...rest }) => rest);
+      res.json({ success: true, calendarVisibility: 'PUBLIC', calls: safeCalls });
+    } catch (error) {
+      logger.error('Failed to fetch other user scheduled calls:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch scheduled calls' });
+    }
+  };
 }
 
 export const scheduleCallController = new ScheduleCallController();

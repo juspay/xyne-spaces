@@ -54,6 +54,8 @@ import CalendarWeekView from './CalendarWeekView';
 import CalendarDayView from './CalendarDayView';
 import CalendarMonthView from './CalenderMonthView';
 import { usePlatform } from '../../hooks/usePlatform';
+import MeetWithPanel from './MeetWithPanel';
+import { useOtherUserCalls } from '../../hooks/useOtherUserCalls';
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -91,7 +93,7 @@ const CallHistoryScreen = (): ReactElement => {
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const [externalChatCallId, setExternalChatCallId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
   const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>(() =>
     isMobile ? 'day' : 'month',
   );
@@ -158,6 +160,35 @@ const CallHistoryScreen = (): ReactElement => {
     showChannelCalls,
     setShowChannelCalls,
   } = useCallHistory(user?.id);
+
+  const allUsers = useUsers();
+
+  // Compute date range for the currently displayed calendar view
+  const calendarFrom = useMemo(() => {
+    if (calendarSubView === 'week') return currentWeekStart;
+    if (calendarSubView === 'day') return currentDayStart;
+    return currentMonthStart;
+  }, [calendarSubView, currentWeekStart, currentDayStart, currentMonthStart]);
+
+  const calendarTo = useMemo(() => {
+    const d = new Date(calendarFrom);
+    if (calendarSubView === 'week') d.setDate(d.getDate() + 7);
+    else if (calendarSubView === 'day') d.setDate(d.getDate() + 1);
+    else d.setMonth(d.getMonth() + 1);
+    return d;
+  }, [calendarFrom, calendarSubView]);
+
+  const {
+    selectedUsers: meetWithUsers,
+    otherUsersCalls,
+    addUser: addMeetWithUser,
+    removeUser: removeMeetWithUser,
+  } = useOtherUserCalls(calendarFrom, calendarTo);
+
+  const otherUsersCallsArray = useMemo(
+    () => Array.from(otherUsersCalls.values()),
+    [otherUsersCalls],
+  );
 
   const zero = useZero();
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
@@ -288,9 +319,7 @@ const CallHistoryScreen = (): ReactElement => {
     const params = new URLSearchParams(location.search);
     params.set('tab', newTab);
     void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
-    if (newTab !== 'upcoming') {
-      setViewMode('list');
-    } else {
+    if (newTab === 'upcoming') {
       setViewMode('calendar');
     }
   };
@@ -707,116 +736,131 @@ const CallHistoryScreen = (): ReactElement => {
 
           {/* Calendar toolbar (calendar mode) or Search + icons (list mode) */}
           {isCalendarMode ? (
-            <div className='my-3 flex items-center justify-between gap-3'>
-              {/* Left: title + prev/next */}
-              <div className='flex items-center gap-2'>
-                <h2 className='text-base font-semibold text-foreground min-w-[140px] max-sm:min-w-[78px] max-sm:font-normal'>
-                  <span className='sm:hidden flex flex-col leading-tight'>
-                    {calendarSubView === 'week' ? (
-                      <>
-                        <span>{calendarMobileTitle().split(' ').slice(0, 2).join(' ')}</span>
-                        <span className='text-xs font-normal text-muted-foreground'>
-                          {calendarMobileTitle().split(' ').slice(2).join(' ')}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span>{calendarMobileTitle().replace(/\s*\b\d{4}\b\s*$/, '')}</span>
-                        <span className='text-xs font-normal text-muted-foreground'>
-                          {calendarMobileTitle().match(/\b\d{4}\b/)?.[0]}
-                        </span>
-                      </>
-                    )}
-                  </span>
-                  <span className='hidden sm:inline'>{calendarTitle()}</span>
-                </h2>
-                <div className='flex items-center'>
-                  <button
-                    onClick={handleCalendarPrev}
-                    data-track-category='Calls'
-                    data-track-name='calendar-prev'
-                    className='p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground'
-                    aria-label='Previous'
-                  >
-                    <ChevronDown className='size-4 rotate-90' />
-                  </button>
-                  <button
-                    onClick={handleCalendarNext}
-                    disabled={isNextDisabled}
-                    data-track-category='Calls'
-                    data-track-name='calendar-next'
-                    className={cn(
-                      'p-1.5 rounded transition-colors',
-                      isNextDisabled
-                        ? 'text-muted-foreground/30 cursor-not-allowed'
-                        : 'hover:bg-muted text-muted-foreground',
-                    )}
-                    aria-label='Next'
-                  >
-                    <ChevronDown className='size-4 -rotate-90' />
-                  </button>
-                </div>
-              </div>
-
-              {/* Right: Today + sub-view dropdown + list/calendar icons */}
-              <div className='flex items-center gap-2 max-sm:gap-1.5'>
-                <button
-                  onClick={handleCalendarToday}
-                  disabled={isTodayDisabled}
-                  data-track-category='Calls'
-                  data-track-name='calendar-today'
-                  className={cn(
-                    'px-3 max-sm:px-2 py-1.5 text-sm max-sm:text-xs font-medium border border-border rounded-lg transition-colors',
-                    isTodayDisabled
-                      ? 'text-muted-foreground/50 cursor-not-allowed'
-                      : 'hover:bg-muted text-foreground',
-                  )}
-                >
-                  Today
-                </button>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className='flex items-center gap-1.5 px-3 max-sm:px-2 py-1.5 text-sm max-sm:text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors text-foreground'>
-                      {calendarSubView.charAt(0).toUpperCase() + calendarSubView.slice(1)}
-                      <ChevronDown className='size-3.5' />
+            <div className='my-3 flex flex-col gap-2'>
+              <div className='flex items-center justify-between gap-3'>
+                {/* Left: title + prev/next */}
+                <div className='flex items-center gap-2'>
+                  <h2 className='text-base font-semibold text-foreground min-w-[140px] max-sm:min-w-[78px] max-sm:font-normal'>
+                    <span className='sm:hidden flex flex-col leading-tight'>
+                      {calendarSubView === 'week' ? (
+                        <>
+                          <span>{calendarMobileTitle().split(' ').slice(0, 2).join(' ')}</span>
+                          <span className='text-xs font-normal text-muted-foreground'>
+                            {calendarMobileTitle().split(' ').slice(2).join(' ')}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span>{calendarMobileTitle().replace(/\s*\b\d{4}\b\s*$/, '')}</span>
+                          <span className='text-xs font-normal text-muted-foreground'>
+                            {calendarMobileTitle().match(/\b\d{4}\b/)?.[0]}
+                          </span>
+                        </>
+                      )}
+                    </span>
+                    <span className='hidden sm:inline'>{calendarTitle()}</span>
+                  </h2>
+                  <div className='flex items-center'>
+                    <button
+                      onClick={handleCalendarPrev}
+                      data-track-category='Calls'
+                      data-track-name='calendar-prev'
+                      className='p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground'
+                      aria-label='Previous'
+                    >
+                      <ChevronDown className='size-4 rotate-90' />
                     </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align='end' sideOffset={6} className='rounded-xl w-32'>
-                    {(['month', 'week', 'day'] as const).map(v => (
-                      <DropdownMenuItem
-                        key={v}
-                        className={cn(
-                          'text-sm rounded-lg capitalize cursor-pointer',
-                          calendarSubView === v && 'font-medium',
-                        )}
-                        onSelect={() => setCalendarSubView(v)}
-                      >
-                        {v.charAt(0).toUpperCase() + v.slice(1)}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    <button
+                      onClick={handleCalendarNext}
+                      disabled={isNextDisabled}
+                      data-track-category='Calls'
+                      data-track-name='calendar-next'
+                      className={cn(
+                        'p-1.5 rounded transition-colors',
+                        isNextDisabled
+                          ? 'text-muted-foreground/30 cursor-not-allowed'
+                          : 'hover:bg-muted text-muted-foreground',
+                      )}
+                      aria-label='Next'
+                    >
+                      <ChevronDown className='size-4 -rotate-90' />
+                    </button>
+                  </div>
+                </div>
 
-                <div className='flex items-center shrink-0 border border-border rounded-lg overflow-hidden'>
+                {/* Right: Today + sub-view dropdown + list/calendar icons */}
+                <div className='flex items-center gap-2'>
+                  {/* Meet With inline — desktop only */}
+                  <div className='min-w-[220px] w-64 shrink-0 hidden sm:block'>
+                    <MeetWithPanel
+                      allUsers={allUsers}
+                      currentUserId={user?.id}
+                      selectedUsers={meetWithUsers}
+                      otherUsersCalls={otherUsersCalls}
+                      onAddUser={addMeetWithUser}
+                      onRemoveUser={removeMeetWithUser}
+                      hideHeading
+                    />
+                  </div>
+                  <div className='w-px h-6 bg-border shrink-0 hidden sm:block' />
                   <button
-                    onClick={() => setViewMode('list')}
+                    onClick={handleCalendarToday}
+                    disabled={isTodayDisabled}
                     data-track-category='Calls'
-                    data-track-name='calendar-switch-to-list'
-                    className='px-2 py-1.5 text-muted-foreground hover:bg-muted/50 transition-colors'
-                    aria-label='List view'
+                    data-track-name='calendar-today'
+                    className={cn(
+                      'px-3 max-sm:px-2 py-1.5 text-sm max-sm:text-xs font-medium border border-border rounded-lg transition-colors',
+                      isTodayDisabled
+                        ? 'text-muted-foreground/50 cursor-not-allowed'
+                        : 'hover:bg-muted text-foreground',
+                    )}
                   >
-                    <LayoutList className='size-4' />
+                    Today
                   </button>
-                  <button
-                    onClick={() => setViewMode('calendar')}
-                    data-track-category='Calls'
-                    data-track-name='calendar-switch-to-calendar'
-                    className='px-2 py-1.5 bg-muted text-foreground transition-colors'
-                    aria-label='Calendar view'
-                  >
-                    <Calendar className='size-4' />
-                  </button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className='flex items-center gap-1.5 px-3 max-sm:px-2 py-1.5 text-sm max-sm:text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors text-foreground'>
+                        {calendarSubView.charAt(0).toUpperCase() + calendarSubView.slice(1)}
+                        <ChevronDown className='size-3.5' />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='end' sideOffset={6} className='rounded-xl w-32'>
+                      {(['month', 'week', 'day'] as const).map(v => (
+                        <DropdownMenuItem
+                          key={v}
+                          className={cn(
+                            'text-sm rounded-lg capitalize cursor-pointer',
+                            calendarSubView === v && 'font-medium',
+                          )}
+                          onSelect={() => setCalendarSubView(v)}
+                        >
+                          {v.charAt(0).toUpperCase() + v.slice(1)}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <div className='flex items-center shrink-0 border border-border rounded-lg overflow-hidden'>
+                    <button
+                      onClick={() => setViewMode('list')}
+                      data-track-category='Calls'
+                      data-track-name='calendar-switch-to-list'
+                      className='px-2 py-1.5 text-muted-foreground hover:bg-muted/50 transition-colors'
+                      aria-label='List view'
+                    >
+                      <LayoutList className='size-4' />
+                    </button>
+                    <button
+                      onClick={() => setViewMode('calendar')}
+                      data-track-category='Calls'
+                      data-track-name='calendar-switch-to-calendar'
+                      className='px-2 py-1.5 bg-muted text-foreground transition-colors'
+                      aria-label='Calendar view'
+                    >
+                      <Calendar className='size-4' />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1052,6 +1096,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onEditClick={call => handleEditClick(call)}
                   onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCall={handleCreateCallOnDay}
+                  otherUsersCalls={otherUsersCallsArray}
                 />
               )}
               {calendarSubView === 'week' && (
@@ -1065,6 +1110,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onEditClick={call => handleEditClick(call)}
                   onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCallAtSlot={handleCreateCallAtSlot}
+                  otherUsersCalls={otherUsersCallsArray}
                 />
               )}
               {calendarSubView === 'day' && (
@@ -1072,12 +1118,14 @@ const CallHistoryScreen = (): ReactElement => {
                   calls={calendarCalls}
                   currentDay={currentDayStart}
                   currentUserId={user?.id}
+                  currentUser={user}
                   onCallClick={call => handleCallRowClick(call)}
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
                   onEditClick={call => handleEditClick(call)}
                   onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCallAtSlot={handleCreateCallAtSlot}
+                  otherUsersCalls={otherUsersCallsArray}
                 />
               )}
             </div>
@@ -1184,6 +1232,7 @@ const CallHistoryScreen = (): ReactElement => {
         }}
         initialStartsAt={scheduleInitialTime?.startsAt ?? null}
         initialEndsAt={scheduleInitialTime?.endsAt ?? null}
+        initialParticipants={meetWithUsers.length > 0 ? meetWithUsers.map(u => u.id) : null}
       />
 
       {/* Schedule Call Modal (edit) */}

@@ -610,6 +610,22 @@ export class CallService {
       throw error;
     }
   }
+  async getOtherUserScheduledCalls(
+    userId: string,
+    from: Date,
+    to: Date,
+  ): Promise<{
+    calendarVisibility: 'PUBLIC' | 'PRIVATE';
+    calls: { startsAt: number; endsAt: number | null; id?: string; title?: string }[];
+  }> {
+    const response = await apiInstance.get<{
+      calendarVisibility: 'PUBLIC' | 'PRIVATE';
+      calls: { startsAt: number; endsAt: number | null; id?: string; title?: string }[];
+    }>(`/calls/user/${userId}/scheduled`, {
+      params: { from: from.toISOString(), to: to.toISOString() },
+    });
+    return response.data;
+  }
 }
 
 export const callService = new CallService();

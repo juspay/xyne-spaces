@@ -244,6 +244,20 @@ export class CallRepository {
     });
   }
 
+  async getScheduledCallsForUser(userId: string, from: Date, to: Date) {
+    return DatabaseClient.getInstance().call.findMany({
+      where: {
+        participants: { some: { userId } },
+        status: CallStatus.SCHEDULED,
+        startsAt: { gte: from, lte: to },
+      },
+      include: {
+        participants: { select: { userId: true, meetingStatus: true } },
+      },
+      orderBy: { startsAt: 'asc' },
+    });
+  }
+
   async findParticipant(callId: string, userId: string): Promise<CallParticipant | null> {
     const result = await DatabaseClient.getInstance().callParticipant.findFirst({
       where: {
