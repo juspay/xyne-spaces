@@ -1,6 +1,5 @@
 import React, { createContext, ReactElement, ReactNode, useContext } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { usePath } from '../../hooks/usePath';
 import { useZero } from '../../hooks/useZero';
 import { Activity, ChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
@@ -36,6 +35,7 @@ interface ActivityItemCardProps {
   className?: string;
   actorAction?: string;
   isSelected?: boolean | undefined;
+  showUnreadDot?: boolean;
 }
 
 export const ActivityItemCard = ({
@@ -53,18 +53,31 @@ export const ActivityItemCard = ({
   className,
   actorAction,
   isSelected,
+  showUnreadDot = false,
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
   const zero = useZero();
   const { isMobile } = usePlatform();
   const location = useLocation();
-  const currentPathname = usePath();
-  const isSelectedPath = `${currentPathname}${location.search}${location.hash}` === targetPath;
   const nofocusRef = useContext(NofocusRefContext);
+
+  // URL-based selection — survives refresh, unique per activity.id
+  const selectedActivityParam = new URLSearchParams(location.search).get('selectedActivity');
+  const isSelectedPath = selectedActivityParam === activity.id;
+  const isActive = isSelected || isSelectedPath;
 
   const channel = useChannel(channelId || '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
+
+  // Appends ?selectedActivity=id to path, preserving existing hash
+  const appendSelectedActivity = (path: string): string => {
+    const hashIdx = path.indexOf('#');
+    const base = hashIdx >= 0 ? path.slice(0, hashIdx) : path;
+    const hash = hashIdx >= 0 ? path.slice(hashIdx) : '';
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}selectedActivity=${activity.id}${hash}`;
+  };
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     // Always mark as read on any click (including URL clicks per FR-4)
@@ -84,18 +97,20 @@ export const ActivityItemCard = ({
       : targetPath;
 
     if (path) {
+      const pathWithActivityId = appendSelectedActivity(path);
       if (nofocusRef.current) {
-        const separator = path.includes('?') ? '&' : '?';
-        const hashIdx = path.indexOf('#');
-        const pathWithoutHash = hashIdx >= 0 ? path.slice(0, hashIdx) : path;
-        const hash = hashIdx >= 0 ? path.slice(hashIdx) : '';
+        const separator = pathWithActivityId.includes('?') ? '&' : '?';
+        const hashIdx = pathWithActivityId.indexOf('#');
+        const pathWithoutHash =
+          hashIdx >= 0 ? pathWithActivityId.slice(0, hashIdx) : pathWithActivityId;
+        const hash = hashIdx >= 0 ? pathWithActivityId.slice(hashIdx) : '';
         void navigate(`${pathWithoutHash}${separator}nofocus=1${hash}`, {
           state: {
             activityNavigationNonce: Date.now(),
           },
         });
       } else {
-        void navigate(path, {
+        void navigate(pathWithActivityId, {
           state: {
             activityNavigationNonce: Date.now(),
           },
@@ -120,13 +135,9 @@ export const ActivityItemCard = ({
       role='button'
       onClick={handleClick}
       className={cn(
-        'group flex w-full items-start gap-3 p-4 text-left transition-colors duration-150 h-auto rounded-none border-b border-border',
-        isSelected
-          ? 'bg-accent'
-          : !activity.isRead
-            ? 'bg-muted hover:bg-accent'
-            : 'bg-card hover:bg-muted',
-        isSelectedPath && 'bg-accent',
+        'group flex w-full items-start gap-3 p-4 text-left transition-colors duration-150 h-auto rounded-none border-b border-border border-l-4',
+        isActive ? 'border-l-foreground' : 'border-l-transparent',
+        !activity.isRead ? 'bg-accent hover:!bg-accent/50' : 'bg-card hover:!bg-muted/30',
         className,
       )}
       data-activity-id={activity.id}
@@ -213,7 +224,10 @@ export const ActivityItemCard = ({
               ))}
           </div>
 
-          <span className='flex-shrink-0 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
+          <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
+            {showUnreadDot && !activity.isRead && (
+              <span className='h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0' />
+            )}
             {getTimestampDisplay(activityTimestamp)}
           </span>
         </div>
