@@ -9,6 +9,7 @@ import type { UserGroup, User } from '@xyne/shared';
 import { UserResponsibility } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface UserGroupFormData {
   name: string;
@@ -39,7 +40,7 @@ export const UserGroupForm = ({
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'about' | 'members'>('about');
-
+  const { isMobile } = usePlatform();
   // ONE Map - mutate directly
   const responsibilitiesRef = useRef<Map<string, UserResponsibility>>(new Map());
   const responsibilities = responsibilitiesRef.current;
@@ -235,6 +236,7 @@ export const UserGroupForm = ({
                     required
                     disabled={isLoading}
                     data-testid='user-group-name-input'
+                    autoFocus={!isMobile}
                   />
                 )}
               />

@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo } from 'react';
+import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
 import { useZero } from '../../hooks/useZero';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -15,14 +15,16 @@ import { UserResponsibility } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useUserGroups } from '../../hooks/useUserGroup';
+import { usePlatform } from '../../hooks/usePlatform';
 
 const UserGroupsScreen = (): ReactElement => {
   const zero = useZero();
+  const { isMobile } = usePlatform();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUserGroup, setEditingUserGroup] = useState<ZeroUserGroup | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showManagedOnly, setShowManagedOnly] = useState(false);
-
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const userGroups = useUserGroups();
   // Fetch current user's group memberships to find which groups they manage
   const [userMemberships] = useCachedQuery(queries.getUserGroupMappingsByUserId());
@@ -176,6 +178,14 @@ const UserGroupsScreen = (): ReactElement => {
     }
   };
 
+  useEffect(() => {
+    if (isMobile || editingUserGroup || showCreateModal) return;
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isMobile, editingUserGroup, showManagedOnly, showCreateModal]);
+
   if (loading) {
     return (
       <div className='h-full bg-background flex items-center justify-center'>
@@ -215,6 +225,7 @@ const UserGroupsScreen = (): ReactElement => {
                   size={18}
                 />
                 <Input
+                  ref={searchInputRef}
                   type='text'
                   placeholder='Search user groups by name...'
                   value={searchQuery}

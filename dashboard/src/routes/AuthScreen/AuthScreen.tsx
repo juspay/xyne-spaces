@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useState } from 'react';
+import { ReactElement, useEffect, useRef, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { useAuth } from '../../hooks/useAuth';
@@ -11,6 +11,7 @@ import { Loader2, Building2, ArrowRight } from 'lucide-react';
 import { ShineBorder } from '../../components/ui/shine-border';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
+import { usePlatform } from '../../hooks/usePlatform';
 
 /**
  * AuthScreen - Mobile-Responsive Login Page with Modern Design
@@ -52,6 +53,8 @@ const AuthScreen = (): ReactElement => {
   const [orgName, setOrgName] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
   const [showCreateOrgForm, setShowCreateOrgForm] = useState(false);
+  const orgNameInputRef = useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
 
   useEffect(() => {
     const param = searchParams.get('enrollment_success');
@@ -81,6 +84,14 @@ const AuthScreen = (): ReactElement => {
     const path = `${location.pathname}${location.search}${location.hash}`;
     reactNativeBridge.notifyRouteReady(path);
   }, [location]);
+
+  useEffect(() => {
+    if (isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      orgNameInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [showCreateOrgForm, isCreatingOrg, isMobile]);
 
   const handleGoogleSignIn = (): void => {
     clearError();
@@ -285,6 +296,7 @@ const AuthScreen = (): ReactElement => {
                         id='orgName'
                         type='text'
                         value={orgName}
+                        ref={orgNameInputRef}
                         onChange={e => {
                           setOrgName(e.target.value);
                           if (error?.toLowerCase().includes('already exists')) {
