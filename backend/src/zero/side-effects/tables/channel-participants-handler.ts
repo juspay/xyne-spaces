@@ -26,7 +26,7 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       }
 
       const { channelId, userId } = participant;
-
+      
       if (this.ctx.userID === userId) {
         logger.info(`[ChannelParticipantsHandler] User ${userId} joined channel ${channelId} themselves - skipping notification`);
         return; // Don't notify user when they join themselves

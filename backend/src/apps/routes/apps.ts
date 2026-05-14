@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AppController } from '../controllers/appController';
 import { incomingWebhookController } from '../controllers/incomingWebhookController';
 import { ChatController } from '../controllers/chatController';
+import { CommandController } from '../controllers/commandController';
 import { authorize } from '@/middleware/authorize';
 import { AccessType } from '@prisma/client';
 import chatRoutes from './chat';
@@ -29,6 +30,7 @@ const platformRegistry = new PlatformAdapterRegistry();
 platformRegistry.register(new SlackAdapter());
 
 router.post('/webhooks/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleIncoming);
+const commandController = new CommandController();
 
 router.post('/create', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.createApp);
 router.post('/install/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appController.installApp);
@@ -45,6 +47,12 @@ router.post('/incoming-webhooks/:webhookId/revoke', authMiddleware.authenticate,
 
 // User-initiated app action dispatch (user auth, not app token)
 router.post("/chat/action", authMiddleware.authenticate, chatController.dispatchAction);
+
+// Channel commands (user auth) — fetch available commands + dispatch when user presses Enter
+// These must be declared BEFORE router.use('/channel', authenticateApp, ...) to avoid
+// being intercepted by the app-token authenticateApp middleware.
+router.get('/channel/:channelId/commands', authMiddleware.authenticate, commandController.getChannelCommands);
+router.post('/channel/:channelId/command', authMiddleware.authenticate, commandController.dispatchCommand);
 
 // Channel routes
 router.use("/channel", authenticateApp, channelRoutes);
@@ -76,5 +84,12 @@ router.post("/flow/action", authMiddleware.authenticate, flowController.executeA
 
 // Platform adapter routes
 platformRegistry.mountAll(router);
+
+// Commands (user auth) — manage commands per app
+router.get('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getCommands);
+router.put('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.upsertCommand);
+router.delete('/:appId/commands/:commandName', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.deleteCommand);
+
+// Channel commands user-auth routes are declared above, before authenticateApp middleware.
 
 export default router;

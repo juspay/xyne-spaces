@@ -920,6 +920,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
       if (!hasSendableContent) return;
 
+      // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
+      // If so, dispatch it to the app instead of sending it as a chat message.
+      const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
+      if (commandMatch && onCommandSelect) {
+        const cmdName = commandMatch[1] ?? '';
+        const cmdText = commandMatch[2]?.trim() ?? '';
+        const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
+        if (matchedCmd) {
+          editor.commands.setContent('');
+          setContent('');
+          editor.commands.focus();
+          void onCommandSelect(matchedCmd, cmdText);
+          return;
+        }
+      }
+
       setIsSending(true);
       isSendingRef.current = true;
 
@@ -1120,6 +1136,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       providerClearDroppedFiles,
       shareableOrigin,
       selfUser,
+      commandItems,
+      onCommandSelect,
     ]);
 
     // Canvas attachment handlers

@@ -59,6 +59,8 @@ import { useNavigate } from 'react-router-dom';
 import { useUpcomingDelayedMessage } from '../../../hooks/useUserDelayedMessages';
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { appsService } from '../../../services/Apps/appsService';
+import type { CommandItem } from '../../ui/Selectors/Selectors.types';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
@@ -156,6 +158,39 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
     const channelResults = useChannelSearch(channelSearchQuery, 10);
     const conversationId = conversation?.conversationId;
+
+    // Slash commands for this channel — filtered by context (thread vs chat)
+    const [channelCommands, setChannelCommands] = useState<CommandItem[]>([]);
+    useEffect(() => {
+      const isThread = !!conversation?.conversationId;
+      const filter = isThread ? { isForThread: true } : { isForChat: true };
+      appsService
+        .getChannelCommands(channelId, filter)
+        .then(cmds =>
+          setChannelCommands(
+            cmds.map(c => ({ id: c.id, name: c.commandName, description: c.description })),
+          ),
+        )
+        .catch(() => {
+          // silently ignore — channel may simply have no apps
+        });
+    }, [channelId, conversation?.conversationId]);
+
+    const handleCommandSelect = useCallback(
+      async (command: CommandItem, text?: string) => {
+        try {
+          await appsService.executeCommandAction(
+            channelId,
+            command.name,
+            conversationId ?? null,
+            text,
+          );
+        } catch {
+          // Error notice is shown as a private system message in chat (only visible to the user)
+        }
+      },
+      [channelId, conversationId],
+    );
 
     const currentSessionId = conversationId ?? channelId;
     const { handleTyping, stopTyping } = useTypingIndicator(currentSessionId);
@@ -790,6 +825,8 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               placeholder={placeholderText}
               typingUsers={typingUsers}
               showTypingIndicator={showTypingIndicator}
+              commandItems={channelCommands}
+              onCommandSelect={handleCommandSelect}
               {...(editorValue !== undefined && { value: editorValue })}
               {...(messageId && onCancel && { onCancel: handleCancelEdit })}
               {...(conversationId && { conversationId })}
