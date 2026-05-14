@@ -169,6 +169,11 @@ const PRD_GENERATION_PROMPT = `You are a senior product manager creating a Produ
 
 Analyze the conversation and extract product requirements discussed during the call.
 
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
+
 Return ONLY a valid JSON object with this exact structure:
 \`\`\`json
 {
@@ -200,6 +205,11 @@ CALL SUMMARY:
 // Detailed AI Summary prompt - phase-based comprehensive analysis
 const DETAILED_SUMMARY_PROMPT = `You are creating a comprehensive, phase-based meeting summary that captures the natural flow of conversation.
 **LANGUAGE: Generate this entire summary in English, regardless of the transcript language.**
+
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
 Analyze the transcript and divide it into distinct phases/segments based on topic shifts or conversation flow.
 
