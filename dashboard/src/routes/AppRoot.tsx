@@ -161,6 +161,7 @@ import { getTicketsPath } from '../components/ErrorReportModal/ErrorReportModal.
 import { useCacConfig } from '../hooks/useCacConfig';
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
+import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
 import { ExternalLobbyPage } from './ExternalLobby/ExternalLobbyPage';
 
@@ -1089,6 +1090,14 @@ export const router = createBrowserRouter([
                 element: (
                   <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
                     <JiraMigrationScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'migration/confluence',
+                element: (
+                  <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
+                    <ConfluenceMigrationScreen />
                   </ResourceProtectedRoute>
                 ),
               },

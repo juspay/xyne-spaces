@@ -223,6 +223,12 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
+  // Confluence migration configuration
+  CONFLUENCE_BASE_URL: Joi.string().allow('').default(''),
+  CONFLUENCE_EMAIL: Joi.string().allow('').default(''),
+  CONFLUENCE_API_TOKEN: Joi.string().allow('').default(''),
+  CONFLUENCE_AUTH_TOKEN: Joi.string().allow('').default(''),
+  CONFLUENCE_MIGRATION_FALLBACK_EMAIL: Joi.string().email().default(''),
   // Bit-Bot Integration
   ENABLE_FILE_INDEXING: Joi.boolean().default(false),
   VESPA_QUEUE_NAMES: Joi.string().default(''),
@@ -530,6 +536,13 @@ export const config = {
     eulerBotAuthToken: envVars.JIRA_EULER_BOT_AUTH_TOKEN as string,
     migrationBotEmail: envVars.JIRA_MIGRATION_BOT_EMAIL as string, 
     migrationBotAuthToken: envVars.JIRA_MIGRATION_BOT_AUTH_TOKEN as string,
+  },
+  confluence: {
+    baseUrl: envVars.CONFLUENCE_BASE_URL as string,
+    email: envVars.CONFLUENCE_EMAIL as string,
+    apiToken: envVars.CONFLUENCE_API_TOKEN as string,
+    authToken: envVars.CONFLUENCE_AUTH_TOKEN as string,
+    migrationFallbackEmail: envVars.CONFLUENCE_MIGRATION_FALLBACK_EMAIL as string,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   email: {

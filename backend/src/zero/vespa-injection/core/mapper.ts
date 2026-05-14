@@ -2,7 +2,7 @@ import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
-import { ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
+import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
 import { VespaJob, VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
 import { Conversation, Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call } from '@prisma/client';
@@ -657,7 +657,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<Vesp
     urlInternal: '',
     urlOriginal: '',
     fileSize: 0,
-    isPrivate: true,
+    isPrivate: args.visibility !== CanvasVisibility.PUBLIC,
     mimeType: 'application/json',
     subApp: SubApp.CANVAS,
     channelRef,
