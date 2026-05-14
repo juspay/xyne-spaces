@@ -28,6 +28,10 @@ export class FormsACL extends BaseACL<'forms'> {
     if (form.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Form update failed: workspace ID mismatch', 'forms');
     }
+    // Allow OWNER and ADMIN roles to update any form in their workspace
+    if (this.ctx.orgRole === 'OWNER' || this.ctx.orgRole === 'ADMIN') {
+      return;
+    }
     if (form.createdBy !== this.ctx.userID) {
       throw new MutationACLError('Form update failed: only the creator can update this form', 'forms');
     }
@@ -41,6 +45,10 @@ export class FormsACL extends BaseACL<'forms'> {
     // Direct workspaceId check - no user lookup needed
     if (form.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Form delete failed: workspace ID mismatch', 'forms');
+    }
+    // Allow OWNER and ADMIN roles to delete any form in their workspace
+    if (this.ctx.orgRole === 'OWNER' || this.ctx.orgRole === 'ADMIN') {
+      return;
     }
     if (form.createdBy !== this.ctx.userID) {
       throw new MutationACLError('Form delete failed: only the creator can delete this form', 'forms');
