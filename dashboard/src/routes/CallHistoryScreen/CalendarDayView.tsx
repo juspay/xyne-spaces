@@ -33,19 +33,32 @@ import {
   getCurrentUserMeetingStatus,
   dayKey,
   isCallDraggable,
+  computeEventPositions,
+  buildDayEventPool,
 } from './CalenderViewUtils';
 import { CalendarTimeSlotCell } from './CalendarTimeSlotCell';
+import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
+import Avatar from '../../components/ui/Avatar/Avatar';
+import { getUserDisplayName } from '../../utils/userDisplayName';
+import { OtherUserEventBlock } from './OtherUserEventBlock';
 
 interface CalendarDayViewProps {
   calls: Call[];
   currentDay: Date;
   currentUserId?: string | undefined;
+  currentUser?: {
+    id?: string;
+    name?: string | null;
+    email?: string | null;
+    displayName?: string | null;
+  } | null;
   onCallClick: (call: Call) => void;
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
   onDeleteClick?: (call: Call) => void;
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
+  otherUsersCalls?: OtherUserCalls[];
 }
 
 // ── Per-call card: drag handle IS the popover trigger button ─────────────────
@@ -55,6 +68,8 @@ interface DayViewCallCardProps {
   draggable: boolean;
   top: number;
   height: number;
+  leftPct: number;
+  widthPct: number;
   isBeingResized: boolean;
   currentUserId: string | undefined;
   openCallId: string | null;
@@ -72,6 +87,8 @@ function DayViewCallCard({
   draggable,
   top,
   height,
+  leftPct,
+  widthPct,
   isBeingResized,
   currentUserId,
   openCallId,
@@ -111,6 +128,8 @@ function DayViewCallCard({
           style={{
             top,
             height,
+            left: `calc(${leftPct}% + 2px)`,
+            width: `calc(${widthPct}% - 4px)`,
             backgroundColor: meetingStatus === MeetingStatus.ACCEPTED ? '#0077FF1A' : 'transparent',
             opacity: isDragging || isBeingResized ? 0.3 : 1,
             cursor: draggable ? 'grab' : 'pointer',
@@ -243,6 +262,7 @@ function DroppableDayColumn({
   onCreateCallAtSlot,
   onDragCreatePointerDown,
   consumeDragEnd,
+  className,
 }: {
   date: Date;
   children: ReactNode;
@@ -252,6 +272,7 @@ function DroppableDayColumn({
     | ((e: React.PointerEvent<HTMLDivElement>, date: Date) => void)
     | undefined;
   consumeDragEnd: (() => boolean) | undefined;
+  className?: string;
 }): ReactElement {
   const { setNodeRef } = useDroppable({ id: dayKey(date) });
 
@@ -264,6 +285,7 @@ function DroppableDayColumn({
       onDragCreatePointerDown={onDragCreatePointerDown}
       consumeDragEnd={consumeDragEnd}
       trackName='calendar-day-slot-create'
+      {...(className !== undefined ? { className } : {})}
     >
       {children}
     </CalendarTimeSlotCell>
@@ -309,12 +331,14 @@ const CalendarDayView = ({
   calls,
   currentDay,
   currentUserId,
+  currentUser,
   onCallClick,
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
   onDeleteClick,
   onCreateCallAtSlot,
+  otherUsersCalls = [],
 }: CalendarDayViewProps): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
@@ -373,6 +397,7 @@ const CalendarDayView = ({
   const today = new Date();
   const isDisplayingToday = isSameDay(currentDay, today);
   const currentTimePx = topPxForMinutes(minutesSinceMidnight(now));
+  const isMultiPerson = otherUsersCalls.length > 0;
 
   const dayCalls = calls
     .filter(call => call.startsAt && isSameDay(new Date(call.startsAt), currentDay))
@@ -387,6 +412,10 @@ const CalendarDayView = ({
         )
       : 60;
 
+  const currentUserDisplayName = getUserDisplayName(currentUser);
+  const currentUserFirstName =
+    currentUserDisplayName !== 'Unknown' ? (currentUserDisplayName.split(' ')[0] ?? 'You') : 'You';
+
   return (
     <DndContext
       sensors={sensors}
@@ -396,17 +425,68 @@ const CalendarDayView = ({
       onDragCancel={onDragCancel}
     >
       <div className='w-full flex flex-col border border-border rounded-xl overflow-hidden'>
-        {/* Single day header */}
+        {/* Day header */}
         <div className='flex shrink-0 border-b border-border bg-background'>
-          <div className='w-[50px] sm:w-[90px] shrink-0 border-r border-border' />
-          <div
-            className={cn(
-              'flex-1 py-2.5 px-3 text-sm font-medium',
-              isDisplayingToday ? 'text-primary bg-primary/5' : 'text-muted-foreground',
-            )}
-          >
-            {DAY_NAMES[currentDay.getDay()]} {currentDay.getDate()}
-          </div>
+          {!isMultiPerson ? (
+            /* Single-person: simple date label */
+            <>
+              <div className='w-[50px] sm:w-[90px] shrink-0 border-r border-border' />
+              <div
+                className={cn(
+                  'flex-1 py-2.5 px-3 text-sm font-medium',
+                  isDisplayingToday ? 'text-primary bg-primary/5' : 'text-muted-foreground',
+                )}
+              >
+                {DAY_NAMES[currentDay.getDay()]} {currentDay.getDate()}
+              </div>
+            </>
+          ) : (
+            /* Multi-person: date in gutter, per-person column headers */
+            <>
+              <div className='w-[50px] sm:w-[90px] shrink-0 border-r border-border flex flex-col items-center justify-center py-2 gap-0.5'>
+                <span className='text-[11px] uppercase text-muted-foreground leading-none tracking-wide'>
+                  {(DAY_NAMES[currentDay.getDay()] ?? '').slice(0, 3)}
+                </span>
+                <span
+                  className={cn(
+                    'text-2xl font-light leading-none',
+                    isDisplayingToday ? 'text-primary' : 'text-muted-foreground',
+                  )}
+                >
+                  {currentDay.getDate()}
+                </span>
+              </div>
+              <div className='flex flex-1'>
+                {/* Own column header */}
+                <div className='flex-1 flex flex-col items-center justify-center py-2 gap-1 border-r border-border'>
+                  <Avatar
+                    userId={currentUserId ?? null}
+                    size='sm'
+                    showActiveStatus={false}
+                    rounded
+                  />
+                  <span className='text-xs font-medium text-foreground truncate max-w-full px-1'>
+                    {currentUserFirstName}
+                  </span>
+                </div>
+                {/* Other user column headers */}
+                {otherUsersCalls.map(({ user }) => (
+                  <div
+                    key={user.id}
+                    className='flex-1 flex flex-col items-center justify-center py-2 gap-1 border-r last:border-r-0 border-border'
+                  >
+                    <Avatar userId={user.id} size='sm' showActiveStatus={false} rounded />
+                    <span className='text-xs font-medium text-foreground truncate max-w-full px-1'>
+                      {(() => {
+                        const dn = getUserDisplayName(user);
+                        return dn.split(' ')[0] ?? dn;
+                      })()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Scrollable time grid */}
@@ -443,83 +523,225 @@ const CalendarDayView = ({
               )}
             </div>
 
-            {/* Day column */}
-            <DroppableDayColumn
-              date={currentDay}
-              isPopoverOpen={openCallId !== null}
-              onCreateCallAtSlot={onCreateCallAtSlot}
-              onDragCreatePointerDown={onDragCreatePointerDown}
-              consumeDragEnd={consumeDragEnd}
-            >
-              {/* Hour grid lines */}
-              {HOURS.map(hour => (
-                <div
-                  key={hour}
-                  className='absolute left-0 right-0 border-t border-border/60'
-                  style={{ top: hour * HOUR_HEIGHT }}
-                />
-              ))}
-
-              {isDisplayingToday && (
-                <div
-                  className='absolute left-0 right-0 h-px bg-red-500 z-10 pointer-events-none'
-                  style={{ top: currentTimePx }}
-                />
-              )}
-
-              {/* Move-drag ghost */}
-              {dragPreview && (
-                <DropGhost dragPreview={dragPreview} durationMins={activeDurationMins} />
-              )}
-
-              {/* Resize ghost */}
-              {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
-
-              {/* Drag-create ghost */}
-              {dragCreatePreview && (
-                <CalendarEventGhost
-                  top={topPxForMinutes(dragCreatePreview.startMins)}
-                  height={Math.max(
-                    MIN_EVENT_HEIGHT,
-                    topPxForMinutes(dragCreatePreview.endMins - dragCreatePreview.startMins),
-                  )}
-                  formattedTime={dragCreatePreview.formattedTime}
-                />
-              )}
-
-              {/* Call event blocks */}
-              {dayCalls.map(call => {
-                if (!call.startsAt) return null;
-                const startMins = minutesSinceMidnight(new Date(call.startsAt));
-                const endMins = call.endsAt
-                  ? minutesSinceMidnight(new Date(call.endsAt))
-                  : startMins + 60;
-                const durationMins = Math.max(15, endMins - startMins);
-                const top = topPxForMinutes(startMins);
-                const height = Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins));
-                const draggable = isCallDraggable(call, currentUserId);
-
-                return (
-                  <DayViewCallCard
-                    key={call.id}
-                    call={call}
-                    draggable={draggable}
-                    top={top}
-                    height={height}
-                    isBeingResized={activeResizeCallId === call.id}
-                    currentUserId={currentUserId}
-                    openCallId={openCallId}
-                    setOpenCallId={setOpenCallId}
-                    onCallClick={onCallClick}
-                    onGotoMessage={onGotoMessage}
-                    onDownloadTranscript={onDownloadTranscript}
-                    {...(onEditClick ? { onEditClick } : {})}
-                    {...(onDeleteClick ? { onDeleteClick } : {})}
-                    onResizePointerDown={onResizePointerDown}
+            {!isMultiPerson ? (
+              /* ── Single-person: one droppable column ── */
+              <DroppableDayColumn
+                date={currentDay}
+                isPopoverOpen={openCallId !== null}
+                onCreateCallAtSlot={onCreateCallAtSlot}
+                onDragCreatePointerDown={onDragCreatePointerDown}
+                consumeDragEnd={consumeDragEnd}
+              >
+                {/* Hour grid lines */}
+                {HOURS.map(hour => (
+                  <div
+                    key={hour}
+                    className='absolute left-0 right-0 border-t border-border/60'
+                    style={{ top: hour * HOUR_HEIGHT }}
                   />
-                );
-              })}
-            </DroppableDayColumn>
+                ))}
+
+                {isDisplayingToday && (
+                  <div
+                    className='absolute left-0 right-0 h-px bg-red-500 z-10 pointer-events-none'
+                    style={{ top: currentTimePx }}
+                  />
+                )}
+
+                {/* Move-drag ghost */}
+                {dragPreview && (
+                  <DropGhost dragPreview={dragPreview} durationMins={activeDurationMins} />
+                )}
+
+                {/* Resize ghost */}
+                {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
+
+                {/* Drag-create ghost */}
+                {dragCreatePreview && (
+                  <CalendarEventGhost
+                    top={topPxForMinutes(dragCreatePreview.startMins)}
+                    height={Math.max(
+                      MIN_EVENT_HEIGHT,
+                      topPxForMinutes(dragCreatePreview.endMins - dragCreatePreview.startMins),
+                    )}
+                    formattedTime={dragCreatePreview.formattedTime}
+                  />
+                )}
+
+                {/* All events — own calls + other users' slots — in one unified pool */}
+                {(() => {
+                  const { allEvents, otherSlotMap } = buildDayEventPool(
+                    dayCalls,
+                    otherUsersCalls,
+                    slot => !!slot.startsAt && isSameDay(new Date(slot.startsAt), currentDay),
+                  );
+                  const positions = computeEventPositions(allEvents);
+
+                  return allEvents.map(event => {
+                    const pos = positions.get(event.id);
+                    if (!pos) return null;
+                    const { startMins, endMins, leftPct, widthPct } = pos;
+                    const durationMins = Math.max(15, endMins - startMins);
+                    const top = topPxForMinutes(startMins);
+                    const height = Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins));
+
+                    const otherMeta = otherSlotMap.get(event.id);
+                    if (otherMeta) {
+                      return (
+                        <OtherUserEventBlock
+                          key={event.id}
+                          top={top}
+                          height={height}
+                          leftPct={leftPct}
+                          widthPct={widthPct}
+                          color={otherMeta.color}
+                          title={otherMeta.title}
+                          startsAt={otherMeta.startsAt}
+                          endsAt={otherMeta.endsAt}
+                        />
+                      );
+                    }
+
+                    const call = dayCalls.find(c => c.id === event.id);
+                    if (!call) return null;
+                    const draggable = isCallDraggable(call, currentUserId);
+                    return (
+                      <DayViewCallCard
+                        key={call.id}
+                        call={call}
+                        draggable={draggable}
+                        top={top}
+                        height={height}
+                        leftPct={leftPct}
+                        widthPct={widthPct}
+                        isBeingResized={activeResizeCallId === call.id}
+                        currentUserId={currentUserId}
+                        openCallId={openCallId}
+                        setOpenCallId={setOpenCallId}
+                        onCallClick={onCallClick}
+                        onGotoMessage={onGotoMessage}
+                        onDownloadTranscript={onDownloadTranscript}
+                        {...(onEditClick ? { onEditClick } : {})}
+                        {...(onDeleteClick ? { onDeleteClick } : {})}
+                        onResizePointerDown={onResizePointerDown}
+                      />
+                    );
+                  });
+                })()}
+              </DroppableDayColumn>
+            ) : (
+              /* ── Multi-person: one column per person ── */
+              <div className='flex flex-1 relative'>
+                {/* Hour grid lines spanning all columns */}
+                {HOURS.map(hour => (
+                  <div
+                    key={hour}
+                    className='absolute left-0 right-0 border-t border-border/60 pointer-events-none'
+                    style={{ top: hour * HOUR_HEIGHT }}
+                  />
+                ))}
+
+                {/* Current time line spanning all columns */}
+                {isDisplayingToday && (
+                  <div
+                    className='absolute left-0 right-0 h-px bg-red-500 z-10 pointer-events-none'
+                    style={{ top: currentTimePx }}
+                  />
+                )}
+
+                {/* Own column — droppable, with overlap algorithm */}
+                <DroppableDayColumn
+                  date={currentDay}
+                  className='border-r border-border'
+                  isPopoverOpen={openCallId !== null}
+                  onCreateCallAtSlot={onCreateCallAtSlot}
+                  onDragCreatePointerDown={onDragCreatePointerDown}
+                  consumeDragEnd={consumeDragEnd}
+                >
+                  {dragPreview && (
+                    <DropGhost dragPreview={dragPreview} durationMins={activeDurationMins} />
+                  )}
+                  {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
+                  {(() => {
+                    const positions = computeEventPositions(dayCalls);
+                    return dayCalls.map(call => {
+                      if (!call.startsAt) return null;
+                      const pos = positions.get(call.id);
+                      if (!pos) return null;
+                      const { startMins, endMins, leftPct, widthPct } = pos;
+                      const durationMins = Math.max(15, endMins - startMins);
+                      const top = topPxForMinutes(startMins);
+                      const height = Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins));
+                      const draggable = isCallDraggable(call, currentUserId);
+                      return (
+                        <DayViewCallCard
+                          key={call.id}
+                          call={call}
+                          draggable={draggable}
+                          top={top}
+                          height={height}
+                          leftPct={leftPct}
+                          widthPct={widthPct}
+                          isBeingResized={activeResizeCallId === call.id}
+                          currentUserId={currentUserId}
+                          openCallId={openCallId}
+                          setOpenCallId={setOpenCallId}
+                          onCallClick={onCallClick}
+                          onGotoMessage={onGotoMessage}
+                          onDownloadTranscript={onDownloadTranscript}
+                          {...(onEditClick ? { onEditClick } : {})}
+                          {...(onDeleteClick ? { onDeleteClick } : {})}
+                          onResizePointerDown={onResizePointerDown}
+                        />
+                      );
+                    });
+                  })()}
+                </DroppableDayColumn>
+
+                {/* Other user columns — read-only, with overlap algorithm per column */}
+                {otherUsersCalls.map(({ user, color, calls: userCalls }) => {
+                  const daySlots = userCalls.filter(
+                    slot => slot.startsAt && isSameDay(new Date(slot.startsAt), currentDay),
+                  );
+                  const slotEvents = daySlots.map(slot => ({
+                    id: `other-${user.id}-${slot.id ?? slot.startsAt}`,
+                    startsAt: slot.startsAt,
+                    endsAt: slot.endsAt,
+                    slot,
+                  }));
+                  const positions = computeEventPositions(slotEvents);
+                  return (
+                    <div
+                      key={user.id}
+                      className='flex-1 relative border-r last:border-r-0 border-border'
+                    >
+                      {slotEvents.map(({ id, slot }) => {
+                        const pos = positions.get(id);
+                        if (!pos) return null;
+                        const { startMins, endMins, leftPct, widthPct } = pos;
+                        const durationMins = Math.max(15, endMins - startMins);
+                        const top = topPxForMinutes(startMins);
+                        const height = Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins));
+                        return (
+                          <OtherUserEventBlock
+                            key={id}
+                            top={top}
+                            height={height}
+                            leftPct={leftPct}
+                            widthPct={widthPct}
+                            color={color}
+                            title={slot.title}
+                            startsAt={slot.startsAt}
+                            endsAt={slot.endsAt}
+                            zClass='z-[5]'
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -11,6 +11,7 @@ const channelController = new ChannelController();
 router.get('/search', userManagementController.searchUsers); // Search users
 router.get('/me/dms', channelController.getUserDMs); // Get all user's DM channels
 router.post('/me/picture', uploadConfig.single('picture'), userManagementController.uploadProfilePicture); // Upload profile picture
+router.patch('/me/calendar-visibility', userManagementController.updateCalendarVisibility); // Update calendar visibility
 router.get('/:id/picture', userManagementController.streamProfilePicture); // Stream user's profile picture
 
 // Voice signature routes (for meeting/recording speaker identification)

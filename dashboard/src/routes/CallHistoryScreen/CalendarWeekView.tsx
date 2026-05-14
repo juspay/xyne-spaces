@@ -1,5 +1,6 @@
 import { ReactElement, ReactNode, useEffect, useRef, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
+import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
 import {
   DndContext,
   DragOverlay,
@@ -24,7 +25,6 @@ import {
   MIN_EVENT_HEIGHT,
   DAY_NAMES,
   HOURS,
-  OVERLAP_LEFT_MARGIN,
   isSameDay,
   getWeekStartForMonth,
   minutesSinceMidnight,
@@ -34,11 +34,14 @@ import {
   formatCurrentTime,
   getCurrentUserMeetingStatus,
   dayKey,
-  computeOverlapIndices,
+  computeEventPositions,
   isCallDraggable,
+  buildDayEventPool,
 } from './CalenderViewUtils';
 import { CalendarTimeSlotCell } from './CalendarTimeSlotCell';
 import { usePlatform } from '../../hooks/usePlatform';
+import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
+import { OtherUserEventBlock } from './OtherUserEventBlock';
 
 interface CalendarWeekViewProps {
   calls: Call[];
@@ -50,6 +53,7 @@ interface CalendarWeekViewProps {
   onEditClick?: (call: Call) => void;
   onDeleteClick?: (call: Call) => void;
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
+  otherUsersCalls?: OtherUserCalls[];
 }
 
 const TIME_GUTTER_WIDTH = 80;
@@ -62,7 +66,8 @@ interface WeekViewCallCardProps {
   draggable: boolean;
   top: number;
   height: number;
-  leftPx: number;
+  leftPct: number;
+  widthPct: number;
   isBeingResized: boolean;
   currentUserId: string | undefined;
   openCallId: string | null;
@@ -80,7 +85,8 @@ function WeekViewCallCard({
   draggable,
   top,
   height,
-  leftPx,
+  leftPct,
+  widthPct,
   isBeingResized,
   currentUserId,
   openCallId,
@@ -126,7 +132,8 @@ function WeekViewCallCard({
           style={{
             top,
             height,
-            left: `calc(0.25rem + ${leftPx}px)`,
+            left: `calc(${leftPct}% + 1px)`,
+            width: `calc(${widthPct}% - 2px)`,
             backgroundColor: meetingStatus === MeetingStatus.ACCEPTED ? '#0077FF1A' : 'transparent',
             opacity: isDragging || isBeingResized ? 0.3 : 1,
             cursor: draggable ? 'grab' : 'pointer',
@@ -352,6 +359,7 @@ const CalendarWeekView = ({
   onEditClick,
   onDeleteClick,
   onCreateCallAtSlot,
+  otherUsersCalls = [],
 }: CalendarWeekViewProps): ReactElement => {
   const { isMobile } = usePlatform();
   const timeGutterWidth = isMobile ? 48 : TIME_GUTTER_WIDTH;
@@ -550,9 +558,21 @@ const CalendarWeekView = ({
               <div className='absolute inset-0 flex'>
                 {weekDays.map((day, i) => {
                   const dayCalls = callsByDay.get(dayKey(day)) ?? [];
-                  const overlapInfos = computeOverlapIndices(dayCalls);
-                  const isToday = isSameDay(day, today);
                   const colDateKey = dayKey(day);
+                  const isToday = isSameDay(day, today);
+
+                  // Merge own calls + other users' slots into one pool so the
+                  // cluster algorithm places them side-by-side when they overlap.
+                  // Always use a per-user synthetic id so the same underlying call
+                  // (shared between current user + selected user, or shared across
+                  // multiple selected users) gets its own column in the algorithm.
+                  const { allEvents, otherSlotMap } = buildDayEventPool(
+                    dayCalls,
+                    otherUsersCalls,
+                    slot => !!slot.startsAt && dayKey(new Date(slot.startsAt)) === colDateKey,
+                  );
+
+                  const positions = computeEventPositions(allEvents);
 
                   return (
                     <DroppableDayColumn
@@ -593,15 +613,58 @@ const CalendarWeekView = ({
                         />
                       )}
 
-                      {dayCalls.map((call, callIdx) => {
-                        if (!call.startsAt) return null;
-                        const overlapInfo = overlapInfos[callIdx];
-                        if (!overlapInfo) return null;
+                      {/* All events rendered together with unified overlap positions */}
+                      {allEvents.map(event => {
+                        const pos = positions.get(event.id);
+                        if (!pos) return null;
 
-                        const { startMins, endMins, overlapIndex } = overlapInfo;
+                        const { startMins, endMins, leftPct, widthPct } = pos;
                         const durationMins = Math.max(15, endMins - startMins);
                         const top = topPxForMinutes(startMins);
                         const height = Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins));
+
+                        const otherMeta = otherSlotMap.get(event.id);
+                        if (otherMeta) {
+                          const { color, title, startsAt, endsAt } = otherMeta;
+                          const timeLabel = endsAt
+                            ? `${formatTime(startsAt)} – ${formatTime(endsAt)}`
+                            : formatTime(startsAt);
+                          return (
+                            <Tooltip
+                              key={event.id}
+                              delayDuration={300}
+                              side='top'
+                              sideOffset={6}
+                              avoidCollisions
+                              collisionPadding={8}
+                              content={
+                                <div className='flex flex-col gap-0.5'>
+                                  <span className='font-medium'>{title ?? 'Busy'}</span>
+                                  <span className='opacity-75'>{timeLabel}</span>
+                                </div>
+                              }
+                            >
+                              <OtherUserEventBlock
+                                top={top}
+                                height={height}
+                                leftPct={leftPct}
+                                widthPct={widthPct}
+                                color={color}
+                                title={title}
+                                startsAt={startsAt}
+                                endsAt={endsAt}
+                                gutterPx={1}
+                                zClass='z-[3]'
+                                interactive
+                                onClick={e => e.stopPropagation()}
+                                onPointerDown={e => e.stopPropagation()}
+                              />
+                            </Tooltip>
+                          );
+                        }
+
+                        const call = dayCalls.find(c => c.id === event.id);
+                        if (!call) return null;
                         const draggable = isCallDraggable(call, currentUserId);
 
                         return (
@@ -611,7 +674,8 @@ const CalendarWeekView = ({
                             draggable={draggable}
                             top={top}
                             height={height}
-                            leftPx={overlapIndex * OVERLAP_LEFT_MARGIN}
+                            leftPct={leftPct}
+                            widthPct={widthPct}
                             isBeingResized={activeResizeCallId === call.id}
                             currentUserId={currentUserId}
                             openCallId={openCallId}

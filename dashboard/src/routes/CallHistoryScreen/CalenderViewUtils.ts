@@ -1,6 +1,7 @@
 import type React from 'react';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { Call } from './callHistoryItem.utils';
+import type { OtherUserCalls, OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
 
 // ── Drag & Drop helpers ──────────────────────────────────────────────────────
 
@@ -80,7 +81,6 @@ export const HOUR_HEIGHT = 64; // px per hour
 export const MIN_EVENT_HEIGHT = 28; // px
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const HOURS = Array.from({ length: 24 }, (_, i) => i);
-export const OVERLAP_LEFT_MARGIN = 2; // px per overlap level
 
 export const POPOVER_CONTENT_CLASS =
   'z-[60] bg-background rounded-xl border border-border shadow-lg w-[340px] outline-none ' +
@@ -179,37 +179,136 @@ export function getWeekStartForMonth(date: Date): Date {
   return d;
 }
 
-type OverlapInfo = {
+export type EventPosition = {
   startMins: number;
   endMins: number;
-  overlapIndex: number;
+  leftPct: number;
+  widthPct: number;
 };
 
+export interface PositionableEvent {
+  id: string;
+  startsAt?: string | number | null;
+  endsAt?: string | number | null;
+}
+
 /**
- * Compute overlap indices for calls to handle overlapping events
+ * Google Calendar-style cluster algorithm.
+ * Groups overlapping events into clusters, assigns each event a column within
+ * its cluster, then returns `leftPct` and `widthPct` (0–100) so events sit
+ * side-by-side instead of stacking on top of each other.
+ *
+ * Returns a Map keyed by event.id for O(1) lookup in the renderer.
  */
-export function computeOverlapIndices(dayCalls: Call[]): OverlapInfo[] {
-  const sorted = [...dayCalls]
-    .filter(c => c.startsAt)
-    .sort((a, b) => new Date(a.startsAt!).getTime() - new Date(b.startsAt!).getTime());
+export function computeEventPositions(dayCalls: PositionableEvent[]): Map<string, EventPosition> {
+  const result = new Map<string, EventPosition>();
+  const valid = dayCalls.filter(c => c.startsAt);
+  if (valid.length === 0) return result;
 
-  const result: OverlapInfo[] = [];
+  type Item = { id: string; startMins: number; endMins: number };
 
-  for (const call of sorted) {
+  const items: Item[] = valid.map(call => {
     const startMins = minutesSinceMidnight(new Date(call.startsAt!));
-    const endMins = call.endsAt ? minutesSinceMidnight(new Date(call.endsAt)) : startMins + 60;
+    const rawEnd = call.endsAt ? minutesSinceMidnight(new Date(call.endsAt)) : startMins + 60;
+    return { id: call.id, startMins, endMins: Math.max(rawEnd, startMins + 15) };
+  });
 
-    let minIndex = 0;
-    for (const existing of result) {
-      if (startMins < existing.endMins && endMins > existing.startMins) {
-        minIndex = Math.max(minIndex, existing.overlapIndex + 1);
-      }
+  // Sort by start time; break ties by longest duration first
+  items.sort((a, b) =>
+    a.startMins !== b.startMins ? a.startMins - b.startMins : b.endMins - a.endMins,
+  );
+
+  let i = 0;
+  while (i < items.length) {
+    // Expand cluster: include any event that starts before the current cluster ends
+    const cluster: Item[] = [items[i]!];
+    let clusterEnd = items[i]!.endMins;
+    let j = i + 1;
+    while (j < items.length && items[j]!.startMins < clusterEnd) {
+      cluster.push(items[j]!);
+      clusterEnd = Math.max(clusterEnd, items[j]!.endMins);
+      j++;
     }
 
-    result.push({ startMins, endMins, overlapIndex: minIndex });
+    // Greedy column assignment: place each event in the first column whose
+    // last event has already ended before this one starts.
+    const columns: Item[][] = [];
+    for (const item of cluster) {
+      let placed = false;
+      for (const col of columns) {
+        if (item.startMins >= col[col.length - 1]!.endMins) {
+          col.push(item);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) columns.push([item]);
+    }
+
+    const numCols = columns.length;
+    const widthPct = 100 / numCols;
+
+    columns.forEach((col, colIdx) => {
+      for (const item of col) {
+        result.set(item.id, {
+          startMins: item.startMins,
+          endMins: item.endMins,
+          leftPct: colIdx * widthPct,
+          widthPct,
+        });
+      }
+    });
+
+    i = j;
   }
 
   return result;
+}
+
+export type OtherSlotMeta = {
+  color: string;
+  title: string | undefined;
+  startsAt: number;
+  endsAt: number | null;
+};
+
+/**
+ * Merges own day calls with other users' slots into a single event pool for
+ * the cluster-overlap algorithm.  Pass a `dayFilter` predicate to restrict
+ * which other-user slots belong to the current column/day.
+ *
+ * Returns:
+ * - `allEvents`   – unified list for `computeEventPositions`
+ * - `otherSlotMap` – keyed by synthetic id, used at render time
+ */
+export function buildDayEventPool(
+  dayCalls: Call[],
+  otherUsersCalls: OtherUserCalls[],
+  dayFilter: (slot: OtherUserBusySlot) => boolean,
+): { allEvents: PositionableEvent[]; otherSlotMap: Map<string, OtherSlotMeta> } {
+  const otherSlotMap = new Map<string, OtherSlotMeta>();
+  const allEvents: PositionableEvent[] = [];
+
+  for (const call of dayCalls) {
+    if (call.startsAt)
+      allEvents.push({ id: call.id, startsAt: call.startsAt, endsAt: call.endsAt });
+  }
+
+  for (const { user, color, calls: userCalls } of otherUsersCalls) {
+    for (const slot of userCalls) {
+      if (!slot.startsAt || !dayFilter(slot)) continue;
+      const id = `other-${user.id}-${slot.id ?? slot.startsAt}`;
+      allEvents.push({ id, startsAt: slot.startsAt, endsAt: slot.endsAt });
+      otherSlotMap.set(id, {
+        color,
+        title: slot.title,
+        startsAt: slot.startsAt,
+        endsAt: slot.endsAt,
+      });
+    }
+  }
+
+  return { allEvents, otherSlotMap };
 }
 
 /**
