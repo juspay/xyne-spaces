@@ -1,17 +1,42 @@
 import { Request, Response } from 'express';
 import { formService } from '@/services/formService';
 import { FormFieldType } from '@xyne/shared';
+import { AccessType } from '@prisma/client';
+import { repositories } from '@/database/repositories';
 import {logger} from '@/utils/logger';
 
-const isFormAccessibleToUser = (
+const isElevatedFormEditor = (user: NonNullable<Request['user']>): boolean => {
+  return (
+    user.orgRole === 'OWNER' ||
+    user.orgRole === 'ADMIN' ||
+    user.role === 'OWNER' ||
+    user.role === 'ADMIN'
+  );
+};
+
+const hasFormsAccess = async (userId: string, requiredAccess: AccessType): Promise<boolean> => {
+  const formsResource = await repositories.resources.findByName('FORMS');
+  if (!formsResource) {
+    return false;
+  }
+
+  return repositories.resourceAccess.hasAccess(userId, formsResource.id, requiredAccess);
+};
+
+const isFormAccessibleToUser = async (
   form: { workspaceId: string; createdBy: string },
-  user: NonNullable<Request['user']>
-): boolean => {
+  user: NonNullable<Request['user']>,
+  requiredAccess: AccessType
+): Promise<boolean> => {
   if (!user.workspaceId || form.workspaceId !== user.workspaceId) {
     return false;
   }
 
-  return user.orgRole === 'OWNER' || user.orgRole === 'ADMIN' || form.createdBy === user.id;
+  if (isElevatedFormEditor(user) || form.createdBy === user.id) {
+    return true;
+  }
+
+  return hasFormsAccess(user.id, requiredAccess);
 };
 
 export class FormController {
@@ -118,7 +143,7 @@ export class FormController {
         return;
       }
 
-      if (!isFormAccessibleToUser(form, req.user)) {
+      if (!(await isFormAccessibleToUser(form, req.user, AccessType.READ))) {
         res.status(403).json({ error: 'Forbidden' });
         return;
       }
@@ -177,7 +202,7 @@ export class FormController {
         return;
       }
 
-      if (!isFormAccessibleToUser(existingForm, req.user)) {
+      if (!(await isFormAccessibleToUser(existingForm, req.user, AccessType.WRITE))) {
         res.status(403).json({ error: 'Forbidden' });
         return;
       }
