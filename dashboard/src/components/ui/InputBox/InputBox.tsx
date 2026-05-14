@@ -308,18 +308,20 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           return;
         }
 
-        try {
-          const uploadPromise = providerAddDroppedFiles(files, channelId, conversationId);
+        // Store the promise so handleSend can await it
+        // We use a unique key for this batch
+        const batchId = `${Date.now()}-${Math.random()}`;
+        let uploadPromise: Promise<{
+          successful: Array<{ attachmentId: string; file: File }>;
+          failed: Array<{ attachmentId: string; file: File; fileName: string; error: string }>;
+          allSucceeded: boolean;
+        }> | null = null;
 
-          // Store the promise so handleSend can await it
-          // We use a unique key for this batch
-          const batchId = `${Date.now()}-${Math.random()}`;
+        try {
+          uploadPromise = providerAddDroppedFiles(files, channelId, conversationId);
           pendingUploadsRef.current.set(batchId, uploadPromise);
 
           const result = await uploadPromise;
-
-          // Remove from pending once complete
-          pendingUploadsRef.current.delete(batchId);
 
           // Show toast for partial failures
           if (!result.allSucceeded && result.failed.length > 0) {
@@ -341,6 +343,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             description: error instanceof Error ? error.message : 'Unknown error',
           });
           throw error;
+        } finally {
+          // This prevents stale failed promises from blocking future sends
+          pendingUploadsRef.current.delete(batchId);
         }
       },
       [providerAddDroppedFiles, channelId, conversationId],
@@ -906,8 +911,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const handleSend = useCallback(async () => {
       if (!editor || isSending || sendDisabled) return;
 
-      const plainText = editor.getText().trim();
-      const htmlContent = editor.getHTML();
+      // Capture the editor instance at the start to use same
+      // instance throughout the async operation, even if channel changes
+      const activeEditor = editor;
+
+      const plainText = activeEditor.getText().trim();
+      const htmlContent = activeEditor.getHTML();
 
       if (!hasSendableContent) return;
 
@@ -1040,7 +1049,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             undefined,
             attachmentIds,
           );
-          editor.commands.focus();
+          // Only focus if editor hasn't been destroyed (e.g., due to channel switch)
+          if (!activeEditor.isDestroyed) {
+            activeEditor.commands.focus();
+          }
         } catch (error) {
           toast.error('Failed to send message with attachments', {
             description: error instanceof Error ? error.message : 'Unknown error',
@@ -1080,7 +1092,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             undefined,
             attachmentIds,
           );
-          editor.commands.focus();
+          // Only focus if editor hasn't been destroyed (e.g., due to channel switch)
+          if (!activeEditor.isDestroyed) {
+            activeEditor.commands.focus();
+          }
         } catch (error) {
           toast.error('Failed to send message', {
             description: error instanceof Error ? error.message : 'Unknown error',
