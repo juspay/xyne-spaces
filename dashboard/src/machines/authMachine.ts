@@ -59,6 +59,7 @@ export type AuthState =
   | 'loggingOut'
   | 'validatingSession'
   | 'processingOAuthCallback'
+  | 'redirectingToInvitation'
   | 'testAuthenticating';
 
 interface ValidateSessionResponse {
@@ -70,9 +71,19 @@ interface ApiErrorResponse {
   error: string;
 }
 
+interface Invitation {
+  id: string;
+  email: string;
+  role: string;
+  workspaceId?: string;
+  organizationName?: string;
+  workspaceName?: string;
+}
+
 interface OAuthCallbackOutput {
   user?: User;
   workspaces: Workspace[];
+  invitations?: Invitation[];
   pendingUserData: { email: string; name: string; picture?: string };
   autoLoginWorkspace?: string;
   isNewUser?: boolean;
@@ -194,6 +205,22 @@ export const authMachine = createMachine(
           src: 'processOAuthCallback',
           onDone: [
             {
+              // If pending invitation exists in localStorage, prioritize invitation flow
+              // This overrides auto-login so user can see and accept the invitation
+              target: 'redirectingToInvitation',
+              guard: 'hasPendingInvitationInStorage',
+              actions: assign(({ context, event }) => {
+                const output = event.output as OAuthCallbackOutput | undefined;
+                return {
+                  ...context,
+                  workspaces: output?.workspaces || [],
+                  invitations: output?.invitations || [],
+                  pendingUserData: output?.pendingUserData || null,
+                  error: null,
+                };
+              }),
+            },
+            {
               // User already exists in a workspace (legacy flow or session refresh)
               target: 'authenticated',
               guard: 'hasUserInOutput',
@@ -288,6 +315,15 @@ export const authMachine = createMachine(
             target: 'unauthenticated',
             actions: 'setError',
           },
+        },
+      },
+      redirectingToInvitation: {
+        // Entry action that performs the navigation
+        entry: () => {
+          const pendingInvitationId = localStorage.getItem('pending_invitation_id');
+          if (pendingInvitationId) {
+            window.location.href = `/invite?invitationId=${encodeURIComponent(pendingInvitationId)}&loginComplete=true`;
+          }
         },
       },
       selectingWorkspace: {
@@ -720,6 +756,14 @@ export const authMachine = createMachine(
       hasUserInOutput: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
         return !!e.output?.user?.id;
+      },
+      hasPendingInvitationInStorage: ({ event }) => {
+        const e = event as { output?: OAuthCallbackOutput };
+        // Only check for pending invitation if we have a valid OAuth callback
+        if (!e.output?.pendingUserData?.email) return false;
+        // Check localStorage for pending invitation (set by AcceptInvitation.tsx)
+        const pendingInvitationId = localStorage.getItem('pending_invitation_id');
+        return !!pendingInvitationId;
       },
       hasLastActiveWorkspace: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
