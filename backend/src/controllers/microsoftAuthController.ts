@@ -182,12 +182,14 @@ export class MicrosoftAuthController {
         logger.info(`[${requestId}] Microsoft OAuth callback received`);
 
         // Peek at state early to determine platform for error redirects
+        let peekedState: Awaited<ReturnType<typeof oauthStateServiceV2.validateState>> = null;
         if (state) {
-          const peekedState = await oauthStateServiceV2.validateState(state as string, false);
+          peekedState = await oauthStateServiceV2.validateState(state as string, false);
           if (peekedState) {
             resolvedPlatform = peekedState.platform;
           }
         }
+        logger.info(`[${requestId}] STATE_PEEK: platform=${peekedState?.platform || 'NULL'}, provider=${peekedState?.provider || 'NULL'}, invitationId=${peekedState?.invitationId || 'NULL'}, stateFound=${!!peekedState}`);
 
         if (error) {
           logger.error(`[${requestId}] Microsoft OAuth error: ${error}`);
@@ -221,8 +223,15 @@ export class MicrosoftAuthController {
         // State and PKCE verifier must remain intact until that exchange.
         if (resolvedPlatform === 'electron') {
           const frontendUrl = this.getFrontendUrl(req);
-          const launchUrl = `${frontendUrl}/launch?code=${encodeURIComponent(code as string)}&state=${encodeURIComponent(state as string)}`;
-          logger.info(`[${requestId}] Redirecting electron flow to launch page`);
+          const launchParams = new URLSearchParams({
+            code: code as string,
+            state: state as string,
+          });
+          if (peekedState?.invitationId) {
+            launchParams.set('invitationId', peekedState.invitationId);
+          }
+          const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
+          logger.info(`[${requestId}] ELECTRON_REDIRECT: invitationId_appended=${!!peekedState?.invitationId}, invitationId=${peekedState?.invitationId || 'NULL'}, launchUrl=${launchUrl}`);
           res.redirect(launchUrl);
           return;
         }
@@ -471,6 +480,8 @@ export class MicrosoftAuthController {
       const state = (req.body?.state as string | undefined)?.trim();
       const bodyInvitationId = (req.body?.invitationId as string | undefined)?.trim();
 
+      logger.info(`[${requestId}] EXCHANGE_ELECTRON_BODY: code=${code ? code.substring(0, 12) + '...' : 'NULL'}, state=${state ? state.substring(0, 12) + '...' : 'NULL'}, bodyInvitationId=${bodyInvitationId || 'NULL'}`);
+
       if (!code || !state) {
         logger.error(`[${requestId}] Missing code or state`);
         res.status(400).json({
@@ -513,6 +524,8 @@ export class MicrosoftAuthController {
         });
         return;
       }
+
+      logger.info(`[${requestId}] STATE_DATA: platform=${stateData.platform}, provider=${stateData.provider || 'NULL'}, invitationId=${stateData.invitationId || 'NULL'}`);
 
 
 
@@ -572,13 +585,33 @@ export class MicrosoftAuthController {
       const workspaces = await this.userService.getWorkspacesByEmail(email);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
       logger.info(`[${requestId}] User has ${workspaces.length} workspace(s), userExistsButRemoved: ${userExistsButRemoved}`);
+      logger.info(`[${requestId}] PROFILE: email=${email}, msId=${profile.id}, workspaceCount=${workspaces.length}`);
 
       const isProduction = process.env.NODE_ENV === 'production';
 
-      // If user has no workspaces and is not invited (not in org_members), redirect to no-access
-      // This mirrors Google SSO behavior for unauthorized users
+      // If user has no workspaces and is not invited (not in org_members), redirect to no-access.
+      // Still set google_access_token so that AuthScreen's isCreatingOrg + pendingInvitationId
+      // path can redirect to /invite and acceptInvitation will have the identity cookie.
+      // This mirrors Google's exchangeElectronCode which always sets google_access_token (line 842).
       if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
-        logger.info(`[${requestId}] User has no workspaces and no invitation - redirecting to no-access`);
+        logger.info(`[${requestId}] User has no workspaces and no invitation - setting google_access_token and returning no-access`);
+        res.cookie('google_access_token', JSON.stringify({
+          user: {
+            providerUserId: profile.id,
+            email,
+            name: profile.displayName,
+            picture: undefined,
+          },
+          provider: 'microsoft',
+          refreshToken: (token.refresh_token as string | undefined) ?? null,
+        }), {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          path: '/',
+          maxAge: 10 * 60 * 1000,
+        });
+        logger.info(`[${requestId}] NO_WORKSPACE_COOKIE_SET: google_access_token set for potential invite redirect (sameSite=lax, maxAge=10min)`);
         res.status(200).json({
           success: true,
           workspaces: [],
@@ -595,12 +628,11 @@ export class MicrosoftAuthController {
       // will navigate to /invite?loginComplete=true inside the app — no browser involvement.
       // Combine state and body invitation IDs (same as Google flow)
       const effectiveInvitationId = stateData.invitationId || bodyInvitationId;
-      logger.info(`[${requestId}] DEBUG invitation: stateData.invitationId=${stateData.invitationId || 'NULL'}, body.invitationId=${bodyInvitationId || 'NULL'}, effective=${effectiveInvitationId || 'NULL'}`);
+      logger.info(`[${requestId}] INVITATION_CHECK: stateData.invitationId=${stateData.invitationId || 'NULL'}, bodyInvitationId=${bodyInvitationId || 'NULL'}, effectiveInvitationId=${effectiveInvitationId || 'NULL'} → path=${effectiveInvitationId ? 'INVITATION' : 'WORKSPACE_LOGIN'}`);
       if (effectiveInvitationId) {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
         // Use sameSite: 'lax' for Electron invitation flow - cookies need to be sent
         // from the renderer (localhost:5173) to backend (localhost:3001)
-        // Note: Only store essential user info, NOT tokens (too large for cookies)
         res.cookie('google_access_token', JSON.stringify({
           user: {
             providerUserId: profile.id,
@@ -609,6 +641,7 @@ export class MicrosoftAuthController {
             picture: undefined,
           },
           provider: 'microsoft',
+          refreshToken: (token.refresh_token as string | undefined) ?? null,
         }), {
           httpOnly: true,
           secure: isProduction,
@@ -616,7 +649,7 @@ export class MicrosoftAuthController {
           path: '/',
           maxAge: 10 * 60 * 1000,
         });
-        logger.info(`[${requestId}] Cookie set: google_access_token (sameSite=lax, secure=${isProduction}, size=minimal)`);
+        logger.info(`[${requestId}] INVITATION_COOKIE_SET: google_access_token set (provider=microsoft, hasRefreshToken=${!!(token.refresh_token)}, hasAccessToken=${!!accessToken}, sameSite=lax, maxAge=10min)`);
         res.status(200).json({
           success: true,
           hasInvitation: true,
@@ -629,7 +662,7 @@ export class MicrosoftAuthController {
         return;
       }
 
-      logger.info(`[${requestId}] Finding/creating user: ${email}`);
+      logger.info(`[${requestId}] NO_INVITATION: falling through to workspace login (workspaces=${workspaces.length}, userExistsButRemoved=${userExistsButRemoved})`);
       
       /**
        * AUTO-LOGIN SINGLE WORKSPACE USERS (Electron)
@@ -729,7 +762,24 @@ export class MicrosoftAuthController {
           });
         }
 
-        logger.info(`[${requestId}] Electron auto-login complete - cookies set: user_session_id`);
+        res.cookie('google_access_token', JSON.stringify({
+          user: {
+            providerUserId: profile.id,
+            email,
+            name: profile.displayName,
+            picture: undefined,
+          },
+          provider: 'microsoft',
+          refreshToken: refreshToken ?? null,
+        }), {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          path: '/',
+          maxAge: 10 * 60 * 1000,
+        });
+
+        logger.info(`[${requestId}] Electron auto-login complete - cookies set: user_session_id, google_access_token`);
 
         // Return JSON with workspaces (Electron expects this for renderer to handle)
         res.status(200).json({
@@ -758,15 +808,6 @@ export class MicrosoftAuthController {
       logger.info(
         `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser}, workspaces: ${workspaces.length})`
       );
-
-      const customToken = jwtService.generateToken({
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        picture: user.picture ?? undefined,
-        workspaceId: user.workspaceId ?? undefined,
-        memberId: user.orgMemberId ?? undefined,
-      });
 
       // Create session for multi-workspace users too (same as single workspace)
       let sessionId: string | null = null;
@@ -802,13 +843,22 @@ export class MicrosoftAuthController {
         }
       }
 
-      // Store pending auth data for later loginWorkspace call (multi-workspace case)
-      res.cookie('google_access_token', customToken, {
+      // Store pending auth data for later loginWorkspace / acceptInvitation call
+      res.cookie('google_access_token', JSON.stringify({
+        user: {
+          providerUserId: profile.id,
+          email,
+          name: profile.displayName,
+          picture: undefined,
+        },
+        provider: 'microsoft',
+        refreshToken: refreshToken ?? null,
+      }), {
         httpOnly: true,
         secure: isProduction,
-        sameSite: 'strict' as const,
+        sameSite: 'lax' as const,
         path: '/',
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 10 * 60 * 1000,
       });
 
       if (sessionId) {
