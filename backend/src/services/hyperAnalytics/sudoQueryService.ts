@@ -72,6 +72,7 @@ class SudoQueryService {
 
   track(eventName: string, properties?: EventProperties): void {
     if (!this.isInitialized) {
+      logger.error('[SudoQuery] Track not initialized');
       return;
     }
 

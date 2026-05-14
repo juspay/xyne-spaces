@@ -96,6 +96,11 @@ export interface SearchClickEvent extends CommonEventFields {
    */
   exact_query_text_length: number;
   tab: string;
+  /**
+   * Relevance score of the clicked result from the search engine
+   * Higher scores indicate more relevant results
+   */
+  relevance_score?: number;
 }
 
 /**

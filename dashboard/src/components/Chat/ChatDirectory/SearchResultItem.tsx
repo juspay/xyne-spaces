@@ -106,6 +106,8 @@ const UserSearchResultItem = ({
     <Command.Item
       key={result.id}
       value={`backend-${result.type}-${result.id}`}
+      data-result-id={result.id}
+      data-result-type={result.type}
       onSelect={() => void onSelect(result)}
       onMouseDownCapture={handleMouseDown}
       className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
@@ -179,6 +181,8 @@ const SearchResultItem = ({
           <Command.Item
             key={result.id}
             value={`backend-${result.type}-${result.id}`}
+            data-result-id={result.id}
+            data-result-type={result.type}
             onSelect={() => void onSelect(result)}
             className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
           >
@@ -218,6 +222,8 @@ const SearchResultItem = ({
         <Command.Item
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
+          data-result-id={result.id}
+          data-result-type={result.type}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
           className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
@@ -250,6 +256,8 @@ const SearchResultItem = ({
         <Command.Item
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
+          data-result-id={result.id}
+          data-result-type={result.type}
           data-ticket-id={result.id}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
@@ -279,6 +287,8 @@ const SearchResultItem = ({
         <Command.Item
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
+          data-result-id={result.id}
+          data-result-type={result.type}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
           className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
@@ -324,6 +334,8 @@ const SearchResultItem = ({
         <Command.Item
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
+          data-result-id={result.id}
+          data-result-type={result.type}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
           className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'

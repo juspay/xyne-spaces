@@ -17,6 +17,8 @@ import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
 import { executeFuzzyFallback } from '../utils/fallback';
+import { superpositionClient } from '@/services/superpositionClient';
+import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 
 function escapeQueryForUserInput(query: string): string {
   if (!query) return query;
@@ -163,7 +165,7 @@ export class SearchService {
         }
       }
 
-      const buildPayload = (useFuzzy: boolean) => {
+      const buildPayload = (useFuzzy: boolean, useSemanticAnyway: boolean) => {
         const escapedQuery = escapeQueryForUserInput(searchQuery);
         const effectiveQuery = escapedQuery || '*';
         const yql = this.yqlBuilder.buildYql(
@@ -178,8 +180,13 @@ export class SearchService {
           meeting,
           userId,
           mail,
-          useFuzzy
+          useFuzzy,
+          useSemanticAnyway
         );
+
+        const hasQuery = !!(searchQuery && searchQuery.trim());
+        const queryLength = searchQuery?.trim().length || 0;
+        const shouldEmbed = hasQuery &&  queryLength > 3 &&(useSemanticAnyway || useFuzzy);
 
         return {
           yql,
@@ -191,7 +198,7 @@ export class SearchService {
           "input.query(chunk_limit)": chunkLimit,
           "input.query(query_length)": queryWordCount,
           timeout: '30s',
-          ...(query && query.trim() ? { 'input.query(e)': 'embed(@query)' } : {}),
+          ...(shouldEmbed ? { 'input.query(e)': 'embed(@query)' } : {}),
           ...(useFuzzy ? { "gram.match": "weakAnd" } : {}),
           "input.query(freshness_weight)": freshnessWeight,
           "input.query(filtering_weight)": filteringWeight,
@@ -205,16 +212,29 @@ export class SearchService {
             "input.query(user_personalization_weights)": userWeights,
             "input.query(saturation_point)": 100.0,
           }),
-          ...(effectiveQuery !== '*' ? { 'input.query(e)': 'embed(@query)' } : {}), // skip embedding for wildcard
         };
       };
 
       // Execute search
-      const payload = buildPayload(false);
+      // Fetch feature flags from Superposition
+      const useSemanticAnyway = await superpositionClient.getBooleanValue(
+        'vespa_search_use_semantic_anyway',
+        true,
+        {}
+      );
+      const newFallbackMethod = await superpositionClient.getBooleanValue(
+        'vespa_search_new_fallback_method',
+        false,
+        {}
+      );
+      const payload = buildPayload(false, useSemanticAnyway);
       this.logger.info(`Payload: ${JSON.stringify(payload)}`);
 
+      const totalStartTime = Date.now();
+      const exactStartTime = Date.now();
       let response = await this.vespa.search<VespaSearchResponse>(payload);
-      
+      const exactDuration = Date.now() - exactStartTime;
+
        // Filter by nativerank if enabled
        // Skip nativeRank filtering for filter-only searches (no query text)
        // nativeRank is based on text matching - meaningless without a query
@@ -227,11 +247,38 @@ export class SearchService {
       this.logger.info(`Exact search returned ${exactResultCount} results, expected ${expectedCount}`);
       
       const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
-      if(exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly){
-      const fallbackResult = await executeFuzzyFallback(
+
+      const oldFallback = exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly
+
+      const FALLBACK_SCORE_THRESHOLD = await superpositionClient.getNumberValue(
+        'vespa_fallback_score_threshold',
+        0.1,
+        {}
+      );
+      const MIN_GOOD_RESULTS = await superpositionClient.getNumberValue(
+        'vespa_min_good_results',
+        5,
+        {}
+      );
+      const goodResults = response.root?.children?.filter(
+        child => (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
+      ) ?? [];
+
+      const newFallback =
+        searchQuery?.trim() &&
+        !isTranscriptOnly &&
+        goodResults.length < MIN_GOOD_RESULTS;
+
+
+      const needsFallback = newFallbackMethod ? newFallback : oldFallback;
+      let fallbackDuration = 0
+
+      if(needsFallback){
+        const fallbackStartTime = Date.now();
+        const fallbackResult = await executeFuzzyFallback(
         response,
         async () => {
-          const fuzzyPayload = buildPayload(true);
+          const fuzzyPayload = buildPayload(true, useSemanticAnyway);
           this.logger.info(`Fuzzy Search Payload: ${JSON.stringify(fuzzyPayload)}`);
           return this.vespa.search<VespaSearchResponse>(fuzzyPayload);
         },
@@ -245,6 +292,7 @@ export class SearchService {
       );
 
       response = fallbackResult.mergedResponse;
+      fallbackDuration = Date.now() - fallbackStartTime;
 
       this.logger.info(
         `Fallback completed: ${fallbackResult.exactCount} exact + ${fallbackResult.fuzzyCount} fuzzy results`
@@ -261,6 +309,30 @@ export class SearchService {
 
         this.logger.info(`Results: ${JSON.stringify(simplifiedResults)}`);
       }
+
+      const totalDuration = Date.now() - totalStartTime;
+
+      // Track search metrics to sudo-query
+      sudoQueryService.identify({ id: userId });
+      sudoQueryService.track('vespa_latency_metrics', {
+        ts: Date.now(),
+        searchId: searchId || '',
+        userId,
+        apps: app.join(','),
+        searchQuery: searchQuery || '',
+        queryLength: searchQuery?.trim()?.split(/\s+/)?.filter(Boolean)?.length || 0,
+        rankProfile,
+        useSemanticAnyway,
+        useFuzzy: false,
+        exactResultCount,
+        expectedCount,
+        fallBack: needsFallback,
+        newFallbackMethod: newFallbackMethod,
+        exactDuration,
+        fallbackDuration,
+        totalDuration,
+        hasTimeKeyword: parsedQuery.hasTimeKeyword,
+      });
       return response;
 
     } catch (error) {

@@ -423,6 +423,9 @@ const ChannelCommandMenu = ({
   } | null>(null);
   const [previewTicket, setPreviewTicket] = useState<DisplaySearchResult | null>(null);
   const [hoveredResult, setHoveredResult] = useState<DisplaySearchResult | null>(null);
+  const [keyboardSelectedResult, setKeyboardSelectedResult] = useState<DisplaySearchResult | null>(
+    null,
+  );
 
   const DISPLAY_LIMIT = 5;
 
@@ -949,6 +952,7 @@ const ChannelCommandMenu = ({
   const handleTicketMouseEnter = useCallback(
     (result: DisplaySearchResult): void => {
       setHoveredResult(result);
+      setKeyboardSelectedResult(null); // Clear keyboard selection when mouse takes over
       // Only update when preview is already open
       if (!previewTicket) {
         return;
@@ -1671,9 +1675,20 @@ const ChannelCommandMenu = ({
       setSuppressHover(true);
       hasNavigatedRef.current = true;
 
+      // Track which result is currently selected via keyboard
+      const newlySelectedItem = items[nextIndex];
+      const resultId = newlySelectedItem?.getAttribute('data-result-id');
+      const resultType = newlySelectedItem?.getAttribute('data-result-type');
+      if (resultId && resultType) {
+        const result = backendResults.find(r => r.type === resultType && r.id === resultId);
+        setKeyboardSelectedResult(result || null);
+        setHoveredResult(null); // Clear mouse hover state when using keyboard
+      } else {
+        setKeyboardSelectedResult(null);
+      }
+
       // Linear-style preview: update preview when navigating to a different ticket
       if (previewTicket) {
-        const newlySelectedItem = items[nextIndex];
         const ticketId = newlySelectedItem?.getAttribute('data-ticket-id');
         if (ticketId) {
           const ticket = backendResults.find(r => r.type === 'ticket' && r.id === ticketId);
@@ -1703,17 +1718,55 @@ const ChannelCommandMenu = ({
     // ArrowRight: open ticket preview if a ticket is selected, otherwise do nothing (disable tab navigation)
     if (e.key === 'ArrowRight') {
       if (!typeAutocomplete.suggestion && !previewTicket) {
+        // Check keyboard selection state (most reliable)
+        const keyboardTicket = keyboardSelectedResult;
+        // Check mouse hover state
+        const mouseTicket = hoveredResult;
+
+        // Use whichever is available
+        const ticketToShow =
+          keyboardTicket?.type === 'ticket'
+            ? keyboardTicket
+            : mouseTicket?.type === 'ticket'
+              ? mouseTicket
+              : null;
+
+        if (ticketToShow) {
+          e.preventDefault();
+          e.stopPropagation();
+          setPreviewTicket(ticketToShow);
+          setKeyboardSelectedResult(ticketToShow);
+          // Track preview click
+          if (searchText.trim()) {
+            const ticketIndex = backendResults.findIndex(
+              r => r.type === 'ticket' && r.id === ticketToShow.id,
+            );
+            onResultClick(
+              ticketToShow,
+              ticketIndex >= 0 ? ticketIndex + 1 : 1,
+              ticketToShow.searchContext?.channelId,
+              undefined,
+              true,
+            );
+          }
+          return;
+        }
+
+        // Fallback: check DOM directly
         const selectedItem = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
-        const ticketId = selectedItem?.getAttribute('data-ticket-id');
-        if (ticketId) {
+        const resultType = selectedItem?.getAttribute('data-result-type');
+        const resultId = selectedItem?.getAttribute('data-result-id');
+        if (resultType === 'ticket' && resultId) {
           const ticketIndex = backendResults.findIndex(
-            r => r.type === 'ticket' && r.id === ticketId,
+            r => r.type === 'ticket' && r.id === resultId,
           );
           const ticket = ticketIndex >= 0 ? backendResults[ticketIndex] : undefined;
           if (ticket) {
             e.preventDefault();
             e.stopPropagation();
             setPreviewTicket(ticket);
+            setKeyboardSelectedResult(ticket);
+            setHoveredResult(null);
             // Track preview click
             if (searchText.trim()) {
               onResultClick(
@@ -2644,7 +2697,8 @@ const ChannelCommandMenu = ({
                 <span>Close</span>
               </span>
             ) : activeTab === TabType.TICKETS ||
-              (activeTab === TabType.ALL && hoveredResult?.type === 'ticket') ? (
+              (activeTab === TabType.ALL &&
+                (hoveredResult?.type === 'ticket' || keyboardSelectedResult?.type === 'ticket')) ? (
               <span className='flex gap-2.5 items-center'>
                 <span className='flex gap-1'>
                   <span className='p-1 bg-background rounded-md border border-border'>
