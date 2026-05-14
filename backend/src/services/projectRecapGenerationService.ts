@@ -2,14 +2,9 @@ import { db } from '../database/client';
 import { logger } from '../utils/logger';
 import { AgentsConfig } from '../agents/config';
 import { redisService } from './redisService';
-import { getPrompt } from '../agents/xyne-ai/langfuse/prompts.js';
+import { getPrompt, PROMPT_NAMES } from '../agents/xyne-ai/langfuse/prompts.js';
 import { compileFallbackPrompt } from '../agents/xyne-ai/langfuse/fallback-prompts.js';
 import { CacConfigService } from './cacConfigService';
-
-const PROJECT_RECAP_PROMPT_NAMES = {
-  CHANNEL_SUMMARY: 'project-recap-channel-summary',
-  AGGREGATOR: 'project-recap-aggregator',
-} as const;
 
 async function getProjectRecapPrompt(
   promptName: string,
@@ -417,7 +412,7 @@ export class ProjectRecapGenerationService {
     });
 
     try {
-      const prompt = await getProjectRecapPrompt(PROJECT_RECAP_PROMPT_NAMES.CHANNEL_SUMMARY, {
+      const prompt = await getProjectRecapPrompt(PROMPT_NAMES.PROJECT_RECAP_CHANNEL_SUMMARY, {
         project_name: projectName,
         channel_name: channelName,
         date: formattedDate,
@@ -531,7 +526,7 @@ export class ProjectRecapGenerationService {
     };
 
     try {
-      const prompt = await getProjectRecapPrompt(PROJECT_RECAP_PROMPT_NAMES.AGGREGATOR, {
+      const prompt = await getProjectRecapPrompt(PROMPT_NAMES.PROJECT_RECAP_AGGREGATOR, {
         project_name: project.name,
         date: formattedDate,
         channel_count: String(channelSummaries.length),
