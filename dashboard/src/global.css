@@ -2779,3 +2779,74 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-theme="midnight"] .ai-landing-bg {
   display: none;
 }
+
+/* Voice recording wave animation */
+@keyframes voice-wave {
+  0%,
+  100% {
+    transform: scaleY(0.2);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.voice-wave-bar {
+  width: 3px;
+  border-radius: 99px;
+  background: #ff8904;
+  transform-origin: bottom;
+  animation: voice-wave 0.75s ease-in-out infinite;
+}
+
+/* Voice transcription shimmer on newly inserted text */
+@keyframes voice-text-shimmer {
+  0% {
+    background-position: -100% center;
+  }
+  100% {
+    background-position: 300% center;
+  }
+}
+
+.voice-shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 137, 4, 0.45) 50%, transparent 100%);
+  background-size: 200% 100%;
+  background-position: -100% center;
+  border-radius: 2px;
+  animation: voice-text-shimmer 0.9s ease-out forwards;
+}
+
+/* Xyne animated voice border */
+@property --xyne-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes xyne-border-spin {
+  to {
+    --xyne-angle: 360deg;
+  }
+}
+
+.xyne-voice-border-wrap {
+  background: conic-gradient(
+    from var(--xyne-angle),
+    #ff4f00 0%,
+    #ff8904 15%,
+    #ffd6a8 35%,
+    #ffffff 50%,
+    #ffd6a8 65%,
+    #ff8904 85%,
+    #ff4f00 100%
+  );
+  animation: xyne-border-spin 2.4s linear infinite;
+  padding: 2px;
+  border-radius: 1rem;
+  box-shadow:
+    0 0 10px 1px rgba(255, 100, 0, 0.25),
+    0 0 22px 4px rgba(255, 137, 4, 0.15);
+}

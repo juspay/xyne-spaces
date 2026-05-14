@@ -23,9 +23,11 @@ class Config:
 
     # STT Provider Configuration (google, azure, or deepgram)
     stt_model: str  # 'google', 'azure', or 'deepgram'
+    voice_input_stt_model: str  # STT provider for voice-input dictation flow (overrides stt_model for this path)
     google_voice_credentials_json: Optional[str]
-    google_stt_model: str  # Model for Google STT (e.g., chirp-2)
+    google_stt_model: str  # Model for Google STT (e.g., chirp_3)
     google_stt_language: str
+    google_stt_location: str  # Region for Google STT (chirp models require e.g. us-central1, not global)
     
     # Deepgram STT Configuration
     deepgram_api_key: Optional[str]
@@ -64,6 +66,7 @@ class Config:
     # GCS Configuration
     gcs_project_id: Optional[str]
     gcs_bucket_name: Optional[str]
+    gcs_credentials_file: Optional[str]
 
     # S3 Configuration
     s3_bucket_name: Optional[str]
@@ -120,9 +123,11 @@ class Config:
 
             # STT Provider Configuration (google, azure, or deepgram, default: azure)
             stt_model=os.getenv("STT_MODEL", "azure").lower(),
+            voice_input_stt_model=os.getenv("VOICE_INPUT_STT_MODEL", os.getenv("STT_MODEL", "azure")).lower(),
             google_voice_credentials_json=os.getenv("GOOGLE_VOICE_CREDENTIALS_JSON"),
             google_stt_model=os.getenv("GOOGLE_STT_MODEL", "chirp_3"),
             google_stt_language=os.getenv("GOOGLE_STT_LANGUAGE", "en-US"),
+            google_stt_location=os.getenv("GOOGLE_STT_LOCATION", "us"),
             
             # Deepgram STT
             deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
@@ -161,7 +166,7 @@ class Config:
             # GCS
             gcs_project_id=os.getenv("GCS_PROJECT_ID"),
             gcs_bucket_name=os.getenv("TRANSCRIPTION_BUCKET_NAME") or os.getenv("GCS_BUCKET_NAME"),
-
+            gcs_credentials_file=os.getenv('GCS_CREDENTIALS_FILE'),
             # S3
             s3_bucket_name=os.getenv("S3_BUCKET_NAME") or os.getenv("TRANSCRIPTION_BUCKET_NAME"),
             s3_region=os.getenv("AWS_REGION", "ap-south-1"),

@@ -816,6 +816,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               ref={inputBoxRef}
               key={`inputBox-${channelId}-${conversationId}`}
               mentionItems={mentionResults}
+              voiceMentionItems={allUsersForMentionResolution}
               onMentionSearch={handleMentionSearch}
               channelItems={channelItems}
               onChannelSearch={handleChannelSearch}

@@ -18,4 +18,7 @@ router.get('/:callId/search-users', transcriptionAgentController.searchUsers);
 // Fetch all enrolled voice signatures for real-time speaker identification
 router.get('/voiceprints', transcriptionAgentController.getVoiceprints);
 
+// Fetch all workspace user display names for STT keyword hints
+router.get('/user-names', transcriptionAgentController.getUserNames);
+
 export default router;

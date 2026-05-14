@@ -220,6 +220,7 @@ async def entrypoint(ctx: JobContext):
         gcs_provider = GCSBucketProvider(
             project_id=config.gcs_project_id,
             bucket_name=config.gcs_bucket_name,
+            credentials_file=config.gcs_credentials_file,
         )
         bucket = gcs_provider.get_bucket()
         if bucket:

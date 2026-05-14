@@ -3,6 +3,8 @@ Google Cloud Storage bucket provider
 """
 import logging
 from typing import Optional
+from google.auth import load_credentials_from_file
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import storage
 from config import get_logger
 from .storage_base import StorageBucket, BlobWriter
@@ -57,13 +59,38 @@ class GCSBucketProvider:
 
     Avoids blocking worker init by deferring bucket connection
     until first use.
+
+    ``credentials_file`` — path to a credentials JSON (ADC or service account).
+    When provided, credentials are loaded explicitly and passed to the GCS
+    client, bypassing the implicit ``google.auth.default()`` lookup chain.
     """
 
-    def __init__(self, project_id: Optional[str] = None, bucket_name: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: Optional[str] = None,
+        bucket_name: Optional[str] = None,
+        credentials_file: Optional[str] = None,
+    ):
         self.project_id = project_id
         self.bucket_name = bucket_name
+        self.credentials_file = credentials_file
         self._bucket: Optional[StorageBucket] = None
         self._attempted = False
+
+    def _load_credentials(self):
+        """Load credentials explicitly from ``credentials_file``.
+
+        Supports both ADC (OAuth2 user) and service-account JSON formats via
+        ``google.auth.load_credentials_from_file``.
+        Returns the credentials object, refreshed and ready to use.
+        """
+        creds, _ = load_credentials_from_file(
+            self.credentials_file,
+            scopes=['https://www.googleapis.com/auth/cloud-platform'],
+        )
+        if not creds.valid:
+            creds.refresh(GoogleAuthRequest())
+        return creds
 
     def get_bucket(self) -> Optional[StorageBucket]:
         if self._attempted:
@@ -80,7 +107,13 @@ class GCSBucketProvider:
 
         try:
             logger.info(f"Initializing GCS client for project: {self.project_id}")
-            storage_client = storage.Client(project=self.project_id)
+            if self.credentials_file:
+                logger.info(f"GCS: loading credentials explicitly from {self.credentials_file}")
+                creds = self._load_credentials()
+                storage_client = storage.Client(project=self.project_id, credentials=creds)
+            else:
+                # Fall back to ambient credentials (GOOGLE_APPLICATION_CREDENTIALS / metadata server)
+                storage_client = storage.Client(project=self.project_id)
             self._bucket = GCSStorageBucket(storage_client.bucket(self.bucket_name))
             logger.info(f"GCS bucket ready: {self.bucket_name}")
         except Exception as e:
