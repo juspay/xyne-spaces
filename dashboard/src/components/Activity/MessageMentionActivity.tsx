@@ -44,6 +44,7 @@ export const MessageMentionActivity = ({
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
       isSelected={isSelected}
+      showUnreadDot
       className='flex items-start'
     >
       {isExpanded ? (
