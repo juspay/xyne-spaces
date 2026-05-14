@@ -2,9 +2,14 @@ import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { Hash, Lock, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useSelf, useActiveUserSearch } from '../../../hooks/useUsers';
+import { useSelf, useActiveUsers } from '../../../hooks/useUsers';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
+import {
+  parseParticipants,
+  matchParticipants,
+  looksLikeBulkEntry,
+} from '../../../utils/participantUtils';
 import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import Dialog from '../../ui/Dialog';
@@ -23,9 +28,10 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const user = useSelf();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
+  const [notFoundUsers, setNotFoundUsers] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const users = useActiveUserSearch(searchQuery, 15);
+  const activeUsers = useActiveUsers();
 
   // Focus on Search Participant Input when modal opens
   useEffect(() => {
@@ -45,8 +51,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
 
   const inviteUserOrChannelOptions = useMemo(() => {
     const userOptions =
-      users
-        .filter(u => u.id !== user?.id) // filter out the current user from the list
+      activeUsers
+        .filter(u => u.id !== user?.id)
         .map(user => ({
           ...user,
           label: user.name ?? user.email,
@@ -106,12 +112,13 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     }));
 
     return [...userOptions, ...channelOptions].sort((a, b) => a.label.localeCompare(b.label));
-  }, [users, channels]);
+  }, [activeUsers, channels]);
 
   const handleSubmit = () => {
     onSubmit(selectedParticipants);
     setSelectedParticipants([]);
     setSearchQuery('');
+    setNotFoundUsers([]);
     onClose();
   };
 
@@ -119,7 +126,58 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     // Reset state when closing
     setSelectedParticipants([]);
     setSearchQuery('');
+    setNotFoundUsers([]);
     onClose();
+  };
+
+  const handleBulkUserEntry = (query: string): boolean => {
+    if (selectedParticipants.some(value => value.startsWith('channel:'))) {
+      return false;
+    }
+
+    if (!looksLikeBulkEntry(query)) {
+      return false;
+    }
+
+    const parsed = parseParticipants(query);
+    if (parsed.length === 0) {
+      return false;
+    }
+
+    const { matched, notFound } = matchParticipants(parsed, activeUsers, user?.id);
+
+    if (matched.length === 0) {
+      return false;
+    }
+
+    const nextSelected = new Set(selectedParticipants);
+    for (const { userId } of matched) {
+      nextSelected.add(`user:${userId}`);
+    }
+
+    setSelectedParticipants(Array.from(nextSelected));
+    setNotFoundUsers(notFound.map(p => p.raw));
+    setSearchQuery('');
+    return true;
+  };
+
+  const notFoundMessage =
+    notFoundUsers.length > 0
+      ? `${notFoundUsers.length} user${notFoundUsers.length === 1 ? '' : 's'} not found`
+      : undefined;
+
+  const handleSearchQueryChange = (query: string) => {
+    setSearchQuery(query);
+    if (notFoundUsers.length > 0) {
+      setNotFoundUsers([]);
+    }
+  };
+
+  const handleMultiSelect = (participants: string[]) => {
+    setSelectedParticipants(participants);
+    if (notFoundUsers.length > 0) {
+      setNotFoundUsers([]);
+    }
   };
 
   return (
@@ -152,10 +210,12 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               <SearchParticipants
                 options={inviteUserOrChannelOptions}
                 selectedValues={selectedParticipants}
-                onMultiSelect={setSelectedParticipants}
+                onMultiSelect={handleMultiSelect}
                 searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
+                setSearchQuery={handleSearchQueryChange}
                 ref={inputRef}
+                onEnterQuerySubmit={handleBulkUserEntry}
+                helperText={notFoundMessage}
               />
             </div>
             <div className='flex items-center justify-between'>

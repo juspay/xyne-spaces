@@ -3,7 +3,7 @@ import { RRule } from 'rrule';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
-import { useSelf, useUsers } from '../../../hooks/useUsers';
+import { useSelf, useActiveUsers } from '../../../hooks/useUsers';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
 import { callService, type ScheduleCallRequest } from '../../../services/Call/callService';
@@ -24,10 +24,14 @@ import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TimePicker } from '../../ui/TimePicker/TimePicker';
 import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
-import { useActiveUserSearch } from '../../../hooks/useUsers';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Controller, useForm } from 'react-hook-form';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import {
+  parseParticipants,
+  matchParticipants,
+  looksLikeBulkEntry,
+} from '../../../utils/participantUtils';
 import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
@@ -173,7 +177,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   initialParticipants,
 }) => {
   const user = useSelf();
-  const allUsers = useUsers();
+  const allUsers = useActiveUsers();
   const allVisibleChannels = useAllVisibleChannels();
 
   // When opened from a thread, fetch channel participants to restrict the picker
@@ -388,7 +392,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Search query state (not in form)
   const [searchQuery, setSearchQuery] = React.useState('');
-  const users = useActiveUserSearch(searchQuery, 15);
+  const [notFoundUsers, setNotFoundUsers] = React.useState<string[]>([]);
 
   // Recurring call state
   const [isRecurring, setIsRecurring] = React.useState(
@@ -671,7 +675,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       return channelUserOptions.sort((a, b) => a.label.localeCompare(b.label));
     }
 
-    const userOptions = users.filter(u => u.id !== user?.id).map(buildUserOption);
+    const userOptions = allUsers.filter(u => u.id !== user?.id).map(buildUserOption);
 
     const channelOptions = channels.map(channel => ({
       ...channel,
@@ -738,14 +742,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
     return [...userOptions, ...channelOptions].sort((a, b) => a.label.localeCompare(b.label));
   }, [
-    users,
+    allUsers,
     channels,
     user?.id,
     isEditMode,
     initialCall,
     initialParticipants,
     allVisibleChannels,
-    allUsers,
     channelParticipantUserIds,
   ]);
 
@@ -1207,6 +1210,40 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     }
   };
 
+  const handleBulkUserEntry = useCallback(
+    (query: string): boolean => {
+      if (participants.some(v => v.startsWith('channel:'))) {
+        return false;
+      }
+
+      if (!looksLikeBulkEntry(query)) {
+        return false;
+      }
+
+      const parsed = parseParticipants(query);
+      if (parsed.length === 0) {
+        return false;
+      }
+
+      const { matched, notFound } = matchParticipants(parsed, allUsers, user?.id);
+
+      if (matched.length === 0) {
+        return false;
+      }
+
+      const nextSelected = new Set(participants);
+      for (const { userId } of matched) {
+        nextSelected.add(`user:${userId}`);
+      }
+
+      setValue('participants', Array.from(nextSelected));
+      setNotFoundUsers(notFound.map(p => p.raw));
+      setSearchQuery('');
+      return true;
+    },
+    [participants, allUsers, user?.id, setValue],
+  );
+
   // Reset form and close modal
   const handleClose = useCallback((): void => {
     const displayName = getUserDisplayName(user);
@@ -1224,6 +1261,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     });
     setStep('participants');
     setSearchQuery('');
+    setNotFoundUsers([]);
     setIsRecurring(false);
     setRecurrenceFrequency('WEEK');
     setRecurrenceDays([]);
@@ -2113,7 +2151,16 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       selectedValues={field.value}
                       onMultiSelect={field.onChange}
                       searchQuery={searchQuery}
-                      setSearchQuery={setSearchQuery}
+                      setSearchQuery={(q: string) => {
+                        setSearchQuery(q);
+                        if (notFoundUsers.length > 0) setNotFoundUsers([]);
+                      }}
+                      onEnterQuerySubmit={handleBulkUserEntry}
+                      helperText={
+                        notFoundUsers.length > 0
+                          ? `${notFoundUsers.length} user${notFoundUsers.length === 1 ? '' : 's'} not found`
+                          : undefined
+                      }
                     />
                   )}
                   rules={{
