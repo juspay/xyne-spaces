@@ -102,14 +102,16 @@ function filterUsersByResponsibility(
  * - If no other candidates exist after exclusion, returns { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' }
  *
  * Returns: { assignedUserId } or { reason: "NO_ON_CALL_USERS" | "EXCLUDED_USER_ONLY_CANDIDATE" }
+ * @param projectId - Optional project ID to scope workload calculation to boards in the same project only
  */
 export async function evaluateAssignmentRule(
   userGroupId: string,
   boardId: string,
   assignmentType: AssignmentType = AssignmentType.TICKET_ASSIGNEE,
-  excludeUserId?: string
+  excludeUserId?: string,
+  projectId?: string,
 ): Promise<AssignmentResult> {
-  logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}`);
+  logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}${projectId ? `, projectId: ${projectId}` : ''}`);
 
   // Fetch user group mappings
   const userGroupMappings = await repositories.userGroupMapping.findMany({
@@ -198,8 +200,21 @@ export async function evaluateAssignmentRule(
   }
   const finalEligibleUserIds = eligibleUserIds;
 
-  // Get workload mappings and board scores for ALL boards in this user group
-  const [allWorkloadMappings, allBoardScores] = await Promise.all([
+  // If projectId is provided, fetch all boards in that project
+  let projectBoardIds: Set<string> | undefined;
+  if (projectId) {
+    const projectBoards = await repositories.boards.findBoardsByProject(projectId);
+    projectBoardIds = new Set(projectBoards.map(b => b.id));
+
+    // Sanity check: verify the target board belongs to this project
+    if (!projectBoardIds.has(boardId)) {
+      logger.warn(`[Assignment] Board ${boardId} does not belong to project ${projectId}. Falling back to all boards.`);
+      projectBoardIds = undefined;
+    }
+  }
+
+  // Get workload mappings and board scores for boards in this user group
+  let [allWorkloadMappings, allBoardScores] = await Promise.all([
     repositories.userWorkloadMapping.findMany({
       where: {
         userGroupId,
@@ -210,6 +225,12 @@ export async function evaluateAssignmentRule(
       where: { userGroupId },
     }),
   ]);
+
+  // Filter workload and board scores to project boards only
+  if (projectBoardIds) {
+    allWorkloadMappings = allWorkloadMappings.filter(w => projectBoardIds!.has(w.boardId));
+    allBoardScores = allBoardScores.filter(s => projectBoardIds!.has(s.boardId));
+  }
 
   // Create a map of board weights (default to 1 if not configured)
   const boardWeightMap = new Map<string, number>(
@@ -545,8 +566,9 @@ function pickBest(
 export async function evaluateAllRoles(
   userGroupId: string,
   boardId: string,
+  projectId?: string,
 ): Promise<AllRolesResult> {
-  logger.info(`[Assignment] evaluateAllRoles for userGroupId: ${userGroupId}, boardId: ${boardId}`);
+  logger.info(`[Assignment] evaluateAllRoles for userGroupId: ${userGroupId}, boardId: ${boardId}${projectId ? `, projectId: ${projectId}` : ''}`);
 
   // ── Single round of DB fetches ─────────────────────────────────────────────
   const userGroupMappings = await repositories.userGroupMapping.findMany({ where: { userGroupId } });
@@ -558,12 +580,30 @@ export async function evaluateAllRoles(
 
   const allUserIds = userGroupMappings.map(m => m.userId);
 
-  const [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
+  // Fetch project boards if projectId is provided
+  let projectBoardIds: Set<string> | undefined;
+  if (projectId) {
+    const projectBoards = await repositories.boards.findBoardsByProject(projectId);
+    projectBoardIds = new Set(projectBoards.map(b => b.id));
+
+    if (!projectBoardIds.has(boardId)) {
+      logger.warn(`[Assignment] Board ${boardId} does not belong to project ${projectId}. Falling back to all boards.`);
+      projectBoardIds = undefined;
+    }
+  }
+
+  let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
     repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
   ]);
+
+  // Filter workload and board scores to project boards only
+  if (projectBoardIds) {
+    allWorkloadMappings = allWorkloadMappings.filter(w => projectBoardIds!.has(w.boardId));
+    allBoardScores = allBoardScores.filter(s => projectBoardIds!.has(s.boardId));
+  }
 
   const boardWeightMap = new Map<string, number>(allBoardScores.map(s => [s.boardId, s.weight]));
   

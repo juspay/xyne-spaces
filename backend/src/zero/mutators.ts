@@ -219,6 +219,7 @@ async function assignFullRoles(
     activityId,
     messageId,
     timestamp,
+    projectId,
   }: {
     ticketId: string;
     userGroupId: string;
@@ -230,6 +231,7 @@ async function assignFullRoles(
     activityId?: string;
     messageId?: string;
     timestamp: number;
+    projectId?: string;
   }
 ): Promise<void> {
   logger.info(`[AUTO-ASSIGN] Board ${boardId} has fullRoleAssignment enabled for ticket ${ticketId}`);
@@ -239,6 +241,7 @@ async function assignFullRoles(
     userGroupId,
     boardId,
     createdBy,
+    projectId,
   });
 
   if (fullResult.member) {
@@ -4548,9 +4551,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       createdBy: authData.sub,
                       creatorName: authData.name,
                       timestamp: Date.now(),
+                      projectId: ticket.projectId,
                     });
                   } else {
-                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId);
+                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId);
                     if (assignmentResult.assignedUserId) {
                       logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
                       
@@ -4866,12 +4870,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     activityId,
                     messageId,
                     timestamp,
+                    projectId: ticket.projectId,
                   });
                 } else {
                 const assignmentResult = await evaluateAssignmentRule(
                   params.userGroupId!,
                   targetBoardId,
-                  AssignmentType.TICKET_ASSIGNEE
+                  AssignmentType.TICKET_ASSIGNEE,
+                  undefined,
+                  ticket.projectId
                 );
 
                 if (assignmentResult.assignedUserId) {

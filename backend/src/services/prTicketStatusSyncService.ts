@@ -50,6 +50,7 @@ interface TicketInfo {
   channelId: string | null;
   assignedTo: string | null;
   workspaceId: string;
+  projectId: string;
 }
 
 interface StageInfo {
@@ -415,6 +416,7 @@ export class PRTicketStatusSyncService {
           channelId: true,
           assignedTo: true,
           workspaceId: true,
+          projectId: true,
         },
       });
       if (ticket) {
@@ -450,6 +452,7 @@ export class PRTicketStatusSyncService {
               channelId: true,
               assignedTo: true,
               workspaceId: true,
+              projectId: true,
             },
           });
           if (ticket) {
@@ -797,7 +800,8 @@ export class PRTicketStatusSyncService {
         ticket.userGroupId,
         ticket.boardId,
         assignmentType,
-        excludeUserId
+        excludeUserId,
+        ticket.projectId
       );
 
       if (!assignmentResult.assignedUserId) {

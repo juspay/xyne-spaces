@@ -488,7 +488,7 @@ export class TicketController {
             // Full role assignment will be done after ticket creation
             pendingFullRoleAssignment = true;
           } else {
-          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
+          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId);
           if (assignmentResult.assignedUserId) {
             finalAssignedTo = assignmentResult.assignedUserId;
             }
@@ -948,6 +948,7 @@ export class TicketController {
             userGroupId,
             boardId,
             createdBy: userId,
+            projectId: ticket.projectId,
           });
           if (fullRoles.member) {
             const prevAssignedTo = ticket.assignedTo;

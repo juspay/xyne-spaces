@@ -161,10 +161,11 @@ export class TicketAssignmentService {
     userGroupId: string;
     boardId: string;
     createdBy: string;
+    projectId?: string;
   }): Promise<FullRoleAssignmentResult> {
-    const { ticketId, userGroupId, boardId, createdBy } = params;
+    const { ticketId, userGroupId, boardId, createdBy, projectId } = params;
 
-    const allRoles = await evaluateAllRoles(userGroupId, boardId);
+    const allRoles = await evaluateAllRoles(userGroupId, boardId, projectId);
 
     // upsert into ticket_assignments + sync workload for one resolved role
     const persist = async (
