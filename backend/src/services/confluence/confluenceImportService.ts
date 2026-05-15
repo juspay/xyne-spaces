@@ -234,7 +234,7 @@ export class ConfluenceImportService {
     const rawMarkdownByPageId = new Map<string, string>();
     const lastEditorUserIdByPageId = new Map<string, string>();
 
-    for (const prepared of preparedPages) {
+    for (const [index, prepared] of preparedPages.entries()) {
       const result = await this.createOrUpdateInitialCanvas(
         prepared,
         resolvedInput,
@@ -257,6 +257,7 @@ export class ConfluenceImportService {
       confluencePageIdToCanvasId.set(prepared.page.id, result.canvasId);
       rawMarkdownByPageId.set(prepared.page.id, result.rawMarkdown);
       lastEditorUserIdByPageId.set(prepared.page.id, result.lastEditorUserId);
+      await this.applyImportBatchCooldown(index + 1, preparedPages.length, 'importing_pages');
     }
 
     const canvasUrlByConfluencePageId = await this.buildCanvasUrlMap(
@@ -264,7 +265,7 @@ export class ConfluenceImportService {
       resolvedInput.frontendBaseUrl,
     );
 
-    for (const prepared of preparedPages) {
+    for (const [index, prepared] of preparedPages.entries()) {
       const canvasId = confluencePageIdToCanvasId.get(prepared.page.id);
       const rawMarkdown = rawMarkdownByPageId.get(prepared.page.id);
       const lastEditorUserId = lastEditorUserIdByPageId.get(prepared.page.id);
@@ -299,6 +300,7 @@ export class ConfluenceImportService {
           pageResult,
         );
       }
+      await this.applyImportBatchCooldown(index + 1, preparedPages.length, 'rewriting_internal_links');
     }
 
     summary.unresolvedUsers = Array.from(unresolvedUsers.values());
@@ -338,6 +340,32 @@ export class ConfluenceImportService {
       currentPageTitle,
       pageResult,
     });
+  }
+
+  private async applyImportBatchCooldown(
+    processedCount: number,
+    totalCount: number,
+    phase: string,
+  ): Promise<void> {
+    const batchSize = config.confluence.importBatchSize;
+    const cooldownMs = config.confluence.importBatchCooldownMs;
+    if (cooldownMs <= 0 || processedCount >= totalCount || processedCount % batchSize !== 0) {
+      return;
+    }
+
+    logger.info('[ConfluenceImport] Applying import batch cooldown', {
+      phase,
+      processedCount,
+      totalCount,
+      batchSize,
+      cooldownMs,
+    });
+    await this.sleep(cooldownMs);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    if (ms <= 0) return Promise.resolve();
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private async validateTarget(input: ConfluenceImportConfig): Promise<void> {
