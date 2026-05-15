@@ -566,7 +566,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           </div>
 
           <button
-            className='w-full flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-accent disabled:opacity-50'
+            className='w-full flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-foreground hover:bg-accent disabled:opacity-50'
             onClick={() =>
               channelCreateTarget && void handleCreateCanvasInChannel(channelCreateTarget)
             }
@@ -585,7 +585,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                 {channelFoldersForTarget.map(folder => (
                   <button
                     key={folder.id}
-                    className='w-full flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-accent disabled:opacity-50'
+                    className='w-full flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-foreground hover:bg-accent disabled:opacity-50'
                     onClick={() => handleCreateCanvasInChannelFolder(folder)}
                     disabled={isCreatingCanvas}
                     data-track-category='CANVAS'

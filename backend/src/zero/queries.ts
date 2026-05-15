@@ -36,12 +36,13 @@ const applyCanvasVisibilityQueryFilter = (
   query: any,
   userId: string,
   requestedCanvasId?: string,
+  includePublicVisibility = true,
 ) =>
   query.where((helpers: any) =>
     helpers.or(
       helpers.cmp('createdBy', userId),
       helpers.exists('participants', (participant: any) => participant.where('userId', userId)),
-      helpers.cmp('visibility', CanvasVisibility.PUBLIC),
+      ...(includePublicVisibility ? [helpers.cmp('visibility', CanvasVisibility.PUBLIC)] : []),
       ...(requestedCanvasId
         ? [
             helpers.cmp('viewAccessId', requestedCanvasId),
@@ -1270,7 +1271,12 @@ export const queries = defineQueries({
         query = query.where('folderId', 'IS', null);
       }
 
-      return applyCanvasVisibilityQueryFilter(query, ctx.userID).orderBy('updatedAt', 'desc');
+      return applyCanvasVisibilityQueryFilter(
+        query,
+        ctx.userID,
+        undefined,
+        resolvedScope !== 'personal_root',
+      ).orderBy('updatedAt', 'desc');
     }
   ),
 
