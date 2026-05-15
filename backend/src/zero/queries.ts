@@ -892,7 +892,7 @@ export const queries = defineQueries({
     }),
     ({ ctx, args }) => {
       const isBackward = args.direction === 'backward';
-      let query = applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID);
+      let query = applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, undefined, false);
 
       if (!args.includeQuartoDocs) {
         query = query.where('docType', DocType.Canvas);
