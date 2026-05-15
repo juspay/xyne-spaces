@@ -796,6 +796,8 @@ export class XyneAIControllerV2 {
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': userId,
+          ...(req.headers.cookie ? { 'Cookie': req.headers.cookie } : {}),
+
         },
         body: JSON.stringify({
           pendingAction,
@@ -805,6 +807,10 @@ export class XyneAIControllerV2 {
       if (!response.ok) {
         const errorText = await response.text();
         logger.error(`[XyneAIv2] approve-action failed: ${response.status} ${errorText}`);
+        
+        // Do not forward 401 from upstream service to prevent frontend logout
+        // User is authenticated with spaces; 401 from claw-auth is a service issue
+        const statusCode = response.status === 401 ? 503 : response.status;
         
         // Parse error from upstream to show meaningful message in UI
         let errorMessage = 'Failed to execute action';
@@ -816,7 +822,7 @@ export class XyneAIControllerV2 {
           errorMessage = errorText.length > 200 ? `${errorText.slice(0, 200)}...` : errorText;
         }
         
-        res.status(response.status).json({ 
+        res.status(statusCode).json({ 
           success: false, 
           error: errorMessage 
         });
@@ -845,13 +851,20 @@ export class XyneAIControllerV2 {
     try {
       const clawAuthUrl = `${config.xyneClaw.authUrl}/claw/api/v1/agent-chat/ask-ai/conversations?userId=${encodeURIComponent(userId)}`;
       const response = await fetch(clawAuthUrl, {
-        headers: { 'x-user-id': userId },
+        headers: {
+          'x-user-id': userId,
+          ...(req.headers.cookie ? { 'Cookie': req.headers.cookie } : {}),
+        },
       });
 
       if (!response.ok) {
         const errorText = await response.text();
         logger.error(`[XyneAIv2] listConversations failed: ${response.status} ${errorText}`);
-        res.status(response.status).json({ success: false, error: 'Failed to fetch conversations' });
+        
+        // Do not forward 401 from upstream service to prevent frontend logout
+        // User is authenticated with spaces; 401 from claw-auth is a service issue
+        const statusCode = response.status === 401 ? 503 : response.status;
+        res.status(statusCode).json({ success: false, error: 'Failed to fetch conversations' });
         return;
       }
 
@@ -883,13 +896,19 @@ export class XyneAIControllerV2 {
     try {
       const clawAuthUrl = `${config.xyneClaw.authUrl}/claw/api/v1/agent-chat/ask-ai/chat/${convId}/messages`;
       const response = await fetch(clawAuthUrl, {
-        headers: { 'x-user-id': userId },
-      });
+        headers: {
+            'x-user-id': userId,
+            ...(req.headers.cookie ? { 'Cookie': req.headers.cookie } : {}),
+        },      });
 
       if (!response.ok) {
         const errorText = await response.text();
         logger.error(`[XyneAIv2] getMessages failed: ${response.status} ${errorText}`);
-        res.status(response.status).json({ success: false, error: 'Failed to fetch messages' });
+        
+        // Do not forward 401 from upstream service to prevent frontend logout
+        // User is authenticated with spaces; 401 from claw-auth is a service issue
+        const statusCode = response.status === 401 ? 503 : response.status;
+        res.status(statusCode).json({ success: false, error: 'Failed to fetch messages' });
         return;
       }
       
@@ -947,13 +966,20 @@ export class XyneAIControllerV2 {
       logger.info(`[XyneAIv2] Proxying attachment download: ${attachmentId}`);
 
       const response = await fetch(clawAuthUrl, {
-        headers: { 'x-user-id': userId },
+        headers: {
+          'x-user-id': userId,
+          ...(req.headers.cookie ? { 'Cookie': req.headers.cookie } : {}),
+        },
       });
 
       if (!response.ok) {
         const errorText = await response.text();
         logger.error(`[XyneAIv2] Attachment download failed: ${response.status} ${errorText}`);
-        res.status(response.status).json({ 
+        
+        // Do not forward 401 from upstream service to prevent frontend logout
+        // User is authenticated with spaces; 401 from claw-auth is a service issue
+        const statusCode = response.status === 401 ? 503 : response.status;
+        res.status(statusCode).json({ 
           success: false, 
           error: 'Failed to download attachment' 
         });
