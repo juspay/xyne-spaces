@@ -175,10 +175,20 @@ interface FormFieldGroup {
   fieldType: FormFieldType;
 }
 
-function isFormFieldGroup(value: GroupByType): value is FormFieldGroup {
+function isFormFieldGroup(value: unknown): value is FormFieldGroup {
   return (
     typeof value === 'object' && value !== null && 'type' in value && value.type === 'formField'
   );
+}
+
+function parseGroupBy(raw: string): GroupByType {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (isFormFieldGroup(parsed)) return parsed;
+  } catch {
+    // not JSON, fall through
+  }
+  return raw as GroupByType;
 }
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
@@ -233,7 +243,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
-  const [groupBy, setGroupBy] = useState<GroupByType>('none');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const channel = useChannel(channelId || '');
@@ -356,6 +365,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const hasRestoredActiveView = useRef<string | null>(null);
 
   const searchTerm = searchParams.get('search') ?? '';
+
+  const groupBy: GroupByType = useMemo(
+    () => parseGroupBy(state.context.groupBy),
+    [state.context.groupBy],
+  );
+
+  const setGroupBy = useCallback(
+    (value: GroupByType) => {
+      const serialized = typeof value === 'object' ? JSON.stringify(value) : value;
+      send({ type: 'SET_GROUP_BY', groupBy: serialized });
+    },
+    [send],
+  );
 
   const setSearchTerm = (value: string) => {
     setSearchParams(
@@ -482,7 +504,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       }
       setGroupBy(value);
     },
-    [selectedViewId, activeViewKey],
+    [selectedViewId, activeViewKey, setGroupBy],
   );
 
   // Setup sensors for drag and drop
@@ -1836,7 +1858,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           handleSetGroupBy('none');
                         }}
                       >
-                        <div className='cursor-pointer hover:bg-muted rounded p-1 transition-colors'>
+                        <div className='cursor-pointer hover:bg-muted rounded p-1 transition-colors text-foreground'>
                           <X className='w-3.5 h-3.5' />
                         </div>
                       </DropdownMenu.Item>

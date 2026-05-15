@@ -11,11 +11,13 @@ const STORAGE_KEY_PREFIX = 'ticket-filters';
 interface StorageData {
   filters: TicketFilters;
   viewType?: 'status' | 'stage' | 'board';
+  groupBy?: string;
 }
 
 export interface TicketFiltersContext {
   filters: TicketFilters;
   viewType: 'status' | 'stage' | 'board';
+  groupBy: string;
   channelId?: string;
   projectId?: string;
   boardId?: string;
@@ -24,6 +26,7 @@ export interface TicketFiltersContext {
   storageKey: string;
   urlFilters: TicketFilters;
   urlViewType?: 'status' | 'stage' | 'board';
+  urlGroupBy?: string;
   currentSearchParams?: URLSearchParams;
   setSearchParams?: (
     params: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
@@ -46,6 +49,7 @@ export type TicketFiltersEvent =
     }
   | { type: 'SET_FILTERS'; filters: TicketFilters }
   | { type: 'SET_VIEW_TYPE'; viewType: 'status' | 'stage' | 'board' }
+  | { type: 'SET_GROUP_BY'; groupBy: string }
   | { type: 'URL_CHANGED'; searchParams: URLSearchParams };
 
 /* -------------------------- UTILITY FUNCTIONS -------------------------- */
@@ -261,6 +265,9 @@ const loadFromStorage = (key: string): StorageData => {
       if (parsed.viewType) {
         result.viewType = parsed.viewType;
       }
+      if (parsed.groupBy) {
+        result.groupBy = parsed.groupBy;
+      }
       return result;
     }
   } catch {
@@ -276,11 +283,15 @@ const saveToStorage = (
   key: string,
   filters: TicketFilters,
   viewType?: 'status' | 'stage' | 'board',
+  groupBy?: string,
 ): void => {
   try {
     const data: StorageData = { filters };
     if (viewType) {
       data.viewType = viewType;
+    }
+    if (groupBy && groupBy !== 'none') {
+      data.groupBy = groupBy;
     }
     sessionStorage.setItem(key, JSON.stringify(data));
   } catch {
@@ -331,6 +342,7 @@ export const ticketFiltersMachine = setup({
       const currentParams = new URLSearchParams(window.location.search);
       const urlFilters = readFiltersFromUrl(currentParams);
       const urlViewType = currentParams.get('viewType');
+      const urlGroupBy = currentParams.get('groupBy');
       // UPDATED: Pass projectId and boardId to getStorageKey
       const storageKey = getStorageKey(
         event.channelId,
@@ -342,6 +354,7 @@ export const ticketFiltersMachine = setup({
 
       let filters: TicketFilters = {};
       let viewType: 'status' | 'stage' | 'board' = 'stage';
+      let groupBy = 'none';
 
       if (enabled) {
         const storageData = loadFromStorage(storageKey);
@@ -368,12 +381,19 @@ export const ticketFiltersMachine = setup({
         } else {
           viewType = storageData.viewType || 'stage';
         }
+
+        if (urlGroupBy) {
+          groupBy = urlGroupBy;
+        } else if (storageData.groupBy) {
+          groupBy = storageData.groupBy;
+        }
       }
 
       const result: TicketFiltersContext = {
         ...context,
         filters,
         viewType,
+        groupBy,
         enabled,
         storageKey,
         urlFilters,
@@ -397,6 +417,9 @@ export const ticketFiltersMachine = setup({
       if (urlViewType === 'status' || urlViewType === 'stage' || urlViewType === 'board') {
         result.urlViewType = urlViewType;
       }
+      if (urlGroupBy) {
+        result.urlGroupBy = urlGroupBy;
+      }
 
       return result;
     }),
@@ -418,6 +441,14 @@ export const ticketFiltersMachine = setup({
     }),
 
     /**
+     * Update groupBy in context
+     */
+    updateGroupBy: assign(({ event, context }) => {
+      if (event.type !== 'SET_GROUP_BY') return context;
+      return { ...context, groupBy: event.groupBy };
+    }),
+
+    /**
      * Sync URL params to context (browser back/forward)
      */
     syncFromUrl: assign(({ event, context }) => {
@@ -425,9 +456,10 @@ export const ticketFiltersMachine = setup({
 
       const urlFilters = readFiltersFromUrl(event.searchParams);
       const urlViewType = event.searchParams.get('viewType');
+      const urlGroupBy = event.searchParams.get('groupBy');
 
-      // Destructure to remove old urlViewType and prevent it from being stale
-      const { urlViewType: _old, ...restOfContext } = context;
+      // Destructure to remove old urlViewType / urlGroupBy and prevent them from being stale
+      const { urlViewType: _oldVt, urlGroupBy: _oldGb, ...restOfContext } = context;
 
       const result: TicketFiltersContext = {
         ...restOfContext,
@@ -439,6 +471,9 @@ export const ticketFiltersMachine = setup({
       if (urlViewType === 'status' || urlViewType === 'stage' || urlViewType === 'board') {
         result.urlViewType = urlViewType;
       }
+      if (urlGroupBy) {
+        result.urlGroupBy = urlGroupBy;
+      }
 
       return result;
     }),
@@ -447,28 +482,34 @@ export const ticketFiltersMachine = setup({
      * Apply URL filters to state (when URL changes via browser navigation)
      */
     applyUrlFilters: assign(({ context }) => {
-      if (!context.enabled || Object.keys(context.urlFilters).length === 0) {
+      if (!context.enabled) return context;
+
+      const hasUrlFilters = Object.keys(context.urlFilters).length > 0;
+      const hasUrlGroupBy = context.urlGroupBy !== undefined;
+
+      if (!hasUrlFilters && !hasUrlGroupBy) {
         return context;
       }
 
       return {
         ...context,
-        filters: context.urlFilters,
+        filters: hasUrlFilters ? context.urlFilters : context.filters,
         viewType: context.urlViewType || context.viewType,
+        groupBy: context.urlGroupBy ?? context.groupBy,
       };
     }),
 
     /**
-     * Save current filters and viewType to sessionStorage
+     * Save current filters, viewType, and groupBy to sessionStorage
      */
     saveToStorage: ({ context }) => {
       if (!context.enabled) return;
       const { boards: _, ...filtersWithoutBoards } = context.filters;
-      saveToStorage(context.storageKey, filtersWithoutBoards, context.viewType);
+      saveToStorage(context.storageKey, filtersWithoutBoards, context.viewType, context.groupBy);
     },
 
     /**
-     * Syncs current filters and viewType to the URL.
+     * Syncs current filters, viewType, and groupBy to the URL.
      * Updates both the context's currentSearchParams and the actual URL.
      */
     syncStateToUrl: assign(({ context }) => {
@@ -481,6 +522,12 @@ export const ticketFiltersMachine = setup({
       writeFiltersToUrl(params, context.filters);
 
       params.set('viewType', context.viewType);
+
+      if (context.groupBy && context.groupBy !== 'none') {
+        params.set('groupBy', context.groupBy);
+      } else {
+        params.delete('groupBy');
+      }
 
       // Update the URL
       context.setSearchParams(params);
@@ -509,6 +556,7 @@ export const ticketFiltersMachine = setup({
   context: {
     filters: {},
     viewType: 'stage',
+    groupBy: 'none',
     enabled: true,
     storageKey: `${STORAGE_KEY_PREFIX}-default`,
     urlFilters: {},
@@ -542,6 +590,9 @@ export const ticketFiltersMachine = setup({
         },
         SET_VIEW_TYPE: {
           actions: ['updateViewType', 'syncStateToUrl', 'saveToStorage'],
+        },
+        SET_GROUP_BY: {
+          actions: ['updateGroupBy', 'syncStateToUrl', 'saveToStorage'],
         },
         URL_CHANGED: {
           actions: ['syncFromUrl', 'applyUrlFilters', 'saveToStorage'],
