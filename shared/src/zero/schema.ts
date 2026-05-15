@@ -1407,7 +1407,7 @@ export const messageAttachmentTable = table('message_attachments')
     conversationId: string().optional(),
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
-    uploadStatus: enumeration<AttachmentUploadStatus>(),
+    uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
   })
   .primaryKey('id');
 
