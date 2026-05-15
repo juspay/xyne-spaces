@@ -12,6 +12,7 @@ import { ScreenShareFullscreenModal } from '../ScreenShareFullscreenModal';
 import { DrawingCanvas, DrawingToolbar } from '../DrawingCanvas';
 import type { DrawingCanvasHandle } from '../DrawingCanvas';
 import { useDrawStore } from '../../../hooks/useDrawStore';
+import { sortParticipants } from '../ParticipantGrid/sortParticipants';
 
 interface ScreenShareViewProps {
   focusedScreenShare: ParticipantInfo;
@@ -38,6 +39,8 @@ export function ScreenShareView({
   aiController,
   requestedAiController,
 }: ScreenShareViewProps): React.ReactElement {
+  // Derive AI enablement from aiController presence — same pattern as ParticipantGrid
+  const isAIAssistantEnabled = aiController !== null;
   const callId = useSelector(roomActor, state => state.context.callId);
 
   // Fullscreen modal state
@@ -107,32 +110,12 @@ export function ScreenShareView({
     screenShareTrackRef,
   ]);
 
-  // Sort participants: active speaker first, screen sharers next, then others
-  const sortedParticipants = useMemo(() => {
-    return [...participants].sort((a, b) => {
-      // Get speaking state directly from participant (handle native mode where participant is undefined)
-      const aIsSpeaking = a.participant?.isSpeaking && a.isMicrophoneEnabled;
-      const bIsSpeaking = b.participant?.isSpeaking && b.isMicrophoneEnabled;
-
-      // In native mode, use isScreenShareEnabled flag; in web mode, check actual publication
-      const aIsSharing = a.participant
-        ? a.participant.getTrackPublication(Track.Source.ScreenShare)?.isSubscribed
-        : a.isScreenShareEnabled;
-      const bIsSharing = b.participant
-        ? b.participant.getTrackPublication(Track.Source.ScreenShare)?.isSubscribed
-        : b.isScreenShareEnabled;
-
-      // Active speaker comes first
-      if (aIsSpeaking && !bIsSpeaking) return -1;
-      if (!aIsSpeaking && bIsSpeaking) return 1;
-
-      // Screen sharers come next
-      if (aIsSharing && !bIsSharing) return -1;
-      if (!aIsSharing && bIsSharing) return 1;
-
-      return 0;
-    });
-  }, [participants]);
+  // Sort sidebar: mic on → camera on → earlier joinedAt, always applied.
+  // Agent (Xyne Automatic) pinned to end unless AI assistant is enabled.
+  const sortedParticipants = useMemo(
+    () => sortParticipants(participants, isAIAssistantEnabled),
+    [participants, isAIAssistantEnabled],
+  );
 
   return (
     <div className={cn('h-full w-full flex overflow-hidden', className)}>
