@@ -162,6 +162,33 @@ class XyneAIStreamStorage {
   }
 
   /**
+   * Update threadId on a stream record (e.g. after migrating draft → server session key)
+   */
+  async updateStreamThreadId(streamId: string, newThreadId: string): Promise<void> {
+    try {
+      const record = await this.getStream(streamId);
+      if (!record) {
+        console.warn('[XyneAIStreamStorage] Stream not found for thread id update:', streamId);
+        return;
+      }
+
+      record.threadId = newThreadId;
+
+      const db = await this.openDB();
+      const transaction = db.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+
+      return new Promise((resolve, reject) => {
+        const request = store.put(record);
+        request.onsuccess = (): void => resolve();
+        request.onerror = (): void => reject(new Error('Failed to update stream thread id'));
+      });
+    } catch (error) {
+      console.error('[XyneAIStreamStorage] Failed to update stream thread id:', error);
+    }
+  }
+
+  /**
    * Update messages for a stream
    */
   async updateMessages(streamId: string, messages: Message[]): Promise<void> {
