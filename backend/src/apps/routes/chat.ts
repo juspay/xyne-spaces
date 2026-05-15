@@ -10,5 +10,6 @@ router.post('/updateMessage', validateChannelAccessForPost, chatController.updat
 router.post('/agentProgress', validateChannelAccessForPost, chatController.agentProgress);
 router.get('/channelHistory', validateChannelAccessForGet, chatController.channelHistory);
 router.get('/conversationReplies', validateChannelAccessForGet, chatController.conversationReplies);
+router.get('/conversationAttachments', validateChannelAccessForGet, chatController.getConversationAttachments);
 
 export default router;
