@@ -10,10 +10,13 @@ import type { AttachedContextItem } from '../components/Chat/XyneAISidebar/compo
 import type { UserActivity } from '../hooks/useUserActivity';
 import { useAskAIVersion } from './useAskAIVersion';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
+import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
 
 interface UseXyneAIStreamParams {
   channelIds: string[];
   conversationId: string;
+  /** Client draft UUID or server session id — must match active conversation slot */
+  streamSessionKey: string;
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined; // Attachment IDs to fetch from GCS on backend
   canvasViewAccessId?: string | null;
@@ -68,6 +71,7 @@ This is MANDATORY - the user requires the output in a canvas document with a cli
 export const useXyneAIStream = ({
   channelIds,
   conversationId,
+  streamSessionKey,
   threadConversationId,
   attachmentIds,
   canvasViewAccessId,
@@ -91,54 +95,50 @@ export const useXyneAIStream = ({
   // Get Ask AI version from user settings
   const { askAIVersion } = useAskAIVersion();
 
-  // Compute thread ID for stream manager
-  const threadId = channelId
-    ? threadConversationId
-      ? `${channelId}_${threadConversationId}`
-      : channelId
-    : 'general';
+  const threadId = buildXyneAIStreamThreadId({
+    channelId: channelId ?? null,
+    threadConversationId: threadConversationId ?? null,
+    streamSessionKey,
+  });
 
   // Track conversationId in a ref so subscription doesn't re-run when it changes
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
 
-  // Subscribe to stream manager updates
-  // For global context (no threadConversationId), we listen to any non-thread stream
+  const streamSessionKeyRef = useRef(streamSessionKey);
+  streamSessionKeyRef.current = streamSessionKey;
+
+  // Subscribe by streamSlotKey (matches streamSessionKey). During draft→server migration,
+  // React may still have the draft key in refs while the manager already updated streamSlotKey;
+  // fall back to streamId (one POST == one streamId) so chunks are not dropped.
   useEffect(() => {
-    const isGlobalContext = !threadConversationId;
-
     const unsubscribe = xyneAIStreamManager.subscribe((state: StreamState) => {
-      if (isGlobalContext) {
-        // Global context: accept updates from any non-thread stream
-        // Non-thread streams have threadId without underscore
-        if (state.threadId.includes('_')) return;
-      } else {
-        // Thread context: only accept updates for our specific thread
-        if (state.threadId !== threadId) return;
-      }
+      const slotRef = streamSessionKeyRef.current;
+      const matchesSlot = state.streamSlotKey === slotRef;
+      const matchesTrackedStream =
+        currentStreamIdRef.current !== null && state.streamId === currentStreamIdRef.current;
+      if (!matchesSlot && !matchesTrackedStream) return;
 
-      // Update messages from stream state
       setMessages(state.messages);
 
-      // Update session ID if changed (use ref to avoid stale closure)
       if (state.sessionId && state.sessionId !== conversationIdRef.current) {
         setConversationId(state.sessionId);
       }
 
-      // Update trace ID if available
       if (state.traceId && setCurrentTraceId) {
         setCurrentTraceId(state.traceId);
       }
     });
 
-    // Check for active stream on mount
-    let activeStream;
-    if (isGlobalContext) {
-      // Global context: check for any active global stream
-      activeStream = xyneAIStreamManager.getActiveGlobalStream();
-    } else {
-      // Thread context: check for thread-specific stream
-      activeStream = xyneAIStreamManager.getActiveStream(threadId);
+    const builtThreadId = threadId;
+    let activeStream = xyneAIStreamManager.getActiveStream(builtThreadId);
+    if (!activeStream) {
+      for (const s of xyneAIStreamManager.getAllActiveStreams().values()) {
+        if (s.streamSlotKey === streamSessionKey && s.status === 'streaming') {
+          activeStream = s;
+          break;
+        }
+      }
     }
 
     if (activeStream) {
@@ -150,14 +150,14 @@ export const useXyneAIStream = ({
         setCurrentTraceId(activeStream.traceId);
       }
       currentStreamIdRef.current = activeStream.streamId;
+    } else {
+      currentStreamIdRef.current = null;
     }
 
-    // Note: We do NOT abort on unmount - this is the key change!
-    // The stream continues in the background via the stream manager
     return () => {
       unsubscribe();
     };
-  }, [threadId, threadConversationId, setMessages, setConversationId, setCurrentTraceId]);
+  }, [threadId, streamSessionKey, setMessages, setConversationId, setCurrentTraceId]);
 
   // Store current messages ref for stream manager
   const messagesRef = useRef<Message[]>([]);
@@ -327,6 +327,7 @@ export const useXyneAIStream = ({
       attachedContext,
       activities,
       askAIVersion,
+      streamSessionKey,
     ],
   );
 

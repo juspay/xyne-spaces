@@ -52,6 +52,8 @@ export interface XyneAIContext {
   canvasInfo: CanvasInfo | null;
   // Canvas selection context - groups canvas with its selections
   canvasContexts: CanvasSelectionContext[];
+  /** Session to focus when opening from a background completion toast */
+  focusSessionId: string | null;
 }
 
 // Event types for XyneAI machine
@@ -66,8 +68,11 @@ export type XyneAIEvent =
       canvasInfo?: CanvasInfo | null;
       selectionInfo?: SelectionInfo | null;
       selectionInfos?: SelectionInfo[];
+      /** When set, selects this Ask AI session after OPEN (e.g. toast View) */
+      focusSessionId?: string | null;
     }
   | { type: 'CLOSE' }
+  | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
   | { type: 'SET_CONTEXT'; contextType: XyneAIContextType; contextId: string }
   | { type: 'SET_CHANNEL'; channelId: string }
   | { type: 'SET_TICKET_CONTEXT'; channelId: string; threadInfo: ThreadInfo }
@@ -384,6 +389,10 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          focusSessionId:
+            'focusSessionId' in event && event.focusSessionId !== undefined
+              ? event.focusSessionId
+              : null,
         };
 
         // Persist to IndexedDB
@@ -437,6 +446,10 @@ export const xyneAIMachine = setup({
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
+          focusSessionId:
+            'focusSessionId' in event && event.focusSessionId !== undefined
+              ? event.focusSessionId
+              : context.focusSessionId,
         };
 
         // Persist to IndexedDB
@@ -456,6 +469,7 @@ export const xyneAIMachine = setup({
         startFreshChat: false,
         canvasInfo: null,
         canvasContexts: [] as CanvasSelectionContext[],
+        focusSessionId: null,
       };
 
       // Clear from IndexedDB when closing
@@ -576,6 +590,12 @@ export const xyneAIMachine = setup({
       }
       return {};
     }),
+    setFocusSession: assign(({ event }) => {
+      if (event.type === 'SET_FOCUS_SESSION') {
+        return { focusSessionId: event.sessionId };
+      }
+      return {};
+    }),
   },
 }).createMachine({
   context: () => ({
@@ -587,6 +607,7 @@ export const xyneAIMachine = setup({
     startFreshChat: false,
     canvasInfo: null,
     canvasContexts: [],
+    focusSessionId: null,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',
@@ -634,6 +655,9 @@ export const xyneAIMachine = setup({
         },
         REMOVE_SELECTION: {
           actions: 'removeSelection',
+        },
+        SET_FOCUS_SESSION: {
+          actions: 'setFocusSession',
         },
       },
     },

@@ -267,7 +267,6 @@ const HistoryPanel = ({
 // ─── AIScreen ─────────────────────────────────────────────────────────────────
 
 const AIScreen = (): ReactElement => {
-  const [chatKey, setChatKey] = useState(0);
   const [activeConversationId, setActiveConversationId] = useState('');
   const [pendingConversationId, setPendingConversationId] = useState<string | undefined>(undefined);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -294,7 +293,6 @@ const AIScreen = (): ReactElement => {
   }, [historyOpen]);
 
   const handleClose = (): void => {
-    setChatKey(k => k + 1);
     setPendingConversationId(undefined);
     setActiveConversationId('');
   };
@@ -303,7 +301,6 @@ const AIScreen = (): ReactElement => {
     if (conv.sessionId === activeConversationId) return;
     setActiveConversationId(conv.sessionId);
     setPendingConversationId(conv.sessionId);
-    setChatKey(k => k + 1);
   };
 
   const handleConversationChange = useCallback(
@@ -366,7 +363,6 @@ const AIScreen = (): ReactElement => {
 
       {/* Full-width AI sidebar */}
       <XyneAISidebar
-        key={chatKey}
         channelId={null}
         variant='fullscreen'
         onClose={handleClose}

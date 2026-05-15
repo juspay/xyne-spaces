@@ -66,6 +66,17 @@ import {
 } from '../../../machines/xyneAIMachine';
 import type { ResearchContext } from '../../../hooks/useResearchAgent';
 import { xyneAIStreamManager } from '../../../services/XyneAI';
+import {
+  buildXyneAIStreamThreadId,
+  getChannelIdFromStreamThreadId,
+} from '../../../utils/xyneAIStreamThreadId';
+
+function newStreamSlotKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
 
 interface XyneAIConfigResponse {
   webSearchAccessible: boolean;
@@ -98,6 +109,12 @@ const XyneAISidebar = ({
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
+  const [streamThreadKey, setStreamThreadKey] = useState<string>(
+    () => initialConversationId ?? newStreamSlotKey(),
+  );
+  const usesDraftStreamKeyRef = useRef(!initialConversationId);
+  const [loadingHistorySessionId, setLoadingHistorySessionId] = useState<string | null>(null);
+  const [streamingSessionIds, setStreamingSessionIds] = useState<string[]>([]);
   const [currentTraceId, setCurrentTraceId] = useState<string | undefined>();
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
@@ -142,6 +159,11 @@ const XyneAISidebar = ({
   const displayMessages = useMemo(
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
+  );
+
+  const isActiveSessionStreaming = useMemo(
+    () => messages.some((m: Message) => m.isStreaming),
+    [messages],
   );
 
   // Legacy conversation: no message has parentId — branching features disabled
@@ -206,6 +228,8 @@ const XyneAISidebar = ({
       setConversationId('');
       setBranchSelections({});
       setFeedbackMap({});
+      setStreamThreadKey(newStreamSlotKey());
+      usesDraftStreamKeyRef.current = true;
     }
   }, [threadInfo]);
 
@@ -266,27 +290,25 @@ const XyneAISidebar = ({
     };
   }, []);
 
+  useEffect(() => {
+    xyneAIStreamManager.setVisibleConversationId(conversationId || null);
+  }, [conversationId]);
+
+  useEffect(() => {
+    const syncStreaming = (): void => {
+      setStreamingSessionIds(xyneAIStreamManager.getStreamingSessionIds());
+    };
+    syncStreaming();
+    return xyneAIStreamManager.subscribe(() => syncStreaming());
+  }, []);
+
   // Notify stream manager when sidebar opens/closes
   useEffect(() => {
-    // Sidebar is open when this component mounts
     xyneAIStreamManager.setSidebarOpen(true);
-
-    // Check for pending completion notifications
-    if (channelId) {
-      const threadId = activeThreadInfo?.conversationId
-        ? `${channelId}_${activeThreadInfo.conversationId}`
-        : channelId;
-
-      if (xyneAIStreamManager.hasPendingCompletion(threadId)) {
-        xyneAIStreamManager.clearPendingCompletion(threadId);
-      }
-    }
-
     return () => {
-      // Sidebar is closing when this component unmounts
       xyneAIStreamManager.setSidebarOpen(false);
     };
-  }, [channelId, activeThreadInfo?.conversationId]);
+  }, []);
 
   const channel = useChannel(channelId || '');
 
@@ -359,6 +381,7 @@ const XyneAISidebar = ({
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
     conversationId,
+    streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
     canvasViewAccessId: canvasInfo?.viewAccessId ?? null,
@@ -387,6 +410,8 @@ const XyneAISidebar = ({
   // This is triggered when XyneAI is invoked from "Ask AI" button
   useEffect(() => {
     if (startFreshChat) {
+      xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
+
       // Reset to fresh state (keeps threadInfo but clears messages/conversation)
       setMessages([]);
       setBranchSelections({});
@@ -399,8 +424,8 @@ const XyneAISidebar = ({
 
       hasLoadedInitialConversationRef.current = true;
 
-      // Abort any existing streams for this thread
-      abortCurrentRequest();
+      setStreamThreadKey(newStreamSlotKey());
+      usesDraftStreamKeyRef.current = true;
 
       // Only update the xstate machine in sidebar mode (fullscreen manages its own lifecycle)
       if (!isFullscreen) {
@@ -413,7 +438,7 @@ const XyneAISidebar = ({
         });
       }
     }
-  }, [startFreshChat, channelId, threadInfo, canvasInfo, abortCurrentRequest, isFullscreen]);
+  }, [startFreshChat, channelId, threadInfo, canvasInfo, isFullscreen]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
@@ -485,6 +510,8 @@ const XyneAISidebar = ({
     if (startFreshChat) {
       hasLoadedInitialConversationRef.current = true;
       setIsLoadingConversation(false);
+      setStreamThreadKey(newStreamSlotKey());
+      usesDraftStreamKeyRef.current = true;
       return;
     }
 
@@ -494,33 +521,7 @@ const XyneAISidebar = ({
 
         const threadConversationId = threadInfo?.conversationId;
 
-        // Check if there's an active stream - if so, sync with it instead of loading from storage
-        let activeStream;
-        if (threadConversationId && channelId) {
-          // Thread context: check for thread-specific active stream
-          const threadId = `${channelId}_${threadConversationId}`;
-          activeStream = xyneAIStreamManager.getActiveStream(threadId);
-        } else {
-          // Global context: check for any active global stream (across all channels)
-          activeStream = xyneAIStreamManager.getActiveGlobalStream();
-        }
-
-        if (activeStream) {
-          // Stream is active, sync messages from stream state
-          setMessages(activeStream.messages);
-          if (activeStream.sessionId) {
-            setConversationId(activeStream.sessionId);
-          }
-          // Set the original channel ID from the stream's threadId
-          // threadId format is "channelId" or "channelId_threadConversationId"
-          const originalChannelId = activeStream.threadId.split('_')[0];
-          setConversationChannelId(originalChannelId || null);
-          setIsLoadingConversation(false);
-          hasLoadedInitialConversationRef.current = true;
-          return;
-        }
-
-        // v2: Load most recent conversation from claw
+        // Global / channel-only / channel+thread: load session list first, then match active stream by session id
         if (isV2) {
           let v2Sessions = v2SessionsData;
           if (!v2Sessions) {
@@ -537,6 +538,32 @@ const XyneAISidebar = ({
 
           // Load the most recent conversation's messages from claw
           const mostRecentConv = v2Sessions[0]!;
+          setStreamThreadKey(mostRecentConv.sessionId);
+          usesDraftStreamKeyRef.current = false;
+
+          const streamTid = buildXyneAIStreamThreadId({
+            channelId: channelId ?? null,
+            threadConversationId: threadConversationId ?? null,
+            streamSessionKey: mostRecentConv.sessionId,
+          });
+          const liveStream =
+            xyneAIStreamManager.getActiveStream(streamTid) ??
+            xyneAIStreamManager.findActiveStreamBySessionId(mostRecentConv.sessionId);
+
+          if (liveStream) {
+            setMessages(liveStream.messages);
+            if (liveStream.sessionId) {
+              setConversationId(liveStream.sessionId);
+            }
+            const originalChannelId = getChannelIdFromStreamThreadId(liveStream.threadId);
+            setConversationChannelId(originalChannelId ?? mostRecentConv.channelId ?? null);
+            setIsLoadingConversation(false);
+            setTimeout(() => {
+              scrollToBottom();
+            }, 100);
+            return;
+          }
+
           const clawMessages = await fetchV2ConversationMessages(mostRecentConv.sessionId);
           const messagesWithoutStreaming: Message[] = clawMessages.map(msg => ({
             ...msg,
@@ -583,6 +610,32 @@ const XyneAISidebar = ({
           const mostRecent = await loadSessionDetail(mostRecentSession.sessionId);
           if (!mostRecent) {
             setIsLoadingConversation(false);
+            return;
+          }
+
+          setStreamThreadKey(mostRecent.sessionId);
+          usesDraftStreamKeyRef.current = false;
+
+          const streamTid = buildXyneAIStreamThreadId({
+            channelId: channelId ?? null,
+            threadConversationId: threadConversationId ?? null,
+            streamSessionKey: mostRecent.sessionId,
+          });
+          const liveStream =
+            xyneAIStreamManager.getActiveStream(streamTid) ??
+            xyneAIStreamManager.findActiveStreamBySessionId(mostRecent.sessionId);
+
+          if (liveStream) {
+            setMessages(liveStream.messages);
+            if (liveStream.sessionId) {
+              setConversationId(liveStream.sessionId);
+            }
+            const originalChannelId = getChannelIdFromStreamThreadId(liveStream.threadId);
+            setConversationChannelId(originalChannelId ?? mostRecent.channelId ?? null);
+            setIsLoadingConversation(false);
+            setTimeout(() => {
+              scrollToBottom();
+            }, 100);
             return;
           }
 
@@ -709,9 +762,38 @@ const XyneAISidebar = ({
   };
 
   const handleLoadConversation = async (conversation: ConversationHistoryType): Promise<void> => {
+    setLoadingHistorySessionId(conversation.sessionId);
+    setStreamThreadKey(conversation.sessionId);
+    usesDraftStreamKeyRef.current = false;
+
     try {
+      const threadConversationId = activeThreadInfo?.conversationId;
+      const streamTid = buildXyneAIStreamThreadId({
+        channelId: channelId ?? null,
+        threadConversationId: threadConversationId ?? null,
+        streamSessionKey: conversation.sessionId,
+      });
+      const live =
+        xyneAIStreamManager.getActiveStream(streamTid) ??
+        xyneAIStreamManager.findActiveStreamBySessionId(conversation.sessionId);
+
+      if (live && live.status === 'streaming') {
+        setMessages(live.messages);
+        if (live.sessionId) {
+          setConversationId(live.sessionId);
+        }
+        setConversationChannelId(conversation.channelId || null);
+        setBranchSelections({});
+        setEditingMessageId(null);
+        setShowHistorySidebar(false);
+        setFeedbackMap({});
+        setTimeout(() => {
+          scrollToBottom();
+        }, 100);
+        return;
+      }
+
       if (isV2) {
-        // v2: Load conversation messages from claw via proxy endpoint
         const clawMessages = await fetchV2ConversationMessages(conversation.sessionId);
         const messagesWithoutStreaming: Message[] = clawMessages.map(msg => ({
           ...msg,
@@ -729,14 +811,12 @@ const XyneAISidebar = ({
           scrollToBottom();
         }, 100);
       } else {
-        // v1: Fetch full session detail (with messages) from backend
         const fullConversation = await loadSessionDetail(conversation.sessionId);
         if (!fullConversation) {
           console.error('[XyneAISidebar] Failed to load conversation detail');
           return;
         }
 
-        // Clear streaming state and mark aborted messages
         const messagesWithoutStreaming: Message[] = fullConversation.messages.map(msg => {
           const toolOutputs = msg.toolOutputs;
           if (
@@ -761,10 +841,8 @@ const XyneAISidebar = ({
         setEditingMessageId(null);
         setShowHistorySidebar(false);
 
-        // Restore input box state
         restoreInputContext(fullConversation.lastInputContext);
 
-        // Restore feedback from stored messages
         const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
         fullConversation.messages.forEach(msg => {
           if (msg.feedback === 1) {
@@ -783,19 +861,10 @@ const XyneAISidebar = ({
       }
     } catch (error) {
       console.error('[XyneAISidebar] Failed to load conversation:', error);
+    } finally {
+      setLoadingHistorySessionId(null);
     }
   };
-
-  // Fullscreen: load a specific conversation on mount when initialConversationId is provided.
-  // We use a ref so the effect truly only runs once (chatKey re-mount provides the fresh prop value).
-  const initialConversationIdRef = useRef(initialConversationId);
-  useEffect(() => {
-    if (!isFullscreen || !initialConversationIdRef.current) return;
-    void loadSessionDetail(initialConversationIdRef.current).then(conv => {
-      if (conv) void handleLoadConversation(conv);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Fullscreen: notify parent whenever the active session ID changes.
   const onConversationChangeRef = useRef(onConversationChange);
@@ -824,6 +893,8 @@ const XyneAISidebar = ({
         setMessages([]);
         setBranchSelections({});
         setConversationId('');
+        setStreamThreadKey(newStreamSlotKey());
+        usesDraftStreamKeyRef.current = true;
       }
     } catch (error) {
       console.error('[XyneAISidebar] Failed to delete conversation:', error);
@@ -841,12 +912,18 @@ const XyneAISidebar = ({
     }
   };
 
-  const handleNewChat = (): void => {
-    // Reset to fresh state
+  const handleNewChat = useCallback((): void => {
+    // Clear machine focus first — otherwise the focus subscription sees stale focusSessionId
+    // while conversationId is '' and re-loads the previous session (flicker).
+    xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
+
+    setStreamThreadKey(newStreamSlotKey());
+    usesDraftStreamKeyRef.current = true;
+
     setMessages([]);
     setBranchSelections({});
     setConversationId('');
-    setConversationChannelId(null); // Reset so new conversation uses current channel
+    setConversationChannelId(null);
     setCurrentTraceId(undefined);
     setInputValue('');
     setAttachments([]);
@@ -856,13 +933,81 @@ const XyneAISidebar = ({
     setShowHistorySidebar(false);
     setShowUserActivityPanel(false);
 
-    // Clear processed selection keys to prevent memory leak
     processedSelectionKeysRef.current.clear();
+  }, []);
 
-    // Don't abort - let streams continue in background
-    // When user submits a new query, the stream manager will handle aborting
-    // any existing stream for the same thread (see XyneAIStreamManager.startStream)
-  };
+  const handleLoadConversationRef = useRef(handleLoadConversation);
+  handleLoadConversationRef.current = handleLoadConversation;
+
+  // Fullscreen / parent-driven session id (no remount required)
+  const prevFullscreenSessionRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!isFullscreen) return;
+    if (initialConversationId === prevFullscreenSessionRef.current) return;
+    prevFullscreenSessionRef.current = initialConversationId;
+
+    if (!initialConversationId) {
+      handleNewChat();
+      return;
+    }
+
+    const stub: ConversationHistoryType = {
+      id: initialConversationId,
+      sessionId: initialConversationId,
+      channelId: '',
+      title: '',
+      messages: [],
+      createdAt: new Date(),
+      lastUpdated: new Date(),
+    };
+    void handleLoadConversationRef.current(stub);
+  }, [initialConversationId, isFullscreen, handleNewChat]);
+
+  // Open the session requested by a background completion toast (View)
+  useEffect(() => {
+    const sub = xyneAIActor.subscribe(snapshot => {
+      const focus = snapshot.context.focusSessionId;
+      if (!focus) return;
+      if (focus === conversationId) {
+        xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
+        return;
+      }
+      const stub: ConversationHistoryType = {
+        id: focus,
+        sessionId: focus,
+        channelId: '',
+        title: '',
+        messages: [],
+        createdAt: new Date(),
+        lastUpdated: new Date(),
+      };
+      void handleLoadConversationRef.current(stub);
+      xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
+    });
+    return () => sub.unsubscribe();
+  }, [conversationId]);
+
+  // Draft stream slot key → server session id once the first turn completes (keeps threadId stable mid-stream)
+  useEffect(() => {
+    if (!usesDraftStreamKeyRef.current || !conversationId) return;
+    if (messages.some(m => m.isStreaming)) return;
+
+    const oldTid = buildXyneAIStreamThreadId({
+      channelId: channelId ?? null,
+      threadConversationId: activeThreadInfo?.conversationId ?? null,
+      streamSessionKey: streamThreadKey,
+    });
+    const newTid = buildXyneAIStreamThreadId({
+      channelId: channelId ?? null,
+      threadConversationId: activeThreadInfo?.conversationId ?? null,
+      streamSessionKey: conversationId,
+    });
+    if (oldTid === newTid) return;
+
+    xyneAIStreamManager.migrateThreadId(oldTid, newTid);
+    setStreamThreadKey(conversationId);
+    usesDraftStreamKeyRef.current = false;
+  }, [messages, conversationId, streamThreadKey, channelId, activeThreadInfo?.conversationId]);
 
   const handleOpenContextModal = useCallback(() => setShowContextModal(true), []);
   const handleCloseContextModal = useCallback(() => {
@@ -1068,7 +1213,7 @@ const XyneAISidebar = ({
 
   // Regenerate: re-submit the same user query, creating a sibling bot branch
   const handleRegenerate = useCallback(async (): Promise<void> => {
-    if (messages.some((m: Message) => m.isStreaming)) return;
+    if (isActiveSessionStreaming) return;
 
     // Find last user message in the display path
     let lastUserMessage: Message | undefined;
@@ -1097,7 +1242,7 @@ const XyneAISidebar = ({
   // Edit: create a sibling branch with new content from the same parent
   const handleEditMessage = useCallback(
     async (messageId: string, newContent: string): Promise<void> => {
-      if (messages.some((m: Message) => m.isStreaming)) return;
+      if (isActiveSessionStreaming) return;
 
       const messageToEdit = messages.find((m: Message) => m.id === messageId);
       if (!messageToEdit || messageToEdit.type !== 'user') return;
@@ -1120,7 +1265,7 @@ const XyneAISidebar = ({
   // Mobile edit: populate input box but keep messages intact until submit
   const handleEditMobile = useCallback(
     (messageId: string): void => {
-      if (messages.some((m: Message) => m.isStreaming)) return;
+      if (isActiveSessionStreaming) return;
 
       const message = messages.find((m: Message) => m.id === messageId);
       if (!message || message.type !== 'user') return;
@@ -1209,9 +1354,12 @@ const XyneAISidebar = ({
       abortCurrentRequest();
       setEditingMessageId(null);
     } else if (!isLegacyConversation) {
-      // Normal submit: chain from last displayed message (only for branching-enabled conversations)
+      // Normal submit: chain from the last displayed message for established sessions only.
+      // Draft stream slots (new chat / new parallel session) stay on a fresh server session until
+      // the first turn completes — omit parentMessageId here so turns are not linked as tree
+      // siblings/branches of another session. Regenerate and edit still pass parent explicitly.
       const lastDisplayed = displayMessages[displayMessages.length - 1];
-      if (lastDisplayed) {
+      if (lastDisplayed && !usesDraftStreamKeyRef.current) {
         parentMessageId = lastDisplayed.id;
       }
     }
@@ -1262,6 +1410,13 @@ const XyneAISidebar = ({
     abortCurrentRequest,
     isLegacyConversation,
   ]);
+
+  const hasBackgroundStreamingElsewhere = useMemo(() => {
+    if (streamingSessionIds.length === 0) return false;
+    if (messages.some((m: Message) => m.isStreaming)) return false;
+    const curKeys = new Set([conversationId, streamThreadKey].filter(k => k.trim().length > 0));
+    return streamingSessionIds.some(id => id && !curKeys.has(id));
+  }, [streamingSessionIds, conversationId, streamThreadKey, messages]);
 
   // Shared props for XyneAIInputSection
   const contextSelections: ContextSelections = {
@@ -1354,6 +1509,8 @@ const XyneAISidebar = ({
         <ConversationHistory
           conversations={conversations}
           conversationId={conversationId}
+          loadingSessionId={loadingHistorySessionId}
+          streamingSessionIds={streamingSessionIds}
           onBack={() => setShowHistorySidebar(false)}
           onLoadConversation={(conversation): void => {
             void handleLoadConversation(conversation);
@@ -1400,6 +1557,13 @@ const XyneAISidebar = ({
                 : {})}
             />
           )}
+
+          {hasBackgroundStreamingElsewhere ? (
+            <div className='flex-shrink-0 px-4 py-2 text-xs text-muted-foreground border-b border-border bg-muted/35'>
+              Another chat is still generating. Open history to see which one is marked{' '}
+              <span className='font-medium text-foreground'>Responding</span>.
+            </div>
+          ) : null}
 
           {/* Content - Scrollable Area */}
           <div className='flex-1 overflow-y-auto overflow-x-hidden min-h-0'>
@@ -1619,7 +1783,7 @@ const XyneAISidebar = ({
                   ref={xyneAIInputRef}
                   isOnboarding={aiOnboarding.isActive}
                   showChannelTag={true}
-                  isStreaming={messages.some(m => m.isStreaming)}
+                  isStreaming={isActiveSessionStreaming}
                   contextPanelPosition='bottom'
                   {...sharedInputSectionProps}
                 />

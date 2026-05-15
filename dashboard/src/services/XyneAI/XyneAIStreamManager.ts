@@ -35,10 +35,16 @@ import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStrea
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
 import { fetchV2ConversationMessages } from './XyneAISessionsV2Service';
 import { getAskAIErrorInfo } from '../../utils/askAIErrorMapping';
+import {
+  deriveStreamSlotKey,
+  getStreamSlotKeyFromThreadId,
+} from '../../utils/xyneAIStreamThreadId';
 
 export interface StreamState {
   streamId: string;
   threadId: string;
+  /** Same as sidebar streamSessionKey — stable across migrateThreadId; use for subscriber routing */
+  streamSlotKey: string;
   sessionId: string;
   status: StreamStatus;
   messages: Message[];
@@ -144,6 +150,9 @@ class XyneAIStreamManager {
 
   // Track if sidebar is open for notification logic
   private isSidebarOpen: boolean = false;
+
+  /** Backend session id (or empty) for the conversation currently visible in the sidebar */
+  private visibleConversationId: string | null = null;
 
   // Web Worker instance
   private worker: Worker;
@@ -621,19 +630,16 @@ class XyneAIStreamManager {
   public setSidebarOpen(isOpen: boolean): void {
     this.isSidebarOpen = isOpen;
 
-    // Clear pending notifications for current thread when sidebar opens
-    if (isOpen) {
-      const snapshot = xyneAIActor.getSnapshot();
-      const channelId = snapshot.context.channelId;
-      const threadInfo = snapshot.context.threadInfo;
-
-      if (channelId) {
-        const threadId = threadInfo?.conversationId
-          ? `${channelId}_${threadInfo.conversationId}`
-          : channelId;
-        this.pendingCompletionNotifications.delete(threadId);
-      }
+    if (isOpen && this.visibleConversationId) {
+      this.pendingCompletionNotifications.delete(this.visibleConversationId);
     }
+  }
+
+  /**
+   * Which conversation the user is viewing (for completion toasts when backgrounded or on another session).
+   */
+  public setVisibleConversationId(sessionId: string | null): void {
+    this.visibleConversationId = sessionId && sessionId.length > 0 ? sessionId : null;
   }
 
   /**
@@ -651,18 +657,70 @@ class XyneAIStreamManager {
   }
 
   /**
-   * Get any active global stream (non-thread stream)
-   * Returns the most recent active stream that is not a thread-specific stream
+   * Debug / diagnostics: each streamId corresponds to one worker SSE request.
    */
-  public getActiveGlobalStream(): StreamState | null {
-    for (const [threadId, state] of this.activeStreams.entries()) {
-      // Global streams have threadId that doesn't contain underscore (no thread suffix)
-      // e.g., "channelId" vs "channelId_threadConversationId"
-      if (!threadId.includes('_') && state.status === 'streaming') {
+  public getInFlightStreamSummaries(): ReadonlyArray<{
+    streamId: string;
+    streamSlotKey: string;
+    sessionId: string;
+    threadId: string;
+    status: StreamStatus;
+  }> {
+    return Array.from(this.activeStreams.values()).map(s => ({
+      streamId: s.streamId,
+      streamSlotKey: s.streamSlotKey,
+      sessionId: s.sessionId,
+      threadId: s.threadId,
+      status: s.status,
+    }));
+  }
+
+  /**
+   * Active stream whose server session id matches (e.g. after switching history while a draft-keyed stream received an id).
+   */
+  public findActiveStreamBySessionId(sessionId: string): StreamState | null {
+    if (!sessionId) return null;
+    for (const state of this.activeStreams.values()) {
+      if (state.status !== 'streaming') continue;
+      if (state.sessionId === sessionId || state.streamSlotKey === sessionId) {
         return state;
       }
     }
     return null;
+  }
+
+  /**
+   * Session / slot keys that currently have a streaming response (for history row indicators).
+   */
+  public getStreamingSessionIds(): string[] {
+    const ids = new Set<string>();
+    for (const state of this.activeStreams.values()) {
+      if (state.status !== 'streaming') continue;
+      const sid = state.sessionId?.trim();
+      if (sid) ids.add(sid);
+      const slotKey = state.streamSlotKey?.trim();
+      if (slotKey) ids.add(slotKey);
+      const fromTid = getStreamSlotKeyFromThreadId(state.threadId);
+      if (fromTid) ids.add(fromTid);
+    }
+    return Array.from(ids);
+  }
+
+  /**
+   * Migrate active stream map + storage from one thread key to another (draft client key → server session key).
+   */
+  public migrateThreadId(oldThreadId: string, newThreadId: string): void {
+    if (oldThreadId === newThreadId) return;
+    const state = this.activeStreams.get(oldThreadId);
+    if (!state) return;
+    if (this.activeStreams.has(newThreadId)) return;
+
+    this.activeStreams.delete(oldThreadId);
+    state.threadId = newThreadId;
+    state.streamSlotKey = deriveStreamSlotKey(newThreadId);
+    this.activeStreams.set(newThreadId, state);
+    this.notifySubscribers({ ...state });
+    void xyneAIStreamStorage.updateStreamThreadId(state.streamId, newThreadId);
   }
 
   /**
@@ -706,11 +764,16 @@ class XyneAIStreamManager {
     const abortController = new AbortController();
     this.abortControllers.set(streamId, abortController);
 
+    const trimmedConv = request.conversationId?.trim() ?? '';
+    const slotFromThread = getStreamSlotKeyFromThreadId(threadId) ?? '';
+    const initialSessionId = trimmedConv || slotFromThread;
+
     // Initialize stream state
     const streamState: StreamState = {
       streamId,
       threadId,
-      sessionId: request.conversationId,
+      streamSlotKey: deriveStreamSlotKey(threadId),
+      sessionId: initialSessionId,
       status: 'streaming',
       messages: initialMessages,
       ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
@@ -723,7 +786,7 @@ class XyneAIStreamManager {
     await xyneAIStreamStorage.createStream(
       streamId,
       threadId,
-      request.conversationId,
+      initialSessionId,
       request.query,
       request.channelIds,
       request.webSearchEnabled,
@@ -1363,10 +1426,17 @@ class XyneAIStreamManager {
     // during streaming deltas (similar to refreshRuns pattern in claw chat)
     void this.refreshMessagesFromBackend(streamId, threadId);
 
-    // Show toast notification if sidebar is closed
-    if (!this.isSidebarOpen && !currentState.suppressCompletionToast) {
-      this.pendingCompletionNotifications.add(threadId);
-      this.showCompletionToast(threadId, finalResponse);
+    const notifyKey = currentState.sessionId || currentState.streamSlotKey || threadId;
+    const viewingThis = Boolean(
+      notifyKey && this.visibleConversationId && notifyKey === this.visibleConversationId,
+    );
+
+    const shouldNotify =
+      !currentState.suppressCompletionToast && (!this.isSidebarOpen || !viewingThis);
+
+    if (shouldNotify) {
+      this.pendingCompletionNotifications.add(notifyKey);
+      this.showCompletionToast(notifyKey, finalResponse, currentState.sessionId || null);
     }
 
     // Cleanup after a delay — only if this stream is still the active one for this thread
@@ -1622,7 +1692,11 @@ class XyneAIStreamManager {
   /**
    * Show toast notification for completed stream
    */
-  private showCompletionToast(threadId: string, response: string): void {
+  private showCompletionToast(
+    notifyKey: string,
+    response: string,
+    focusSessionId: string | null,
+  ): void {
     const preview = response.length > 100 ? response.substring(0, 100) + '...' : response;
 
     toast('XyneAI Response Ready', {
@@ -1631,9 +1705,11 @@ class XyneAIStreamManager {
       action: {
         label: 'View',
         onClick: () => {
-          // Open sidebar
-          xyneAIActor.send({ type: 'OPEN' });
-          this.clearPendingCompletion(threadId);
+          xyneAIActor.send({
+            type: 'OPEN',
+            ...(focusSessionId ? { focusSessionId } : {}),
+          });
+          this.clearPendingCompletion(notifyKey);
         },
       },
     });

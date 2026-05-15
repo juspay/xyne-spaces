@@ -1,5 +1,5 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
-import { ChevronDown, X, Search, ArrowLeft, MoreVertical } from 'lucide-react';
+import { ChevronDown, X, Search, ArrowLeft, MoreVertical, Loader2 } from 'lucide-react';
 import { Popover } from '../../../ui/Popover';
 import { Drawer } from '../../../ui/Drawer/Drawer';
 import type { ConversationHistory as ConversationHistoryType } from '../utils/XyneAITypes';
@@ -11,6 +11,8 @@ import { formatRelativeTime } from '../../../../utils/dateUtils';
 interface ConversationHistoryProps {
   conversations: ConversationHistoryType[];
   conversationId: string;
+  loadingSessionId: string | null;
+  streamingSessionIds: string[];
   onBack: () => void;
   onLoadConversation: (conversation: ConversationHistoryType) => void;
   onToggleStar: (conversation: ConversationHistoryType) => Promise<void>;
@@ -60,6 +62,8 @@ const groupConversationsByDate = (
 export const ConversationHistory = ({
   conversations,
   conversationId,
+  loadingSessionId,
+  streamingSessionIds,
   onBack,
   onLoadConversation,
   onToggleStar,
@@ -208,6 +212,8 @@ export const ConversationHistory = ({
                       c.title.toLowerCase().includes(searchQuery.toLowerCase())),
                 )}
                 currentConversationId={conversationId}
+                loadingSessionId={loadingSessionId}
+                streamingSessionIds={streamingSessionIds}
                 renamingId={renamingId}
                 renameValue={renameValue}
                 openDropdownId={openDropdownId}
@@ -240,6 +246,8 @@ export const ConversationHistory = ({
                     title={dateKey}
                     conversations={convs}
                     currentConversationId={conversationId}
+                    loadingSessionId={loadingSessionId}
+                    streamingSessionIds={streamingSessionIds}
                     renamingId={renamingId}
                     renameValue={renameValue}
                     openDropdownId={openDropdownId}
@@ -286,6 +294,8 @@ export const ConversationHistory = ({
                       c.title.toLowerCase().includes(searchQuery.toLowerCase())),
                 )}
                 currentConversationId={conversationId}
+                loadingSessionId={loadingSessionId}
+                streamingSessionIds={streamingSessionIds}
                 renamingId={renamingId}
                 renameValue={renameValue}
                 openDropdownId={openDropdownId}
@@ -310,6 +320,8 @@ export const ConversationHistory = ({
                   (searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase())),
               )}
               currentConversationId={conversationId}
+              loadingSessionId={loadingSessionId}
+              streamingSessionIds={streamingSessionIds}
               renamingId={renamingId}
               renameValue={renameValue}
               openDropdownId={openDropdownId}
@@ -339,6 +351,8 @@ interface ConversationSectionProps {
   title: string;
   conversations: ConversationHistoryType[];
   currentConversationId: string;
+  loadingSessionId: string | null;
+  streamingSessionIds: string[];
   renamingId: string | null;
   renameValue: string;
   openDropdownId: string | null;
@@ -358,6 +372,8 @@ const ConversationSection = ({
   title,
   conversations,
   currentConversationId,
+  loadingSessionId,
+  streamingSessionIds,
   renamingId,
   renameValue,
   openDropdownId,
@@ -400,6 +416,11 @@ const ConversationSection = ({
               key={conversation.id}
               conversation={conversation}
               isActive={conversation.sessionId === currentConversationId}
+              isLoadingRow={loadingSessionId === conversation.sessionId}
+              isStreamingRow={
+                streamingSessionIds.includes(conversation.sessionId) ||
+                streamingSessionIds.includes(conversation.id)
+              }
               isRenaming={renamingId === conversation.id}
               renameValue={renameValue}
               isDropdownOpen={openDropdownId === conversation.id}
@@ -430,6 +451,8 @@ const ConversationSection = ({
 interface ConversationItemProps {
   conversation: ConversationHistoryType;
   isActive: boolean;
+  isLoadingRow: boolean;
+  isStreamingRow: boolean;
   isRenaming: boolean;
   renameValue: string;
   isDropdownOpen: boolean;
@@ -448,6 +471,8 @@ interface ConversationItemProps {
 const ConversationItem = ({
   conversation,
   isActive,
+  isLoadingRow,
+  isStreamingRow,
   isRenaming,
   renameValue,
   isDropdownOpen,
@@ -579,13 +604,21 @@ const ConversationItem = ({
           <div
             className={
               isMobile
-                ? `text-[14px] leading-[20px] tracking-[0.14px] text-foreground font-['Inter'] truncate ${
+                ? `text-[14px] leading-[20px] tracking-[0.14px] text-foreground font-['Inter'] min-w-0 flex items-center gap-2 ${
                     isActive ? 'font-semibold' : 'font-normal'
                   }`
-                : `text-sm text-foreground font-${isStarred ? 'medium' : 'normal'} font-['Inter'] truncate`
+                : `text-sm text-foreground font-${isStarred ? 'medium' : 'normal'} font-['Inter'] min-w-0 flex items-center gap-2`
             }
           >
-            {conversation.title}
+            {isLoadingRow && (
+              <Loader2 className='w-3.5 h-3.5 shrink-0 animate-spin text-muted-foreground' />
+            )}
+            <span className='truncate'>{conversation.title}</span>
+            {isStreamingRow && (
+              <span className='shrink-0 text-[10px] uppercase tracking-wide text-primary/80'>
+                Responding
+              </span>
+            )}
           </div>
           <div className="text-xs text-muted-foreground font-['Inter'] mt-0.5 flex items-center gap-1 flex-wrap">
             <span>{formatRelativeTime(conversation.lastUpdated)}</span>
