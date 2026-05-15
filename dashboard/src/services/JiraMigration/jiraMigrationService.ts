@@ -1,9 +1,11 @@
-import { API_BASE_URL, isSandBox } from '../../config';
+import { API_BASE_URL, isLocalhost, isSandboxLocal, isTestEnv } from '../../config';
 import { apiInstance } from '../clients/apiClient';
 
 const JIRA_MIGRATION_BASE_URL = API_BASE_URL.replace(
   /\/api$/,
-  isSandBox ? '/api/migration/jira' : '/migrate/api/migration/jira',
+  isLocalhost || isTestEnv || isSandboxLocal
+    ? '/api/migration/jira'
+    : '/migrate/api/migration/jira',
 );
 
 export interface JiraMigrationFilters {
@@ -20,6 +22,10 @@ export interface JiraMigrationPreviewResponse {
     name: string;
     totalIssues: number;
   };
+  jiraBoards: Array<{ id: number; name: string; type: string | null }>;
+  selectedJiraBoardId: number | null;
+  jiraStatusSequence: string[];
+  jiraStatusSequenceSource: 'agile_board' | 'project_statuses' | 'fallback';
   target: {
     projectId: string;
     projectName: string;
@@ -108,6 +114,7 @@ export interface JiraMigrationPreviewRequest {
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
+  jiraBoardId?: number;
   nextPageToken?: string;
   maxResults?: number;
   dateFrom?: string;
@@ -119,6 +126,8 @@ export interface JiraMigrationExecuteRequest extends JiraMigrationPreviewRequest
   issueKeys?: string[];
   statusV2Mappings: Record<string, string>;
   skipCustomFieldIds?: string[];
+  jiraStatusSequence?: string[];
+  excludedStageNames?: string[];
 }
 
 export interface JiraMigrationIssueResult {
@@ -179,11 +188,13 @@ export interface JiraMigrationHistoryItem {
 export interface JiraMigrationJobProgress {
   jobId: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
+  controlStatus: 'running' | 'paused' | 'cancel_requested';
   jiraProjectKey: string;
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
   issueKeys?: string[];
+  stageSequence?: Array<{ sequenceNumber: number; name: string; defaultTicketStatusV2: string }>;
   totalIssues: number | null;
   processedIssues: number;
   importedTickets: number;
@@ -237,6 +248,31 @@ class JiraMigrationService {
       `${JIRA_MIGRATION_BASE_URL}/status/${jobId}`,
     );
 
+    return response.data.data;
+  }
+
+  async stopMigration(jobId: string): Promise<JiraMigrationJobProgress> {
+    const response = await apiInstance.post<{ success: true; data: JiraMigrationJobProgress }>(
+      `${JIRA_MIGRATION_BASE_URL}/stop/${jobId}`,
+    );
+    return response.data.data;
+  }
+
+  async pauseMigration(
+    jobId: string,
+    pauseForMs: number = 2 * 60 * 1000,
+  ): Promise<JiraMigrationJobProgress> {
+    const response = await apiInstance.post<{ success: true; data: JiraMigrationJobProgress }>(
+      `${JIRA_MIGRATION_BASE_URL}/pause/${jobId}`,
+      { pauseForMs },
+    );
+    return response.data.data;
+  }
+
+  async resumeMigration(jobId: string): Promise<JiraMigrationJobProgress> {
+    const response = await apiInstance.post<{ success: true; data: JiraMigrationJobProgress }>(
+      `${JIRA_MIGRATION_BASE_URL}/resume/${jobId}`,
+    );
     return response.data.data;
   }
 }

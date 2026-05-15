@@ -66,6 +66,7 @@ export interface JiraMigrationPreviewInput {
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
+  jiraBoardId?: number;
   nextPageToken?: string;
   maxResults?: number;
   dateFrom?: string;
@@ -80,6 +81,10 @@ export interface JiraMigrationPreviewResult {
     name: string;
     totalIssues: number;
   };
+  jiraBoards: Array<{ id: number; name: string; type: string | null }>;
+  selectedJiraBoardId: number | null;
+  jiraStatusSequence: string[];
+  jiraStatusSequenceSource: 'agile_board' | 'project_statuses' | 'fallback';
   target: {
     projectId: string;
     projectName: string;
@@ -435,7 +440,7 @@ export class JiraMigrationPreviewService {
       );
       const allStatuses = new Set<string>();
       for (const issueType of issueTypes) {
-        for (const status of issueType.statuses) {
+        for (const status of issueType.statuses || []) {
           if (typeof status.name === 'string' && status.name.trim()) {
             allStatuses.add(status.name.trim());
           }
@@ -445,6 +450,78 @@ export class JiraMigrationPreviewService {
     } catch (err) {
       logger.warn('[JiraMigrationPreview] Failed to fetch project statuses from API, will fall back to statuses seen in issues', { projectKey, err });
       return new Set<string>();
+    }
+  }
+
+  private async fetchProjectStatusSequence(projectKey: string): Promise<string[]> {
+    try {
+      const issueTypes = await this.fetchJson<JiraProjectStatusesResponse>(
+        `/rest/api/3/project/${encodeURIComponent(projectKey)}/statuses`,
+      );
+
+      const ordered: string[] = [];
+      const seen = new Set<string>();
+
+      for (const issueType of issueTypes) {
+        for (const status of issueType.statuses || []) {
+          const name = typeof status.name === 'string' ? status.name.trim() : '';
+          if (!name) continue;
+          const normalized = normalize(name);
+          if (!normalized || seen.has(normalized)) continue;
+          seen.add(normalized);
+          ordered.push(name);
+        }
+      }
+
+      return ordered;
+    } catch (err) {
+      logger.warn('[JiraMigrationPreview] Failed to fetch ordered project statuses from API', { projectKey, err });
+      return [];
+    }
+  }
+
+  private async fetchProjectBoards(projectKey: string): Promise<Array<{ id: number; name: string; type: string | null }>> {
+    try {
+      const boards = await this.fetchJson<{
+        values?: Array<{ id?: number; name?: string; type?: string }>;
+      }>(`/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(projectKey)}&maxResults=50`);
+
+      return (boards.values || [])
+        .filter(board => typeof board.id === 'number')
+        .map(board => ({
+          id: board.id as number,
+          name: typeof board.name === 'string' && board.name.trim() ? board.name.trim() : `Board ${board.id}`,
+          type: typeof board.type === 'string' ? board.type : null,
+        }));
+    } catch (err) {
+      logger.warn('[JiraMigrationPreview] Failed to fetch Jira boards for project', { projectKey, err });
+      return [];
+    }
+  }
+
+  private async fetchBoardStatusSequenceById(boardId: number): Promise<string[] | null> {
+    try {
+      const configResponse = await this.fetchJson<{
+        columnConfig?: { columns?: Array<{ name?: string; statuses?: Array<{ name?: string }> }> };
+      }>(`/rest/agile/1.0/board/${boardId}/configuration`);
+
+      const ordered: string[] = [];
+      const seen = new Set<string>();
+      for (const column of configResponse.columnConfig?.columns || []) {
+        for (const status of column.statuses || []) {
+          const name = typeof status.name === 'string' ? status.name.trim() : '';
+          if (!name) continue;
+          const normalized = normalize(name);
+          if (!normalized || seen.has(normalized)) continue;
+          seen.add(normalized);
+          ordered.push(name);
+        }
+      }
+
+      return ordered.length > 0 ? ordered : null;
+    } catch (err) {
+      logger.warn('[JiraMigrationPreview] Failed to fetch Jira board configuration statuses', { boardId, err });
+      return null;
     }
   }
 
@@ -498,7 +575,18 @@ export class JiraMigrationPreviewService {
       input.loadFilterOptions === true ||
       Boolean(appliedFilters.reporterAccountIds?.length || appliedFilters.creatorAccountIds?.length || appliedFilters.assigneeAccountIds?.length || appliedFilters.labels?.length);
 
-    const [project, board, channel, boardStages, fieldDefinitions, existingBoardFields, allProjectStatuses, allProjectCustomFields] = await Promise.all([
+    const [
+      project,
+      board,
+      channel,
+      boardStages,
+      fieldDefinitions,
+      existingBoardFields,
+      allProjectStatuses,
+      boardsForProject,
+      projectStatusSequence,
+      allProjectCustomFields,
+    ] = await Promise.all([
       db.project.findUnique({ where: { id: input.targetProjectId } }),
       db.board.findUnique({ where: { id: input.targetBoardId } }),
       db.channel.findUnique({ where: { id: input.targetChannelId } }),
@@ -517,12 +605,25 @@ export class JiraMigrationPreviewService {
         ORDER BY ff."createdAt" ASC
       `,
       this.fetchAllProjectStatuses(jiraProjectKey),
+      this.fetchProjectBoards(jiraProjectKey),
+      this.fetchProjectStatusSequence(jiraProjectKey),
       this.fetchAllProjectCustomFields(jiraProjectKey),
     ]);
 
     if (!project) throw new Error('Target project not found');
     if (!board) throw new Error('Target board not found');
     if (!channel) throw new Error('Target channel not found');
+
+    const selectedJiraBoardId =
+      typeof input.jiraBoardId === 'number'
+        ? input.jiraBoardId
+        : boardsForProject.length === 1
+          ? boardsForProject[0].id
+          : null;
+
+    const boardStatusSequence = selectedJiraBoardId
+      ? await this.fetchBoardStatusSequenceById(selectedJiraBoardId)
+      : null;
 
     let filteredIssueCount = 0;
     let filterOptions: JiraMigrationFilterOptions = { reporters: [], creators: [], assignees: [], labels: [] };
@@ -679,14 +780,69 @@ export class JiraMigrationPreviewService {
       })
       .sort((a, b) => a.jiraFieldName.localeCompare(b.jiraFieldName));
 
-    const allStatuses = new Set(
+    const allStatuses = new Set<string>(
       shouldLoadFilters && filteredStatusNames.size > 0
         ? [...filteredStatusNames, ...seenStatuses]
         : [...allProjectStatuses, ...seenStatuses],
     );
 
+    for (const stage of boardStages) {
+      if (stage?.name && typeof stage.name === 'string' && stage.name.trim()) {
+        allStatuses.add(stage.name.trim());
+      }
+    }
+
+    for (const status of boardStatusSequence || []) {
+      if (typeof status === 'string' && status.trim()) {
+        allStatuses.add(status.trim());
+      }
+    }
+    for (const status of projectStatusSequence || []) {
+      if (typeof status === 'string' && status.trim()) {
+        allStatuses.add(status.trim());
+      }
+    }
+
+    const orderedSource: string[] =
+      boardStatusSequence && boardStatusSequence.length > 0 ? boardStatusSequence : projectStatusSequence;
+
+    const orderedStatusesByNormalized = new Map<string, string>(
+      orderedSource
+        .map(status => [normalize(status), status] as const)
+        .filter(([key]) => Boolean(key)),
+    );
+    const allStatusesByNormalized = new Map<string, string>(
+      Array.from(allStatuses)
+        .map(status => [normalize(status), status] as const)
+        .filter(([key]) => Boolean(key)),
+    );
+
+    const jiraStatusSequence: string[] = [];
+    const seenSequence = new Set<string>();
+    for (const [normalized] of orderedStatusesByNormalized.entries()) {
+      const resolved = allStatusesByNormalized.get(normalized);
+      if (!resolved) continue;
+      if (seenSequence.has(normalized)) continue;
+      seenSequence.add(normalized);
+      jiraStatusSequence.push(resolved);
+    }
+    for (const [normalized, status] of allStatusesByNormalized.entries()) {
+      if (seenSequence.has(normalized)) continue;
+      seenSequence.add(normalized);
+      jiraStatusSequence.push(status);
+    }
+
+    const orderIndex = new Map(jiraStatusSequence.map((status, index) => [normalize(status), index] as const));
+
     const statusMappings = Array.from(allStatuses)
-      .sort((a, b) => a.localeCompare(b))
+      .sort((a, b) => {
+        const ai = orderIndex.get(normalize(a));
+        const bi = orderIndex.get(normalize(b));
+        if (ai !== undefined && bi !== undefined) return ai - bi;
+        if (ai !== undefined) return -1;
+        if (bi !== undefined) return 1;
+        return a.localeCompare(b);
+      })
       .map(status => ({
         jiraStatus: status,
         ...inferStatusMatch(status, boardStages),
@@ -715,6 +871,14 @@ export class JiraMigrationPreviewService {
         name: jiraProjectKey,
         totalIssues: shouldLoadFilters ? filteredIssueCount : filteredIssueCount,
       },
+      jiraBoards: boardsForProject,
+      selectedJiraBoardId,
+      jiraStatusSequence,
+      jiraStatusSequenceSource: boardStatusSequence
+        ? 'agile_board'
+        : projectStatusSequence.length > 0
+          ? 'project_statuses'
+          : 'fallback',
       target: {
         projectId: project.id,
         projectName: project.name,

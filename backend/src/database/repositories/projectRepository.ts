@@ -301,15 +301,15 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
 
   /**
    * Validate project code format and uniqueness
-   * Format: 3+ uppercase alphanumeric characters (e.g., "EUL", "INT", "PROJ", "PRO1", "XY2")
+   * Format: 2+ uppercase alphanumeric characters (e.g., "EU", "PR", "X2", "PROJ", "PRO1", "XY2")
    */
   async validateProjectCode(code: string, excludeId: string | undefined, workspaceId: string): Promise<void> {
     // Sanitize using shared utility
     const sanitizedCode = sanitizeProjectCode(code);
 
-    // Validate format: at least 3 uppercase alphanumeric characters
-    if (sanitizedCode.length < 3) {
-      throw new Error(`Project code must be at least 3 uppercase alphanumeric characters (e.g., EUL, PRO1, XY2)`);
+    // Validate format: at least 2 uppercase alphanumeric characters
+    if (sanitizedCode.length < 2) {
+      throw new Error(`Project code must be at least 2 uppercase alphanumeric characters (e.g., EU, PR, X2)`);
     }
 
     // Check uniqueness

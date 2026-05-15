@@ -10,11 +10,13 @@ export type JiraMigrationJobStatus = 'queued' | 'running' | 'completed' | 'faile
 export interface JiraMigrationJobProgress {
   jobId: string;
   status: JiraMigrationJobStatus;
+  controlStatus: 'running' | 'paused' | 'cancel_requested';
   jiraProjectKey: string;
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
   issueKeys?: string[];
+  stageSequence?: Array<{ sequenceNumber: number; name: string; defaultTicketStatusV2: string }>;
   totalIssues: number | null;
   processedIssues: number;
   importedTickets: number;
@@ -45,11 +47,13 @@ class JiraMigrationProgressService {
     const progress: JiraMigrationJobProgress = {
       jobId,
       status: 'queued',
+      controlStatus: 'running',
       jiraProjectKey: input.jiraProjectKey.trim().toUpperCase(),
       targetProjectId: input.targetProjectId,
       targetBoardId: input.targetBoardId,
       targetChannelId: input.targetChannelId,
       ...(input.issueKeys ? { issueKeys: input.issueKeys } : {}),
+      stageSequence: undefined,
       totalIssues: null,
       processedIssues: 0,
       importedTickets: 0,
@@ -95,10 +99,30 @@ class JiraMigrationProgressService {
     const current = await this.getJob(jobId);
     if (!current) return null;
 
+    const now = new Date().toISOString();
+    const nextControlStatus = patch.controlStatus ?? current.controlStatus;
+
+    // Permanent stop: once cancel is requested, freeze the job in a terminal state.
+    if (nextControlStatus === 'cancel_requested') {
+      const stopped: JiraMigrationJobProgress = {
+        ...current,
+        controlStatus: 'cancel_requested',
+        status: current.status === 'completed' ? 'completed' : 'failed',
+        currentStep: 'stopped',
+        currentIssueKey: null,
+        completedAt: current.completedAt ?? now,
+        errorMessage: current.errorMessage ?? 'Migration stopped by user',
+        updatedAt: now,
+      };
+
+      await this.setProgress(stopped);
+      return stopped;
+    }
+
     const next: JiraMigrationJobProgress = {
       ...current,
       ...patch,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     };
 
     await this.setProgress(next);

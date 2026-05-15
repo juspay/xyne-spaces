@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../components/ui/EntitySelector/EntityMultiSelector';
 import { FolderKanban, LayoutTemplate, Hash, User, Tag } from 'lucide-react';
+import { isAxiosError } from 'axios';
 
 const actionClassMap: Record<string, string> = {
   create_board_custom_field: 'bg-blue-100 text-blue-800',
@@ -136,6 +137,7 @@ const JiraMigrationScreen = (): ReactElement => {
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [targetChannelId, setTargetChannelId] = useState('');
   const [jiraProjectKey, setJiraProjectKey] = useState('');
+  const [jiraBoardId, setJiraBoardId] = useState<number | null>(null);
   const [ticketRange, setTicketRange] = useState<TicketRange>('all');
   const [filters, setFilters] = useState<JiraMigrationFilters>({});
   const [isFilterEnabled, setIsFilterEnabled] = useState(false);
@@ -153,6 +155,12 @@ const JiraMigrationScreen = (): ReactElement => {
   const [issueSamplePage, setIssueSamplePage] = useState(0);
   const [issueResultPage, setIssueResultPage] = useState(0);
   const [statusV2Mappings, setStatusV2Mappings] = useState<Record<string, string>>({});
+  const [jiraStatusSequence, setJiraStatusSequence] = useState<string[]>([]);
+  const [jiraStatusSequenceOrderInput, setJiraStatusSequenceOrderInput] = useState<
+    Record<string, string>
+  >({});
+  const [draggingJiraStatus, setDraggingJiraStatus] = useState<string | null>(null);
+  const [excludedStageNames, setExcludedStageNames] = useState<Record<string, boolean>>({});
   const [skippedCustomFieldIds, setSkippedCustomFieldIds] = useState<Record<string, boolean>>({});
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [migrationPhase, setMigrationPhase] = useState<MigrationPhase>('setup');
@@ -235,35 +243,78 @@ const JiraMigrationScreen = (): ReactElement => {
   const statusesMissingV2Mapping = useMemo(() => {
     if (!preview) return [];
 
-    return preview.statusMappings
-      .map(mapping => mapping.jiraStatus)
-      .filter(
-        status =>
-          !TICKET_STATUS_V2_OPTIONS.includes(statusV2Mappings[status] as TicketStatusV2Option),
-      );
+    const statuses =
+      preview.jiraStatusSequence.length > 0
+        ? preview.jiraStatusSequence
+        : preview.statusMappings.map(mapping => mapping.jiraStatus);
+
+    return statuses.filter(
+      status =>
+        !TICKET_STATUS_V2_OPTIONS.includes(statusV2Mappings[status] as TicketStatusV2Option),
+    );
   }, [preview, statusV2Mappings]);
 
   const hasCompleteStatusV2Mappings = Boolean(preview) && statusesMissingV2Mapping.length === 0;
 
+  const orderedStageSequence = useMemo(() => {
+    if (!preview) return [];
+    const base = jiraStatusSequence.length > 0 ? jiraStatusSequence : preview.jiraStatusSequence;
+    return base.filter(status => !excludedStageNames[status]);
+  }, [excludedStageNames, jiraStatusSequence, preview]);
+
   const mappedStatusMappings = useMemo(() => {
     if (!preview) return [];
 
-    return preview.statusMappings.filter(mapping =>
-      TICKET_STATUS_V2_OPTIONS.includes(
-        statusV2Mappings[mapping.jiraStatus] as TicketStatusV2Option,
-      ),
+    const mappingByStatus = new Map(
+      preview.statusMappings.map(mapping => [mapping.jiraStatus, mapping] as const),
     );
+    const orderedStatuses =
+      preview.jiraStatusSequence.length > 0
+        ? preview.jiraStatusSequence
+        : preview.statusMappings.map(mapping => mapping.jiraStatus);
+
+    return orderedStatuses
+      .map(
+        status =>
+          mappingByStatus.get(status) || {
+            jiraStatus: status,
+            suggestedStageName: null,
+            confidence: 'low' as const,
+          },
+      )
+      .filter(mapping =>
+        TICKET_STATUS_V2_OPTIONS.includes(
+          statusV2Mappings[mapping.jiraStatus] as TicketStatusV2Option,
+        ),
+      );
   }, [preview, statusV2Mappings]);
 
   const newStatusMappings = useMemo(() => {
     if (!preview) return [];
 
-    return preview.statusMappings.filter(
-      mapping =>
-        !TICKET_STATUS_V2_OPTIONS.includes(
-          statusV2Mappings[mapping.jiraStatus] as TicketStatusV2Option,
-        ),
+    const mappingByStatus = new Map(
+      preview.statusMappings.map(mapping => [mapping.jiraStatus, mapping] as const),
     );
+    const orderedStatuses =
+      preview.jiraStatusSequence.length > 0
+        ? preview.jiraStatusSequence
+        : preview.statusMappings.map(mapping => mapping.jiraStatus);
+
+    return orderedStatuses
+      .map(
+        status =>
+          mappingByStatus.get(status) || {
+            jiraStatus: status,
+            suggestedStageName: null,
+            confidence: 'low' as const,
+          },
+      )
+      .filter(
+        mapping =>
+          !TICKET_STATUS_V2_OPTIONS.includes(
+            statusV2Mappings[mapping.jiraStatus] as TicketStatusV2Option,
+          ),
+      );
   }, [preview, statusV2Mappings]);
 
   const loadMigrationHistory = async (): Promise<void> => {
@@ -314,6 +365,7 @@ const JiraMigrationScreen = (): ReactElement => {
     if (!activeJobId) return undefined;
 
     let cancelled = false;
+    const lastRetryableToastAtRef = { current: 0 };
 
     const pollStatus = async (): Promise<void> => {
       try {
@@ -356,7 +408,30 @@ const JiraMigrationScreen = (): ReactElement => {
         }
       } catch (error) {
         if (cancelled) return;
-        clearPersistedJiraMigrationJob();
+
+        const httpStatus = isAxiosError(error) ? error.response?.status : undefined;
+        const isRetryable =
+          httpStatus === 429 ||
+          (typeof httpStatus === 'number' && httpStatus >= 500 && httpStatus <= 599) ||
+          typeof httpStatus !== 'number'; // network / unknown
+
+        if (isRetryable) {
+          // Do NOT clear persisted job for transient server/network failures (e.g. 503).
+          // Keep showing last known progress and retry on next poll tick.
+          const now = Date.now();
+          if (now - lastRetryableToastAtRef.current > 10_000) {
+            lastRetryableToastAtRef.current = now;
+            toast.warning('Migration status temporarily unavailable', {
+              description:
+                typeof httpStatus === 'number'
+                  ? `Server returned ${httpStatus}. Retrying…`
+                  : 'Network error. Retrying…',
+            });
+          }
+          return;
+        }
+
+        // Non-retryable: job likely gone / auth issues etc. Clear local persistence so UI can recover cleanly.
         setIsImportLoading(false);
         setActiveJobId(null);
         const message = error instanceof Error ? error.message : 'Failed to fetch migration status';
@@ -386,6 +461,7 @@ const JiraMigrationScreen = (): ReactElement => {
     targetProjectId: selectedProjectId,
     targetBoardId: selectedBoardId,
     targetChannelId: targetChannelId.trim(),
+    ...(jiraBoardId !== null ? { jiraBoardId } : {}),
     maxResults: 25,
     ...(resolvedDateFrom ? { dateFrom: resolvedDateFrom } : {}),
     ...(isFilterEnabled ? { loadFilterOptions: true } : {}),
@@ -419,22 +495,29 @@ const JiraMigrationScreen = (): ReactElement => {
       );
 
       setPreview(previewResult);
+      setJiraBoardId(previewResult.selectedJiraBoardId ?? null);
       setStatusV2Mappings(previous =>
         Object.fromEntries(
-          previewResult.statusMappings.map(mapping => [
-            mapping.jiraStatus,
-            previous[mapping.jiraStatus] ||
+          (previewResult.jiraStatusSequence.length > 0
+            ? previewResult.jiraStatusSequence
+            : previewResult.statusMappings.map(mapping => mapping.jiraStatus)
+          ).map(status => [
+            status,
+            previous[status] ||
               (TICKET_STATUS_V2_OPTIONS.includes(
                 boardStatusByNormalizedStageName.get(
-                  normalizeStatusKey(mapping.jiraStatus),
+                  normalizeStatusKey(status),
                 ) as TicketStatusV2Option,
               )
-                ? boardStatusByNormalizedStageName.get(normalizeStatusKey(mapping.jiraStatus))
+                ? boardStatusByNormalizedStageName.get(normalizeStatusKey(status))
                 : '') ||
               '',
           ]),
         ),
       );
+      setJiraStatusSequence(previewResult.jiraStatusSequence);
+      setJiraStatusSequenceOrderInput({});
+      setExcludedStageNames({});
       setSkippedCustomFieldIds(previous =>
         Object.fromEntries(
           previewResult.customFieldMappings.map(mapping => [
@@ -475,7 +558,7 @@ const JiraMigrationScreen = (): ReactElement => {
     }
 
     const strictStatusV2Mappings = Object.fromEntries(
-      preview.statusMappings.map(({ jiraStatus }) => [
+      orderedStageSequence.map(jiraStatus => [
         jiraStatus,
         statusV2Mappings[jiraStatus]?.trim() || '',
       ]),
@@ -497,6 +580,10 @@ const JiraMigrationScreen = (): ReactElement => {
         ...buildPayload(),
         statusV2Mappings: strictStatusV2Mappings,
         skipCustomFieldIds: selectedSkipCustomFieldIds,
+        jiraStatusSequence: orderedStageSequence,
+        excludedStageNames: Object.keys(excludedStageNames).filter(
+          name => excludedStageNames[name],
+        ),
       };
 
       const startResult = await jiraMigrationService.startMigration(payload);
@@ -516,6 +603,45 @@ const JiraMigrationScreen = (): ReactElement => {
       const message = error instanceof Error ? error.message : 'Failed to start migration';
       setIsImportLoading(false);
       toast.error('Import failed', { description: message });
+    }
+  };
+
+  const handleStopMigration = async (): Promise<void> => {
+    if (!migrationProgress) return;
+    try {
+      const next = await jiraMigrationService.stopMigration(migrationProgress.jobId);
+      setMigrationProgress(next);
+      toast.warning('Stopping migration...');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to stop migration';
+      toast.error('Stop failed', { description: message });
+    }
+  };
+
+  const handlePauseMigration = async (): Promise<void> => {
+    if (!migrationProgress) return;
+    try {
+      const next = await jiraMigrationService.pauseMigration(
+        migrationProgress.jobId,
+        2 * 60 * 1000,
+      );
+      setMigrationProgress(next);
+      toast.info('Migration paused for 2 minutes');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to pause migration';
+      toast.error('Pause failed', { description: message });
+    }
+  };
+
+  const handleResumeMigration = async (): Promise<void> => {
+    if (!migrationProgress) return;
+    try {
+      const next = await jiraMigrationService.resumeMigration(migrationProgress.jobId);
+      setMigrationProgress(next);
+      toast.success('Migration resumed');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to resume migration';
+      toast.error('Resume failed', { description: message });
     }
   };
 
@@ -1013,12 +1139,54 @@ const JiraMigrationScreen = (): ReactElement => {
                     </p>
                   </div>
                   <span className='text-xs text-muted-foreground'>
-                    {preview.jiraProject.totalIssues} total issues · {preview.statusMappings.length}{' '}
-                    project-wide statuses (fetched from Jira project config, not just preview page)
+                    {preview.jiraProject.totalIssues} total issues ·{' '}
+                    {preview.jiraStatusSequence.length} statuses
                   </span>
                 </div>
               </div>
               <div className='p-5'>
+                {preview.jiraBoards.length > 1 && (
+                  <div className='mb-5 rounded-xl border border-border bg-muted/10 p-4'>
+                    <p className='text-xs font-semibold text-foreground'>Jira Board</p>
+                    <p className='mt-1 text-xs text-muted-foreground'>
+                      Multiple Jira boards found for this project. Pick board to derive status
+                      list/order, then refresh preview.
+                    </p>
+                    <div className='mt-3 flex flex-wrap items-center gap-3'>
+                      <select
+                        value={jiraBoardId ?? ''}
+                        onChange={event => {
+                          const raw = event.target.value;
+                          setJiraBoardId(raw ? Number(raw) : null);
+                        }}
+                        data-track-category='jira_migration'
+                        data-track-name='jira_board_select'
+                        className='w-full max-w-md rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                      >
+                        <option value=''>Select Jira board</option>
+                        {preview.jiraBoards.map(board => (
+                          <option key={board.id} value={board.id}>
+                            {board.name}
+                            {board.type ? ` (${board.type})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant='outline'
+                        onClick={() => void handlePreview()}
+                        disabled={isPreviewLoading || isImportLoading}
+                      >
+                        Refresh Preview
+                      </Button>
+                      {preview.selectedJiraBoardId && (
+                        <span className='text-xs text-muted-foreground'>
+                          Using board ID {preview.selectedJiraBoardId}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {statusesMissingV2Mapping.length > 0 ? (
                   <div className='mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800'>
                     {statusesMissingV2Mapping.length}{' '}
@@ -1103,6 +1271,183 @@ const JiraMigrationScreen = (): ReactElement => {
                     </div>
                   ))}
                 </div>
+
+                <div className='mt-6 rounded-2xl border border-border/70 bg-background/60 p-4'>
+                  <div className='flex flex-wrap items-start justify-between gap-3'>
+                    <div>
+                      <p className='text-sm font-semibold text-foreground'>
+                        Stage Sequence (Manual)
+                      </p>
+                      <p className='mt-1 text-xs text-muted-foreground'>
+                        Reorder Jira statuses; stages will be created/reordered in this order.
+                      </p>
+                    </div>
+                    <Button
+                      variant='outline'
+                      onClick={() =>
+                        setJiraStatusSequence(
+                          [...preview.jiraStatusSequence].sort((a, b) => a.localeCompare(b)),
+                        )
+                      }
+                      disabled={preview.jiraStatusSequence.length === 0}
+                    >
+                      Sort A→Z
+                    </Button>
+                  </div>
+
+                  <div className='mt-3 max-h-72 overflow-auto rounded-xl border border-border bg-background'>
+                    <table className='w-full text-left text-xs'>
+                      <thead className='sticky top-0 bg-background/90 backdrop-blur'>
+                        <tr>
+                          <th className='px-3 py-2 font-medium text-muted-foreground'>#</th>
+                          <th className='px-3 py-2 font-medium text-muted-foreground'>
+                            Jira Status
+                          </th>
+                          <th className='px-3 py-2 font-medium text-muted-foreground'>Order</th>
+                          <th className='px-3 py-2 font-medium text-muted-foreground'>Exclude</th>
+                          <th className='px-3 py-2 font-medium text-muted-foreground'>
+                            Mapped StatusV2
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const list =
+                            jiraStatusSequence.length > 0
+                              ? jiraStatusSequence
+                              : preview.jiraStatusSequence;
+                          const boardStageNames = new Set(
+                            preview.target.stages.map(stage => stage.name),
+                          );
+                          return list.map((status, index) => {
+                            const isBoardStage = boardStageNames.has(status);
+                            const excluded = Boolean(excludedStageNames[status]);
+                            return (
+                              <tr
+                                key={status}
+                                className={`border-t border-border/60 ${draggingJiraStatus === status ? 'bg-muted/40' : ''} ${excluded ? 'opacity-50' : ''}`}
+                                draggable
+                                onDragStart={event => {
+                                  if (excluded) return;
+                                  setDraggingJiraStatus(status);
+                                  event.dataTransfer.setData('text/plain', status);
+                                  event.dataTransfer.effectAllowed = 'move';
+                                  if (jiraStatusSequence.length === 0) {
+                                    setJiraStatusSequence([...list]);
+                                  }
+                                }}
+                                onDragEnd={() => setDraggingJiraStatus(null)}
+                                onDragOver={event => {
+                                  if (excluded) return;
+                                  event.preventDefault();
+                                  event.dataTransfer.dropEffect = 'move';
+                                }}
+                                onDrop={event => {
+                                  if (excluded) return;
+                                  event.preventDefault();
+                                  const draggedStatus = event.dataTransfer.getData('text/plain');
+                                  if (!draggedStatus || draggedStatus === status) return;
+
+                                  setJiraStatusSequence(prev => {
+                                    const base = prev.length > 0 ? [...prev] : [...list];
+                                    const fromIndex = base.indexOf(draggedStatus);
+                                    const toIndex = base.indexOf(status);
+                                    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex)
+                                      return base;
+                                    const [moved] = base.splice(fromIndex, 1);
+                                    if (!moved) return base;
+                                    base.splice(toIndex, 0, moved);
+                                    return base;
+                                  });
+                                }}
+                              >
+                                <td className='px-3 py-2 text-muted-foreground'>{index + 1}</td>
+                                <td className='px-3 py-2 font-medium text-foreground'>
+                                  <span
+                                    className='mr-2 select-none text-muted-foreground'
+                                    title='Drag to reorder'
+                                  >
+                                    ⋮⋮
+                                  </span>
+                                  {status}
+                                </td>
+                                <td className='px-3 py-2'>
+                                  <input
+                                    type='number'
+                                    min={1}
+                                    max={list.length}
+                                    value={
+                                      jiraStatusSequenceOrderInput[status] ?? String(index + 1)
+                                    }
+                                    onChange={event => {
+                                      const raw = event.target.value;
+                                      setJiraStatusSequenceOrderInput(previous => ({
+                                        ...previous,
+                                        [status]: raw,
+                                      }));
+
+                                      const nextPosition = Number(raw);
+                                      if (!Number.isInteger(nextPosition)) return;
+                                      setJiraStatusSequence(prev => {
+                                        const next = prev.length > 0 ? [...prev] : [...list];
+                                        const fromIndex = next.indexOf(status);
+                                        if (fromIndex === -1) return next;
+
+                                        const toIndexRaw = nextPosition - 1;
+                                        const toIndex = Math.min(
+                                          next.length - 1,
+                                          Math.max(0, toIndexRaw),
+                                        );
+                                        if (toIndex === fromIndex) return next;
+
+                                        const [moved] = next.splice(fromIndex, 1);
+                                        if (!moved) return next;
+                                        next.splice(toIndex, 0, moved);
+                                        return next;
+                                      });
+
+                                      setJiraStatusSequenceOrderInput(previous => {
+                                        const { [status]: _ignored, ...rest } = previous;
+                                        return rest;
+                                      });
+                                    }}
+                                    data-track-category='jira_migration'
+                                    data-track-name={`jira_stage_sequence_set_position:${status}`}
+                                    className='w-20 rounded-lg border border-border bg-background px-2 py-1 text-xs text-foreground shadow-sm'
+                                    disabled={excluded}
+                                  />
+                                </td>
+                                <td className='px-3 py-2'>
+                                  <label className='inline-flex items-center gap-2 text-xs text-muted-foreground'>
+                                    <input
+                                      type='checkbox'
+                                      checked={excluded}
+                                      onChange={event => {
+                                        const checked = event.target.checked;
+                                        setExcludedStageNames(previous => ({
+                                          ...previous,
+                                          [status]: checked,
+                                        }));
+                                      }}
+                                      data-track-category='jira_migration'
+                                      data-track-name={`jira_stage_exclude_toggle:${status}`}
+                                      disabled={!isBoardStage}
+                                    />
+                                    {isBoardStage ? 'Exclude' : '—'}
+                                  </label>
+                                </td>
+                                <td className='px-3 py-2 text-muted-foreground'>
+                                  {statusV2Mappings[status] || '-'}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
                 <div className='mt-6 flex flex-wrap items-center gap-3 border-t border-border/60 pt-5'>
                   <Button variant='outline' onClick={() => setMigrationPhase('setup')}>
                     ← Back to Configure
@@ -1148,6 +1493,51 @@ const JiraMigrationScreen = (): ReactElement => {
                   </Button>
                 </div>
               </div>
+
+              {hasCompleteStatusV2Mappings && orderedStageSequence.length > 0 && (
+                <div className='border-t border-emerald-200/60 bg-white/70 px-5 py-4'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <div>
+                      <p className='text-xs font-semibold text-foreground'>
+                        Planned Stage Sequence
+                      </p>
+                      <p className='mt-1 text-xs text-muted-foreground'>
+                        Stages will be created/reordered on the board in Jira status order.
+                      </p>
+                    </div>
+                    <p className='text-[11px] text-muted-foreground'>
+                      {orderedStageSequence.length} stages
+                    </p>
+                  </div>
+
+                  <div className='mt-3 max-h-64 overflow-auto rounded-xl border border-emerald-100 bg-background/70'>
+                    <table className='w-full text-left text-xs'>
+                      <thead className='sticky top-0 bg-background/90 backdrop-blur'>
+                        <tr>
+                          <th className='px-3 py-2 font-medium text-muted-foreground'>#</th>
+                          <th className='px-3 py-2 font-medium text-muted-foreground'>
+                            Jira Status
+                          </th>
+                          <th className='px-3 py-2 font-medium text-muted-foreground'>
+                            Mapped StatusV2
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orderedStageSequence.map((status, index) => (
+                          <tr key={status} className='border-t border-emerald-50'>
+                            <td className='px-3 py-2 text-muted-foreground'>{index + 1}</td>
+                            <td className='px-3 py-2 font-medium text-foreground'>{status}</td>
+                            <td className='px-3 py-2 text-muted-foreground'>
+                              {statusV2Mappings[status] || '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
@@ -1163,6 +1553,22 @@ const JiraMigrationScreen = (): ReactElement => {
                 <div className='text-right text-xs text-muted-foreground'>
                   <p>Job ID</p>
                   <p className='mt-1 font-medium text-foreground'>{migrationProgress.jobId}</p>
+                  {migrationProgress.status === 'running' && (
+                    <div className='mt-2 flex flex-wrap justify-end gap-2'>
+                      {migrationProgress.controlStatus === 'paused' ? (
+                        <Button variant='outline' onClick={() => void handleResumeMigration()}>
+                          Resume
+                        </Button>
+                      ) : (
+                        <Button variant='outline' onClick={() => void handlePauseMigration()}>
+                          Pause
+                        </Button>
+                      )}
+                      <Button variant='outline' onClick={() => void handleStopMigration()}>
+                        Stop
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1232,6 +1638,54 @@ const JiraMigrationScreen = (): ReactElement => {
                               : 'Waiting to start')}
                       </p>
                     </div>
+
+                    {migrationProgress.stageSequence &&
+                      migrationProgress.stageSequence.length > 0 && (
+                        <div className='mt-4 rounded-lg border border-emerald-200 bg-card/70 p-3'>
+                          <div className='flex items-center justify-between gap-3'>
+                            <p className='text-xs text-muted-foreground'>Stage Sequence</p>
+                            <p className='text-[11px] text-muted-foreground'>
+                              {migrationProgress.stageSequence.length} stages
+                            </p>
+                          </div>
+                          <div className='mt-2 max-h-56 overflow-auto rounded-md border border-emerald-100 bg-background/60'>
+                            <table className='w-full text-left text-xs'>
+                              <thead className='sticky top-0 bg-background/80 backdrop-blur'>
+                                <tr>
+                                  <th className='px-2 py-1 font-medium text-muted-foreground'>#</th>
+                                  <th className='px-2 py-1 font-medium text-muted-foreground'>
+                                    Stage
+                                  </th>
+                                  <th className='px-2 py-1 font-medium text-muted-foreground'>
+                                    StatusV2
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {migrationProgress.stageSequence
+                                  .slice()
+                                  .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
+                                  .map(stage => (
+                                    <tr
+                                      key={`${stage.sequenceNumber}-${stage.name}`}
+                                      className='border-t border-emerald-50'
+                                    >
+                                      <td className='px-2 py-1 text-muted-foreground'>
+                                        {stage.sequenceNumber}
+                                      </td>
+                                      <td className='px-2 py-1 font-medium text-foreground'>
+                                        {stage.name}
+                                      </td>
+                                      <td className='px-2 py-1 text-muted-foreground'>
+                                        {stage.defaultTicketStatusV2}
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
                   </>
                 );
               })()}

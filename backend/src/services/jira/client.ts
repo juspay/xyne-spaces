@@ -58,6 +58,31 @@ interface JiraCommentResponse {
   comments: JiraCommentRecord[];
 }
 
+type JiraProjectStatusesResponse = Array<{
+  statuses?: Array<{
+    name?: string;
+  }>;
+}>;
+
+type JiraAgileBoardsResponse = {
+  values?: Array<{
+    id?: number;
+    name?: string;
+    type?: string;
+  }>;
+};
+
+type JiraAgileBoardConfigurationResponse = {
+  columnConfig?: {
+    columns?: Array<{
+      name?: string;
+      statuses?: Array<{
+        name?: string;
+      }>;
+    }>;
+  };
+};
+
 export interface JiraFieldRecord {
   id: string;
   name: string;
@@ -298,6 +323,121 @@ export class JiraMigrationClient {
 
   async fetchFieldDefinitions(): Promise<JiraFieldRecord[]> {
     return this.fetchJson<JiraFieldRecord[]>('/rest/api/3/field');
+  }
+
+  async fetchProjectStatusOrder(projectKey: string): Promise<string[]> {
+    const result = await this.fetchJson<JiraProjectStatusesResponse>(`/rest/api/3/project/${encodeURIComponent(projectKey)}/statuses`);
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+
+    for (const issueType of result || []) {
+      for (const status of issueType.statuses || []) {
+        const name = status.name?.trim();
+        if (!name) continue;
+        const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        ordered.push(normalized);
+      }
+    }
+
+    logger.info('[JiraMigrationImport] Fetched Jira project status order', {
+      projectKey,
+      statusCount: ordered.length,
+      sampleStatuses: ordered.slice(0, 10),
+    });
+
+    return ordered;
+  }
+
+  async fetchProjectBoardStatusOrder(projectKey: string): Promise<string[] | null> {
+    // Preferred: use Jira Agile board configuration because it reflects the user's board column order.
+    // If the project has 0 or >1 boards, return null and fall back to other heuristics.
+    const boards = await this.fetchJson<JiraAgileBoardsResponse>(
+      `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(projectKey)}&maxResults=50`,
+    );
+
+    const projectBoards = (boards.values || []).filter(board => typeof board.id === 'number');
+    if (projectBoards.length !== 1) {
+      logger.info('[JiraMigrationImport] Jira project boards not uniquely resolved; skipping board-based status ordering', {
+        projectKey,
+        boardCount: projectBoards.length,
+        boardIds: projectBoards.map(board => board.id).slice(0, 10),
+      });
+      return null;
+    }
+
+    const boardId = projectBoards[0].id as number;
+    const configResponse = await this.fetchJson<JiraAgileBoardConfigurationResponse>(
+      `/rest/agile/1.0/board/${boardId}/configuration`,
+    );
+
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+
+    for (const column of configResponse.columnConfig?.columns || []) {
+      for (const status of column.statuses || []) {
+        const name = status.name?.trim();
+        if (!name) continue;
+        const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        ordered.push(normalized);
+      }
+    }
+
+    logger.info('[JiraMigrationImport] Fetched Jira board status order from Agile configuration', {
+      projectKey,
+      boardId,
+      statusCount: ordered.length,
+      sampleStatuses: ordered.slice(0, 10),
+    });
+
+    return ordered.length > 0 ? ordered : null;
+  }
+
+  async fetchBoardColumnsAndStatusMap(boardId: number): Promise<{
+    columns: string[];
+    statusToColumn: Record<string, string>;
+  }> {
+    const configResponse = await this.fetchJson<JiraAgileBoardConfigurationResponse>(
+      `/rest/agile/1.0/board/${boardId}/configuration`,
+    );
+
+    const columns: string[] = [];
+    const seenColumns = new Set<string>();
+    const statusToColumn: Record<string, string> = {};
+
+    for (const column of configResponse.columnConfig?.columns || []) {
+      const columnName = column.name?.trim() || '';
+      if (columnName) {
+        const columnKey = columnName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (columnKey && !seenColumns.has(columnKey)) {
+          seenColumns.add(columnKey);
+          columns.push(columnName);
+        }
+      }
+
+      for (const status of column.statuses || []) {
+        const statusName = status.name?.trim() || '';
+        if (!statusName || !columnName) continue;
+        const statusKey = statusName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!statusKey) continue;
+        // keep first mapping if duplicates
+        if (!statusToColumn[statusKey]) {
+          statusToColumn[statusKey] = columnName;
+        }
+      }
+    }
+
+    logger.info('[JiraMigrationImport] Fetched Jira board columns + status mapping', {
+      boardId,
+      columnCount: columns.length,
+      mappedStatuses: Object.keys(statusToColumn).length,
+      sampleColumns: columns.slice(0, 10),
+    });
+
+    return { columns, statusToColumn };
   }
 
   async fetchAllComments(issueKey: string): Promise<JiraCommentRecord[]> {

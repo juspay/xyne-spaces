@@ -116,11 +116,14 @@ export interface JiraMigrationExecuteInput {
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
+  jiraBoardId?: number;
   issueKeys?: string[];
   dateFrom?: string;
   filters?: JiraMigrationFilters;
   statusV2Mappings: Record<string, string>;
   skipCustomFieldIds?: string[];
+  jiraStatusSequence?: string[];
+  excludedStageNames?: string[];
 }
 
 export interface JiraMigrationIssueResult {
@@ -161,6 +164,7 @@ export interface JiraMigrationProgressUpdate {
   skippedAttachments: number;
   currentIssueKey: string | null;
   currentStep: string | null;
+  stageSequence: Array<{ sequenceNumber: number; name: string; defaultTicketStatusV2: TicketStatusV2 }>;
   warnings: string[];
   issueResult?: JiraMigrationIssueResult;
 }
@@ -310,6 +314,11 @@ const chunkArray = <T,>(items: T[], size: number): T[][] => {
   return chunks;
 };
 
+const sleep = async (ms: number): Promise<void> => {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  await new Promise<void>(resolve => setTimeout(resolve, ms));
+};
+
 
 const mapWithConcurrency = async <T, R>(
   items: T[],
@@ -432,7 +441,7 @@ const buildJiraMigrationProjectLogPrefix = (jiraProjectKey: string): string =>
   `[jira-migration][${jiraProjectKey}]`;
 
 const buildJiraMigrationIssueLogPrefix = (jiraProjectKey: string, issue: JiraIssue): string =>
-  `${buildJiraMigrationProjectLogPrefix(jiraProjectKey)}[${issue.id}]`;
+  `${buildJiraMigrationProjectLogPrefix(jiraProjectKey)}[${issue.key || issue.id}]`;
 
 type JiraStageSummary = {
   id: string;
@@ -1069,6 +1078,8 @@ export class JiraMigrationImportService {
     issues: JiraIssue[],
     stages: JiraStageSummary[],
     statusV2ByStatus: Map<string, TicketStatusV2>,
+    jiraStatusOrder?: string[],
+    excludedStageNames?: string[],
   ): Promise<JiraStageSummary[]> {
     const stageByNormalizedName = new Map(
       stages.map(stage => [normalize(stage.name), stage] as const),
@@ -1134,6 +1145,45 @@ export class JiraMigrationImportService {
           stages[stageIndex] = updatedStage;
         }
         stageByNormalizedName.set(normalizedStatusName, updatedStage);
+      }
+    }
+
+    if (jiraStatusOrder && jiraStatusOrder.length > 0) {
+      const excludedNormalized = new Set((excludedStageNames || []).map(name => normalize(name || '')).filter(Boolean));
+      const desiredStages: JiraStageSummary[] = [];
+      const stageById = new Map(stages.map(stage => [stage.id, stage] as const));
+
+      for (const normalizedStatusName of jiraStatusOrder) {
+        const stage = stageByNormalizedName.get(normalizedStatusName);
+        if (stage && !excludedNormalized.has(normalize(stage.name))) {
+          desiredStages.push(stage);
+          stageById.delete(stage.id);
+        }
+      }
+
+      const remainder = [...stageById.values()].sort((left, right) => left.sequenceNumber - right.sequenceNumber);
+      desiredStages.push(...remainder);
+
+      const orderChanged =
+        desiredStages.length === stages.length &&
+        desiredStages.some((stage, index) => stages[index]?.id !== stage.id);
+
+      if (orderChanged) {
+        const resequenced = await db.$transaction(
+          desiredStages.map((stage, index) =>
+            db.stage.update({
+              where: { id: stage.id },
+              data: { sequenceNumber: index + 1 },
+              select: {
+                id: true,
+                name: true,
+                sequenceNumber: true,
+                defaultTicketStatusV2: true,
+              },
+            }),
+          ),
+        );
+        stages = resequenced;
       }
     }
 
@@ -2442,6 +2492,7 @@ export class JiraMigrationImportService {
     input: JiraMigrationExecuteInput,
     actorUserId: string,
     onProgress?: (update: JiraMigrationProgressUpdate) => Promise<void> | void,
+    getControlStatus?: () => Promise<'running' | 'paused' | 'cancel_requested' | null | undefined> | 'running' | 'paused' | 'cancel_requested' | null | undefined,
   ): Promise<JiraMigrationExecuteResult> {
     this.resetExecutionCaches();
     const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
@@ -2480,6 +2531,14 @@ export class JiraMigrationImportService {
     if (board.projectId !== project.id) throw new Error('Board does not belong to target project');
     if (channel.projectId !== project.id) throw new Error('Channel does not belong to target project');
 
+    // Workspace scoping: some Prisma client types in this repo omit `workspaceId` even though the DB schema
+    // contains it (denormalized on Board/Channel and present on Project). Resolve it defensively.
+    const workspaceId: string =
+      (channel as any).workspaceId ||
+      (board as any).workspaceId ||
+      (project as any).workspaceId ||
+      config.defaultWorkspaceId;
+
     const normalizedStatusV2Mappings = new Map<string, TicketStatusV2>();
     for (const [rawStatus, rawStatusV2] of Object.entries(input.statusV2Mappings || {})) {
       const normalizedStatus = normalize(rawStatus || '');
@@ -2517,7 +2576,7 @@ export class JiraMigrationImportService {
       created: externalSourceCreated,
     } = await this.ensureExternalSource(jiraProjectKey, channel.id, board.id);
 
-    const fallbackUser = await this.userRepository.findByEmail(JIRA_MIGRATION_FALLBACK_EMAIL, project.workspaceId);
+    const fallbackUser = await this.userRepository.findByEmail(JIRA_MIGRATION_FALLBACK_EMAIL, workspaceId);
     const fallbackUserId = fallbackUser?.id || actorUserId;
     if (!fallbackUser) {
       logger.warn(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Configured fallback user not found; using actor user`, {
@@ -2527,6 +2586,23 @@ export class JiraMigrationImportService {
     }
 
     await this.userResolver.warmUserResolutionLookup();
+
+    let jiraStatusOrder: string[] | null = null;
+    if (Array.isArray(input.jiraStatusSequence) && input.jiraStatusSequence.length > 0) {
+      jiraStatusOrder = input.jiraStatusSequence
+        .map(status => normalize(status || ''))
+        .filter(Boolean);
+    } else {
+      try {
+        jiraStatusOrder =
+          (await this.jiraClient.fetchProjectBoardStatusOrder(jiraProjectKey)) ||
+          (await this.jiraClient.fetchProjectStatusOrder(jiraProjectKey));
+      } catch (error) {
+        logger.warn(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Failed to fetch Jira status order; falling back to append ordering`, {
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
 
     let stages: JiraStageSummary[] = [...initialStages];
     const fieldMap = new Map<string, { fieldId: string; fieldType: string }>();
@@ -2543,6 +2619,28 @@ export class JiraMigrationImportService {
     let initialProgressPublished = false;
     const issueResults: JiraMigrationIssueResult[] = [];
     const relationshipIssues: JiraIssue[] = [];
+    let stageSequence: Array<{ sequenceNumber: number; name: string; defaultTicketStatusV2: TicketStatusV2 }> =
+      stages.map(stage => ({
+        sequenceNumber: stage.sequenceNumber,
+        name: stage.name,
+        defaultTicketStatusV2: stage.defaultTicketStatusV2,
+      }));
+
+    const checkControl = async (): Promise<void> => {
+      if (!getControlStatus) return;
+
+      while (true) {
+        const status = await getControlStatus();
+        if (status === 'cancel_requested') {
+          throw new Error('Migration stopped by user');
+        }
+        if (status === 'paused') {
+          await sleep(1000);
+          continue;
+        }
+        break;
+      }
+    };
 
     const publishProgress = async (
       currentIssueKey: string | null,
@@ -2551,6 +2649,7 @@ export class JiraMigrationImportService {
     ): Promise<void> => {
       if (!onProgress) return;
 
+      await checkControl();
       await onProgress({
         totalIssues,
         processedIssues,
@@ -2562,6 +2661,7 @@ export class JiraMigrationImportService {
         skippedAttachments,
         currentIssueKey,
         currentStep,
+        stageSequence,
         warnings: [...warnings],
         ...(issueResult ? { issueResult } : {}),
       });
@@ -2578,11 +2678,13 @@ export class JiraMigrationImportService {
         return;
       }
 
+      await checkControl();
       relationshipIssues.push(
         ...issuesChunk.map(issue => this.buildIssueRelationshipSnapshot(issue, parentFieldIds)),
       );
 
       for (const issue of issuesChunk) {
+        await checkControl();
         const statusName = issue.fields.status?.name?.trim();
         if (!statusName) {
           throw new Error(`Jira issue ${issue.key} is missing status; StatusV2 mapping cannot continue`);
@@ -2591,7 +2693,7 @@ export class JiraMigrationImportService {
         const mappedStatusV2 = normalizedStatusV2Mappings.get(normalize(statusName));
         if (!mappedStatusV2) {
           throw new Error(
-            `Missing StatusV2 mapping for Jira status '${statusName}'. Add mappings for all statuses before migrating.`,
+            `Missing StatusV2 mapping for Jira status '${statusName}'. Add mappings for all before migrating.`,
           );
         }
       }
@@ -2603,13 +2705,20 @@ export class JiraMigrationImportService {
         issuesChunk,
         stages,
         normalizedStatusV2Mappings,
+        jiraStatusOrder ?? undefined,
+        input.excludedStageNames,
       );
+      stageSequence = stages.map(stage => ({
+        sequenceNumber: stage.sequenceNumber,
+        name: stage.name,
+        defaultTicketStatusV2: stage.defaultTicketStatusV2,
+      }));
 
       const incrementalFieldSetup = await this.ensureBoardCustomFieldsIncremental(
         board.id,
         board.name,
         actorUserId,
-        project.workspaceId,
+        workspaceId,
         fieldDefinitions,
         issuesChunk,
         fieldMap,
@@ -2639,6 +2748,7 @@ export class JiraMigrationImportService {
       await ensureInitialProgress();
 
       for (const issue of issuesChunk) {
+        await checkControl();
         const existingTicket = await this.findExistingTicketByJiraId(externalSourceId, issue.id, issue.key);
         let ticketId = existingTicket?.id;
         let conversationId = existingTicket?.conversationId;
@@ -2646,18 +2756,19 @@ export class JiraMigrationImportService {
         const reporter = issue.fields.reporter as JiraUser | undefined;
         const assignee = issue.fields.assignee as JiraUser | undefined;
         const statusName = issue.fields.status?.name || 'Open';
+        const resolvedStageName = statusName;
         const mappedStatusV2 = normalizedStatusV2Mappings.get(normalize(statusName));
 
         if (!mappedStatusV2) {
           throw new Error(
-            `Missing StatusV2 mapping for Jira status '${statusName}'. Add mappings for all statuses before migrating.`,
+            `Missing StatusV2 mapping for Jira status '${resolvedStageName}'. Add mappings for all before migrating.`,
           );
         }
 
-        const mappedStage = stages.find(stage => normalize(stage.name) === normalize(statusName));
+        const mappedStage = stages.find(stage => normalize(stage.name) === normalize(resolvedStageName));
         if (!mappedStage) {
           throw new Error(
-            `Stage '${statusName}' was not found or could not be created on board '${board.name}'`,
+            `Stage '${resolvedStageName}' was not found or could not be created on board '${board.name}'`,
           );
         }
 
@@ -2780,12 +2891,12 @@ export class JiraMigrationImportService {
                   priority: mapPriority(issue.fields.priority?.name),
                   xyneId,
                   ticketType: issue.fields.issuetype?.name || undefined,
-                  stageName: stageMatch.stageName,
-                  createdAt: createdAt.toISOString(),
-                  workspaceId: project.workspaceId,
-                },
-                tx as any,
-              );
+	                  stageName: stageMatch.stageName,
+	                  createdAt: createdAt.toISOString(),
+	                  workspaceId,
+	                },
+	                tx as any,
+	              );
 
               const ticketMd = serializeTicketMd({
                 id: createdTicket.id,
@@ -2849,13 +2960,13 @@ export class JiraMigrationImportService {
                 xyneId: ticket.xyneId,
                 title: ticket.title,
                 description: ticket.description,
-                createdBy: ticket.createdBy,
-                assignedTo: ticket.assignedTo,
-                workspaceId: project.workspaceId,
-              },
-              issue.id,
-              issue.key,
-            );
+	                createdBy: ticket.createdBy,
+	                assignedTo: ticket.assignedTo,
+	                workspaceId,
+	              },
+	              issue.id,
+	              issue.key,
+	            );
             this.cacheExternalMapping(issue.id, ticket.id, ExternalEntityType.TICKET);
             this.cacheExternalMapping(
               this.buildIssueRootMessageExternalId(issue.id),
@@ -3081,15 +3192,15 @@ export class JiraMigrationImportService {
           }
 
           try {
-            const attachmentResult = await this.importAttachments(
-              externalSourceId,
-              issue,
-              ticketId,
-              conversationId,
-              fallbackUserId,
-              unresolvedUsers,
-              project.workspaceId,
-            );
+	            const attachmentResult = await this.importAttachments(
+	              externalSourceId,
+	              issue,
+	              ticketId,
+	              conversationId,
+	              fallbackUserId,
+	              unresolvedUsers,
+	              workspaceId,
+	            );
             importedAttachments += attachmentResult.imported;
             skippedAttachments += attachmentResult.skipped;
           } catch (error) {
@@ -3108,17 +3219,17 @@ export class JiraMigrationImportService {
 
           if (importedCommentData) {
             try {
-              const commentAttachmentResult = await this.importCommentAttachments(
-                externalSourceId,
-                issue,
-                conversationId,
-                ticketId,
-                importedCommentData.comments,
-                importedCommentData.commentMessageMap,
-                fallbackUserId,
-                unresolvedUsers,
-                project.workspaceId,
-              );
+	              const commentAttachmentResult = await this.importCommentAttachments(
+	                externalSourceId,
+	                issue,
+	                conversationId,
+	                ticketId,
+	                importedCommentData.comments,
+	                importedCommentData.commentMessageMap,
+	                fallbackUserId,
+	                unresolvedUsers,
+	                workspaceId,
+	              );
               importedAttachments += commentAttachmentResult.imported;
               skippedAttachments += commentAttachmentResult.skipped;
               if (commentAttachmentResult.warnings.length > 0) {
@@ -3192,16 +3303,24 @@ export class JiraMigrationImportService {
       const selectedIssues = await this.jiraClient.fetchIssuesByKeys(jiraProjectKey, resolvedIssueKeys, input.dateFrom);
       totalIssues = selectedIssues.length;
       await ensureInitialProgress();
-      await processIssuesChunk(selectedIssues);
+      const selectedIssueChunks = chunkArray(selectedIssues, config.jiraMigration.issuePageSize);
+      for (const [chunkIndex, issuesChunk] of selectedIssueChunks.entries()) {
+        await checkControl();
+        await processIssuesChunk(issuesChunk);
+        if (config.jiraMigration.batchDelayMs > 0 && chunkIndex < selectedIssueChunks.length - 1) {
+          await sleep(config.jiraMigration.batchDelayMs);
+        }
+      }
     } else if (input.filters) {
       totalIssues = 0;
       await ensureInitialProgress();
     } else {
       let nextPageToken: string | undefined;
       let hasNextPage = true;
-      const pageSize = 100;
+      const pageSize = config.jiraMigration.issuePageSize;
 
       while (hasNextPage) {
+        await checkControl();
         const page = await this.jiraClient.fetchIssuesPage(jiraProjectKey, nextPageToken, pageSize, input.dateFrom);
         if (!initialProgressPublished) {
           totalIssues = page.total;
@@ -3209,6 +3328,9 @@ export class JiraMigrationImportService {
         }
 
         await processIssuesChunk(page.issues);
+        if (config.jiraMigration.batchDelayMs > 0 && page.issues.length > 0) {
+          await sleep(config.jiraMigration.batchDelayMs);
+        }
 
         nextPageToken = page.nextPageToken || undefined;
         hasNextPage = page.hasNextPage;

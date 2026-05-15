@@ -41,7 +41,7 @@ export const ProjectForm = ({
     // Validate project code for new projects (required)
     const sanitizedCode = sanitizeProjectCode(code);
     if (!isEdit && !isValidProjectCode(sanitizedCode)) {
-      setError('Project code must be at least 3 uppercase letters/numbers (e.g., EUL, PRO1, XY2)');
+      setError('Project code must be at least 2 uppercase letters/numbers (e.g., EU, PR, X2)');
       return;
     }
 
