@@ -21,7 +21,7 @@ import { createDirectMessageActivities } from '@/utils/messageActivityUtils';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { activityTrackingService } from '@/services/activityTrackingService';
-import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkPreviewMd, type MessagePreviewData, type TicketPreviewSnapshot } from '@xyne/shared';
+import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkPreviewMd, parseForwardedMessageXml, type MessagePreviewData, type TicketPreviewSnapshot } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -38,6 +38,41 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 const LARGE_GROUP_DM_THRESHOLD = 8;
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
+
+function getNotificationPreviewContent(content: string, msgType: string, hasAttachment: boolean): string {
+  let cleanContent = '';
+
+  if (msgType === 'FORWARDED') {
+    const forwardedMessage = parseForwardedMessageXml(content);
+    if (forwardedMessage) {
+      const notePreview = forwardedMessage.optionalText
+        ? getPlainTextNotificationContent(forwardedMessage.optionalText)
+        : '';
+      const forwardedPreview = getPlainTextNotificationContent(forwardedMessage.content);
+      const forwardedSummary = forwardedPreview
+        ? `Forwarded from ${forwardedMessage.originalSenderName}: ${forwardedPreview}`
+        : `Forwarded a message from ${forwardedMessage.originalSenderName}`;
+
+      cleanContent = [notePreview, forwardedSummary]
+        .filter(Boolean)
+        .join(' ');
+    }
+  }
+
+  if (!cleanContent) {
+    cleanContent = getPlainTextNotificationContent(content);
+  }
+
+  if (!cleanContent && hasAttachment) {
+    return msgType === 'FORWARDED' ? 'Forwarded an attachment' : 'Sent an attachment';
+  }
+
+  return cleanContent;
+}
+
+function getPlainTextNotificationContent(content: string): string {
+  return extractPlainTextFromHtml(content).replace(/\s+/g, ' ').trim();
+}
 
 export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -131,10 +166,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const channelName = channel?.name || 'Unknown Channel';
     const senderName = sender?.name || 'Someone';
-    let cleanContent = content.replace(/<[^>]*>/g, '');
-    if (!cleanContent.trim() && message.hasAttachment) {
-      cleanContent = 'Sent an attachment';
-    }
+    const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
     const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
     const specialMentions = extractSpecialMentions(content);
     const mentionType = specialMentions.hasChannel ? '@channel' : specialMentions.hasHere ? '@here' : undefined;
