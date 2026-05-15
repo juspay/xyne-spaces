@@ -971,6 +971,10 @@ export const router = createBrowserRouter([
                 element: <CallPage />,
               },
               {
+                path: 'call/:callId',
+                element: <CallRouteHandler />,
+              },
+              {
                 path: 'recordings',
                 element: <RecordingsScreen />,
               },
