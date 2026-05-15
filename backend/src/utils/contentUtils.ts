@@ -2,6 +2,36 @@ import { convert } from 'html-to-text';
 import DOMPurify from 'isomorphic-dompurify';
 import { logger } from '@/utils/logger';
 
+const CUSTOM_EMOJI_IMG_REGEX = /<img\b(?=[^>]*\bdata-emoji-id=["'][^"']+["'])([^>]*)>/gi;
+
+function getHtmlAttribute(attrs: string, name: string): string | null {
+  const match = attrs.match(new RegExp(`\\b${name}=["']([^"']*)["']`, 'i'));
+  return match?.[1] ?? null;
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(parseInt(code, 10)));
+}
+
+export function replaceCustomEmojiImagesWithAltText(htmlContent: string): string {
+  return htmlContent.replace(CUSTOM_EMOJI_IMG_REGEX, (_full, attrs: string) => {
+    const alt = getHtmlAttribute(attrs, 'alt');
+    if (alt) {
+      return ` ${decodeHtmlEntities(alt)} `;
+    }
+
+    const title = getHtmlAttribute(attrs, 'title');
+    return title ? ` :${decodeHtmlEntities(title)}: ` : ' ';
+  });
+}
+
 /**
  * Sanitize text to prevent XSS by stripping all HTML tags
  * Uses DOMPurify with no allowed tags for maximum security
@@ -66,7 +96,7 @@ export function extractPlainTextFromHtml(htmlContent: string): string {
     return '';
   }
   try {
-    const plainText = convert(htmlContent, {
+    const plainText = convert(replaceCustomEmojiImagesWithAltText(htmlContent), {
       wordwrap: false,
       selectors: [
         // Preserve code blocks with some formatting
