@@ -232,6 +232,13 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findByConversationId(conversationId: string): Promise<MessageAttachment[]> {
+    return await this.db.messageAttachment.findMany({
+      where: { conversationId, isDeleted: false },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async findByEntityIdAndType(entityId: string, entityType: AttachmentEntityType): Promise<MessageAttachment[]> {
     return await this.db.messageAttachment.findMany({
       where: {

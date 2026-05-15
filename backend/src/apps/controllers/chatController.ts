@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { findOrCreateConversation, updateConversation, getChannelHistory, getConversationReplies } from '../core/conversationUtils';
+import { repositories } from '@/database/repositories';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
@@ -102,7 +103,33 @@ const ConversationRepliesQuerySchema = z.object({
   cursor: z.string().optional(),
 });
 
+const ConversationAttachmentsQuerySchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID is required').trim(),
+});
+
 export class ChatController {
+  /**
+   * Get all attachments for a conversation
+   * GET /api/external-event/chat/conversationAttachments?conversationId=xxx
+   */
+  getConversationAttachments = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const queryResult = ConversationAttachmentsQuerySchema.safeParse(req.query);
+      if (!queryResult.success) {
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: queryResult.error.errors });
+        return;
+      }
+
+      const { conversationId } = queryResult.data;
+      const attachments = await repositories.messageAttachments.findByConversationId(conversationId);
+
+      res.status(200).json({ conversationId, attachments });
+    } catch (error) {
+      logger.error('Error fetching conversation attachments:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   private blockKitParser: SlackBlockKitParser;
 
   constructor() {

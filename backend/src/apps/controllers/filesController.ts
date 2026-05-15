@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { ingestAttachment } from '../core/fileUtils';
 import { resolveChannelId } from '../utils/channelUtils';
+import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
+import { storageService, getStorageService } from '@/services/storage/index';
+import { normalizeStoragePath } from '@/services/storage/pathUtils';
+import { config } from '@/config/env';
 
 const UploadFilesBodySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
@@ -18,6 +22,95 @@ const UploadFilesBodySchema = z.object({
 );
 
 export class FilesController {
+  private messageAttachmentRepository: MessageAttachmentRepository;
+
+  constructor() {
+    this.messageAttachmentRepository = new MessageAttachmentRepository();
+  }
+
+  /**
+   * Get file metadata by attachment ID
+   * GET /api/external-event/files/info/:attachmentId
+   */
+  getFileInfo = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { attachmentId } = req.params;
+      const workspaceId = req.body.workspaceId as string | undefined;
+
+      const attachment = await this.messageAttachmentRepository.findById(attachmentId);
+      if (!attachment) {
+        res.status(404).json({ error: 'Attachment not found', code: 'NOT_FOUND' });
+        return;
+      }
+
+      if (workspaceId && attachment.workspaceId !== workspaceId) {
+        res.status(403).json({ error: 'Access denied', code: 'FORBIDDEN' });
+        return;
+      }
+
+      res.status(200).json({
+        id: attachment.id,
+        originalFilename: attachment.originalFilename,
+        mimetype: attachment.mimetype,
+        size: attachment.size,
+        width: attachment.width,
+        height: attachment.height,
+        thumbnailUrl: attachment.thumbnailUrl,
+        createdAt: attachment.createdAt,
+        conversationId: attachment.conversationId,
+      });
+    } catch (error) {
+      logger.error('Error fetching file info:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Download a file by attachment ID (wrapper over internal attachment download logic)
+   * GET /api/external-event/files/download/:attachmentId
+   */
+  downloadFile = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { attachmentId } = req.params;
+      const workspaceId = req.body.workspaceId as string | undefined;
+
+      const attachment = await this.messageAttachmentRepository.findById(attachmentId);
+      if (!attachment) {
+        res.status(404).json({ error: 'Attachment not found', code: 'NOT_FOUND' });
+        return;
+      }
+
+      if (workspaceId && attachment.workspaceId !== workspaceId) {
+        res.status(403).json({ error: 'Access denied', code: 'FORBIDDEN' });
+        return;
+      }
+
+      const filePath = normalizeStoragePath(attachment.url);
+      if (!filePath) {
+        res.status(404).json({ error: 'Attachment not yet uploaded', code: 'NOT_FOUND' });
+        return;
+      }
+
+      const meta = attachment.metadata as { type?: string };
+      const service = meta?.type === 'transcript' || meta?.type === 'identified_transcript'
+        ? getStorageService(config.gcs.transcriptionBucketName)
+        : storageService;
+
+      const buffer = await service.getFileBuffer(filePath);
+
+      const encodedFilename = encodeURIComponent(attachment.originalFilename);
+      res.setHeader('Content-Type', attachment.mimetype);
+      res.setHeader('Content-Length', buffer.length);
+      res.setHeader('Content-Disposition', `inline; filename="${encodedFilename}"`);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+
+      res.send(buffer);
+    } catch (error) {
+      logger.error('Error downloading file:', error);
+      res.status(500).json({ error: 'Failed to download file' });
+    }
+  };
+
   /**
    * Upload file(s) to a channel or conversation
    * POST /api/external-event/files/upload
