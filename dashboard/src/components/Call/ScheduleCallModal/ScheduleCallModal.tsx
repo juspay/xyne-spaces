@@ -502,9 +502,18 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const callStart = new Date(initialCall.startsAt);
       const callEnd = new Date(initialCall.endsAt);
 
-      // If the call was created for a channel, show the channel as a single entry.
-      // Otherwise expand individual participants.
-      const participantValues: string[] = initialCall.channelId
+      // Only show a channel pill if the call was explicitly created for a real
+      // (DEFAULT-scope) channel. DM/GROUP_DM channels are auto-created by the
+      // backend as an internal routing detail — in those cases show the
+      // individual participants the user actually invited.
+      const callChannel = initialCall.channelId
+        ? allVisibleChannels.find(c => c.id === initialCall.channelId)
+        : null;
+      const isExplicitChannel =
+        callChannel &&
+        callChannel.scopeType !== ChannelScopeType.DM &&
+        callChannel.scopeType !== ChannelScopeType.GROUP_DM;
+      const participantValues: string[] = isExplicitChannel
         ? [`channel:${initialCall.channelId}`]
         : initialCall.participants.filter(p => p.userId !== user?.id).map(p => `user:${p.userId}`);
 
