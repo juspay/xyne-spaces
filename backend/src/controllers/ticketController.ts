@@ -191,7 +191,7 @@ export class TicketController {
         statusV2: statusV2 as TicketStatusV2,
         priority: priority.toUpperCase() as TicketPriority,
         xyneId,
-      });
+      }, tx);
 
       // Post ticket notification as SYSTEM message in conversation
       const now = new Date();
@@ -537,7 +537,7 @@ export class TicketController {
             xyneId,
             ticketType,
             dynamicFields: dynamicFields as Record<string, string>,
-          });
+          }, tx);
 
           const ticketMd = serializeTicketMd({
             id: ticket.id,
@@ -660,7 +660,7 @@ export class TicketController {
             xyneId,
             ticketType,
             dynamicFields: dynamicFields as Record<string, string>,
-          });
+          }, tx);
 
           await this.messageRepository.createWithExecutionId({
             conversationId,
