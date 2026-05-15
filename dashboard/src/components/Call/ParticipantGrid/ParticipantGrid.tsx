@@ -1,7 +1,9 @@
+import { useMemo } from 'react';
 import { cn } from '../../../utils/classNames';
 import { ParticipantTile } from '../ParticipantTile/ParticipantTile';
 import { useGridLayout } from './useGridLayout';
 import { usePagination } from './usePagination';
+import { sortParticipants } from './sortParticipants';
 import { PaginationIndicator } from './PaginationIndicator';
 import { PaginationControls } from './PaginationControls';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
@@ -21,10 +23,25 @@ export function ParticipantGrid({
   aiController,
   requestedAiController,
 }: ParticipantGridProps): React.ReactElement {
+  // Derive AI enablement from aiController presence — same pattern as Lotus ParticipantsGrid
+  const isAIAssistantEnabled = aiController !== null;
   // Max 4 tiles (2x2) for compact view, 16 tiles (4x4) for full view
   const maxTiles = compact ? 4 : 16;
+
+  // Compute layout first using raw participant count — layout.maxTiles is the true
+  // per-page capacity determined by container size, not just the cap.
   const { containerRef, layout } = useGridLayout(participants.length, maxTiles);
-  const pagination = usePagination(layout.maxTiles, participants);
+
+  // Pagination is active when participants spill onto a second page.
+  // This is the canonical signal that sorting matters (so users can find
+  // the most-engaged participants on page 0).
+  const isPaginating = participants.length > layout.maxTiles;
+  const displayParticipants = useMemo(() => {
+    if (!isPaginating) return participants;
+    return sortParticipants(participants, isAIAssistantEnabled);
+  }, [participants, isPaginating, isAIAssistantEnabled]);
+
+  const pagination = usePagination(layout.maxTiles, displayParticipants);
 
   return (
     <div
@@ -55,7 +72,7 @@ export function ParticipantGrid({
       </div>
 
       {/* Pagination Controls */}
-      {participants.length > layout.maxTiles && (
+      {displayParticipants.length > layout.maxTiles && (
         <>
           <PaginationIndicator
             currentPage={pagination.currentPage}
