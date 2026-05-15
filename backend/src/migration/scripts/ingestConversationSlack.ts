@@ -167,8 +167,18 @@ export const findOrCreateApp = async (
   }
 
   const appRepo = new AppsRepository();
-  const app = await appRepo.createApp({ name: botName, createdBy: creatorUser.id });
-  await installApp(app.id, creatorUser.workspaceId);
+  let app: Awaited<ReturnType<typeof appRepo.createApp>>;
+  try {
+    app = await appRepo.createApp({ name: botName, createdBy: creatorUser.id });
+    await installApp(app.id, creatorUser.workspaceId);
+  } catch (err) {
+    // App already exists — find it by name and reuse it
+    const existingApps = await appRepo.findMany({
+      where: { name: { equals: botName.trim(), mode: 'insensitive' } },
+    });
+    if (!existingApps.length) throw err; // unexpected error, re-throw
+    app = existingApps[0];
+  }
 
   const installedAppsRepo = new InstalledAppsRepository();
   const installed = await installedAppsRepo.findFirst({ where: { appId: app.id } });

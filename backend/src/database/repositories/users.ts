@@ -57,6 +57,12 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     });
   }
 
+  async findByEmailCaseInsensitive(email: string, workspaceId: string): Promise<User | null> {
+    return await this.db.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' }, workspaceId },
+    });
+  }
+
   async findByUsername(username: string): Promise<User | null> {
     return await this.db.user.findFirst({
       where: { name: username },

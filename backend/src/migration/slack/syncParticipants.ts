@@ -11,6 +11,7 @@ import { addChannelParticipantsBeforeMigration } from './slackConversationServic
 import { checkUserAuthorization } from './command';
 import { getSyncParticipantsModal } from './utils/blockKit';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
+import { config } from '../../config/env';
 
 export async function handleSyncParticipantsCommand(req: Request, res: Response): Promise<Response> {
   try {
@@ -63,31 +64,33 @@ export async function runSyncParticipants({
 }): Promise<void> {
   const token = process.env.SLACK_BOT_TOKEN!;
   const client = new WebClient(token);
+  const logChannelId = config.slackMigrationLogChannelId || slackChannelId;
 
   const channelRepo = new ChannelRepository();
   const xyneChannel = await channelRepo.findById(xyneSpaceChannelId);
   if (!xyneChannel) {
     logger.warn('[Migration] /sync-participants invalid xyne-space channelId', { xyneSpaceChannelId, userId });
     await postMessage({
-      channelId: slackChannelId,
+      channelId: logChannelId,
       text: `❌ Invalid xyne-space channel ID: \`${xyneSpaceChannelId}\`. Channel not found in database.`,
     });
     return;
   }
 
-  const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${xyneSpaceChannelId}|${xyneChannel.name}>`;
+  const workspaceId = xyneChannel.workspaceId;
+  const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${xyneSpaceChannelId}|${xyneChannel.name}>`;
 
   const startedTs = await postMessage({
-    channelId: slackChannelId,
+    channelId: logChannelId,
     text: `🔄 <@${userId}> :: Started Participant sync for xyne-space channel ${xyneSpaceChannelLink}...`,
   });
 
   try {
-    await addChannelParticipantsBeforeMigration(slackChannelId, xyneSpaceChannelId, true, startedTs ?? undefined);
+    await addChannelParticipantsBeforeMigration(slackChannelId, xyneSpaceChannelId, true, startedTs ?? undefined, logChannelId);
 
     if (startedTs) {
       await client.chat.update({
-        channel: slackChannelId,
+        channel: logChannelId,
         ts: startedTs,
         text: `✅ <@${userId}> :: Participant sync completed for xyne-space channel ${xyneSpaceChannelLink}.`,
       });
@@ -98,7 +101,7 @@ export async function runSyncParticipants({
 
     if (startedTs) {
       await client.chat.update({
-        channel: slackChannelId,
+        channel: logChannelId,
         ts: startedTs,
         text: `❌ Participant sync failed for xyne-space channel ${xyneSpaceChannelLink}:\n${errorMessage}`,
       });

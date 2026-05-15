@@ -90,6 +90,7 @@ export async function extractChannelMembers(channelId: string): Promise<string[]
     logger.info('[ExtractChannelMembers] Successfully fetched channel members', {
       channelId,
       memberCount: allMemberIds.length,
+      userIds: allMemberIds,
     });
 
     return allMemberIds;
