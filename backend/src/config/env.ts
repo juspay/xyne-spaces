@@ -229,6 +229,8 @@ const envSchema = Joi.object({
   CONFLUENCE_API_TOKEN: Joi.string().allow('').default(''),
   CONFLUENCE_AUTH_TOKEN: Joi.string().allow('').default(''),
   CONFLUENCE_MIGRATION_FALLBACK_EMAIL: Joi.string().email().default(''),
+  CONFLUENCE_IMPORT_BATCH_SIZE: Joi.number().integer().min(1).default(50),
+  CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS: Joi.number().integer().min(0).default(5000),
   // Bit-Bot Integration
   ENABLE_FILE_INDEXING: Joi.boolean().default(false),
   VESPA_QUEUE_NAMES: Joi.string().default(''),
@@ -543,6 +545,8 @@ export const config = {
     apiToken: envVars.CONFLUENCE_API_TOKEN as string,
     authToken: envVars.CONFLUENCE_AUTH_TOKEN as string,
     migrationFallbackEmail: envVars.CONFLUENCE_MIGRATION_FALLBACK_EMAIL as string,
+    importBatchSize: envVars.CONFLUENCE_IMPORT_BATCH_SIZE as number,
+    importBatchCooldownMs: envVars.CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS as number,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   email: {
