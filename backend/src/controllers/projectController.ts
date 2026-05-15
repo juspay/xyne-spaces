@@ -47,11 +47,11 @@ export class ProjectController {
       // Sanitize code using shared utility
       const sanitizedCode = sanitizeProjectCode(code);
 
-      // Validate format: at least 3 uppercase letters
+      // Validate format: at least 2 uppercase letters/numbers
       if (!isValidProjectCode(sanitizedCode)) {
         res.status(400).json({
           error: 'Invalid project code',
-          message: `Project code must be at least 3 uppercase letters (e.g., EUL, INT, PROJ). Received: '${code}'`,
+          message: `Project code must be at least 2 uppercase letters/numbers (e.g., EU, PR, X2). Received: '${code}'`,
           sanitizedCode
         });
         return;

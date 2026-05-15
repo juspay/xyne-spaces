@@ -37,6 +37,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'WORKSPACE', description: 'Workspace management access' },
   { name: 'ORGANIZATIONS', description: 'Organization management access' },
   { name: 'INSPECTOR', description: 'Inspector panel access (/inspector)' },
+  { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'}
 ];
 
 // Default user groups with their permissions

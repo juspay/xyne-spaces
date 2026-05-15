@@ -20,11 +20,11 @@ export function sanitizeProjectCode(input: string): string {
 
 /**
  * Validates that a project code meets the minimum requirements
- * - Must be at least 3 alphanumeric characters
+ * - Must be at least 2 alphanumeric characters
  *
  * @param code - Sanitized project code
  * @returns Whether the code is valid
  */
 export function isValidProjectCode(code: string): boolean {
-  return code.length >= 3;
+  return code.length >= 2;
 }

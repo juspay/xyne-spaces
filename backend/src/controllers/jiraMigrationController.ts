@@ -22,6 +22,7 @@ export class JiraMigrationController {
         targetProjectId?: string;
         targetBoardId?: string;
         targetChannelId?: string;
+        jiraBoardId?: number;
         nextPageToken?: string;
         maxResults?: number;
         dateFrom?: string;
@@ -41,6 +42,7 @@ export class JiraMigrationController {
         targetProjectId,
         targetBoardId,
         targetChannelId,
+        ...(typeof req.body.jiraBoardId === 'number' ? { jiraBoardId: req.body.jiraBoardId } : {}),
         nextPageToken: req.body.nextPageToken,
         maxResults: req.body.maxResults,
         dateFrom: typeof req.body.dateFrom === 'string' ? req.body.dateFrom : undefined,
@@ -70,9 +72,12 @@ export class JiraMigrationController {
         targetBoardId?: string;
         targetChannelId?: string;
         issueKeys?: string[];
+        jiraBoardId?: number;
         dateFrom?: string;
         statusV2Mappings?: Record<string, string>;
         skipCustomFieldIds?: string[];
+        jiraStatusSequence?: string[];
+        excludedStageNames?: string[];
         filters?: { reporterAccountIds?: string[]; creatorAccountIds?: string[]; assigneeAccountIds?: string[]; labels?: string[] };
       };
 
@@ -95,6 +100,7 @@ export class JiraMigrationController {
         targetBoardId,
         targetChannelId,
         issueKeys: Array.isArray(req.body.issueKeys) ? req.body.issueKeys : undefined,
+        ...(typeof req.body.jiraBoardId === 'number' ? { jiraBoardId: req.body.jiraBoardId } : {}),
         dateFrom: typeof req.body.dateFrom === 'string' ? req.body.dateFrom : undefined,
         filters: req.body.filters && typeof req.body.filters === 'object' ? {
           ...(Array.isArray(req.body.filters.reporterAccountIds) ? { reporterAccountIds: req.body.filters.reporterAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
@@ -109,6 +115,12 @@ export class JiraMigrationController {
         skipCustomFieldIds: Array.isArray(req.body.skipCustomFieldIds)
           ? req.body.skipCustomFieldIds.filter((fieldId: unknown): fieldId is string => typeof fieldId === 'string')
           : [],
+        jiraStatusSequence: Array.isArray(req.body.jiraStatusSequence)
+          ? req.body.jiraStatusSequence.filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+          : undefined,
+        excludedStageNames: Array.isArray(req.body.excludedStageNames)
+          ? req.body.excludedStageNames.filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+          : undefined,
       };
 
       if (Object.keys(input.statusV2Mappings).length === 0) {
@@ -156,6 +168,97 @@ export class JiraMigrationController {
     }
   };
 
+  stop = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { jobId } = req.params as { jobId?: string };
+      if (!jobId) {
+        res.status(400).json({ error: 'jobId is required' });
+        return;
+      }
+
+      const job = await jiraMigrationProgressService.getJob(jobId);
+      if (!job) {
+        res.status(404).json({ error: 'Migration job not found' });
+        return;
+      }
+
+      if (job.status !== 'running' && job.status !== 'queued') {
+        res.status(400).json({ error: `Job cannot be stopped (status=${job.status})` });
+        return;
+      }
+
+      const next = await jiraMigrationProgressService.patchJob(jobId, { controlStatus: 'cancel_requested' });
+      res.json({ success: true, data: next });
+    } catch (error) {
+      logger.error('Jira migration stop failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to stop Jira migration' });
+    }
+  };
+
+  pause = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { jobId } = req.params as { jobId?: string };
+      if (!jobId) {
+        res.status(400).json({ error: 'jobId is required' });
+        return;
+      }
+
+      const job = await jiraMigrationProgressService.getJob(jobId);
+      if (!job) {
+        res.status(404).json({ error: 'Migration job not found' });
+        return;
+      }
+
+      if (job.controlStatus === 'cancel_requested') {
+        res.status(400).json({ error: 'Job is already stopped' });
+        return;
+      }
+
+      if (job.status !== 'running') {
+        res.status(400).json({ error: `Job is not running (status=${job.status})` });
+        return;
+      }
+
+      const next = await jiraMigrationProgressService.patchJob(jobId, { controlStatus: 'paused', currentStep: 'paused' });
+      res.json({ success: true, data: next });
+    } catch (error) {
+      logger.error('Jira migration pause failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to pause Jira migration' });
+    }
+  };
+
+  resume = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { jobId } = req.params as { jobId?: string };
+      if (!jobId) {
+        res.status(400).json({ error: 'jobId is required' });
+        return;
+      }
+
+      const job = await jiraMigrationProgressService.getJob(jobId);
+      if (!job) {
+        res.status(404).json({ error: 'Migration job not found' });
+        return;
+      }
+
+      if (job.controlStatus === 'cancel_requested') {
+        res.status(400).json({ error: 'Job is already stopped' });
+        return;
+      }
+
+      if (job.status !== 'running') {
+        res.status(400).json({ error: `Job is not running (status=${job.status})` });
+        return;
+      }
+
+      const next = await jiraMigrationProgressService.patchJob(jobId, { controlStatus: 'running' });
+      res.json({ success: true, data: next });
+    } catch (error) {
+      logger.error('Jira migration resume failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to resume Jira migration' });
+    }
+  };
+
 
   history = async (_req: Request, res: Response): Promise<void> => {
     try {
@@ -194,6 +297,7 @@ export class JiraMigrationController {
     try {
       await jiraMigrationProgressService.patchJob(jobId, {
         status: 'running',
+        controlStatus: 'running',
         currentStep: 'starting',
         currentIssueKey: null,
       });
@@ -204,6 +308,7 @@ export class JiraMigrationController {
         async (update: JiraMigrationProgressUpdate) => {
           await this.handleProgressUpdate(jobId, update);
         },
+        async () => (await jiraMigrationProgressService.getJob(jobId))?.controlStatus,
       );
 
       await jiraMigrationProgressService.patchJob(jobId, {
@@ -389,52 +494,75 @@ export class JiraMigrationController {
     const canvasId = randomUUID();
     const viewAccessId = randomUUID();
     const participantId = randomUUID();
-    await db.$transaction(async tx => {
-      await tx.canvas.create({
-        data: {
-          id: canvasId,
-          title: `Jira Migration Report: ${result.jiraProjectKey}`,
-          content: this.buildMigrationReportCanvasBlocks(result) as any,
-          channelId,
-          createdBy: actorUserId,
-          viewAccessId,
-          editAccessId: null,
-          visibility: 'PUBLIC',
-          isTemplate: false,
-          isCollaborative: false,
-          lastEditedBy: actorUserId,
-          lastEditedAt: now,
-          createdAt: now,
-          updatedAt: now,
-          metadata: {
-            source: 'jira_migration_report',
-            jiraProjectKey: result.jiraProjectKey,
-            externalSourceId: result.externalSourceId || null,
-            summary: {
-              importedTickets: result.importedTickets,
-              skippedTickets: result.skippedTickets,
-              importedComments: result.importedComments,
-              importedAttachments: result.importedAttachments,
-              warnings: result.warnings.length,
-              ...this.getMigrationReportSummary(result),
+    try {
+      await db.$transaction(async tx => {
+        await tx.canvas.create({
+          data: {
+            id: canvasId,
+            title: `Jira Migration Report: ${result.jiraProjectKey}`,
+            content: this.buildMigrationReportCanvasBlocks(result) as any,
+            channelId,
+            createdBy: actorUserId,
+            viewAccessId,
+            editAccessId: null,
+            visibility: 'PUBLIC',
+            isTemplate: false,
+            isCollaborative: false,
+            lastEditedBy: actorUserId,
+            lastEditedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            metadata: {
+              source: 'jira_migration_report',
+              jiraProjectKey: result.jiraProjectKey,
+              externalSourceId: result.externalSourceId || null,
+              summary: {
+                importedTickets: result.importedTickets,
+                skippedTickets: result.skippedTickets,
+                importedComments: result.importedComments,
+                importedAttachments: result.importedAttachments,
+                warnings: result.warnings.length,
+                ...this.getMigrationReportSummary(result),
+              },
             },
           },
-        },
-      });
+        });
 
-      await tx.canvasParticipant.create({
-        data: {
-          id: participantId,
-          canvasId,
-          userId: actorUserId,
-          role: 'OWNER',
-          joinedAt: now,
-          updatedAt: now,
-        },
+        await tx.canvasParticipant.create({
+          data: {
+            id: participantId,
+            canvasId,
+            userId: actorUserId,
+            role: 'OWNER',
+            joinedAt: now,
+            updatedAt: now,
+          },
+        });
       });
+    } catch (error) {
+      logger.error('[JiraMigration] Canvas report create failed', error, {
+        jiraProjectKey: result.jiraProjectKey,
+        externalSourceId: result.externalSourceId || null,
+        channelId,
+        actorUserId,
+        canvasId,
+        viewAccessId,
+      });
+      throw error;
+    }
+
+    const canvasUrl = getCanvasUrl(viewAccessId);
+    logger.info('[JiraMigration] Canvas report created', {
+      jiraProjectKey: result.jiraProjectKey,
+      externalSourceId: result.externalSourceId || null,
+      channelId,
+      actorUserId,
+      canvasId,
+      viewAccessId,
+      canvasUrl,
     });
 
-    return getCanvasUrl(viewAccessId);
+    return canvasUrl;
   }
 
   private async postMigrationReport(
@@ -445,7 +573,17 @@ export class JiraMigrationController {
     const conversationId = randomUUID();
     const messageId = randomUUID();
     const now = new Date();
-    const canvasUrl = await this.createMigrationReportCanvas(channelId, actorUserId, result);
+    let canvasUrl: string | null = null;
+    try {
+      canvasUrl = await this.createMigrationReportCanvas(channelId, actorUserId, result);
+    } catch (error) {
+      logger.error('[JiraMigration] Canvas report failed; posting summary message without canvas link', error, {
+        channelId,
+        actorUserId,
+        jiraProjectKey: result.jiraProjectKey,
+        externalSourceId: result.externalSourceId || null,
+      });
+    }
     const { completedIssues, partialIssues, failedIssues } = this.getMigrationReportSummary(result);
     const messageContent = [
       `Jira migration report · ${result.jiraProjectKey}`,
@@ -455,8 +593,7 @@ export class JiraMigrationController {
       `Attachments: ${result.importedAttachments} imported · ${result.skippedAttachments} skipped`,
       `Issue status: ${completedIssues} completed · ${partialIssues} partial · ${failedIssues} failed`,
       `Warnings: ${result.warnings.length}`,
-      '',
-      `View full report: ${canvasUrl}`,
+      ...(canvasUrl ? ['', `View full report: ${canvasUrl}`] : []),
     ].join('\n');
 
     await db.$transaction(async tx => {
@@ -555,8 +692,15 @@ export class JiraMigrationController {
       skippedAttachments: update.skippedAttachments,
       currentIssueKey: update.currentIssueKey,
       currentStep: update.currentStep,
+      stageSequence: update.stageSequence,
       warnings: update.warnings,
     });
+
+    // Stop controls (checked between progress ticks)
+    const job = await jiraMigrationProgressService.getJob(jobId);
+    if (job?.controlStatus === 'cancel_requested') {
+      throw new Error('Migration stopped by user');
+    }
 
     if (update.issueResult) {
       await jiraMigrationProgressService.upsertIssueResult(jobId, update.issueResult);
