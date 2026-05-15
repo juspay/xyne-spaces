@@ -7,6 +7,8 @@ import express, { Router, Request, Response } from 'express';
 import slackRoutes from './slack';
 import jiraRoutes from './jira';
 import confluenceRoutes from './confluence';
+import cleanupRoutes from './cleanUp';
+import userActivationRoutes from '@/routes/userActivation';
 
 const router = Router();
 
@@ -21,6 +23,11 @@ router.use('/jira', jiraRoutes);
 
 // Route to Confluence migration
 router.use('/confluence', confluenceRoutes);
+// Cleanup routes
+router.use('/cleanup', cleanupRoutes);
+
+// User activation routes (accessible at /migrate/api/migration/user-activation)
+router.use('/user-activation', userActivationRoutes);
 
 // Handle unknown migration routes
 router.use('*', (req: Request, res: Response) => {

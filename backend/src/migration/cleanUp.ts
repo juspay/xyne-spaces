@@ -1,0 +1,19 @@
+import { Router } from 'express';
+import { authMiddleware } from '@/middleware/auth';
+import { authorize } from '@/middleware/authorize';
+import { AccessType } from '@prisma/client';
+import { MigrationCleanupController } from '@/controllers/migrationCleanupController';
+
+const router = Router();
+const controller = new MigrationCleanupController();
+const migrationAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
+
+/**
+ * DELETE /api/migration/cleanup/orphan-conversations
+ * Body: { channelId?: string }
+ * Deletes conversations with initialMessageId = 'temp' (orphaned from failed migrations).
+ * Omit channelId to delete across ALL channels (use with caution).
+ */
+router.delete('/orphan-conversations', authMiddleware.authenticate, migrationAdminAuth, controller.cleanupOrphanConversations);
+
+export default router;

@@ -340,7 +340,9 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
   isBot?: boolean;
 }> {
   if (cache.has(slackUID)) {
-    return cache.get(slackUID)!;
+    const cached = cache.get(slackUID)!;
+    logger.info('[getUserInfo] Cache hit', { slackUID, cached });
+    return cached;
   }
 
   try {
@@ -350,6 +352,8 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
     if (user) {
       const result = {
         userId: user.id,
+        userEmail: user.email,
+        userName: user.name,
       };
       cache.set(slackUID, result);
       return result;
@@ -367,6 +371,7 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
   }
 
   const userInfo = await retryWithBackoff(() => fetchSlackUserInfo(slackUID, token));
+  logger.info('[extractUserFromSlackUID] fetchSlackUserInfo returned', { slackUID, hasUserInfo: !!userInfo, userId: userInfo?.id, isBot: userInfo?.is_bot, deleted: userInfo?.deleted, hasProfile: !!userInfo?.profile, hasEmail: !!userInfo?.profile?.email });
 
   if (!userInfo || !userInfo.profile?.email) {
     const result = {
@@ -388,15 +393,16 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
   try {
     const userRepo = new UserRepository();
     // Migration context - workspaceId from config (same pattern as qa-alert-bot)
+    const emailLower = userInfo.profile.email.toLowerCase();
     const workspaceId = config.defaultWorkspaceId;
     if (!workspaceId) {
       return {};
     }
-    const userByEmail = await userRepo.findByEmail(userInfo.profile.email, workspaceId);
+    const userByEmail = await userRepo.findByEmailCaseInsensitive(emailLower, workspaceId);
 
     if (userByEmail) {
       await userRepo.upsertMetaDataField(userByEmail.id, 'slackId', slackUID);
-      
+
       const result = {
         userId: userByEmail.id,
       };
@@ -416,7 +422,6 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
     isDeactivated: userInfo.deleted,
     botId: userInfo.profile?.bot_id,
   };
-
   cache.set(slackUID, result);
   return result;
 }

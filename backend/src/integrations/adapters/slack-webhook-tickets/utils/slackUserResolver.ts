@@ -77,20 +77,34 @@ export async function fetchSlackUserInfo(
   botOauthToken: string
 ): Promise<SlackUserInfo | null> {
   try {
+    logger.info('[fetchSlackUserInfo] Creating WebClient', { slackUserId });
     const client = new WebClient(botOauthToken);
 
+    logger.info('[fetchSlackUserInfo] Calling client.users.info', { slackUserId });
     const result = await client.users.info({
       user: slackUserId,
     });
 
+    logger.info('[fetchSlackUserInfo] Got result from Slack', { slackUserId, resultOk: result.ok, hasUser: !!result.user, error: result.error });
+
     if (!result.ok || !result.user) {
-      logger.warn('Failed to fetch Slack user info', { slackUserId, error: result.error });
+      logger.warn('[fetchSlackUserInfo] Failed to fetch Slack user info - invalid result', { slackUserId, error: result.error, resultOk: result.ok, hasUser: !!result.user });
       return null;
     }
 
+    logger.info('[fetchSlackUserInfo] Success', { slackUserId, userId: result.user.id, isBot: result.user.is_bot });
     return result.user as SlackUserInfo;
   } catch (error) {
-    logger.error('Error fetching Slack user info', { slackUserId, error });
+    const errorDetails = error instanceof Error ? {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    } : { error };
+
+    logger.error('Error fetching Slack user info', {
+      slackUserId,
+      ...errorDetails,
+    });
     return null;
   }
 }

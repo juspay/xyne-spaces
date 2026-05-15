@@ -423,9 +423,6 @@ export class App {
       userManagementRoutes
     );
 
-    // User activation routes - admin operations (auth and authorize handled in route)
-    // migration/user-activation (via migration service)
-    this.app.use('/migration/user-activation', userActivationRoutes);
     // user deactivation from dashboard 
     this.app.use('/api/user-activation', userActivationRoutes);
 

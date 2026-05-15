@@ -175,7 +175,8 @@ async function processBatch(
   batch: TimeBatch,
   input: MigrationInput,
   externalSourceName: string,
-  messageTs: string | null | undefined
+  messageTs: string | null | undefined,
+  logChannelId: string,
 ): Promise<BatchResult> {
   const { channelId, xyneSpaceChannelId, syncOptions } = input;
 
@@ -195,7 +196,7 @@ async function processBatch(
   // Notify user
   if (ENABLE_NOTIFICATIONS && messageTs) {
     await postMessage({
-      channelId,
+      channelId: logChannelId,
       text: `🔄 Processing batch ${batch.batchNumber}/${batch.totalBatches} (${batch.startDate} to ${batch.endDate})`,
       threadTs: messageTs,
     });
@@ -214,7 +215,7 @@ async function processBatch(
 
   if (ENABLE_NOTIFICATIONS && messageTs) {
     await postMessage({
-      channelId,
+      channelId: logChannelId,
       text: `✅ Batch ${batch.batchNumber}/${batch.totalBatches} extracted: ${conversationHistory.length} messages`,
       threadTs: messageTs,
     });
@@ -240,7 +241,7 @@ async function processBatch(
 
     if (ENABLE_NOTIFICATIONS && messageTs) {
       await postMessage({
-        channelId,
+        channelId: logChannelId,
         text: `✅ Batch ${batch.batchNumber}/${batch.totalBatches} ingested`,
         threadTs: messageTs,
       });
@@ -291,8 +292,10 @@ export async function addChannelParticipantsBeforeMigration(
   slackChannelId: string,
   xyneChannelId: string,
   batchSync: boolean = false,
-  threadTs?: string
+  threadTs?: string,
+  logChannelId?: string
 ): Promise<void> {
+  logChannelId = logChannelId || slackChannelId;
   logger.info('[Migration] Preparing channel participants before migration', {
     slackChannelId,
     xyneChannelId,
@@ -453,13 +456,13 @@ export async function addChannelParticipantsBeforeMigration(
             existingCount: result.existingCount,
           });
           await postMessage({
-            channelId: slackChannelId,
+            channelId: logChannelId,
             text: `✅ Batch ${batchNum}/${totalBatches}: added ${result.addedCount} participant(s).`,
             threadTs,
           });
           if (i + BATCH_SIZE < memberUserIds.length) {
             await postMessage({
-              channelId: slackChannelId,
+              channelId: logChannelId,
               text: `⏳ Waiting 60 seconds before next batch...`,
               threadTs,
             });
@@ -498,6 +501,11 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
   let messageTs: string | null = null;
 
+  // All progress/error messages go to the dedicated log channel if configured,
+  // falling back to the source channel. The final @channel announcement always
+  // goes to the source channel regardless.
+  const logChannelId = config.slackMigrationLogChannelId || input.channelId!;
+
   try {
     // Validate input
     await validateInput(input);
@@ -508,11 +516,12 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
       if (xyneChannel) {
         const channelName = xyneChannel.name;
-        xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+        const workspaceId = xyneChannel.workspaceId;
+        xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${input.xyneSpaceChannelId}|${channelName}>`;
       }
     }
 
-    // Post initial message
+    // Post initial message to log channel
     const blocks = getMigrationMessageBlocks({
       syncDate: input.syncDate!,
       userId: input.userId,
@@ -523,7 +532,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
     messageTs = ENABLE_NOTIFICATIONS
       ? await postMessage({
-          channelId: input.channelId!,
+          channelId: logChannelId,
           text: fallbackText,
           blocks,
         })
@@ -533,12 +542,12 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     if (input.xyneSpaceChannelId) {
       if (ENABLE_NOTIFICATIONS && messageTs) {
         await postMessage({
-          channelId: input.channelId!,
+          channelId: logChannelId,
           text: '🔄 Syncing channel participants...',
           threadTs: messageTs,
         });
       }
-      await addChannelParticipantsBeforeMigration(input.channelId!, input.xyneSpaceChannelId);
+      await addChannelParticipantsBeforeMigration(input.channelId!, input.xyneSpaceChannelId, false, messageTs ?? undefined, logChannelId);
     }
 
     // Create time batches
@@ -546,7 +555,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
     if (ENABLE_NOTIFICATIONS && messageTs) {
       await postMessage({
-        channelId: input.channelId!,
+        channelId: logChannelId,
         text: `🔄 Migration initiated - Processing ${batches.length} batches (${BATCH_SIZE_DAYS} days each)`,
         threadTs: messageTs,
       });
@@ -562,14 +571,14 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       const batch = batches[i];
 
       try {
-        const result = await processBatch(batch, input, externalSourceName, messageTs);
+        const result = await processBatch(batch, input, externalSourceName, messageTs, logChannelId);
         totalMessages += result.messages;
 
         // Delay between batches (except last)
         if (i < batches.length - 1) {
           if (ENABLE_NOTIFICATIONS && messageTs) {
             await postMessage({
-              channelId: input.channelId!,
+              channelId: logChannelId,
               text: `⏳ Waiting ${BATCH_DELAY_MS / 1000} seconds before next batch...`,
               threadTs: messageTs,
             });
@@ -585,7 +594,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
         if (ENABLE_NOTIFICATIONS && messageTs) {
           await postMessage({
-            channelId: input.channelId!,
+            channelId: logChannelId,
             text: `❌ Batch ${batch.batchNumber}/${batch.totalBatches} failed: ${
               error instanceof Error ? error.message : 'Unknown error'
             }`,
@@ -596,26 +605,33 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       }
     }
 
-    // Post final summary
+    // Post final summary to log channel (threaded)
     if (ENABLE_NOTIFICATIONS && messageTs) {
       if (input.xyneSpaceChannelId) {
         await postMessage({
-          channelId: input.channelId!,
+          channelId: logChannelId,
           text: `🎉 Migration complete!\n\nTotal messages: ${totalMessages}`,
           threadTs: messageTs,
         });
       } else {
         await postMessage({
-          channelId: input.channelId!,
+          channelId: logChannelId,
           text: `🎉 Extraction complete!\n\nTotal messages extracted: ${totalMessages}\n⚠️ No Xyne channel selected - ingestion skipped`,
           threadTs: messageTs,
         });
       }
     }
 
+    // Final @channel announcement always goes to the source channel
     if (ENABLE_NOTIFICATIONS) {
-      const xyneSpacesLink = input.xyneSpaceChannelId
-        ? `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|Xyne Spaces>`
+      let xyneSpaceWorkspaceId: string | undefined;
+      if (input.xyneSpaceChannelId) {
+        const channelRepo2 = new ChannelRepository();
+        const ch = await channelRepo2.findById(input.xyneSpaceChannelId);
+        xyneSpaceWorkspaceId = ch?.workspaceId;
+      }
+      const xyneSpacesLink = input.xyneSpaceChannelId && xyneSpaceWorkspaceId
+        ? `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${input.xyneSpaceChannelId}|Xyne Spaces>`
         : 'Xyne Spaces';
       let finalMessage = `<!channel> This Channel has been migrated to ${xyneSpacesLink}. Please move your conversations there only this channel will be soon archived.`;
       if (config.slackMigrationFinalMessage) {
@@ -646,7 +662,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     if (messageTs && ENABLE_NOTIFICATIONS) {
       try {
         await postMessage({
-          channelId: input.channelId!,
+          channelId: logChannelId,
           threadTs: messageTs,
           text: `❌ Migration failed: ${errorMessage}`,
         });
