@@ -751,6 +751,7 @@ export class EmailService {
             userGroupId: groupId,
             boardId,
             createdBy: userId,
+            projectId: ticket.projectId,
           });
           if (fullRoles.member) {
             const updatedTicket = await this.prisma.ticket.update({
@@ -760,7 +761,7 @@ export class EmailService {
             await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
           }
         } else {
-        const assignmentResult = await evaluateAssignmentRule(groupId, boardId);
+        const assignmentResult = await evaluateAssignmentRule(groupId, boardId, undefined, undefined, ticket.projectId);
         if (assignmentResult.assignedUserId) {
           const updatedTicket = await this.prisma.ticket.update({
             where: { id: ticket.id },
@@ -1166,6 +1167,7 @@ export class EmailService {
             userGroupId,
             boardId,
             createdBy: userId,
+            projectId: ticket.projectId,
           });
           if (fullRoles.member) {
             const updatedTicket = await this.prisma.ticket.update({
@@ -1175,7 +1177,7 @@ export class EmailService {
             await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
           }
         } else {
-        const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
+        const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, ticket.projectId);
         if (assignmentResult.assignedUserId) {
           const updatedTicket = await this.prisma.ticket.update({
             where: { id: ticket.id },

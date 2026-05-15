@@ -893,10 +893,10 @@ export const assignTicketByQueryType = async (
       return { success: false, groupName };
     }
 
-    // Get ticket's boardId
+    // Get ticket's boardId and projectId
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { boardId: true },
+      select: { boardId: true, projectId: true },
     });
 
     if (!ticket || !ticket.boardId) {
@@ -914,6 +914,7 @@ export const assignTicketByQueryType = async (
         userGroupId: userGroup.id,
         boardId: ticket.boardId,
         createdBy: userId,
+        projectId: ticket.projectId,
       });
       // Update ticket group and assignedTo (member)
       await prisma.ticket.update({
@@ -927,7 +928,7 @@ export const assignTicketByQueryType = async (
     }
 
     // Call assignment engine
-    const assignmentResult = await evaluateAssignmentRule(userGroup.id, ticket.boardId);
+    const assignmentResult = await evaluateAssignmentRule(userGroup.id, ticket.boardId, undefined, undefined, ticket.projectId);
 
     if (!assignmentResult.assignedUserId) {
       logger.info(`[assignTicketByQueryType] No user assigned. Reason: ${assignmentResult.reason}`);

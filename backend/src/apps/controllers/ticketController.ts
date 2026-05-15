@@ -173,7 +173,7 @@ export class TicketController {
             // Full role assignment will be done after ticket creation
             pendingFullRoleAssignment = true;
           } else {
-          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
+          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId);
           if (assignmentResult.assignedUserId) {
             resolvedAssignedTo = assignmentResult.assignedUserId;
             }
@@ -221,6 +221,7 @@ export class TicketController {
             userGroupId,
             boardId,
             createdBy: userId,
+            projectId,
           });
           if (fullRoles.member) {
             const updatedTicket = await prismaClient.ticket.update({
