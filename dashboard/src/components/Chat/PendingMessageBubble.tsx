@@ -228,23 +228,23 @@ export const PendingMessageBubble: React.FC<PendingMessageBubbleProps> = ({ msg 
     >
       {/* Avatar — match MessageBubble: w-8 column */}
       <div className='w-8 h-full flex items-start justify-center flex-shrink-0'>
-        <Avatar userId={msg.senderId} size='md' showActiveStatus={false} />
+        <Avatar userId={msg.senderId} size='rg' showActiveStatus={false} />
       </div>
 
       {/* Content area — match MessageBubble: flex-1 flex-col gap-1 */}
       <div className='flex-1 flex flex-col gap-1 min-w-0'>
         {/* Header row */}
         <div className='flex items-baseline gap-2 mb-0.5 flex-wrap'>
-          <span className='font-semibold text-sm text-gray-900 leading-tight'>
+          <span className='font-semibold text-sm text-foreground leading-tight'>
             {msg.senderName}
           </span>
-          <span className='text-xs text-gray-500'>{formattedTime}</span>
+          <span className='text-xs text-muted-foreground'>{formattedTime}</span>
         </div>
 
         {/* Message HTML content */}
         {!isEmptyHtml && (
           <div
-            className='text-sm text-gray-800 prose prose-sm max-w-none [&_p]:my-0 [&_p]:leading-6 break-words'
+            className='text-sm text-foreground prose prose-sm max-w-none dark:prose-invert [&_p]:my-0 [&_p]:leading-6 break-words'
             dangerouslySetInnerHTML={{ __html: msg.html }}
           />
         )}
