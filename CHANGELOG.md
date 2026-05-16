@@ -1,3 +1,11 @@
+## [1.141.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.141.1...v1.141.2) (2026-05-16)
+
+
+### Bug Fixes
+
+* darkmode fix, reduce delay between pending and actual msg, thread attachment legacy fix ([573de01](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/573de01377aa09a2bb3886e75a3fb56752279f01)), closes [#6403](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6403)
+* filter threads section to show only subscribed threads ([08fe979](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/08fe97981a512954d31188a4461f0280e4c9ff08)), closes [#6377](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6377)
+
 ## [1.141.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.141.0...v1.141.1) (2026-05-16)
 
 
