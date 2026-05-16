@@ -844,6 +844,7 @@ export const queries = defineQueries({
       let query = zql.conversation_participants
         .where('userId', userId)
         .where('lastReplyAt', 'IS NOT', null)
+        .where('isSubscribed', true)
         .orderBy('lastReplyAt', 'desc');
 
       if (start) {
