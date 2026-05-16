@@ -70,7 +70,12 @@ import RadioGroup, { Radio } from '../../ui/RadioGroup';
 import Textarea from '../../ui/Textarea';
 import Tooltip from '../../ui/Tooltip';
 import { getFilesDimensions } from '../../ui/utils/files';
-import { getPriorityOptions, parseAssignee, TAG_COLORS } from './createTicket.utils';
+import {
+  getMissingMandatoryFieldMessage,
+  getPriorityOptions,
+  parseAssignee,
+  TAG_COLORS,
+} from './createTicket.utils';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from './ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
@@ -814,48 +819,54 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   };
 
+  const missingMandatoryFieldMessage = useMemo(
+    () =>
+      getMissingMandatoryFieldMessage({
+        formValues,
+        boards,
+        formMapping,
+        showUserGroupsOnly,
+        showAssignee,
+        showTodo,
+        showDueDate,
+        showWorkflows,
+        showLabels,
+        showMerchantId,
+        mandatoryUserGroupsOnly,
+        mandatoryAssignee,
+        mandatoryTodo,
+        mandatoryDueDate,
+        mandatoryWorkflows,
+        mandatoryLabels,
+        mandatoryMerchantId,
+      }),
+    [
+      formValues,
+      boards,
+      formMapping,
+      showUserGroupsOnly,
+      showAssignee,
+      showTodo,
+      showDueDate,
+      showWorkflows,
+      showLabels,
+      showMerchantId,
+      mandatoryUserGroupsOnly,
+      mandatoryAssignee,
+      mandatoryTodo,
+      mandatoryDueDate,
+      mandatoryWorkflows,
+      mandatoryLabels,
+      mandatoryMerchantId,
+    ],
+  );
+
   const isFormReadyForSubmit = useMemo(() => {
     if (!form.state.isValid || !form.state.isDirty) return false;
-    if (!formValues?.title?.trim()) return false;
-    if (!formValues?.description?.trim()) return false;
-    if (!formValues?.boardId?.trim()) return false;
-    if (boards && !boards.some(board => board.id === formValues.boardId)) return false;
-
-    // Validate dynamic fields if form mapping exists
-    if (formMapping?.formFields && formMapping.formFields.length > 0) {
-      const hasEmptyRequiredFields = formMapping.formFields.some(field => {
-        // Only validate required fields (isOptional must be true to skip, otherwise validate)
-        if (field.isOptional === true) return false;
-
-        const fieldName = field.fieldName;
-        const value = formValues?.dynamicFields?.[fieldName];
-
-        return !value || (typeof value === 'string' && !value.trim());
-      });
-
-      if (hasEmptyRequiredFields) return false;
-    }
-
-    // Check assignee mandatory
-    if (!showUserGroupsOnly && showAssignee && mandatoryAssignee && !formValues?.assignee?.value)
-      return false;
-    if (showUserGroupsOnly && mandatoryUserGroupsOnly && !formValues?.assignee?.value) return false;
-
-    // Check if any dynamic fields error
+    if (missingMandatoryFieldMessage) return false;
     if (Object.keys(dynamicFieldErrors).length > 0) return false;
-
     return true;
-  }, [
-    form.state.isValid,
-    form.state.isDirty,
-    formMapping,
-    formValues,
-    dynamicFieldErrors,
-    showUserGroupsOnly,
-    showAssignee,
-    mandatoryAssignee,
-    mandatoryUserGroupsOnly,
-  ]);
+  }, [form.state.isValid, form.state.isDirty, missingMandatoryFieldMessage, dynamicFieldErrors]);
 
   const handleCreateTicket = async (formData: CreateTicketFormData) => {
     if (!user) return;
@@ -2339,8 +2350,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
             </Button>
             <div className='flex items-center gap-3'>
-              {!formValues?.boardId?.trim() ? (
-                <Tooltip content='Select a board first' side='top'>
+              {missingMandatoryFieldMessage ? (
+                <Tooltip content={missingMandatoryFieldMessage} side='top'>
                   <span className='cursor-not-allowed'>
                     <Button
                       type='submit'
@@ -2348,7 +2359,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       disabled={form.state.isSubmitting || !isFormReadyForSubmit}
                       className={cn(
                         'px-3 rounded-lg h-8',
-                        'text-white text-sm font-medium bg-[var(--ticket-accent)] hover:bg-[var(--ticket-accent)]/90',
+                        'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
                         'pointer-events-none',
                       )}
                       data-testid='ticket-submit-button'
