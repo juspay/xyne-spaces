@@ -1,3 +1,11 @@
+## [1.141.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.141.0...v1.141.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* rebasing migrationDeployment branch ([5d3978a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5d3978aa3feeae805d02c0aeba7649fb9c49a483)), closes [#6350](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6350)
+* show tooltip for all mandatory fields and unify submit button color ([3677dd7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3677dd754c1f67275727a3abd3d3523697d97850)), closes [#6249](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6249)
+
 ## [1.141.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.140.0...v1.141.0) (2026-05-15)
 
 
