@@ -2536,7 +2536,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .where('userId', authData.sub)
                 .where('createdAt', '<=', timestamp),
             );
-            const draft = channelDrafts.find(d => d.conversationId === null);
+            const draft = channelDrafts.find(d => d.conversationId === conversationId);
 
             if (draft) {
               // Get attachments for this draft, filtering by those without explicit uploadStatus or with COMPLETED status
@@ -8339,7 +8339,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 if (error instanceof Error && error.message.includes('duplicate key value violates unique constraint')) {
                   // Record already exists, nothing to do
                   logger.info("Skipping insert, record already exists")
-                  return;
+                  continue;
                 }
                 throw error;
               }

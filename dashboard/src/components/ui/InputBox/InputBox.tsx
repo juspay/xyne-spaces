@@ -215,8 +215,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       new Map(),
     );
 
-    // Ref to track if we're currently in the send process
-    const isSendingRef = useRef(false);
     // Ref to skip onContentChange when clearing editor as part of send
     const skipNextContentChangeRef = useRef(false);
 
@@ -225,11 +223,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       const loadAttachments = () => {
         if (!channelId) {
           setAttachmentsMap(new Map());
-          return;
-        }
-
-        // This prevents completed attachments from reappearing briefly
-        if (isSendingRef.current) {
           return;
         }
 
@@ -971,7 +964,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       }
 
       setIsSending(true);
-      isSendingRef.current = true;
 
       const snapshotAttachments = [...allAttachments];
 
@@ -1084,7 +1076,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             // Remove the pending message since we couldn't send
             removePendingMessage(pendingMsgId);
             setIsSending(false);
-            isSendingRef.current = false;
             return;
           }
 
@@ -1104,14 +1095,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             activeEditor.commands.focus();
           }
         } catch (error) {
+          removePendingMessage(pendingMsgId);
           toast.error('Failed to send message with attachments', {
             description: error instanceof Error ? error.message : 'Unknown error',
           });
         } finally {
           // Always remove the optimistic bubble, whether the send succeeded or failed.
-          removePendingMessage(pendingMsgId);
           setIsSending(false);
-          isSendingRef.current = false;
         }
         return;
       }
@@ -1152,7 +1142,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           });
         } finally {
           setIsSending(false);
-          isSendingRef.current = false;
         }
         return;
       }
