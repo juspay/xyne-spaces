@@ -81,7 +81,16 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
     const decoded = jwt.verify(encodedJWT, secret, {
       issuer: 'xyne',
       audience: 'xyne-user',
-    }) as AuthData;
+    }) as AuthData & { iat?: number };
+
+    const forceLogoutBefore = config.jwt.forceLogoutBefore;
+    if (forceLogoutBefore && decoded.iat && decoded.iat < forceLogoutBefore) {
+      logger.warn('JWT rejected: issued before force logout timestamp', {
+        iat: decoded.iat,
+        forceLogoutBefore,
+      });
+      return undefined;
+    }
 
     const [user, orgMember] = await Promise.all([
       db.user.findUnique({
