@@ -64,7 +64,6 @@ import {
   getCanvasFolderNameConflictMessage,
   rethrowCanvasFolderNameConflict,
   resolveCanvasHierarchy,
-  AttachmentUploadStatus,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
@@ -1738,9 +1737,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           conversationId: z.string(),
           messageId: z.string(),
           timestamp: z.number(),
-          attachmentIds: z.array(z.string()).optional(),
         }),
-        async ({ tx, args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds } }) => {
+        async ({ tx, args: { channelId, content, type, conversationId, messageId, timestamp } }) => {
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -1798,76 +1796,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             isSent: true
           };
 
-          // Use provided attachmentIds to get attachments directly
-          // FALLBACK: If attachmentIds key not present (old client/new client text-only), query drafts
-          // for attachments for old client. In text only case of new client when new mutator doesn't send attachmentIds,
-          //  filter channelDraft by timestmap to avoid race condition
-          if (attachmentIds && attachmentIds.length > 0) {
-            // Get all attachments by ID to handle PENDING/FAILED cleanup
-            const allAttachments = await tx.run(zql.message_attachments
-              .where('id', 'IN', attachmentIds));
+          // Check for existing draft and transfer attachments
+          const channelDrafts = await tx.run(zql.draft_messages
+            .where('channelId', channelId)
+            .where('userId', authData.sub));
 
-            // Separate COMPLETED from PENDING/FAILED
-            const completedAttachments = allAttachments.filter(
-              a => a.uploadStatus === AttachmentUploadStatus.COMPLETED
-            );
-            const pendingOrFailedAttachments = allAttachments.filter(
-              a => a.uploadStatus === AttachmentUploadStatus.PENDING || 
-                   a.uploadStatus === AttachmentUploadStatus.FAILED
-            );
+          const draft = channelDrafts.find(d => d.conversationId === null);
 
-            // Delete PENDING/FAILED attachments
-            for (const attachment of pendingOrFailedAttachments) {
-              await tx.mutate.message_attachments.delete({ id: attachment.id });
+          if (draft) {
+            // Get attachments linked to this draft
+            const draftAttachments = await tx.run(zql.message_attachments
+              .where('entityId', draft.id)
+              .where('entityType', AttachmentEntityType.DRAFT));
+
+            // Transfer attachments to new message
+            for (const attachment of draftAttachments) {
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
             }
 
-            // Transfer COMPLETED attachments to message
-            if (completedAttachments.length > 0) {
-              for (const attachment of completedAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
-              }
+            await tx.mutate.draft_messages.delete({ id: draft.id });
 
-              // Mark message as having attachments
-              message.hasAttachment = true;
-            }
-          } else {
-            // BACKWARD COMPATIBILITY: Old clients don't send attachmentIds
-            // Query for drafts and transfer attachments (legacy behavior)
-            const channelDrafts = await tx.run(
-              zql.draft_messages
-                .where('channelId', channelId)
-                .where('userId', authData.sub)
-                .where('createdAt', '<=', now),
-            );
-            const draft = channelDrafts.find(d => d.conversationId === null);
-
-            if (draft) {
-              const draftAttachments = await tx.run(
-                zql.message_attachments
-                  .where('entityId', draft.id)
-                  .where('entityType', AttachmentEntityType.DRAFT),
-              );
-
-              // Transfer valid attachments to new message
-              for (const attachment of draftAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
-              }
-
-              await tx.mutate.draft_messages.delete({ id: draft.id });
-
-              // Mark message as having attachments
-              message.hasAttachment = draftAttachments.length > 0;
-            }
+            // Mark message as having attachments
+            message.hasAttachment = draftAttachments.length > 0;
           }
 
           await tx.mutate.messages.insert(message);
@@ -2141,12 +2096,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           // Get original message attachments (only if not using optionalText)
-          // Filter to only include attachments that are completed (not pending/failed)
           const originalAttachments = useOptionalText
             ? []
-            : await tx.run(zql.message_attachments
-                .where('entityId', originalMessageId)
-                .where('uploadStatus', '=', AttachmentUploadStatus.COMPLETED));
+            : await tx.run(zql.message_attachments.where('entityId', originalMessageId));
 
           const now = timestamp;
 
@@ -2214,7 +2166,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               metadata: attachment.metadata, 
               createdAt: now,
               isDeleted: false,
-              uploadStatus: AttachmentUploadStatus.COMPLETED,
             });
           }
 
@@ -2301,8 +2252,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                          workspaceId: authData.workspaceId,
                          metadata: attInfo.metadata as any,
                          createdAt: now,
-                         isDeleted: false,
-                         uploadStatus: AttachmentUploadStatus.COMPLETED,
+                        isDeleted: false,
                       });
                     }
                 }
@@ -2446,10 +2396,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           showInChannel: z.boolean().optional(),
           timestamp: z.number(),
           messageId: z.string(),
-          childConversationId: z.string().optional(),
-          attachmentIds: z.array(z.string()).optional()
+          childConversationId: z.string().optional()
         }),
-        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds } }) => {
+        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId } }) => {
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -2491,77 +2440,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             isSent: true
           };
 
-          // Use provided attachmentIds to get attachments directly
-          // FALLBACK: If attachmentIds key not present (old/new client), use hybrid approach
-          if (attachmentIds && attachmentIds.length > 0) {
-            // Get all attachments by ID to handle PENDING/FAILED cleanup
-            const allAttachments = await tx.run(zql.message_attachments
-              .where('id', 'IN', attachmentIds));
+          // Check for existing draft and transfer attachments
+          const channelDrafts = await tx.run(zql.draft_messages
+            .where('channelId', conversation.channelId)
+            .where('userId', authData.sub));
 
-            // Separate COMPLETED from PENDING/FAILED
-            const completedAttachments = allAttachments.filter(
-              a => a.uploadStatus === AttachmentUploadStatus.COMPLETED
-            );
-            
-            const pendingOrFailedAttachments = allAttachments.filter(
-              a => a.uploadStatus === AttachmentUploadStatus.PENDING || 
-                   a.uploadStatus === AttachmentUploadStatus.FAILED
-            );
+          const draft = channelDrafts.find(d => d.conversationId === conversationId);
 
-            // Delete PENDING/FAILED attachments
-            for (const attachment of pendingOrFailedAttachments) {
-              await tx.mutate.message_attachments.delete({ id: attachment.id });
+          if (draft) {
+            // Get attachments linked to this draft
+            const draftAttachments = await tx.run(zql.message_attachments
+              .where('entityId', draft.id)
+              .where('entityType', AttachmentEntityType.DRAFT));
+
+            // Transfer attachments to new message
+            for (const attachment of draftAttachments) {
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
             }
 
-            // Transfer COMPLETED attachments to message
-            if (completedAttachments.length > 0) {
-              for (const attachment of completedAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
-              }
+            await tx.mutate.draft_messages.delete({ id: draft.id });
 
-              // Mark message as having attachments
-              message.hasAttachment = true;
-            }
-          } else {
-            // HYBRID FALLBACK: attachmentIds not provided or empty
-            // RACE CONDITION FIX: Only consider drafts created <= timestamp to avoid picking up newer drafts
-            const channelDrafts = await tx.run(
-              zql.draft_messages
-                .where('channelId', channel.id)
-                .where('userId', authData.sub)
-                .where('createdAt', '<=', timestamp),
-            );
-            const draft = channelDrafts.find(d => d.conversationId === conversationId);
-
-            if (draft) {
-              // Get attachments for this draft, filtering by those without explicit uploadStatus or with COMPLETED status
-              // This handles both old attachments (without uploadStatus) and new ones
-              const draftAttachments = await tx.run(
-                zql.message_attachments
-                  .where('entityId', draft.id)
-                  .where('entityType', AttachmentEntityType.DRAFT),
-              );
-
-              // Transfer valid attachments to new message
-              for (const attachment of draftAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
-              }
-
-              await tx.mutate.draft_messages.delete({ id: draft.id });
-
-              // Mark message as having attachments
-              message.hasAttachment = draftAttachments.length > 0;
-            }
+            // Mark message as having attachments
+            message.hasAttachment = draftAttachments.length > 0;
           }
 
           await tx.mutate.messages.insert(message);
@@ -3546,24 +3451,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
     },
     messageAttachment: {
-      updateUploadStatus: defineMutator(
-        z.object({
-          attachmentId: z.string(),
-          uploadStatus: z.nativeEnum(AttachmentUploadStatus),
-        }),
-        async ({ tx, args: { attachmentId, uploadStatus } }) => {
-          const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
-
-          if (!attachment) {
-            throw new Error('Attachment not found');
-          }
-
-          await tx.mutate.message_attachments.update({
-            id: attachmentId,
-            uploadStatus,
-          });
-        },
-      ),
       delete: defineMutator(
         z.object({ attachmentId: z.string() }),
         async ({ tx, args: { attachmentId } }) => {
@@ -8238,9 +8125,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const finalDraftMessageId = existingDraft?.id || draftMessageId;
 
-          // 2. If no draft exists, create one with the provided ID
+          // 2. If no draft exists, upsert one atomically
           if (!existingDraft) {
-            await tx.mutate.draft_messages.insert({
+            await tx.mutate.draft_messages.upsert({
               id: draftMessageId,
               channelId,
               conversationId: conversationId || null,
@@ -8261,7 +8148,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          // 3. Create or update all attachments using upsert to prevent race conditions
+          // 3. Create or update all attachments
           for (const attachment of attachments) {
             const { attachmentId, mimetype, size, width, height } = attachment;
             const rawName = attachment.originalFilename || 'unnamed_file';
@@ -8332,7 +8219,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   conversationId: conversationId || null,
                   isDeleted: false,
                   workspaceId: authData.workspaceId,
-                  uploadStatus: AttachmentUploadStatus.PENDING,
                 });
               } catch (error) {
                 // Ignore duplicate key errors - record already created by concurrent request
@@ -10564,6 +10450,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         if (!draft) {
           throw new Error('Draft not found');
         }
+        await deleteDraftEntityAttachments(tx, asyncTasks, id);
         await tx.mutate.draft_messages.delete({ id });
       }),
 

@@ -4,7 +4,7 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { logger } from '../utils/logger';
-import { AttachmentEntityType, AttachmentUploadStatus } from '@prisma/client';
+import { AttachmentEntityType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 
 export class DraftAttachmentController {
@@ -106,53 +106,46 @@ export class DraftAttachmentController {
         return;
       }
 
-      // Note: We do NOT create the draft here. The frontend creates drafts via Zero mutators,
-      // and we rely on that draft existing. If the draft doesn't exist (e.g., message was sent
-      // while uploads were in progress), we still process the attachments since they were
-      // already created via Zero with PENDING status. The attachments will be transferred
-      // to the message when send completes, regardless of draft existence.
-      const finalDraftMessageId = draftMessageId;
+      // Check if draft message already exists for this user+channel+conversation
+      const existingDraft = await this.db.draftMessage.findFirst({
+        where: {
+          channelId: channelId,
+          conversationId: conversationId || null,
+          userId: userId,
+        },
+      });
+
+      const finalDraftMessageId = existingDraft?.id || draftMessageId;
+      if (!existingDraft) {
+        const now = new Date();
+        try {
+          await this.db.draftMessage.upsert({
+            where: { id: draftMessageId },
+            update: {}, // already exists — leave all fields alone
+            create: {
+              id: draftMessageId,
+              channelId,
+              conversationId: conversationId || null,
+              userId,
+              content: '',
+              hasAttachment: true,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            // Race condition: another request already created this draft — safe to ignore
+          } else {
+            throw error;
+          }
+        }
+      }
 
       logger.info(`Uploading ${files.length} draft attachments using fileUploadService`);
 
       // Fetch workspaceId from channel
       const draftWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
-
-      // First, mark all attachments as STARTED
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const attachmentId = attachmentIdsArray[i];
-
-        try {
-          await this.db.messageAttachment.upsert({
-            where: { id: attachmentId },
-            update: {
-              uploadStatus: AttachmentUploadStatus.STARTED,
-            },
-            create: {
-              id: attachmentId,
-              entityId: finalDraftMessageId,
-              entityType: AttachmentEntityType.DRAFT,
-              url: '',
-              size: file.size,
-              originalFilename: file.originalname,
-              mimetype: file.mimetype,
-              uploadedByUserId: userId,
-              createdBy: userId,
-              storageProvider: config.fileStorage.provider,
-              conversationId: conversationId || null,
-              workspaceId: draftWorkspaceId,
-              width: null,
-              height: null,
-              thumbnailUrl: null,
-              metadata: {},
-              uploadStatus: AttachmentUploadStatus.STARTED,
-            },
-          });
-        } catch (error) {
-          logger.error(`Failed to mark attachment ${attachmentId} as STARTED:`, error);
-        }
-      }
 
       // Prepare fileMetadata array format for fileUploadService
       const fileMetadataArray = parsedFileMetadata.map((metadata, index) => ({
@@ -171,7 +164,7 @@ export class DraftAttachmentController {
         fileMetadataArray
       );
 
-      // Process each file individually and update MessageAttachment records to COMPLETED
+      // Process each file individually and create/update MessageAttachment records
       const results = [];
 
       for (let i = 0; i < files.length; i++) {
@@ -202,9 +195,6 @@ export class DraftAttachmentController {
           const finalWidth = metadata.width ?? uploadedFile.width ?? parsedLegacyWidth;
           const finalHeight = metadata.height ?? uploadedFile.height ?? parsedLegacyHeight;
 
-          // Update attachment to COMPLETED with all file metadata
-          // Use upsert to handle race condition where attachment might have been deleted
-          // (e.g., draft was sent/deleted while upload was in progress)
           await this.db.messageAttachment.upsert({
             where: { id: attachmentId },
             update: {
@@ -216,7 +206,6 @@ export class DraftAttachmentController {
               thumbnailUrl,
               storageProvider: config.fileStorage.provider,
               metadata: completeMetadata,
-              uploadStatus: AttachmentUploadStatus.COMPLETED,
             },
             create: {
               id: attachmentId,
@@ -235,7 +224,6 @@ export class DraftAttachmentController {
               height: finalHeight,
               thumbnailUrl,
               metadata: completeMetadata,
-              uploadStatus: AttachmentUploadStatus.COMPLETED,
             },
           });
 
@@ -248,39 +236,6 @@ export class DraftAttachmentController {
           });
         } catch (error) {
           logger.error(`Failed to process draft attachment ${attachmentId}:`, error);
-
-          // Mark attachment as FAILED
-          // Use upsert to handle race condition where attachment might have been deleted
-          try {
-            await this.db.messageAttachment.upsert({
-              where: { id: attachmentId },
-              update: {
-                uploadStatus: AttachmentUploadStatus.FAILED,
-              },
-              create: {
-                id: attachmentId,
-                entityId: finalDraftMessageId,
-                entityType: AttachmentEntityType.DRAFT,
-                url: '',
-                size: file.size,
-                originalFilename: file.originalname,
-                mimetype: file.mimetype,
-                uploadedByUserId: userId,
-                createdBy: userId,
-                storageProvider: config.fileStorage.provider,
-                conversationId: conversationId || null,
-                workspaceId: draftWorkspaceId,
-                width: null,
-                height: null,
-                thumbnailUrl: null,
-                metadata: {},
-                uploadStatus: AttachmentUploadStatus.FAILED,
-              },
-            });
-          } catch (updateError) {
-            logger.error(`Failed to mark attachment ${attachmentId} as FAILED:`, updateError);
-          }
-
           // Continue with next file even if this one fails
           results.push({
             attachmentId,

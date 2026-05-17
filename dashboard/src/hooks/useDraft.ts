@@ -3,7 +3,6 @@ import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
-import { AttachmentUploadStatus } from '@xyne/shared/zero';
 import { apiInstance } from '../services/clients/apiClient';
 import { queryClient } from '../services/clients/queryClient';
 import { v4 as uuidv4 } from 'uuid';
@@ -14,11 +13,6 @@ import {
 } from '../services/documentThumbnailService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
 import { logger, Event } from '../utils/logger';
-import {
-  trackUploadingIds,
-  untrackUploadingIds,
-  isUploadingTracked,
-} from '../utils/attachmentUploadTracker';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
 const getFileExtension = (name: string): string => {
@@ -226,7 +220,8 @@ export function useDraftAttachments() {
         }),
       );
 
-      trackUploadingIds(attachmentIds);
+      // Get draft content to pass to mutator
+      const currentContent = getDraft(channelId, conversationId ?? null) || '';
 
       // Create draft and attachment entries via mutator (batch operation)
       zero.mutate(
@@ -235,6 +230,7 @@ export function useDraftAttachments() {
           attachments: attachmentsData,
           channelId,
           conversationId,
+          content: currentContent,
           timestamp,
         }),
       );
@@ -297,71 +293,20 @@ export function useDraftAttachments() {
           formData.append('conversationId', conversationId);
         }
 
-        const response = await apiInstance.post('/drafts/attachments/upload', formData);
-
-        const responseData = response.data as {
-          success: boolean;
-          uploadedAttachments: Array<{
-            attachmentId: string;
-            fileUrl?: string;
-            success: boolean;
-            error?: string;
-          }>;
-          totalCount: number;
-          successCount: number;
-          failureCount: number;
-        };
+        await apiInstance.post('/drafts/attachments/upload', formData);
 
         logger.info(Event.ATTACHMENT_UPLOAD_SUCCESS, {
           fileCount: filesArray.length,
-          successCount: responseData.successCount,
-          failureCount: responseData.failureCount,
           latency: Date.now() - uploadStartTime,
           channelId,
           draftMessageId,
         });
 
-        // Get upload results
-        const uploadResults = responseData.uploadedAttachments || [];
-
-        // Separate successful and failed uploads
-        const successfulAttachments: Array<{ attachmentId: string; file: File }> = [];
-        const failedAttachments: Array<{
-          attachmentId: string;
-          file: File;
-          fileName: string;
-          error: string;
-        }> = [];
-
-        processedFiles.forEach(({ attachmentId, file }) => {
-          const result = uploadResults.find(
-            (r: { attachmentId: string; success: boolean; error?: string }) =>
-              r.attachmentId === attachmentId,
-          );
-          if (result?.success) {
-            successfulAttachments.push({ attachmentId, file });
-          } else {
-            failedAttachments.push({
-              attachmentId,
-              file,
-              fileName: file.name,
-              error: result?.error || 'Upload failed',
-            });
-          }
-        });
-
-        // If any uploads failed, remove them from the draft
-        if (failedAttachments.length > 0) {
-          const failedIds = failedAttachments.map(f => f.attachmentId);
-          removeDroppedFiles(failedIds);
-        }
-
-        // Return results with success/failure information
-        return {
-          successful: successfulAttachments,
-          failed: failedAttachments,
-          allSucceeded: failedAttachments.length === 0,
-        };
+        // Return results in same order as input
+        return processedFiles.map(({ attachmentId, file }) => ({
+          attachmentId: attachmentId,
+          file,
+        }));
       } catch (error) {
         console.error('Failed to upload files:', error);
         logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
@@ -373,8 +318,6 @@ export function useDraftAttachments() {
         });
         removeDroppedFiles(attachmentIds);
         throw error;
-      } finally {
-        untrackUploadingIds(attachmentIds);
       }
     },
     [zero],
@@ -428,28 +371,6 @@ export function useDraftAttachments() {
     [zero, draftMessages],
   );
 
-  /**
-   * Clears only the draft message content without deleting the attachments.
-   * This is used before sending a message so the attachments can be transferred
-   * to the sent message by the mutator.
-   */
-  const clearDraftMessageOnly = useCallback(
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async (channelId: string, conversationId: string | null) => {
-      // Find the draft message matching the channelId and conversationId
-      const draftMessage = draftMessages.find(
-        d => d.channelId === channelId && d.conversationId === conversationId,
-      );
-
-      if (!draftMessage) return;
-
-      // Only delete the draft message, not the attachments
-      // The attachments will be transferred to the sent message by the mutator
-      zero.mutate(mutators.draftMessages.delete({ id: draftMessage.id }));
-    },
-    [zero, draftMessages],
-  );
-
   const getDroppedFilesForEntity = useCallback(
     (channelId: string, conversationId: string | null): Map<string, File | UploadedFile> => {
       // Return empty map if no channelId provided
@@ -469,17 +390,8 @@ export function useDraftAttachments() {
       // Build a map of attachmentId -> File | UploadedFile
       const result = new Map<string, File | UploadedFile>();
 
-      // Process all attachments, filtering out stale PENDING ones
+      // Process all attachments in parallel
       draftMessage.attachments.forEach(attachment => {
-        // Always include STARTED and COMPLETED
-        // For PENDING, only include if it's being actively tracked
-        if (
-          attachment.uploadStatus === AttachmentUploadStatus.PENDING &&
-          !isUploadingTracked(attachment.id)
-        ) {
-          return;
-        }
-
         // Check if we have the full File object (newly uploaded files)
         const cachedFile = filesMapRef[attachment.id];
 
@@ -521,7 +433,6 @@ export function useDraftAttachments() {
       removeDroppedFile,
       removeDroppedFiles,
       clearDroppedFiles,
-      clearDraftMessageOnly,
       getDroppedFilesForEntity,
     }),
     [
@@ -529,7 +440,6 @@ export function useDraftAttachments() {
       removeDroppedFile,
       removeDroppedFiles,
       clearDroppedFiles,
-      clearDraftMessageOnly,
       getDroppedFilesForEntity,
     ],
   );

@@ -414,10 +414,10 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
           {renderPreview()}
         </div>
 
-        {/* Upload loading overlay - semi-transparent so thumbnail is visible underneath */}
+        {/* Upload loading overlay */}
         {isUploading && (
-          <div className='absolute inset-0 flex items-center justify-center bg-background/40 rounded-xl z-10'>
-            <Loader2 className='h-8 w-8 text-foreground animate-spin drop-shadow-md' />
+          <div className='absolute inset-0 flex items-center justify-center backdrop-blur-sm bg-background/80 rounded-xl z-10'>
+            <Loader2 className='h-8 w-8 text-foreground animate-spin' />
           </div>
         )}
 

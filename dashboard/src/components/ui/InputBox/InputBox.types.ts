@@ -25,7 +25,6 @@ export interface InputBoxProps {
     html: string,
     files: File[],
     videoThumbnails?: Map<File, Blob>,
-    attachmentIds?: string[],
   ) => void | Promise<void>;
   onContentChange?: (html: string, text: string) => void;
   onCancel?: () => void;

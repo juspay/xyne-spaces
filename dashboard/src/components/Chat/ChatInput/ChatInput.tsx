@@ -61,10 +61,6 @@ import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
-import {
-  pendingMessageMachine,
-  removePendingMessage,
-} from '../../../machines/pendingMessageMachine';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
@@ -447,13 +443,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     );
 
     const handleSendMessage = useCallback(
-      (
-        _plainText: string,
-        html: string,
-        files: File[],
-        _videoThumbnails?: Map<File, Blob>,
-        attachmentIds?: string[],
-      ): void => {
+      (_plainText: string, html: string, files: File[]): void => {
         if (isOffline) {
           toast.warning("You're offline", {
             description: messageId
@@ -477,23 +467,10 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
           onSuccess?: () => void,
           logMeta?: Record<string, unknown>,
         ) => {
-          // Remove pending messages for this channel/conversation once mutation settles
-          const cleanupPending = () => {
-            const pending = pendingMessageMachine.getState();
-            const targetConvId = conversationId ?? null;
-            pending
-              .filter(m => m.channelId === channelId && m.conversationId === targetConvId)
-              .forEach(m => removePendingMessage(m.id));
-          };
-
           result.client
             .then(clientResult => {
               if (clientResult.type === 'error') {
                 onReject();
-                cleanupPending();
-                toast.error('Failed to send message', {
-                  description: 'Please try again.',
-                });
                 if (logMeta) {
                   logger.error(Event.MESSAGE_SEND_FAILED, {
                     ...logMeta,
@@ -506,10 +483,6 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             })
             .catch(() => {
               onReject();
-              cleanupPending();
-              toast.error('Failed to send message', {
-                description: 'Please try again.',
-              });
               if (logMeta) {
                 logger.error(Event.MESSAGE_SEND_FAILED, {
                   ...logMeta,
@@ -522,7 +495,6 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             .then(serverResult => {
               if (serverResult.type === 'error') {
                 onReject();
-                cleanupPending();
                 if (logMeta) {
                   logger.error(Event.MESSAGE_SEND_FAILED, {
                     ...logMeta,
@@ -531,13 +503,10 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                     stage: 'server',
                   });
                 }
-              } else {
-                cleanupPending();
               }
             })
             .catch(() => {
               onReject();
-              cleanupPending();
               if (logMeta) {
                 logger.error(Event.MESSAGE_SEND_FAILED, {
                   ...logMeta,
@@ -601,7 +570,6 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 timestamp: messageCreatedAt,
                 messageId: newMessageId,
                 ...(alsoSendToChannel && { childConversationId: uuidv4() }),
-                ...(attachmentIds && attachmentIds.length > 0 && { attachmentIds }),
               }),
             );
             saveDraft(lookupId, '', '');
@@ -660,7 +628,6 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 conversationId: newConversationId,
                 messageId: newMessageId,
                 timestamp: messageCreatedAt,
-                ...(attachmentIds && attachmentIds.length > 0 && { attachmentIds }),
               }),
             );
 

@@ -3,7 +3,6 @@ import { queries } from '../../../zero/queries';
 import { MessageType } from '@xyne/shared';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
-import type { PendingMessage } from '../../../machines/pendingMessageMachine';
 
 // Type definitions for utility functions
 export type ThreadMessage = QueryResultType<typeof queries.channelAndThreadMessagesV2>[number];
@@ -19,11 +18,6 @@ export type CombinedMessageItem =
   | {
       type: 'thread-message';
       data: ThreadMessage;
-      createdAt: Date;
-    }
-  | {
-      type: 'pending';
-      data: PendingMessage;
       createdAt: Date;
     };
 
@@ -105,19 +99,15 @@ export const shouldShowAvatar = (
     );
   };
 
-  // Always show avatar for call messages (pending messages are never call messages)
+  // Always show avatar for call messages
   const isCurrentItemCallMessage = (): boolean => {
     if (currentItem.type === 'conversation') {
       const initialMessage = getInitialMessageFromConversation(currentItem.data);
       const metadata = initialMessage?.metadata as Record<string, unknown> | null;
       return metadata?.['isCallMessage'] === true;
     }
-    if (currentItem.type === 'thread-message') {
-      const metadata = currentItem.data.metadata as Record<string, unknown> | null;
-      return metadata?.['isCallMessage'] === true;
-    }
-    // Pending messages are never call messages
-    return false;
+    const metadata = currentItem.data.metadata as Record<string, unknown> | null;
+    return metadata?.['isCallMessage'] === true;
   };
 
   const isPreviousItemAWorkflowOrActivity = (): boolean => {
@@ -158,11 +148,7 @@ export const shouldShowAvatar = (
       const prevInitialMessage = getInitialMessageFromConversation(prevItem.data);
       return prevInitialMessage?.msgType === MessageType.SYSTEM;
     }
-    if (prevItem.type === 'thread-message') {
-      return prevItem.data.msgType === MessageType.SYSTEM;
-    }
-    // Pending messages are never system messages
-    return false;
+    return prevItem.data.msgType === MessageType.SYSTEM;
   };
 
   // Always show avatar after a system message
@@ -184,9 +170,10 @@ export const shouldShowAvatar = (
     return true;
   }
 
-  // Check replyCount only for conversation type
-  if (prevItem.type === 'conversation' && (prevItem.data.replyCount ?? 0) > 0) {
-    return true;
+  if (prevItem.type === 'conversation') {
+    if ((prevItem.data.replyCount ?? 0) > 0) {
+      return true;
+    }
   }
 
   return false;

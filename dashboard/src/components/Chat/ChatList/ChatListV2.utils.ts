@@ -5,7 +5,6 @@ import { CombinedMessageItem, shouldShowAvatar } from './ChatListUtils';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { MessageType, parseReactionsMd } from '@xyne/shared';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
-import type { PendingMessage } from '../../../machines/pendingMessageMachine';
 
 type CombinedMesseges = {
   combinedMessages: CombinedMessageItem[];
@@ -38,12 +37,6 @@ const ATTACHMENT_CHROME = 32; // padding-top(8) + padding-bottom(8) + filename(1
 const MEDIA_CAP = 256; // Preview fixedHeight (desktop)
 const FILE_PILL_HEIGHT = 52; // file attachment row (icon + name + size)
 const ATTACHMENT_HEADER = 24; // "N files ▼" header bar
-
-// Pending attachment layout
-// PendingMessageBubble uses "flex flex-wrap gap-2 mt-2" — no header bar,
-// and images sit side-by-side (2 per row on desktop, 1 on mobile).
-const PENDING_ATTACHMENT_GAP = 8; // gap-2 = 8px between rows
-const PENDING_ATTACHMENT_TOP = 8; // mt-2 above the attachment strip
 
 // Video constraints (must match InlineVideoPlayer)
 const VIDEO_MAX_WIDTH_DESKTOP = 500;
@@ -119,13 +112,8 @@ export function estimateMessageHeight(
   isMobile: boolean,
   isNewMsgBoundary = false,
 ): number {
-  // Handle pending messages with a fixed estimate
-  if (item.type === 'pending') {
-    // ✅ Forward isMobile so the pending estimator can calculate rows correctly
-    return estimatePendingMessageHeight(item.data, prevItem, isMobile);
-  }
-
-  // Thread messages are handled separately, return a default height
+  // Only 'conversation' type items exist in this list (no date-separator via
+  // useCombinedMesseges – those come from GroupedVirtuoso group headers).
   if (item.type !== 'conversation') return 60;
 
   const message = getInitialMessageFromConversation(item.data);
@@ -352,84 +340,20 @@ export function estimateMessageHeight(
   return Math.max(height, 40); // never return less than 40px
 }
 
-// ─── Pending message height estimator ─────────────────────────────────────────
-
-/**
- * Estimates height for a pending message bubble.
- *
- * PendingMessageBubble renders attachments in a "flex flex-wrap gap-2 mt-2"
- * strip — no "N files" header bar, and thumbnails sit side-by-side
- * (2 per row on desktop, 1 per row on mobile), each at MEDIA_CAP (256px) height.
- *
- * ✅ isMobile is now forwarded from estimateMessageHeight so row-count is accurate.
- */
-function estimatePendingMessageHeight(
-  pendingMsg: PendingMessage,
-  _prevItem: CombinedMessageItem | null,
-  isMobile: boolean,
-): number {
-  // Pending bubbles always show the avatar (they're always the "first" in sequence)
-  let height = WITH_AVATAR_PADDING;
-
-  // Header row: sender name + timestamp + "Uploading…" indicator
-  height += AVATAR_HEADER_HEIGHT;
-
-  // ── Text content ──
-  const isEmptyHtml =
-    !pendingMsg.html ||
-    pendingMsg.html.replace(/<p[^>]*>(\s|&nbsp;)*<\/p>/gi, '').trim() === '' ||
-    pendingMsg.html === '<p></p>';
-
-  if (!isEmptyHtml) {
-    const charsPerLine = isMobile ? CHARS_PER_LINE_MOBILE : CHARS_PER_LINE_DESKTOP;
-    const textLength = pendingMsg.html.replace(/<[^>]*>/g, '').length;
-    const lines = Math.max(1, Math.ceil(textLength / charsPerLine));
-    height += lines * LINE_HEIGHT;
-  }
-
-  // ── Attachments ──
-  // PendingMessageBubble uses "flex flex-wrap gap-2 mt-2" — no header bar.
-  // Thumbnails are arranged 2-per-row on desktop, 1-per-row on mobile,
-  // each rendered at MEDIA_CAP (256px) height + gap between rows.
-  if (pendingMsg.attachments.length > 0) {
-    const perRow = isMobile ? 1 : 2;
-    const rowCount = Math.ceil(pendingMsg.attachments.length / perRow);
-    height += PENDING_ATTACHMENT_TOP; // mt-2 above the strip
-    height += rowCount * MEDIA_CAP; // thumbnail rows
-    height += (rowCount - 1) * PENDING_ATTACHMENT_GAP; // gap-2 between rows
-  }
-
-  return Math.max(height, 60);
-}
-
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export const useCombinedMesseges = (
   conversations: InputProps,
   isMobile: boolean,
   isNewMsgBoundaryIndex = -1,
-  pendingMessages: PendingMessage[] = [],
 ): CombinedMesseges => {
   const combinedMessages: CombinedMessageItem[] = useMemo(() => {
-    const conversationItems: CombinedMessageItem[] = conversations.map(conversation => ({
+    return conversations.map(conversation => ({
       type: 'conversation' as const,
       data: conversation,
       createdAt: new Date(conversation.createdAt),
     }));
-
-    // Add pending messages as items
-    const pendingItems: CombinedMessageItem[] = pendingMessages.map(pending => ({
-      type: 'pending' as const,
-      data: pending,
-      createdAt: new Date(pending.createdAt),
-    }));
-
-    // Combine and sort by createdAt
-    const allItems = [...conversationItems, ...pendingItems];
-    allItems.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-
-    return allItems;
-  }, [conversations, pendingMessages]);
+  }, [conversations]);
 
   const { groupCounts, dateGroups } = useMemo((): {
     groupCounts: number[];
