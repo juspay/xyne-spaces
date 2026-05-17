@@ -21,6 +21,8 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   selectedCanvasId,
   onDelete,
   onDuplicate,
+  isPersonalSectionCollapsed,
+  onSetPersonalSectionCollapsed,
 }) => {
   const z = useZero();
   const navigate = useNavigate();
@@ -90,6 +92,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   useEffect(() => {
     registerCollapsedFolderIds(lazyFolderIds);
   }, [lazyFolderIds, registerCollapsedFolderIds]);
+
   const resolvedChannelTargetName = channelCreateTarget
     ? getChannelDisplayName(channelCreateTarget, currentUserId, activeUsersById)
     : '';
@@ -179,6 +182,10 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           });
         }
 
+        if (!projectId && !channelId) {
+          onSetPersonalSectionCollapsed(false);
+        }
+
         setCollapsedFolders(prev => {
           const next = new Set(prev);
           next.delete(folderId);
@@ -198,7 +205,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
         return null;
       }
     },
-    [z],
+    [onSetPersonalSectionCollapsed, z],
   );
 
   const handleCreateFolder = useCallback(
@@ -232,6 +239,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     const canvasId = uuidv4();
     const viewAccessId = uuidv4();
     setIsCreatingCanvas(true);
+    onSetPersonalSectionCollapsed(false);
 
     try {
       await canvasService.createCollaborativeCanvas({
@@ -246,7 +254,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     } finally {
       setIsCreatingCanvas(false);
     }
-  }, [navigate]);
+  }, [navigate, onSetPersonalSectionCollapsed]);
 
   const handleCreateCanvasInProject = useCallback(
     async (project: CanvasProject, projectFolders: CanvasFolder[]) => {
@@ -525,6 +533,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           selectedCanvasId={selectedCanvasId}
           usersById={activeUsersById}
           adminChannelIds={activeAdminChannelIds}
+          isPersonalSectionCollapsed={isPersonalSectionCollapsed}
           collapsedProjects={collapsedProjects}
           collapsedChannels={collapsedChannels}
           collapsedFolders={collapsedFolders}
@@ -537,6 +546,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           onToggleFolder={handleToggleFolder}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
+          onSetPersonalSectionCollapsed={onSetPersonalSectionCollapsed}
           onCreatePersonalCanvas={handleCreatePersonalCanvas}
           onCreateCanvasInProject={handleCreateCanvasInProject}
           onCreateFolder={handleCreateFolder}

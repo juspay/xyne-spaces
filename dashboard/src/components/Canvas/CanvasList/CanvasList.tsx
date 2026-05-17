@@ -38,6 +38,7 @@ import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
 import { useCachedQuery } from '@xyne/shared/hooks';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShortcut } from '../../../shortcuts';
+import { openQuartoDoc } from '../openQuartoDoc';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 type CanvasCursor = { id: string; updatedAt: number };
@@ -370,15 +371,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   );
 
   const handleQuartoDocClick = (e: React.MouseEvent | KeyboardEvent, canvas: Canvas): void => {
-    const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
-    const docsUrl = `/docs/${canvas.userRepo}`;
-
-    // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
-    if (!isMobile && isCmdClick) {
-      window.open(docsUrl, '_blank');
-    } else {
-      void navigate(docsUrl);
-    }
+    openQuartoDoc(e, canvas, navigate, isMobile);
   };
 
   const getUserRole = (canvas: Canvas): CanvasRole | null => {

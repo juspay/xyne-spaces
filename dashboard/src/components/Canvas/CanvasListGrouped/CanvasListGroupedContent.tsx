@@ -240,6 +240,8 @@ interface ProjectSectionProps extends Omit<
   | 'personalFolderGroups'
   | 'personalCanvases'
   | 'isEmpty'
+  | 'isPersonalSectionCollapsed'
+  | 'onSetPersonalSectionCollapsed'
   | 'onCreatePersonalCanvas'
 > {
   group: ProjectGroup;
@@ -569,6 +571,7 @@ export interface CanvasListGroupedContentProps {
   selectedCanvasId?: string | undefined;
   usersById: Map<string, CanvasUser>;
   adminChannelIds: ReadonlySet<string>;
+  isPersonalSectionCollapsed: boolean;
   collapsedProjects: ReadonlySet<string>;
   collapsedChannels: ReadonlySet<string>;
   collapsedFolders: ReadonlySet<string>;
@@ -581,6 +584,7 @@ export interface CanvasListGroupedContentProps {
   onToggleFolder: (folderId: string) => void;
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
+  onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
   onCreatePersonalCanvas: () => void | Promise<void>;
   onCreateCanvasInProject: (
     project: CanvasProject,
@@ -606,6 +610,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   selectedCanvasId,
   usersById,
   adminChannelIds,
+  isPersonalSectionCollapsed,
   collapsedProjects,
   collapsedChannels,
   collapsedFolders,
@@ -618,6 +623,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   onToggleFolder,
   onDelete,
   onDuplicate,
+  onSetPersonalSectionCollapsed,
   onCreatePersonalCanvas,
   onCreateCanvasInProject,
   onCreateFolder,
@@ -645,10 +651,20 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
     <div className='p-2 space-y-1'>
       <section className='border-b border-border pb-1'>
         <div className='flex items-center group'>
-          <div className='flex min-w-0 flex-1 items-center gap-2 px-3 py-2'>
+          <button
+            className='flex min-w-0 flex-1 items-center gap-2 px-3 py-2 hover:bg-accent rounded-md text-left'
+            onClick={() => onSetPersonalSectionCollapsed(!isPersonalSectionCollapsed)}
+            data-track-category='CANVAS'
+            data-track-name='TOGGLE_PERSONAL_CANVAS_SECTION'
+          >
+            {isPersonalSectionCollapsed ? (
+              <ChevronRight className='w-4 h-4 text-muted-foreground shrink-0' />
+            ) : (
+              <ChevronDown className='w-4 h-4 text-muted-foreground shrink-0' />
+            )}
             <User className='w-4 h-4 text-muted-foreground shrink-0' />
             <span className='font-semibold text-sm'>My Canvases</span>
-          </div>
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -687,48 +703,52 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {personalFolderGroups.map(folderGroup => (
-          <FolderGroupSection
-            key={folderGroup.folder.id}
-            folderGroup={folderGroup}
-            indentClassName='pl-6'
-            canvasIndentClassName='pl-10'
-            currentUserId={currentUserId}
-            selectedCanvasId={selectedCanvasId}
-            adminChannelIds={adminChannelIds}
-            collapsedFolders={collapsedFolders}
-            renamingFolderId={renamingFolderId}
-            renamingFolderName={renamingFolderName}
-            setRenamingFolderName={setRenamingFolderName}
-            isCreatingCanvas={isCreatingCanvas}
-            onSelect={onSelect}
-            onDelete={onDelete}
-            onDuplicate={onDuplicate}
-            onToggleFolder={onToggleFolder}
-            onCreateCanvasInFolder={onCreateCanvasInFolder}
-            onStartRenameFolder={onStartRenameFolder}
-            onConfirmRenameFolder={onConfirmRenameFolder}
-            onCancelRenameFolder={onCancelRenameFolder}
-            onDeleteFolder={onDeleteFolder}
-          />
-        ))}
-        {personalCanvases.map(canvas => (
-          <CanvasRow
-            key={canvas.id}
-            canvas={canvas}
-            indentClassName='pl-3'
-            onSelect={onSelect}
-            selectedCanvasId={selectedCanvasId}
-            currentUserId={currentUserId}
-            trackNames={groupedCanvasRowTrackNames}
-            onDelete={onDelete}
-            onDuplicate={onDuplicate}
-          />
-        ))}
-        {personalFolderGroups.length === 0 && personalCanvases.length === 0 && (
-          <div className='px-6 py-2 text-sm text-muted-foreground'>
-            Create a personal canvas or folder to get started.
-          </div>
+        {!isPersonalSectionCollapsed && (
+          <>
+            {personalFolderGroups.map(folderGroup => (
+              <FolderGroupSection
+                key={folderGroup.folder.id}
+                folderGroup={folderGroup}
+                indentClassName='pl-6'
+                canvasIndentClassName='pl-10'
+                currentUserId={currentUserId}
+                selectedCanvasId={selectedCanvasId}
+                adminChannelIds={adminChannelIds}
+                collapsedFolders={collapsedFolders}
+                renamingFolderId={renamingFolderId}
+                renamingFolderName={renamingFolderName}
+                setRenamingFolderName={setRenamingFolderName}
+                isCreatingCanvas={isCreatingCanvas}
+                onSelect={onSelect}
+                onDelete={onDelete}
+                onDuplicate={onDuplicate}
+                onToggleFolder={onToggleFolder}
+                onCreateCanvasInFolder={onCreateCanvasInFolder}
+                onStartRenameFolder={onStartRenameFolder}
+                onConfirmRenameFolder={onConfirmRenameFolder}
+                onCancelRenameFolder={onCancelRenameFolder}
+                onDeleteFolder={onDeleteFolder}
+              />
+            ))}
+            {personalCanvases.map(canvas => (
+              <CanvasRow
+                key={canvas.id}
+                canvas={canvas}
+                indentClassName='pl-3'
+                onSelect={onSelect}
+                selectedCanvasId={selectedCanvasId}
+                currentUserId={currentUserId}
+                trackNames={groupedCanvasRowTrackNames}
+                onDelete={onDelete}
+                onDuplicate={onDuplicate}
+              />
+            ))}
+            {personalFolderGroups.length === 0 && personalCanvases.length === 0 && (
+              <div className='px-6 py-2 text-sm text-muted-foreground'>
+                Create a personal canvas or folder to get started.
+              </div>
+            )}
+          </>
         )}
       </section>
 

@@ -22,6 +22,7 @@ import {
 import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
 import { canvasService } from '../../../services/Canvas/canvasService';
+import { openQuartoDoc } from '../openQuartoDoc';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 type ViewMode = 'list' | 'grouped';
@@ -40,10 +41,14 @@ const CanvasPanel = (): ReactElement => {
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
 
   const handleCreateCanvas = useCallback(async () => {
     setIsCreatingCanvas(true);
+    if (viewMode === 'grouped') {
+      setIsPersonalSectionCollapsed(false);
+    }
     const newCanvasId = uuidv4();
     const viewAccessId = uuidv4();
 
@@ -62,7 +67,7 @@ const CanvasPanel = (): ReactElement => {
     } finally {
       setIsCreatingCanvas(false);
     }
-  }, [navigate]);
+  }, [navigate, viewMode]);
 
   const handleSelectCanvas = useCallback(
     (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => {
@@ -72,19 +77,13 @@ const CanvasPanel = (): ReactElement => {
         });
         return;
       }
-      const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
+
       // If it's a Quarto doc, navigate to docs
       if (canvas.docType === DocType.Quarto && canvas.userRepo) {
-        const docsUrl = `/docs/${canvas.userRepo}`;
-        // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
-        if (!isMobile && isCmdClick) {
-          window.open(docsUrl, '_blank');
-        } else {
-          void navigate(docsUrl);
-        }
+        openQuartoDoc(e, canvas, navigate, isMobile);
         return;
       }
-
+      const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       // Navigate to the canvas in the right panel
       const canvasUrl = `/chat/canvas/${canvas.id}`;
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
@@ -250,6 +249,8 @@ const CanvasPanel = (): ReactElement => {
             selectedCanvasId={selectedCanvasId}
             onDelete={handleDeleteCanvas}
             onDuplicate={handleDuplicateCanvas}
+            isPersonalSectionCollapsed={isPersonalSectionCollapsed}
+            onSetPersonalSectionCollapsed={setIsPersonalSectionCollapsed}
           />
         ) : (
           <CanvasList
