@@ -8,6 +8,8 @@ export interface CanvasListGroupedProps {
   selectedCanvasId?: string | undefined;
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
+  isPersonalSectionCollapsed: boolean;
+  onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
 }
 
 export interface FolderGroup {
