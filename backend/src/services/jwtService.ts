@@ -68,6 +68,11 @@ export class JwtService {
         audience: this.audience,
       }) as JwtPayload;
 
+      const forceLogoutBefore = config.jwt.forceLogoutBefore;
+      if (forceLogoutBefore && decoded.iat && decoded.iat < forceLogoutBefore) {
+        throw new Error('JWT token has expired');
+      }
+
       return decoded;
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
