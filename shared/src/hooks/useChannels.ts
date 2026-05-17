@@ -8,9 +8,10 @@ import type { Channel, ChannelUserStatus } from '../zero/schema.js';
 import { ChannelScopeType, ChannelType, ChannelVisibility } from '../zero/schema.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
+import type { QueryResultType } from '@rocicorp/zero';
 
 export { type VisibleChannel } from '../machines/stateMachine.js';
-export type VisibleProject = NonNullable<VisibleChannel['project']>;
+export type VisibleProject = QueryResultType<typeof queries.projectsByIds>[number];
 
 const shallowEqualVisibleChannels = (a: VisibleChannel[], b: VisibleChannel[]): boolean => {
   if (a.length !== b.length) return false;
@@ -25,10 +26,7 @@ const shallowEqualVisibleChannels = (a: VisibleChannel[], b: VisibleChannel[]): 
       channel.channelStats?.lastActivityAt === otherChannel.channelStats?.lastActivityAt &&
       channel.channelStats?.participantCount === otherChannel.channelStats?.participantCount &&
       channel.channelStats?.addUserPolicy === otherChannel.channelStats?.addUserPolicy &&
-      channel.description === otherChannel.description &&
-      channel.project?.id === otherChannel.project?.id &&
-      channel.project?.name === otherChannel.project?.name &&
-      channel.project?.code === otherChannel.project?.code
+      channel.description === otherChannel.description
     );
   });
 };
@@ -84,17 +82,23 @@ export const useAllVisibleChannels = (): VisibleChannel[] => {
 
 export const useVisibleProjects = (): VisibleProject[] => {
   const channels = useAllVisibleChannels();
-  return useMemo(() => {
-    const byId = new Map<string, VisibleProject>();
-
+  const projectIds = useMemo(() => {
+    const ids = new Set<string>();
     for (const channel of channels) {
-      const project = channel.project;
-      if (!project) continue;
-      byId.set(project.id, project);
+      if (channel.projectId) ids.add(channel.projectId);
     }
-
-    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(ids);
   }, [channels]);
+
+  const [projects] = useQuery(
+    queries.projectsByIds({ projectIds }),
+    { enabled: projectIds.length > 0 },
+  );
+
+  return useMemo(
+    () => [...(projects ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [projects],
+  );
 };
 
 export const useChannel = (channelId: string): Channel | undefined => {

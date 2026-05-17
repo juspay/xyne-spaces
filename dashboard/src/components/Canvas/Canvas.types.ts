@@ -66,7 +66,6 @@ export interface CanvasChannel {
   projectId: string;
   isArchived?: boolean;
   scopeType?: ChannelScopeType;
-  project?: CanvasProject;
 }
 
 export interface CanvasFolder {
