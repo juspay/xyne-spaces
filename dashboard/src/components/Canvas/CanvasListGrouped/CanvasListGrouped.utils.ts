@@ -133,15 +133,11 @@ export function buildGroupedCanvasSections(
     sections.projectChannels.map(channel => [channel.id, channel]),
   );
 
-  const ensureProjectGroup = (
-    projectId: string,
-    fallbackProject?: CanvasProject | null,
-  ): ProjectGroup | null => {
+  const ensureProjectGroup = (projectId: string): ProjectGroup | null => {
     let group = groups.get(projectId);
     if (group) return group;
 
-    const project =
-      sections.projects.find(item => item.id === projectId) ?? fallbackProject ?? null;
+    const project = sections.projects.find(item => item.id === projectId) ?? null;
     if (!project) return null;
 
     group = { project, channels: [], folders: [], rootCanvases: [] };
@@ -169,7 +165,7 @@ export function buildGroupedCanvasSections(
   }
 
   for (const channel of sections.projectChannels) {
-    const group = ensureProjectGroup(channel.projectId, channel.project);
+    const group = ensureProjectGroup(channel.projectId);
     if (!group) continue;
     ensureChannelGroup(group, channel);
   }
@@ -179,7 +175,7 @@ export function buildGroupedCanvasSections(
     const channel = projectChannelsById.get(folder.channelId) ?? null;
     const projectId = channel?.projectId ?? folder.projectId ?? null;
     if (!channel || !projectId) continue;
-    const group = ensureProjectGroup(projectId, channel.project);
+    const group = ensureProjectGroup(projectId);
     if (!group) continue;
     const channelGroup = ensureChannelGroup(group, channel);
     if (!channelGroup.folders.some(item => item.folder.id === folder.id)) {
@@ -211,20 +207,15 @@ export function buildGroupedCanvasSections(
     const channel =
       canvas.channel ?? (canvas.channelId ? projectChannelsById.get(canvas.channelId) : null);
     if (!channel) continue;
-    const group = ensureProjectGroup(channel.projectId, channel.project);
+    const group = ensureProjectGroup(channel.projectId);
     if (!group) continue;
     const channelGroup = ensureChannelGroup(group, channel);
     channelGroup.rootCanvases.push(canvas);
   }
 
   for (const canvas of sections.projectRootCanvases) {
-    const project =
-      canvas.project ??
-      (canvas.projectId
-        ? (sections.projects.find(item => item.id === canvas.projectId) ?? null)
-        : null);
-    if (!project) continue;
-    const group = ensureProjectGroup(project.id, project);
+    if (!canvas.projectId) continue;
+    const group = ensureProjectGroup(canvas.projectId);
     if (!group) continue;
     group.rootCanvases.push(canvas);
   }

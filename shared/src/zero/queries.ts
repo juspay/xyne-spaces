@@ -909,8 +909,14 @@ export const queries = defineQueries({
       .where('userId', ctx.userID)
       .where('isClosed', false)
       .where('isDeleted', false)
-      .related('channel', ch => ch.related('channelStats').related('project'));
+      .related('channel', ch => ch.related('channelStats'));
   }),
+  projectsByIds: defineQuery(
+    z.object({ projectIds: z.array(z.string()) }),
+    ({ args: { projectIds } }) => {
+      return zql.projects.where(helpers => helpers.cmp('id', 'IN', projectIds));
+    },
+  ),
   channelParticipants: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {
