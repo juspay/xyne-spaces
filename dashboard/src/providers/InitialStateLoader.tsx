@@ -31,8 +31,6 @@ import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
 import { Channel } from '@xyne/shared/index';
 import { SharedAuthProvider } from '@xyne/shared/hooks';
-import { isUploadingTracked } from '../utils/attachmentUploadTracker';
-import { AttachmentUploadStatus } from '@xyne/shared/zero';
 
 interface InitialStateLoaderProps {
   children: ReactNode;
@@ -493,23 +491,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     }
 
     if (isQueryCompleted(userDraftsDetails)) {
-      // Filter out PENDING attachments that are not being actively tracked
-      // PENDING attachments from a previous session (not tracked) are considered orphaned
-      const filteredDrafts = userDrafts.map(draft => ({
-        ...draft,
-        attachments: draft.attachments?.filter(att => {
-          // Never show FAILED attachments in InputBox
-          if (att.uploadStatus === AttachmentUploadStatus.FAILED) {
-            return false;
-          }
-          // For PENDING, only show if it's being actively tracked by setUploadingIds
-          if (att.uploadStatus === AttachmentUploadStatus.PENDING) {
-            return isUploadingTracked(att.id);
-          }
-          return true;
-        }),
-      }));
-      stateMachineActor.send({ type: 'ADD_USER_DRAFTS', draftMessages: filteredDrafts });
+      stateMachineActor.send({ type: 'ADD_USER_DRAFTS', draftMessages: userDrafts });
     }
 
     if (isQueryCompleted(userDelayedMessagesDetails)) {

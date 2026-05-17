@@ -12,7 +12,6 @@ import { z } from 'zod';
 import {
   ActivityClassification,
   AttachmentEntityType,
-  AttachmentUploadStatus,
   CallStatus,
   CanvasVisibility,
   ChannelRole,
@@ -1224,9 +1223,7 @@ export const queries = defineQueries({
     return zql.activities.where('isRead', false).orderBy('updatedAt', 'desc').related('channel');
   }),
   userDrafts: defineQuery(({ ctx }) => {
-    return zql.draft_messages
-      .where('userId', ctx.userID)
-      .related('attachments', a => a.where('uploadStatus', '!=', AttachmentUploadStatus.FAILED));
+    return zql.draft_messages.where('userId', ctx.userID).related('attachments');
   }),
   // Query for message with sender and channel info for activity display
   getMessageForActivity: defineQuery(

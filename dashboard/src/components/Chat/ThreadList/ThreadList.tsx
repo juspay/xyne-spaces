@@ -16,8 +16,6 @@ import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/c
 import { ArrowDown, ChevronUp } from 'lucide-react';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
-import { pendingMessageMachine } from '../../../machines/pendingMessageMachine';
-import PendingMessageBubble from '../PendingMessageBubble';
 
 type ThreadListProps = {
   channelId: string;
@@ -142,31 +140,6 @@ const ThreadList = ({
       setIsNearBottom(true);
     }
   }, [updateLastReadAt]);
-
-  // Optimistic pending messages — shown while file uploads are settling.
-  // Scoped to this thread's conversationId.
-  const [pendingMessages, setPendingMessages] = useState(() =>
-    pendingMessageMachine
-      .getState()
-      .filter(m => m.channelId === channelId && m.conversationId === conversationId),
-  );
-
-  useEffect(() => {
-    return pendingMessageMachine.subscribe(() => {
-      setPendingMessages(
-        pendingMessageMachine
-          .getState()
-          .filter(m => m.channelId === channelId && m.conversationId === conversationId),
-      );
-    });
-  }, [channelId, conversationId]);
-
-  // Auto-scroll to bottom when pending messages appear (Just sent by user)
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container || pendingMessages.length === 0) return;
-    container.scrollTop = container.scrollHeight - container.clientHeight;
-  }, [pendingMessages.length]);
 
   // Check if the previous message is a system message
   const isPreviousMessageSystem = (
@@ -437,11 +410,6 @@ const ThreadList = ({
                 </div>
               );
             })}
-
-            {/* Pending messages — optimistic bubbles while uploads settle */}
-            {pendingMessages.map(msg => (
-              <PendingMessageBubble key={`pending-${msg.id}`} msg={msg} />
-            ))}
           </div>
         </div>
         {showFab && (
@@ -557,11 +525,6 @@ const ThreadList = ({
               <div className='flex-1 bg-border h-[1px]'></div>
             </div>
           )}
-
-          {/* Pending messages — optimistic bubbles while uploads settle */}
-          {pendingMessages.map(msg => (
-            <PendingMessageBubble key={`pending-${msg.id}`} msg={msg} />
-          ))}
         </div>
       </div>
       {showFab && (
