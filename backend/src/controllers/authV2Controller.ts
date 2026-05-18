@@ -34,6 +34,7 @@ type AutoLoginResult = {
 export class AuthV2Controller {
   private googleClient: OAuth2Client;
   private googleClientNew: OAuth2Client | null = null;
+  private mobileGoogleClient: OAuth2Client;
   private userService: UserService;
   private userSessionService: UserSessionService;
   private microsoftAuthController: MicrosoftAuthController;
@@ -41,6 +42,8 @@ export class AuthV2Controller {
   constructor() {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const mobileClientId = process.env.GOOGLE_MOBILE_CLIENT_ID;
+    const mobileClientSecret = process.env.GOOGLE_MOBILE_CLIENT_SECRET;
 
     if (!clientId || !clientSecret) {
       throw new Error(
@@ -55,6 +58,7 @@ export class AuthV2Controller {
     if (clientIdNew && clientSecretNew) {
       this.googleClientNew = new OAuth2Client(clientIdNew, clientSecretNew);
     }
+    this.mobileGoogleClient = new OAuth2Client(mobileClientId, mobileClientSecret);
 
     this.userService = new UserService();
     this.userSessionService = new UserSessionService();
@@ -926,7 +930,7 @@ export class AuthV2Controller {
       logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
 
       logger.info(`[${requestId}] Exchanging code for tokens`);
-      const { tokens } = await this.googleClient.getToken({
+      const { tokens } = await this.mobileGoogleClient.getToken({
         code: code as string,
         redirect_uri: redirectUri,
       });
@@ -940,10 +944,10 @@ export class AuthV2Controller {
       }
 
       logger.info(`[${requestId}] Verifying ID token`);
-      const ticket = await this.googleClient.verifyIdToken({
+      const ticket = await this.mobileGoogleClient.verifyIdToken({
         idToken: id_token,
         // Accept both web and iOS client IDs
-        audience: [process.env.GOOGLE_CLIENT_ID!, process.env.GOOGLE_IOS_CLIENT_ID!].filter(
+        audience: [process.env.GOOGLE_MOBILE_CLIENT_ID!, process.env.GOOGLE_IOS_CLIENT_ID!].filter(
           Boolean
         ),
       });
