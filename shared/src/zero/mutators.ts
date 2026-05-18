@@ -29,6 +29,7 @@ import {
   DocType,
   PRStatusEvent,
   RotationInterval,
+  QueryVisualizationType,
 
   ActivityClassification,
   AccessType,
@@ -5947,7 +5948,9 @@ export const mutators = defineMutators({
         id: z.string(),
         title: z.string(),
         queryJson: z.any(),
-        entityType: z.nativeEnum(FormEntityType),
+        entityType: z.nativeEnum(FormEntityType).optional(),
+        targetEntity: z.string().optional(),
+        visualType: z.string().optional(),
         dashboardId: z.string().optional(),
         createdBy: z.string(),
         timestamp: z.number(),
@@ -5955,7 +5958,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
-        args: { id, title, queryJson, entityType, dashboardId, createdBy, timestamp, mappingId },
+        args: { id, title, queryJson, entityType, targetEntity, visualType, dashboardId, createdBy, timestamp, mappingId },
       }) => {
         const now = timestamp;
 
@@ -5965,7 +5968,9 @@ export const mutators = defineMutators({
           id: id,
           title: title.trim(),
           queryJson: queryJson as ReadonlyJSONValue,
-          entityType,
+          entityType: entityType ?? null,
+          targetEntity: targetEntity ?? null,
+          visualType: (visualType as QueryVisualizationType | undefined) ?? null,
           createdBy: existingQuery?.createdBy ?? createdBy,
           updatedAt: now,
           createdAt: existingQuery?.createdAt ?? now,
@@ -5985,10 +5990,14 @@ export const mutators = defineMutators({
             if (!newMappingId) {
               throw new Error('mappingId is required when creating a new dashboard query mapping');
             }
+            const existingMappings = await tx.run(
+              zql.dashboard_queries_mapping.where('dashboardId', dashboardId),
+            );
             await tx.mutate.dashboard_queries_mapping.insert({
               id: newMappingId,
               dashboardId,
               queryId: id,
+              sequence: existingMappings.length,
               createdAt: now,
               updatedAt: now,
             });
@@ -6006,6 +6015,22 @@ export const mutators = defineMutators({
           await tx.mutate.dashboard_queries_mapping.delete({ id: mapping.id });
         }
         await tx.mutate.queries.delete({ id });
+      },
+    ),
+    reorder: defineMutator(
+      z.object({
+        orderedMappingIds: z.array(z.string()),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { orderedMappingIds, timestamp } }) => {
+        for (let i = 0; i < orderedMappingIds.length; i++) {
+          const mappingId = orderedMappingIds[i]!;
+          await tx.mutate.dashboard_queries_mapping.update({
+            id: mappingId,
+            sequence: i,
+            updatedAt: timestamp,
+          });
+        }
       },
     ),
   },

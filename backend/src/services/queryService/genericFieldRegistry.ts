@@ -1,5 +1,5 @@
-import { PrismaClient, FormEntityType, FormFieldType } from '@prisma/client';
-import { FieldInfo, FieldType, AvailableFields, getPrismaModelName } from './types';
+import { PrismaClient, FormFieldType } from '@prisma/client';
+import { FieldInfo, FieldType, AvailableFields, getPrismaModelName, isSupportedEntityType, isValidFormEntityType } from './types';
 import {logger} from '@/utils/logger';
 
 const FORM_FIELD_TYPE_MAPPING: Record<FormFieldType, FieldType> = {
@@ -37,7 +37,13 @@ async function initSchemaCache(): Promise<void> {
     const fields = new Map<string, FieldMetadata>();
 
     for (const field of model.fields) {
+      if (field.kind === 'object') {
+        continue;
+      }
       const fieldType = field.type as PrismaFieldType;
+      if (fieldType === 'Json') {
+        continue;
+      }
 
       // Get enum values for enum fields
       let enumValues: string[] | undefined;
@@ -52,8 +58,8 @@ async function initSchemaCache(): Promise<void> {
         isRequired: field.isRequired,
         isId: field.isId,
         enumValues,
-        sortable: fieldType !== 'Json',
-        filterable: fieldType !== 'Json',
+        sortable: true,
+        filterable: true,
         aggregatable: ['Int', 'Float', 'DateTime', 'String'].includes(fieldType),
       });
     }
@@ -143,12 +149,18 @@ export class GenericFieldRegistry {
     return GenericFieldRegistry.instance;
   }
 
-  getSystemFields(entityType: FormEntityType): FieldInfo[] {
+  getSystemFields(entityType: string): FieldInfo[] {
+    if (!isSupportedEntityType(entityType)) {
+      return [];
+    }
     const modelName = getPrismaModelName(entityType);
     return extractFieldsFromModel(modelName);
   }
 
-  async getCustomFields(entityType: FormEntityType): Promise<FieldInfo[]> {
+  async getCustomFields(entityType: string): Promise<FieldInfo[]> {
+    if (!isValidFormEntityType(entityType)) {
+      return [];
+    }
     try {
       const forms = await this.prisma.form.findMany({
         where: { entityType },
@@ -190,7 +202,7 @@ export class GenericFieldRegistry {
   }
 
 
-  async getAvailableFields(entityType: FormEntityType): Promise<AvailableFields> {
+  async getAvailableFields(entityType: string): Promise<AvailableFields> {
     const systemFields = this.getSystemFields(entityType);
     const customFields = await this.getCustomFields(entityType);
 

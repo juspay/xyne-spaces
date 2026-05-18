@@ -45,6 +45,7 @@ import {
   SurfaceAreaType,
   SurfaceLinkKind,
   RotationInterval,
+  QueryVisualizationType,
   parseReactionsMd,
   removeReactionFromData,
   serializeReactionsMd,
@@ -8240,13 +8241,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           id: z.string(),
           title: z.string(),
           queryJson: z.any(),
-          entityType: z.nativeEnum(FormEntityType),
+          entityType: z.nativeEnum(FormEntityType).optional(),
+          targetEntity: z.string().optional(),
+          visualType: z.string().optional(),
           dashboardId: z.string().optional(),
           createdBy: z.string(),
           timestamp: z.number(),
           mappingId: z.string().optional(),
         }),
-        async ({ tx, args: { id, title, queryJson, entityType, dashboardId, createdBy, timestamp, mappingId } }) => {
+        async ({ tx, args: { id, title, queryJson, entityType, targetEntity, visualType, dashboardId, createdBy, timestamp, mappingId } }) => {
           const now = timestamp;
 
           const existingQuery = await tx.run(zql.queries.where('id', id).one())
@@ -8255,7 +8258,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: id,
             title: title.trim(),
             queryJson,
-            entityType,
+            entityType: entityType ?? null,
+            targetEntity: targetEntity ?? null,
+            visualType: visualType ? (visualType as QueryVisualizationType) : null,
             createdBy: existingQuery?.createdBy ?? createdBy,
             updatedAt: now,
             createdAt: existingQuery?.createdAt ?? now,
@@ -8275,10 +8280,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               if (!newMappingId) {
                 throw new Error('mappingId is required when creating a new dashboard query mapping');
               }
+              const existingMappings = await tx.run(
+                zql.dashboard_queries_mapping.where('dashboardId', dashboardId),
+              );
               await tx.mutate.dashboard_queries_mapping.insert({
                 id: newMappingId,
                 dashboardId,
                 queryId: id,
+                sequence: existingMappings.length,
                 createdAt: now,
                 updatedAt: now,
               });
@@ -8291,11 +8300,42 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           id: z.string(),
         }),
         async ({ tx, args: { id } }) => {
-          const mappings = await tx.run(zql.dashboard_queries_mapping.where('queryId', id));
-          for (const mapping of mappings) {
+          const mapping = await tx.run(zql.dashboard_queries_mapping.where('queryId', id).one());
+          const dashboardId = mapping?.dashboardId;
+          if (mapping) {
             await tx.mutate.dashboard_queries_mapping.delete({ id: mapping.id });
           }
           await tx.mutate.queries.delete({ id });
+
+          if (dashboardId) {
+            asyncTasks.push(async () => {
+              const remainingMappings = await tx.run(
+                zql.dashboard_queries_mapping.where('dashboardId', dashboardId).orderBy('sequence', 'asc')
+              );
+              for (let i = 0; i < remainingMappings.length; i++) {
+                await tx.mutate.dashboard_queries_mapping.update({
+                  id: remainingMappings[i].id,
+                  sequence: i,
+                });
+              }
+            });
+          }
+        },
+      ),
+      reorder: defineMutator(
+        z.object({
+          orderedMappingIds: z.array(z.string()),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { orderedMappingIds, timestamp } }) => {
+          for (let i = 0; i < orderedMappingIds.length; i++) {
+            const mappingId = orderedMappingIds[i]!;
+            await tx.mutate.dashboard_queries_mapping.update({
+              id: mappingId,
+              sequence: i,
+              updatedAt: timestamp,
+            });
+          }
         },
       ),
     },

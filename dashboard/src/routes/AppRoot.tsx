@@ -146,7 +146,7 @@ import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
 import NoOrganizationAccessScreen from './NoOrganizationAccessScreen/NoOrganizationAccessScreen';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
-import QueryBuilderScreen from './QueryBuilderScreen/QueryBuilderScreen.tsx';
+import QueryDashboardScreen from '../components/AnalyticsDashboard/QueryDashboardScreen';
 import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
@@ -1002,7 +1002,7 @@ export const router = createBrowserRouter([
                 path: 'analytics-dashboard/:dashboardId',
                 element: (
                   <ResourceProtectedRoute resourceName='ANALYTICS'>
-                    <QueryBuilderScreen />
+                    <QueryDashboardScreen />
                   </ResourceProtectedRoute>
                 ),
               },

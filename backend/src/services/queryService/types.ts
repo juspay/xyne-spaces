@@ -1,21 +1,34 @@
 import { z } from 'zod';
 import { FormEntityType } from '@prisma/client';
 
-/**
- * Mapping of FormEntityType to Prisma model names
- */
-export const ENTITY_TYPE_TO_PRISMA_MODEL: Record<FormEntityType, string> = {
+export const SUPPORTED_ENTITY_TYPES = [
+  FormEntityType.TICKET,
+  FormEntityType.SUB_TICKET,
+  FormEntityType.RELEASE_ENV_FORM,
+  FormEntityType.RELEASE_MIGRATION_FORM,
+  'USER_WORKLOAD_MAPPING',
+] as const;
+
+export type SupportedEntityType = (typeof SUPPORTED_ENTITY_TYPES)[number];
+
+export function isSupportedEntityType(entityType: string): entityType is SupportedEntityType {
+  return (SUPPORTED_ENTITY_TYPES as readonly string[]).includes(entityType);
+}
+
+export const ENTITY_TYPE_TO_PRISMA_MODEL: Record<SupportedEntityType, string> = {
   [FormEntityType.TICKET]: 'Ticket',
   [FormEntityType.SUB_TICKET]: 'SubTicket',
   [FormEntityType.RELEASE_ENV_FORM]: "ReleaseChangeType",
   [FormEntityType.RELEASE_MIGRATION_FORM]: "ReleaseChangeType",
-} as const;
+  USER_WORKLOAD_MAPPING: 'UserWorkloadMapping',
+};
 
-/**
- * Get Prisma model name from entity type
- */
-export function getPrismaModelName(entityType: FormEntityType): string {
+export function getPrismaModelName(entityType: SupportedEntityType): string {
   return ENTITY_TYPE_TO_PRISMA_MODEL[entityType];
+}
+
+export function isValidFormEntityType(entityType: string): entityType is FormEntityType {
+  return Object.values(FormEntityType).includes(entityType as FormEntityType);
 }
 
 /**
@@ -101,7 +114,7 @@ export function isLogicalFilter(filter: unknown): filter is LogicalFilter {
  * Generic query interface for querying any entity type
  */
 export interface GenericQuery {
-  entityType: FormEntityType;
+  entityType: string;
   projectId?: string;
   select?: string[];
   filters?: LogicalFilter;
@@ -215,7 +228,7 @@ const LogicalFilterSchema = z.object({
 }) as any;
 
 const GenericQuerySchema = z.object({
-  entityType: z.nativeEnum(FormEntityType),
+  entityType: z.string(),
   projectId: z.string().optional(),
   select: z.array(z.string()).optional(),
   filters: LogicalFilterSchema.optional(),

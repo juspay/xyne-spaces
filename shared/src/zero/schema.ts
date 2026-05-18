@@ -369,6 +369,18 @@ export enum ACLAuditTargetType {
 }
 
 // @ts-ignore TS1294
+export enum QueryVisualizationType {
+  KPI = 'KPI',
+  BAR_CHART = 'BAR_CHART',
+  PIE_CHART = 'PIE_CHART',
+  DONUT_CHART = 'DONUT_CHART',
+  LINE_CHART = 'LINE_CHART',
+  FUNNEL = 'FUNNEL',
+  HEATMAP = 'HEATMAP',
+  DATA_TABLE = 'DATA_TABLE',
+}
+
+// @ts-ignore TS1294
 export enum PRStatus {
   OPEN = 'OPEN',
   DECLINED = 'DECLINED',
@@ -1930,14 +1942,15 @@ export const queryTable = table('queries')
     id: string(),
     title: string(),
     queryJson: json(),
-    entityType: enumeration<FormEntityType>(),
+    entityType: enumeration<FormEntityType>().optional(),
+    targetEntity: string().optional(),
+    visualType: enumeration<QueryVisualizationType>().optional(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
   })
   .primaryKey('id');
 
-// Lookup Values Table
 export const lookupValueTable = table('lookup_values')
   .columns({
     id: string(),
@@ -2081,6 +2094,7 @@ export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
     id: string(),
     dashboardId: string(),
     queryId: string(),
+    sequence: number(),
     createdAt: number(),
     updatedAt: number(),
   })

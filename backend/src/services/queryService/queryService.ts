@@ -1,4 +1,4 @@
-import { PrismaClient, FormEntityType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { AvailableFields, GenericQuery, QueryResult, FieldCondition, LogicalFilter, isLogicalFilter, isOperatorValidForType, FieldInfo, parseGenericQuery, normalizeValueForOperator, FieldType } from './types';
 import { GenericFieldRegistry } from './genericFieldRegistry';
 import { GenericQueryBuilder } from './genericQueryBuilder';
@@ -186,7 +186,7 @@ export class GenericQueryService {
     return this.queryBuilder.execute(query);
   }
 
-  async getAvailableFields(entityType: FormEntityType): Promise<AvailableFields> {
+  async getAvailableFields(entityType: string): Promise<AvailableFields> {
     return this.registry.getAvailableFields(entityType);
   }
 }
