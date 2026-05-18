@@ -207,6 +207,7 @@ const AppSidebar = (): ReactElement => {
     (!currentUser?.statusExpiryAt || !isStatusExpired(currentUser.statusExpiryAt));
 
   const handleStatusClick = (): void => {
+    setIsSettingsPopoverOpen(false);
     setIsStatusModalOpen(true);
   };
 
@@ -477,6 +478,7 @@ const AppSidebar = (): ReactElement => {
           <SettingsContent
             onClose={() => setIsSettingsPopoverOpen(false)}
             onOpenPreferences={handleOpenPreferences}
+            onOpenStatusModal={handleStatusClick}
           />
         </Popover>
 
