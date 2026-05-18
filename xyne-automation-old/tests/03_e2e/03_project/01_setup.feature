@@ -25,6 +25,10 @@ Feature: Project Test Setup
     And I open the Xyne-Space at "<landing_page>"
 
     Examples:
-      | user  | browser       | user_context | auth_url           | landing_page   |
-      | Admin | admin-browser | admin        | /auth?isAdmin=true | /listprojects  |
-      | User1 | user1-browser | user1        | /auth              | /chat          |
+      # The dashboard's authMachine only forwards `email` and `setAsNewUser`
+      # to /test/auth/login (the legacy ?isAdmin=true URL flag is dropped).
+      # Authenticate via an admin-pattern email so the backend grants the
+      # ADMIN resource permissions — same mechanism gauge uses.
+      | user  | browser       | user_context | auth_url                                              | landing_page |
+      | Admin | admin-browser | admin        | /auth?email=test-admin-email-1@xyne-test.local        | /chat/dir    |
+      | User1 | user1-browser | user1        | /auth?email=test-user-email-1@xyne-test.local         | /chat        |

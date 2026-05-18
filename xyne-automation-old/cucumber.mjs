@@ -10,7 +10,15 @@ const common = {
   requireModule: ['ts-node/register', 'tsconfig-paths/register'],
   require: ['tests/**/*.steps.ts', 'fixtures/cucumber.*.ts'],
   format: [
-    'summary',
+    // CI (TEST_ENV=test) needs streaming output so Jenkins logs show motion
+    // and don't look hung. Local interactive runs (TEST_ENV=local/local-test)
+    // prefer the quieter 'summary' formatter. Restored from pre-gauge state —
+    // was accidentally flattened in PR #6240.
+    process.env.TEST_ENV === 'local-test'
+      ? 'summary'
+      : process.env.TEST_ENV !== 'local'
+        ? 'progress'
+        : 'summary',
     `summary:report/${timestamp}/cucumber-summary.log`,
     `json:report/${timestamp}/cucumber-report.json`,
     `html:report/${timestamp}/cucumber-report.html`,

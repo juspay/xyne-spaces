@@ -10,7 +10,6 @@
     "test:e2e": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/03_e2e",
     "test:push": "bash scripts/push-report-branch.sh",
     "test:integrity": "bash scripts/verify-test-code-integrity.sh",
-    "test:cleanup": "bash scripts/cleanup-all-tests.sh",
     "format": "biome format --write .",
     "format:check": "biome format . --diagnostic-level=error",
     "lint": "biome check --assist-enabled=true .",
