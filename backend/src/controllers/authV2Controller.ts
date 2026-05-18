@@ -1204,7 +1204,7 @@ export class AuthV2Controller {
         oauthUserData = {
           email: session.user.email,
           name: session.user.name || '',
-          providerUserId: session.user.id, // Use session user ID as provider ID
+          providerUserId: session.user.providerUserId,
           picture: session.user.picture || undefined,
         };
         provider = 'GOOGLE'; // Assume Google for auto-login
