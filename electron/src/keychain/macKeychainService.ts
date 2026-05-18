@@ -92,14 +92,41 @@ class MacKeychainService implements IKeychain {
                 "/Applications/Safari.app",
                 `/Applications/${config.APP_NAME}.app`,
                 "/Applications/Brave Browser.app",
-                "/Applications/Firefox.app"
+                "/Applications/Firefox.app",
+                "/Applications/DuckDuckGo.app",
+                "/Applications/Arc.app",
+                "/Applications/Opera.app",
+                "/Applications/Microsoft Edge.app",
+                "/Applications/Vivaldi.app",
+                "/Applications/Tor Browser.app",
+                "/Applications/Waterfox.app",
+                "/Applications/Pale Moon.app",
             ];
 
-            // Generate -T flags only for applications that exist on the system
-            const trustFlags = appPaths
-                .filter(app => fs.existsSync(app))
-                .map(app => `-T "${app}"`)
-                .join(' ');
+            /**
+             * Returns true only if the app exists on disk AND passes codesign
+             * verification. This prevents a corrupted (or partially-installed)
+             * bundle from causing the `security import` command to fail.
+             */
+            const isAppValid = async (appPath: string): Promise<boolean> => {
+                if (!fs.existsSync(appPath)) return false;
+                try {
+                    await execAsync(`/usr/bin/codesign --verify "${appPath}"`);
+                    return true;
+                } catch {
+                    console.warn(`Skipping trust flag for "${appPath}": codesign verification failed (app may be corrupted or unsigned).`);
+                    return false;
+                }
+            };
+
+            // Generate -T flags only for applications that exist and are not corrupted
+            const validApps = (
+                await Promise.all(appPaths.map(async (appPath) => ({ appPath, valid: await isAppValid(appPath) })))
+            )
+                .filter(({ valid }) => valid)
+                .map(({ appPath }) => appPath);
+
+            const trustFlags = validApps.map(appPath => `-T "${appPath}"`).join(' ');
 
             // Import into Keychain
             const importCmd = `${SECURITY} import "${p12Path}" -k "$(${SECURITY} login-keychain | xargs)" -f pkcs12 -P "changeit" -x ${trustFlags}`;

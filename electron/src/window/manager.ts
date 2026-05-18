@@ -15,6 +15,7 @@ import { handleCertificateError, isCertificateError } from '../services/certific
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import type { Counter } from '@opentelemetry/api';
+import { logger } from '@sentry/electron/main';
 
 let mainWindow: BrowserWindow | null = null;
 let isCompactMode = false;
@@ -335,26 +336,36 @@ function setupSpellcheckerContextMenu(window: BrowserWindow): void {
   log.info('[WindowManager] Spellchecker context menu configured');
 }
 
+const LOAD_URL_MAX_RETRIES = 3;
+const LOAD_URL_RETRY_DELAY_MS = 1000;
+
 export async function loadUrl(window: BrowserWindow, url: string, counter?: Counter): Promise<void> {
-  try {
-    await window.loadURL(url);
-    safeRecordMetric(() => {
-      counter?.add(1, { 
-        success: 'true',
-        buildVersion: app.getVersion(),
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= LOAD_URL_MAX_RETRIES; attempt++) {
+    try {
+      await window.loadURL(url);
+      Logger.info(EnrollmentEvent.LOAD_URL, { url, attempts: attempt });
+      safeRecordMetric(() => {
+        counter?.add(1, { success: 'true', buildVersion: app.getVersion() });
       });
-    });
-  } catch (error) {
-    safeRecordMetric(() => {
-      counter?.add(1, { 
-        success: 'false',
-        error: 'url_load_error',
-        buildVersion: app.getVersion(),
-      });
-    });
-    const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
-    await window.loadFile(errorPage);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < LOAD_URL_MAX_RETRIES) {
+        Logger.info(EnrollmentEvent.LOAD_URL_RETRY, { url, retry_attempt: attempt, error: lastError });
+        await new Promise(resolve => setTimeout(resolve, LOAD_URL_RETRY_DELAY_MS));
+      }
+    }
   }
+
+  Logger.logError(EnrollmentEvent.URL_LOAD_FAILED, lastError!, { url, total_attempts: LOAD_URL_MAX_RETRIES });
+  safeRecordMetric(() => {
+    counter?.add(1, { success: 'false', error: 'url_load_error', buildVersion: app.getVersion() });
+  });
+  const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
+  await window.loadFile(errorPage);
 }
 
 const MAX_HEALTH_CHECK_RETRIES = 3;
