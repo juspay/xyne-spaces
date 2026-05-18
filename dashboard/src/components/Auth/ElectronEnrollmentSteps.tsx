@@ -124,10 +124,10 @@ export function ElectronEnrollmentSteps({
           <a
             target='_blank'
             rel='noreferrer'
-            href='https://juspay.slack.com/archives/C0A473SV8CC'
+            href='https://juspay.slack.com/archives/C0A2BFNLBB8'
             className='font-bold text-primary hover:text-primary/80 hover:underline'
           >
-            #xyne-app-issues
+            #xyne-spaces-troubleshooting
           </a>{' '}
           Slack channel.
         </p>
