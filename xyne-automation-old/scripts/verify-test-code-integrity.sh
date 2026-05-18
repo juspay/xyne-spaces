@@ -29,11 +29,11 @@ CROSS_MARK='✗'
 cd "$(git rev-parse --show-toplevel)"
 
 # Calculate hash on current branch
-CURRENT_BRANCH_HASH=$(git ls-files -s xyne-automation/tests/ | awk '{print $2, $4}' | sort | sha256sum | awk '{print $1}')
+CURRENT_BRANCH_HASH=$(git ls-files -s xyne-automation-old/tests/ | awk '{print $2, $4}' | sort | sha256sum | awk '{print $1}')
 
-# Calculate hash of xyne-automation folder in main branch
+# Calculate hash of xyne-automation-old folder in main branch
 git fetch origin main --depth=1 2>/dev/null || true
-MAIN_BRANCH_HASH=$(git ls-tree -r origin/main xyne-automation/tests/ | awk '{print $3, $4}' | sort | sha256sum | awk '{print $1}')
+MAIN_BRANCH_HASH=$(git ls-tree -r origin/main xyne-automation-old/tests/ | awk '{print $3, $4}' | sort | sha256sum | awk '{print $1}')
 
 # Show hash details only in verbose mode
 if [ "$VERBOSE" = true ]; then

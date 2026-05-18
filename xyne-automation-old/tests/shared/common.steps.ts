@@ -25,7 +25,7 @@ When('I wait for {int} seconds', async function (this: CustomWorld, seconds: num
 /**
  * Resolves workspace-scoped URLs for test automation.
  * If the active browser session has a logged-in user with workspaceId,
- * paths like /listprojects are automatically resolved to /{workspaceId}/listprojects
+ * paths like /projects are automatically resolved to /{workspaceId}/projects
  */
 function resolveWorkspaceUrl(
   endpoint: string,
@@ -163,8 +163,37 @@ When(
     const container = this.page.locator(selector).first();
     await container.waitFor({ state: 'visible' });
 
-    let firstButton = container.locator('button').first();
+    // For listbox-style dropdowns (EntitySelector etc.) the options live inside
+    // `<li role="option"><button>`. Prefer those over any `<button>` we might
+    // find — otherwise we can land on a search chevron or close icon and the
+    // form value never updates.
+    //
+    // IMPORTANT: EntitySelector treats clicking the already-selected option as a
+    // toggle (deselect). Many ticket form fields auto-select their first option
+    // on mount, so blindly clicking would clear them. If the first option is
+    // already `aria-selected="true"`, the desired state is already reached —
+    // skip the click and let the popover close on its own (the trigger click
+    // that opened it is enough; we treat this as a no-op success).
+    const firstOption = container.locator('li[role="option"]').first();
+    const hasOption = await firstOption
+      .waitFor({ state: 'visible', timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
 
+    if (hasOption) {
+      const ariaSelected = await firstOption.getAttribute('aria-selected');
+      if (ariaSelected === 'true') {
+        uiLogger.info('[UI] First option already selected (aria-selected=true); skipping click to avoid toggle-deselect');
+        // Close the popover so the next step isn't blocked by an open overlay.
+        await this.page.keyboard.press('Escape');
+        return;
+      }
+      await firstOption.locator('button').first().click();
+      uiLogger.info('[UI] Clicked first option button (role=option)');
+      return;
+    }
+
+    let firstButton = container.locator('button').first();
     const buttonCount = await container.locator('button').count();
     if (buttonCount === 0) {
       uiLogger.info('[UI] No button elements found, trying role="button"');
@@ -259,6 +288,13 @@ When(
     const dateButton = calendar.locator(`button[data-date="${year}-${month}-${day}"]`);
     await dateButton.waitFor({ state: 'visible' });
     await dateButton.click();
+    // The picker is a popover with an "Apply" footer button — selecting a
+    // date alone leaves the popover open and blocks the surrounding form's
+    // submit button. Click Apply to commit and close.
+    const applyButton = calendar.getByRole('button', { name: 'Apply' });
+    if (await applyButton.isVisible().catch(() => false)) {
+      await applyButton.click();
+    }
     uiLogger.info(
       `[UI] Selected date ${year}-${month + 1}-${day} (${days} days from now) in calendar "${calendarSelector}"`
     );

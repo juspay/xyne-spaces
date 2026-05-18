@@ -1,13 +1,18 @@
 @e2e @user-groups @user-group-creation
 Feature: User Group Creation
 
+  # The /user-groups route is permission-gated. A direct URL navigation races
+  # the permissions fetch and gets redirected to home. Enter via the in-app
+  # sidebar nav — the testid only renders once the state machine has hydrated
+  # the user's permissions.
+
   Background:
     Given using browser "admin-browser"
     When I open the Xyne-Space at "/chat/dir"
-    And I wait for "[data-testid='chat-list-loading']" to disappear
+    And I should see the element "[data-testid='nav-user-groups']"
+    And I click on "[data-testid='nav-user-groups']"
 
   Scenario: Create a user group with multiple members
-    And I click on "[data-testid='nav-user-groups']"
     And I should see the element "[data-testid='create-user-group-btn']"
     And I click on "[data-testid='create-user-group-btn']"
     And I click on "[data-testid='user-group-name-input']"
