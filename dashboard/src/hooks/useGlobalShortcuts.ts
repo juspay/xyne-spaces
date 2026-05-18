@@ -5,6 +5,7 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../machines/roomMachine';
+import { browserPanelActor } from '../machines/browserPanelMachine';
 
 interface UseGlobalShortcutsProps {
   leftPanelRef: RefObject<ImperativePanelHandle | null>;
@@ -21,9 +22,10 @@ interface UseGlobalShortcutsProps {
 export const useGlobalShortcuts = ({ leftPanelRef }: UseGlobalShortcutsProps): void => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { channelId, conversationId } = useParams<{
+  const { channelId, conversationId, workspaceId } = useParams<{
     channelId?: string;
     conversationId?: string;
+    workspaceId?: string;
   }>();
   const isChatOpen = useSelector(roomActor, state => state.context.isChatOpen);
 
@@ -49,6 +51,21 @@ export const useGlobalShortcuts = ({ leftPanelRef }: UseGlobalShortcutsProps): v
   // Open activity view
   useShortcutById('global.openActivity', () => {
     void navigate('/chat/activity');
+  });
+
+  // Toggle between the main app and the in-app fullscreen browser.
+  useShortcutById('global.toggleBrowser', () => {
+    const onBrowser = /\/browser(\/|$)/.test(location.pathname);
+    const panelState = browserPanelActor.getSnapshot().context.browserPanelState;
+
+    if (onBrowser) {
+      browserPanelActor.send({ type: 'CLOSE' });
+      void navigate(-1);
+    } else if (panelState === 'open') {
+      browserPanelActor.send({ type: 'CLOSE' });
+    } else {
+      void navigate(workspaceId ? `/${workspaceId}/browser` : '/browser');
+    }
   });
 
   // Go back in navigation history

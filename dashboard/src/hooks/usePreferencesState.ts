@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 
@@ -7,6 +7,11 @@ import { useAILandingDefault } from './useAILandingDefault';
 import { useDebugSettings } from './useDebugSettings';
 import { useAskAIVersion } from './useAskAIVersion';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
+import {
+  getLinkOpenExternalDefault,
+  setLinkOpenExternalDefault,
+  subscribeLinkOpenPref,
+} from '../utils/openLink';
 import { useZero } from './useZero';
 import { useSelf } from './useUsers';
 import { useCurrentUserAssignmentState } from './useAssignmentState';
@@ -31,6 +36,10 @@ export function usePreferencesState(enabled: boolean) {
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { askAIVersion, setAskAIVersion } = useAskAIVersion();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
+  const linksOpenExternalByDefault = useSyncExternalStore(
+    subscribeLinkOpenPref,
+    getLinkOpenExternalDefault,
+  );
   const { isCurrentlyUnavailable, unavailableUntil, isActiveInAtLeastOneGroup } =
     useCurrentUserAssignmentState();
 
@@ -102,6 +111,8 @@ export function usePreferencesState(enabled: boolean) {
     setAskAIVersion,
     enterSendsMessage,
     setEnterSendsMessage,
+    linksOpenExternalByDefault,
+    setLinksOpenExternalByDefault: setLinkOpenExternalDefault,
     hasVoiceSignature,
     isCurrentlyUnavailable,
     unavailableUntil,

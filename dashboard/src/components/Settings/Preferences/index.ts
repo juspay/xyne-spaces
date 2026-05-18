@@ -13,6 +13,7 @@ export type PreferenceSection =
 export interface PreferencesProps {
   open: boolean;
   onClose: () => void;
+  initialSection?: PreferenceSection;
 }
 
 export interface NavItem {

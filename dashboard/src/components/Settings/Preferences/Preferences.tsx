@@ -26,6 +26,7 @@ import type { Theme } from '../../../hooks/useTheme';
 import { cn } from '../../../utils/classNames';
 import { isElectronApp } from '../../../utils/electronApp';
 import { detectReactNativeWebView, reactNativeBridge } from '../../../utils/reactNativeBridge';
+import { linkOpenPrefIsRelevant } from '../../../utils/openLink';
 import { logger } from '../../../utils/logger';
 
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
@@ -219,9 +220,10 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 );
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
+// Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
 const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-4'>
-    <SectionHeader title='Messaging' subtitle='Configure message composition behavior' />
+    <SectionHeader title='Messaging' subtitle='Configure message composition and link behavior' />
     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
       <div>
         <p className='text-sm font-medium text-foreground'>Press Enter to send</p>
@@ -237,6 +239,23 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={state.setEnterSendsMessage}
       />
     </div>
+    {linkOpenPrefIsRelevant() && (
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Open links in external browser</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            {state.linksOpenExternalByDefault
+              ? 'Click opens externally · ⌘/Ctrl-click opens in the app browser'
+              : 'Click opens in the app browser · ⌘/Ctrl-click opens externally'}
+          </p>
+        </div>
+        <Switch
+          id='links-open-external-by-default'
+          checked={state.linksOpenExternalByDefault}
+          onCheckedChange={state.setLinksOpenExternalByDefault}
+        />
+      </div>
+    )}
   </div>
 );
 
@@ -285,22 +304,22 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
     <div className='space-y-4'>
       <SectionHeader title='Developer' subtitle='Debug settings and app information' />
       <div className='space-y-3'>
-        <div className='p-3 rounded-lg border border-border bg-muted/30'>
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <p className='text-sm font-medium text-foreground'>Show send indicators</p>
           <Switch
             id='show-send-indicators'
             checked={state.debugSettings.showSendIndicators}
             onCheckedChange={state.toggleSendIndicators}
-            label='Show send indicators'
           />
         </div>
 
         {!isMobile && (
-          <div className='p-3 rounded-lg border border-border bg-muted/30'>
+          <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+            <p className='text-sm font-medium text-foreground'>Use Ask AI v2</p>
             <Switch
               id='ask-ai-version'
               checked={state.askAIVersion === 'v2'}
               onCheckedChange={checked => state.setAskAIVersion(checked ? 'v2' : 'v1')}
-              label='Use Ask AI v2'
             />
           </div>
         )}
@@ -375,7 +394,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
 // ════════════════════════════════════════════════════════════════════════════
 // Main component
 // ════════════════════════════════════════════════════════════════════════════
-const Preferences = ({ open, onClose }: PreferencesProps): ReactElement => {
+const Preferences = ({ open, onClose, initialSection }: PreferencesProps): ReactElement => {
   const { isMobile } = usePlatform();
   const state = usePreferencesState(open);
   const navItems = useMemo(() => {
@@ -386,19 +405,27 @@ const Preferences = ({ open, onClose }: PreferencesProps): ReactElement => {
       return true;
     });
   }, [isMobile]);
+  const defaultSection: PreferenceSection | null = isMobile ? null : 'appearance';
   const [activeSection, setActiveSection] = useState<PreferenceSection | null>(
-    isMobile ? null : 'appearance',
+    initialSection ?? defaultSection,
   );
 
   const { setIsAssignmentModalOpen, setIsVoiceModalOpen } = state;
 
   useEffect(() => {
     if (open) {
-      setActiveSection(isMobile ? null : 'appearance');
+      setActiveSection(initialSection ?? defaultSection);
       setIsAssignmentModalOpen(false);
       setIsVoiceModalOpen(false);
     }
-  }, [open, isMobile, setIsAssignmentModalOpen, setIsVoiceModalOpen]);
+  }, [
+    open,
+    isMobile,
+    initialSection,
+    defaultSection,
+    setIsAssignmentModalOpen,
+    setIsVoiceModalOpen,
+  ]);
 
   const handleOpenChange = (next: boolean): void => {
     if (!next) onClose();
