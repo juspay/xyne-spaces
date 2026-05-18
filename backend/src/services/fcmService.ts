@@ -177,12 +177,15 @@ type SessionPushTarget = {
   token: string;
   platform: string;
   deviceId?: string | null;
+  appVersion?: string | null;
 };
 
 class FcmPushService {
   private accessTokenManager?: FcmAccessTokenManager;
+  private accessTokenManagerNew?: FcmAccessTokenManager;
   private redis?: Redis;
   private projectId?: string;
+  private projectIdNew?: string;
   private sendEnabled = false;
 
   constructor() {
@@ -204,6 +207,17 @@ class FcmPushService {
       redis: this.redis,
       serviceAccountJson: serviceAccount,
     });
+
+    this.projectIdNew = config.fcm.projectIdNew || undefined;
+    if (this.projectIdNew) {
+      const serviceAccountNew = this.loadServiceAccountNew();
+      if (serviceAccountNew) {
+        this.accessTokenManagerNew = new FcmAccessTokenManager({
+          redis: this.redis,
+          serviceAccountJson: serviceAccountNew,
+        });
+      }
+    }
 
     this.sendEnabled = true;
     logger.info('FCM push service initialized');
@@ -527,8 +541,12 @@ class FcmPushService {
     }
   }
 
-  private async dispatchToFcm(token: string, payload: FcmNotificationPayload): Promise<void> {
-    if (!this.accessTokenManager || !this.projectId) {
+  private async dispatchToFcm(token: string, payload: FcmNotificationPayload, platform?: string, appVersion?: string): Promise<void> {
+    const useNew = platform && shouldUseNewFcmCredentials(platform, appVersion);
+    const manager = useNew ? this.accessTokenManagerNew : this.accessTokenManager;
+    const pid = useNew ? this.projectIdNew : this.projectId;
+
+    if (!manager || !pid) {
       throw new Error('FCM access token manager not initialized');
     }
 
@@ -554,10 +572,10 @@ class FcmPushService {
       },
     };
 
-    const url = `https://fcm.googleapis.com/v1/projects/${this.projectId}/messages:send`;
+    const url = `https://fcm.googleapis.com/v1/projects/${pid}/messages:send`;
 
     const doRequest = async () => {
-      const accessToken = await this.accessTokenManager!.getAccessToken();
+      const accessToken = await manager.getAccessToken();
       return fetch(url, {
         method: 'POST',
         headers: {
@@ -571,7 +589,7 @@ class FcmPushService {
     let response = await doRequest();
 
     if (response.status === 401 || response.status === 403) {
-      await this.accessTokenManager.invalidate();
+      await manager.invalidate();
       response = await doRequest();
     }
 
@@ -735,8 +753,8 @@ class FcmPushService {
    * Direct dispatch to FCM - exposed for worker usage
    * @throws Error if FCM call fails
    */
-  async dispatchToFcmDirect(token: string, payload: FcmNotificationPayload): Promise<void> {
-    return this.dispatchToFcm(token, payload);
+  async dispatchToFcmDirect(token: string, payload: FcmNotificationPayload, platform: string, appVersion?: string): Promise<void> {
+    return this.dispatchToFcm(token, payload, platform, appVersion);
   }
 
   private loadServiceAccount(): Record<string, unknown> | undefined {
@@ -748,6 +766,20 @@ class FcmPushService {
       }
     } catch (error) {
       logger.error('Failed to load FCM service account', error);
+    }
+
+    return undefined;
+  }
+
+  private loadServiceAccountNew(): Record<string, unknown> | undefined {
+    try {
+      const base64Json = config.fcm.serviceAccountBase64New;
+      if (base64Json) {
+        const decoded = Buffer.from(base64Json, 'base64').toString('utf8');
+        return JSON.parse(decoded);
+      }
+    } catch (error) {
+      logger.error('Failed to load FCM service account (new)', error);
     }
 
     return undefined;
@@ -782,6 +814,23 @@ function extractFcmErrorCode(error: unknown): string | undefined {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldUseNewFcmCredentials(platform: string, appVersion: string | undefined): boolean {
+  if (!appVersion) return false;
+  const target = platform === 'ios' ? '1.0.44' : platform === 'android' ? '1.0.37' : '';
+  if (!target) return false;
+  try {
+    const [major, minor, patch] = appVersion.split('.').map(Number);
+    const [tMajor, tMinor, tPatch] = target.split('.').map(Number);
+    if (major > tMajor) return true;
+    if (major < tMajor) return false;
+    if (minor > tMinor) return true;
+    if (minor < tMinor) return false;
+    return patch >= tPatch;
+  } catch {
+    return false;
+  }
 }
 
 export const fcmPushService = new FcmPushService();

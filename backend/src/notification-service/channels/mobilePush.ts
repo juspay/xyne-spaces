@@ -69,7 +69,7 @@ export class MobilePushChannel {
         relatedEntityType: payload.relatedEntityType,
         relatedEntityId: payload.relatedEntityId,
         metadata: payload.metadata,
-      });
+      }, platform, appVersion);
 
       if (isIncomingCall) {
         getCallNotifications().add(1, { deliveryType: 'fcm', platform, status: 'sent' });

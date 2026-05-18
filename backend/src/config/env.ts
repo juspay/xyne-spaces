@@ -95,6 +95,8 @@ const envSchema = Joi.object({
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
   FCM_PROJECT_ID: Joi.string().allow('').default(''),
   FCM_SERVICE_ACCOUNT_BASE64: Joi.string().allow('').default(''),
+  FCM_PROJECT_ID_NEW: Joi.string().allow('').default(''),
+  FCM_SERVICE_ACCOUNT_BASE64_NEW: Joi.string().allow('').default(''),
   APNS_KEY_ID: Joi.string().allow('').default(''),
   APNS_TEAM_ID: Joi.string().allow('').default(''),
   APNS_BUNDLE_ID: Joi.string().allow('').default(''),
@@ -402,6 +404,8 @@ export const config = {
   fcm: {
     projectId: envVars.FCM_PROJECT_ID,
     serviceAccountBase64: envVars.FCM_SERVICE_ACCOUNT_BASE64,
+    projectIdNew: envVars.FCM_PROJECT_ID_NEW,
+    serviceAccountBase64New: envVars.FCM_SERVICE_ACCOUNT_BASE64_NEW,
   },
   apns: {
     keyId: envVars.APNS_KEY_ID,
