@@ -455,7 +455,7 @@ const Preferences = ({ open, onClose }: PreferencesProps): ReactElement => {
                     data-track-category='PREFERENCES'
                     data-track-name={`Open_${item.id}`}
                   >
-                    <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0'>
+                    <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0 text-muted-foreground'>
                       {item.icon}
                     </div>
                     <div className='flex-1 min-w-0'>
