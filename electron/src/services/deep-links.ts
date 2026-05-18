@@ -5,6 +5,7 @@ import { setCookiesFromHeaders } from './cookies';
 import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
+import ElectronEvent from './logger/electron-events';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -113,7 +114,7 @@ async function handleDeepLink(url: string): Promise<void> {
       const isMTLS = url.includes("mtls");
 
       if (isMTLS) {
-        await exchangeMTLSAuthCode(code, state);
+        await exchangeMTLSAuthCode(code, state, invitationId);
         return;
       }
 
@@ -207,7 +208,7 @@ async function handleDeepLink(url: string): Promise<void> {
       log.info('[DeepLinks] Invite deep link received:', { workspaceId, invitationId });
 
       // Wait for mainWindow to be available (app might be launching)
-      const waitForWindow = async (): Promise<BrowserWindow | null> => {
+        const waitForWindow = async (): Promise<BrowserWindow | null> => {
         if (mainWindow) return mainWindow;
         
         // Wait up to 10 seconds for window to be created
@@ -231,15 +232,18 @@ async function handleDeepLink(url: string): Promise<void> {
           url: config.BACKEND_URL,
           name: 'pending_invitation_id',
           value: invitationId,
-          httpOnly: true,
-          secure: config.BACKEND_URL.startsWith('https'),
+          httpOnly: false,
+          secure: false,
           sameSite: 'lax' as const,
           expirationDate: Math.floor(Date.now() / 1000) + 600, // 10 minutes
         };
+        Logger.info(ElectronEvent.SET_PENDING_INVITATION_COOKIE, {
+          invitationId,
+        });
 
         try {
           await session.defaultSession.cookies.set(cookie);
-          log.info('[DeepLinks] Set pending_invitation_id cookie successfully:', invitationId);
+          log.info('[DeepLinks] Set pending_invitation_id cookie successfully:', cookie);
           
           // Verify the cookie was set
           const cookies = await session.defaultSession.cookies.get({
@@ -247,6 +251,7 @@ async function handleDeepLink(url: string): Promise<void> {
             name: 'pending_invitation_id'
           });
           log.info('[DeepLinks] Verified cookies:', cookies.map(c => c.name));
+          log.info('[DeepLinks] Cookie details:', cookies)
         } catch (cookieError) {
           log.error('[DeepLinks] Failed to set cookie:', cookieError);
         }
@@ -418,12 +423,12 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
   });
 }
 
-function exchangeMTLSAuthCode(code: string, state: string): Promise<void> {
-  log.info('Exchanging MTLS auth code:', code, state);
+function exchangeMTLSAuthCode(code: string, state: string, invitationId: string | null): Promise<void> {
+  log.info('Exchanging MTLS auth code:', { code: !!code, state: !!state, invitationId });
   Logger.info(EnrollmentEvent.AUTH_EXCHANGE_START, {
     type: 'mtls',
   });
-  
+
   return new Promise((resolve) => {
 
     const request = net.request({
@@ -448,6 +453,21 @@ function exchangeMTLSAuthCode(code: string, state: string): Promise<void> {
           Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS, {
             type: 'mtls',
           });
+
+          // If the backend signals a pending invitation, navigate the renderer to the
+          // in-app accept page (same as regular auth flow)
+          if (responseBody.hasInvitation) {
+            const invitePath = `/invite?loginComplete=true&invitationId=${encodeURIComponent(responseBody.invitationId)}&loggedInEmail=${encodeURIComponent(responseBody.loggedInEmail)}`;
+            log.info('[exchangeMTLSAuthCode] Invitation flow — navigating renderer to:', invitePath);
+            mainWindow?.show();
+            mainWindow?.webContents.executeJavaScript(
+              `window.location.href = ${JSON.stringify(invitePath)}`
+            ).catch((err: Error) => {
+              log.error('[exchangeMTLSAuthCode] Failed to navigate to invite page:', err);
+            });
+            resolve();
+            return;
+          }
 
           setTimeout(() => {
             mainWindow?.webContents.send('auth:mtls-success', {
@@ -476,7 +496,7 @@ function exchangeMTLSAuthCode(code: string, state: string): Promise<void> {
           statusCode: response.statusCode,
           type: 'mtls',
         });
-        
+
         resolve();
       }
     });
@@ -487,7 +507,7 @@ function exchangeMTLSAuthCode(code: string, state: string): Promise<void> {
         type: 'mtls',
       });
     });
-    request.write(JSON.stringify({ code, state }));
+    request.write(JSON.stringify({ code, state, invitationId }));
     request.end();
   });
 }

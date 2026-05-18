@@ -49,8 +49,8 @@ app.setAppUserModelId(config.APP_ID);
 
 // Initialize electron-log for main process
 log.initialize();
-log.transports.file.level = 'error';
-log.transports.console.level = 'error';
+log.transports.file.level = 'info';
+log.transports.console.level = 'info';
 log.info('[Main] Electron app starting...');
 
 // Setup global error handlers FIRST to catch any initialization errors
