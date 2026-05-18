@@ -111,6 +111,15 @@ export const shortcuts = {
     priority: 50,
     allowInInputs: true,
   },
+  'global.toggleBrowser': {
+    keys: 'mod+shift+b',
+    scope: 'global',
+    description: 'Toggle between Xyne and the in-app browser',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+    useKey: true,
+  },
   'global.openGrafana': {
     keys: 'mod+shift+g',
     scope: 'global',

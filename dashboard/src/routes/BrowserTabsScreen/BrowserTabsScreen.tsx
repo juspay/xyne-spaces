@@ -439,7 +439,15 @@ export function BrowserTabsScreen({
   const handleCloseTab = (tabId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     delete webviewRefs.current[tabId];
+    const wasLastTab = tabs.length === 1 && tabs[0]?.id === tabId;
     browserPanelActor.send({ type: 'CLOSE_TAB', tabId });
+    if (wasLastTab) {
+      if (isPanel) {
+        browserPanelActor.send({ type: 'CLOSE' });
+      } else {
+        void navigate(-1);
+      }
+    }
   };
 
   const handleNavigate = (e: React.FormEvent) => {
@@ -587,16 +595,6 @@ export function BrowserTabsScreen({
             </div>
             <div className='flex items-center gap-1'>
               <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
-              <button
-                onClick={handleOpenFullscreen}
-                className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-                title='Open in fullscreen browser'
-                data-track-category='BROWSER'
-                data-track-name='OpenFullscreenBrowser'
-                data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
-              >
-                <Maximize2 size={14} />
-              </button>
               {activeTab && (
                 <button
                   onClick={handleOpenExternal}
@@ -629,16 +627,6 @@ export function BrowserTabsScreen({
             </div>
             <div className='flex items-center gap-1'>
               <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
-              <button
-                onClick={handleMinimizeToPanel}
-                className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-                title='Minimize to docked panel'
-                data-track-category='BROWSER'
-                data-track-name='MinimizeToDocked'
-                data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
-              >
-                <Minimize2 size={16} />
-              </button>
               {activeTab && (
                 <button
                   onClick={handleOpenExternal}
@@ -732,6 +720,16 @@ export function BrowserTabsScreen({
           data-track-metadata={JSON.stringify({ url: 'https://www.google.com' })}
         >
           <Plus size={isPanel ? 14 : 16} />
+        </button>
+        <button
+          onClick={isPanel ? handleOpenFullscreen : handleMinimizeToPanel}
+          className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
+          title={isPanel ? 'Open in fullscreen browser' : 'Minimize to docked panel'}
+          data-track-category='BROWSER'
+          data-track-name={isPanel ? 'OpenFullscreenBrowser' : 'MinimizeToDocked'}
+          data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
+        >
+          {isPanel ? <Maximize2 size={14} /> : <Minimize2 size={isPanel ? 14 : 16} />}
         </button>
         <button
           onClick={() => setAreControlsVisible(v => !v)}

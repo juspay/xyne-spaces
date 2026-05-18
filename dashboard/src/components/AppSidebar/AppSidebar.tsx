@@ -51,7 +51,7 @@ import {
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
 import SettingsContent from '../Settings/Settings';
-import Preferences from '../Settings/Preferences';
+import Preferences, { type PreferenceSection } from '../Settings/Preferences';
 import { useSelf } from '../../hooks/useUsers';
 import { isStatusExpired } from '../../utils/statusUtils';
 import { UpdateStatusModal } from './UpdateStatusModal';
@@ -195,11 +195,26 @@ const AppSidebar = (): ReactElement => {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [preferencesInitialSection, setPreferencesInitialSection] = useState<
+    PreferenceSection | undefined
+  >(undefined);
 
   const handleOpenPreferences = (): void => {
     setIsSettingsPopoverOpen(false);
+    setPreferencesInitialSection(undefined);
     setIsPreferencesOpen(true);
   };
+
+  useEffect(() => {
+    const handler = (e: Event): void => {
+      const section = (e as CustomEvent<{ section?: PreferenceSection }>).detail?.section;
+      setPreferencesInitialSection(section);
+      setIsSettingsPopoverOpen(false);
+      setIsPreferencesOpen(true);
+    };
+    window.addEventListener('xyne-open-preferences', handler);
+    return (): void => window.removeEventListener('xyne-open-preferences', handler);
+  }, []);
 
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
@@ -482,7 +497,11 @@ const AppSidebar = (): ReactElement => {
           />
         </Popover>
 
-        <Preferences open={isPreferencesOpen} onClose={() => setIsPreferencesOpen(false)} />
+        <Preferences
+          open={isPreferencesOpen}
+          onClose={() => setIsPreferencesOpen(false)}
+          {...(preferencesInitialSection && { initialSection: preferencesInitialSection })}
+        />
       </div>
 
       {/* Status Update Modal */}

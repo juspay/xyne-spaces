@@ -130,6 +130,7 @@ const nativeOutboundMessageTypeValues = {
   RESTORE_RECORDING_SCREEN: 'RESTORE_RECORDING_SCREEN',
   CLEAR_RECORDING_STATE: 'CLEAR_RECORDING_STATE',
   REQUEST_NATIVE_SHELL: 'REQUEST_NATIVE_SHELL',
+  OPEN_EXTERNAL_URL: 'OPEN_EXTERNAL_URL',
 } as const;
 
 export type NativeOutboundMessageType = keyof typeof nativeOutboundMessageTypeValues;
@@ -381,6 +382,7 @@ type ReactNativeOutboundPayloadMap = {
   DRAWER_CLOSED: undefined;
   RESTORE_RECORDING_SCREEN: undefined;
   CLEAR_RECORDING_STATE: undefined;
+  OPEN_EXTERNAL_URL: { url: string };
 };
 
 export type ReactNativeInboundMessage = {
@@ -572,6 +574,10 @@ class ReactNativeBridge {
       NativeOutboundMessageType.REQUEST_NATIVE_SHELL,
       reason === undefined ? undefined : { reason },
     );
+  }
+
+  openExternalUrl(url: string): boolean {
+    return this.send(NativeOutboundMessageType.OPEN_EXTERNAL_URL, { url });
   }
 
   saveFileToDevice(
