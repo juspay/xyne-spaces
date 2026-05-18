@@ -1,3 +1,25 @@
+## [1.142.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.141.2...v1.142.0) (2026-05-18)
+
+
+### Features
+
+* Add external browser setting to profile ([b9a84b3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b9a84b3428ee3635f41869e5ab0ec4a7262886cf)), closes [#6308](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6308)
+* clean preferences UI : dark mode and voice section removed from profile ([4936234](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/49362346b0212a19917e9fa7d92e9e0a3b81eae3)), closes [#6445](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6445)
+* Feature/ticket analytics revamp ([11cc015](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/11cc015b81c3e6050b312890abd1ab04aaa035ac)), closes [#6451](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6451)
+* force logout flow using iat ([7e7e6eb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7e7e6eba36933b67a5a6754adec219114d404f53)), closes [#6426](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6426)
+* mtls invitation fix ([63bc373](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/63bc373577a6881f31750dd2606acc3c51bd37c4)), closes [#6370](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6370)
+* replace xyne-app-issues channel ([575aba3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/575aba3e6c649910bb5124bac8aa50472794f815)), closes [#6224](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6224)
+* revamp mobile sandbox and prod config to use new gcp, fcm projects ([3883f21](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3883f21fb6b007ae8331924c2e339c2826a0079c)), closes [#6428](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6428)
+
+
+### Bug Fixes
+
+* .related('project') from userVisibleChannelsV2 to reduce sync payload ([70ec449](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/70ec449b8d68d6d14159e367c945ce9f92100cb2)), closes [#6417](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6417)
+* Attachment changes revert ([fb41f01](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fb41f01d1ca900eb435c16551504da67ae5531e9)), closes [#6419](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6419)
+* made personal canvas collapsed ([dfb0f97](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dfb0f9746ece5341d75cb3c2e1e9b25ee46c1ea1)), closes [#6360](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6360)
+* providerUserId as google.provideruserId instead of user table id ([00ec8cb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/00ec8cb637da52ad998ce116e6ebeb58a7122fab)), closes [#6442](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6442)
+* route Jenkins to cucumber by default, gauge behind USE_GAUGE ([4d114b5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4d114b569ca3b2a68b7a6d782c657de1ab88891e)), closes [#6418](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6418)
+
 ## [1.141.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.141.1...v1.141.2) (2026-05-16)
 
 
