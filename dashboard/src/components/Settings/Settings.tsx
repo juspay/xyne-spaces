@@ -16,7 +16,6 @@ import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
 import Avatar from '../ui/Avatar/Avatar';
 import { StatusIndicator } from '../ui/StatusIndicator';
-import { UpdateStatusModal } from '../AppSidebar/UpdateStatusModal';
 import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
 import { isStatusExpired, formatExpiryTime } from '../../utils/statusUtils';
@@ -31,12 +30,16 @@ import { useUserPresence } from '../../hooks/usePresence';
 interface SettingsProps {
   onClose: () => void;
   onOpenPreferences: () => void;
+  onOpenStatusModal: () => void;
 }
 
-const Settings = ({ onClose, onOpenPreferences }: SettingsProps): ReactElement => {
+const Settings = ({
+  onClose,
+  onOpenPreferences,
+  onOpenStatusModal,
+}: SettingsProps): ReactElement => {
   const { logout } = useAuth();
   const user = useSelf();
-  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState<Date | null>(null);
   const zero = useZero();
@@ -57,11 +60,8 @@ const Settings = ({ onClose, onOpenPreferences }: SettingsProps): ReactElement =
     user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
 
   const handleStatusClick = (): void => {
-    setIsStatusModalOpen(true);
-  };
-
-  const handleStatusModalClose = (): void => {
-    setIsStatusModalOpen(false);
+    onClose();
+    onOpenStatusModal();
   };
 
   const handleClearStatus = (e: React.MouseEvent): void => {
@@ -408,21 +408,6 @@ const Settings = ({ onClose, onOpenPreferences }: SettingsProps): ReactElement =
           Sign out of Xyne Space
         </Button>
       </div>
-
-      {/* Status Update Modal */}
-      <UpdateStatusModal
-        isOpen={isStatusModalOpen}
-        onClose={handleStatusModalClose}
-        currentStatus={
-          hasValidStatus
-            ? {
-                emoji: user?.statusEmoji || '',
-                content: user?.statusContent || '',
-                expiryAt: user?.statusExpiryAt || null,
-              }
-            : null
-        }
-      />
     </div>
   );
 };
