@@ -105,6 +105,18 @@ enum RotationInterval {
   @@schema("public")
 }
 
+enum QueryVisualizationType {
+  KPI
+  BAR_CHART
+  PIE_CHART
+  DONUT_CHART
+  LINE_CHART
+  FUNNEL
+  HEATMAP
+  DATA_TABLE
+  @@schema("public")
+}
+
 enum EntityType {
   MERCHANT
   GATEWAY
@@ -2953,13 +2965,15 @@ model Dashboard {
 }
 
 model Query {
-  id          String    @id @default(cuid())
-  title       String
-  queryJson   Json
-  entityType  FormEntityType
-  createdBy   String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String          @id @default(cuid())
+  title          String
+  queryJson      Json
+  entityType     FormEntityType? // Deprecated: use targetEntity instead
+  targetEntity   String?         // Entity/table being queried (e.g., TICKET, USER_WORKLOAD_MAPPING)
+  visualType     QueryVisualizationType?
+  createdBy      String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@map("queries")
   @@schema("public")
@@ -2969,6 +2983,7 @@ model dashboardQueryMapping {
   id          String    @id @default(cuid())
   dashboardId String
   queryId     String
+  sequence    Int       @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

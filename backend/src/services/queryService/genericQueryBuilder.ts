@@ -1,4 +1,4 @@
-import { PrismaClient, FormEntityType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import {
   GenericQuery,
   Aggregation,
@@ -7,7 +7,9 @@ import {
   FieldCondition,
   isLogicalFilter,
   getPrismaModelName,
+  isSupportedEntityType,
   normalizeValueForOperator,
+  isValidFormEntityType,
 } from './types';
 import { PrismaFieldType, getFieldMetadata, hasField } from './genericFieldRegistry';
 
@@ -37,16 +39,61 @@ export class GenericQueryBuilder {
   }
 
   /**
+   * Format date value for grouping by day (YYYY-MM-DD)
+   * Prevents grouping by year or timestamp and ensures day-level grouping
+   */
+  private formatDateForGrouping(value: any): string {
+    if (!value) return 'null';
+    
+    try {
+      let date: Date;
+      
+      if (value instanceof Date) {
+        date = value;
+      } else if (typeof value === 'string') {
+        date = new Date(value);
+      } else {
+        return String(value);
+      }
+      
+      if (isNaN(date.getTime())) return 'null';
+      
+      // Extract just the date part (YYYY-MM-DD) by converting to ISO and taking first 10 chars
+      // This discards all time information
+      return date.toISOString().substring(0, 10);
+    } catch {
+      return String(value);
+    }
+  }
+
+  /**
+   * Check if a field is a date/temporal field
+   */
+  private isDateField(fieldName: string, entityType: string): boolean {
+    if (fieldName.startsWith('custom.')) return false;
+    
+    // Only check metadata for supported entity types
+    if (!isSupportedEntityType(entityType)) {
+      return fieldName.endsWith('At') || fieldName === 'eta';
+    }
+    
+    // Convert entity type to Prisma model name
+    const modelName = getPrismaModelName(entityType);
+    const metadata = getFieldMetadata(modelName, fieldName);
+    return metadata?.type === 'DateTime' || (metadata?.type === 'Int' && fieldName.endsWith('At'));
+  }
+
+  /**
    * Get the Prisma model for a given entity type.
    * Uses a whitelist approach to prevent SQL injection via dynamic model access.
    */
-  private getModel(entityType: FormEntityType) {
-    const modelMap: Record<FormEntityType, any> = {
-      [FormEntityType.TICKET]: this.prisma.ticket,
-      [FormEntityType.SUB_TICKET]: this.prisma.subTicket,
-      [FormEntityType.RELEASE_ENV_FORM]: this.prisma.releaseChangeType,
-      [FormEntityType.RELEASE_MIGRATION_FORM]: this.prisma.releaseChangeType,
-      // Add other allowed entity types here as needed
+  private getModel(entityType: string) {
+    const modelMap: Record<string, any> = {
+      TICKET: this.prisma.ticket,
+      SUB_TICKET: this.prisma.subTicket,
+      RELEASE_ENV_FORM: this.prisma.releaseChangeType,
+      RELEASE_MIGRATION_FORM: this.prisma.releaseChangeType,
+      USER_WORKLOAD_MAPPING: this.prisma.userWorkloadMapping,
     };
 
     const model = modelMap[entityType];
@@ -164,6 +211,7 @@ export class GenericQueryBuilder {
   private async getEntityIdsByCustomFields(query: GenericQuery): Promise<string[]> {
     const { filters, entityType } = query;
     if (!filters) return [];
+    if (!isValidFormEntityType(entityType)) return [];
 
     const customFieldFilters = this.extractCustomFieldFilters(filters);
 
@@ -238,7 +286,7 @@ export class GenericQueryBuilder {
    */
   private buildFormEntityValuesWhere(
     filters: LogicalFilter,
-    entityType: FormEntityType,
+    entityType: string,
     fieldTypeMap: Map<string, string>
   ): Record<string, unknown> {
     const baseWhere: Record<string, unknown> = {
@@ -388,15 +436,298 @@ export class GenericQueryBuilder {
   private async executeAggregation(query: GenericQuery): Promise<QueryResult> {
     const startTime = Date.now();
 
-    // Check if we have custom field filters
-    const hasCustomFieldFilters = this.hasCustomFieldFilters(query.filters);
+    try {
+      // Separate system and custom field aggregations
+      const aggregations = query.aggregations || [];
+      const systemAggregations = aggregations.filter(agg => !agg.field.startsWith('custom.'));
+      const customAggregations = aggregations.filter(agg => agg.field.startsWith('custom.'));
 
-    // If we have custom field filters, we need to get matching entity IDs first
-    let entityIds: string[] = [];
-    if (hasCustomFieldFilters) {
-      entityIds = await withTimeout(this.getEntityIdsByCustomFields(query));
-      if (entityIds.length === 0) {
-        // No entities match the custom field criteria
+      // Build where clause (handles custom field filters too)
+      const hasCustomFieldFilters = this.hasCustomFieldFilters(query.filters);
+      let entityIds: string[] = [];
+      if (hasCustomFieldFilters) {
+        entityIds = await withTimeout(this.getEntityIdsByCustomFields(query));
+        if (entityIds.length === 0) {
+          return {
+            success: true,
+            data: [],
+            metadata: {
+              count: 0,
+              executionTimeMs: Date.now() - startTime,
+            },
+          };
+        }
+      }
+
+      const where = await this.buildWhere(query, entityIds);
+      const model = this.getModel(query.entityType);
+
+      // If we have groupBy, handle mixed aggregations
+      if (query.groupBy && query.groupBy.length > 0) {
+        return this.executeGroupByAggregation(
+          query,
+          systemAggregations,
+          customAggregations,
+          where,
+          startTime
+        );
+      }
+
+      // Simple aggregation (no groupBy)
+      const result: Record<string, unknown> = {};
+
+      // Handle system field aggregations via Prisma
+      if (systemAggregations.length > 0) {
+        const aggregateResult = await model.aggregate({
+          where,
+          ...this.buildAggregateOperations(systemAggregations),
+        });
+
+        systemAggregations.forEach(agg => {
+          const alias = agg.alias || `${agg.function.toLowerCase()}_${agg.field}`;
+          result[alias] = aggregateResult[`_${agg.function.toLowerCase()}`]?.[agg.field] || 0;
+        });
+      }
+
+      // Handle custom field aggregations in-memory
+      if (customAggregations.length > 0 && isValidFormEntityType(query.entityType)) {
+        const customResults = await this.calculateCustomFieldAggregations(
+          customAggregations,
+          query.entityType,
+          where
+        );
+        Object.assign(result, customResults);
+      }
+
+      const executionTime = Date.now() - startTime;
+
+      return {
+        success: true,
+        data: [result],
+        metadata: {
+          count: 1,
+          executionTimeMs: executionTime,
+        },
+      };
+    } catch (error) {
+      const executionTime = Date.now() - startTime;
+      return {
+        success: false,
+        error: {
+          code: 'AGGREGATION_ERROR',
+          message: error instanceof Error ? error.message : 'Unknown error',
+          details: { executionTimeMs: executionTime },
+        },
+      };
+    }
+  }
+
+  /**
+   * Calculate aggregations on custom fields by fetching all values and computing in-memory
+   */
+  private async calculateCustomFieldAggregations(
+    aggregations: Aggregation[],
+    entityType: string,
+    where: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const model = this.getModel(entityType);
+    
+    // Get all matching entity IDs
+    const entities = await model.findMany({
+      where,
+      select: { id: true },
+    });
+    
+    const entityIds = entities.map((e: any) => e.id);
+    
+    // Enforce query limit for custom field aggregations
+    if (entityIds.length > MAX_QUERY_LIMIT) {
+      throw new Error(
+        `Query too large: ${entityIds.length} entities exceed maximum limit of ${MAX_QUERY_LIMIT}. ` +
+        `Please add filters to reduce the dataset size.`
+      );
+    }
+    
+    if (entityIds.length === 0) {
+      // Return 0 for all aggregations
+      const result: Record<string, unknown> = {};
+      aggregations.forEach(agg => {
+        const alias = agg.alias || `${agg.function.toLowerCase()}_${agg.field}`;
+        result[alias] = agg.function === 'COUNT' ? 0 : null;
+      });
+      return result;
+    }
+
+    // Get custom field values for all entities
+    const customFieldIds = aggregations.map(agg => agg.field.replace('custom.', ''));
+    const customFieldValues = await this.prisma.formEntityValues.findMany({
+      where: {
+        entityId: { in: entityIds },
+      entityType,
+        fieldId: { in: customFieldIds },
+      },
+      select: {
+        entityId: true,
+        fieldId: true,
+        actualFieldValue: true,
+      },
+    });
+
+    // Fetch field types to know how to interpret values
+    const formFields = await this.prisma.formFields.findMany({
+      where: { id: { in: customFieldIds } },
+      select: { id: true, fieldType: true },
+    });
+    const fieldTypeMap = new Map(formFields.map(f => [f.id, f.fieldType]));
+
+    // Group values by field
+    const valuesByField = new Map<string, any[]>();
+    customFieldValues.forEach(cf => {
+      const fieldId = `custom.${cf.fieldId}`;
+      if (!valuesByField.has(fieldId)) {
+        valuesByField.set(fieldId, []);
+      }
+      const fieldType = fieldTypeMap.get(cf.fieldId);
+      let value: any = cf.actualFieldValue;
+      
+      // Convert based on field type
+      if (fieldType === 'NUMBER') {
+        value = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
+      } else if (fieldType === 'DATE' && value) {
+        value = value instanceof Date ? value : new Date(String(value));
+      }
+      
+      valuesByField.get(fieldId)!.push(value);
+    });
+
+    // Calculate aggregations
+    const result: Record<string, unknown> = {};
+    aggregations.forEach(agg => {
+      const alias = agg.alias || `${agg.function.toLowerCase()}_${agg.field}`;
+      const values = valuesByField.get(agg.field) || [];
+      
+      switch (agg.function) {
+        case 'COUNT':
+          result[alias] = values.length;
+          break;
+        case 'SUM':
+          result[alias] = values.reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+          break;
+        case 'AVG':
+          if (values.length === 0) {
+            result[alias] = null;
+          } else {
+            const sum = values.reduce((acc, v) => acc + (typeof v === 'number' ? v : 0), 0);
+            result[alias] = sum / values.length;
+          }
+          break;
+        case 'MIN':
+          if (values.length === 0) {
+            result[alias] = null;
+          } else if (values[0] instanceof Date) {
+            result[alias] = new Date(Math.min(...values.map((v: Date) => v.getTime())));
+          } else {
+            result[alias] = Math.min(...values.filter(v => typeof v === 'number'));
+          }
+          break;
+        case 'MAX':
+          if (values.length === 0) {
+            result[alias] = null;
+          } else if (values[0] instanceof Date) {
+            result[alias] = new Date(Math.max(...values.map((v: Date) => v.getTime())));
+          } else {
+            result[alias] = Math.max(...values.filter(v => typeof v === 'number'));
+          }
+          break;
+        default:
+          result[alias] = null;
+      }
+    });
+
+    return result;
+  }
+
+  /**
+   * Execute aggregation with GROUP BY, handling mixed system and custom fields
+   */
+  private async executeGroupByAggregation(
+    query: GenericQuery,
+    systemAggregations: Aggregation[],
+    customAggregations: Aggregation[],
+    where: Record<string, unknown>,
+    startTime: number
+  ): Promise<QueryResult> {
+    try {
+      const model = this.getModel(query.entityType);
+      const groupByFields = query.groupBy!;
+      
+      // Check if groupBy includes custom fields
+      const hasCustomGroupBy = groupByFields.some(f => f.startsWith('custom.'));
+      
+      // Always use in-memory grouping because:
+      // 1. Prisma groupBy doesn't properly handle date grouping with formatting
+      // 2. We need to format dates before grouping
+      // 3. In-memory grouping is more flexible and consistent
+      // Only use native Prisma groupBy if no custom fields AND no aggregations
+      if (!hasCustomGroupBy && customAggregations.length === 0 && !query.groupBy?.some(f => this.isDateField(f, query.entityType))) {
+        // All system fields, no date fields - use native Prisma
+        const groupByResult = await model.groupBy({
+          by: groupByFields,
+          where,
+          ...this.buildAggregateOperations(systemAggregations),
+        });
+
+        const formatted = groupByResult.map((row: any) => {
+          const formattedRow: Record<string, unknown> = {};
+          groupByFields.forEach(field => {
+            const value = row[field];
+            // Format date fields for proper display
+            if (this.isDateField(field, query.entityType) || 
+                (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value))) {
+              formattedRow[field] = this.formatDateForGrouping(value);
+            } else {
+              formattedRow[field] = value;
+            }
+          });
+          systemAggregations.forEach(agg => {
+            const alias = agg.alias || `${agg.function.toLowerCase()}_${agg.field}`;
+            const aggKey = `_${agg.function.toLowerCase()}`;
+            formattedRow[alias] = row[aggKey]?.[agg.field] || 0;
+          });
+          return formattedRow;
+        });
+
+        return {
+          success: true,
+          data: formatted,
+          metadata: {
+            count: formatted.length,
+            executionTimeMs: Date.now() - startTime,
+          },
+        };
+      }
+
+      // Has custom fields in groupBy or aggregations - fetch all data and group in-memory
+      const systemGroupByFields = groupByFields.filter(f => !f.startsWith('custom.'));
+      
+      // Single query to get all entity data (fixes double-fetch)
+      const entityData = await model.findMany({
+        where,
+        select: {
+          id: true,
+          ...systemGroupByFields.reduce((acc, field) => ({ ...acc, [field]: true }), {}),
+        },
+      });
+
+      // Enforce query limit for GROUP BY aggregations with custom fields
+      if (entityData.length > MAX_QUERY_LIMIT) {
+        throw new Error(
+          `Query too large: ${entityData.length} entities exceed maximum limit of ${MAX_QUERY_LIMIT}. ` +
+          `Please add filters to reduce the dataset size.`
+        );
+      }
+
+      if (entityData.length === 0) {
         return {
           success: true,
           data: [],
@@ -406,73 +737,216 @@ export class GenericQueryBuilder {
           },
         };
       }
-    }
 
-    // Build where clause
-    const where = await this.buildWhere(query, entityIds);
+      // Get custom field values if needed
+      const customGroupByFields = groupByFields.filter(f => f.startsWith('custom.'));
+      const customAggFieldIds = customAggregations.map(agg => agg.field.replace('custom.', ''));
+      const allCustomFieldIds = [
+        ...customGroupByFields.map(f => f.replace('custom.', '')),
+        ...customAggFieldIds,
+      ];
 
-    const model = this.getModel(query.entityType);
+      // Pre-process custom field values: Map<fieldId, Map<entityId, value>>
+      const customFieldValuesByField = new Map<string, Map<string, any>>();
+      
+      if (allCustomFieldIds.length > 0) {
+        const customFieldValues = await this.prisma.formEntityValues.findMany({
+          where: {
+            entityId: { in: entityData.map((e: any) => e.id) },
+            entityType: query.entityType,
+            fieldId: { in: allCustomFieldIds },
+          },
+          select: {
+            entityId: true,
+            fieldId: true,
+            actualFieldValue: true,
+          },
+        });
 
-    // Check if we have groupBy
-    if (query.groupBy && query.groupBy.length > 0) {
-      // Group by query
-      const groupByResult = await model.groupBy({
-        by: query.groupBy,
-        where,
-        ...this.buildAggregateOperations(query.aggregations || []),
+        // Preprocess: O(n) instead of O(n * aggregations)
+        customFieldValues.forEach(cf => {
+          const fieldKey = `custom.${cf.fieldId}`;
+          if (!customFieldValuesByField.has(fieldKey)) {
+            customFieldValuesByField.set(fieldKey, new Map());
+          }
+          customFieldValuesByField.get(fieldKey)!.set(cf.entityId, cf.actualFieldValue);
+        });
+      }
+
+      // Build entity data map with both system and custom fields
+      const entityDataMap = new Map<string, Record<string, unknown>>();
+      entityData.forEach((e: any) => {
+        entityDataMap.set(e.id, { ...e });
       });
 
-      // Format results with aliases
-      const formatted = groupByResult.map((row: any) => {
-        const formattedRow: Record<string, unknown> = {};
-        // Add group by fields
-        query.groupBy!.forEach(field => {
-          formattedRow[field] = row[field];
+      // Add custom field values to entity data
+      customFieldValuesByField.forEach((entityMap, fieldKey) => {
+        entityMap.forEach((value, entityId) => {
+          const entity = entityDataMap.get(entityId);
+          if (entity) {
+            entity[fieldKey] = value;
+          }
         });
-        // Add aggregations with aliases
-        query.aggregations!.forEach(agg => {
+      });
+
+      // Group entities
+      const groups = new Map<string, any[]>();
+      let entityCount = 0;
+      entityDataMap.forEach((data) => {
+        entityCount++;
+        const groupKey = groupByFields.map(field => {
+          const fieldValue = data[field];
+          if (this.isDateField(field, query.entityType)) {
+            const formatted = this.formatDateForGrouping(fieldValue);
+            return formatted;
+          }
+          return fieldValue ?? 'null';
+        }).join('|');
+        if (!groups.has(groupKey)) {
+          groups.set(groupKey, []);
+        }
+        groups.get(groupKey)!.push(data);
+      });
+
+      // Calculate aggregations per group
+      const results: Record<string, unknown>[] = [];
+      groups.forEach((entities) => {
+        const row: Record<string, unknown> = {};
+        
+        // Add group by values from first entity
+        const firstEntity = entities[0];
+        groupByFields.forEach(field => {
+          const value = firstEntity[field];
+          const isDateFieldCheck = this.isDateField(field, query.entityType);
+          const isISOString = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value);
+
+          // Format date fields in response for proper chart display
+          // Check both via metadata and by detecting ISO datetime strings
+          if (isDateFieldCheck || isISOString) {
+            const formatted = this.formatDateForGrouping(value);
+            row[field] = formatted;
+          } else {
+            row[field] = value;
+          }
+        });
+
+        // System aggregations
+        systemAggregations.forEach(agg => {
           const alias = agg.alias || `${agg.function.toLowerCase()}_${agg.field}`;
-          const aggKey = `_${agg.function.toLowerCase()}`;
-          formattedRow[alias] = row[aggKey]?.[agg.field] || 0;
+          const values = entities.map(e => e[agg.field]).filter(v => v != null);
+          
+          switch (agg.function) {
+            case 'COUNT':
+              row[alias] = values.length;
+              break;
+            case 'SUM':
+              row[alias] = values.reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+              break;
+            case 'AVG':
+              row[alias] = values.length > 0 
+                ? values.reduce((acc, v) => acc + (typeof v === 'number' ? v : 0), 0) / values.length
+                : null;
+              break;
+            case 'MIN':
+              row[alias] = values.length > 0 ? Math.min(...values.filter(v => typeof v === 'number')) : null;
+              break;
+            case 'MAX':
+              row[alias] = values.length > 0 ? Math.max(...values.filter(v => typeof v === 'number')) : null;
+              break;
+          }
         });
-        return formattedRow;
+
+        // Custom aggregations - O(1) lookup per entity instead of O(n²)
+        customAggregations.forEach(agg => {
+          const alias = agg.alias || `${agg.function.toLowerCase()}_${agg.field}`;
+          const fieldKey = agg.field;
+          const entityIdSet = new Set(entities.map(e => e.id)); // O(n) to build Set
+          
+          // Direct lookup: O(1) per entity instead of .includes()
+          const values: any[] = [];
+          const entityValueMap = customFieldValuesByField.get(fieldKey);
+          if (entityValueMap) {
+            entityIdSet.forEach(entityId => {
+              const value = entityValueMap.get(entityId);
+              if (value != null) {
+                values.push(value);
+              }
+            });
+          }
+
+          switch (agg.function) {
+            case 'COUNT':
+              row[alias] = values.length;
+              break;
+            case 'SUM':
+              row[alias] = values.reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+              break;
+            case 'AVG':
+              row[alias] = values.length > 0
+                ? values.reduce((acc, v) => acc + (typeof v === 'number' ? v : 0), 0) / values.length
+                : null;
+              break;
+            case 'MIN':
+              row[alias] = values.length > 0 ? Math.min(...values.filter(v => typeof v === 'number')) : null;
+              break;
+            case 'MAX':
+              row[alias] = values.length > 0 ? Math.max(...values.filter(v => typeof v === 'number')) : null;
+              break;
+          }
+        });
+
+        results.push(row);
       });
+
+      // Apply orderBy to results
+      if (query.orderBy && query.orderBy.length > 0) {
+        results.sort((a, b) => {
+          for (const order of query.orderBy!) {
+            const aVal = a[order.field];
+            const bVal = b[order.field];
+            
+            if (aVal == null && bVal == null) continue;
+            if (aVal == null) return order.direction === 'ASC' ? 1 : -1;
+            if (bVal == null) return order.direction === 'ASC' ? -1 : 1;
+            
+            let comparison = 0;
+            if (typeof aVal === 'string' && typeof bVal === 'string') {
+              comparison = aVal.localeCompare(bVal);
+            } else if (typeof aVal === 'number' && typeof bVal === 'number') {
+              comparison = aVal - bVal;
+            } else {
+              comparison = String(aVal).localeCompare(String(bVal));
+            }
+            
+            if (comparison !== 0) {
+              return order.direction === 'ASC' ? comparison : -comparison;
+            }
+          }
+          return 0;
+        });
+      }
 
       const executionTime = Date.now() - startTime;
 
       return {
         success: true,
-        data: formatted,
+        data: results,
         metadata: {
-          count: formatted.length,
+          count: results.length,
           executionTimeMs: executionTime,
         },
       };
+    } catch (error) {
+      const executionTime = Date.now() - startTime;
+      return {
+        success: false,
+        error: {
+          code: 'GROUP_BY_AGGREGATION_ERROR',
+          message: error instanceof Error ? error.message : 'Unknown error',
+          details: { executionTimeMs: executionTime },
+        },
+      };
     }
-
-    // Simple aggregation without groupBy
-    const aggregateResult = await model.aggregate({
-      where,
-      ...this.buildAggregateOperations(query.aggregations || []),
-    });
-
-    // Format result with aliases
-    const formattedResult: Record<string, unknown> = {};
-    query.aggregations?.forEach(agg => {
-      const alias = agg.alias || `${agg.function.toLowerCase()}_${agg.field}`;
-      formattedResult[alias] = aggregateResult[`_${agg.function.toLowerCase()}`]?.[agg.field] || 0;
-    });
-
-    const executionTime = Date.now() - startTime;
-
-    return {
-      success: true,
-      data: [formattedResult],
-      metadata: {
-        count: 1,
-        executionTimeMs: executionTime,
-      },
-    };
   }
 
   /**
@@ -552,7 +1026,7 @@ export class GenericQueryBuilder {
    */
   private async buildLogicalWhere(
     filter: LogicalFilter,
-    entityType: FormEntityType
+    entityType: string
   ): Promise<Record<string, unknown>> {
     const conditions = await Promise.all(
       filter.conditions.map(async (condition) => {
@@ -584,7 +1058,7 @@ export class GenericQueryBuilder {
    */
   private async buildFieldConditionPrisma(
     condition: FieldCondition,
-    entityType: FormEntityType
+    entityType: string
   ): Promise<Record<string, unknown>> {
     const { field, operator } = condition;
 
@@ -593,6 +1067,9 @@ export class GenericQueryBuilder {
       return {};
     }
 
+    if (!isSupportedEntityType(entityType)) {
+      return {};
+    }
     const modelName = getPrismaModelName(entityType);
     if (!hasField(modelName, field)) {
       return {};
@@ -606,30 +1083,23 @@ export class GenericQueryBuilder {
     // Handle isEmpty/isNotEmpty specially based on field type
     if (operator === 'isEmpty') {
       if (fieldMetadata.type === 'DateTime') {
-        if (fieldMetadata.isRequired) {
-          return {};
-        }
-        return { [field]: null };
+        // For required fields, isEmpty always returns 0 results
+        // Use { NOT: { [field]: { not: null } } } which means "NOT (field IS NOT NULL)" = "field IS NULL"
+        return fieldMetadata.isRequired ? { NOT: { [field]: { not: null } } } : { [field]: null };
       }
       if (fieldMetadata.enumValues) {
-        if (fieldMetadata.isRequired) {
-          return {};
-        }
-        return { [field]: null };
+        return fieldMetadata.isRequired ? { NOT: { [field]: { not: null } } } : { [field]: null };
       }
       return { OR: [{ [field]: null }, { [field]: '' }] };
     }
 
     if (operator === 'isNotEmpty') {
       if (fieldMetadata.type === 'DateTime') {
-        return { [field]: { not: null } };
+        // For required fields, isNotEmpty is always true - no filter needed
+        return fieldMetadata.isRequired ? {} : { [field]: { not: null } };
       }
       if (fieldMetadata.enumValues) {
-
-        if (fieldMetadata.isRequired) {
-          return {};
-        }
-        return { [field]: { not: null } };
+        return fieldMetadata.isRequired ? {} : { [field]: { not: null } };
       }
       return {
         AND: [
@@ -698,6 +1168,9 @@ export class GenericQueryBuilder {
     }
     if (fieldType === 'DateTime') {
       if (typeof value === 'number') {
+        return new Date(value);
+      }
+      if (typeof value === 'string') {
         return new Date(value);
       }
       return value;
@@ -826,12 +1299,14 @@ export class GenericQueryBuilder {
     results: unknown[],
     query: GenericQuery
   ): Promise<Record<string, unknown>[]> {
-    // If no results, return early
     if (results.length === 0) {
       return results as Record<string, unknown>[];
     }
 
-    // Determine if we need to fetch custom fields
+    if (!isValidFormEntityType(query.entityType)) {
+      return results as Record<string, unknown>[];
+    }
+
     const needsCustomFields =
       !query.select || query.select.some(field => field.startsWith('custom.'));
 

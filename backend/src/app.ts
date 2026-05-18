@@ -88,6 +88,7 @@ import channelRecapToRecapBackfillRoutes from '@/routes/channelRecapToRecapBackf
 import emailChannelUnreadBackfillRoutes from '@/routes/emailChannelUnreadBackfill';
 import setUpdatedAtTimeRoutes from '@/routes/setUpdatedAtTime';
 import ticketMetadataBackfillRoutes from '@/routes/ticketMetadataBackfill';
+import queriesEntityTypeBackfillRoutes from '@/routes/queriesEntityTypeBackfill';
 import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
@@ -305,6 +306,7 @@ export class App {
     this.app.use('/api/admin/email-channel-unread-backfill', emailChannelUnreadBackfillRoutes);
     this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
     this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
+    this.app.use('/migrate/api/admin/queries-entity-type-backfill', queriesEntityTypeBackfillRoutes);
     // Ticket duplicate backfill route (always available, no vespa flag)
     this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
     this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);

@@ -1,10 +1,19 @@
-import type { RuleGroupType, ValueEditorType } from 'react-querybuilder';
+// ============================================================================
+// Imports
+// ============================================================================
+
+import {
+  detectFieldType,
+  userGroupsToOptions,
+  usersToOptions,
+} from '../../utils/queryBuilderFieldMappings';
 
 // ============================================================================
 // Operator-Type Mapping
 // ============================================================================
 
 export type FieldType = 'string' | 'number' | 'boolean' | 'date' | 'select';
+export type ValueEditorType = 'text' | 'select' | 'multiselect' | 'checkbox' | 'date' | 'time';
 export type ComparisonOperator =
   | 'equals'
   | 'notEquals'
@@ -86,6 +95,18 @@ export interface FieldOption {
   isCustom?: boolean;
   fieldId?: string;
   isRequired?: boolean;
+  aggregatable?: boolean;
+}
+
+export interface UserGroup {
+  id: string;
+  name: string;
+}
+
+export interface User {
+  id: string;
+  name?: string;
+  email?: string;
 }
 
 export type FieldConfig = {
@@ -97,13 +118,27 @@ export type FieldConfig = {
   operators: Array<{ name: string; label: string }>;
   valueEditorType: ValueEditorType | ((operator: string) => ValueEditorType);
   values?: Array<{ name: string; label: string }>;
+  aggregatable?: boolean;
 };
 
-export function buildFieldsConfig(fieldOptions: FieldOption[]): FieldConfig[] {
+export function buildFieldsConfig(
+  fieldOptions: FieldOption[],
+  userGroups?: UserGroup[],
+  users?: User[],
+  projects?: Array<{ id: string; name: string }>,
+  boards?: Array<{ id: string; name: string }>,
+): FieldConfig[] {
   const fieldsConfig: FieldConfig[] = [];
+
+  // Ensure all inputs are arrays
+  const userGroupsData = Array.isArray(userGroups) ? userGroups : [];
+  const usersData = Array.isArray(users) ? users : [];
+  const projectsData = Array.isArray(projects) ? projects : [];
+  const boardsData = Array.isArray(boards) ? boards : [];
 
   fieldOptions.forEach(field => {
     const isSelectOrEnum = field.type === 'select';
+    const dropdownType = detectFieldType(field.name);
 
     const fieldConfigObj: FieldConfig = {
       name: field.isCustom ? field.key : field.name,
@@ -111,6 +146,7 @@ export function buildFieldsConfig(fieldOptions: FieldOption[]): FieldConfig[] {
       value: field.isCustom ? field.key : field.name,
       key: field.key,
       isCustom: field.isCustom ?? false,
+      ...(field.aggregatable !== undefined ? { aggregatable: field.aggregatable } : {}),
       operators: getOperatorsForFieldType(field.type, field.isRequired).map(op => ({
         name: op,
         label: getOperatorLabel(op),
@@ -118,10 +154,39 @@ export function buildFieldsConfig(fieldOptions: FieldOption[]): FieldConfig[] {
       valueEditorType: 'text',
     };
 
-    if (isSelectOrEnum) {
+    if (field.type === 'date') {
+      fieldConfigObj.valueEditorType = 'date';
+    } else if (isSelectOrEnum || dropdownType) {
       fieldConfigObj.valueEditorType = (operator: string): ValueEditorType =>
         operator === 'in' || operator === 'notIn' ? 'multiselect' : 'select';
-      if (field.enumValues) {
+
+      // Initialize values array - will be populated based on dropdown type
+      fieldConfigObj.values = [];
+
+      // Add dropdown options based on field type
+      if (dropdownType === 'userGroup') {
+        if (userGroupsData.length > 0) {
+          fieldConfigObj.values = userGroupsToOptions(userGroupsData);
+        }
+      } else if (dropdownType === 'user') {
+        if (usersData.length > 0) {
+          fieldConfigObj.values = usersToOptions(usersData);
+        }
+      } else if (dropdownType === 'project') {
+        if (projectsData.length > 0) {
+          fieldConfigObj.values = projectsData.map(p => ({
+            name: p.id,
+            label: p.name || p.id,
+          }));
+        }
+      } else if (dropdownType === 'board') {
+        if (boardsData.length > 0) {
+          fieldConfigObj.values = boardsData.map(b => ({
+            name: b.id,
+            label: b.name || b.id,
+          }));
+        }
+      } else if (field.enumValues && field.enumValues.length > 0) {
         fieldConfigObj.values = field.enumValues.map(v => ({ name: v, label: v }));
       }
     }
@@ -133,9 +198,7 @@ export function buildFieldsConfig(fieldOptions: FieldOption[]): FieldConfig[] {
 }
 
 // ============================================================================
-// Query Transformation Functions
-// These are pure functions that transform between react-querybuilder format
-// and the backend logical filter format
+// Value Transformation & Operator Mapping Functions
 // ============================================================================
 
 export interface FieldCondition {
@@ -143,13 +206,6 @@ export interface FieldCondition {
   operator: string;
   value: unknown;
 }
-
-export interface LogicalFilter {
-  operator: 'AND' | 'OR';
-  conditions: Array<FieldCondition | LogicalFilter>;
-}
-
-type FilterCondition = FieldCondition | LogicalFilter;
 
 export function transformValueForOperator(operator: string, value: unknown): unknown {
   if (value && typeof value === 'object' && 'id' in value) {
@@ -160,8 +216,8 @@ export function transformValueForOperator(operator: string, value: unknown): unk
       if (typeof value === 'string') {
         const parts = value
           .split(',')
-          .map(v => v.trim())
-          .filter(v => v.length > 0);
+          .map((v: string) => v.trim())
+          .filter((v: string) => v.length > 0);
         return parts.length > 0 ? parts : [value];
       }
       return [value];
@@ -169,8 +225,8 @@ export function transformValueForOperator(operator: string, value: unknown): unk
     if (value.length === 1 && typeof value[0] === 'string' && value[0].includes(',')) {
       const parts = value[0]
         .split(',')
-        .map(v => v.trim())
-        .filter(v => v.length > 0);
+        .map((v: string) => v.trim())
+        .filter((v: string) => v.length > 0);
       return parts.length > 0 ? parts : value;
     }
     return value.map((v: unknown) => (typeof v === 'object' && v !== null && 'id' in v ? v : v));
@@ -198,47 +254,85 @@ export function mapOperatorToBackend(operator: string): string {
     lessThanOrEqual: 'lte',
     between: 'between',
   };
-  if (operator === '=' || operator === '==') return 'equals';
-  if (operator === '!=') return 'notEquals';
-  if (operator === '>') return 'gt';
-  if (operator === '>=') return 'gte';
-  if (operator === '<') return 'lt';
-  if (operator === '<=') return 'lte';
+  if (operator === '=' || operator === '==') {
+    return 'equals';
+  }
+  if (operator === '!=') {
+    return 'notEquals';
+  }
+  if (operator === '>') {
+    return 'gt';
+  }
+  if (operator === '>=') {
+    return 'gte';
+  }
+  if (operator === '<') {
+    return 'lt';
+  }
+  if (operator === '<=') {
+    return 'lte';
+  }
   return map[operator] || operator;
 }
 
-export function transformQueryToLogicalFilter(ruleGroup: RuleGroupType): LogicalFilter {
-  const conditions: FilterCondition[] = [];
-  for (const rule of ruleGroup.rules) {
-    if ('rules' in rule) {
-      conditions.push(transformQueryToLogicalFilter(rule));
-    } else {
-      const backendOperator = mapOperatorToBackend(rule.operator);
-      conditions.push({
-        field: rule.field,
-        operator: backendOperator,
-        value: transformValueForOperator(backendOperator, rule.value),
-      });
-    }
-  }
-  return { operator: ruleGroup.combinator.toUpperCase() as 'AND' | 'OR', conditions };
+// ============================================================================
+// FilterGroup Conversion Functions (for compatibility with new custom builder)
+// ============================================================================
+
+import { FilterGroup, FilterCondition, generateId } from '../../utils/queryBuilder';
+
+export interface LogicalFilter {
+  operator: 'AND' | 'OR';
+  conditions: Array<{
+    field: string;
+    operator: ComparisonOperator;
+    value: unknown;
+  }>;
 }
 
-export function transformLogicalFilterToQuery(filter: LogicalFilter): RuleGroupType {
-  const rules: Array<RuleGroupType | { field: string; operator: string; value: unknown }> = [];
-  for (const condition of filter.conditions) {
-    if ('operator' in condition && 'conditions' in condition) {
-      rules.push(transformLogicalFilterToQuery(condition));
-    } else {
-      rules.push({
-        field: condition.field,
-        operator: condition.operator,
-        value: condition.value,
-      });
-    }
-  }
+export function createEmptyFilterGroup(): FilterGroup {
   return {
-    combinator: filter.operator.toLowerCase() as 'and' | 'or',
-    rules: rules as RuleGroupType['rules'],
+    id: generateId('group'),
+    combinator: 'AND',
+    conditions: [],
+  };
+}
+
+export function logicalFilterToFilterGroup(filter: LogicalFilter): FilterGroup {
+  const conditions: Array<FilterCondition | FilterGroup> = filter.conditions.map(
+    (cond: { field: string; operator: ComparisonOperator; value: unknown }) => ({
+      id: generateId('cond'),
+      field: cond.field,
+      operator: cond.operator,
+      value: cond.value,
+    }),
+  );
+
+  return {
+    id: generateId('group'),
+    combinator: filter.operator,
+    conditions,
+  };
+}
+
+export function filterGroupToLogicalFilter(group: FilterGroup | null): LogicalFilter {
+  if (!group) {
+    return { operator: 'AND', conditions: [] };
+  }
+
+  const conditions = group.conditions
+    .filter(
+      (item: FilterCondition | FilterGroup) =>
+        'field' in item && 'operator' in item && 'value' in item,
+    )
+    .map((item: FilterCondition | FilterGroup) => ({
+      field: (item as FilterCondition).field,
+      operator: (item as FilterCondition).operator,
+      value: (item as FilterCondition).value,
+    }));
+
+  return {
+    operator: group.combinator,
+    conditions,
   };
 }

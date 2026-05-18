@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { createQueryService } from '@/services/queryService/queryService';
 import { DatabaseClient } from '@/database/client';
-import { FormEntityType } from '@prisma/client';
 
 export class QueryController {
   /**
@@ -26,7 +25,7 @@ export class QueryController {
       const prisma = DatabaseClient.getInstance();
       const queryService = createQueryService(prisma);
 
-      const availableFields = await queryService.getAvailableFields(entityType as FormEntityType);
+      const availableFields = await queryService.getAvailableFields(entityType);
 
       res.json({
         success: true,

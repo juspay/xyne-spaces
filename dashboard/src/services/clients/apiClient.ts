@@ -285,12 +285,15 @@ apiConfig.interceptors.response.use(
       // Handle specific error responses with custom data
       if (error.response.data) {
         const data = error.response.data as {
-          error?: string;
+          error?: string | { message?: string; code?: string };
           errors?: { message?: string }[];
         };
 
         if (typeof data.error === 'string') {
           return Promise.reject(createErrorWithStatus(data.error, status));
+        }
+        if (typeof data.error === 'object' && data.error?.message) {
+          return Promise.reject(createErrorWithStatus(data.error.message, status));
         }
         if (Array.isArray(data.errors) && data.errors[0]?.message) {
           return Promise.reject(createErrorWithStatus(data.errors[0].message, status));
