@@ -20,6 +20,7 @@ import {
   ActivityType,
   TicketReferenceRelation,
   EmailMergeMode,
+  AutoDraftMode,
   CanvasVisibility,
   CanvasRole,
   BookmarkEntityType,
@@ -10005,6 +10006,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           sendAsEmail: z.string().optional().nullable(),
           defaultCc: z.string().optional().nullable(),
           emailMergeMode: z.nativeEnum(EmailMergeMode).optional(),
+          autoDraftMode: z.nativeEnum(AutoDraftMode).optional(),
         }),
         async ({
           tx,
@@ -10015,6 +10017,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             sendAsEmail,
             defaultCc,
             emailMergeMode,
+            autoDraftMode,
           },
         }) => {
           const existing = await tx.run(
@@ -10028,6 +10031,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
               ...(defaultCc !== undefined ? { defaultCc } : {}),
               ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
+              ...(autoDraftMode !== undefined ? { autoDraftMode } : {}),
             });
           } else {
             await tx.mutate.email_channel_preferences.insert({
@@ -10042,6 +10046,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               subCategoryField: null,
               defaultCc: defaultCc ?? null,
               emailMergeMode: emailMergeMode ?? EmailMergeMode.ENABLED,
+              autoDraftMode: autoDraftMode ?? AutoDraftMode.OFF,
               priorityClassificationEnabled: false,
               priorityClassificationPrompt: null,
               priorityClassificationThreshold: 0.5,
@@ -10082,6 +10087,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             categoryField,
             subCategoryField: subCategoryField ?? null,
             defaultCc: null,
+            autoDraftMode: AutoDraftMode.OFF,
             priorityClassificationEnabled: false,
             priorityClassificationPrompt: null,
             priorityClassificationThreshold: 0.5,
@@ -10120,6 +10126,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             categoryField: null,
             subCategoryField: null,
             defaultCc: null,
+            autoDraftMode: AutoDraftMode.OFF,
             priorityClassificationEnabled,
             priorityClassificationPrompt: priorityClassificationPrompt ?? null,
             priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,

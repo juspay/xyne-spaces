@@ -479,7 +479,11 @@ export const queries = defineQueries({
         .related('tags')
         .related('entity')
         .related('emails', q => q.related('attachments'))
-        .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('emailDrafts', q =>
+          q.where(({ or, cmp }) =>
+            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+          ),
+        )
         .related('emailReads', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
@@ -507,7 +511,11 @@ export const queries = defineQueries({
         .related('tags')
         .related('entity')
         .related('emails', q => q.related('attachments'))
-        .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('emailDrafts', q =>
+          q.where(({ or, cmp }) =>
+            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+          ),
+        )
         .related('emailReads', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
@@ -523,7 +531,11 @@ export const queries = defineQueries({
         .related('tags')
         .related('entity')
         .related('emails', q => q.related('attachments'))
-        .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('emailDrafts', q =>
+          q.where(({ or, cmp }) =>
+            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+          ),
+        )
         .related('emailReads', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
@@ -615,7 +627,11 @@ export const queries = defineQueries({
         .related('tags')
         .related('entity')
         .related('emails', q => q.related('attachments'))
-        .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('emailDrafts', q =>
+          q.where(({ or, cmp }) =>
+            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+          ),
+        )
         .related('emailReads', q => q.where('userId', ctx.userID))
         .related('conversation');
     }
@@ -638,7 +654,9 @@ export const queries = defineQueries({
     ({ ctx, args: { conversationId } }) => {
       return zql.email_drafts
         .where('conversationId', conversationId)
-        .where('userId', ctx.userID)
+        .where(({ or, cmp }) =>
+          or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+        )
         .orderBy('updatedAt', 'desc');
     }
   ),

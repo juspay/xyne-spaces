@@ -24,10 +24,10 @@ const PageWrapper = memo(
 );
 PageWrapper.displayName = 'PageWrapper';
 
-export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
+export const PdfViewer: React.FC<BaseViewerProps> = ({ source, initialPage }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfContentRef = useRef<HTMLDivElement>(null);
-  const [currentVisiblePage, setCurrentVisiblePage] = useState<number>(1);
+  const [currentVisiblePage, setCurrentVisiblePage] = useState<number>(initialPage ?? 1);
   const [pageInput, setPageInput] = useState<string | null>(null);
   const { isMobile } = usePlatform();
 
@@ -81,9 +81,9 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
     send({
       type: 'LOAD',
       source,
-      initialPage: 1,
+      initialPage: initialPage ?? 1,
     });
-  }, [source, send]);
+  }, [source, send, initialPage]);
 
   // Reset zoom when source changes
   useEffect(() => {
@@ -129,6 +129,19 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
     onScroll();
     return () => el.removeEventListener('scroll', onScroll);
   }, [numPages, rowVirtualizer]);
+
+  const hasScrolledToInitialRef = useRef(false);
+  useEffect(() => {
+    hasScrolledToInitialRef.current = false;
+  }, [source, initialPage]);
+  useEffect(() => {
+    if (hasScrolledToInitialRef.current) return;
+    if (!numPages || !initialPage || initialPage < 1) return;
+    const target = Math.min(initialPage, numPages);
+    rowVirtualizer.scrollToIndex(target - 1, { align: 'start' });
+    setCurrentVisiblePage(target);
+    hasScrolledToInitialRef.current = true;
+  }, [numPages, initialPage, rowVirtualizer]);
 
   /* --------------------------- Navigation functions ------------------------------ */
   const goToPage = useCallback(

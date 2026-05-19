@@ -421,13 +421,17 @@ export async function searchFilesImpl(
         entityCounter++;
         const words = sc.chunk.split(/\s+/);
         const truncatedChunk = words.length > 2000 ? words.slice(0, 2000).join(' ') : sc.chunk;
+        const pageMatch = sc.chunk.match(/^\[Pages?\s+(\d+)/i);
+        const chunkPos = pageMatch?.[1]
+          ? Number(pageMatch[1])
+          : resolveChunkPos(sc.index);
         return {
           ...baseFields,
           entityIndex: entityCounter,
           content: `${docMeta}\nContent: ${truncatedChunk}`,
           chunkIndex: sc.index,
           chunkText: truncatedChunk,
-          chunkPos: resolveChunkPos(sc.index),
+          chunkPos,
         } as ToolEntity;
       });
     });

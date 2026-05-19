@@ -198,7 +198,7 @@ const Info = ({
     // On Desk, stay on the current URL — the list body auto-flips to the
     // JoinChannel CTA once the leave mutation lands. Only Chat falls back
     // to the previous-channel / directory redirect.
-    const onSupport = location.pathname.startsWith('/support');
+    const onSupport = /^\/(?:[^/]+\/)?support(\/|$|\?)/.test(location.pathname);
 
     if (!onSupport) {
       const targetPath =

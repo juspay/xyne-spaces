@@ -90,6 +90,7 @@ interface ThreadMessagesProps {
   disableAskAI?: boolean;
   previewCardMode?: boolean;
   conversationParticipant?: { lastReadAt?: number | null };
+  hideTabBar?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -105,6 +106,7 @@ export const ThreadMessages = ({
   disableAskAI,
   previewCardMode = false,
   conversationParticipant: propConversationParticipant,
+  hideTabBar = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -735,132 +737,134 @@ export const ThreadMessages = ({
           className='flex-1 flex flex-col h-full overflow-hidden'
         >
           {/* Tab Header */}
-          <div className='w-full p-4 pb-0 bg-background'>
-            <div className='border-b border-border'>
-              <Tabs.List className='flex items-center justify-between'>
-                <div className='flex items-center'>
-                  {/* Replies Tab */}
-                  <Tabs.Trigger asChild value='replies'>
-                    <button
-                      className={cn(
-                        'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                        underTicketActiveTab === 'replies'
-                          ? 'border-b-2 border-primary'
-                          : 'border-b-2 border-transparent',
-                      )}
-                    >
-                      <span
-                        className={
-                          underTicketActiveTab === 'replies'
-                            ? 'text-primary'
-                            : 'text-muted-foreground'
-                        }
-                      >
-                        <CornerDownRight size={12} />
-                      </span>
-                      <span
-                        className={`text-sm font-medium ${underTicketActiveTab === 'replies' ? 'text-primary' : 'text-muted-foreground'}`}
-                      >
-                        Messages
-                      </span>
-                    </button>
-                  </Tabs.Trigger>
-
-                  {/* Workflows Tab */}
-                  <Tabs.Trigger asChild value='workflows'>
-                    <button
-                      className={cn(
-                        'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                        underTicketActiveTab === 'workflows'
-                          ? 'border-b-2 border-primary'
-                          : 'border-b-2 border-transparent',
-                      )}
-                    >
-                      <span
-                        className={
-                          underTicketActiveTab === 'workflows'
-                            ? 'text-primary'
-                            : 'text-muted-foreground'
-                        }
-                      >
-                        <Workflow size={12} />
-                      </span>
-                      <span
-                        className={`text-sm font-medium ${underTicketActiveTab === 'workflows' ? 'text-primary' : 'text-muted-foreground'}`}
-                      >
-                        Workflows
-                      </span>
-                      {latestWorkflowStatus &&
-                        (latestWorkflowStatus === 'FAILED' ? (
-                          <FailedStatusIcon />
-                        ) : latestWorkflowStatus === 'RUNNING' ||
-                          latestWorkflowStatus === 'SUCCESS' ? (
-                          <SuccessStatusIcon />
-                        ) : null)}
-                    </button>
-                  </Tabs.Trigger>
-
-                  {/* RCA Tab */}
-                  {isFixTicket && (
-                    <Tabs.Trigger asChild value='rca'>
+          {!hideTabBar && (
+            <div className='w-full p-4 pb-0 bg-background'>
+              <div className='border-b border-border'>
+                <Tabs.List className='flex items-center justify-between'>
+                  <div className='flex items-center'>
+                    {/* Replies Tab */}
+                    <Tabs.Trigger asChild value='replies'>
                       <button
                         className={cn(
                           'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                          underTicketActiveTab === 'rca'
+                          underTicketActiveTab === 'replies'
                             ? 'border-b-2 border-primary'
                             : 'border-b-2 border-transparent',
                         )}
                       >
                         <span
                           className={
-                            underTicketActiveTab === 'rca'
+                            underTicketActiveTab === 'replies'
                               ? 'text-primary'
                               : 'text-muted-foreground'
                           }
                         >
-                          <ClipboardCheck size={12} />
+                          <CornerDownRight size={12} />
                         </span>
                         <span
-                          className={`text-sm font-medium ${underTicketActiveTab === 'rca' ? 'text-primary' : 'text-muted-foreground'}`}
+                          className={`text-sm font-medium ${underTicketActiveTab === 'replies' ? 'text-primary' : 'text-muted-foreground'}`}
                         >
-                          RCA
+                          Messages
                         </span>
                       </button>
                     </Tabs.Trigger>
-                  )}
-                </div>
-                <div className='flex items-center gap-2'>
-                  {/* Subscription Button */}
-                  {derivedConversationId && (
-                    <Tooltip content='Toggle notification subscription'>
-                      <div className='p-2 border border-border rounded-lg h-8 w-8'>
-                        <ConversationSubscription
-                          conversationId={derivedConversationId}
-                          {...(conversation && { conversation })}
-                          variant='icon-only'
-                          className='flex items-center justify-center'
-                        />
-                      </div>
-                    </Tooltip>
-                  )}
-                  {/* Initiate Call Button */}
-                  {derivedConversationId && (
-                    <ThreadCallButton
-                      onStartCall={handleInitiateCall}
-                      onScheduleCall={() => setIsScheduleCallModalOpen(true)}
-                      hasActiveCall={hasActiveCallForConversation}
-                      trackCategory='THREAD_PANEL'
-                      trackName='INITIATE_CALL_FROM_THREAD'
-                      trackMetadata={{
-                        channelId: channel?.id,
-                        conversationId: derivedConversationId,
-                      }}
-                    />
-                  )}
-                </div>
-              </Tabs.List>
+
+                    {/* Workflows Tab */}
+                    <Tabs.Trigger asChild value='workflows'>
+                      <button
+                        className={cn(
+                          'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                          underTicketActiveTab === 'workflows'
+                            ? 'border-b-2 border-primary'
+                            : 'border-b-2 border-transparent',
+                        )}
+                      >
+                        <span
+                          className={
+                            underTicketActiveTab === 'workflows'
+                              ? 'text-primary'
+                              : 'text-muted-foreground'
+                          }
+                        >
+                          <Workflow size={12} />
+                        </span>
+                        <span
+                          className={`text-sm font-medium ${underTicketActiveTab === 'workflows' ? 'text-primary' : 'text-muted-foreground'}`}
+                        >
+                          Workflows
+                        </span>
+                        {latestWorkflowStatus &&
+                          (latestWorkflowStatus === 'FAILED' ? (
+                            <FailedStatusIcon />
+                          ) : latestWorkflowStatus === 'RUNNING' ||
+                            latestWorkflowStatus === 'SUCCESS' ? (
+                            <SuccessStatusIcon />
+                          ) : null)}
+                      </button>
+                    </Tabs.Trigger>
+
+                    {/* RCA Tab */}
+                    {isFixTicket && (
+                      <Tabs.Trigger asChild value='rca'>
+                        <button
+                          className={cn(
+                            'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                            underTicketActiveTab === 'rca'
+                              ? 'border-b-2 border-primary'
+                              : 'border-b-2 border-transparent',
+                          )}
+                        >
+                          <span
+                            className={
+                              underTicketActiveTab === 'rca'
+                                ? 'text-primary'
+                                : 'text-muted-foreground'
+                            }
+                          >
+                            <ClipboardCheck size={12} />
+                          </span>
+                          <span
+                            className={`text-sm font-medium ${underTicketActiveTab === 'rca' ? 'text-primary' : 'text-muted-foreground'}`}
+                          >
+                            RCA
+                          </span>
+                        </button>
+                      </Tabs.Trigger>
+                    )}
+                  </div>
+                  <div className='flex items-center gap-2'>
+                    {/* Subscription Button */}
+                    {derivedConversationId && (
+                      <Tooltip content='Toggle notification subscription'>
+                        <div className='p-2 border border-border rounded-lg h-8 w-8'>
+                          <ConversationSubscription
+                            conversationId={derivedConversationId}
+                            {...(conversation && { conversation })}
+                            variant='icon-only'
+                            className='flex items-center justify-center'
+                          />
+                        </div>
+                      </Tooltip>
+                    )}
+                    {/* Initiate Call Button */}
+                    {derivedConversationId && (
+                      <ThreadCallButton
+                        onStartCall={handleInitiateCall}
+                        onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+                        hasActiveCall={hasActiveCallForConversation}
+                        trackCategory='THREAD_PANEL'
+                        trackName='INITIATE_CALL_FROM_THREAD'
+                        trackMetadata={{
+                          channelId: channel?.id,
+                          conversationId: derivedConversationId,
+                        }}
+                      />
+                    )}
+                  </div>
+                </Tabs.List>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Replies Tab Content */}
           <Tabs.Content

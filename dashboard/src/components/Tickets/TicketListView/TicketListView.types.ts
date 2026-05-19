@@ -13,7 +13,7 @@ export interface TicketListItem {
   assignedTo?: string | null;
   metadata?: unknown;
   emails?: readonly unknown[] | null;
-  emailDrafts?: readonly unknown[] | null;
+  emailDrafts?: readonly { userId: string | null }[] | null;
   emailReads?: readonly unknown[] | null;
   conversation?: unknown;
   _raw?: Record<string, unknown>;

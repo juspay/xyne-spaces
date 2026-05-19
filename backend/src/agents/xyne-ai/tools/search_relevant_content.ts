@@ -49,6 +49,9 @@ function buildSearchContentMappings(result: ToolResult): EnhancedCitationMapping
   const channelIdMapping: Record<number, string> = {};
   const externalUrlMapping: Record<number, string | undefined> = {};
   const isExternalMapping: Record<number, boolean> = {};
+  const chunkTextMapping: Record<number, string | undefined> = {};
+  const canvasTitleMapping: Record<number, string | undefined> = {};
+  const channelNameMapping: Record<number, string | undefined> = {};
 
   for (const msg of result.messages) {
     const idx = msg.messageIndex;
@@ -57,6 +60,11 @@ function buildSearchContentMappings(result: ToolResult): EnhancedCitationMapping
     entityIdMapping[idx] = msg.messageId;
     channelIdMapping[idx] = msg.channelId;
     isExternalMapping[idx] = false;
+    channelNameMapping[idx] = msg.channelName;
+    if (msg.canvasTitle) canvasTitleMapping[idx] = msg.canvasTitle;
+    if (msg.content && msg.content.trim().length > 0) {
+      chunkTextMapping[idx] = msg.content;
+    }
 
     switch (contentType) {
       case 'message':
@@ -92,10 +100,12 @@ function buildSearchContentMappings(result: ToolResult): EnhancedCitationMapping
     externalUrlMapping,
     isExternalMapping,
     chunkIndexMapping: {},
-    chunkTextMapping: {},
+    chunkTextMapping,
     chunkPosMapping: {},
     fileNameMapping: {},
     mimeTypeMapping: {},
+    canvasTitleMapping,
+    channelNameMapping,
   };
 }
 
@@ -146,7 +156,8 @@ function flattenVespaChildren(children: any[]): any[] {
 
   function walk(items: any[]) {
     for (const item of items) {
-      if (item.fields) {
+      const isGroupNode = typeof item.id === 'string' && item.id.startsWith('group:');
+      if (item.fields && !isGroupNode) {
         // Real document hit
         hits.push(item);
       } else if (item.children) {
@@ -341,11 +352,11 @@ async function searchRelevantContentImpl(
       } else if (contentType === 'canvas') {
         // Prefer the full content fetched from Y-Sweet / DB; fall back to the
         // Vespa title-only snippet when neither source returned anything.
-        const fullContent = canvasContentMap.get(result.id);
-        const bodyText = truncateContent(
-          fullContent ?? stripHtml(result.subtitle || result.context || ''),
-          CANVAS_CONTENT_MAX_CHARS
-        );
+        const rawCanvas = canvasContentMap.get(result.id);
+        const canvasBody = rawCanvas
+          ? rawCanvas.replace(/^Canvas:[\s\S]*?\nContent Status:[^\n]*\n\n/, '')
+          : stripHtml(result.subtitle || result.context || '');
+        const bodyText = truncateContent(canvasBody, CANVAS_CONTENT_MAX_CHARS);
         content = `Title: ${result.title}\nCreated by: ${result.avatar || 'Unknown'}\n\nContent:\n${bodyText}`;
         authorName = result.avatar || 'Unknown';
         authorId = result.searchContext?.attachmentId ? '' : (result.avatar || '');
@@ -387,6 +398,7 @@ async function searchRelevantContentImpl(
         hasAttachment: false,
         isTicket: contentType === 'ticket',
         contentType,
+        ...(contentType === 'canvas' && { canvasTitle: stripHtml(result.title) }),
       };
     });
 

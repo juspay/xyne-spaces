@@ -50,6 +50,12 @@ enum WorkflowExecutionMode {
   @@schema("public")
 }
 
+enum AutoDraftMode {
+  OFF
+  DRAFT
+  @@schema("public")
+}
+
 enum TicketStatus {      // Deprecated
   NEW                    // Ticket created, awaiting triage or auto-assignment
   IN_PROGRESS            // Work actively ongoing
@@ -1923,6 +1929,7 @@ model EmailChannelPreference {
   priorityClassificationEnabled Boolean @default(false)
   priorityClassificationPrompt String?  // Custom system prompt for the priority classification LLM
   priorityClassificationThreshold Float @default(0.5) // Minimum confidence threshold (0.0 - 1.0) to auto-apply priority
+  autoDraftMode          AutoDraftMode @default(OFF)
 
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])

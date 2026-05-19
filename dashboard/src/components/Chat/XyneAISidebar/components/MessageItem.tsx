@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
+import { stripCitationMarks } from '../../../ui/TipTapExtensions/CitationMark';
 import { genericInstance } from '../../../../services/clients/genericClient';
 import type { Components } from 'react-markdown';
 import {
@@ -864,7 +865,8 @@ export const MessageItem = React.memo(
         message.type === 'bot' && message.isStreaming && message.streamingContent
           ? message.streamingContent
           : message.content || message.streamingContent || '';
-      return message.isStreaming ? raw + '\n' : raw;
+      const stripped = stripCitationMarks(raw);
+      return message.isStreaming ? stripped + '\n' : stripped;
     }, [message.type, message.isStreaming, message.streamingContent, message.content]);
 
     const parsedContent = message.parsedContent;

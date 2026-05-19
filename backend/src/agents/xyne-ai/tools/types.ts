@@ -62,6 +62,7 @@ export interface XyneAIAgentContext {
   webSearchEnabled?: boolean;  // Flag to enable/disable web search functionality
   deepResearchEnabled?: boolean;  // Flag to enable/disable deep research functionality
   memoryEnabled?: boolean;  // Flag to enable/disable memory tools (get_memories, update_memory); default true
+  disableTools?: boolean;  // When true, the agent runs with NO tools at all — pure single LLM call.
   requestMappings?: {  // Request-scoped mappings from FVD tool
     channelNameToId: Map<string, string>;
     userNameToId: Map<string, string>;
@@ -157,6 +158,7 @@ export interface ToolMessage {
   hasAttachment: boolean;
   isTicket?: boolean; // Indicates if this is a ticket citation
   contentType?: 'message' | 'ticket' | 'canvas' | 'call' | 'recording'; // Content type for citation URL construction
+  canvasTitle?: string; // For canvas results — title carried so the UI needn't refetch
 }
 
 // ============================================================================
@@ -231,6 +233,9 @@ export interface ToolEntity {
   chunkIndex?: number;
   chunkText?: string;
   chunkPos?: number;  // 1-indexed page number (PDFs) or sheet index from chunks_pos_summary
+  ticketTitle?: string;
+  ticketXyneId?: string; 
+  canvasTitle?: string;
 }
 
 /**
@@ -274,6 +279,10 @@ export interface EnhancedCitationMappings {
   chunkPosMapping: Record<number, number | undefined>;  // page/sheet position from chunks_pos_summary
   fileNameMapping: Record<number, string | undefined>;
   mimeTypeMapping: Record<number, string | undefined>;
+  ticketTitleMapping?: Record<number, string | undefined>;  // index -> ticket title (ticket entities only)
+  ticketXyneIdMapping?: Record<number, string | undefined>;  // index -> ticket human id (ticket entities only)
+  canvasTitleMapping?: Record<number, string | undefined>;  // index -> canvas title (canvas entities only)
+  channelNameMapping?: Record<number, string | undefined>;  // index -> channel/group name (all entity types)
 }
 
 // ============================================================================

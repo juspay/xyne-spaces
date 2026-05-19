@@ -82,12 +82,13 @@ class XyneAISessionStore {
     
     return {
       sessionId: sessionData.sessionId,
-      context: { 
+      context: {
         userId: sessionData.userId,
         channelIds: context.channelIds,
         conversationId: context.conversationId,
       },
       history: [],
+      tag: sessionData.tag,
       createdAt: sessionData.createdAt.toISOString(),
       updatedAt: sessionData.updatedAt.toISOString(),
     };
@@ -110,12 +111,13 @@ class XyneAISessionStore {
       
       return {
         sessionId: sessionData.sessionId,
-        context: { 
+        context: {
           userId: sessionData.userId,
           channelIds,
           conversationId,
         },
         history,
+        tag: sessionData.tag,
         createdAt: sessionData.createdAt.toISOString(),
         updatedAt: sessionData.updatedAt.toISOString(),
       };
@@ -273,6 +275,19 @@ class XyneAISessionStore {
     }
   }
 
+  async findActiveSessionId(userId: string, conversationId: string, tagFilter?: string | { not: string }): Promise<string | null> {
+    try {
+      const provider = await this.ensureInitialized();
+      return await provider.findActiveSessionId(userId, conversationId, tagFilter);
+    } catch (error) {
+      logger.error(
+        `[SessionStore] Error finding active session for user=${userId} conv=${conversationId}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
   async getRawMessages(sessionId: string): Promise<MessageData[]> {
     try {
       const provider = await this.ensureInitialized();
@@ -415,9 +430,9 @@ export async function getOrCreateSession(
 
   // Before creating a new session, check if one already exists for this (userId, conversationId)
   if (context.conversationId) {
-    const existingSessions = await sessionStore.getUserSessions(context.userId, context.conversationId);
-    if (existingSessions.length > 0 && existingSessions[0]) {
-      const existing = await sessionStore.get(existingSessions[0].sessionId);
+    const existingId = await sessionStore.findActiveSessionId(context.userId, context.conversationId);
+    if (existingId) {
+      const existing = await sessionStore.get(existingId);
       if (existing) {
         logger.info(`[XyneAI SessionStore] Found existing session ${existing.sessionId} for conversationId: ${context.conversationId}`);
         return { session: existing, isNewSession: false };

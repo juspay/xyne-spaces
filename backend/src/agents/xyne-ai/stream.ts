@@ -268,6 +268,59 @@ function buildCitationUrlsForTrace(keyPoints: XyneAIOutput['keyPoints']): Record
   return urls;
 }
 
+function flattenMappingsToCitations(
+  mappings: EnhancedCitationMappings | undefined,
+  defaultChannelId?: string,
+): Citation[] {
+  if (!mappings) return [];
+  const entityIds = (mappings.entityIdMapping ?? {}) as Record<string, string>;
+  const refs = Object.keys(entityIds);
+  if (refs.length === 0) return [];
+
+  const channelIdMap = (mappings.channelIdMapping ?? {}) as Record<string, string | undefined>;
+  const entityTypeMap = (mappings.entityTypeMapping ?? {}) as Record<string, Citation['entityType']>;
+  const messageIdMap = (mappings.messageIdMapping ?? {}) as Record<string, string | undefined>;
+  const conversationIdMap = (mappings.conversationIdMapping ?? {}) as Record<string, string | undefined>;
+  const canvasIdMap = (mappings.canvasIdMapping ?? {}) as Record<string, string | undefined>;
+  const externalUrlMap = (mappings.externalUrlMapping ?? {}) as Record<string, string | undefined>;
+  const isExternalMap = (mappings.isExternalMapping ?? {}) as Record<string, boolean | undefined>;
+  const chunkIndexMap = (mappings.chunkIndexMapping ?? {}) as Record<string, number | undefined>;
+  const chunkTextMap = (mappings.chunkTextMapping ?? {}) as Record<string, string | undefined>;
+  const chunkPosMap = (mappings.chunkPosMapping ?? {}) as Record<string, number | undefined>;
+  const fileNameMap = (mappings.fileNameMapping ?? {}) as Record<string, string | undefined>;
+  const mimeTypeMap = (mappings.mimeTypeMapping ?? {}) as Record<string, string | undefined>;
+  const ticketTitleMap = (mappings.ticketTitleMapping ?? {}) as Record<string, string | undefined>;
+  const ticketXyneIdMap = (mappings.ticketXyneIdMapping ?? {}) as Record<string,string | undefined>;
+  const canvasTitleMap = (mappings.canvasTitleMapping ?? {}) as Record<string, string | undefined>;
+  const channelNameMap = (mappings.channelNameMapping ?? {}) as Record<string, string | undefined>;
+
+  return refs.map((ref, idx) => {
+    const entityType = entityTypeMap[ref];
+    return {
+      messageIndex: idx + 1,
+      messageId: messageIdMap[ref] ?? '',
+      conversationId: conversationIdMap[ref] ?? '',
+      channelId: channelIdMap[ref] ?? defaultChannelId ?? '',
+      prefixedRef: ref,
+      isTicket: entityType === 'ticket',
+      entityType,
+      entityId: entityIds[ref],
+      canvasId: canvasIdMap[ref],
+      externalUrl: externalUrlMap[ref],
+      isExternal: isExternalMap[ref] ?? false,
+      chunkIndex: chunkIndexMap[ref],
+      chunkText: chunkTextMap[ref],
+      chunkPos: chunkPosMap[ref],
+      fileName: fileNameMap[ref],
+      mimeType: mimeTypeMap[ref],
+      ticketTitle: ticketTitleMap[ref],
+      ticketXyneId: ticketXyneIdMap[ref],
+      canvasTitle: canvasTitleMap[ref],
+      channelName: channelNameMap[ref],
+    };
+  });
+}
+
 // ============================================================================
 // Streaming Execution
 // ============================================================================
@@ -276,6 +329,7 @@ export interface XyneAIStreamRequest extends XyneAIRequest {
   onStreamEvent?: StreamEventCallback;
   agentsConfig?: AgentsConfig;  // CAC config fetched in controller
   memoryEnabled?: boolean;  // Whether memory tools are available; default true. Pass false for bot contexts.
+  disableTools?: boolean;  // When true, runs a single LLM call with no tools / no agent loop / no session persistence (pure rewrite path).
 }
 
 export async function* xyneAIStream(
@@ -309,12 +363,22 @@ const {
 
   const timestamp = currentTimestamp || getCurrentTimestamp();
   const source: 'thread' | 'channel' = conversationId ? 'thread' : 'channel';
+  const isEphemeralSession = request.disableTools === true;
 
   const agentName = request.agentName;
   const sessionContext: SessionContext = {  channelIds, conversationId, userId, agentName };
-  const { session, isNewSession } = await getOrCreateSession(sessionId, sessionContext);
 
-  logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}, attachments: ${attachments?.length || 0}, messageAttachmentIds: ${messageAttachmentIds?.length || 0}`);
+  let session: { sessionId: string };
+  let isNewSession = false;
+  if (isEphemeralSession) {
+    session = { sessionId: `ephemeral-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` };
+  } else {
+    const created = await getOrCreateSession(sessionId, sessionContext);
+    session = created.session;
+    isNewSession = created.isNewSession;
+  }
+
+  logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}, attachments: ${attachments?.length || 0}, messageAttachmentIds: ${messageAttachmentIds?.length || 0}, ephemeral: ${isEphemeralSession}`);
 
   yield { type: 'start', sessionId: session.sessionId, isNewSession };
 
@@ -432,9 +496,12 @@ const {
   // parentMessageId is the user message ID; bot response branches as its new child.
   // For edit/normal: create a new user message linked to parentMessageId.
   let userMessageId: string;
-  let historyMessages;
+  let historyMessages: ReturnType<typeof formatHistoryForJAF>;
 
-  if (isRegenerate && parentMessageId) {
+  if (isEphemeralSession) {
+    userMessageId = `pure-llm-user-${Date.now()}`;
+    historyMessages = [];
+  } else if (isRegenerate && parentMessageId) {
     // Regenerate: no new user message, parent is the existing user message
     userMessageId = parentMessageId;
     // Get history up to (but excluding) the user message — the current query
@@ -627,7 +694,7 @@ const {
   const wrappedOnStreamEvent: StreamEventCallback | undefined = onStreamEvent
     ? (event: Record<string, unknown>) => {
         const eventType = event.type as string;
-        if (eventType === 'tool_input' && event.tool_name) {
+        if (!isEphemeralSession && eventType === 'tool_input' && event.tool_name) {
           const toolName = event.tool_name as string;
           const input = typeof event.input === 'string' ? event.input : JSON.stringify(event.input);
           subToolQueue = subToolQueue.then(async () => {
@@ -637,7 +704,7 @@ const {
               logger.error(`[XyneAI] [${session.sessionId}] Failed to store sub-tool input:`, err);
             }
           });
-        } else if (eventType === 'tool_output' && event.tool_name) {
+        } else if (!isEphemeralSession && eventType === 'tool_output' && event.tool_name) {
           const toolName = event.tool_name as string;
           subToolQueue = subToolQueue.then(async () => {
             try {
@@ -669,6 +736,7 @@ const {
     researchContext,
     customInstruction,
     memoryEnabled: request.memoryEnabled !== false,  // default true; false disables get_memories/update_memory
+    disableTools: request.disableTools === true,  // pure-LLM rewrite path: no tools at all
     modelName: cacConfig.xyneAiModelName,
     agentName: request.agentName,
     systemPromptOverride,
@@ -730,14 +798,15 @@ const {
           break;
         
         case 'before_tool_execution':
-          // Store tool input in DB, chaining to previous step
-          lastStepId = await sessionStore.addToolInput(
-            session.sessionId,
-            event.data.toolName,
-            event.data.args,
-            currentTraceId,
-            lastStepId,
-          );
+          if (!isEphemeralSession) {
+            lastStepId = await sessionStore.addToolInput(
+              session.sessionId,
+              event.data.toolName,
+              event.data.args,
+              currentTraceId,
+              lastStepId,
+            );
+          }
           
           yield {
             type: 'tool_input',
@@ -776,13 +845,15 @@ const {
           }
           
           // Store tool output in DB, chaining to previous step
-          lastStepId = await sessionStore.addToolOutput(
-            session.sessionId,
-            event.data.toolName,
-            event.data.result,
-            currentTraceId,
-            lastStepId,
-          );
+          if (!isEphemeralSession) {
+            lastStepId = await sessionStore.addToolOutput(
+              session.sessionId,
+              event.data.toolName,
+              event.data.result,
+              currentTraceId,
+              lastStepId,
+            );
+          }
           
           yield {
             type: 'tool_output',
@@ -845,9 +916,13 @@ const {
               if (currentTraceId) finalizeTrace(currentTraceId, citationUrls);
             }
 
+            parsedOutput.sources = flattenMappingsToCitations(mappings, channelIds[0]);
+
             // Store clean assistant message in DB, chaining to previous step
-            const result = await sessionStore.addAssistantMessage(session.sessionId, parsedOutput, currentTraceId, lastStepId);
-            if (!result) {
+            const result = isEphemeralSession
+              ? null
+              : await sessionStore.addAssistantMessage(session.sessionId, parsedOutput, currentTraceId, lastStepId);
+            if (!isEphemeralSession && !result) {
               logger.error(`[XyneAI] [${session.sessionId}] Failed to save assistant message`);
             }
 
@@ -873,8 +948,8 @@ const {
             // Finalize span even on error
             if (currentTraceId) finalizeTrace(currentTraceId, {});
 
-            // On error, save what we have as fallback
-            if (accumulatedContent) {
+            // On error, save what we have as fallback (pure-LLM rewrites skip persistence)
+            if (!isEphemeralSession && accumulatedContent) {
               const fallbackOutput: XyneAIOutput = {
                 summary: accumulatedContent,
                 keyPoints: [],
@@ -899,8 +974,8 @@ const {
     // Ensure the OTEL span is finalized even if an exception cut the run short
     if (currentTraceId) finalizeTrace(currentTraceId, {});
 
-    // Save whatever we have as fallback even on exception
-    if (accumulatedContent) {
+    // Save whatever we have as fallback even on exception (pure-LLM rewrites skip persistence)
+    if (!isEphemeralSession && accumulatedContent) {
       const fallbackOutput: XyneAIOutput = {
         summary: accumulatedContent,
         keyPoints: [],

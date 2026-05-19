@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'crypto';
 import type { MessageData } from '../storage/customPostgresProvider.js';
-import type { XyneAIOutput, KeyPointWithCitation } from '../types.js';
+import type { XyneAIOutput, KeyPointWithCitation, Citation } from '../types.js';
 
 // ============================================================================
 // Frontend Message Type
@@ -33,6 +33,7 @@ export interface FrontendMessage {
   conversationIdMapping?: Record<string, string>;
   channelIdMapping?: Record<string, string>;
   userTags?: Record<string, { name: string; userId: string }>;
+  sources?: Citation[];
 }
 
 // ============================================================================
@@ -373,6 +374,7 @@ export function transformMessagesToFrontendFormat(steps: MessageData[]): Fronten
         conversationIdMapping: Object.keys(conversationIdMapping).length > 0 ? conversationIdMapping : undefined,
         channelIdMapping: Object.keys(channelIdMapping).length > 0 ? channelIdMapping : undefined,
         userTags: output?.userTags,
+        ...(output?.sources && output.sources.length > 0 && { sources: output.sources }),
       });
     }
     // TOOL_INPUT and TOOL_OUTPUT steps are folded into their parent ASSISTANT (or aborted) message

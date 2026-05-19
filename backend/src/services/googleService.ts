@@ -105,15 +105,32 @@ export class GoogleService {
   private readonly gmail: gmail_v1.Gmail;
   private readonly credentials: GoogleCredentials;
 
-  constructor(credentials: GoogleCredentials) {
+  constructor(credentials: GoogleCredentials, sourceId?: string) {
     this.credentials = credentials;
     this.oauth2Client = GoogleService.createOAuth2Client(credentials);
+
+    if (sourceId) {
+      const externalSourceRepo = new ExternalSourceRepository();
+      this.oauth2Client.on('tokens', async tokens => {
+        try {
+          if (tokens.access_token) this.credentials.accessToken = tokens.access_token;
+          if (tokens.refresh_token) this.credentials.refreshToken = tokens.refresh_token;
+          await externalSourceRepo.update(sourceId, {
+            credentials: encrypt(JSON.stringify(this.credentials)),
+          });
+          logger.info(`${TAG} Google tokens refreshed and persisted (instance)`, { sourceId });
+        } catch (error) {
+          logger.warn(`${TAG} Failed to persist refreshed Google tokens (instance)`, error);
+        }
+      });
+    }
+
     this.gmail = google.gmail({ version: 'v1', auth: this.oauth2Client as any });
   }
 
-  static fromEncryptedCredentials(encryptedCredentials: string, _sourceId: string): GoogleService {
+  static fromEncryptedCredentials(encryptedCredentials: string, sourceId: string): GoogleService {
     const credentials = JSON.parse(decrypt(encryptedCredentials)) as GoogleCredentials;
-    return new GoogleService(credentials);
+    return new GoogleService(credentials, sourceId);
   }
 
   getUserEmail(): string {

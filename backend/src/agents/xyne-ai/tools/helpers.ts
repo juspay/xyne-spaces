@@ -516,6 +516,10 @@ export function buildEnhancedCitationMappings(result: EnhancedToolResult): Enhan
   const chunkPosMapping: Record<number, number | undefined> = {};
   const fileNameMapping: Record<number, string | undefined> = {};
   const mimeTypeMapping: Record<number, string | undefined> = {};
+  const ticketTitleMapping: Record<number, string | undefined> = {};
+  const ticketXyneIdMapping: Record<number, string | undefined> = {};
+  const canvasTitleMapping: Record<number, string | undefined> = {};
+  const channelNameMapping: Record<number, string | undefined> = {};
 
   for (const entity of result.entities) {
     const idx = entity.entityIndex;
@@ -533,6 +537,10 @@ export function buildEnhancedCitationMappings(result: EnhancedToolResult): Enhan
     chunkPosMapping[idx] = entity.chunkPos;
     fileNameMapping[idx] = entity.fileName;
     mimeTypeMapping[idx] = entity.attachmentMimetype;
+    ticketTitleMapping[idx] = entity.ticketTitle;
+    ticketXyneIdMapping[idx] = entity.ticketXyneId;
+    canvasTitleMapping[idx] = entity.canvasTitle;
+    channelNameMapping[idx] = entity.channelName;
   }
 
   return {
@@ -549,6 +557,10 @@ export function buildEnhancedCitationMappings(result: EnhancedToolResult): Enhan
     chunkPosMapping,
     fileNameMapping,
     mimeTypeMapping,
+    ticketTitleMapping,
+    ticketXyneIdMapping,
+    canvasTitleMapping,
+    channelNameMapping,
   };
 }
 
@@ -628,7 +640,15 @@ export async function appendEnhancedSessionMappings(
           chunkPosMapping: {},
           fileNameMapping: {},
           mimeTypeMapping: {},
+          ticketTitleMapping: {},
+          ticketXyneIdMapping: {},
+          canvasTitleMapping: {},
+          channelNameMapping: {},
         };
+    existing.ticketTitleMapping ??= {};
+    existing.ticketXyneIdMapping ??= {};
+    existing.canvasTitleMapping ??= {};
+    existing.channelNameMapping ??= {};
 
     // Add new mappings with prefix
     for (const [index, entityId] of Object.entries(mappings.entityIdMapping)) {
@@ -700,6 +720,26 @@ export async function appendEnhancedSessionMappings(
     for (const [index, val] of Object.entries(mappings.mimeTypeMapping || {})) {
       const prefixedKey = `${prefix}${index}`;
       existing.mimeTypeMapping[prefixedKey as unknown as number] = val;
+    }
+
+    for (const [index, val] of Object.entries(mappings.ticketTitleMapping || {})) {
+      const prefixedKey = `${prefix}${index}`;
+      existing.ticketTitleMapping![prefixedKey as unknown as number] = val;
+    }
+
+    for (const [index, val] of Object.entries(mappings.ticketXyneIdMapping || {})) {
+      const prefixedKey = `${prefix}${index}`;
+      existing.ticketXyneIdMapping![prefixedKey as unknown as number] = val;
+    }
+
+    for (const [index, val] of Object.entries(mappings.canvasTitleMapping || {})) {
+      const prefixedKey = `${prefix}${index}`;
+      existing.canvasTitleMapping![prefixedKey as unknown as number] = val;
+    }
+
+    for (const [index, val] of Object.entries(mappings.channelNameMapping || {})) {
+      const prefixedKey = `${prefix}${index}`;
+      existing.channelNameMapping![prefixedKey as unknown as number] = val;
     }
 
     await redis.setex(key, CITATION_TTL_SECONDS, JSON.stringify(existing));
@@ -811,6 +851,7 @@ export function transformMessageToEntity(
     entityId: message.messageId,
     entityIndex: index,
     content: stripHtml(message.content),
+    chunkText: stripHtml(message.content),
     authorName: user?.name || user?.email || 'Unknown User',
     authorId: message.senderId,
     timestamp: toIST(message.createdAt),
@@ -954,6 +995,7 @@ export function transformCanvasToEntity(
     channelId: canvas.channelId || '',
     channelName,
     canvasId: canvas.id,
+    canvasTitle: canvas.title,
   };
 }
 
@@ -1005,6 +1047,8 @@ export function transformTicketToEntity(
     conversationId: ticket.conversationId,
     ticketId: ticket.id,
     ticketStatus: ticket.statusV2,
+    ticketTitle: ticket.title,
+    ticketXyneId: ticket.xyneId,
   };
 }
 

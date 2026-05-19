@@ -16,6 +16,7 @@ import {
   TicketPriority,
   TicketReferenceRelation,
   EmailMergeMode,
+  AutoDraftMode,
   CanvasVisibility,
   CanvasRole,
   BookmarkEntityType,
@@ -6157,6 +6158,7 @@ export const mutators = defineMutators({
         sendAsEmail: z.string().optional().nullable(),
         defaultCc: z.string().optional().nullable(),
         emailMergeMode: z.nativeEnum(EmailMergeMode).optional(),
+        autoDraftMode: z.nativeEnum(AutoDraftMode).optional(),
       }),
       async ({
         tx,
@@ -6168,6 +6170,7 @@ export const mutators = defineMutators({
           sendAsEmail,
           defaultCc,
           emailMergeMode,
+          autoDraftMode,
         },
       }) => {
         const existing = await tx.run(
@@ -6181,6 +6184,7 @@ export const mutators = defineMutators({
             ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
             ...(defaultCc !== undefined ? { defaultCc } : {}),
             ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
+            ...(autoDraftMode !== undefined ? { autoDraftMode } : {}),
           });
         } else {
           await tx.mutate.email_channel_preferences.insert({
@@ -6195,6 +6199,7 @@ export const mutators = defineMutators({
             subCategoryField: null,
             defaultCc: defaultCc ?? null,
             emailMergeMode: emailMergeMode ?? EmailMergeMode.ENABLED,
+            autoDraftMode: autoDraftMode ?? AutoDraftMode.OFF,
             priorityClassificationEnabled: false,
             priorityClassificationPrompt: null,
             priorityClassificationThreshold: 0.5,
@@ -6235,6 +6240,7 @@ export const mutators = defineMutators({
             categoryField,
             subCategoryField: subCategoryField ?? null,
             defaultCc: null,
+            autoDraftMode: AutoDraftMode.OFF,
             priorityClassificationEnabled: false,
             priorityClassificationPrompt: null,
             priorityClassificationThreshold: 0.5,
@@ -6273,6 +6279,7 @@ export const mutators = defineMutators({
             categoryField: null,
             subCategoryField: null,
             defaultCc: null,
+            autoDraftMode: AutoDraftMode.OFF,
             priorityClassificationEnabled,
             priorityClassificationPrompt: priorityClassificationPrompt ?? null,
             priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,

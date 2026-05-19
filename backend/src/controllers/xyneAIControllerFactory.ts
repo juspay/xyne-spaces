@@ -112,6 +112,20 @@ export class XyneAIControllerFactory {
   };
 
   /**
+   * Resolve "the user's session for this mail" — replaces localStorage-based
+   */
+  getSessionByConversation = async (req: Request, res: Response): Promise<void> => {
+    return xyneAIController.getSessionByConversation(req, res);
+  };
+
+  /**
+   * Resolve "the autodraft session for this mail" — looks up the channel
+   */
+  getAutodraftSessionByConversation = async (req: Request, res: Response): Promise<void> => {
+    return xyneAIController.getAutodraftSessionByConversation(req, res);
+  };
+
+  /**
    * Toggle star - v2 uses xyne-claw session storage
    */
   toggleStar = async (req: Request, res: Response): Promise<void> => {

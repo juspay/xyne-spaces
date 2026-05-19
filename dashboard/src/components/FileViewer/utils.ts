@@ -15,6 +15,7 @@ export interface BaseViewerProps {
   width?: number;
   height?: number;
   initialTime?: number;
+  initialPage?: number;
   onExpand?: () => void;
   disableGestures?: boolean;
 }

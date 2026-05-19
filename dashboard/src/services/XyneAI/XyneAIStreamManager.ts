@@ -17,6 +17,8 @@ import type {
   MessageAttachment,
   Participant,
   UserTag,
+  DraftSource,
+  SummarizerOutput,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import type { ResearchContext } from '@xyne/shared';
@@ -77,6 +79,7 @@ export interface StreamRequest {
   suppressCompletionToast?: boolean | undefined;
   draftMode?: boolean | undefined;
   version?: 'v1' | 'v2' | undefined;
+  disableTools?: boolean | undefined;
 }
 
 type StreamSubscriber = (state: StreamState) => void;
@@ -868,6 +871,7 @@ class XyneAIStreamManager {
           ...(request.isRegenerate && { isRegenerate: request.isRegenerate }),
           ...(request.draftMode && { draftMode: true }),
           ...(request.version && { version: request.version }),
+          ...(request.disableTools && { disableTools: true }),
         },
       },
     };
@@ -1292,6 +1296,12 @@ class XyneAIStreamManager {
     const userTags = extractUserTags(data);
     const streamData = streamId ? this.streamDataMap.get(streamId) : undefined;
 
+    const outputObj = (data['output'] as Record<string, unknown> | undefined) ?? undefined;
+    const rawSources = outputObj?.['sources'];
+    const sources: DraftSource[] | undefined = Array.isArray(rawSources)
+      ? (rawSources as DraftSource[])
+      : undefined;
+
     // Determine participants: from completion data, userTags conversion, or stored from start event
     let participants = extractParticipants(data);
     if (!participants?.length && userTags && Object.keys(userTags).length > 0) {
@@ -1323,12 +1333,12 @@ class XyneAIStreamManager {
             const updatedMsg: Message = {
               ...msg,
               content: (output['summary'] as string) || '',
-              summarizerOutput:
-                output as unknown as import('../../components/Chat/XyneAISidebar/utils/XyneAITypes').SummarizerOutput,
+              summarizerOutput: output as unknown as SummarizerOutput,
               isStreaming: false,
               agentType: 'summarizer',
               ...(userTags && { userTags }),
               ...(participants && participants.length > 0 && { participants }),
+              ...(sources && sources.length > 0 && { sources }),
             };
             if (traceId) updatedMsg.traceId = traceId;
             return updatedMsg;
@@ -1401,6 +1411,7 @@ class XyneAIStreamManager {
           ...(pendingActions && pendingActions.length > 0 && { pendingActions }),
           ...(messageAttachments &&
             messageAttachments.length > 0 && { attachments: messageAttachments }),
+          ...(sources && sources.length > 0 && { sources }),
         };
         if (traceId) updatedMsg.traceId = traceId;
         return updatedMsg;

@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { EmailMergeMode } from '@xyne/shared';
+import { EmailMergeMode, AutoDraftMode } from '@xyne/shared';
 import { useZero } from './useZero';
 import { queries } from '../zero/queries';
 import { useCachedQuery } from './useCachedQuery';
@@ -31,6 +31,7 @@ export function useUpdateEmailChannelPreference() {
       sendAsEmail,
       defaultCc,
       emailMergeMode,
+      autoDraftMode,
     }: {
       channelId: string;
       ownerUserId?: string;
@@ -38,6 +39,7 @@ export function useUpdateEmailChannelPreference() {
       sendAsEmail?: string | null;
       defaultCc?: string | null;
       emailMergeMode?: EmailMergeMode;
+      autoDraftMode?: AutoDraftMode;
     }): Promise<void> => {
       zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -47,6 +49,7 @@ export function useUpdateEmailChannelPreference() {
           ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
           ...(defaultCc !== undefined ? { defaultCc } : {}),
           ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
+          ...(autoDraftMode !== undefined ? { autoDraftMode } : {}),
         }),
       );
       return Promise.resolve();

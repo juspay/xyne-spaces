@@ -22,8 +22,10 @@ export class EmailRepository {
       throw new Error('At least one recipient is required');
     }
 
-    return await this.db.email.create({
-      data: {
+    return await this.db.email.upsert({
+      where: { externalMessageId: data.externalMessageId },
+      update: {},
+      create: {
         type: data.type,
         subject: data.subject,
         body: data.body,

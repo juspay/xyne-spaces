@@ -40,7 +40,7 @@ import { PrismaClient, EmailMergeMode } from '@prisma/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
-import type { BoardMetadata } from '@xyne/shared';
+import { BaseTicketType, type BoardMetadata } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
 import { workflowManager, WorkflowType } from '@/workflows';
@@ -59,8 +59,14 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { v4 as uuidv4 } from 'uuid';
+import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { EmailClassificationService } from './emailClassificationService';
+import { xyneAIStream } from '@/agents/xyne-ai';
+import { AUTODRAFT_SESSION_TAG } from '@/controllers/xyneAIController';
+import { AgentsConfig } from '@/agents/config';
+import { buildDraftEmailSystemPrompt } from '@/agents/xyne-ai/prompts/draft';
+import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
 
 const emailClassificationService = new EmailClassificationService();
@@ -410,6 +416,142 @@ export class EmailService {
     }
   }
 
+  private async triggerAutoDraft(params: {
+    ticketId: string;
+    conversationId: string;
+    channelId: string;
+    emailSubject: string;
+    emailBody: string;
+  }): Promise<void> {
+    const { ticketId, conversationId, channelId, emailSubject, emailBody } = params;
+
+    const preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
+    if (preference?.autoDraftMode !== 'DRAFT') {
+      logger.info('[AutoDraft] Skipping — auto-draft is not enabled for this channel', {
+        ticketId,
+        channelId,
+      });
+      return;
+    }
+
+    const personaUserId = preference.ownerUserId;
+    if (!personaUserId) {
+      logger.info('[AutoDraft] Skipping — no desk owner configured to personalize the draft', {
+        ticketId,
+      });
+      return;
+    }
+
+    const persona = await this.userRepository.findById(personaUserId);
+    if (!persona?.email) {
+      logger.warn('[AutoDraft] Skipping — desk owner has no email', {
+        ticketId,
+        ownerUserId: personaUserId,
+      });
+      return;
+    }
+
+    const userInfo: AgentUserInfo = {
+      userId: persona.id,
+      userName: persona.name || 'Support',
+      userEmail: persona.email,
+    };
+
+    const signatureCount = await this.prisma.emailSignature.count({
+      where: { userId: personaUserId },
+    });
+    
+    const hasDeskSignature = signatureCount > 0;
+    const agentsConfig = await AgentsConfig.fetch({ email: persona.email });
+    const baseQuery = `Draft a reply for this ticket.\n\nLatest inbound email:\nSubject: ${emailSubject}\n\n${emailBody}\n\n---\nWhen looking up topic context for this draft, use \`search_relevant_content\` (covers chat messages, tickets, AND canvases together). Reserve \`search_files\` for cases where you need a specific file artifact by name — using it instead of \`search_relevant_content\` for topic lookup misses every chat thread and ticket on the topic.`;
+
+    let summary = '';
+    let autodraftSessionId: string | undefined;
+    try {
+      const stream = xyneAIStream({
+        query: baseQuery,
+        channelIds: [channelId],
+        conversationId,
+        userId: personaUserId,
+        userInfo,
+        webSearchEnabled: true,
+        deepResearchEnabled: false,
+        ticketIds: [ticketId],
+        agentName: 'ask-ai',
+        agentsConfig,
+        systemPromptOverride: buildDraftEmailSystemPrompt(userInfo, hasDeskSignature),
+      });
+
+      for await (const chunk of stream) {
+        if (chunk.type === 'start' && typeof chunk.sessionId === 'string') {
+          autodraftSessionId = chunk.sessionId;
+        }
+        if (chunk.type === 'complete' && chunk.output?.summary) {
+          summary = chunk.output.summary;
+          break;
+        }
+      }
+    } catch (error) {
+      logger.warn('[AutoDraft] Stream failed — no draft will be saved', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+
+    if (!summary.trim()) {
+      logger.warn('[AutoDraft] Empty summary returned — no draft will be saved', { ticketId });
+      return;
+    }
+
+    const html = await marked.parse(summary);
+    const now = new Date();
+    try {
+      const existingSeed = await this.prisma.emailDraft.findFirst({
+        where: { conversationId, userId: null },
+        select: { id: true },
+      });
+      if (existingSeed) {
+        await this.prisma.emailDraft.update({
+          where: { id: existingSeed.id },
+          data: { draftContent: html, channelId, updatedAt: now },
+        });
+      } else {
+        await this.prisma.emailDraft.create({
+          data: {
+            conversationId,
+            channelId,
+            userId: null,
+            draftContent: html,
+          },
+        });
+      }
+      logger.info('[AutoDraft] Shared AI seed draft persisted', { ticketId, conversationId });
+    } catch (error) {
+      logger.error('[AutoDraft] Failed to persist draft', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      return;
+    }
+
+    if (autodraftSessionId) {
+      try {
+        await this.prisma.workflowExecution.update({
+          where: { id: autodraftSessionId },
+          data: { tag: AUTODRAFT_SESSION_TAG },
+        });
+      } catch (error) {
+        logger.warn('[AutoDraft] Failed to tag session row', {
+          autodraftSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   /**
    * Private utility function to create attachment entries for email
    */
@@ -644,6 +786,7 @@ export class EmailService {
           lastEmailAt: receivedAt ?? new Date(),
           stageName: firstStage.name,
           priority: ticketPriority,
+          ticketType: BaseTicketType.DESK,
           ...(slaResolutionDue && { eta: slaResolutionDue }),
           ...(userGroup && { userGroupId: groupId }),
           ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
@@ -783,6 +926,14 @@ export class EmailService {
         logger.error('[EmailService] Auto-assignment failed:', error);
       }
     }
+
+    void this.triggerAutoDraft({
+      ticketId: ticket.id,
+      conversationId: conversation.conversationId,
+      channelId,
+      emailSubject,
+      emailBody,
+    });
 
     // Start workflow (only for Zoho sources, controlled by config)
     const isZohoSource = sourceName?.startsWith('zoho');
@@ -1023,6 +1174,16 @@ export class EmailService {
       // Create MessageAttachment entries for email attachments
       await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel?.workspaceId ?? '', uploadedFiles);
 
+      if (ticketRow) {
+        void this.triggerAutoDraft({
+          ticketId: ticketRow.id,
+          conversationId,
+          channelId: conversation.channelId,
+          emailSubject,
+          emailBody,
+        });
+      }
+
       // Process Google Meet links from reply email body and send to SAM service
       try {
         // Get ticket associated with this conversation to get xyneTicketId and zohoTicketId
@@ -1134,6 +1295,7 @@ export class EmailService {
           boardId: boardId,
           stageName: stageName,
           priority: ticketPriority,
+          ticketType: BaseTicketType.DESK,
           ...(slaResolutionDue && { eta: slaResolutionDue }),
           ...(userGroupId && { userGroupId }),
           ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
@@ -1557,6 +1719,7 @@ export class EmailService {
               boardId: boardId!,
               lastEmailAt: firstEmail.receivedAt ?? new Date(),
               stageName: firstStage.name,
+              ticketType: BaseTicketType.DESK,
               ...(ingestSlaResolutionDue && { eta: ingestSlaResolutionDue }),
               ...(groupId && { userGroupId: groupId }),
               ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),

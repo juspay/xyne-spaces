@@ -44,6 +44,7 @@ export interface WorkerStartStreamMessage {
       isRegenerate?: boolean;
       draftMode?: boolean;
       version?: 'v1' | 'v2';
+      disableTools?: boolean;
     };
   };
 }
@@ -153,6 +154,7 @@ async function executeStream(
         ...(requestBody.isRegenerate && { is_regenerate: requestBody.isRegenerate }),
         ...(requestBody.draftMode && { draft_mode: true }),
         ...(requestBody.version && { version: requestBody.version }),
+        ...(requestBody.disableTools && { disable_tools: true }),
         /* eslint-enable @typescript-eslint/naming-convention */
       }),
       signal: abortController.signal,

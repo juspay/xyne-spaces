@@ -235,6 +235,38 @@ export interface SummarizerKeyPoint {
   citation?: SummarizerCitation;
 }
 
+export interface DraftSource {
+  messageIndex: number;
+  messageId: string;
+  conversationId: string;
+  channelId: string;
+  prefixedRef: string;
+  isTicket?: boolean;
+  url?: string;
+  entityType?:
+    | 'message'
+    | 'attachment'
+    | 'call'
+    | 'recording'
+    | 'canvas'
+    | 'ticket'
+    | 'web_search'
+    | 'knowledge_base';
+  entityId?: string;
+  canvasId?: string;
+  externalUrl?: string;
+  isExternal?: boolean;
+  fileName?: string;
+  mimeType?: string;
+  chunkIndex?: number;
+  chunkText?: string;
+  chunkPos?: number;
+  ticketTitle?: string;
+  ticketXyneId?: string;
+  canvasTitle?: string;
+  channelName?: string;
+}
+
 export interface SummarizerOutput {
   summary: string;
   keyPoints: SummarizerKeyPoint[];
@@ -316,6 +348,7 @@ export interface Message {
   selectionContexts?: SelectionContext[]; // Canvas selection contexts
   parentId?: string | null; // Parent message ID for tree branching
   sessionId?: string; // Session ID for v2 streaming
+  sources?: DraftSource[];
 
   // ============================================================================
   // v2 Types (xyne-claw integration) - mirrored from StoredMessage

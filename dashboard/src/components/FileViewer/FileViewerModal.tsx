@@ -1137,9 +1137,14 @@ export const AttachmentGalleryModal: React.FC = () => {
     }
 
     const ViewerComponent = fileType.component;
+    const initialPage: number | undefined = currentAttachment?.initialPage;
     return (
       <div className={`${fileType.wrapperClass} max-w-full max-h-full`}>
-        <ViewerComponent source={machineFileData} fileName={currentFileName} />
+        <ViewerComponent
+          source={machineFileData}
+          fileName={currentFileName}
+          {...(initialPage !== undefined && { initialPage })}
+        />
       </div>
     );
   };

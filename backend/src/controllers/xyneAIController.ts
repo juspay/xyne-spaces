@@ -18,6 +18,7 @@ import {
   transformMessagesToFrontendFormat,
   applyFeedbackToMessages,
 } from '@/agents/xyne-ai/utils/messageTransformer';
+export const AUTODRAFT_SESSION_TAG = 'autodraft';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -73,6 +74,7 @@ const XyneAIRequestSchema = z.object({
   call_ids: z.array(z.string().min(1)).optional(), // Call IDs to fetch and inject as context (includes recordings)
   display_query: z.string().optional(), // Original user query without canvas/selection enhancements — stored in DB
   draft_mode: z.boolean().optional().default(false), // When true, swap in the draft-email system prompt
+  disable_tools: z.boolean().optional().default(false), // When true, run a pure-LLM call: no tools, no retrieval, no agent loop. Backend treats this as ephemeral too — no session row created, no message persistence.
 });
 
 // Feedback request validation schema
@@ -125,6 +127,7 @@ export class XyneAIController {
       call_ids,
       display_query,
       draft_mode,
+      disable_tools,
     } = parseResult.data;
 
     const userId = (req as any).user?.id;
@@ -231,6 +234,7 @@ export class XyneAIController {
         agentName: 'ask-ai',
         displayQuery: display_query,
         ...(draft_mode && { systemPromptOverride: buildDraftEmailSystemPrompt(userInfo, hasDeskSignature) }),
+        disableTools: disable_tools,
       };
 
       // Track metrics: context channels count
@@ -533,12 +537,79 @@ export class XyneAIController {
       return;
     }
 
+    const conversationId =
+      typeof req.query.conversationId === 'string' && req.query.conversationId.length > 0
+        ? req.query.conversationId
+        : undefined;
+
     try {
-      const sessions = await sessionStore.getUserSessions(userId);
+      const sessions = await sessionStore.getUserSessions(userId, conversationId);
       res.json({ sessions });
     } catch (error) {
       logger.error('[XyneAI] Error fetching sessions:', error);
       res.status(500).json({ error: 'Failed to fetch sessions' });
+    }
+  };
+
+  getSessionByConversation = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const { conversationId } = req.params;
+    if (!conversationId) {
+      res.status(400).json({ error: 'conversationId is required' });
+      return;
+    }
+    try {
+      const sessionId = await sessionStore.findActiveSessionId(userId, conversationId, {
+        not: AUTODRAFT_SESSION_TAG,
+      });
+      res.json({ sessionId });
+    } catch (error) {
+      logger.error(`[XyneAI] sessionByConversation lookup failed for user=${userId} conv=${conversationId}:`, error);
+      res.status(500).json({ error: 'Failed to fetch session' });
+    }
+  };
+
+  getAutodraftSessionByConversation = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const { conversationId } = req.params;
+    if (!conversationId) {
+      res.status(400).json({ error: 'conversationId is required' });
+      return;
+    }
+    try {
+      const conversation = await db.conversation.findUnique({
+        where: { conversationId },
+        select: { channelId: true },
+      });
+      if (!conversation?.channelId) {
+        res.json({ sessionId: null });
+        return;
+      }
+      const preference = await db.emailChannelPreference.findUnique({
+        where: { channelId: conversation.channelId },
+        select: { ownerUserId: true },
+      });
+      if (!preference?.ownerUserId) {
+        res.json({ sessionId: null });
+        return;
+      }
+      const sessionId = await sessionStore.findActiveSessionId(
+        preference.ownerUserId,
+        conversationId,
+        AUTODRAFT_SESSION_TAG,
+      );
+      res.json({ sessionId });
+    } catch (error) {
+      logger.error(`[XyneAI] autodraftSessionByConversation lookup failed for conv=${conversationId}:`, error);
+      res.status(500).json({ error: 'Failed to fetch autodraft session' });
     }
   };
 
@@ -569,8 +640,27 @@ export class XyneAIController {
 
       // Verify session belongs to user
       if (sessionData.context.userId !== userId) {
-        res.status(403).json({ error: 'Access denied' });
-        return;
+        const isAutodraft = sessionData.tag === AUTODRAFT_SESSION_TAG;
+        let sessionChannelId: string | undefined = sessionData.context.channelIds?.[0];
+        if (!sessionChannelId && sessionData.context.conversationId) {
+          const conv = await db.conversation.findUnique({
+            where: { conversationId: sessionData.context.conversationId },
+            select: { channelId: true },
+          });
+          sessionChannelId = conv?.channelId ?? undefined;
+        }
+        let allowed = false;
+        if (isAutodraft && sessionChannelId) {
+          const member = await db.channelParticipant.findUnique({
+            where: { channelId_userId: { channelId: sessionChannelId, userId } },
+            select: { userId: true },
+          });
+          allowed = !!member;
+        }
+        if (!allowed) {
+          res.status(403).json({ error: 'Access denied' });
+          return;
+        }
       }
 
       // Get raw messages for transformation
