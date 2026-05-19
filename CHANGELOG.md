@@ -1,3 +1,11 @@
+## [1.143.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.142.1...v1.143.0) (2026-05-19)
+
+
+### Features
+
+* introduces scroll space saving for browser panel navigation and stopped remount of chatlist ([1c496f5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1c496f53cb6707d234b226acb9457346b87db0fc)), closes [#6190](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6190)
+* sync-dm ([8634a22](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8634a22fde7fc033bebb3caf7502cc592d6bff9a)), closes [#6433](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6433)
+
 ## [1.142.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.142.0...v1.142.1) (2026-05-19)
 
 
