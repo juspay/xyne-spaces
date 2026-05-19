@@ -21,6 +21,9 @@ export interface ConfluenceMigrationJobProgress {
   migratedAttachments: number;
   reusedAttachments: number;
   failedAttachments: number;
+  containerPagesWithContent: number;
+  containerCanvasesCreated: number;
+  containerCanvasesUpdated: number;
   currentPageTitle: string | null;
   currentStep: string | null;
   warnings: string[];
@@ -122,6 +125,9 @@ class ConfluenceMigrationProgressService {
       migratedAttachments: 0,
       reusedAttachments: 0,
       failedAttachments: 0,
+      containerPagesWithContent: 0,
+      containerCanvasesCreated: 0,
+      containerCanvasesUpdated: 0,
       currentPageTitle: null,
       currentStep: 'queued',
       warnings: [],

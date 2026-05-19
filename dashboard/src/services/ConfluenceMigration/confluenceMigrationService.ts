@@ -26,6 +26,8 @@ export interface ConfluenceMigrationPreviewResponse {
   totalPages: number;
   leafPages: number;
   containerPages: number;
+  containerPagesWithContent: number;
+  expectedCanvasPages: number;
   rootPages: Array<{ id: string; title: string; childPages: number }>;
   sections: Array<{
     id: string;
@@ -93,6 +95,8 @@ export interface ConfluencePageResult {
   visibility?: 'PRIVATE' | 'PUBLIC';
   confluenceReadRestricted?: boolean;
   confluenceRestrictionStatus?: 'checked' | 'unknown';
+  isContainerPage?: boolean;
+  containerPageHasContent?: boolean;
   destination?: ConfluenceSectionMapping & {
     projectId?: string;
     channelId?: string;
@@ -125,6 +129,9 @@ export interface ConfluenceMigrationSummary {
   migratedAttachments: number;
   reusedAttachments: number;
   failedAttachments: number;
+  containerPagesWithContent: number;
+  containerCanvasesCreated: number;
+  containerCanvasesUpdated: number;
   warnings: string[];
   unresolvedUsers: UnresolvedConfluenceUser[];
   pageResults: ConfluencePageResult[];
@@ -150,6 +157,9 @@ export interface ConfluenceMigrationJobProgress {
   migratedAttachments: number;
   reusedAttachments: number;
   failedAttachments: number;
+  containerPagesWithContent: number;
+  containerCanvasesCreated: number;
+  containerCanvasesUpdated: number;
   currentPageTitle: string | null;
   currentStep: string | null;
   warnings: string[];
