@@ -518,8 +518,13 @@ const AppRoot = (): ReactElement => {
                       </Panel>
                     </PanelGroup>
                   </div>
-                ) : browserPanelState === 'open' ? (
-                  // Browser Panel is open - show panel layout with Browser
+                ) : browserPanelState === 'open' ||
+                  webviewState === 'closed' ||
+                  webviewState === 'idle' ? (
+                  // Unified branch: browser panel open OR no side panel active.
+                  // Keeping both cases in one branch prevents the <Outlet /> from
+                  // remounting (and losing scroll position) when the browser panel
+                  // opens or closes.
                   <div className='flex flex-col h-screen'>
                     {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <PanelGroup
@@ -527,7 +532,11 @@ const AppRoot = (): ReactElement => {
                       className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
                       autoSaveId='app-root-browser'
                     >
-                      <Panel ref={browserPanelLeftRef} defaultSize={65}>
+                      <Panel
+                        id='app-root-left'
+                        ref={browserPanelLeftRef}
+                        defaultSize={browserPanelState === 'open' ? 65 : 100}
+                      >
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
                           <main className='flex-1 no-scrollbar overflow-auto'>
@@ -536,29 +545,19 @@ const AppRoot = (): ReactElement => {
                           </main>
                         </div>
                       </Panel>
-                      <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                        <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                      </PanelResizeHandle>
-                      <Panel ref={browserPanelRightRef} defaultSize={35} maxSize={50}>
-                        <div className='h-full'>
-                          <BrowserPanel />
-                        </div>
-                      </Panel>
+                      {browserPanelState === 'open' && (
+                        <>
+                          <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                            <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                          </PanelResizeHandle>
+                          <Panel ref={browserPanelRightRef} defaultSize={35} maxSize={50}>
+                            <div className='h-full'>
+                              <BrowserPanel />
+                            </div>
+                          </Panel>
+                        </>
+                      )}
                     </PanelGroup>
-                  </div>
-                ) : webviewState === 'closed' || webviewState === 'idle' ? (
-                  // When both closed or idle, only show the left panel without resize handle or right panel
-                  <div className='flex flex-col h-screen'>
-                    {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
-                    <div
-                      className={`flex flex-1 overflow-hidden ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                    >
-                      <AppSidebar />
-                      <main className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'>
-                        <EditWarningModal />
-                        <Outlet />
-                      </main>
-                    </div>
                   </div>
                 ) : (
                   // WebView is open - show panel layout with WebView

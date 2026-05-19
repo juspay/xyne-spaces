@@ -20,6 +20,9 @@ export interface BrowserPanelContext {
   tabs: BrowserTab[];
   activeTabId: string | null;
   browserSettings: BrowserSettings;
+  // Scroll position per channel — populated when ChatListV3 unmounts due to /browser navigation.
+  // One-shot: consumed and cleared on the next mount of the same channel.
+  channelScrollPositions: Map<string, string>; // channelId → conversationId
 }
 
 export type BrowserPanelEvent =
@@ -30,7 +33,9 @@ export type BrowserPanelEvent =
   | { type: 'CLOSE_TAB'; tabId: string }
   | { type: 'SWITCH_TAB'; tabId: string }
   | { type: 'UPDATE_TAB'; tabId: string; patch: Partial<BrowserTab> }
-  | { type: 'UPDATE_SETTINGS'; settings: Partial<BrowserSettings> };
+  | { type: 'UPDATE_SETTINGS'; settings: Partial<BrowserSettings> }
+  | { type: 'SAVE_SCROLL_POSITION'; channelId: string; conversationId: string }
+  | { type: 'CLEAR_SCROLL_POSITION'; channelId: string };
 
 interface PanelHandle {
   resize: (size: number) => void;
@@ -120,6 +125,22 @@ export const browserPanelMachine = setup({
         return { ...context.browserSettings, ...event.settings };
       },
     }),
+    saveScrollPosition: assign({
+      channelScrollPositions: ({ context, event }) => {
+        if (event.type !== 'SAVE_SCROLL_POSITION') return context.channelScrollPositions;
+        const next = new Map(context.channelScrollPositions);
+        next.set(event.channelId, event.conversationId);
+        return next;
+      },
+    }),
+    clearScrollPosition: assign({
+      channelScrollPositions: ({ context, event }) => {
+        if (event.type !== 'CLEAR_SCROLL_POSITION') return context.channelScrollPositions;
+        const next = new Map(context.channelScrollPositions);
+        next.delete(event.channelId);
+        return next;
+      },
+    }),
   },
 }).createMachine({
   context: () => ({
@@ -128,6 +149,7 @@ export const browserPanelMachine = setup({
     tabs: [] as BrowserTab[],
     activeTabId: null as string | null,
     browserSettings: defaultBrowserSettings,
+    channelScrollPositions: new Map<string, string>(),
   }),
   id: 'browserPanelMachine',
   initial: 'closed',
@@ -156,6 +178,12 @@ export const browserPanelMachine = setup({
         UPDATE_SETTINGS: {
           actions: 'updateSettings',
         },
+        SAVE_SCROLL_POSITION: {
+          actions: 'saveScrollPosition',
+        },
+        CLEAR_SCROLL_POSITION: {
+          actions: 'clearScrollPosition',
+        },
       },
     },
     open: {
@@ -181,6 +209,12 @@ export const browserPanelMachine = setup({
         },
         UPDATE_SETTINGS: {
           actions: 'updateSettings',
+        },
+        SAVE_SCROLL_POSITION: {
+          actions: 'saveScrollPosition',
+        },
+        CLEAR_SCROLL_POSITION: {
+          actions: 'clearScrollPosition',
         },
       },
     },

@@ -177,7 +177,12 @@ const ChatView = (): ReactElement => {
     isGroupPanelOpen ||
     isExternalChatActive;
 
-  // Stack when either narrow view OR parent says to stack (XyneAI > 700px with thread)
+  // Stack when either narrow view OR parent says to stack (XyneAI > 700px with thread).
+  // NOTE: shouldStack can now flip freely at any width without causing a remount of
+  // ConversationPanelV2, because the restructured render below always places
+  // ConversationPanelV2 in the same PanelGroup > Panel position regardless of
+  // shouldStack. The flag only controls how the *secondary* panel is shown
+  // (overlay vs side-by-side). Original 700 px threshold restored.
   const shouldStack = bounds.width < 700 || shouldStackThreadFromParent;
 
   const defaultConversationPannelSize = 50;
@@ -245,20 +250,66 @@ const ChatView = (): ReactElement => {
     void navigate(newUrl, { replace: true });
   };
 
+  // Secondary panel content — defined once, reused for both overlay and
+  // side-by-side layouts so there is no JSX duplication.
+  const secondaryPanelContent = isExternalChatActive ? (
+    <CallExternalChatPanel callExternalId={externalChatCallId} />
+  ) : isCanvasActive ? (
+    <CanvasScreen
+      canvasId={canvasId}
+      isFullscreen={isCanvasFullscreen}
+      onToggleFullscreen={toggleCanvasFullscreen}
+    />
+  ) : isChannelSummaryActive ? (
+    <ChannelSummary
+      channelId={channelId ?? ''}
+      channelName={channel?.['name'] || 'channel'}
+      {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
+      dateFrom={channelSummaryParams.dateFrom}
+      dateTo={channelSummaryParams.dateTo}
+      onClose={handleCloseChannelSummary}
+    />
+  ) : (
+    <Outlet />
+  );
+
   return (
     <div
       ref={chatViewContainerRef}
       data-component='ChatView'
       className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-lg'}`}
     >
-      {shouldStack ? (
-        <>
-          {/* Mobile/stacked layout */}
-          {isThreadSummaryActive && conversationId && channelId ? (
-            // Thread Summary Mode: Show thread in main view, summary overlays with slide animation
-            <>
-              <ThreadMessages channelId={channelId} conversationId={conversationId} />
-              <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
+      {isThreadSummaryActive && conversationId && channelId ? (
+        // Thread Summary Mode — unchanged; ConversationPanelV2 is not rendered
+        // here so no remount risk from shouldStack flips.
+        shouldStack ? (
+          <>
+            <ThreadMessages channelId={channelId} conversationId={conversationId} />
+            <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
+              <ThreadSummary
+                conversationId={conversationId}
+                channelName={channel?.['name'] || 'thread'}
+                {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
+                onClose={handleCloseThreadSummary}
+              />
+            </div>
+          </>
+        ) : (
+          <PanelGroup
+            direction='horizontal'
+            className='h-full'
+            autoSaveId={`${channelId}-thread-summary`}
+          >
+            <Panel defaultSize={defaultConversationPannelSize} minSize={minConversationPannelSize}>
+              <div className='h-full animate-slide-in-from-right'>
+                <ThreadMessages channelId={channelId} conversationId={conversationId} />
+              </div>
+            </Panel>
+            <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+              <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
+            </PanelResizeHandle>
+            <Panel defaultSize={defaultSecondaryPanelSize} minSize={minSecondaryPanelSize}>
+              <div className='h-full bg-muted animate-slide-in-from-right'>
                 <ThreadSummary
                   conversationId={conversationId}
                   channelName={channel?.['name'] || 'thread'}
@@ -266,162 +317,72 @@ const ChatView = (): ReactElement => {
                   onClose={handleCloseThreadSummary}
                 />
               </div>
-            </>
-          ) : (
-            // Normal Mode with stacking support
-            <>
-              {/* Show thread when parent says to stack, otherwise show channel */}
-              {shouldStackThreadFromParent && conversationId ? (
-                <Outlet />
-              ) : (
-                <ConversationPanelV2
-                  channelId={channelId ?? ''}
-                  previousChannelId={previousChannelId}
-                />
-              )}
-              {showSecondaryPanel && !shouldStackThreadFromParent && (
-                <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
-                  {isExternalChatActive ? (
-                    <CallExternalChatPanel callExternalId={externalChatCallId} />
-                  ) : isCanvasActive ? (
-                    <CanvasScreen
-                      canvasId={canvasId}
-                      isFullscreen={isCanvasFullscreen}
-                      onToggleFullscreen={toggleCanvasFullscreen}
-                    />
-                  ) : isChannelSummaryActive ? (
-                    <ChannelSummary
-                      channelId={channelId ?? ''}
-                      channelName={channel?.['name'] || 'channel'}
-                      {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
-                      dateFrom={channelSummaryParams.dateFrom}
-                      dateTo={channelSummaryParams.dateTo}
-                      onClose={handleCloseChannelSummary}
-                    />
-                  ) : (
-                    <Outlet />
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </>
+            </Panel>
+          </PanelGroup>
+        )
       ) : (
+        // Normal mode (including channel summary) — ConversationPanelV2 is ALWAYS
+        // inside the same PanelGroup > Panel regardless of shouldStack. The
+        // shouldStack flag only controls whether the secondary panel (thread,
+        // canvas, profile, etc.) appears as a side-by-side resizable panel or as
+        // an absolute overlay that slides in from the right. This means shouldStack
+        // can flip at any width (panel resize, browser panel open/close, window
+        // resize) without ever remounting ConversationPanelV2 or ChatListV3.
         <>
-          {/* Desktop layout with resizable panels */}
-          {isThreadSummaryActive && conversationId && channelId ? (
-            // Thread Summary Mode: Thread in left panel, Summary in right panel
-            <PanelGroup
-              direction='horizontal'
-              className='h-full'
-              autoSaveId={`${channelId}-thread-summary`}
-            >
+          <PanelGroup
+            direction='horizontal'
+            className='h-full'
+            autoSaveId={
+              isChannelSummaryActive && channelId
+                ? `${channelId}-channel-summary`
+                : channelId || null
+            }
+          >
+            {/* Conversation Panel — stable position forever */}
+            {!isCanvasFullscreen && (
               <Panel
-                defaultSize={defaultConversationPannelSize}
+                id='chat-conv-panel'
+                defaultSize={
+                  showSecondaryPanel && !shouldStack ? defaultConversationPannelSize : 100
+                }
                 minSize={minConversationPannelSize}
               >
-                <div className='h-full animate-slide-in-from-right'>
-                  <ThreadMessages channelId={channelId} conversationId={conversationId} />
-                </div>
-              </Panel>
-              <Panel defaultSize={defaultSecondaryPanelSize} minSize={minSecondaryPanelSize}>
-                <div className='h-full bg-muted animate-slide-in-from-right'>
-                  <ThreadSummary
-                    conversationId={conversationId}
-                    channelName={channel?.['name'] || 'thread'}
-                    {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
-                    onClose={handleCloseThreadSummary}
-                  />
-                </div>
-              </Panel>
-            </PanelGroup>
-          ) : isChannelSummaryActive && channelId ? (
-            <PanelGroup
-              direction='horizontal'
-              className='h-full'
-              autoSaveId={`${channelId}-channel-summary`}
-            >
-              <Panel
-                defaultSize={defaultConversationPannelSize}
-                minSize={minConversationPannelSize}
-              >
-                <ConversationPanelV2 channelId={channelId} previousChannelId={previousChannelId} />
-              </Panel>
-              <Panel defaultSize={defaultSecondaryPanelSize} minSize={minSecondaryPanelSize}>
-                <div className='h-full bg-muted animate-slide-in-from-right'>
-                  <ChannelSummary
-                    channelId={channelId}
-                    channelName={channel?.['name'] || 'channel'}
-                    {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
-                    dateFrom={channelSummaryParams.dateFrom}
-                    dateTo={channelSummaryParams.dateTo}
-                    onClose={handleCloseChannelSummary}
-                  />
-                </div>
-              </Panel>
-            </PanelGroup>
-          ) : (
-            // Normal Mode: Handle stacking when parent context indicates (XyneAI > 700px with thread)
-            <PanelGroup direction='horizontal' className='h-full' autoSaveId={channelId || null}>
-              {/* Conversation Panel - hidden when canvas is fullscreen */}
-              {!isCanvasFullscreen && (
-                <Panel
-                  defaultSize={showSecondaryPanel ? defaultConversationPannelSize : 100}
-                  minSize={minConversationPannelSize}
-                >
-                  <div className='h-full'>
-                    {/* When parent says to stack (XyneAI > 700px with thread), show thread here */}
-                    {shouldStackThreadFromParent && conversationId ? (
-                      <Outlet />
-                    ) : (
-                      <ConversationPanelV2
-                        channelId={channelId ?? ''}
-                        previousChannelId={previousChannelId}
-                      />
-                    )}
-                  </div>
-                </Panel>
-              )}
-
-              {/* Only show secondary panel if not stacking */}
-              {showSecondaryPanel && !shouldStackThreadFromParent && (
-                <>
-                  {/* Resize handle - hidden when fullscreen */}
-                  {!isCanvasFullscreen && (
-                    <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                      <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
-                    </PanelResizeHandle>
+                <div className='h-full'>
+                  {shouldStackThreadFromParent && conversationId ? (
+                    <Outlet />
+                  ) : (
+                    <ConversationPanelV2
+                      channelId={channelId ?? ''}
+                      previousChannelId={previousChannelId}
+                    />
                   )}
-                  <Panel
-                    defaultSize={isCanvasFullscreen ? 100 : defaultSecondaryPanelSize}
-                    minSize={isCanvasFullscreen ? 100 : minSecondaryPanelSize}
-                  >
-                    <div className='h-full'>
-                      {isExternalChatActive ? (
-                        <CallExternalChatPanel callExternalId={externalChatCallId} />
-                      ) : isCanvasActive ? (
-                        <CanvasScreen
-                          canvasId={canvasId}
-                          isFullscreen={isCanvasFullscreen}
-                          onToggleFullscreen={toggleCanvasFullscreen}
-                        />
-                      ) : isChannelSummaryActive ? (
-                        <ChannelSummary
-                          channelId={channelId ?? ''}
-                          channelName={channel?.['name'] || 'channel'}
-                          {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
-                          dateFrom={channelSummaryParams.dateFrom}
-                          dateTo={channelSummaryParams.dateTo}
-                          onClose={handleCloseChannelSummary}
-                        />
-                      ) : (
-                        <Outlet />
-                      )}
-                    </div>
-                  </Panel>
-                </>
-              )}
-            </PanelGroup>
+                </div>
+              </Panel>
+            )}
+
+            {/* Side-by-side secondary panel — only when wide enough */}
+            {showSecondaryPanel && !shouldStack && !shouldStackThreadFromParent && (
+              <>
+                {!isCanvasFullscreen && (
+                  <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                    <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
+                  </PanelResizeHandle>
+                )}
+                <Panel
+                  defaultSize={isCanvasFullscreen ? 100 : defaultSecondaryPanelSize}
+                  minSize={isCanvasFullscreen ? 100 : minSecondaryPanelSize}
+                >
+                  <div className='h-full'>{secondaryPanelContent}</div>
+                </Panel>
+              </>
+            )}
+          </PanelGroup>
+
+          {/* Overlay secondary panel — slides over chat when viewport is narrow */}
+          {showSecondaryPanel && shouldStack && !shouldStackThreadFromParent && (
+            <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
+              {secondaryPanelContent}
+            </div>
           )}
         </>
       )}
