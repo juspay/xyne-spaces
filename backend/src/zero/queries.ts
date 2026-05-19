@@ -1163,8 +1163,9 @@ export const queries = defineQueries({
       start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
       types: z.array(z.string()),
       classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
+      isRead: z.boolean().optional(),
     }),
-    ({ args: { limit, start, types, classification } }) => {
+    ({ args: { limit, start, types, classification, isRead } }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -1177,6 +1178,10 @@ export const queries = defineQueries({
         query = query.where(helpers =>
           helpers.or(...classification.map(c => helpers.cmp('classification', '=', c)))
         );
+      }
+
+      if (isRead !== undefined) {
+        query = query.where('isRead', isRead);
       }
 
       query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');

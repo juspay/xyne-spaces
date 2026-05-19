@@ -299,7 +299,7 @@ const ActivityListView = (): ReactElement => {
   const [isLoading, setIsLoading] = useState(true);
   const activityLoadStartTimeRef = useRef<number | null>(null);
 
-  // Reset pagination when tab changes
+  // Reset pagination when tab or unread mode changes
   useEffect(() => {
     setActivities([]);
     setFetchCursor(null);
@@ -307,7 +307,7 @@ const ActivityListView = (): ReactElement => {
     setHasMore(true);
     setIsLoading(true);
     activityLoadStartTimeRef.current = Date.now();
-  }, [activeTab]);
+  }, [activeTab, showUnreadOnly]);
 
   const getClassificationFilter = (tab: ActivityTab): ActivityClassification[] | undefined => {
     switch (tab) {
@@ -330,8 +330,9 @@ const ActivityListView = (): ReactElement => {
         start: fetchCursor,
         types: currentTypes,
         classification: classificationFilter,
+        ...(showUnreadOnly ? { isRead: false } : {}),
       }),
-    [PAGE_SIZE, fetchCursor, currentTypes, classificationFilter],
+    [PAGE_SIZE, fetchCursor, currentTypes, classificationFilter, showUnreadOnly],
   );
 
   const [activitiesPage, activitiesDetails] = useCachedQuery(activitiesQuery, {
@@ -370,7 +371,9 @@ const ActivityListView = (): ReactElement => {
 
     if (activitiesPage.length === 0) {
       if (fetchCursor === null) {
-        setActivities([]);
+        if (!showUnreadOnly) {
+          setActivities([]);
+        }
         setNextCursor(null);
       }
       setHasMore(false);
@@ -378,9 +381,17 @@ const ActivityListView = (): ReactElement => {
     }
 
     setActivities(prev => {
-      if (fetchCursor === null) return activitiesPage;
+      if (showUnreadOnly) {
+        // In unread mode, keep already displayed activities stable even after
+        // they are marked read. Only add rows that have not been shown yet:
+        // new head rows go at the top, older paginated rows go at the bottom.
+        const existingIds = new Set(prev.map(item => item.id));
+        const newActivities = activitiesPage.filter(item => !existingIds.has(item.id));
+        return fetchCursor === null ? [...newActivities, ...prev] : [...prev, ...newActivities];
+      }
 
-      const combined = [...prev, ...activitiesPage];
+      const combined =
+        fetchCursor === null ? [...activitiesPage, ...prev] : [...prev, ...activitiesPage];
       const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
       return unique;
     });
@@ -395,7 +406,7 @@ const ActivityListView = (): ReactElement => {
         updatedAt: lastItemOfPage.updatedAt ?? lastItemOfPage.createdAt,
       });
     }
-  }, [activitiesPage, activitiesDetails.type, fetchCursor, activeTab]);
+  }, [activitiesPage, activitiesDetails.type, fetchCursor, activeTab, showUnreadOnly]);
 
   // Scroll down - load older items (triggered ~20-25 items before end via overscan)
   const handleEndReached = useCallback(() => {
@@ -414,12 +425,8 @@ const ActivityListView = (): ReactElement => {
       return activities;
     }
 
-    return activities.filter(activity => {
-      const matchesTab = activeTabConfig.filter(activity);
-      const matchesReadState = showUnreadOnly ? !activity.isRead : true;
-      return matchesTab && matchesReadState;
-    });
-  }, [activities, activeTab, showUnreadOnly, visibleTabs]);
+    return activities.filter(activity => activeTabConfig.filter(activity));
+  }, [activities, activeTab, visibleTabs]);
 
   // j/k keyboard navigation through activity list.
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
@@ -612,6 +619,11 @@ const ActivityListView = (): ReactElement => {
               style={{ height: '100%' }}
               data={activityList}
               endReached={handleEndReached}
+              atTopStateChange={isAtTop => {
+                if (isAtTop && fetchCursor !== null) {
+                  setFetchCursor(null);
+                }
+              }}
               computeItemKey={(_, activity) => activity.id}
               overscan={{ main: 2000, reverse: 500 }}
               itemContent={(_, activity) => (
