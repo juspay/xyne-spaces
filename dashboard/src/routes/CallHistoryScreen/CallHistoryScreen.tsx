@@ -245,6 +245,36 @@ const CallHistoryScreen = (): ReactElement => {
   const searchParams = new URLSearchParams(location.search);
   const tabParam = searchParams.get('tab');
   const activeTab = (tabParam as CallTabType) || 'all';
+  const callIdParam = searchParams.get('callId');
+
+  // When navigating from an activity with a callId, jump the calendar to the call's date,
+  // then remove callId from the URL so switching sub-views doesn't re-open the popup.
+  useEffect(() => {
+    if (!callIdParam) return;
+    const allCalls = [...(calls || []), ...(scheduledCalls || [])];
+    const target = allCalls.find(c => c.id === callIdParam);
+    if (!target?.startsAt) return;
+
+    const callDate = new Date(target.startsAt);
+
+    const month = new Date(callDate.getFullYear(), callDate.getMonth(), 1);
+    month.setHours(0, 0, 0, 0);
+    setCurrentMonthStart(month);
+
+    const weekStart = new Date(callDate);
+    weekStart.setDate(callDate.getDate() - callDate.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+    setCurrentWeekStart(weekStart);
+
+    const dayStart = new Date(callDate);
+    dayStart.setHours(0, 0, 0, 0);
+    setCurrentDayStart(dayStart);
+
+    // Remove callId from URL so it isn't re-applied on sub-view switches
+    const params = new URLSearchParams(location.search);
+    params.delete('callId');
+    void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+  }, [callIdParam, calls, scheduledCalls]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (isMobile) return;
@@ -1097,6 +1127,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCall={handleCreateCallOnDay}
                   otherUsersCalls={otherUsersCallsArray}
+                  initialOpenCallId={callIdParam}
                 />
               )}
               {calendarSubView === 'week' && (
@@ -1111,6 +1142,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCallAtSlot={handleCreateCallAtSlot}
                   otherUsersCalls={otherUsersCallsArray}
+                  initialOpenCallId={callIdParam}
                 />
               )}
               {calendarSubView === 'day' && (
@@ -1126,6 +1158,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCallAtSlot={handleCreateCallAtSlot}
                   otherUsersCalls={otherUsersCallsArray}
+                  initialOpenCallId={callIdParam}
                 />
               )}
             </div>

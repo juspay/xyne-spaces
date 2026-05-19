@@ -59,6 +59,7 @@ interface CalendarDayViewProps {
   onDeleteClick?: (call: Call) => void;
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
   otherUsersCalls?: OtherUserCalls[];
+  initialOpenCallId?: string | null;
 }
 
 // ── Per-call card: drag handle IS the popover trigger button ─────────────────
@@ -339,10 +340,11 @@ const CalendarDayView = ({
   onDeleteClick,
   onCreateCallAtSlot,
   otherUsersCalls = [],
+  initialOpenCallId,
 }: CalendarDayViewProps): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
-  const [openCallId, setOpenCallId] = useState<string | null>(null);
+  const [openCallId, setOpenCallId] = useState<string | null>(initialOpenCallId ?? null);
 
   const {
     sensors,
