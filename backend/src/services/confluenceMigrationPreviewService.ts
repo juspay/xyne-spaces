@@ -3,6 +3,10 @@ import { CanvasVisibility } from '@prisma/client';
 import { ConfluenceClient, type ConfluenceContentRestrictions, type ConfluenceUser } from '@/services/confluence/confluenceClient';
 import { resolveConfluenceCanvasVisibility, type ConfluenceRestrictionDecision } from '@/services/confluence/contentRestrictions';
 import {
+  hasMeaningfulConfluenceContent,
+  shouldPreferRenderedConfluenceView,
+} from '@/services/confluence/contentTransformer';
+import {
   buildConfluencePageTree,
   countChildrenByParentId,
   getConfluenceTopLevelSections,
@@ -24,6 +28,8 @@ export interface ConfluenceMigrationPreviewResult {
   totalPages: number;
   leafPages: number;
   containerPages: number;
+  containerPagesWithContent: number;
+  expectedCanvasPages: number;
   rootPages: Array<{ id: string; title: string; childPages: number }>;
   sections: Array<{
     id: string;
@@ -104,7 +110,13 @@ class ConfluenceMigrationPreviewService {
     const leafPages = [...nodeById.values()].filter(node => !node.isVirtual && node.children.length === 0).length;
     const containerPages = pages.length - leafPages;
     const roots = tree.roots;
-    const realLeafNodes = [...nodeById.values()].filter(node => !node.isVirtual && node.children.length === 0);
+    const realImportNodes = [...nodeById.values()].filter(node => {
+      if (node.isVirtual) return false;
+      if (node.children.length === 0) return true;
+      return this.pageHasMeaningfulContent(node.page);
+    });
+    const containerPagesWithContent = realImportNodes.filter(node => node.children.length > 0).length;
+    const expectedCanvasPages = realImportNodes.length;
     const restrictionDecisionByPageId = new Map<string, ConfluenceRestrictionDecision>();
 
     if (roots.length === 0 && pages.length > 0) {
@@ -115,7 +127,7 @@ class ConfluenceMigrationPreviewService {
     }
 
     const sections = getConfluenceTopLevelSections(roots, childCountByParentId);
-    await this.mapWithConcurrency(realLeafNodes, 8, async (node) => {
+    await this.mapWithConcurrency(realImportNodes, 8, async (node) => {
       const decision = await resolveConfluenceCanvasVisibility(
         node.page,
         contentId => this.fetchContentRestrictionsCached(contentId, contentRestrictionCache),
@@ -197,6 +209,8 @@ class ConfluenceMigrationPreviewService {
       totalPages: pages.length,
       leafPages,
       containerPages,
+      containerPagesWithContent,
+      expectedCanvasPages,
       rootPages: roots.map(root => ({
         id: root.page.id,
         title: root.page.title,
@@ -231,6 +245,18 @@ class ConfluenceMigrationPreviewService {
       },
       warnings,
     };
+  }
+
+  private pageHasMeaningfulContent(page: { body?: { storage?: { value?: string }, view?: { value?: string } } }): boolean {
+    return hasMeaningfulConfluenceContent(this.getPageBodyForTransform(page));
+  }
+
+  private getPageBodyForTransform(page: { body?: { storage?: { value?: string }, view?: { value?: string } } }): string {
+    const storage = page.body?.storage?.value || '';
+    const view = page.body?.view?.value || '';
+    const shouldPreferRenderedView = shouldPreferRenderedConfluenceView(storage);
+
+    return shouldPreferRenderedView && view ? view : storage || view;
   }
 
   private async resolveTargetChannel(input: {

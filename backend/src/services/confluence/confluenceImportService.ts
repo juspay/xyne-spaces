@@ -4,7 +4,7 @@ import { AttachmentEntityType, CanvasRole, CanvasVisibility, DocType, ExternalEn
 import type { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { convertMarkdownToBlockNote, getCanvasUrl } from '@/services/canvasService';
+import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils';
 import { getStorageService } from '@/services/storage';
@@ -19,7 +19,9 @@ import { encrypt } from '@/services/encryptionService';
 import { ConfluenceClient, type ConfluenceContentRestrictions, type ConfluencePage } from './confluenceClient';
 import { resolveConfluenceCanvasVisibility, type ConfluenceRestrictionDecision } from './contentRestrictions';
 import {
+  hasMeaningfulConfluenceContent,
   rewriteConfluenceCanvasLinks,
+  shouldPreferRenderedConfluenceView,
   transformConfluenceStorageToMarkdown,
 } from './contentTransformer';
 import { ConfluenceUserResolver, type UnresolvedConfluenceUser } from './userResolver';
@@ -66,6 +68,9 @@ export interface ConfluenceImportSummary {
   migratedAttachments: number;
   reusedAttachments: number;
   failedAttachments: number;
+  containerPagesWithContent: number;
+  containerCanvasesCreated: number;
+  containerCanvasesUpdated: number;
   unresolvedUsers: UnresolvedConfluenceUser[];
   warnings: string[];
   pageResults: Array<{
@@ -76,6 +81,8 @@ export interface ConfluenceImportSummary {
     visibility?: CanvasVisibility;
     confluenceReadRestricted?: boolean;
     confluenceRestrictionStatus?: 'checked' | 'unknown';
+    isContainerPage?: boolean;
+    containerPageHasContent?: boolean;
     status: 'created' | 'updated' | 'partial' | 'failed';
     failedStep?: 'canvas' | 'attachments' | 'link_rewrite' | null;
     errors?: string[];
@@ -94,6 +101,9 @@ export interface ConfluenceImportProgressUpdate {
   migratedAttachments: number;
   reusedAttachments: number;
   failedAttachments: number;
+  containerPagesWithContent: number;
+  containerCanvasesCreated: number;
+  containerCanvasesUpdated: number;
   warnings: string[];
   unresolvedUsers: UnresolvedConfluenceUser[];
   currentStep: string;
@@ -116,6 +126,8 @@ interface PreparedPage {
   topLevelPageId: string;
   topLevelSectionTitle: string;
   destination: PageDestination;
+  isContainerPage: boolean;
+  containerPageHasContent: boolean;
 }
 
 interface SectionContext {
@@ -183,6 +195,9 @@ export class ConfluenceImportService {
       migratedAttachments: 0,
       reusedAttachments: 0,
       failedAttachments: 0,
+      containerPagesWithContent: 0,
+      containerCanvasesCreated: 0,
+      containerCanvasesUpdated: 0,
       unresolvedUsers: [],
       warnings: [],
       pageResults: [],
@@ -262,7 +277,7 @@ export class ConfluenceImportService {
 
     const canvasUrlByConfluencePageId = await this.buildCanvasUrlMap(
       confluencePageIdToCanvasId,
-      resolvedInput.frontendBaseUrl,
+      resolvedInput.workspaceId,
     );
 
     for (const [index, prepared] of preparedPages.entries()) {
@@ -272,7 +287,11 @@ export class ConfluenceImportService {
       if (!canvasId || rawMarkdown === undefined || !lastEditorUserId) continue;
 
       try {
-        const finalMarkdown = rewriteConfluenceCanvasLinks(rawMarkdown, canvasUrlByConfluencePageId);
+        const finalMarkdown = rewriteConfluenceCanvasLinks(
+          rawMarkdown,
+          canvasUrlByConfluencePageId,
+          config.confluence.baseUrl,
+        );
         await this.updateCanvasContent(canvasId, finalMarkdown, lastEditorUserId, prepared, resolvedInput);
         await this.queueCanvasVespaJob(canvasId, lastEditorUserId);
         await this.emitProgress(summary, 'rewriting_internal_links', prepared.breadcrumb.join(' / '), onProgress);
@@ -334,6 +353,9 @@ export class ConfluenceImportService {
       migratedAttachments: summary.migratedAttachments,
       reusedAttachments: summary.reusedAttachments,
       failedAttachments: summary.failedAttachments,
+      containerPagesWithContent: summary.containerPagesWithContent,
+      containerCanvasesCreated: summary.containerCanvasesCreated,
+      containerCanvasesUpdated: summary.containerCanvasesUpdated,
       warnings: summary.warnings,
       unresolvedUsers: summary.unresolvedUsers,
       currentStep,
@@ -692,15 +714,21 @@ export class ConfluenceImportService {
     const visit = async (node: ConfluencePageTreeNode, breadcrumb: string[], section: SectionContext): Promise<void> => {
       const nextBreadcrumb = [...breadcrumb, node.page.title];
       const isLeafPage = node.children.length === 0;
+      const containerPageHasContent = !isLeafPage && !node.isVirtual && this.pageHasMeaningfulContent(node.page);
 
-      if (isLeafPage && !node.isVirtual) {
+      if ((isLeafPage || containerPageHasContent) && !node.isVirtual) {
         prepared.push({
           page: node.page,
           breadcrumb: nextBreadcrumb,
           topLevelPageId: section.topLevelPageId,
           topLevelSectionTitle: section.topLevelTitle,
           destination: section.destination,
+          isContainerPage: !isLeafPage,
+          containerPageHasContent,
         });
+        if (containerPageHasContent) {
+          summary.containerPagesWithContent += 1;
+        }
       }
 
       for (const child of node.children.sort((a, b) => a.page.title.localeCompare(b.page.title))) {
@@ -746,6 +774,18 @@ export class ConfluenceImportService {
     }
 
     return prepared;
+  }
+
+  private pageHasMeaningfulContent(page: ConfluencePage): boolean {
+    return hasMeaningfulConfluenceContent(this.getPageBodyForTransform(page));
+  }
+
+  private getPageBodyForTransform(page: ConfluencePage): string {
+    const storage = page.body?.storage?.value || '';
+    const view = page.body?.view?.value || '';
+    const shouldPreferRenderedView = shouldPreferRenderedConfluenceView(storage);
+
+    return shouldPreferRenderedView && view ? view : storage || view;
   }
 
   private resolveChannelDestination(
@@ -1017,7 +1057,7 @@ export class ConfluenceImportService {
       const resultStatus = (baseStatus: 'created' | 'updated'): 'created' | 'updated' | 'partial' =>
         attachmentErrors.length > 0 ? 'partial' : baseStatus;
 
-      const rawMarkdown = transformConfluenceStorageToMarkdown(page.body?.storage?.value || page.body?.view?.value || '', {
+      const rawMarkdown = transformConfluenceStorageToMarkdown(this.getPageBodyForTransform(page), {
         baseUrl: this.client.getBaseUrl(),
         pageIdByTitle,
         attachmentUrlByFileName: attachmentResult.urlByFileName,
@@ -1034,6 +1074,7 @@ export class ConfluenceImportService {
         await this.updateCanvasRecord(existingCanvas.id, title, content, input.actorUserId, creatorUserId, lastEditorUserId, prepared, input, visibilityDecision, checksum, sourceUrl, existingCanvas.metadata);
         await this.ensureCanvasExternalMapping(input.externalSourceId, page.id, prepared.topLevelPageId, existingCanvas.id);
         summary.updatedCanvases += 1;
+        if (prepared.isContainerPage) summary.containerCanvasesUpdated += 1;
         summary.pageResults.push({
           confluencePageId: page.id,
           canvasId: existingCanvas.id,
@@ -1042,6 +1083,8 @@ export class ConfluenceImportService {
           visibility: visibilityDecision.visibility,
           confluenceReadRestricted: visibilityDecision.hasReadRestriction ?? undefined,
           confluenceRestrictionStatus: visibilityDecision.status,
+          isContainerPage: prepared.isContainerPage,
+          containerPageHasContent: prepared.containerPageHasContent,
           status: resultStatus('updated'),
           failedStep: attachmentErrors.length > 0 ? 'attachments' : null,
           errors: attachmentErrors,
@@ -1051,6 +1094,7 @@ export class ConfluenceImportService {
         await this.createCanvasRecord(canvasId, title, content, input.actorUserId, creatorUserId, lastEditorUserId, prepared, input, visibilityDecision, checksum, sourceUrl);
         await this.ensureCanvasExternalMapping(input.externalSourceId, page.id, prepared.topLevelPageId, canvasId);
         summary.createdCanvases += 1;
+        if (prepared.isContainerPage) summary.containerCanvasesCreated += 1;
         summary.pageResults.push({
           confluencePageId: page.id,
           canvasId,
@@ -1059,6 +1103,8 @@ export class ConfluenceImportService {
           visibility: visibilityDecision.visibility,
           confluenceReadRestricted: visibilityDecision.hasReadRestriction ?? undefined,
           confluenceRestrictionStatus: visibilityDecision.status,
+          isContainerPage: prepared.isContainerPage,
+          containerPageHasContent: prepared.containerPageHasContent,
           status: resultStatus('created'),
           failedStep: attachmentErrors.length > 0 ? 'attachments' : null,
           errors: attachmentErrors,
@@ -1080,6 +1126,8 @@ export class ConfluenceImportService {
         confluencePageId: page.id,
         title: page.title,
         status: 'failed',
+        isContainerPage: prepared.isContainerPage,
+        containerPageHasContent: prepared.containerPageHasContent,
         failedStep: 'canvas',
         errors: [message],
         destination: prepared.destination,
@@ -1405,6 +1453,8 @@ export class ConfluenceImportService {
         topLevelPageId: prepared.topLevelPageId,
         topLevelSection: prepared.topLevelSectionTitle,
         breadcrumb: prepared.breadcrumb,
+        isContainerPage: prepared.isContainerPage,
+        containerPageHasContent: prepared.containerPageHasContent,
         destination: prepared.destination,
         ...(restrictionDecision ? {
           restriction: {
@@ -1614,7 +1664,7 @@ export class ConfluenceImportService {
 
   private async buildCanvasUrlMap(
     pageIdToCanvasId: Map<string, string>,
-    frontendBaseUrl?: string,
+    workspaceId?: string,
   ): Promise<Map<string, string>> {
     const canvasIds = [...pageIdToCanvasId.values()];
     const canvases = await db.canvas.findMany({
@@ -1627,16 +1677,16 @@ export class ConfluenceImportService {
     for (const [pageId, canvasId] of pageIdToCanvasId.entries()) {
       const canvas = canvasById.get(canvasId);
       if (!canvas) continue;
-      if (frontendBaseUrl) {
-        result.set(pageId, `${frontendBaseUrl.replace(/\/$/, '')}/chat/canvas/${canvas.viewAccessId || canvas.id}`);
-      } else if (canvas.viewAccessId) {
-        result.set(pageId, getCanvasUrl(canvas.viewAccessId));
-      } else {
-        result.set(pageId, getCanvasUrl(canvas.id));
-      }
+      result.set(pageId, this.buildWorkspaceCanvasUrl(canvas.viewAccessId || canvas.id, workspaceId));
     }
 
     return result;
+  }
+
+  private buildWorkspaceCanvasUrl(canvasRouteId: string, workspaceId?: string): string {
+    const canvasPath = `/chat/dir/canvas/${canvasRouteId}`;
+
+    return workspaceId ? `/${workspaceId}${canvasPath}` : canvasPath;
   }
 }
 

@@ -210,6 +210,9 @@ export class ConfluenceMigrationController {
         migratedAttachments: result.migratedAttachments,
         reusedAttachments: result.reusedAttachments,
         failedAttachments: result.failedAttachments,
+        containerPagesWithContent: result.containerPagesWithContent,
+        containerCanvasesCreated: result.containerCanvasesCreated,
+        containerCanvasesUpdated: result.containerCanvasesUpdated,
       });
     } catch (error) {
       logger.error('[ConfluenceMigration] Background migration job failed', error, { jobId });
@@ -237,6 +240,9 @@ export class ConfluenceMigrationController {
       migratedAttachments: update.migratedAttachments,
       reusedAttachments: update.reusedAttachments,
       failedAttachments: update.failedAttachments,
+      containerPagesWithContent: update.containerPagesWithContent,
+      containerCanvasesCreated: update.containerCanvasesCreated,
+      containerCanvasesUpdated: update.containerCanvasesUpdated,
       currentPageTitle: update.currentPageTitle || null,
       currentStep: update.currentStep,
       warnings: update.warnings,

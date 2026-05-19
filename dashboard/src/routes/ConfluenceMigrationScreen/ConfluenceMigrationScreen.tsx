@@ -525,14 +525,23 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                     </h3>
                   </div>
                   <span className='text-xs text-muted-foreground'>
-                    {preview.leafPages} canvases from {preview.totalPages} Confluence pages
+                    {preview.expectedCanvasPages ?? preview.leafPages} canvases from{' '}
+                    {preview.totalPages} Confluence pages
                   </span>
                 </div>
               </div>
 
               <div className='grid grid-cols-2 gap-3 p-5 md:grid-cols-4 xl:grid-cols-6'>
+                <MetricCard
+                  label='Expected canvases'
+                  value={String(preview.expectedCanvasPages ?? preview.leafPages)}
+                />
                 <MetricCard label='Leaf pages' value={String(preview.leafPages)} />
                 <MetricCard label='Container pages' value={String(preview.containerPages)} />
+                <MetricCard
+                  label='Contentful containers'
+                  value={String(preview.containerPagesWithContent ?? 0)}
+                />
                 <MetricCard label='Sections' value={String(preview.sections.length)} />
                 <MetricCard
                   label='Public canvases'
@@ -628,7 +637,8 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                 <div className='flex flex-wrap items-center justify-between gap-3'>
                   <p className='text-xs text-muted-foreground'>
                     Migration will create/reuse `{preview.spaceName} General`, create folders for
-                    container sections, and import leaf pages as canvases.
+                    container sections, and import leaf pages plus contentful container pages as
+                    canvases.
                   </p>
                   <Button
                     onClick={() => {
