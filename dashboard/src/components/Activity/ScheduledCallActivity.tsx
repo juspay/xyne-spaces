@@ -21,7 +21,9 @@ export const ScheduledCallActivity = ({
   const isUpdated = activity.actorAction === 'call_updated';
   const isMeetingAccepted = activity.actorAction === 'meeting_accepted';
   const isMeetingDeclined = activity.actorAction === 'meeting_declined';
-  const targetPath = '/calls';
+  const targetPath = activity.callId
+    ? `/calls?tab=upcoming&callId=${activity.callId}`
+    : '/calls?tab=upcoming';
 
   const description = isReminder ? (
     <span className='text-muted-foreground text-sm'>reminded you about a scheduled call in</span>

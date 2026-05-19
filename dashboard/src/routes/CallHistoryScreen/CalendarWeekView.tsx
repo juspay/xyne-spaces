@@ -54,6 +54,7 @@ interface CalendarWeekViewProps {
   onDeleteClick?: (call: Call) => void;
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
   otherUsersCalls?: OtherUserCalls[];
+  initialOpenCallId?: string | null;
 }
 
 const TIME_GUTTER_WIDTH = 80;
@@ -360,12 +361,13 @@ const CalendarWeekView = ({
   onDeleteClick,
   onCreateCallAtSlot,
   otherUsersCalls = [],
+  initialOpenCallId,
 }: CalendarWeekViewProps): ReactElement => {
   const { isMobile } = usePlatform();
   const timeGutterWidth = isMobile ? 48 : TIME_GUTTER_WIDTH;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
-  const [openCallId, setOpenCallId] = useState<string | null>(null);
+  const [openCallId, setOpenCallId] = useState<string | null>(initialOpenCallId ?? null);
 
   const {
     sensors,

@@ -395,7 +395,7 @@ class ScheduledCallNotificationService {
           message: `You have a scheduled call "${title}" at ${startTime}`,
           relatedEntityType: 'call',
           relatedEntityId: callExternalId,
-          actionUrl: `/${workspaceId}/calls`,
+          actionUrl: `/${workspaceId}/calls?tab=upcoming&callId=${callId}`,
           metadata: {
             callId,
             callExternalId,
@@ -454,7 +454,7 @@ class ScheduledCallNotificationService {
           message: `Your call "${title}" starts in ${minutesUntilStart} minutes at ${startTime}`,
           relatedEntityType: 'call',
           relatedEntityId: call.externalId,
-          actionUrl: `/${workspaceId}/calls`,
+          actionUrl: `/${workspaceId}/calls?tab=upcoming&callId=${call.id}`,
           metadata: {
             callId: call.id,
             callExternalId: call.externalId,
@@ -597,7 +597,7 @@ class ScheduledCallNotificationService {
           message: `The scheduled call "${title}" has been updated — new time: ${startTime}`,
           relatedEntityType: 'call',
           relatedEntityId: callExternalId,
-          actionUrl: `/${workspaceId}/calls`,
+          actionUrl: `/${workspaceId}/calls?tab=upcoming&callId=${callId}`,
           metadata: {
             callId,
             callExternalId,

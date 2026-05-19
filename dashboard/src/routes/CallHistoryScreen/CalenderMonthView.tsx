@@ -68,6 +68,7 @@ interface CalendarMonthViewProps {
   onDeleteClick?: (call: Call) => void;
   onCreateCall?: (date: Date) => void;
   otherUsersCalls?: OtherUserCalls[];
+  initialOpenCallId?: string | null;
 }
 
 const DAYS_OF_WEEK = DAY_NAMES;
@@ -102,6 +103,7 @@ const CalendarMonthView = ({
   onDeleteClick,
   onCreateCall,
   otherUsersCalls = [],
+  initialOpenCallId,
 }: CalendarMonthViewProps): ReactElement => {
   const { isMobile } = usePlatform();
 
@@ -110,7 +112,7 @@ const CalendarMonthView = ({
   const month = currentMonth.getMonth();
   const weeks = buildCalendarWeeks(year, month);
 
-  const [openCallId, setOpenCallId] = useState<string | null>(null);
+  const [openCallId, setOpenCallId] = useState<string | null>(initialOpenCallId ?? null);
   const [openOverflowDay, setOpenOverflowDay] = useState<string | null>(null);
   const [openOverflowCallId, setOpenOverflowCallId] = useState<string | null>(null);
 
