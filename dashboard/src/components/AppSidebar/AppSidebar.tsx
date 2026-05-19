@@ -34,7 +34,7 @@ import {
   FileText,
   Mic,
   CalendarClock,
-  MoreHorizontal,
+  EllipsisVertical,
   Bookmark,
   Globe,
   ShieldUser,
@@ -43,6 +43,7 @@ import {
   ArrowRightLeft,
   AppWindow,
   SearchCode,
+  CircleHelp,
   Building2,
   AlertCircle,
   type LucideIcon,
@@ -92,6 +93,7 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarClock },
   { path: '/apps', label: 'Apps', icon: AppWindow },
   { path: '/inspector', label: 'Inspector', icon: SearchCode },
+  { path: '/guide', label: 'User Guide', icon: CircleHelp },
   { path: '/workspace-management', label: 'Workspace Management', icon: Settings },
   { path: '/organisations', label: 'Organisations', icon: Building2 },
 ];
@@ -156,6 +158,11 @@ const mobileNavigationItems = [
     path: '/error-report',
     label: 'Report Issue',
     icon: AlertCircle,
+  },
+  {
+    path: '/guide',
+    label: 'Guide',
+    icon: CircleHelp,
   },
 ];
 
@@ -665,7 +672,7 @@ const MobileNavbar = ({
               className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer relative'
             >
               <div className='size-[24px] flex items-center justify-center'>
-                <MoreHorizontal
+                <EllipsisVertical
                   size={20}
                   className={isMoreActive ? 'text-foreground' : 'text-muted-foreground'}
                 />

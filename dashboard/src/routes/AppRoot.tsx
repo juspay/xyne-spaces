@@ -164,6 +164,7 @@ import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
 import { ExternalLobbyPage } from './ExternalLobby/ExternalLobbyPage';
+import UserGuideScreen from './UserGuideScreen';
 
 /** Auth-aware call route: authenticated users join via CallPage, others see external lobby */
 function CallRouteHandler(): ReactElement | null {
@@ -1103,6 +1104,10 @@ export const router = createBrowserRouter([
                     <ConfluenceMigrationScreen />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                path: 'guide',
+                element: <UserGuideScreen />,
               },
             ],
           },

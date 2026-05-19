@@ -10,6 +10,7 @@ import {
   Headset,
   LucideCommand,
   Search,
+  CircleHelp,
   Square,
 } from 'lucide-react';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
@@ -129,6 +130,17 @@ const NavigationAndSearch = (): ReactElement => {
               <span>)</span>
             </div>
           </div>
+        </button>
+        <button
+          onClick={() => void navigate('/guide')}
+          style={{ color: 'var(--nav-search-btn-text)' }}
+          className='flex items-center justify-center h-[28px] w-[28px] rounded-lg cursor-pointer hover:bg-[var(--nav-search-btn-bg)]'
+          aria-label='User Guide'
+          title='User Guide'
+          data-track-category='GLOBAL_TOP_BAR'
+          data-track-name='OpenUserGuide'
+        >
+          <CircleHelp size={16} />
         </button>
       </div>
     </div>

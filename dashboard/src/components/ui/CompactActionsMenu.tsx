@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { MoreHorizontal } from 'lucide-react';
+import { EllipsisVertical } from 'lucide-react';
 import { Button } from './Button';
 import {
   DropdownMenu,
@@ -36,7 +36,7 @@ const CompactActionsMenu = ({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant='ghost' size='sm' aria-label='More actions' className={triggerClassName}>
-          <MoreHorizontal size={20} />
+          <EllipsisVertical size={20} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={contentAlign} className='min-w-[14rem]'>
