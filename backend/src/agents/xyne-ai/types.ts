@@ -77,6 +77,10 @@ export interface Citation {
   chunkIndex?: number;
   chunkText?: string;
   chunkPos?: number;  // 1-indexed page number for PDFs, sheet index for Excel
+  ticketTitle?: string;
+  ticketXyneId?: string; 
+  canvasTitle?: string;
+  channelName?: string;
 }
 
 export interface KeyPointWithCitation {
@@ -93,6 +97,7 @@ export interface XyneAIOutput {
   summary: string;
   keyPoints: KeyPointWithCitation[];
   userTags?: Record<string, UserTag>; // Tag -> {name, userId}
+  sources?: Citation[];
 }
 
 // ============================================================================

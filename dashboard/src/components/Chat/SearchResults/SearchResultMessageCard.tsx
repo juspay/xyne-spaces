@@ -1,4 +1,4 @@
-import { ReactElement, memo, MouseEvent, useContext } from 'react';
+import { ReactElement, memo, MouseEvent, KeyboardEvent, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
@@ -44,18 +44,29 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   const replyCount = conversation?.replyCount ?? 0;
   const showReplies = isMatchRoot && replyCount > 0;
 
-  const handleCardClick = (e: MouseEvent<HTMLDivElement>): void => {
-    const interactive =
-      e.target instanceof HTMLElement
-        ? e.target.closest('a, button, input, textarea, [role="button"], [data-prevent-thread]')
-        : null;
-    if (interactive && interactive !== e.currentTarget) return;
+  const navigateToMessage = (): void => {
     if (!targetMessage) return;
     void navigate(
       isMatchRoot
         ? `/chat/dir/${channelId}#origin=${conversationId}`
         : `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${targetMessage.messageId}`,
     );
+  };
+
+  const handleCardClick = (e: MouseEvent<HTMLDivElement>): void => {
+    const interactive =
+      e.target instanceof HTMLElement
+        ? e.target.closest('a, button, input, textarea, [role="button"], [data-prevent-thread]')
+        : null;
+    if (interactive && interactive !== e.currentTarget) return;
+    navigateToMessage();
+  };
+
+  const handleCardKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.target !== e.currentTarget) return;
+    e.preventDefault();
+    navigateToMessage();
   };
 
   const handleOpenThread = (e?: MouseEvent): void => {
@@ -68,9 +79,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
       role='button'
       tabIndex={0}
       onClick={handleCardClick}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click();
-      }}
+      onKeyDown={handleCardKeyDown}
       className='group border border-border rounded-xl overflow-hidden bg-card shadow-sm hover:bg-accent/50 transition-colors cursor-pointer'
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_SEARCH_MESSAGE'

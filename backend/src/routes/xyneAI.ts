@@ -104,6 +104,26 @@ router.delete('/memories', xyneAIControllerFactory.clearMemories);
 router.get('/sessions', xyneAIControllerFactory.getSessions);
 
 /**
+ * GET /api/xyne-ai/sessions/by-conversation/:conversationId
+ *
+ * Returns the most recent Ask AI session ID for the current user + this mail conversation.
+ */
+router.get(
+  '/sessions/by-conversation/:conversationId',
+  xyneAIControllerFactory.getSessionByConversation,
+);
+
+/**
+ * GET /api/xyne-ai/sessions/by-conversation/:conversationId/autodraft
+ *
+ * Returns the autodraft session ID (channel-owner's session) for this mail conversation.
+ */
+router.get(
+  '/sessions/by-conversation/:conversationId/autodraft',
+  xyneAIControllerFactory.getAutodraftSessionByConversation,
+);
+
+/**
  * GET /api/xyne-ai/sessions/:sessionId
  *
  * Get a single session with all messages transformed to frontend format.

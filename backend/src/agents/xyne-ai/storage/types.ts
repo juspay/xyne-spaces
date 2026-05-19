@@ -88,6 +88,7 @@ export interface XyneAISession {
   sessionId: string;
   context: SessionContext;
   history: HistoryMessage[];
+  tag: string;
   createdAt: string;
   updatedAt: string;
 }

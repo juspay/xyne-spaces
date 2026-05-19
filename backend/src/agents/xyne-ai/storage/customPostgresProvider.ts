@@ -51,6 +51,7 @@ export interface SessionData {
   sessionId: string;
   userId: string;
   metadata: SessionMetadata;
+  tag: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -86,6 +87,7 @@ export interface XyneAIMemoryProvider {
   getSessionsByUser(userId: string, conversationId?: string): Promise<SessionData[]>;
   deleteSession(sessionId: string): Promise<boolean>;
   getUserSessions(userId: string, agentName?: string): Promise<SessionListItem[]>;
+  findActiveSessionId(userId: string, conversationId: string, tagFilter?: string | { not: string }): Promise<string | null>;
   addMessage(sessionId: string, role: XyneAIMessageRole, content: unknown, traceId?: string, attachmentMetadata?: AttachmentMetadata[], previousStepId?: string): Promise<MessageData>;
   getMessages(sessionId: string): Promise<MessageData[]>;
   getMessagesForPath(sessionId: string, leafMessageId: string): Promise<MessageData[]>;
@@ -178,6 +180,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
         sessionId: execution.id,
         userId,
         metadata: metadata || {},
+        tag: execution.tag,
         createdAt: execution.createdAt,
         updatedAt: execution.updatedAt,
       };
@@ -217,6 +220,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
         sessionId: execution.id,
         userId: userMapping?.userId || '',
         metadata: parseSessionMetadata(execution.context),
+        tag: execution.tag,
         createdAt: execution.createdAt,
         updatedAt: execution.updatedAt,
       };
@@ -292,6 +296,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
           sessionId: execution.id,
           userId,
           metadata,
+          tag: execution.tag,
           createdAt: execution.createdAt,
           updatedAt: execution.updatedAt,
         };
@@ -366,6 +371,36 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
       });
     } catch (error) {
       logger.error(`[XyneAIMemoryProvider] Failed to get sessions for user ${userId}:`, error);
+      throw error;
+    }
+  };
+
+  const findActiveSessionId = async (
+    userId: string,
+    conversationId: string,
+    tagFilter: string | { not: string } = { not: 'autodraft' },
+  ): Promise<string | null> => {
+    try {
+      const userMappings = await db.workflowExecutionUsers.findMany({
+        where: { userId },
+        select: { workflowExecutionId: true },
+      });
+      if (userMappings.length === 0) return null;
+      const row = await db.workflowExecution.findFirst({
+        where: {
+          id: { in: userMappings.map(m => m.workflowExecutionId) },
+          context: { contains: `"conversationId":"${conversationId}"` },
+          tag: tagFilter,
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true },
+      });
+      return row?.id ?? null;
+    } catch (error) {
+      logger.error(
+        `[XyneAIMemoryProvider] findActiveSessionId failed for user=${userId} conv=${conversationId}:`,
+        error,
+      );
       throw error;
     }
   };
@@ -593,6 +628,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     getSessionsByUser,
     deleteSession,
     getUserSessions,
+    findActiveSessionId,
     addMessage,
     getMessages,
     getMessagesForPath,

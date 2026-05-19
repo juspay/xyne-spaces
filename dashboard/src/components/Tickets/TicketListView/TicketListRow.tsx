@@ -1,5 +1,5 @@
 import { MouseEvent, ReactElement, useMemo, useRef } from 'react';
-import { Sparkles, Pencil } from 'lucide-react';
+import { Sparkles, Pencil, Wand2 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
@@ -102,9 +102,14 @@ export const TicketListRow = ({
     ? 'Human Intervention'
     : (ticket.stageName ?? formatStatusText(ticket.status));
   const emailCount = ticket.emails?.length ?? 0;
-  // EmailDraftsACL already scopes to ctx.userID, so this is the current
-  // user's unsent draft count for the ticket's conversation.
-  const hasDraft = (ticket.emailDrafts?.length ?? 0) > 0;
+  const draftKind = useMemo((): 'user' | 'auto' | null => {
+    const drafts = (ticket.emailDrafts ?? []) as ReadonlyArray<{
+      userId: string | null;
+    }>;
+    if (drafts.length === 0) return null;
+    if (drafts.some(d => d.userId !== null)) return 'user';
+    return 'auto';
+  }, [ticket.emailDrafts]);
 
   // Thread-level unread: compare the thread's most recent email id against
   // the id the current user last saw (stored in email_reads.lastReadEmailId).
@@ -202,15 +207,26 @@ export const TicketListRow = ({
             </span>
           )}
         </div>
-        <div className='w-[64px] flex justify-start flex-shrink-0'>
-          {hasDraft && (
-            <Tooltip delayDuration={500} content='Unsent draft'>
+        <div className='w-[80px] flex justify-start flex-shrink-0'>
+          {draftKind === 'user' && (
+            <Tooltip delayDuration={500} content='Your unsent draft'>
               <span
                 className='inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-amber-100 text-[10px] font-medium text-amber-700'
                 aria-label='Unsent draft'
               >
                 <Pencil size={10} />
                 Draft
+              </span>
+            </Tooltip>
+          )}
+          {draftKind === 'auto' && (
+            <Tooltip delayDuration={500} content='AI-generated draft suggestion'>
+              <span
+                className='inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-violet-100 text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
+                aria-label='AI draft suggestion'
+              >
+                <Wand2 size={10} />
+                AI draft
               </span>
             </Tooltip>
           )}
@@ -237,13 +253,15 @@ export const TicketListRow = ({
         )}
       </div>
       <div className='flex items-center justify-center gap-3 flex-shrink-0'>
-        <StagePicker
-          ticketId={ticket.id}
-          stageName={ticket.stageName}
-          stageLabel={statusLabel}
-          {...(stageOptions ? { stageOptions } : {})}
-          {...(onStageChange ? { onStageChange } : {})}
-        />
+        <div className='w-[100px] flex justify-start'>
+          <StagePicker
+            ticketId={ticket.id}
+            stageName={ticket.stageName}
+            stageLabel={statusLabel}
+            {...(stageOptions ? { stageOptions } : {})}
+            {...(onStageChange ? { onStageChange } : {})}
+          />
+        </div>
         <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} />
         <Tooltip delayDuration={300} content={formatDateTime(dueDate)} side='top'>
           <span

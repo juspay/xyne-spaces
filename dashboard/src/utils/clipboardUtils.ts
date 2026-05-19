@@ -8,7 +8,18 @@ import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import remarkRehype from 'remark-rehype';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
+
+const citationSanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'cite'],
+  attributes: {
+    ...defaultSchema.attributes,
+    cite: ['dataCitationRef', 'ref'],
+  },
+};
 
 /**
  * Rehype plugin: convert h1–h6 to <p><strong>...</strong></p> so headings paste as bold
@@ -67,7 +78,9 @@ export const markdownToHtml = async (markdown: string): Promise<string> => {
       // Without it, CommonMark collapses "Best,\nNikunj Gupta" to "Best, Nikunj
       // Gupta" in one line — signatures need to be preserved as typed.
       .use(remarkBreaks)
-      .use(remarkRehype)
+      .use(remarkRehype, { allowDangerousHtml: true })
+      .use(rehypeRaw)
+      .use(rehypeSanitize, citationSanitizeSchema)
       .use(rehypeHeadingsToBold)
       .use(rehypeStringify)
       .process(markdown);

@@ -214,8 +214,9 @@ export function createGetPageContentTool(): Tool<
         for (const idx of pageChunkIndices) {
           if (idx < chunks.length) {
             let text = chunks[idx];
-            // Strip [Page N] or [Page N-M] prefix if present — context already defines the page
-            text = text.replace(/^\[Page \d+(-\d+)?\]\s*/, '');
+            const pageMatch = text.match(/^\[Pages?\s+(\d+)/i);
+            text = text.replace(/^\[Pages?\s+\d+(?:[-,\s\d]*)?\]\s*/i, '');
+            const chunkPosFromText = pageMatch?.[1] ? Number(pageMatch[1]) : undefined;
             entityCounter++;
             entities.push({
               ...baseFields,
@@ -223,7 +224,10 @@ export function createGetPageContentTool(): Tool<
               content: `${docMeta}\nContent: ${text}`,
               chunkIndex: idx,
               chunkText: text,
-              chunkPos: chunksMap[idx]?.page_numbers?.[0] ?? (chunksPos.length > idx ? Number(chunksPos[idx]) : undefined),
+              chunkPos:
+                chunkPosFromText
+                ?? chunksMap[idx]?.page_numbers?.[0]
+                ?? (chunksPos.length > idx ? Number(chunksPos[idx]) : undefined),
             } as ToolEntity);
           }
         }

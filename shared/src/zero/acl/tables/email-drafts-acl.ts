@@ -12,10 +12,13 @@ export class EmailDraftsACL extends BaseQueryACL<'email_drafts'> {
   canSelect<TReturn>(query: Query<'email_drafts', Schema, TReturn>, args?: SelectArgs): Query<'email_drafts', Schema, TReturn> {
     const channelId = args?.channelId as string | undefined;
 
-    // Drafts are user-private: a draft belongs to the user who authored it.
-    // Layer the channel-membership gate on top so a user can only read drafts
-    // on channels they still have access to.
-    const ownDrafts = query.where('userId', this.ctx.userID);
+    // A user can read either their own draft (userId = me) or the shared
+    // AI-seeded draft (userId IS NULL). The hook prefers the personal draft
+    // when present and falls back to the AI one. Channel-membership gating
+    // is layered on top so drafts only surface for channels the user can see.
+    const ownDrafts = query.where(({ or, cmp }) =>
+      or(cmp('userId', '=', this.ctx.userID), cmp('userId', 'IS', null)),
+    );
 
     if (args?.isMember && channelId) {
       return ownDrafts.whereExists('channel', (ch) =>

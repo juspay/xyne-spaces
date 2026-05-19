@@ -138,6 +138,7 @@ import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
+import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
@@ -608,6 +609,7 @@ const AppRoot = (): ReactElement => {
                   </>
                 )}
                 <AttachmentGalleryModal />
+                <ThreadCitationModal />
                 <ErrorReportModal
                   isOpen={isErrorReportOpen}
                   onClose={() => setIsErrorReportOpen(false)}
@@ -1014,7 +1016,7 @@ export const router = createBrowserRouter([
                       keyword='support'
                       stripSearchParams={['settings', 'openSettings']}
                       preserveSearchParams={['emailConnected', 'emailError']}
-                      redirectOnlyAt='/support'
+                      redirectOnlyAt={/^\/[^/]+\/support\/?$/}
                     >
                       <SupportScreen />
                     </SaveRoute>
@@ -1145,6 +1147,7 @@ export const router = createBrowserRouter([
                 </div>
                 <AttachmentGalleryModal />
                 <AttachmentCitationPreview />
+                <ThreadCitationModal />
               </EditProvider>
             </InitialStateLoader>
           </ZeroProvider>

@@ -8,6 +8,7 @@ export interface AttachmentRef {
   mimeType: string;
   fileSize: number;
   initialTime?: number;
+  initialPage?: number;
   thumbnailUrl?: string | null;
 
   // Thread context

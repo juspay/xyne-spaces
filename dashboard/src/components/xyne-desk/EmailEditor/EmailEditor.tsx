@@ -13,6 +13,7 @@ import TextAlign from '@tiptap/extension-text-align';
 import { EmailEditorToolbar } from './EmailEditorToolbar';
 import { TableExtensions } from '../../ui/TipTapExtensions';
 import { InlineImageNodeView } from './InlineImageNodeView';
+import { CitationMark, getCitationRefFromTarget } from '../../ui/TipTapExtensions/CitationMark';
 
 // Extend TipTap's SetImageOptions to include our custom dataAttId attribute
 // which is registered via Image.extend() below.
@@ -80,6 +81,8 @@ interface EmailEditorProps {
   readOnly?: boolean;
   className?: string;
   footerSlot?: ReactNode;
+  onCitationClick?: (ref: string) => void;
+  onCitationOrderChange?: (orderedRefs: string[]) => void;
 }
 
 export const EmailEditor = ({
@@ -95,6 +98,8 @@ export const EmailEditor = ({
   readOnly = false,
   className = '',
   footerSlot,
+  onCitationClick,
+  onCitationOrderChange,
 }: EmailEditorProps): ReactElement => {
   const cb = useRef({
     onChange,
@@ -103,6 +108,7 @@ export const EmailEditor = ({
     onSendShortcut,
     onBlur,
     onEditorReady,
+    onCitationClick,
   });
   cb.current = {
     onChange,
@@ -111,6 +117,7 @@ export const EmailEditor = ({
     onSendShortcut,
     onBlur,
     onEditorReady,
+    onCitationClick,
   };
   const lastEmittedRef = useRef('');
 
@@ -162,6 +169,7 @@ export const EmailEditor = ({
       TextAlign.configure({
         types: ['heading', 'paragraph'],
       }),
+      CitationMark,
       ...TableExtensions,
     ],
     onCreate: ({ editor }) => {
@@ -228,6 +236,34 @@ export const EmailEditor = ({
     lastEmittedRef.current = normalized;
     if (normalized !== value) cb.current.onChange(normalized);
   }, [value, editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const dom = editor.view.dom;
+    const handler = (event: MouseEvent): void => {
+      const ref = getCitationRefFromTarget(event.target);
+      if (!ref) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cb.current.onCitationClick?.(ref);
+    };
+    dom.addEventListener('click', handler, { capture: true });
+    return (): void => {
+      dom.removeEventListener('click', handler, { capture: true });
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const storage = (editor.storage as unknown as Record<string, unknown>)['citation'] as
+      | { onRefsChange: ((refs: string[]) => void) | null }
+      | undefined;
+    if (!storage) return;
+    storage.onRefsChange = onCitationOrderChange ?? null;
+    return (): void => {
+      storage.onRefsChange = null;
+    };
+  }, [editor, onCitationOrderChange]);
 
   useEffect(() => {
     editor?.setEditable(!disabled && !readOnly);

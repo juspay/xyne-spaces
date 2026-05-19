@@ -65,6 +65,12 @@ export enum TicketPriority {
 }
 
 // @ts-ignore TS1294
+export enum AutoDraftMode {
+  OFF = 'OFF',
+  DRAFT = 'DRAFT',
+}
+
+// @ts-ignore TS1294
 export enum TicketReferenceRelation {
   LINKED = 'LINKED',
   DUPLICATE_CONFIRMED = 'DUPLICATE_CONFIRMED',
@@ -1816,6 +1822,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     priorityClassificationEnabled: boolean(),
     priorityClassificationPrompt: string().optional(),
     priorityClassificationThreshold: number(),
+    autoDraftMode: enumeration<AutoDraftMode>().optional(),
   })
   .primaryKey('channelId');
 

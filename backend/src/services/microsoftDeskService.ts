@@ -60,6 +60,18 @@ const PENDING_CHANNEL_TTL = 600; // 10 minutes
 const PENDING_CHANNEL_PREFIX = 'email_channel:';
 const GRAPH_SUBSCRIPTION_MAX_MINUTES = 4230; // ~3 days
 
+export const MICROSOFT_OAUTH_SCOPES = [
+  'openid',
+  'email',
+  'offline_access',
+  'Mail.Read',
+  'Mail.Send',
+  'Mail.ReadWrite',
+  'Contacts.Read',
+  'People.Read',
+  'Contacts.Read.Shared',
+];
+
 function extractGraphErrorMessage(rawBody: string): string {
   try {
     const parsed = JSON.parse(rawBody) as { error?: { message?: string } };
@@ -358,8 +370,7 @@ export class MicrosoftDeskService {
           client_secret: clientSecret,
           refresh_token: credentials.refreshToken,
           grant_type: 'refresh_token',
-          scope:
-            'openid email offline_access Mail.Read Mail.Send Mail.ReadWrite Contacts.Read People.Read',
+          scope: MICROSOFT_OAUTH_SCOPES.join(' '),
         }),
       }
     );

@@ -6,6 +6,7 @@ import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
+import { fetchUserSessionForConversation } from '../../../services/XyneAI/XyneAISessionsService';
 import { useAskAIVersion } from '../../../hooks/useAskAIVersion';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
@@ -586,28 +587,30 @@ const XyneAISidebar = ({
 
           hasLoadedInitialConversationRef.current = true;
 
-          if (!sessions || sessions.length === 0) {
-            setIsLoadingConversation(false);
-            return;
-          }
-
-          // Filter sessions based on context
-          let matchingSessions = sessions;
-          if (threadConversationId && channelId) {
-            matchingSessions = sessions.filter(
-              s => s.threadConversationId === threadConversationId,
-            );
+          let targetSessionId: string | undefined;
+          const isDeskTicketContext = Boolean(threadConversationId && channelId);
+          if (isDeskTicketContext && threadConversationId) {
+            const resolved = await fetchUserSessionForConversation(threadConversationId);
+            if (resolved) {
+              targetSessionId = resolved;
+            } else {
+              setIsLoadingConversation(false);
+              return;
+            }
           } else {
-            matchingSessions = sessions.filter(s => !s.threadConversationId);
+            if (!sessions || sessions.length === 0) {
+              setIsLoadingConversation(false);
+              return;
+            }
+            const matchingSessions = sessions.filter(s => !s.threadConversationId);
+            if (matchingSessions.length === 0) {
+              setIsLoadingConversation(false);
+              return;
+            }
+            targetSessionId = matchingSessions[0]!.sessionId;
           }
 
-          if (matchingSessions.length === 0) {
-            setIsLoadingConversation(false);
-            return;
-          }
-
-          const mostRecentSession = matchingSessions[0]!;
-          const mostRecent = await loadSessionDetail(mostRecentSession.sessionId);
+          const mostRecent = await loadSessionDetail(targetSessionId);
           if (!mostRecent) {
             setIsLoadingConversation(false);
             return;

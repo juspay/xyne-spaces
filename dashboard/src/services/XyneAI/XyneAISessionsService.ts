@@ -6,6 +6,7 @@
 import { apiInstance } from '../clients/apiClient';
 import type {
   ConversationHistory as ConversationHistoryType,
+  DraftSource,
   LastInputContext,
   StoredMessage,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -68,6 +69,7 @@ export interface BackendMessage {
   conversationIdMapping?: Record<string, string>;
   channelIdMapping?: Record<string, string>;
   userTags?: Record<string, { name: string; userId: string }>;
+  sources?: DraftSource[];
 }
 
 export interface SessionDetailResponse {
@@ -165,6 +167,24 @@ export async function fetchSessions(): Promise<ConversationHistoryType[]> {
 export async function fetchSessionDetail(sessionId: string): Promise<SessionDetailResponse> {
   const response = await apiInstance.get<SessionDetailResponse>(`/xyne-ai/sessions/${sessionId}`);
   return response.data;
+}
+
+export async function fetchUserSessionForConversation(
+  conversationId: string,
+): Promise<string | null> {
+  const response = await apiInstance.get<{ sessionId: string | null }>(
+    `/xyne-ai/sessions/by-conversation/${encodeURIComponent(conversationId)}`,
+  );
+  return response.data.sessionId ?? null;
+}
+
+export async function fetchAutodraftSessionForConversation(
+  conversationId: string,
+): Promise<string | null> {
+  const response = await apiInstance.get<{ sessionId: string | null }>(
+    `/xyne-ai/sessions/by-conversation/${encodeURIComponent(conversationId)}/autodraft`,
+  );
+  return response.data.sessionId ?? null;
 }
 
 export async function toggleStarApi(sessionId: string): Promise<{ isStarred: boolean }> {

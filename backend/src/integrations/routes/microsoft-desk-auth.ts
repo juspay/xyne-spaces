@@ -8,6 +8,7 @@ import { authV2Middleware } from '../../middleware/authV2Middleware';
 import {
   microsoftDeskService,
   isReconnectChannelData,
+  MICROSOFT_OAUTH_SCOPES,
 } from '../../services/microsoftDeskService';
 import { encrypt } from '../../services/encryptionService';
 import { db } from '../../database/client';
@@ -36,21 +37,6 @@ export function getBackendUrl(req: Request): string {
 function getPublicUrl(req: Request): string {
   return getBackendUrl(req);
 }
-
-export const MICROSOFT_OAUTH_SCOPES = [
-  'openid',
-  'email',
-  'offline_access',
-  'Mail.Read',
-  'Mail.Send',
-  'Mail.ReadWrite',
-  'Contacts.Read',
-  'People.Read',
-  'Contacts.Read.Shared',
-];
-
-/** Space-joined scope string for Microsoft's token-exchange API. */
-export const MICROSOFT_OAUTH_SCOPE_STRING = MICROSOFT_OAUTH_SCOPES.join(' ');
 
 function buildPostOAuthRedirect(
   frontendUrl: string,
@@ -201,7 +187,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     const tokenResult = await oauthClient.getToken({
       code: code as string,
       redirect_uri: redirectUri,
-      scope: MICROSOFT_OAUTH_SCOPE_STRING,
+      scope: MICROSOFT_OAUTH_SCOPES.join(' '),
     });
 
     const { token } = tokenResult;

@@ -20,8 +20,9 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
+import { XyneAIStar } from '../../icons/xyne-ai';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import {
   DropdownMenu,
@@ -34,8 +35,13 @@ import Tooltip from '../../ui/Tooltip';
 import { AttachmentPreview } from '../../ui/files/AttachmentPreview';
 import { MediaViewer } from '../../ui/files';
 import type { UploadedFile } from '../../ui/files/Files.types';
-import { XyneAIStar } from '../../icons/xyne-ai';
 import { cn } from '../../../utils/classNames';
+import type { DraftSource } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
+import {
+  attachmentViewerActor,
+  type AttachmentRef,
+} from '../../../machines/attachmentViewerMachine';
+import { threadCitationStore } from '../ThreadCitationModal/ThreadCitationModal';
 
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { markdownToHtml } from '../../../utils/clipboardUtils';
@@ -53,7 +59,8 @@ import { DraftCard } from '../DraftCard/DraftCard';
 import { EmailEditor } from '../EmailEditor/EmailEditor';
 import { EmailTagWithAvatar } from '../EmailTagWithAvatar/EmailTagWithAvatar';
 import { RecipientSuggestionsDropdown } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
-import { RephrasePrompt } from '../RephrasePrompt/RephrasePrompt';
+import { AIComposerPanel } from '../AIComposerPanel/AIComposerPanel';
+import { stripCitationMarks } from '../../ui/TipTapExtensions/CitationMark';
 
 import {
   buildContactPool,
@@ -83,7 +90,7 @@ export interface EmailComposerFeatures {
   showCollapseIcon: boolean;
   /** Render a Subject input row (compose only — reply inherits subject from thread). */
   showSubject: boolean;
-  /** Show AI features: Ask AI panel button + Wand2 draft trigger + Draft / Rephrase cards. */
+  /** Show AI features: Quick rewrite + Ask AI buttons, draft trigger, draft/AI panel cards. */
   showAI: boolean;
   /** Show the signature picker dropdown. */
   showSignature: boolean;
@@ -109,11 +116,8 @@ const REPLY_FEATURES: EmailComposerFeatures = {
   showCardWrap: true,
 };
 
-// Persist the rephrase-prompt open/closed state across remounts of the
-// composer for a given thread — switching tabs or re-opening the ticket
-// shouldn't lose the prompt the user just started typing in. Module-scope
-// so it survives unmounts; keyed by conversationId.
-const rephrasePromptOpenByConv = new Map<string, boolean>();
+type AIPanelMode = 'quick-rewrite' | 'ask-ai';
+const aiPanelModeByConv = new Map<string, AIPanelMode>();
 
 const COMPOSE_FEATURES: EmailComposerFeatures = {
   collapsible: false,
@@ -143,6 +147,7 @@ interface EmailComposerProps {
   onDiscard?: () => void;
   isAIPanelOpen?: boolean;
   onToggleAIPanel?: () => void;
+  onOpenAskAISidebarFresh?: () => void;
   channelId?: string;
   ticketId?: string | null | undefined;
   replyToEmailId?: string | null;
@@ -160,14 +165,18 @@ interface EmailComposerProps {
    * windows for the same channel each maintain independent drafts.
    */
   composeDraftId?: string;
+  onDraftSourcesChange?: (sources: DraftSource[]) => void;
+  onCitationClick?: (ref: string) => void;
+  onCitationOrderChange?: (orderedRefs: string[]) => void;
 }
 
 export const EmailComposer = ({
   conversationId,
   onClose,
   onDiscard,
-  isAIPanelOpen,
+  isAIPanelOpen: _isAIPanelOpen,
   onToggleAIPanel,
+  onOpenAskAISidebarFresh,
   channelId,
   ticketId,
   replyToEmailId,
@@ -176,6 +185,9 @@ export const EmailComposer = ({
   features: featureOverrides,
   composeDraftId,
   ticketSubject,
+  onDraftSourcesChange,
+  onCitationClick,
+  onCitationOrderChange,
 }: EmailComposerProps): ReactElement => {
   const isComposeMode = mode === 'compose';
   const features = resolveFeatures(mode, featureOverrides);
@@ -207,28 +219,38 @@ export const EmailComposer = ({
   // Subject is only meaningful in compose mode — reply inherits from the thread.
   const [composeSubject, setComposeSubject] = useState<string>('');
 
-  const [isRephrasePromptOpen, setIsRephrasePromptOpenState] = useState<boolean>(() =>
-    conversationId ? (rephrasePromptOpenByConv.get(conversationId) ?? false) : false,
+  const [aiPanelMode, setAIPanelModeState] = useState<AIPanelMode | null>(() =>
+    conversationId ? (aiPanelModeByConv.get(conversationId) ?? null) : null,
   );
   useEffect(() => {
     if (!conversationId) {
-      setIsRephrasePromptOpenState(false);
+      setAIPanelModeState(null);
       return;
     }
-    setIsRephrasePromptOpenState(rephrasePromptOpenByConv.get(conversationId) ?? false);
+    setAIPanelModeState(aiPanelModeByConv.get(conversationId) ?? null);
   }, [conversationId]);
-  const setIsRephrasePromptOpen: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
-    next => {
-      setIsRephrasePromptOpenState(prev => {
-        const resolved = typeof next === 'function' ? next(prev) : next;
-        if (conversationId) {
-          if (resolved) rephrasePromptOpenByConv.set(conversationId, true);
-          else rephrasePromptOpenByConv.delete(conversationId);
-        }
-        return resolved;
-      });
+  const setAIPanelMode = useCallback(
+    (next: AIPanelMode | null): void => {
+      setAIPanelModeState(next);
+      if (conversationId) {
+        if (next) aiPanelModeByConv.set(conversationId, next);
+        else aiPanelModeByConv.delete(conversationId);
+      }
     },
     [conversationId],
+  );
+
+  const isInlineAIPanelOpen = aiPanelMode !== null;
+  const setIsInlineAIPanelOpen = useCallback(
+    (next: boolean | ((prev: boolean) => boolean)) => {
+      const resolved = typeof next === 'function' ? next(aiPanelMode !== null) : next;
+      if (resolved) {
+        if (aiPanelMode === null) setAIPanelMode('quick-rewrite');
+      } else {
+        setAIPanelMode(null);
+      }
+    },
+    [aiPanelMode, setAIPanelMode],
   );
   const [isSending, setIsSending] = useState<boolean>(false);
   const aiActiveRef = useRef<boolean>(false);
@@ -238,6 +260,8 @@ export const EmailComposer = ({
     undefined,
   );
   const composerNavigate = useNavigate();
+  const { workspaceId: routeWorkspaceId } = useParams<{ workspaceId?: string }>();
+  const supportBase = routeWorkspaceId ? `/${routeWorkspaceId}/support` : '/support';
   const signatureAutoAppend = localStorage.getItem('signature-auto-append-enabled') !== 'false';
   const suppressNextReplyAutosaveRef = useRef(false);
 
@@ -311,90 +335,26 @@ export const EmailComposer = ({
     restoredAttachmentsForDraftRef.current = null;
   }, [conversationId]);
 
-  // Initialize email content from draft. The composer now stores HTML
-  // (rich-text editor output) so we feed the saved HTML back in unchanged.
-  // Compose mode has no draft persistence — keep the field blank until typed.
+  const lastLoadedContentRef = React.useRef<string>('');
+  const justLoadedDraftRef = React.useRef(false);
   useEffect(() => {
     if (isComposeMode) return;
-    setEmailContent(draft?.draftContent || '');
-  }, [draft?.draftContent, conversationId, isComposeMode, draft]);
+    const next = draft?.draftContent ?? '';
+    setEmailContent(next);
+    lastLoadedContentRef.current = next;
+    justLoadedDraftRef.current = true;
+  }, [draft?.draftContent, conversationId, isComposeMode]);
 
-  // Restore attachments from draft on initial open.
-  //
-  // Zero's ZQL reactive cache does not propagate json() column values (such as
-  // attachmentIds) through optimistic updates — the column always reads as
-  // undefined until the server round-trip completes, and even then the value
-  // may not surface in the ZQL view store. As a workaround we persist
-  // attachmentIds to localStorage alongside recipients (same pattern) and read
-  // from there first.
-  //
-  // The ref gate ensures this effect only runs ONCE per conversation. Without
-  // it, every autosave changes draft.updatedAt → draft becomes a new reference
-  // → effect re-runs → sees attachmentIds: undefined → clears the user's files
-  // → next save overwrites the draft without attachmentIds.
-  useEffect(() => {
-    if (isComposeMode) return;
-    if (!conversationId) return;
-    // Don't clear attachments if draft is still loading from Zero
-    if (!draft) return;
-    // Only restore once per conversation draft
-    if (restoredAttachmentsForDraftRef.current === conversationId) return;
-    restoredAttachmentsForDraftRef.current = conversationId;
-
-    // Prefer localStorage (reliable) over draft.attachmentIds (Zero ZQL json() limitation)
-    // Format: { id, name, mimeType }[] — older entries may be string[] (plain IDs only).
-    type StoredEntry = { id: string; name: string; mimeType: string };
-    let storedEntries: StoredEntry[] | undefined;
-    let attachmentIds: string[] | undefined;
-    try {
-      const primaryStorageKey = conversationId
-        ? `xyne:emailDraft:attachments:${conversationId}`
-        : null;
-      const legacyStorageKey = draft?.id ? `xyne:emailDraft:attachments:${draft.id}` : null;
-      const stored =
-        (primaryStorageKey && localStorage.getItem(primaryStorageKey)) ||
-        (legacyStorageKey && localStorage.getItem(legacyStorageKey));
-      if (stored) {
-        const parsed = JSON.parse(stored) as StoredEntry[] | string[];
-        if (parsed.length > 0 && typeof parsed[0] === 'string') {
-          // Backward-compat: old format stored bare string[]
-          attachmentIds = parsed as string[];
-        } else {
-          storedEntries = parsed as StoredEntry[];
-          attachmentIds = storedEntries.map(e => e.id);
-        }
-      }
-    } catch {
-      /* ignore */
+  const handleEditorChange = useCallback((html: string): void => {
+    setEmailContent(html);
+    if (justLoadedDraftRef.current) {
+      lastLoadedContentRef.current = html;
+      justLoadedDraftRef.current = false;
     }
-    // Fall back to whatever Zero returned (in case localStorage was cleared)
-    if (!attachmentIds || attachmentIds.length === 0) {
-      attachmentIds = draft.attachmentIds;
-    }
-
-    if (!attachmentIds || attachmentIds.length === 0) {
-      setAttachments([]);
-      return;
-    }
-
-    const restoredAttachments = attachmentIds.map((id, i) => {
-      const entry = storedEntries?.[i];
-      const file: File | UploadedFile = entry
-        ? {
-            id,
-            originalName: entry.name,
-            fileName: entry.name,
-            fileSize: 0,
-            mimeType: entry.mimeType,
-            fileUrl: '',
-          }
-        : new File([], `attachment-${id.slice(-8)}`);
-      return { file, attachmentId: id };
-    });
-    setAttachments(restoredAttachments);
-  }, [draft, isComposeMode, conversationId]);
+  }, []);
 
   const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
+  const isDirty = emailContent !== lastLoadedContentRef.current;
   const hasInlineImages = useMemo(() => /\sdata-att-id=["']/i.test(emailContent), [emailContent]);
 
   const toInputRef = React.useRef<HTMLInputElement>(null);
@@ -518,15 +478,6 @@ export const EmailComposer = ({
     ],
   );
 
-  const maybePersistReplyDraft = useCallback((): void => {
-    if (isComposeMode || (!hasEmailBody && attachments.length === 0)) return;
-    if (suppressNextReplyAutosaveRef.current) {
-      suppressNextReplyAutosaveRef.current = false;
-      return;
-    }
-    persistReplyDraft(emailContent);
-  }, [isComposeMode, hasEmailBody, attachments.length, persistReplyDraft, emailContent]);
-
   const currentUserEmail = users?.find(u => u.id === userID)?.email ?? null;
   const aiDraft = useDeskAIDraft({
     channelId: channelId || '',
@@ -541,6 +492,67 @@ export const EmailComposer = ({
     },
   });
 
+  useEffect(() => {
+    onDraftSourcesChange?.(aiDraft.draftSources);
+  }, [aiDraft.draftSources, onDraftSourcesChange]);
+
+  const [composeSources, setComposeSources] = useState<DraftSource[]>([]);
+
+  const openSourcePreview = useCallback(
+    (ref: string): void => {
+      const sourcePool = aiDraft.draftSources.length > 0 ? aiDraft.draftSources : composeSources;
+      const source = sourcePool.find(s => s.prefixedRef === ref);
+      if (!source) return;
+
+      if (source.entityType === 'attachment' && source.entityId) {
+        const pageMatch = source.chunkText?.match(/^\[Pages?\s+(\d+)/i);
+        const initialPage = pageMatch?.[1] ? Number(pageMatch[1]) : source.chunkPos;
+        const attachment: AttachmentRef = {
+          attachmentId: source.entityId,
+          fileName: source.fileName ?? source.entityId,
+          fileUrl: `/attachments/${source.entityId}/download`,
+          mimeType: source.mimeType ?? 'application/octet-stream',
+          fileSize: 0,
+          ...(initialPage !== undefined && initialPage !== null && { initialPage }),
+        };
+        attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment], startIndex: 0 });
+        return;
+      }
+
+      if (source.entityType === 'ticket' && source.entityId) {
+        threadCitationStore.open({
+          ticketId: source.entityId,
+          ...(source.channelId && { channelId: source.channelId }),
+          ...(source.messageId && { messageId: source.messageId }),
+        });
+        return;
+      }
+
+      if (source.entityType === 'message' && source.conversationId) {
+        threadCitationStore.open({
+          conversationId: source.conversationId,
+          ...(source.channelId && { channelId: source.channelId }),
+          ...((source.messageId || source.entityId) && {
+            messageId: source.messageId || source.entityId!,
+          }),
+        });
+        return;
+      }
+
+      if (source.entityType === 'canvas' && source.canvasId && routeWorkspaceId) {
+        void composerNavigate(`/${routeWorkspaceId}/chat/canvas/${source.canvasId}`);
+        return;
+      }
+
+      if ((source.entityType === 'web_search' || source.isExternal) && source.externalUrl) {
+        window.open(source.externalUrl, '_blank', 'noopener,noreferrer');
+      }
+    },
+    [aiDraft.draftSources, composeSources, routeWorkspaceId, composerNavigate],
+  );
+
+  const effectiveCitationClick = onCitationClick ?? openSourcePreview;
+
   const [isExpandedState, setIsExpanded] = useState<boolean>(true);
   // Compose mode is always expanded — there's no reply-thread to collapse to.
   const isExpanded = isComposeMode ? true : isExpandedState;
@@ -552,7 +564,7 @@ export const EmailComposer = ({
     handleTouchStart: handleComposerResizeTouchStart,
   } = useComposerResize({
     enabled: isExpanded && !isSending,
-    useTallMinHeight: aiDraft.isDraftActive || isRephrasePromptOpen,
+    useTallMinHeight: aiDraft.isDraftActive || isInlineAIPanelOpen,
   });
 
   // Drag-and-drop chips between To / Cc / Bcc.
@@ -660,6 +672,11 @@ export const EmailComposer = ({
     setComposeDraftLoaded(false);
   }, [composeDraftKey]);
   useEffect(() => {
+    if (isComposeMode && aiDraft.draftSources.length > 0) {
+      setComposeSources(aiDraft.draftSources);
+    }
+  }, [isComposeMode, aiDraft.draftSources]);
+  useEffect(() => {
     if (!composeDraftKey || composeDraftLoaded) return;
     try {
       const raw = localStorage.getItem(composeDraftKey);
@@ -671,9 +688,11 @@ export const EmailComposer = ({
           cc?: string[];
           bcc?: string[];
           attachments?: PersistedComposeAttachment[];
+          sources?: DraftSource[];
         };
         if (parsed.subject) setComposeSubject(parsed.subject);
         if (parsed.body) setEmailContent(parsed.body);
+        if (parsed.sources && parsed.sources.length > 0) setComposeSources(parsed.sources);
         if (parsed.to) setToEmails(parsed.to);
         if (parsed.cc) {
           setCcEmails(parsed.cc);
@@ -761,6 +780,7 @@ export const EmailComposer = ({
         cc: ccEmails,
         bcc: bccEmails,
         attachments: persistedAttachments,
+        ...(composeSources.length > 0 && { sources: composeSources }),
       };
       localStorage.setItem(composeDraftKey, JSON.stringify(payload));
     } catch {
@@ -775,28 +795,30 @@ export const EmailComposer = ({
     ccEmails,
     bccEmails,
     attachments,
+    composeSources,
   ]);
 
-  // Auto-grow the composer the first time the AI draft OR the rephrase
-  // prompt opens, so the side-by-side panel has room. Only bumps on the
+  // Auto-grow the composer the first time the AI draft card OR the AI
+  // panel opens, so the side-by-side layout has room. Only bumps on the
   // false → true edge so a user-shrunk size isn't overridden.
   useEffect(() => {
-    const sideBySideActive = (aiDraft.isDraftActive || isRephrasePromptOpen) && hasEmailBody;
+    const sideBySideActive = (aiDraft.isDraftActive || isInlineAIPanelOpen) && hasEmailBody;
     if (sideBySideActive && !aiActiveRef.current) {
       setComposerHeight(h => Math.max(h, 520));
     }
     aiActiveRef.current = sideBySideActive;
-  }, [aiDraft.isDraftActive, isRephrasePromptOpen, hasEmailBody]);
+  }, [aiDraft.isDraftActive, isInlineAIPanelOpen, hasEmailBody]);
 
-  // Reply mode: the rephrase prompt assumes user content exists — auto-close
-  // it if the body is cleared so its state doesn't get orphaned. Compose
-  // mode uses the same surface to ask the AI to *write* something from
-  // scratch, so it must stay open with an empty body.
   useEffect(() => {
-    if (isRephrasePromptOpen && !hasEmailBody && !isComposeMode) {
-      setIsRephrasePromptOpen(false);
+    if (
+      aiPanelMode === 'quick-rewrite' &&
+      !hasEmailBody &&
+      !isComposeMode &&
+      !aiDraft.isDraftActive
+    ) {
+      setAIPanelMode(null);
     }
-  }, [hasEmailBody, isRephrasePromptOpen, isComposeMode, setIsRephrasePromptOpen]);
+  }, [hasEmailBody, aiPanelMode, isComposeMode, aiDraft.isDraftActive, setAIPanelMode]);
 
   useEffect(() => {
     // In compose mode there's no thread to derive recipients from — start blank.
@@ -1066,7 +1088,7 @@ export const EmailComposer = ({
       const activeSig = selectedSignatureId
         ? signatures?.find(s => s.id === selectedSignatureId)
         : null;
-      const bodyContent = hasContent ? emailContent : '';
+      const bodyContent = hasContent ? stripCitationMarks(emailContent) : '';
       const composedBody = activeSig
         ? `${bodyContent}${bodyContent ? '<br><br>' : ''}${activeSig.content}`
         : bodyContent;
@@ -1121,7 +1143,7 @@ export const EmailComposer = ({
         const xyneId = response.data.ticketXyneId;
         const ch = response.data.channelId;
         if (xyneId && ch) {
-          void composerNavigate(`/support/${ch}/${xyneId}`);
+          void composerNavigate(`${supportBase}/${ch}/${xyneId}`);
         }
         return;
       }
@@ -1454,16 +1476,16 @@ export const EmailComposer = ({
       const target = e.target as Node | null;
       if (!target || !composerRef.current?.contains(target)) return;
 
-      if (isRephrasePromptOpen) {
+      if (isInlineAIPanelOpen) {
         e.preventDefault();
         e.stopPropagation();
-        setIsRephrasePromptOpen(false);
+        setIsInlineAIPanelOpen(false);
         return;
       }
 
       e.preventDefault();
       e.stopPropagation();
-      if (hasEmailBody || attachments.length > 0) persistReplyDraft(emailContent);
+      if (hasEmailBody && isDirty) saveDraft(emailContent);
       onClose();
     };
     document.addEventListener('keydown', handler, true);
@@ -1471,11 +1493,11 @@ export const EmailComposer = ({
   }, [
     onClose,
     emailContent,
-    persistReplyDraft,
-    isRephrasePromptOpen,
-    setIsRephrasePromptOpen,
+    saveDraft,
+    isInlineAIPanelOpen,
+    setIsInlineAIPanelOpen,
     hasEmailBody,
-    attachments,
+    isDirty,
   ]);
 
   const { isDraggingFiles, dragHandlers } = useComposerDragDrop(addFilesToAttachments);
@@ -1732,7 +1754,7 @@ export const EmailComposer = ({
                     <button
                       type='button'
                       onClick={() => {
-                        if (hasEmailBody || attachments.length > 0) persistReplyDraft(emailContent);
+                        if (hasEmailBody && isDirty) saveDraft(emailContent);
                         onClose();
                       }}
                       disabled={isSending}
@@ -1965,12 +1987,9 @@ export const EmailComposer = ({
         )}
 
         <div className='flex-1 min-h-0 flex flex-col'>
-          {(() => {
-            // Reply mode requires content for side-by-side; compose mode
-            // shows side-by-side any time the AI surface is open, so the
-            // user can describe what to write while the editor sits empty.
+          {((): ReactElement => {
             const sideBySide =
-              (hasEmailBody || isComposeMode) && (aiDraft.isDraftActive || isRephrasePromptOpen);
+              isInlineAIPanelOpen || ((hasEmailBody || isComposeMode) && aiDraft.isDraftActive);
             const aiOnlyFull = aiDraft.isDraftActive && !hasEmailBody && !isComposeMode;
 
             const draftCard = aiDraft.isDraftActive ? (
@@ -1982,10 +2001,7 @@ export const EmailComposer = ({
                   void (async (): Promise<void> => {
                     const html = content ? await markdownToHtml(content) : '';
                     setEmailContent(html);
-                    if (html) {
-                      if (isComposeMode) saveDraft(html);
-                      else persistReplyDraft(html);
-                    }
+                    if (html) saveDraft(html);
                   })();
                 }}
                 onReject={() => {
@@ -1997,34 +2013,35 @@ export const EmailComposer = ({
               />
             ) : null;
 
-            // Compose-mode prompt copy: ask "what to write" instead of
-            // "what to do with this text" since there's no thread or
-            // drafted body to reframe.
-            const promptTitle = isComposeMode
-              ? hasEmailBody
-                ? 'How should I refine your email?'
-                : 'What would you like to write?'
-              : 'What would you like to do with this text?';
-            const promptPlaceholder = isComposeMode
-              ? hasEmailBody
-                ? 'Refine the draft (e.g., "make it shorter")'
-                : 'Describe the email you want to write…'
-              : 'Or describe how to change it…';
-            const composeQuickActions = isComposeMode && !hasEmailBody ? ([] as const) : undefined;
-
-            const rephraseCard = isRephrasePromptOpen ? (
-              <RephrasePrompt
-                disabled={aiDraft.isStreaming}
-                title={promptTitle}
-                placeholder={promptPlaceholder}
-                {...(composeQuickActions && { quickActions: composeQuickActions })}
-                onSubmit={instruction => {
-                  aiDraft.rephraseDraft(instruction, stripHtml(emailContent));
-                  setIsRephrasePromptOpen(false);
-                }}
-                onClose={() => setIsRephrasePromptOpen(false)}
-              />
-            ) : null;
+            const aiPanel =
+              aiPanelMode !== null ? (
+                <AIComposerPanel
+                  mode={aiPanelMode}
+                  disabled={aiDraft.isStreaming}
+                  onQuickRewrite={action => {
+                    const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
+                    aiDraft.quickRewrite(action, source);
+                  }}
+                  onCustomRewrite={instruction => {
+                    const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
+                    aiDraft.customRewrite(instruction, source);
+                  }}
+                  onAskAISubmit={instruction => {
+                    aiDraft.askAIRefine(instruction, stripHtml(emailContent));
+                  }}
+                  {...((onOpenAskAISidebarFresh || onToggleAIPanel) && {
+                    onOpenAskAISidebar: (): void => {
+                      if (onOpenAskAISidebarFresh) {
+                        onOpenAskAISidebarFresh();
+                      } else {
+                        onToggleAIPanel?.();
+                      }
+                      setAIPanelMode(null);
+                    },
+                  })}
+                  onClose={() => setAIPanelMode(null)}
+                />
+              ) : null;
 
             if (sideBySide) {
               return (
@@ -2036,7 +2053,7 @@ export const EmailComposer = ({
                     </div>
                     <EmailEditor
                       value={emailContent}
-                      onChange={setEmailContent}
+                      onChange={handleEditorChange}
                       onAddFiles={addFilesToAttachments}
                       uploadAndInsertInlineImages={uploadAndInsertInlineImages}
                       onEditorReady={editor => {
@@ -2055,16 +2072,18 @@ export const EmailComposer = ({
                           void handleSendEmail();
                         }
                       }}
-                      onBlur={maybePersistReplyDraft}
-                      readOnly={aiDraft.isDraftActive}
+                      onBlur={() => {
+                        if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
+                      }}
+                      onCitationClick={effectiveCitationClick}
+                      {...(onCitationOrderChange && { onCitationOrderChange })}
+                      readOnly={aiDraft.isDraftActive && !aiDraft.isStreaming}
                       disabled={isSending}
                       className='flex-1 min-h-0'
                       footerSlot={composerFooter}
                     />
                   </div>
-                  <div className='flex-1 min-w-0 flex flex-col min-h-0'>
-                    {draftCard ?? rephraseCard}
-                  </div>
+                  <div className='flex-1 min-w-0 flex flex-col min-h-0'>{draftCard ?? aiPanel}</div>
                 </div>
               );
             }
@@ -2081,7 +2100,7 @@ export const EmailComposer = ({
             return (
               <EmailEditor
                 value={emailContent}
-                onChange={setEmailContent}
+                onChange={handleEditorChange}
                 onAddFiles={addFilesToAttachments}
                 uploadAndInsertInlineImages={uploadAndInsertInlineImages}
                 onEditorReady={editor => {
@@ -2100,7 +2119,11 @@ export const EmailComposer = ({
                     void handleSendEmail();
                   }
                 }}
-                onBlur={maybePersistReplyDraft}
+                onBlur={() => {
+                  if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
+                }}
+                onCitationClick={effectiveCitationClick}
+                {...(onCitationOrderChange && { onCitationOrderChange })}
                 disabled={isSending}
                 className='flex-1 min-h-0'
                 footerSlot={composerFooter}
@@ -2161,7 +2184,7 @@ export const EmailComposer = ({
                 <DropdownMenuContent align='start' side='top'>
                   <DropdownMenuItem
                     onClick={() => {
-                      const base = channelId ? `/support/${channelId}` : '/support';
+                      const base = channelId ? `${supportBase}/${channelId}` : supportBase;
                       void composerNavigate(`${base}?openSettings=signatures`);
                     }}
                     className='text-xs text-muted-foreground'
@@ -2191,7 +2214,7 @@ export const EmailComposer = ({
                 <button
                   type='button'
                   onClick={() => {
-                    const base = channelId ? `/support/${channelId}` : '/support';
+                    const base = channelId ? `${supportBase}/${channelId}` : supportBase;
                     void composerNavigate(`${base}?openSettings=signatures`);
                   }}
                   className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
@@ -2205,63 +2228,54 @@ export const EmailComposer = ({
             ) : null}
           </div>
           <div className='flex items-center gap-0.5'>
-            {/* Ask AI button */}
-            {features.showAI && onToggleAIPanel && (
+            {features.showAI &&
+              ((): ReactElement => {
+                const noBodyToRewrite = !hasEmailBody && !aiDraft.isDraftActive;
+                const wandDisabled =
+                  aiDraft.isStreaming || (!isComposeMode && !emails?.length) || noBodyToRewrite;
+                const wandTooltip = noBodyToRewrite
+                  ? 'Write something first to rewrite it'
+                  : 'Customize with AI';
+                return (
+                  <Tooltip content={wandTooltip} side='bottom' delayDuration={300}>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setAIPanelMode('quick-rewrite');
+                      }}
+                      disabled={wandDisabled}
+                      className='size-7 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                      aria-label='Customize draft with AI'
+                      data-track-category='Support'
+                      data-track-name='OpenAIPanel'
+                      data-track-metadata={JSON.stringify({
+                        hasExistingText: hasEmailBody,
+                      })}
+                    >
+                      <Wand2 size={14} />
+                    </button>
+                  </Tooltip>
+                );
+              })()}
+
+            {features.showAI && (
               <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
                 <button
                   type='button'
-                  onClick={onToggleAIPanel}
+                  onClick={() => setAIPanelMode(aiPanelMode === 'ask-ai' ? null : 'ask-ai')}
+                  disabled={aiDraft.isStreaming}
                   className={cn(
-                    'size-7 flex items-center justify-center rounded-full transition-colors',
-                    isAIPanelOpen ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
+                    'size-7 flex items-center justify-center rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed',
+                    aiPanelMode === 'ask-ai' ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
                   )}
-                  aria-label='Toggle Ask AI panel'
+                  aria-label='Ask AI'
+                  aria-pressed={aiPanelMode === 'ask-ai'}
                   data-track-category='Support'
-                  data-track-name='ToggleAIPanel'
+                  data-track-name='OpenAskAI'
                 >
                   <span className='inline-flex animate-ai-pop'>
                     <XyneAIStar size={14} />
                   </span>
-                </button>
-              </Tooltip>
-            )}
-
-            {/* Draft button — empty body generates from scratch; existing text
-                opens the Gmail-style "what would you like to do?" prompt. */}
-            {features.showAI && (
-              <Tooltip
-                content={
-                  hasEmailBody
-                    ? 'Rewrite with AI'
-                    : isComposeMode
-                      ? 'Write with AI'
-                      : 'Generate AI draft reply'
-                }
-                side='bottom'
-                delayDuration={300}
-              >
-                <button
-                  type='button'
-                  onClick={() => {
-                    // Compose mode always opens the prompt — there's no
-                    // thread context, so the AI needs the user's instruction
-                    // to write something useful.
-                    if (isComposeMode || hasEmailBody) {
-                      setIsRephrasePromptOpen(true);
-                    } else {
-                      aiDraft.triggerDraft();
-                    }
-                  }}
-                  disabled={aiDraft.isStreaming || (!isComposeMode && !emails?.length)}
-                  className='size-7 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-                  aria-label='Draft reply with AI'
-                  data-track-category='Support'
-                  data-track-name='TriggerAIDraft'
-                  data-track-metadata={JSON.stringify({
-                    hasExistingText: hasEmailBody,
-                  })}
-                >
-                  <Wand2 size={14} />
                 </button>
               </Tooltip>
             )}

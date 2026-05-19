@@ -31,7 +31,7 @@ import {
   CheckCheck,
   SquareCheck,
 } from 'lucide-react';
-import { ChannelVisibility, EmailType, EmailMergeMode } from '@xyne/shared';
+import { ChannelVisibility, EmailType, EmailMergeMode, AutoDraftMode } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -103,6 +103,13 @@ import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker
 import { PriorityPicker } from '../../components/Tickets/TicketListView/PriorityPicker';
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
+import { DraftSourcesPanel } from '../../components/xyne-desk/DraftSourcesPanel/DraftSourcesPanel';
+import type { DraftSource } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import {
+  fetchSessionDetail,
+  fetchAutodraftSessionForConversation,
+  fetchUserSessionForConversation,
+} from '../../services/XyneAI/XyneAISessionsService';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
@@ -112,6 +119,13 @@ import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
 import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
+import { extractCitationRefs } from '../../components/ui/TipTapExtensions/CitationMark';
+
+interface BotMessageBrief {
+  id: string;
+  timestamp: number;
+  sources: DraftSource[];
+}
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
 import { InboxSettings } from '../../components/xyne-desk/InboxSettings/InboxSettings';
 import { ClassificationSettings } from '../../components/xyne-desk/ClassificationSettings/ClassificationSettings';
@@ -478,15 +492,21 @@ interface DemergeEmailResponse {
     conversationId: string;
   };
 }
-type TabType = 'messages' | 'details';
+type TabType = 'messages' | 'details' | 'sources';
 
 type ViewMode = 'kanban' | 'list';
 
 const SupportScreen = (): ReactElement => {
-  const { channelId: channelIdParam, ticketId } = useParams<{
+  const {
+    workspaceId,
+    channelId: channelIdParam,
+    ticketId,
+  } = useParams<{
+    workspaceId?: string;
     channelId?: string;
     ticketId?: string;
   }>();
+  const supportBase = workspaceId ? `/${workspaceId}/support` : '/support';
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const zero = useZero();
@@ -510,6 +530,8 @@ const SupportScreen = (): ReactElement => {
   const currentInboxDefaultCc = emailChannelPreference?.defaultCc ?? null;
   const currentInboxEmailMergeMode: EmailMergeMode =
     emailChannelPreference?.emailMergeMode ?? EmailMergeMode.ENABLED;
+  const currentInboxAutoDraftMode: AutoDraftMode =
+    emailChannelPreference?.autoDraftMode ?? AutoDraftMode.OFF;
   const [draftInboxOwnerUserId, setDraftInboxOwnerUserId] = useState<string | null>(
     currentInboxOwnerUserId,
   );
@@ -522,6 +544,8 @@ const SupportScreen = (): ReactElement => {
   const [draftInboxEmailMergeMode, setDraftInboxEmailMergeMode] = useState<EmailMergeMode>(
     currentInboxEmailMergeMode,
   );
+  const [draftInboxAutoDraftMode, setDraftInboxAutoDraftMode] =
+    useState<AutoDraftMode>(currentInboxAutoDraftMode);
   const [isSavingInboxSettings, setIsSavingInboxSettings] = useState(false);
   const [isSavingDefaultCc, setIsSavingDefaultCc] = useState(false);
   useEffect(() => {
@@ -540,6 +564,10 @@ const SupportScreen = (): ReactElement => {
     setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
   }, [currentInboxEmailMergeMode]);
 
+  useEffect(() => {
+    setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
+  }, [currentInboxAutoDraftMode]);
+
   const canEditSendAsEmail =
     !!userID &&
     !!selectedChannelForSettings &&
@@ -550,7 +578,8 @@ const SupportScreen = (): ReactElement => {
     (draftInboxOwnerUserId !== currentInboxOwnerUserId ||
       draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId ||
       (canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail) ||
-      draftInboxEmailMergeMode !== currentInboxEmailMergeMode);
+      draftInboxEmailMergeMode !== currentInboxEmailMergeMode ||
+      draftInboxAutoDraftMode !== currentInboxAutoDraftMode);
 
   const handleSaveInboxSettings = useCallback(async () => {
     if (!selectedChannelId) {
@@ -572,12 +601,16 @@ const SupportScreen = (): ReactElement => {
         ...(draftInboxEmailMergeMode !== currentInboxEmailMergeMode
           ? { emailMergeMode: draftInboxEmailMergeMode }
           : {}),
+        ...(draftInboxAutoDraftMode !== currentInboxAutoDraftMode
+          ? { autoDraftMode: draftInboxAutoDraftMode }
+          : {}),
       });
     } catch (error) {
       setDraftInboxOwnerUserId(currentInboxOwnerUserId);
       setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
       setDraftInboxSendAsEmail(currentInboxSendAsEmail);
       setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
+      setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
       console.error('Failed to update email channel preference:', error);
     } finally {
       setIsSavingInboxSettings(false);
@@ -593,6 +626,8 @@ const SupportScreen = (): ReactElement => {
     currentInboxSendAsEmail,
     draftInboxEmailMergeMode,
     currentInboxEmailMergeMode,
+    draftInboxAutoDraftMode,
+    currentInboxAutoDraftMode,
     updateEmailChannelPreference,
   ]);
 
@@ -601,11 +636,13 @@ const SupportScreen = (): ReactElement => {
     setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
     setDraftInboxSendAsEmail(currentInboxSendAsEmail);
     setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
+    setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
   }, [
     currentInboxOwnerUserId,
     currentInboxAssigneeUserGroupId,
     currentInboxSendAsEmail,
     currentInboxEmailMergeMode,
+    currentInboxAutoDraftMode,
   ]);
 
   const allUserGroups = useUserGroups();
@@ -653,10 +690,10 @@ const SupportScreen = (): ReactElement => {
     (next: string | null): void => {
       // Preserve non-routing query params (settings, openSettings, etc.).
       const qs = searchParams.toString();
-      const path = next ? `/support/${next}` : '/support';
+      const path = next ? `${supportBase}/${next}` : supportBase;
       void navigate(qs ? `${path}?${qs}` : path, { replace: true });
     },
-    [navigate, searchParams],
+    [navigate, searchParams, supportBase],
   );
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('support-sidebar-open');
@@ -881,7 +918,7 @@ const SupportScreen = (): ReactElement => {
     const mailId = searchParams.get('mail');
     if (mailId) params.set('mail', mailId);
     const qs = params.toString();
-    void navigate(`/support/${selectedChannelId}/${xyneId}${qs ? `?${qs}` : ''}`, {
+    void navigate(`${supportBase}/${selectedChannelId}/${xyneId}${qs ? `?${qs}` : ''}`, {
       replace: true,
     });
   }, [
@@ -890,6 +927,7 @@ const SupportScreen = (): ReactElement => {
     selectedChannelId,
     deeplinkConversation,
     navigate,
+    supportBase,
   ]);
 
   useEffect(() => {
@@ -911,7 +949,7 @@ const SupportScreen = (): ReactElement => {
       if (channelFromCallback) {
         clearChannelConnectedEmailCache(channelFromCallback);
         clearDeskContactsCache(channelFromCallback);
-        void navigate(`/support/${channelFromCallback}`, { replace: true });
+        void navigate(`${supportBase}/${channelFromCallback}`, { replace: true });
       } else {
         setSearchParams(
           prev => {
@@ -928,7 +966,7 @@ const SupportScreen = (): ReactElement => {
     } else if (emailError) {
       toast.error(emailError);
       if (channelFromCallback) {
-        void navigate(`/support/${channelFromCallback}`, { replace: true });
+        void navigate(`${supportBase}/${channelFromCallback}`, { replace: true });
       } else {
         setSearchParams(
           prev => {
@@ -950,10 +988,10 @@ const SupportScreen = (): ReactElement => {
     setIsSettingsOpen(isOpen);
     // Clean up the openSettings param (used by "Add signature" deep-link)
     if (searchParams.get('openSettings') === 'signatures') {
-      const base = selectedChannelId ? `/support/${selectedChannelId}` : '/support';
+      const base = selectedChannelId ? `${supportBase}/${selectedChannelId}` : supportBase;
       void navigate(`${base}?settings=open`, { replace: true });
     }
-  }, [searchParams, navigate, selectedChannelId]);
+  }, [searchParams, navigate, selectedChannelId, supportBase]);
 
   useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
@@ -1379,7 +1417,7 @@ const SupportScreen = (): ReactElement => {
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       const ticketData = ticket as SupportTicket;
-      const ticketUrl = `/support/${ticketData.channelId}/${ticketData.xyneId}`;
+      const ticketUrl = `${supportBase}/${ticketData.channelId}/${ticketData.xyneId}`;
 
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
@@ -1397,7 +1435,7 @@ const SupportScreen = (): ReactElement => {
         },
       });
     },
-    [navigate, isMobile],
+    [navigate, isMobile, supportBase],
   );
 
   const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
@@ -1846,8 +1884,8 @@ const SupportScreen = (): ReactElement => {
                             void navigate(-1);
                           } else {
                             const base = selectedChannelId
-                              ? `/support/${selectedChannelId}`
-                              : '/support';
+                              ? `${supportBase}/${selectedChannelId}`
+                              : supportBase;
                             void navigate(`${base}?settings=open`);
                           }
                         }}
@@ -1870,8 +1908,8 @@ const SupportScreen = (): ReactElement => {
                         variant='ghost'
                         onClick={() => {
                           const back = selectedChannelId
-                            ? `/support/${selectedChannelId}`
-                            : '/support';
+                            ? `${supportBase}/${selectedChannelId}`
+                            : supportBase;
                           void navigate(back);
                         }}
                         data-track-category='Support'
@@ -1990,6 +2028,8 @@ const SupportScreen = (): ReactElement => {
                           isSavingDefaultCc={isSavingDefaultCc}
                           emailMergeMode={draftInboxEmailMergeMode}
                           onEmailMergeModeChange={setDraftInboxEmailMergeMode}
+                          autoDraftMode={draftInboxAutoDraftMode}
+                          onAutoDraftModeChange={setDraftInboxAutoDraftMode}
                           disabled={isSavingInboxSettings}
                         />
                         <div className='border-t border-border' />
@@ -2141,7 +2181,7 @@ const SupportScreen = (): ReactElement => {
                           void handleListViewStageChange(ticketId, newStageName, currentStageName)
                         }
                         onTicketClick={ticket => {
-                          void navigate(`/support/${ticket.channelId}/${ticket.xyneId}`, {
+                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
@@ -2346,19 +2386,40 @@ const TicketMetaRow = ({
 };
 
 const SupportTicketDetail = (): ReactElement => {
-  const { channelId: channelIdParam, ticketId: ticketIdParam } = useParams<{
+  const {
+    workspaceId: routeWorkspaceId,
+    channelId: channelIdParam,
+    ticketId: ticketIdParam,
+  } = useParams<{
+    workspaceId?: string;
     channelId?: string;
     ticketId?: string;
   }>();
-  const { workspaceId } = useAuthContextValues();
+  const supportBase = routeWorkspaceId ? `/${routeWorkspaceId}/support` : '/support';
+  const { workspaceId, userID } = useAuthContextValues();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const isAIPanelOpen = useSelector(
     xyneAIActor,
     snapshot => snapshot.context.xyneAIState === 'open',
   );
+  const restoreThreadOnSidebarCloseRef = useRef<boolean>(false);
+  const prevIsAIPanelOpenRef = useRef<boolean>(isAIPanelOpen);
+  useEffect(() => {
+    const wasOpen = prevIsAIPanelOpenRef.current;
+    const isOpen = isAIPanelOpen;
+    prevIsAIPanelOpenRef.current = isOpen;
+    if (wasOpen && !isOpen && restoreThreadOnSidebarCloseRef.current) {
+      setIsRightPanelOpen(true);
+      restoreThreadOnSidebarCloseRef.current = false;
+    }
+  }, [isAIPanelOpen]);
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
+  const [autodraftBotMessages, setAutodraftBotMessages] = useState<BotMessageBrief[]>([]);
+  const [userSessionBotMessages, setUserSessionBotMessages] = useState<BotMessageBrief[]>([]);
+  const [sourcesHydrating, setSourcesHydrating] = useState(false);
+  const [highlightedSourceRef, setHighlightedSourceRef] = useState<string | null>(null);
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {
     if (!cid) return;
     try {
@@ -2413,6 +2474,54 @@ const SupportTicketDetail = (): ReactElement => {
     { enabled: !ticketId && !!ticketIdParam && !!routeChannelId },
   );
   const ticket = ticketById ?? ticketByXyneId;
+  const ticketEmailDrafts = (
+    ticket as
+      | {
+          emailDrafts?: ReadonlyArray<{
+            draftContent?: string | null;
+            userId?: string | null;
+          }>;
+        }
+      | null
+      | undefined
+  )?.emailDrafts;
+  const ticketEmailDraftCount = ticketEmailDrafts?.length ?? 0;
+  const draftBodyHtml = useMemo<string | null>(() => {
+    if (!ticketEmailDrafts || ticketEmailDrafts.length === 0) return null;
+
+    const ownedBody: string | null = userID
+      ? (ticketEmailDrafts.find(d => d.userId === userID)?.draftContent ?? null)
+      : null;
+    const fallbackBody: string | null =
+      ticketEmailDrafts.find(d => d.userId === null)?.draftContent ?? null;
+    return ownedBody ?? fallbackBody;
+  }, [ticketEmailDrafts, userID]);
+  const bodyCitedRefs = useMemo(() => extractCitationRefs(draftBodyHtml), [draftBodyHtml]);
+  const draftSources = useMemo<DraftSource[]>(() => {
+    if (bodyCitedRefs.length === 0) return [];
+    const allBots: BotMessageBrief[] = [...userSessionBotMessages, ...autodraftBotMessages];
+    if (allBots.length === 0) return [];
+    const bodyRefSet = new Set(bodyCitedRefs);
+    const sortedBots = [...allBots].sort((a, b) => b.timestamp - a.timestamp);
+    const refToSource = new Map<string, DraftSource>();
+    for (const msg of sortedBots) {
+      for (const src of msg.sources) {
+        if (!bodyRefSet.has(src.prefixedRef)) continue;
+        if (refToSource.has(src.prefixedRef)) continue;
+        refToSource.set(src.prefixedRef, src);
+      }
+    }
+
+    return Array.from(refToSource.values());
+  }, [userSessionBotMessages, autodraftBotMessages, bodyCitedRefs]);
+  const visibleDraftSources = useMemo<DraftSource[]>(() => {
+    if (!(composerOpen || ticketEmailDraftCount > 0)) return [];
+    if (bodyCitedRefs.length === 0) return [];
+    const bySrc = new Map(draftSources.map(s => [s.prefixedRef, s]));
+    return bodyCitedRefs.map(ref => bySrc.get(ref)).filter((s): s is DraftSource => !!s);
+  }, [composerOpen, ticketEmailDraftCount, bodyCitedRefs, draftSources]);
+
+  const draftHasCitations = (composerOpen || ticketEmailDraftCount > 0) && bodyCitedRefs.length > 0;
   const emails = useMemo(() => (ticket?.emails as Email[] | undefined) ?? [], [ticket?.emails]);
   const emailCollapseState = useEmailCollapseState(emails);
 
@@ -2453,6 +2562,66 @@ const SupportTicketDetail = (): ReactElement => {
       return;
     }
     setComposerOpenState(composerOpenByConv.get(conversationId) ?? false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAutodraftBotMessages([]);
+    setUserSessionBotMessages([]);
+    if (!conversationId) {
+      setSourcesHydrating(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setSourcesHydrating(true);
+
+    const withRetry = async <T,>(fn: () => Promise<T>): Promise<T> => {
+      let lastErr = new Error('request failed');
+      for (const delay of [0, 400, 1200]) {
+        if (delay > 0) await new Promise(r => setTimeout(r, delay));
+        if (cancelled) throw new Error('cancelled');
+        try {
+          return await fn();
+        } catch (err) {
+          lastErr = err instanceof Error ? err : new Error(String(err));
+        }
+      }
+      throw lastErr;
+    };
+
+    const hydrateFrom = async (
+      lookup: (convId: string) => Promise<string | null>,
+      setter: (msgs: BotMessageBrief[]) => void,
+    ): Promise<void> => {
+      try {
+        const sessionId = await withRetry(() => lookup(conversationId));
+        if (cancelled || !sessionId) return;
+        const detail = await withRetry(() => fetchSessionDetail(sessionId));
+        if (cancelled) return;
+        const bots: BotMessageBrief[] = detail.messages
+          .filter(m => m.type === 'bot' && (m.sources?.length ?? 0) > 0)
+          .map(m => ({
+            id: m.id,
+            timestamp: new Date(m.timestamp).getTime(),
+            sources: m.sources ?? [],
+          }));
+        if (!cancelled) setter(bots);
+      } catch {
+        // 404 = no such session yet for this conv — fine, leave that slot empty.
+      }
+    };
+
+    void Promise.allSettled([
+      hydrateFrom(fetchAutodraftSessionForConversation, setAutodraftBotMessages),
+      hydrateFrom(fetchUserSessionForConversation, setUserSessionBotMessages),
+    ]).finally(() => {
+      if (!cancelled) setSourcesHydrating(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId]);
 
   const setComposerOpen: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
@@ -2531,7 +2700,7 @@ const SupportTicketDetail = (): ReactElement => {
     if (!t.xyneId) return;
     const nextChannelId = t.channelId || channelIdParam;
     if (!nextChannelId) return;
-    void navigate(`/support/${nextChannelId}/${t.xyneId}`, {
+    void navigate(`${supportBase}/${nextChannelId}/${t.xyneId}`, {
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
@@ -2716,7 +2885,12 @@ const SupportTicketDetail = (): ReactElement => {
     });
   }, [messages]);
 
-  const activeTab: TabType = searchParams.get('selectedTab') === 'details' ? 'details' : 'messages';
+  const activeTab: TabType = ((): TabType => {
+    const t = searchParams.get('selectedTab');
+    if (t === 'details') return 'details';
+    if (t === 'sources') return 'sources';
+    return 'messages';
+  })();
   const setActiveTab = useCallback(
     (next: TabType) => {
       setSearchParams(
@@ -2756,7 +2930,7 @@ const SupportTicketDetail = (): ReactElement => {
                 <button
                   type='button'
                   onClick={() => {
-                    const back = channelIdParam ? `/support/${channelIdParam}` : '/support';
+                    const back = channelIdParam ? `${supportBase}/${channelIdParam}` : supportBase;
                     void navigate(back);
                   }}
                   className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
@@ -3160,6 +3334,13 @@ const SupportTicketDetail = (): ReactElement => {
                       xyneAIActor.send({ type: 'OPEN' });
                     }
                   }}
+                  onOpenAskAISidebarFresh={() => {
+                    xyneAIActor.send({ type: 'OPEN' });
+                  }}
+                  onCitationClick={(ref): void => {
+                    setActiveTab('sources');
+                    setHighlightedSourceRef(ref);
+                  }}
                   channelId={channelId}
                   ticketId={ticketId}
                   replyToEmailId={replyToEmailId}
@@ -3237,6 +3418,7 @@ const SupportTicketDetail = (): ReactElement => {
               <div
                 className='h-full flex flex-col overflow-hidden relative'
                 ref={dragAndDropAreaRef}
+                data-thread-citation-host
               >
                 <DragAndDropOverlay isVisible={isDragging} />
                 {conversationId && channelId ? (
@@ -3291,6 +3473,45 @@ const SupportTicketDetail = (): ReactElement => {
                               </span>
                             </button>
                           </Tabs.Trigger>
+                          {draftHasCitations && (
+                            <Tabs.Trigger asChild value='sources'>
+                              <button
+                                className={cn(
+                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                                  activeTab === 'sources'
+                                    ? 'border-b-2 border-primary'
+                                    : 'border-b-2 border-transparent',
+                                )}
+                                data-track-category='Support'
+                                data-track-name='OpenSourcesTab'
+                              >
+                                <span
+                                  className={`${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
+                                >
+                                  <Sparkles size={12} />
+                                </span>
+                                <span
+                                  className={`text-sm font-medium ${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
+                                >
+                                  Sources
+                                </span>
+                                <span
+                                  className={cn(
+                                    'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold',
+                                    activeTab === 'sources'
+                                      ? 'bg-primary/10 text-primary'
+                                      : 'bg-muted text-muted-foreground',
+                                  )}
+                                >
+                                  {sourcesHydrating && visibleDraftSources.length === 0 ? (
+                                    <Loader2 size={10} className='animate-spin' />
+                                  ) : (
+                                    visibleDraftSources.length
+                                  )}
+                                </span>
+                              </button>
+                            </Tabs.Trigger>
+                          )}
                         </Tabs.List>
                         <div className='flex items-center gap-2 shrink-0'>
                           {/* Initiate Call Button */}
@@ -3386,6 +3607,18 @@ const SupportTicketDetail = (): ReactElement => {
                           <p>Ticket ID not found</p>
                         </div>
                       )}
+                    </Tabs.Content>
+
+                    <Tabs.Content
+                      value='sources'
+                      className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
+                    >
+                      <DraftSourcesPanel
+                        sources={visibleDraftSources}
+                        embedded
+                        loading={sourcesHydrating}
+                        highlightedRef={highlightedSourceRef}
+                      />
                     </Tabs.Content>
                   </Tabs.Root>
                 ) : (

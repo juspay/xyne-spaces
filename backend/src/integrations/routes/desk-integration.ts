@@ -36,10 +36,8 @@ import {
   createOAuth2Client as createGoogleOAuth2Client,
   setOAuthState as setGoogleOAuthState,
 } from './google-auth';
-import {
-  MICROSOFT_OAUTH_SCOPES,
-  getBackendUrl,
-} from './microsoft-desk-auth';
+import { getBackendUrl } from './microsoft-desk-auth';
+import { MICROSOFT_OAUTH_SCOPES } from '@/services/microsoftDeskService';
 
 const TAG = '[DeskIntegration]';
 const router = express.Router();

@@ -1,10 +1,10 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import {
-  fetchSessionsByConversationId,
   fetchSessionDetail,
+  fetchUserSessionForConversation,
 } from '../services/XyneAI/XyneAISessionsService';
-import type { Message } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import type { Message, DraftSource } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { logger, Event } from '../utils/logger';
 
 export interface DeskAIDraftHeaders {
@@ -22,13 +22,18 @@ interface UseDeskAIDraftOptions {
   headers?: DeskAIDraftHeaders;
 }
 
+export type AIRefineQuickAction = 'polish' | 'formalise' | 'elaborate' | 'shorten';
+
 export interface UseDeskAIDraftReturn {
   draftContent: string;
+  draftSources: DraftSource[];
   isStreaming: boolean;
   isDraftActive: boolean;
   triggerDraft: () => void;
-  rephraseDraft: (instruction: string, sourceText: string) => void;
+  askAIRefine: (instruction: string, sourceText: string) => void;
   refineDraft: (instruction: string, options?: { selectedText?: string }) => void;
+  quickRewrite: (action: AIRefineQuickAction, sourceText: string) => void;
+  customRewrite: (instruction: string, sourceText: string) => void;
   acceptDraft: () => string;
   rejectDraft: () => void;
 }
@@ -41,6 +46,11 @@ const latestBotContent = (messages: Message[]): string | null => {
   const head = stream.trimStart();
   if (head.startsWith('{') || head.startsWith('[')) return null;
   return stream || null;
+};
+
+const latestBotSources = (messages: Message[]): DraftSource[] => {
+  const bot = [...messages].reverse().find(m => m.type === 'bot');
+  return bot?.sources ?? [];
 };
 
 // Prior messages are chained via parentId — without a chain, every parentless
@@ -99,10 +109,16 @@ export function useDeskAIDraft({
   headers,
 }: UseDeskAIDraftOptions): UseDeskAIDraftReturn {
   const [draftContent, setDraftContent] = useState('');
+  const [draftSources, setDraftSources] = useState<DraftSource[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const ourStreamIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   const isComposeMode = mode === 'compose';
   const threadId = channelId
@@ -135,23 +151,29 @@ export function useDeskAIDraft({
   }, [storageKey]);
 
   useEffect(() => {
+    let cancelled = false;
     setDraftContent('');
+    setDraftSources([]);
     setIsStreaming(false);
     setIsDraftActive(false);
-    sessionIdRef.current = null;
+    setSessionId(null);
     ourStreamIdRef.current = null;
 
-    if (!isComposeMode && !conversationId) return;
+    if (!isComposeMode && !conversationId)
+      return () => {
+        cancelled = true;
+      };
 
     if (threadId) {
       const active = xyneAIStreamManager.getActiveStream(threadId);
       if (active) {
         ourStreamIdRef.current = active.streamId;
-        if (active.sessionId) sessionIdRef.current = active.sessionId;
+        if (active.sessionId) setSessionId(active.sessionId);
         setIsDraftActive(true);
         setIsStreaming(active.status === 'streaming');
         const content = latestBotContent(active.messages);
         if (content !== null) setDraftContent(content);
+        setDraftSources(latestBotSources(active.messages));
       }
     }
 
@@ -170,28 +192,21 @@ export function useDeskAIDraft({
       }
     }
 
-    if (isComposeMode || !conversationId) {
-      return;
-    }
-    let cancelled = false;
-    fetchSessionsByConversationId(conversationId)
-      .then(sessions => {
-        if (cancelled) return;
-        const first = sessions[0];
-        if (first && !sessionIdRef.current) {
-          sessionIdRef.current = first.sessionId;
+    if (!isComposeMode && conversationId) {
+      void (async () => {
+        try {
+          const resolved = await fetchUserSessionForConversation(conversationId);
+          if (!cancelled && resolved) setSessionId(resolved);
+        } catch {
+          /* lookup failed — first interaction will create a fresh session */
         }
-      })
-      .catch((err: unknown) => {
-        logger.warn(Event.DESK_AI_DRAFT_SESSIONS_FETCH_FAILED, {
-          conversationId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      })();
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [conversationId, storageKey, isComposeMode]);
+  }, [conversationId, storageKey, isComposeMode, threadId]);
 
   useEffect(() => {
     if (!isDraftActive) return;
@@ -201,36 +216,46 @@ export function useDeskAIDraft({
       return;
     }
     const handle = setTimeout(() => writeStorage(draftContent), 250);
-    return () => clearTimeout(handle);
+    return (): void => clearTimeout(handle);
   }, [draftContent, isDraftActive, isStreaming, writeStorage]);
 
-  // Only mirror content/status for streams we started — sidebar streams share
-  // the threadId but their output belongs in the sidebar, not the draft card.
+  // Mirror content/status for streams we own. Also capture the session ID
+  // assigned by the backend (when our local sessionId was null and the
+  // backend created a fresh session) so the next click reuses it.
   useEffect(() => {
     if (!threadId) return;
-    return xyneAIStreamManager.subscribe((state: StreamState) => {
+    return xyneAIStreamManager.subscribe((state: StreamState): void => {
       if (state.threadId !== threadId) return;
-      if (state.sessionId && state.sessionId !== sessionIdRef.current) {
-        sessionIdRef.current = state.sessionId;
-      }
       if (state.streamId !== ourStreamIdRef.current) return;
+      if (
+        state.sessionId &&
+        state.sessionId !== sessionIdRef.current &&
+        !state.sessionId.startsWith('ephemeral-')
+      ) {
+        setSessionId(state.sessionId);
+      }
       const content = latestBotContent(state.messages);
       if (content !== null) setDraftContent(content);
+      setDraftSources(latestBotSources(state.messages));
       setIsStreaming(state.status === 'streaming');
     });
   }, [threadId]);
 
   const submit = useCallback(
-    async (query: string, displayContent: string) => {
+    async (query: string, displayContent: string, options?: { disableTools?: boolean }) => {
       if (!threadId || !channelId) return;
       if (!isComposeMode && !conversationId) return;
 
       setIsDraftActive(true);
       setIsStreaming(true);
       setDraftContent('');
+      setDraftSources([]);
 
       const userMessageId = `user-${Date.now()}`;
-      const prior = await loadPriorMessages(threadId, sessionIdRef.current);
+      const effectiveSessionId =
+        options?.disableTools || isComposeMode ? undefined : (sessionIdRef.current ?? undefined);
+
+      const prior = await loadPriorMessages(threadId, effectiveSessionId ?? null);
       const lastPriorId = prior[prior.length - 1]?.id;
 
       try {
@@ -238,17 +263,20 @@ export function useDeskAIDraft({
           threadId,
           {
             query,
+            displayQuery: displayContent,
             channelIds: [],
-            conversationId: sessionIdRef.current || '',
+            conversationId: effectiveSessionId ?? '',
             ...(!isComposeMode && conversationId && { threadConversationId: conversationId }),
             webSearchEnabled: true,
             deepResearchEnabled: false,
             researchContext: null,
             attachments: [],
-            ...(!isComposeMode && ticketId && { ticketIds: [ticketId] }),
+            ...(!isComposeMode && !options?.disableTools && ticketId && { ticketIds: [ticketId] }),
             localUserMessageId: userMessageId,
+            ...(!options?.disableTools && lastPriorId && { parentMessageId: lastPriorId }),
             suppressCompletionToast: true,
             draftMode: true,
+            ...(options?.disableTools && { disableTools: true }),
           },
           [
             ...prior,
@@ -291,7 +319,7 @@ export function useDeskAIDraft({
     void submit(basePrompt, display);
   }, [submit, basePrompt, isComposeMode]);
 
-  const rephraseDraft = useCallback(
+  const askAIRefine = useCallback(
     (instruction: string, sourceText: string) => {
       const trimmedSource = sourceText.trim();
       const trimmedInstruction = instruction.trim();
@@ -337,6 +365,87 @@ export function useDeskAIDraft({
     [submit, draftContent, basePrompt],
   );
 
+  const quickRewrite = useCallback(
+    (action: AIRefineQuickAction, sourceText: string) => {
+      const trimmedSource = sourceText.trim();
+      if (!trimmedSource) return;
+
+      const actionInstruction: Record<AIRefineQuickAction, string> = {
+        polish:
+          'Polish the wording and improve clarity while preserving the meaning, tone, structure, and any specific details (numbers, names, links).',
+        formalise:
+          'Rewrite the text in a more formal, professional tone while preserving the meaning, structure, and any specific details (numbers, names, links).',
+        elaborate:
+          'Expand the text with helpful detail and context while preserving the meaning, intent, and any specific details (numbers, names, links). Do not invent facts.',
+        shorten:
+          'Make the text shorter and more concise without losing meaning, tone, or any specific details (numbers, names, links).',
+      };
+
+      const headerLines: string[] = [];
+      const fromLine = headers?.from?.trim();
+      if (fromLine) headerLines.push(`From: ${fromLine}`);
+      const to = (headers?.to ?? []).filter(s => s && s.trim());
+      if (to.length) headerLines.push(`To: ${to.join(', ')}`);
+      const headerBlock = headerLines.length
+        ? `\n\nFor context (do not output these as headers — they are only for tone alignment):\n${headerLines.join('\n')}`
+        : '';
+
+      const signoffRule = headers?.signatureWillBeAppended
+        ? '\n\nIMPORTANT: Do NOT add any closing or sign-off — a signature block will be appended after.'
+        : '';
+
+      const query = [
+        'You are an inline rewrite engine.',
+        'Rewrite the text below according to the instruction. Do not invoke any tools, do not search, do not fetch external content. Output ONLY the rewritten text — no preamble, no explanation, no headers, no quotes around the output.',
+        'Formatting: the source may contain HTML (`<strong>`, `<em>`, `<ul>`, `<ol>`, `<li>`, `<a>`, `<h1>`-`<h6>`, `<br>`, `<p>`, `<cite>`) or markdown. Preserve every formatting element from the source in your output as MARKDOWN — bold as `**text**`, italic as `*text*`, links as `[text](url)`, headings with `#`/`##`, bullets as `- item`, ordered lists as `1.`/`2.`, and keep paragraph breaks as blank lines. **Citation tags `<cite ref="X">…</cite>` MUST be preserved verbatim around the same factual span in the rewrite — do not drop them, do not change the `ref` attribute, do not move them to a different sentence.** If a phrase is bold (or italic / a list item / a link / wrapped in `<cite>`) in the source, the rewritten phrase covering the same point MUST be bold (or italic / a list item / a link / wrapped in `<cite>`) too. Never strip formatting. Never wrap the output in ``` code fences.',
+        `Instruction: ${actionInstruction[action]}`,
+        `Text to rewrite:\n"""\n${trimmedSource}\n"""${headerBlock}${signoffRule}`,
+      ].join('\n\n');
+
+      const displayLabel: Record<AIRefineQuickAction, string> = {
+        polish: 'Polish',
+        formalise: 'Formalise',
+        elaborate: 'Elaborate',
+        shorten: 'Shorten',
+      };
+
+      void submit(query, displayLabel[action], { disableTools: true });
+    },
+    [submit, headers],
+  );
+
+  const customRewrite = useCallback(
+    (instruction: string, sourceText: string) => {
+      const trimmedSource = sourceText.trim();
+      const trimmedInstruction = instruction.trim();
+      if (!trimmedSource || !trimmedInstruction) return;
+
+      const headerLines: string[] = [];
+      const fromLine = headers?.from?.trim();
+      if (fromLine) headerLines.push(`From: ${fromLine}`);
+      const to = (headers?.to ?? []).filter(s => s && s.trim());
+      if (to.length) headerLines.push(`To: ${to.join(', ')}`);
+      const headerBlock = headerLines.length
+        ? `\n\nFor context (do not output these as headers — they are only for tone alignment):\n${headerLines.join('\n')}`
+        : '';
+
+      const signoffRule = headers?.signatureWillBeAppended
+        ? '\n\nIMPORTANT: Do NOT add any closing or sign-off — a signature block will be appended after.'
+        : '';
+
+      const query = [
+        'You are an inline rewrite engine.',
+        'Rewrite the text below according to the instruction. Do not invoke any tools, do not search, do not fetch external content. Output ONLY the rewritten text — no preamble, no explanation, no headers, no quotes around the output.',
+        'Formatting: the source may contain HTML (`<strong>`, `<em>`, `<ul>`, `<ol>`, `<li>`, `<a>`, `<h1>`-`<h6>`, `<br>`, `<p>`, `<cite>`) or markdown. Preserve every formatting element from the source in your output as MARKDOWN — bold as `**text**`, italic as `*text*`, links as `[text](url)`, headings with `#`/`##`, bullets as `- item`, ordered lists as `1.`/`2.`, and keep paragraph breaks as blank lines. **Citation tags `<cite ref="X">…</cite>` MUST be preserved verbatim around the same factual span in the rewrite — do not drop them, do not change the `ref` attribute, do not move them to a different sentence.** If a phrase is bold (or italic / a list item / a link / wrapped in `<cite>`) in the source, the rewritten phrase covering the same point MUST be bold (or italic / a list item / a link / wrapped in `<cite>`) too. Never strip formatting. Never wrap the output in ``` code fences.',
+        `Instruction: ${trimmedInstruction}`,
+        `Text to rewrite:\n"""\n${trimmedSource}\n"""${headerBlock}${signoffRule}`,
+      ].join('\n\n');
+
+      void submit(query, trimmedInstruction, { disableTools: true });
+    },
+    [submit, headers],
+  );
+
   const acceptDraft = useCallback(() => {
     setIsDraftActive(false);
     ourStreamIdRef.current = null;
@@ -351,17 +460,21 @@ export function useDeskAIDraft({
     ourStreamIdRef.current = null;
     setIsDraftActive(false);
     setDraftContent('');
+    setDraftSources([]);
     setIsStreaming(false);
     clearStorage();
   }, [threadId, clearStorage]);
 
   return {
     draftContent,
+    draftSources,
     isStreaming,
     isDraftActive,
     triggerDraft,
-    rephraseDraft,
+    askAIRefine,
     refineDraft,
+    quickRewrite,
+    customRewrite,
     acceptDraft,
     rejectDraft,
   };
