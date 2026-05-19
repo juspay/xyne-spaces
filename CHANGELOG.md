@@ -1,3 +1,16 @@
+## [1.145.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.144.0...v1.145.0) (2026-05-19)
+
+
+### Features
+
+* navigation from call activity ([d52df5f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d52df5f97182bb889e67de9d3396689b42a3656d)), closes [#6478](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6478)
+
+
+### Bug Fixes
+
+* allowing emails query for claw ([158b270](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/158b270b8f30a50073202c7b61e7a7affdcd746a)), closes [#6505](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6505)
+* macros support added for canvas migration ([c57c786](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c57c786fd98901c1d75ed7c9db51800fcd327adb)), closes [#6438](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6438)
+
 ## [1.144.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.143.0...v1.144.0) (2026-05-19)
 
 
