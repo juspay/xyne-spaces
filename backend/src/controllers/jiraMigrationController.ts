@@ -5,6 +5,7 @@ import {
   jiraMigrationImportService,
   type JiraMigrationExecuteInput,
   type JiraMigrationProgressUpdate,
+  type JiraMigrationResolveUsersInput,
 } from '@/services/jiraMigrationImportService';
 import { jiraMigrationProgressService } from '@/services/jiraMigrationProgressService';
 import { DatabaseClient } from '@/database/client';
@@ -64,6 +65,36 @@ export class JiraMigrationController {
     }
   };
 
+  resolveUsers = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { jiraProjectKey } = req.body as { jiraProjectKey?: string };
+      if (!jiraProjectKey) {
+        res.status(400).json({ error: 'jiraProjectKey is required' });
+        return;
+      }
+
+      const input: JiraMigrationResolveUsersInput = {
+        jiraProjectKey,
+        issueKeys: Array.isArray(req.body.issueKeys) ? req.body.issueKeys : undefined,
+        dateFrom: typeof req.body.dateFrom === 'string' ? req.body.dateFrom : undefined,
+        includeComments: req.body.includeComments !== false,
+        includeAttachments: req.body.includeAttachments !== false,
+        nextPageToken: typeof req.body.nextPageToken === 'string' ? req.body.nextPageToken : null,
+        pageSize: typeof req.body.pageSize === 'number' ? req.body.pageSize : undefined,
+        userEmailMappings:
+          req.body.userEmailMappings && typeof req.body.userEmailMappings === 'object' && !Array.isArray(req.body.userEmailMappings)
+            ? (req.body.userEmailMappings as Record<string, string>)
+            : undefined,
+      };
+
+      const result = await jiraMigrationImportService.resolveUsers(input);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      logger.error('Jira migration resolve-users failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to resolve Jira users' });
+    }
+  };
+
   execute = async (req: Request, res: Response): Promise<void> => {
     try {
       const { jiraProjectKey, targetProjectId, targetBoardId, targetChannelId } = req.body as {
@@ -79,6 +110,7 @@ export class JiraMigrationController {
         jiraStatusSequence?: string[];
         excludedStageNames?: string[];
         filters?: { reporterAccountIds?: string[]; creatorAccountIds?: string[]; assigneeAccountIds?: string[]; labels?: string[] };
+        userEmailMappings?: Record<string, string>;
       };
 
       if (!jiraProjectKey || !targetProjectId || !targetBoardId || !targetChannelId) {
@@ -121,6 +153,10 @@ export class JiraMigrationController {
         excludedStageNames: Array.isArray(req.body.excludedStageNames)
           ? req.body.excludedStageNames.filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
           : undefined,
+        userEmailMappings:
+          req.body.userEmailMappings && typeof req.body.userEmailMappings === 'object' && !Array.isArray(req.body.userEmailMappings)
+            ? (req.body.userEmailMappings as Record<string, string>)
+            : undefined,
       };
 
       if (Object.keys(input.statusV2Mappings).length === 0) {

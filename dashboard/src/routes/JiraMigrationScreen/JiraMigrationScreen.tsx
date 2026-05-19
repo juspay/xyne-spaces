@@ -11,6 +11,7 @@ import {
   type JiraMigrationHistoryItem,
   type JiraMigrationJobProgress,
   type JiraMigrationPreviewResponse,
+  type JiraMigrationResolveUsersResponse,
 } from '../../services/JiraMigration/jiraMigrationService';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
@@ -133,6 +134,7 @@ const clearPersistedJiraMigrationJob = (): void => {
 const JiraMigrationScreen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const [projects] = useCachedQuery(queries.getAllProjects());
+  const [workspaceUsers] = useCachedQuery(queries.getUsersV2());
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [targetChannelId, setTargetChannelId] = useState('');
@@ -164,7 +166,21 @@ const JiraMigrationScreen = (): ReactElement => {
   const [skippedCustomFieldIds, setSkippedCustomFieldIds] = useState<Record<string, boolean>>({});
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [migrationPhase, setMigrationPhase] = useState<MigrationPhase>('setup');
+  const [resolveUsersResult, setResolveUsersResult] =
+    useState<JiraMigrationResolveUsersResponse | null>(null);
+  const [isResolveUsersLoading, setIsResolveUsersLoading] = useState(false);
+  const [userEmailMappings, setUserEmailMappings] = useState<Record<string, string>>({});
+  const [scanPagesScanned, setScanPagesScanned] = useState(0);
+  const [scanUnresolvedFound, setScanUnresolvedFound] = useState(0);
+  const [scanIncludeComments, setScanIncludeComments] = useState(true);
+  const [scanIncludeAttachments, setScanIncludeAttachments] = useState(true);
   const channels = useChannelsByProjectId(selectedProjectId || undefined);
+  const [scanResolvedMappings, setScanResolvedMappings] = useState<
+    JiraMigrationResolveUsersResponse['resolvedUserMappings']
+  >([]);
+  const [scanResolvedMappingsTruncated, setScanResolvedMappingsTruncated] = useState(false);
+  const [resolvedUsersPage, setResolvedUsersPage] = useState(0);
+  const RESOLVED_USERS_PER_PAGE = 50;
 
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: selectedProjectId || 'placeholder' }),
@@ -185,6 +201,82 @@ const JiraMigrationScreen = (): ReactElement => {
     () => channels.find(channel => channel.id === targetChannelId) || null,
     [channels, targetChannelId],
   );
+
+  const UnresolvedUserMappingRow = ({
+    item,
+  }: {
+    item: JiraMigrationResolveUsersResponse['unresolvedUsers'][number];
+  }) => {
+    const [search, setSearch] = useState('');
+    const { primary, fallbacks } = getUnresolvedMappingKeys(item);
+    const selectedEmail = getMappedEmailForUnresolved(item);
+
+    const options = useMemo(() => {
+      const query = search.trim().toLowerCase();
+      const users = (workspaceUsers || []).filter(user => Boolean(user?.email));
+      const filtered = query
+        ? users.filter(user => {
+            const email = (user.email || '').toLowerCase();
+            const name = (user.name || '').toLowerCase();
+            return email.includes(query) || name.includes(query);
+          })
+        : users;
+
+      // Keep dropdown fast: cap options shown.
+      const baseOptions = filtered.slice(0, 50).map(user => ({
+        value: user.email,
+        label: user.name || user.email,
+        subtitle: user.email,
+        icon: <User className='w-4 h-4 text-muted-foreground' />,
+      }));
+
+      if (!selectedEmail) return baseOptions;
+
+      const selectedUser = users.find(
+        user => (user.email || '').toLowerCase() === selectedEmail.toLowerCase(),
+      );
+      if (!selectedUser) return baseOptions;
+
+      const selectedOption = {
+        value: selectedUser.email,
+        label: selectedUser.name || selectedUser.email,
+        subtitle: selectedUser.email,
+        icon: <User className='w-4 h-4 text-muted-foreground' />,
+      };
+
+      if (baseOptions.some(opt => opt.value === selectedOption.value)) {
+        return baseOptions;
+      }
+
+      return [selectedOption, ...baseOptions];
+    }, [workspaceUsers, search]);
+
+    return (
+      <EntitySelector
+        options={options}
+        disableClientFiltering
+        onSearchChange={setSearch}
+        selectedValue={selectedEmail}
+        onSelect={value => {
+          setUserEmailMappings(prev => {
+            const next = { ...prev };
+            if (value) {
+              next[primary] = value;
+              for (const k of fallbacks) next[k] = value;
+            } else {
+              delete next[primary];
+              for (const k of fallbacks) delete next[k];
+            }
+            return next;
+          });
+        }}
+        placeholder='Map to Xyne user email'
+        searchPlaceholder='Search users...'
+        width='100%'
+        testId={`jira-unresolved-map-${primary}`}
+      />
+    );
+  };
 
   const previewActionCounts = useMemo(() => {
     if (!preview) {
@@ -456,6 +548,163 @@ const JiraMigrationScreen = (): ReactElement => {
     selectedBoardId.trim() !== '' &&
     targetChannelId.trim() !== '';
 
+  const getUnresolvedMappingKeys = (item: {
+    displayName: string | null;
+    accountId: string | null;
+  }): { primary: string; fallbacks: string[] } => {
+    const accountIdKey = item.accountId?.trim()
+      ? `accountId:${item.accountId.trim().toLowerCase()}`
+      : null;
+    const displayNameKey = item.displayName?.trim()
+      ? `displayName:${item.displayName.trim().toLowerCase()}`
+      : null;
+    const rawDisplayNameKey = item.displayName?.trim()
+      ? item.displayName.trim().toLowerCase()
+      : null;
+
+    const keys = [accountIdKey, displayNameKey, rawDisplayNameKey].filter((v): v is string =>
+      Boolean(v),
+    );
+    const primary = keys[0] || 'unknown';
+    return { primary, fallbacks: keys.slice(1) };
+  };
+
+  const getMappedEmailForUnresolved = (item: {
+    displayName: string | null;
+    accountId: string | null;
+  }): string | null => {
+    const { primary, fallbacks } = getUnresolvedMappingKeys(item);
+    return (
+      userEmailMappings[primary] || fallbacks.map(k => userEmailMappings[k]).find(Boolean) || null
+    );
+  };
+
+  const handleResolveUsers = async (): Promise<void> => {
+    if (!canPreview) {
+      toast.error('Please fill Jira project key, target project, board, and channel ID');
+      return;
+    }
+
+    setIsResolveUsersLoading(true);
+    setScanPagesScanned(0);
+    setScanUnresolvedFound(0);
+    setScanResolvedMappings([]);
+    setScanResolvedMappingsTruncated(false);
+    setResolvedUsersPage(0);
+    try {
+      const aggregated = new Map<
+        string,
+        {
+          displayName: string | null;
+          accountId: string | null;
+          suggestedEmails: Set<string>;
+          issueKeys: Set<string>;
+        }
+      >();
+
+      let nextPageToken: string | null = null;
+      let hasNextPage = true;
+      let pages = 0;
+      const scanPageSize = 100;
+
+      while (hasNextPage) {
+        pages += 1;
+        setScanPagesScanned(pages);
+        const page = await jiraMigrationService.resolveUsers({
+          jiraProjectKey: jiraProjectKey.trim().toUpperCase(),
+          ...(resolvedDateFrom ? { dateFrom: resolvedDateFrom } : {}),
+          includeComments: scanIncludeComments,
+          includeAttachments: scanIncludeAttachments,
+          pageSize: scanPageSize,
+          nextPageToken,
+          ...(Object.keys(userEmailMappings).length > 0 ? { userEmailMappings } : {}),
+        });
+
+        if (page.resolvedUserMappings?.length) {
+          setScanResolvedMappings(prev => {
+            const seen = new Set(prev.map(item => item.jiraUserKey));
+            const next = [...prev];
+            for (const item of page.resolvedUserMappings) {
+              if (!seen.has(item.jiraUserKey)) {
+                next.push(item);
+                seen.add(item.jiraUserKey);
+              }
+            }
+            return next;
+          });
+        }
+        if (page.resolvedUserMappingsTruncated) {
+          setScanResolvedMappingsTruncated(true);
+        }
+
+        for (const item of page.unresolvedUsers) {
+          const { primary: key } = getUnresolvedMappingKeys(item);
+          const existing = aggregated.get(key);
+          const next = existing || {
+            displayName: item.displayName,
+            accountId: item.accountId,
+            suggestedEmails: new Set<string>(),
+            issueKeys: new Set<string>(),
+          };
+
+          item.suggestedEmails.forEach(email => next.suggestedEmails.add(email));
+          item.issueKeys.forEach(issueKey => next.issueKeys.add(issueKey));
+          aggregated.set(key, next);
+        }
+
+        setScanUnresolvedFound(aggregated.size);
+        nextPageToken = page.nextPageToken;
+        hasNextPage = page.hasNextPage;
+        if (pages % 5 === 0) {
+          toast.info(`Scanning Jira users… pages scanned: ${pages}`);
+        }
+      }
+
+      const merged = [...aggregated.entries()].map(([key, item]) => ({
+        key,
+        displayName: item.displayName,
+        accountId: item.accountId,
+        suggestedEmails: [...item.suggestedEmails],
+        issueKeys: [...item.issueKeys],
+      }));
+
+      const emailSet = new Set(
+        (workspaceUsers || []).map(user => (user.email || '').toLowerCase()).filter(Boolean),
+      );
+      const nextMappings: Record<string, string> = { ...userEmailMappings };
+      for (const item of merged) {
+        if (nextMappings[item.key]) continue;
+        const match = item.suggestedEmails.find(email => emailSet.has(email.toLowerCase()));
+        if (match) nextMappings[item.key] = match;
+      }
+      setUserEmailMappings(nextMappings);
+
+      setResolveUsersResult({
+        jiraProjectKey: jiraProjectKey.trim().toUpperCase(),
+        nextPageToken: null,
+        hasNextPage: false,
+        totalIssuesScanned: 0,
+        jiraUsersSeen: 0,
+        resolvedUsers: 0,
+        resolvedUserMappings: [],
+        resolvedUserMappingsTruncated: false,
+        unresolvedUsers: merged.map(item => ({
+          displayName: item.displayName,
+          accountId: item.accountId,
+          suggestedEmails: item.suggestedEmails,
+          issueKeys: item.issueKeys,
+        })),
+      });
+
+      toast.success(`User scan complete. Unresolved: ${merged.length}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to resolve Jira users';
+      toast.error('Resolve users failed', { description: message });
+    } finally {
+      setIsResolveUsersLoading(false);
+    }
+  };
+
   const buildPayload = (nextPageToken?: string) => ({
     jiraProjectKey: jiraProjectKey.trim().toUpperCase(),
     targetProjectId: selectedProjectId,
@@ -584,6 +833,7 @@ const JiraMigrationScreen = (): ReactElement => {
         excludedStageNames: Object.keys(excludedStageNames).filter(
           name => excludedStageNames[name],
         ),
+        ...(Object.keys(userEmailMappings).length > 0 ? { userEmailMappings } : {}),
       };
 
       const startResult = await jiraMigrationService.startMigration(payload);
@@ -1476,14 +1726,55 @@ const JiraMigrationScreen = (): ReactElement => {
                     All {preview.statusMappings.length} Jira statuses are mapped. Review the preview
                     below and run the migration when ready.
                   </p>
+                  {isResolveUsersLoading && (
+                    <p className='mt-2 text-xs text-muted-foreground'>
+                      Scanning users… pages: {scanPagesScanned} · unresolved found:{' '}
+                      {scanUnresolvedFound}
+                    </p>
+                  )}
                 </div>
                 <div className='flex flex-wrap items-center gap-2'>
                   <Button
                     variant='outline'
                     onClick={() => setMigrationPhase('map-statuses')}
                     disabled={isImportLoading}
+                    data-track-category='jira_migration'
+                    data-track-name='edit_status_mappings'
                   >
                     ← Edit Status Mappings
+                  </Button>
+                  <div className='flex flex-wrap items-center gap-3 rounded-xl border border-emerald-100 bg-white/70 px-3 py-2'>
+                    <label className='flex items-center gap-2 text-xs text-muted-foreground'>
+                      <input
+                        type='checkbox'
+                        checked={scanIncludeComments}
+                        onChange={e => setScanIncludeComments(e.target.checked)}
+                        disabled={isResolveUsersLoading || isImportLoading}
+                        data-track-category='jira_migration'
+                        data-track-name='scan_toggle_include_commenters'
+                      />
+                      Include commenters
+                    </label>
+                    <label className='flex items-center gap-2 text-xs text-muted-foreground'>
+                      <input
+                        type='checkbox'
+                        checked={scanIncludeAttachments}
+                        onChange={e => setScanIncludeAttachments(e.target.checked)}
+                        disabled={isResolveUsersLoading || isImportLoading}
+                        data-track-category='jira_migration'
+                        data-track-name='scan_toggle_include_attachments'
+                      />
+                      Include attachments
+                    </label>
+                  </div>
+                  <Button
+                    variant='outline'
+                    onClick={() => void handleResolveUsers()}
+                    disabled={isImportLoading || isResolveUsersLoading}
+                    data-track-category='jira_migration'
+                    data-track-name='scan_users'
+                  >
+                    {isResolveUsersLoading ? 'Scanning Users...' : 'Scan Users'}
                   </Button>
                   <Button
                     onClick={() => void handleImport()}
@@ -1493,6 +1784,223 @@ const JiraMigrationScreen = (): ReactElement => {
                   </Button>
                 </div>
               </div>
+
+              {Object.keys(userEmailMappings).length > 0 && (
+                <div className='border-t border-emerald-200/60 bg-white/70 px-5 py-4'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <div>
+                      <p className='text-xs font-semibold text-foreground'>Mapped Users</p>
+                      <p className='mt-1 text-xs text-muted-foreground'>
+                        Mappings that will be sent with the migration request.
+                      </p>
+                    </div>
+                    <p className='text-[11px] text-muted-foreground'>
+                      {Object.keys(userEmailMappings).length} mapped
+                    </p>
+                  </div>
+
+                  <div className='mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2'>
+                    {Object.entries(userEmailMappings).map(([key, mappedEmail]) => {
+                      const matchingItem = resolveUsersResult?.unresolvedUsers.find(item => {
+                        const { primary, fallbacks } = getUnresolvedMappingKeys(item);
+                        return primary === key || fallbacks.includes(key);
+                      });
+                      const display = matchingItem?.displayName || matchingItem?.accountId || key;
+
+                      return (
+                        <div
+                          key={`${key}-mapped`}
+                          className='flex items-center justify-between gap-2 rounded-lg border border-emerald-50 bg-white/70 px-3 py-2'
+                        >
+                          <div className='min-w-0'>
+                            <p className='text-xs font-medium text-foreground truncate'>
+                              {display}
+                            </p>
+                            <p className='text-[11px] text-muted-foreground truncate'>
+                              {mappedEmail}
+                            </p>
+                          </div>
+                          <Button
+                            variant='outline'
+                            onClick={() => {
+                              setUserEmailMappings(prev => {
+                                const next = { ...prev };
+                                delete next[key];
+                                return next;
+                              });
+                            }}
+                          >
+                            Clear
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {scanResolvedMappings.length > 0 && (
+                <div className='border-t border-emerald-200/60 bg-white/70 px-5 py-4'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <div>
+                      <p className='text-xs font-semibold text-foreground'>Resolved Jira Users</p>
+                      <p className='mt-1 text-xs text-muted-foreground'>
+                        Users Jira resolver matched automatically during scan.
+                      </p>
+                    </div>
+                    <p className='text-[11px] text-muted-foreground'>
+                      Showing {scanResolvedMappings.length}
+                      {scanResolvedMappingsTruncated ? ' (truncated)' : ''}
+                    </p>
+                  </div>
+
+                  <div className='mt-3 flex flex-wrap items-center justify-between gap-2'>
+                    <p className='text-[11px] text-muted-foreground'>
+                      Page {resolvedUsersPage + 1} /{' '}
+                      {Math.max(
+                        1,
+                        Math.ceil(scanResolvedMappings.length / RESOLVED_USERS_PER_PAGE),
+                      )}
+                    </p>
+                    <div className='flex items-center gap-2'>
+                      <Button
+                        variant='outline'
+                        onClick={() => setResolvedUsersPage(p => Math.max(0, p - 1))}
+                        disabled={resolvedUsersPage === 0}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        variant='outline'
+                        onClick={() =>
+                          setResolvedUsersPage(p =>
+                            Math.min(
+                              Math.max(
+                                0,
+                                Math.ceil(scanResolvedMappings.length / RESOLVED_USERS_PER_PAGE) -
+                                  1,
+                              ),
+                              p + 1,
+                            ),
+                          )
+                        }
+                        disabled={
+                          resolvedUsersPage >=
+                          Math.max(
+                            0,
+                            Math.ceil(scanResolvedMappings.length / RESOLVED_USERS_PER_PAGE) - 1,
+                          )
+                        }
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className='mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2'>
+                    {scanResolvedMappings
+                      .slice(
+                        resolvedUsersPage * RESOLVED_USERS_PER_PAGE,
+                        resolvedUsersPage * RESOLVED_USERS_PER_PAGE + RESOLVED_USERS_PER_PAGE,
+                      )
+                      .map(item => (
+                        <div
+                          key={item.jiraUserKey}
+                          className='rounded-lg border border-emerald-50 bg-white/70 px-3 py-2'
+                        >
+                          <p className='text-xs font-medium text-foreground truncate'>
+                            {item.displayName ||
+                              item.emailAddress ||
+                              item.accountId ||
+                              item.jiraUserKey}
+                          </p>
+                          <p className='text-[11px] text-muted-foreground truncate'>
+                            → {item.resolvedEmail || item.resolvedUserId}
+                          </p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {resolveUsersResult && resolveUsersResult.unresolvedUsers.length > 0 && (
+                <div className='border-t border-emerald-200/60 bg-white/70 px-5 py-4'>
+                  {(() => {
+                    const visibleUnresolvedUsers = resolveUsersResult.unresolvedUsers.filter(
+                      item => {
+                        return !getMappedEmailForUnresolved(item);
+                      },
+                    );
+
+                    if (visibleUnresolvedUsers.length === 0) {
+                      return (
+                        <div className='rounded-xl border border-emerald-100 bg-background/70 p-3'>
+                          <p className='text-xs font-semibold text-foreground'>
+                            All unresolved users mapped
+                          </p>
+                          <p className='mt-1 text-xs text-muted-foreground'>
+                            Unresolved list hidden because every item has a manual mapping. You can
+                            run Scan Users again to verify.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <>
+                        <div className='flex items-center justify-between gap-3'>
+                          <div>
+                            <p className='text-xs font-semibold text-foreground'>
+                              Unresolved Jira Users
+                            </p>
+                            <p className='mt-1 text-xs text-muted-foreground'>
+                              Map each Jira user to an existing Xyne user email. These mappings will
+                              be sent with the migration request.
+                            </p>
+                          </div>
+                          <p className='text-[11px] text-muted-foreground'>
+                            {visibleUnresolvedUsers.length} unresolved
+                          </p>
+                        </div>
+
+                        <div className='mt-3 space-y-3'>
+                          {visibleUnresolvedUsers.slice(0, 50).map(item => {
+                            const { primary: key } = getUnresolvedMappingKeys(item);
+                            return (
+                              <div
+                                key={key}
+                                className='rounded-xl border border-emerald-100 bg-background/70 p-3'
+                              >
+                                <div className='flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between'>
+                                  <div className='min-w-0'>
+                                    <p className='text-xs font-semibold text-foreground truncate'>
+                                      {item.displayName || item.accountId || 'Unknown Jira user'}
+                                    </p>
+                                    <p className='mt-1 text-[11px] text-muted-foreground'>
+                                      Suggested:{' '}
+                                      {item.suggestedEmails.slice(0, 3).join(', ') || '—'} ·
+                                      Tickets: {item.issueKeys.slice(0, 3).join(', ') || '—'}
+                                    </p>
+                                  </div>
+                                  <div className='w-full lg:w-[420px]'>
+                                    <UnresolvedUserMappingRow item={item} />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {visibleUnresolvedUsers.length > 50 && (
+                            <p className='text-[11px] text-muted-foreground'>
+                              Showing first 50 unresolved users. Keep scanning/mapping, then run
+                              migration.
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
 
               {hasCompleteStatusV2Mappings && orderedStageSequence.length > 0 && (
                 <div className='border-t border-emerald-200/60 bg-white/70 px-5 py-4'>

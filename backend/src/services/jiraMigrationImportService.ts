@@ -31,6 +31,7 @@ import { JiraUserResolver, type UnresolvedJiraUser } from '@/services/jira/userR
 import { TicketIdService } from '@/services/ticketIdService';
 import { UserRepository } from '@/database/repositories/users';
 import { jiraMigrationProjectIndexService, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';
+import { writeFile } from 'fs/promises';
 import {
   queueJiraImportAttachmentVespaJob,
   queueJiraImportMessageVespaJob,
@@ -124,6 +125,39 @@ export interface JiraMigrationExecuteInput {
   skipCustomFieldIds?: string[];
   jiraStatusSequence?: string[];
   excludedStageNames?: string[];
+  // Optional: manual resolution overrides for Jira users (before fallbackUserId).
+  // Keys can be "displayName:<value>", "accountId:<value>", "emailAddress:<value>", or raw displayName.
+  userEmailMappings?: Record<string, string>;
+}
+
+export interface JiraMigrationResolveUsersInput {
+  jiraProjectKey: string;
+  issueKeys?: string[];
+  dateFrom?: string;
+  includeComments?: boolean;
+  includeAttachments?: boolean;
+  userEmailMappings?: Record<string, string>;
+  nextPageToken?: string | null;
+  pageSize?: number;
+}
+
+export interface JiraMigrationResolveUsersResult {
+  jiraProjectKey: string;
+  nextPageToken: string | null;
+  hasNextPage: boolean;
+  totalIssuesScanned: number;
+  jiraUsersSeen: number;
+  resolvedUsers: number;
+  resolvedUserMappings: Array<{
+    jiraUserKey: string;
+    displayName: string | null;
+    accountId: string | null;
+    emailAddress: string | null;
+    resolvedUserId: string;
+    resolvedEmail: string | null;
+  }>;
+  resolvedUserMappingsTruncated: boolean;
+  unresolvedUsers: UnresolvedJiraUser[];
 }
 
 export interface JiraMigrationIssueResult {
@@ -2494,6 +2528,7 @@ export class JiraMigrationImportService {
     onProgress?: (update: JiraMigrationProgressUpdate) => Promise<void> | void,
     getControlStatus?: () => Promise<'running' | 'paused' | 'cancel_requested' | null | undefined> | 'running' | 'paused' | 'cancel_requested' | null | undefined,
   ): Promise<JiraMigrationExecuteResult> {
+    this.userResolver.setManualEmailMap(input.userEmailMappings ?? null);
     this.resetExecutionCaches();
     const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
     const warnings: string[] = [];
@@ -3373,6 +3408,26 @@ export class JiraMigrationImportService {
       unresolvedUsersCount: unresolvedUsers.size,
     });
 
+    const unresolvedUsersOutputPath = process.env.JIRA_MIGRATION_UNRESOLVED_USERS_PATH?.trim();
+    if (unresolvedUsersOutputPath) {
+      try {
+        await writeFile(
+          unresolvedUsersOutputPath,
+          JSON.stringify(Array.from(unresolvedUsers.values()), null, 2),
+          'utf8',
+        );
+        logger.info(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Unresolved users written`, {
+          unresolvedUsersOutputPath,
+          unresolvedUsersCount: unresolvedUsers.size,
+        });
+      } catch (error) {
+        logger.warn(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Failed to write unresolved users`, {
+          unresolvedUsersOutputPath,
+          error: (error as Error)?.message || String(error),
+        });
+      }
+    }
+
     return {
       jiraProjectKey,
       externalSourceCreated,
@@ -3390,6 +3445,130 @@ export class JiraMigrationImportService {
       unresolvedUsers: Array.from(unresolvedUsers.values()),
       issueResults,
       warnings,
+    };
+  }
+
+  async resolveUsers(input: JiraMigrationResolveUsersInput): Promise<JiraMigrationResolveUsersResult> {
+    const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
+    const unresolvedUsers = new Map<string, UnresolvedJiraUser>();
+
+    this.userResolver.setManualEmailMap(input.userEmailMappings ?? null);
+    this.userResolver.reset();
+
+    const includeComments = input.includeComments !== false;
+    const includeAttachments = input.includeAttachments !== false;
+    const COMMENT_FETCH_CONCURRENCY = 8;
+
+    const pageSize =
+      typeof input.pageSize === 'number' && input.pageSize > 0
+        ? input.pageSize
+        : 100;
+    let nextPageToken: string | null = input.nextPageToken ?? null;
+    let hasNextPage = false;
+    let totalIssuesScanned = 0;
+    let jiraUsersSeen = 0;
+    let resolvedUsers = 0;
+    const resolvedUserMappingsByKey = new Map<string, {
+      jiraUserKey: string;
+      displayName: string | null;
+      accountId: string | null;
+      emailAddress: string | null;
+      resolvedUserId: string;
+      resolvedEmail: string | null;
+    }>();
+    const RESOLVED_MAPPINGS_CAP = 500;
+
+    const page = await this.jiraClient.fetchIssuesPage(
+      jiraProjectKey,
+      nextPageToken || undefined,
+      pageSize,
+      input.dateFrom,
+    );
+
+    const commentsByIssueKey = new Map<string, JiraComment[]>();
+    if (includeComments) {
+      for (let index = 0; index < page.issues.length; index += COMMENT_FETCH_CONCURRENCY) {
+        const chunk = page.issues.slice(index, index + COMMENT_FETCH_CONCURRENCY);
+        const results = await Promise.all(
+          chunk.map(async issue => {
+            try {
+              const comments = await this.jiraClient.fetchAllComments(issue.key);
+              return { issueKey: issue.key, comments };
+            } catch (error) {
+              logger.warn('[JiraMigrationResolveUsers] Failed to fetch Jira comments for issue', {
+                issueKey: issue.key,
+                error: (error as Error)?.message || String(error),
+              });
+              return { issueKey: issue.key, comments: [] as JiraComment[] };
+            }
+          }),
+        );
+        for (const result of results) {
+          commentsByIssueKey.set(result.issueKey, result.comments);
+        }
+      }
+    }
+
+    for (const issue of page.issues) {
+      totalIssuesScanned += 1;
+
+      const reporter = issue.fields.reporter as JiraUser | undefined;
+      const creator = issue.fields.creator as JiraUser | undefined;
+      const assignee = issue.fields.assignee as JiraUser | undefined;
+
+      const candidates: Array<JiraUser | undefined> = [reporter, creator, assignee];
+
+      if (includeAttachments) {
+        const attachments = (issue.fields.attachment as JiraAttachment[] | undefined) || [];
+        for (const attachment of attachments) {
+          candidates.push(attachment.author);
+        }
+      }
+
+      if (includeComments) {
+        const comments = commentsByIssueKey.get(issue.key) || [];
+        for (const comment of comments) {
+          candidates.push(comment.author as JiraUser | undefined);
+        }
+      }
+
+      for (const user of candidates) {
+        if (!user) continue;
+        jiraUsersSeen += 1;
+        const resolved = await this.userResolver.resolveUserOrNull(user, unresolvedUsers, issue.key);
+        if (resolved) {
+          resolvedUsers += 1;
+
+          if (resolvedUserMappingsByKey.size < RESOLVED_MAPPINGS_CAP) {
+            const jiraUserKey = user.accountId || user.displayName || user.emailAddress || 'unknown';
+            if (!resolvedUserMappingsByKey.has(jiraUserKey)) {
+              resolvedUserMappingsByKey.set(jiraUserKey, {
+                jiraUserKey,
+                displayName: user.displayName || null,
+                accountId: user.accountId || null,
+                emailAddress: user.emailAddress || null,
+                resolvedUserId: resolved,
+                resolvedEmail: this.userResolver.getResolvedEmailByUserId(resolved),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    nextPageToken = page.nextPageToken;
+    hasNextPage = page.hasNextPage;
+
+    return {
+      jiraProjectKey,
+      nextPageToken,
+      hasNextPage,
+      totalIssuesScanned,
+      jiraUsersSeen,
+      resolvedUsers,
+      resolvedUserMappings: Array.from(resolvedUserMappingsByKey.values()),
+      resolvedUserMappingsTruncated: resolvedUserMappingsByKey.size >= RESOLVED_MAPPINGS_CAP,
+      unresolvedUsers: Array.from(unresolvedUsers.values()),
     };
   }
 }
