@@ -1,3 +1,18 @@
+## [1.144.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.143.0...v1.144.0) (2026-05-19)
+
+
+### Features
+
+* add ticket stage reconstruction utility ([d664650](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d664650b054c89cc9a3000da1e3561b0f092d7a9)), closes [#6332](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6332)
+* added isread filter in userActivitiesPaginatedV2 query ([501b616](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/501b616097f16e03c13d16e4b28e5eed83538485)), closes [#6384](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6384)
+
+
+### Bug Fixes
+
+* auto draft and ux improvment in xyne desk ai ([52e2873](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/52e2873c6c1876cb0998ddd5e805bfc23d2a466f)), closes [#6110](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6110)
+* fixed user resolver ([0f3e768](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0f3e7688f6af0e08a6a2e5d459580b83a40e3ac6))
+* Increase ticket description height ([6554df2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6554df23d83d265bfd26ea11ce51962199345c88)), closes [#6476](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6476)
+
 ## [1.143.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.142.1...v1.143.0) (2026-05-19)
 
 
