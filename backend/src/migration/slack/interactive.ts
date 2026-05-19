@@ -8,6 +8,7 @@ import { logger } from '../../utils/logger';
 import { runMigration } from './slackConversationService';
 import { runMigrationJiraffe } from './slackJiraffeService';
 import { runSyncParticipants } from './syncParticipants';
+import { runMigrationAllDms } from './syncDmService';
 import { verifySlackRequest } from './middleware/verifySlackRequest';
 
 const router = Router();
@@ -161,6 +162,56 @@ router.post('/interactive', verifySlackRequest, async (req: Request, res: Respon
         )
         .catch((error) => {
           logger.error('[Migration] Error processing sync-participants', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        });
+
+      return;
+    }
+
+    if (type === 'view_submission' && view?.callback_id === 'sync_dm_modal') {
+      const values = view.state.values || {};
+
+      const userToken = values.user_token?.user_token_input?.value?.trim();
+
+      if (!userToken) {
+        return res.status(200).json({
+          response_action: 'errors',
+          errors: { user_token: 'Please enter your personal Slack user token (xoxp-...)' },
+        });
+      }
+
+      if (!userToken.startsWith('xoxp-') && !userToken.startsWith('xoxe.xoxp-')) {
+        return res.status(200).json({
+          response_action: 'errors',
+          errors: { user_token: 'Token must be a user token starting with xoxp- or xoxe.xoxp-' },
+        });
+      }
+
+      let responseChannelId = container?.channel_id;
+      if (!responseChannelId && view.private_metadata) {
+        try {
+          const metadata = JSON.parse(view.private_metadata);
+          responseChannelId = metadata.channel_id;
+        } catch (e) {
+          logger.warn('[Migration] Failed to parse private_metadata for sync_dm_modal', { error: e });
+        }
+      }
+
+      // Close modal immediately
+      res.status(200).json({ response_action: 'clear' });
+
+      // Migrate ALL DMs asynchronously
+      Promise.resolve()
+        .then(() =>
+          runMigrationAllDms({
+            userToken,
+            userId: user?.id,
+            responseChannelId,
+          })
+        )
+        .catch((error) => {
+          logger.error('[Migration] Error processing bulk DM migration', {
             error: error instanceof Error ? error.message : 'Unknown error',
           });
         });

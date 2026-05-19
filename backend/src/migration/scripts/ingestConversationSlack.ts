@@ -34,6 +34,7 @@ export interface IngestConversationSlackInput {
   channelId: string;
   onlyReplies?: boolean;
   workspaceId: string;
+  userToken?: string;
 }
 
 export interface IngestConversationSlackResult {
@@ -204,7 +205,7 @@ export const findOrCreateApp = async (
 export async function ingestConversationSlack(
   input: IngestConversationSlackInput
 ): Promise<IngestConversationSlackResult> {
-  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId } = input;
+  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken } = input;
 
   logger.info('[IngestSlack] Starting ingestion', {
     externalSourceName,
@@ -275,6 +276,7 @@ export async function ingestConversationSlack(
             timeout: 200000, // 200 seconds
             scopeType: 'EXTERNAL_MESSAGE',
             scopeId: externalSourceName,
+            overrideToken: userToken, // Use user token for DM attachments
           }
         );
       } catch (error) {
