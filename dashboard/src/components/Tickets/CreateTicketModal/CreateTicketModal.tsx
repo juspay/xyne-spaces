@@ -1470,9 +1470,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   onChange={e => {
                     const newValue = e.target.value;
                     field.handleChange(newValue);
+                    // Dynamically adjust the height
+                    const target = e.target;
+                    target.style.height = 'auto'; // Reset height to recalculate
+                    target.style.height = `${target.scrollHeight}px`; // Set to scroll height
                   }}
                   className={cn(
                     'border-none focus-visible:ring-0 focus-visible:border-none rounded-none p-0 min-h-16',
+                    'max-h-[25vh]', // can occupy max 25% of vertical height
+                    'resize-none overflow-y-auto',
                     'placeholder:text-muted-foreground/80 !text-muted-foreground leading-5 font-semibold',
                     field.state.meta.errors.length > 0 && 'text-red-600',
                   )}
