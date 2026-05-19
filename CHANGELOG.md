@@ -1,3 +1,10 @@
+## [1.142.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.142.0...v1.142.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* channel search ([a3e45b2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a3e45b27adc3c95d1bd80a2e5f10a43f1a82e87e)), closes [#6462](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6462)
+
 ## [1.142.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.141.2...v1.142.0) (2026-05-18)
 
 
