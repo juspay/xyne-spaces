@@ -21,6 +21,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { ArrowDown } from 'lucide-react';
 import { mutators } from '../../../zero/mutators';
 import { queryCacheActor } from '../../../machines/queryCacheMachine';
+import { browserPanelActor } from '../../../machines/browserPanelMachine';
 import LoadingAnimation from '../Loader/Loader';
 import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
@@ -190,7 +191,22 @@ const ChatListV3: React.FC<ChatListProps> = ({
   linkedConversationId,
   channelScopeType,
   skipMarkAsReadRef,
+  // DEBUG: mount/unmount tracker injected below via useEffect
 }) => {
+  // Save scroll position when unmounting due to /browser fullscreen navigation.
+  // window.location.pathname is already updated by React Router before cleanup runs.
+  useEffect(() => {
+    return () => {
+      const pathname = window.location.pathname;
+      const atBottom = isAtBottomRef.current;
+      const convId = topVisibleConvIdRef.current;
+      if (pathname.endsWith('/browser') && !atBottom && convId !== undefined) {
+        browserPanelActor.send({ type: 'SAVE_SCROLL_POSITION', channelId, conversationId: convId });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId]);
+
   const zero = useZero();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -246,6 +262,26 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const initialLinkedIdRef = useRef<string | null>(null);
   const [initialTopMostItemIndex, setInitialTopMostItemIndex] = useState<VirtuosoIndex | null>(
     () => {
+      // Browser panel restore: check FIRST (takes priority over activity navigation).
+      // Read synchronously from machine snapshot (Option B) — guaranteed to have latest state.
+      // Guard: skip if currently on /browser — component may be mounting as background render.
+      const pathname = window.location.pathname;
+      const savedConvId = browserPanelActor
+        .getSnapshot()
+        .context.channelScrollPositions.get(channelId);
+
+      if (savedConvId && !pathname.endsWith('/browser')) {
+        browserPanelActor.send({ type: 'CLEAR_SCROLL_POSITION', channelId });
+        const idx = cachedConversations.findIndex(c => c.conversationId === savedConvId);
+        if (idx !== -1) {
+          const isLast = idx === cachedConversations.length - 1;
+          return {
+            index: isLast ? firstItemIndex + idx : idx,
+            align: isLast ? ('end' as const) : ('start' as const),
+          };
+        }
+      }
+
       if (cachedConversations.length === 0) return null;
 
       if (linkedItemCreatedAt && linkedConversationId) {
@@ -270,7 +306,14 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isNearBottomRef = useRef(false);
   const dateObserverRef = useRef<IntersectionObserver | null>(null);
-  const visibleDatesRef = useRef<Map<Element, { timestamp: number; rect: DOMRect }>>(new Map());
+  const visibleDatesRef = useRef<
+    Map<Element, { timestamp: number; conversationId: string; rect: DOMRect }>
+  >(new Map());
+  // Tracks the conversationId of the topmost visible item in the viewport.
+  // Updated by IntersectionObserver on every scroll/resize — reliable for short and long lists.
+  const topVisibleConvIdRef = useRef<string | undefined>(undefined);
+  // Pixel-accurate bottom detection via Virtuoso's atBottomStateChange.
+  const isAtBottomRef = useRef(true);
   const { isMobile } = usePlatform();
   const { combinedMessages, itemHeights } = useCombinedMesseges(
     conversations,
@@ -990,10 +1033,12 @@ const ChatListV3: React.FC<ChatListProps> = ({
         // Update visible items map
         entries.forEach(entry => {
           const timestampStr = entry.target.getAttribute('data-item-timestamp');
-          if (timestampStr) {
+          const conversationId = entry.target.getAttribute('data-conversation-id');
+          if (timestampStr && conversationId) {
             if (entry.isIntersecting) {
               visibleDatesRef.current.set(entry.target, {
                 timestamp: Number(timestampStr),
+                conversationId,
                 rect: entry.boundingClientRect,
               });
             } else {
@@ -1014,6 +1059,15 @@ const ChatListV3: React.FC<ChatListProps> = ({
         if (oldestItem?.[1]) {
           const newStickyDate = formatDatePill(oldestItem[1].timestamp);
           setStickyDate(newStickyDate);
+        }
+
+        // Track topmost visible conversation for browser panel scroll restore.
+        // Use the item with the smallest non-negative rect.top (closest to top of viewport).
+        const topmostItem = Array.from(visibleDatesRef.current.values())
+          .filter(d => d.rect.top >= 0)
+          .sort((a, b) => a.rect.top - b.rect.top)[0];
+        if (topmostItem) {
+          topVisibleConvIdRef.current = topmostItem.conversationId;
         }
       },
       { threshold: 0, rootMargin: '0px' },
@@ -1087,6 +1141,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
       <Virtuoso
         ref={virtuosoRef}
         rangeChanged={handleRangeChanged}
+        atBottomStateChange={atBottom => {
+          isAtBottomRef.current = atBottom;
+        }}
         increaseViewportBy={1000}
         firstItemIndex={firstItemIndex}
         heightEstimates={itemHeights}
@@ -1120,7 +1177,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
             newConversationBoundary !== null && arrayIndex === newConversationBoundary.index;
 
           return (
-            <div data-item-timestamp={item.createdAt.getTime()} ref={itemRef}>
+            <div
+              data-item-timestamp={item.createdAt.getTime()}
+              data-conversation-id={item.data.conversationId}
+              ref={itemRef}
+            >
               {showDatePill && (
                 <div
                   className={shouldHideInlineDatePill ? 'invisible' : 'block'}

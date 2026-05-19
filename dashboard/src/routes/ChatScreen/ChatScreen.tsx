@@ -39,7 +39,13 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
     (pathnameWithoutWorkspace.startsWith('/chat/canvas') &&
       !pathnameWithoutWorkspace.startsWith('/chat/dir/canvas')) ||
     pathnameWithoutWorkspace.startsWith('/chat/dm');
-  const { isWideScreen, containerRef } = useResizablePanel({ isMobile });
+  const { isWideScreen: measuredWideScreen, containerRef } = useResizablePanel({ isMobile });
+  // On desktop, always treat as wide-screen regardless of the measured container
+  // width. Without this, when the browser panel opens and the left panel shrinks
+  // to 65 %, the measurement can briefly dip below the 700 px threshold and flip
+  // isWideScreen false → triggering a second remount of ConversationPanelV2 /
+  // ChatListV3 and losing scroll position a second time.
+  const isWideScreen = !isMobile || measuredWideScreen;
   const chatSidebarPanelRef = useRef<ImperativePanelHandle>(null);
 
   // Listen for resize events from global shortcuts
