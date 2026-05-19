@@ -135,10 +135,12 @@ export function filterChannelsBySearchableNames<
   });
 
   const regularChannels = regularItems.map(item => item.channel);
-  const matchedIds = new Set(
-    searchChannels(regularChannels, query, regularChannels.length).map(c => c.id),
-  );
-  const matchedRegular = regularItems.filter(({ channel }) => matchedIds.has(channel.id));
+  const orderedChannels = searchChannels(regularChannels, query, regularChannels.length);
+  const regularItemsById = new Map(regularItems.map(item => [item.channel.id, item]));
+  const matchedRegular = orderedChannels.flatMap(c => {
+    const item = regularItemsById.get(c.id);
+    return item ? [item] : [];
+  });
 
   return [...matchedDms, ...matchedRegular];
 }
