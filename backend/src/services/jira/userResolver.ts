@@ -1,5 +1,9 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
+import {
+  extractEmailFromDisplayName,
+  inferEmailCandidatesFromDisplayName,
+} from './userEmailInference';
 
 const db = DatabaseClient.getInstance();
 
@@ -21,8 +25,7 @@ type UserResolutionLookup = {
   byProfileDisplayName: Map<string, string>;
   byNormalizedComparable: Map<string, string>;
   byEmail: Map<string, string>;
-  byEmailLocalPart: Map<string, string>;
-  emailLocalPartCandidates: Array<{ normalizedLocalPart: string; userId: string; email: string }>;
+  byUserIdToEmail: Map<string, string>;
 };
 
 const normalizeNamePart = (value: string): string =>
@@ -34,63 +37,14 @@ const normalizeNamePart = (value: string): string =>
 
 const normalizeComparableValue = (value?: string | null): string => normalizeNamePart(value || '');
 
-const normalizeEmailLocalPart = (value?: string | null): string =>
-  (value || '')
-    .normalize('NFKD')
-    .replace(/[^\x00-\x7F]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '')
-    .replace(/[^a-z0-9._-]/g, '');
+type ManualUserEmailMapping = Record<string, string>;
 
-const inferEmailCandidatesFromDisplayName = (displayName?: string): string[] => {
-  if (!displayName) return [];
-
-  const nameParts = displayName
-    .split(/\s+/)
-    .map(normalizeNamePart)
-    .filter(Boolean);
-
-  const candidates = new Set<string>();
-  const rawLocalPart = normalizeEmailLocalPart(displayName);
-  if (rawLocalPart) {
-    candidates.add(`${rawLocalPart}@juspay.in`);
-  }
-
-  if (nameParts.length === 0) {
-    return [...candidates];
-  }
-
-  const first = nameParts[0];
-  const second = nameParts[1];
-  const last = nameParts[nameParts.length - 1];
-  const firstInitial = first?.[0];
-  const lastInitial = last?.[0];
-
-  candidates.add(`${nameParts.join('.')}@juspay.in`);
-  candidates.add(`${nameParts.join('')}@juspay.in`);
-
-  if (nameParts.length >= 2) {
-    candidates.add(`${first}.${last}@juspay.in`);
-    candidates.add(`${first}${last}@juspay.in`);
-    candidates.add(`${first}.${lastInitial}@juspay.in`);
-    candidates.add(`${first}${lastInitial}@juspay.in`);
-    candidates.add(`${firstInitial}.${last}@juspay.in`);
-
-    if (second) {
-      candidates.add(`${first}.${second}@juspay.in`);
-      candidates.add(`${first}${second}@juspay.in`);
-      candidates.add(`${second}.${last}@juspay.in`);
-      candidates.add(`${second}${last}@juspay.in`);
-    }
-  }
-
-  return [...candidates].filter(Boolean);
-};
+const normalizeMappingKey = (value?: string | null): string => (value || '').trim().toLowerCase();
 
 export class JiraUserResolver {
   private resolvedUserCache = new Map<string, string>();
   private userResolutionLookup: UserResolutionLookup | null = null;
+  private manualEmailMap: ManualUserEmailMapping | null = null;
   private workspaceId: string;
 
   constructor(workspaceId: string) {
@@ -101,9 +55,29 @@ export class JiraUserResolver {
     return user.accountId || user.displayName || user.emailAddress || 'unknown';
   }
 
+  setManualEmailMap(map: ManualUserEmailMapping | null): void {
+    if (!map) {
+      this.manualEmailMap = null;
+      this.resolvedUserCache.clear();
+      return;
+    }
+
+    const normalized: ManualUserEmailMapping = {};
+    for (const [rawKey, rawValue] of Object.entries(map)) {
+      const key = normalizeMappingKey(rawKey);
+      const value = (rawValue || '').trim();
+      if (!key || !value) continue;
+      normalized[key] = value;
+    }
+
+    this.manualEmailMap = normalized;
+    this.resolvedUserCache.clear();
+  }
+
   reset(): void {
     this.resolvedUserCache.clear();
     this.userResolutionLookup = null;
+    // Keep manualEmailMap as-is across resets.
   }
 
   private buildUserCacheKey(user: JiraUserLike | undefined): string | null {
@@ -118,37 +92,56 @@ export class JiraUserResolver {
     return parts.length > 0 ? parts.join('|') : null;
   }
 
+  private resolveManualMappedEmail(user: JiraUserLike): string | null {
+    if (!this.manualEmailMap) return null;
+
+    const candidates = [
+      user.accountId ? `accountId:${normalizeMappingKey(user.accountId)}` : null,
+      user.emailAddress ? `emailAddress:${normalizeMappingKey(user.emailAddress)}` : null,
+      user.displayName ? `displayName:${normalizeMappingKey(user.displayName)}` : null,
+      user.displayName ? normalizeMappingKey(user.displayName) : null,
+    ].filter(Boolean) as string[];
+
+    for (const key of candidates) {
+      const mapped = this.manualEmailMap[normalizeMappingKey(key)];
+      if (mapped) return mapped;
+    }
+
+    return null;
+  }
+
   async warmUserResolutionLookup(): Promise<void> {
     if (this.userResolutionLookup) return;
 
-    const [users, profiles] = await Promise.all([
-      db.user.findMany({
-        where: { workspaceId: this.workspaceId },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      }),
-      db.userProfile.findMany({
-        where: {
-          displayName: {
-            not: null,
-          },
-        },
-        select: {
-          userId: true,
-          displayName: true,
-        },
-      }),
-    ]);
+    const users = await db.user.findMany({
+      where: { workspaceId: this.workspaceId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+
+    const userIds = users.map(user => user.id);
+    const profiles =
+      userIds.length === 0
+        ? []
+        : await db.userProfile.findMany({
+            where: {
+              userId: { in: userIds },
+              displayName: { not: null },
+            },
+            select: {
+              userId: true,
+              displayName: true,
+            },
+          });
 
     const byExactName = new Map<string, string>();
     const byProfileDisplayName = new Map<string, string>();
     const byNormalizedComparable = new Map<string, string>();
     const byEmail = new Map<string, string>();
-    const byEmailLocalPart = new Map<string, string>();
-    const emailLocalPartCandidates: Array<{ normalizedLocalPart: string; userId: string; email: string }> = [];
+    const byUserIdToEmail = new Map<string, string>();
 
     for (const user of users) {
       if (user.name) {
@@ -162,18 +155,7 @@ export class JiraUserResolver {
 
       const email = user.email.toLowerCase();
       byEmail.set(email, user.id);
-
-      const normalizedLocalPart = normalizeComparableValue(email.split('@')[0] || '');
-      if (normalizedLocalPart) {
-        if (!byEmailLocalPart.has(normalizedLocalPart)) {
-          byEmailLocalPart.set(normalizedLocalPart, user.id);
-        }
-        emailLocalPartCandidates.push({
-          normalizedLocalPart,
-          userId: user.id,
-          email: user.email,
-        });
-      }
+      byUserIdToEmail.set(user.id, user.email);
     }
 
     for (const profile of profiles) {
@@ -191,9 +173,12 @@ export class JiraUserResolver {
       byProfileDisplayName,
       byNormalizedComparable,
       byEmail,
-      byEmailLocalPart,
-      emailLocalPartCandidates,
+      byUserIdToEmail,
     };
+  }
+
+  getResolvedEmailByUserId(userId: string): string | null {
+    return this.userResolutionLookup?.byUserIdToEmail.get(userId) || null;
   }
 
   async resolveUserOrNull(
@@ -210,8 +195,25 @@ export class JiraUserResolver {
 
     await this.warmUserResolutionLookup();
 
+    const manuallyMappedEmail = this.resolveManualMappedEmail(user);
+    if (manuallyMappedEmail) {
+      const match = this.userResolutionLookup?.byEmail.get(manuallyMappedEmail.toLowerCase());
+      if (match) {
+        logger.info('[JiraMigration] Resolved Jira user by manual email mapping', {
+          displayName: user.displayName || null,
+          accountId: user.accountId || null,
+          emailAddress: user.emailAddress || null,
+          mappedEmail: manuallyMappedEmail,
+          resolvedUserId: match,
+        });
+        if (userCacheKey) this.resolvedUserCache.set(userCacheKey, match);
+        return match;
+      }
+    }
+
     if (user.displayName) {
       const normalizedDisplayName = normalizeComparableValue(user.displayName);
+      const emailInDisplayName = extractEmailFromDisplayName(user.displayName);
       const inferredEmails = inferEmailCandidatesFromDisplayName(user.displayName);
 
       const exactNameMatch = this.userResolutionLookup?.byExactName.get(user.displayName.toLowerCase());
@@ -240,6 +242,19 @@ export class JiraUserResolver {
         return normalizedLookupMatch;
       }
 
+      if (emailInDisplayName) {
+        const match = this.userResolutionLookup?.byEmail.get(emailInDisplayName.toLowerCase());
+        if (match) {
+          logger.info('[JiraMigration] Resolved Jira user by email embedded in display name', {
+            displayName: user.displayName,
+            embeddedEmail: emailInDisplayName,
+            resolvedUserId: match,
+          });
+          if (userCacheKey) this.resolvedUserCache.set(userCacheKey, match);
+          return match;
+        }
+      }
+
       for (const email of inferredEmails) {
         const inferredEmailMatch = this.userResolutionLookup?.byEmail.get(email.toLowerCase());
         if (inferredEmailMatch) {
@@ -256,43 +271,19 @@ export class JiraUserResolver {
       if (user.emailAddress) {
         const jiraEmailMatch = this.userResolutionLookup?.byEmail.get(user.emailAddress.toLowerCase());
         if (jiraEmailMatch) {
+          logger.info('[JiraMigration] Resolved Jira user by Jira email address', {
+            displayName: user.displayName,
+            emailAddress: user.emailAddress,
+            resolvedUserId: jiraEmailMatch,
+          });
           if (userCacheKey) this.resolvedUserCache.set(userCacheKey, jiraEmailMatch);
           return jiraEmailMatch;
         }
       }
 
-      for (const email of inferredEmails) {
-        const localPart = email.split('@')[0] || '';
-        const normalizedLocalPart = normalizeComparableValue(localPart);
-        if (!normalizedLocalPart) continue;
-
-        const exactLocalPartMatch = this.userResolutionLookup?.byEmailLocalPart.get(normalizedLocalPart);
-        if (exactLocalPartMatch) {
-          logger.info('[JiraMigration] Resolved Jira user by inferred email prefix', {
-            displayName: user.displayName,
-            resolvedUserId: exactLocalPartMatch,
-          });
-          if (userCacheKey) this.resolvedUserCache.set(userCacheKey, exactLocalPartMatch);
-          return exactLocalPartMatch;
-        }
-
-        const prefixMatch = this.userResolutionLookup?.emailLocalPartCandidates.find(candidate =>
-          candidate.normalizedLocalPart.startsWith(normalizedLocalPart) ||
-          candidate.normalizedLocalPart.includes(normalizedLocalPart),
-        );
-        if (prefixMatch) {
-          logger.info('[JiraMigration] Resolved Jira user by inferred email prefix', {
-            displayName: user.displayName,
-            resolvedUserId: prefixMatch.userId,
-            resolvedEmail: prefixMatch.email,
-          });
-          if (userCacheKey) this.resolvedUserCache.set(userCacheKey, prefixMatch.userId);
-          return prefixMatch.userId;
-        }
-      }
-
       const byName = await db.user.findFirst({
         where: {
+          workspaceId: this.workspaceId,
           name: {
             equals: user.displayName,
             mode: 'insensitive',
@@ -314,8 +305,8 @@ export class JiraUserResolver {
       });
 
       if (byProfileDisplayName?.userId) {
-        const profileUser = await db.user.findUnique({
-          where: { id: byProfileDisplayName.userId },
+        const profileUser = await db.user.findFirst({
+          where: { id: byProfileDisplayName.userId, workspaceId: this.workspaceId },
         });
 
         if (profileUser?.id) {
@@ -329,44 +320,15 @@ export class JiraUserResolver {
         }
       }
 
-      const possibleNameMatches = await db.user.findMany({
-        where: {
-          OR: user.displayName
-            .split(/\s+/)
-            .map(normalizeNamePart)
-            .filter(Boolean)
-            .map(part => ({
-              name: {
-                contains: part,
-                mode: 'insensitive' as const,
-              },
-            })),
-        },
-        take: 20,
-      });
-
-      const normalizedNameMatch = possibleNameMatches.find(candidate => {
-        const normalizedCandidateName = normalizeComparableValue(candidate.name);
-        const normalizedCandidateEmailLocalPart = normalizeComparableValue(candidate.email.split('@')[0] || '');
-        return (
-          normalizedCandidateName === normalizedDisplayName ||
-          inferredEmails.some(email => normalizeComparableValue(email.split('@')[0] || '') === normalizedCandidateEmailLocalPart)
-        );
-      });
-
-      if (normalizedNameMatch) {
-        logger.info('[JiraMigration] Resolved Jira user by normalized name match', {
-          displayName: user.displayName,
-          resolvedUserId: normalizedNameMatch.id,
-          resolvedEmail: normalizedNameMatch.email,
-        });
-        if (userCacheKey) this.resolvedUserCache.set(userCacheKey, normalizedNameMatch.id);
-        return normalizedNameMatch.id;
-      }
-
       for (const email of inferredEmails) {
-        const byInferredEmail = await db.user.findUnique({ 
-          where: { email_workspaceId: { email, workspaceId: this.workspaceId } } 
+        const byInferredEmail = await db.user.findFirst({
+          where: {
+            workspaceId: this.workspaceId,
+            email: {
+              equals: email,
+              mode: 'insensitive',
+            },
+          },
         });
         if (byInferredEmail) {
           logger.info('[JiraMigration] Resolved Jira user by inferred email', {
@@ -380,46 +342,19 @@ export class JiraUserResolver {
       }
 
       if (user.emailAddress) {
-        const existingByJiraEmail = await db.user.findUnique({ 
-          where: { email_workspaceId: { email: user.emailAddress, workspaceId: this.workspaceId } } 
+        const existingByJiraEmail = await db.user.findFirst({
+          where: {
+            workspaceId: this.workspaceId,
+            email: {
+              equals: user.emailAddress,
+              mode: 'insensitive',
+            },
+          },
         });
         if (existingByJiraEmail) {
           if (userCacheKey) this.resolvedUserCache.set(userCacheKey, existingByJiraEmail.id);
           return existingByJiraEmail.id;
         }
-      }
-
-      const byEmailPrefix = await db.user.findFirst({
-        where: {
-          OR: inferredEmails.flatMap(email => {
-            const localPart = email.split('@')[0] || '';
-            const normalizedLocalPart = normalizeComparableValue(localPart);
-            return [
-              {
-                email: {
-                  startsWith: localPart,
-                  mode: 'insensitive' as const,
-                },
-              },
-              {
-                email: {
-                  contains: normalizedLocalPart,
-                  mode: 'insensitive' as const,
-                },
-              },
-            ];
-          }),
-        },
-      });
-
-      if (byEmailPrefix) {
-        logger.info('[JiraMigration] Resolved Jira user by inferred email prefix', {
-          displayName: user.displayName,
-          resolvedUserId: byEmailPrefix.id,
-          resolvedEmail: byEmailPrefix.email,
-        });
-        if (userCacheKey) this.resolvedUserCache.set(userCacheKey, byEmailPrefix.id);
-        return byEmailPrefix.id;
       }
 
       const unresolvedUserKey = this.unresolvedUserKey(user);

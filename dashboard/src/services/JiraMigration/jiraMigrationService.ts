@@ -128,6 +128,7 @@ export interface JiraMigrationExecuteRequest extends JiraMigrationPreviewRequest
   skipCustomFieldIds?: string[];
   jiraStatusSequence?: string[];
   excludedStageNames?: string[];
+  userEmailMappings?: Record<string, string>;
 }
 
 export interface JiraMigrationIssueResult {
@@ -172,6 +173,41 @@ export interface JiraMigrationExecuteResponse {
 
 export interface JiraMigrationStartResponse {
   jobId: string;
+}
+
+export interface JiraMigrationResolveUsersRequest {
+  jiraProjectKey: string;
+  issueKeys?: string[];
+  dateFrom?: string;
+  includeComments?: boolean;
+  includeAttachments?: boolean;
+  nextPageToken?: string | null;
+  pageSize?: number;
+  userEmailMappings?: Record<string, string>;
+}
+
+export interface JiraMigrationResolveUsersResponse {
+  jiraProjectKey: string;
+  nextPageToken: string | null;
+  hasNextPage: boolean;
+  totalIssuesScanned: number;
+  jiraUsersSeen: number;
+  resolvedUsers: number;
+  resolvedUserMappings: Array<{
+    jiraUserKey: string;
+    displayName: string | null;
+    accountId: string | null;
+    emailAddress: string | null;
+    resolvedUserId: string;
+    resolvedEmail: string | null;
+  }>;
+  resolvedUserMappingsTruncated: boolean;
+  unresolvedUsers: Array<{
+    displayName: string | null;
+    accountId: string | null;
+    suggestedEmails: string[];
+    issueKeys: string[];
+  }>;
 }
 
 export interface JiraMigrationHistoryItem {
@@ -231,6 +267,17 @@ class JiraMigrationService {
       `${JIRA_MIGRATION_BASE_URL}/execute`,
       payload,
     );
+
+    return response.data.data;
+  }
+
+  async resolveUsers(
+    payload: JiraMigrationResolveUsersRequest,
+  ): Promise<JiraMigrationResolveUsersResponse> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: JiraMigrationResolveUsersResponse;
+    }>(`${JIRA_MIGRATION_BASE_URL}/resolve-users`, payload);
 
     return response.data.data;
   }

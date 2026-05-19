@@ -9,6 +9,7 @@ const controller = new JiraMigrationController();
 const jiraMigrationAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 
 router.post('/preview', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.preview);
+router.post('/resolve-users', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.resolveUsers);
 router.post('/execute', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.execute);
 router.get('/status/:jobId', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.status);
 router.post('/stop/:jobId', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.stop);
