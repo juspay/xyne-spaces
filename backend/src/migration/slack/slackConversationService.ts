@@ -62,6 +62,8 @@ export interface MigrationInput {
   userId?: string;
   channelId?: string;
   xyneSpaceChannelId?: string;
+  /** Optional user token (xoxp-...) to use instead of the bot token. Required for DMs. */
+  userToken?: string;
 }
 
 export interface MigrationResult {
@@ -178,7 +180,7 @@ async function processBatch(
   messageTs: string | null | undefined,
   logChannelId: string,
 ): Promise<BatchResult> {
-  const { channelId, xyneSpaceChannelId, syncOptions } = input;
+  const { channelId, xyneSpaceChannelId, syncOptions, userToken } = input;
 
   if (!channelId) {
     throw new Error('channelId is required');
@@ -211,6 +213,7 @@ async function processBatch(
     includeAttachments: syncOptions?.includes('include_attachments'),
     includeDeactivatedUsers: syncOptions?.includes('include_deactivated_users'),
     includeBotMessages: syncOptions?.includes('include_bot_messages'),
+    ...(userToken && { token: userToken }),
   });
 
   if (ENABLE_NOTIFICATIONS && messageTs) {
@@ -237,6 +240,7 @@ async function processBatch(
       externalSourceName,
       channelId: xyneSpaceChannelId,
       workspaceId,
+      ...(input.userToken && { userToken: input.userToken }),
     });
 
     if (ENABLE_NOTIFICATIONS && messageTs) {
@@ -677,5 +681,199 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       success: false,
       error: errorMessage,
     };
+  }
+}
+
+// ============================================================================
+// DM Migration
+// ============================================================================
+
+export interface DmMigrationInput {
+  /** The Slack DM or group-DM channel ID to migrate from (D… or G…) */
+  dmChannelId: string;
+  /** The Xyne Space channel ID to ingest messages into */
+  xyneSpaceChannelId: string;
+  /** Personal user token (xoxp-...) that has access to this DM */
+  userToken: string;
+  /**
+   * Unix timestamp (seconds) of when the Slack DM was created.
+   * Used as the migration start date so we capture the full history.
+   * If not provided, falls back to 1 year ago.
+   */
+  dmCreatedTimestamp?: number;
+  /** Slack user ID of the person who triggered the command */
+  userId?: string;
+  /** Slack channel to report progress back to (usually the channel the command was typed in) */
+  responseChannelId?: string;
+}
+
+/**
+ * Migrate DM / group-DM messages into a Xyne Space channel.
+ *
+ * Differences from `runMigration`:
+ *  - Does NOT call `addChannelParticipantsBeforeMigration` (conversations.members
+ *    fails for 1:1 DMs; participant provisioning is handled in syncDmService).
+ *  - Does NOT post the final <!channel> announcement (not applicable for DMs).
+ *  - `syncDate` is optional; falls back to 90 days ago.
+ */
+export async function runMigrationDm(input: DmMigrationInput): Promise<MigrationResult> {
+  const { dmChannelId, xyneSpaceChannelId, userToken, userId, responseChannelId } = input;
+
+  // Use the DM creation timestamp so we capture full history from day 1.
+  // Falls back to 1 year ago if Slack didn't return a created timestamp.
+  const effectiveSyncDate = input.dmCreatedTimestamp
+    ? new Date(input.dmCreatedTimestamp * 1000).toISOString().split('T')[0]
+    : (() => {
+        const d = new Date();
+        d.setFullYear(d.getFullYear() - 1);
+        return d.toISOString().split('T')[0];
+      })();
+
+  const logChannelId = config.slackMigrationLogChannelId || responseChannelId || dmChannelId;
+
+  logger.info('[MigrationDM] Starting DM migration', {
+    dmChannelId,
+    xyneSpaceChannelId,
+    effectiveSyncDate,
+    userId,
+  });
+
+  let messageTs: string | null = null;
+
+  try {
+    // Validate xyneSpaceChannelId exists in DB
+    const channelRepo = new ChannelRepository();
+    const xyneChannel = await channelRepo.findById(xyneSpaceChannelId);
+    if (!xyneChannel) {
+      if (ENABLE_NOTIFICATIONS && userId && config.slackBotToken && responseChannelId) {
+        const client = new WebClient(config.slackBotToken);
+        await client.chat.postEphemeral({
+          channel: responseChannelId,
+          user: userId,
+          text: '❌ Xyne channel does not exist in the database. Please provide a valid Xyne channel ID.',
+        });
+      }
+      throw new Error('Xyne Space channel not found in database');
+    }
+
+    const channelName = xyneChannel.name;
+    const xyneSpaceWorkspaceId = xyneChannel.workspaceId;
+    const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${xyneSpaceChannelId}|${channelName}>`;
+
+    // Post thread-starter to log channel
+    const blocks = getMigrationMessageBlocks({
+      syncDate: effectiveSyncDate,
+      userId,
+      xyneSpaceChannelId: xyneSpaceChannelLink,
+    });
+    const fallbackText = getMigrationMessageFallbackText(effectiveSyncDate);
+
+    messageTs = ENABLE_NOTIFICATIONS
+      ? await postMessage({ channelId: logChannelId, text: fallbackText, blocks })
+      : null;
+
+    if (ENABLE_NOTIFICATIONS && messageTs) {
+      await postMessage({
+        channelId: logChannelId,
+        text: `🔄 DM migration initiated for <#${dmChannelId}> → ${xyneSpaceChannelLink}`,
+        threadTs: messageTs,
+      });
+    }
+
+    // Create time batches and process
+    const batches = createTimeBatches(effectiveSyncDate);
+
+    if (ENABLE_NOTIFICATIONS && messageTs) {
+      await postMessage({
+        channelId: logChannelId,
+        text: `🔄 Processing ${batches.length} batch(es) of ${BATCH_SIZE_DAYS} days each`,
+        threadTs: messageTs,
+      });
+    }
+
+    const externalSourceName = `slackMigration-${dmChannelId}`;
+    const migrationInput: MigrationInput = {
+      channelId: dmChannelId,
+      xyneSpaceChannelId,
+      syncDate: effectiveSyncDate,
+      userId,
+      syncOptions: [
+        'include_attachments',      // include file attachments
+        'include_threads',           // include thread replies (common in DMs)
+        'include_deactivated_users', // preserve history from users who left
+        'include_bot_messages',      // include bot messages (e.g. workflow notifications)
+      ],
+      userToken,      // user's personal xoxp token — required to read DM history
+    };
+
+    let totalMessages = 0;
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      try {
+        const result = await processBatch(batch, migrationInput, externalSourceName, messageTs, logChannelId);
+        totalMessages += result.messages;
+
+        if (i < batches.length - 1) {
+          if (ENABLE_NOTIFICATIONS && messageTs) {
+            await postMessage({
+              channelId: logChannelId,
+              text: `⏳ Waiting ${BATCH_DELAY_MS / 1000}s before next batch…`,
+              threadTs: messageTs,
+            });
+          }
+          await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
+        }
+      } catch (error) {
+        logger.error('[MigrationDM] Batch processing failed', {
+          batch: `${batch.batchNumber}/${batch.totalBatches}`,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+
+        if (ENABLE_NOTIFICATIONS && messageTs) {
+          await postMessage({
+            channelId: logChannelId,
+            text: `❌ Batch ${batch.batchNumber}/${batch.totalBatches} failed: ${
+              error instanceof Error ? error.message : 'Unknown error'
+            }`,
+            threadTs: messageTs,
+          });
+        }
+        // Continue with next batch
+      }
+    }
+
+    if (ENABLE_NOTIFICATIONS && messageTs) {
+      await postMessage({
+        channelId: logChannelId,
+        text: `🎉 DM migration complete! Total messages migrated: ${totalMessages}`,
+        threadTs: messageTs,
+      });
+    }
+
+    logger.info('[MigrationDM] DM migration completed', { totalMessages, dmChannelId });
+
+    // Pinned messages are now handled inline during extractChannelHistory (same mechanism as /sync)
+
+    return { success: true, channelId: dmChannelId };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('[MigrationDM] DM migration failed', { error: errorMessage });
+
+    if (messageTs && ENABLE_NOTIFICATIONS) {
+      try {
+        await postMessage({
+          channelId: logChannelId,
+          threadTs: messageTs,
+          text: `❌ DM migration failed: ${errorMessage}`,
+        });
+      } catch (postError) {
+        logger.error('[MigrationDM] postMessage failed', {
+          error: postError instanceof Error ? postError.message : 'Unknown error',
+        });
+      }
+    }
+
+    return { success: false, error: errorMessage };
   }
 }

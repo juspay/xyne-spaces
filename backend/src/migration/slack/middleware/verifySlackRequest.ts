@@ -47,11 +47,17 @@ export function verifySlackRequest(req: Request, res: Response, next: NextFuncti
       return res.status(400).send('Request timestamp is too old');
     }
 
-    // Get the raw body for signature verification
-    // Slack requires the raw body, not parsed JSON
+    // Get the raw body for signature verification.
+    // Prefer req.rawBody captured verbatim by the parser's verify callback
+    // (set in migration/slack/index.ts). Falling back to reconstruction is
+    // unreliable because URLSearchParams re-encoding can differ from what
+    // Slack actually signed.
     let rawBody: string;
 
-    if (req.body && typeof req.body === 'object') {
+    if ((req as any).rawBody !== undefined) {
+      // Exact bytes Slack signed
+      rawBody = (req as any).rawBody;
+    } else if (req.body && typeof req.body === 'object') {
       // For urlencoded data (command endpoint)
       if (req.headers['content-type']?.includes('application/x-www-form-urlencoded')) {
         // Reconstruct the raw body from parsed form data

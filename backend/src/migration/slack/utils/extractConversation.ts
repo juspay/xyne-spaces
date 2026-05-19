@@ -27,6 +27,8 @@ export interface ChannelHistoryOptions {
   includeAttachments?: boolean; // Fetch all attachments (default: true)
   includeDeactivatedUsers?: boolean; // Fetch deactivated users (default: true)
   includeBotMessages?: boolean; // Include bot messages when allowedBots is empty (default: false)
+  /** Optional user token (xoxp-...) to use instead of the bot token. Required for DMs. */
+  token?: string;
 }
 
 export interface SlackFile {
@@ -548,7 +550,15 @@ async function fetchChannelMessages(
         cursor,
         inclusive: true,
       })
-    );
+    ).catch((err) => {
+      logger.error('[Migration] conversations.history failed', {
+        channelId,
+        error: err?.data?.error || err?.message || err,
+        needed_scope: err?.data?.needed,
+        provided_scopes: err?.data?.provided,
+      });
+      throw err;
+    });
 
     if (!result.ok) {
       throw new Error(`Slack API error: ${result.error || 'Unknown error'}`);
@@ -798,6 +808,7 @@ export async function extractChannelHistory(
     includeAttachments = true,
     includeDeactivatedUsers = true,
     includeBotMessages = false,
+    token: overrideToken,
   } = options;
 
   // Validate inputs
@@ -822,8 +833,9 @@ export async function extractChannelHistory(
     includeBotMessages,
   });
 
-  const client = getSlackClient();
+  const client = overrideToken ? new WebClient(overrideToken) : getSlackClient();
   const userCache: UserInfoCache = new Map();
+  // Use the same client (bot or user token) to fetch pins inline
   const pinnedMessageTs = await fetchPinnedMessageTimestamps(client, channelId);
 
   // Step 1: Fetch all top-level messages

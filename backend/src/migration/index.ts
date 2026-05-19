@@ -12,8 +12,16 @@ import userActivationRoutes from '@/routes/userActivation';
 
 const router = Router();
 
-router.use(express.json({ limit: '50mb' }));
-router.use(express.urlencoded({ extended: true, limit: '50mb' }));
+/**
+ * Capture raw body bytes before parsing.
+ * Required by verifySlackRequest to compute the exact HMAC Slack produces.
+ */
+function rawBodyCapture(req: any, _res: any, buf: Buffer, _encoding: string) {
+  req.rawBody = buf.toString('utf8');
+}
+
+router.use(express.json({ limit: '50mb', verify: rawBodyCapture }));
+router.use(express.urlencoded({ extended: true, limit: '50mb', verify: rawBodyCapture }));
 
 // Route to Slack migration
 router.use('/slack', slackRoutes);

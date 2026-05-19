@@ -53,6 +53,12 @@ export interface DownloadAttachmentsOptions {
    */
   scopeType?: string;
   scopeId?: string;
+
+  /**
+   * Override token for auth (e.g., Slack user token for DM attachments)
+   * When provided, takes precedence over stored credentials
+   */
+  overrideToken?: string;
 }
 
 /**
@@ -151,8 +157,13 @@ export class ExternalAttachmentService {
     let authHeaders: Record<string, string> = {};
     if (attachments.some(a => !a.buffer && a.fileUrl)) {
       try {
-        const credentials = JSON.parse(decrypt(source.credentials));
-        authHeaders = this.getAuthHandler(source.sourceType).getHeaders(credentials);
+        // If overrideToken is provided, use it directly (e.g., Slack user token for DMs) as user token will only have access to private dm's attachment's
+        if (options.overrideToken) {
+          authHeaders = this.getAuthHandler(source.sourceType).getHeaders({ botToken: options.overrideToken });
+        } else {
+          const credentials = JSON.parse(decrypt(source.credentials));
+          authHeaders = this.getAuthHandler(source.sourceType).getHeaders(credentials);
+        }
       } catch (error) {
         logger.error(`Failed to decrypt credentials for source: ${sourceName}`, error);
         throw new Error(`Invalid credentials for source: ${sourceName}`);

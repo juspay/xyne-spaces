@@ -230,6 +230,55 @@ export function getSyncParticipantsModal(channelId?: string) {
   };
 }
 
+export function getSyncDmModal(channelId?: string) {
+  return {
+    type: 'modal',
+    callback_id: 'sync_dm_modal',
+    private_metadata: channelId ? JSON.stringify({ channel_id: channelId }) : undefined,
+    title: {
+      type: 'plain_text',
+      text: 'Sync All DMs',
+    },
+    submit: {
+      type: 'plain_text',
+      text: 'Start Sync',
+    },
+    close: {
+      type: 'plain_text',
+      text: 'Cancel',
+    },
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: ':information_source: This will migrate *all your DMs* (1:1 and group) to Xyne Spaces. Existing conversations will have messages inserted; new ones will be created automatically.',
+        },
+      },
+      {
+        type: 'input',
+        block_id: 'user_token',
+        label: {
+          type: 'plain_text',
+          text: 'Your Slack User Token',
+        },
+        hint: {
+          type: 'plain_text',
+          text: ':key: *How to get your Slack User Token:*\n1. Ensure you are an app collaborator for **Xyne Spaces**.\n2. Navigate to <https://app.slack.com/app-settings/T04T5CL7L/A09QL5AE5PY/oauth|App OAuth Settings> to request installation.\n3. Once approved, copy your token (`xoxp-...`) from either the *OAuth & Permissions* or *Install App* tabs.',
+        },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'user_token_input',
+          placeholder: {
+            type: 'plain_text',
+            text: 'xoxp-...',
+          },
+        },
+      },
+    ],
+  };
+}
+
 export function getMigrationMessageBlocks(data: MigrationMessageData) {
   const optionsText = formatSyncOptions(data.syncOptions);
   const today = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
