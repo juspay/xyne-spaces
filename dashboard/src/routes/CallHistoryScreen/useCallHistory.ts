@@ -10,7 +10,11 @@ import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
 import { stateMachineActor, type User } from '../../machines/stateMachine';
-import { getCallStatus, getParticipantUsers } from './callHistoryItem.utils';
+import {
+  getCallStatus,
+  getParticipantUsers,
+  isExternalCalendarEvent,
+} from './callHistoryItem.utils';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -163,7 +167,12 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       // Only show calls where the user is an actual participant. This filters out
       // broadcast-channel calls (post call updates mode) where call.channelId is a
       // large channel but only a subset of members are real participants.
-      const isParticipant = call.participants?.some(p => p.userId === userId);
+      // External calendar calls (Google/Microsoft) have no CallParticipant rows —
+      // attendees are stored in metadata only — so check creator instead.
+      const isExternalCalendarCall = isExternalCalendarEvent(call);
+      const isParticipant = isExternalCalendarCall
+        ? call.createdByUserId === userId
+        : call.participants?.some(p => p.userId === userId);
       if (!isParticipant) return false;
       return true;
     });
