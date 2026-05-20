@@ -129,7 +129,7 @@ const ChatView = (): ReactElement => {
   useEffect(() => {
     if (!channelId || !channel) return;
     if (channel.type === ChannelType.EMAIL) return;
-    setLastVisitedChannel(channelId);
+    setLastVisitedChannel(channelId, workspaceId ?? '');
   }, [channelId, channel]);
 
   // Check for canvas in hash with validation

@@ -93,7 +93,7 @@ const BookmarksPanel = (): ReactElement => {
 
   const isOnIndexRoute = pathWithoutWorkspace === '/chat/bookmarks';
 
-  const lastVisitedChannelId = useLastVisitedChannel();
+  const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
   const backPath = lastVisitedChannelId ? `/chat/dir/${lastVisitedChannelId}` : '/chat/dir';
 
   const bookmarksPanelRef = useRef<ImperativePanelHandle>(null);
