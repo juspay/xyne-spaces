@@ -70,7 +70,12 @@ const openExternal = (url: string): void => {
 
 const openInApp = (url: string): void => {
   if (isElectronApp()) {
-    browserPanelActor.send({ type: 'OPEN', urls: [url] });
+    const { browserPanelState } = browserPanelActor.getSnapshot().context;
+    if (browserPanelState === 'open') {
+      browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
+    } else {
+      browserPanelActor.send({ type: 'OPEN', urls: [url] });
+    }
     return;
   }
   window.open(url, '_blank', 'noopener,noreferrer');

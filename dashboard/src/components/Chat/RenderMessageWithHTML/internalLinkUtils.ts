@@ -32,12 +32,20 @@ const INTERNAL_XYNE_HOSTS = new Set([
   '127.0.0.1',
 ]);
 
+/** Paths that should be treated as external (no internal router handling) */
+const EXTERNAL_PATH_PREFIXES = ['/claw', '/claw-preview', '/changelog'];
+
 export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | null => {
   try {
     const url = new URL(href, window.location.origin);
     const isOurHost =
       INTERNAL_XYNE_HOSTS.has(url.hostname) || url.origin === window.location.origin;
     if (!isOurHost) {
+      return null;
+    }
+
+    // Treat certain paths as external - no internal routing exists
+    if (EXTERNAL_PATH_PREFIXES.some(prefix => url.pathname.startsWith(prefix))) {
       return null;
     }
 
