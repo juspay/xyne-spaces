@@ -96,6 +96,7 @@ export const textComponentSchema = baseComponentSchema.extend({
     size: z.enum(['xs', 'sm', 'base', 'lg', 'xl']).optional(),
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
+    codeBlock: z.boolean().optional(),
   }).strict().optional(),
 });
 

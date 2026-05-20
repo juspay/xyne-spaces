@@ -316,6 +316,7 @@ export async function getConversationReplies(
       const item: ConversationRepliesItem = {
         messageId: message.messageId,
         conversationId: message.conversationId,
+        parentMessageId: conversation.initialMessageId,
         content: message.content, 
         cleanContent: cleanContent, 
         userId: message.senderId,

@@ -37,7 +37,7 @@ export function transformHistoryResponse(
 			ts: item.initialMessageId,
 			user: item.userId,
 			text: item.cleanContent,
-			thread_ts: item.conversationId,
+			thread_ts: item.initialMessageId,
 		};
 
 		if (item.attachments && item.attachments.length > 0) {
@@ -69,7 +69,7 @@ export function transformRepliesResponse(
 			ts: item.messageId,
 			user: item.userId,
 			text: item.cleanContent,
-			thread_ts: item.conversationId,
+			thread_ts: item.parentMessageId,
 		};
 
 		if (item.attachments && item.attachments.length > 0) {
@@ -162,12 +162,13 @@ export function transformListResponse(
 
 export function transformOpenResponse(
 	channelId: string,
+	isIm = true,
 ): SlackConversationsOpenResponse {
 	return {
 		ok: true,
 		channel: {
 			id: channelId,
-			is_im: true,
+			is_im: isIm,
 		},
 	};
 }

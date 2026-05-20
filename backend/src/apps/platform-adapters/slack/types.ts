@@ -55,11 +55,26 @@ export interface SlackUsersInfoRequest {
 	include_locale?: boolean;
 }
 
+export interface SlackUsersLookupByEmailRequest {
+	email: string;
+}
+
 // ========== Slack Response Types ==========
 
 export interface SlackErrorResponse {
 	ok: false;
 	error: string;
+}
+
+export interface SlackAuthTestResponse {
+	ok: true;
+	url: string;
+	team: string;
+	user: string;
+	team_id: string;
+	user_id: string;
+	bot_id: string;
+	is_enterprise_install: false;
 }
 
 export interface SlackMessageObject {
@@ -68,6 +83,7 @@ export interface SlackMessageObject {
 	ts: string;
 	user?: string;
 	bot_id?: string;
+	username?: string;
 	text: string;
 	thread_ts?: string;
 	files?: SlackFileObject[];
@@ -81,6 +97,22 @@ export interface SlackFileObject {
 	mimetype: string;
 	url_private: string;
 	permalink: string;
+	shares?: {
+		public?: Record<string, SlackFileShareObject[]>;
+		private?: Record<string, SlackFileShareObject[]>;
+	};
+	channels?: string[];
+	groups?: string[];
+	ims?: string[];
+}
+
+export interface SlackFileShareObject {
+	reply_users: string[];
+	reply_users_count: number;
+	reply_count: number;
+	ts: string;
+	channel_name?: string;
+	team_id?: string;
 }
 
 export interface SlackChatPostMessageResponse {
@@ -207,7 +239,8 @@ export interface SlackConversationsListResponse {
 // ========== conversations.open ==========
 
 export interface SlackConversationsOpenRequest {
-	users: string;
+	users?: string;
+	channel?: string;
 	return_im?: boolean;
 }
 
@@ -215,7 +248,7 @@ export interface SlackConversationsOpenResponse {
 	ok: true;
 	channel: {
 		id: string;
-		is_im: true;
+		is_im: boolean;
 	};
 }
 
@@ -244,9 +277,10 @@ export interface SlackUsergroupObject {
 	handle: string;
 	description: string;
 	date_delete: number;
-	user_count: number;
+	user_count?: number;
 	date_create: number;
 	date_update: number;
+	users?: string[];
 }
 
 export interface SlackUsergroupsListResponse {
@@ -271,7 +305,8 @@ export interface SlackGetUploadURLExternalResponse {
 
 export interface SlackCompleteUploadExternalRequest {
 	files: Array<{ id: string; title?: string }>;
-	channel_id: string;
+	channel_id?: string;
+	channels?: string;
 	initial_comment?: string;
 	thread_ts?: string;
 }

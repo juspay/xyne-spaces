@@ -73,7 +73,7 @@ backend/src/apps/
       request-transformers/
         chat.ts                     # chat.postMessage, chat.update → Xyne format
         conversations.ts            # conversations.list, .history, .replies → Xyne format
-        users.ts                    # users.info → Xyne format
+        users.ts                    # users.info, users.lookupByEmail → Xyne format
         files.ts                    # files.upload → Xyne format
       response-transformers/
         chat.ts                     # ChatActionResponse → {ok, channel, ts, message}
@@ -121,6 +121,7 @@ import { Router, RequestHandler } from 'express';
 export interface TransformContext {
   userId: string;
   appId: string;
+  workspaceId?: string;
 }
 
 export interface IPlatformAdapter {
@@ -155,23 +156,25 @@ export class PlatformAdapterRegistry {
 
 ### 5.1 In Scope — All Implemented Endpoints
 
-All Slack adapter endpoints use **POST** (Slack's Web API accepts both GET and POST; POST-only simplifies body parsing).
+Slack adapter endpoints support Slack's documented HTTP method. Read/list/info methods that Slack documents as **GET** also expose equivalent **POST** routes because some Slack client packages only issue POST calls. GET routes read parameters from `req.query`; equivalent POST routes read the same parameters from `req.body`. Write/upload methods remain POST-only.
 
 | #  | Slack Method                     | Slack Path                                            | Xyne Core Function                            |
 | -- | -------------------------------- | ----------------------------------------------------- | --------------------------------------------- |
-| 1  | `chat.postMessage`             | `POST /api/apps/slack/chat.postMessage`             | `findOrCreateConversation()`                |
-| 2  | `chat.update`                  | `POST /api/apps/slack/chat.update`                  | `updateConversation()`                      |
-| 3  | `conversations.history`        | `POST /api/apps/slack/conversations.history`        | `getChannelHistory()`                       |
-| 4  | `conversations.replies`        | `POST /api/apps/slack/conversations.replies`        | `getConversationReplies()`                  |
-| 5  | `conversations.info`           | `POST /api/apps/slack/conversations.info`           | `repositories.channels.findById()`          |
-| 6  | `conversations.list`           | `POST /api/apps/slack/conversations.list`           | `repositories.channels.findManyPaginated()` |
-| 7  | `conversations.open`           | `POST /api/apps/slack/conversations.open`           | `unifiedDMService.getOrCreateBotDM()`       |
-| 8  | `users.info`                   | `POST /api/apps/slack/users.info`                   | `getUserData()`                             |
-| 9  | `files.upload`                 | `POST /api/apps/slack/files.upload`                 | `ingestAttachment()`                        |
-| 10 | `usergroups.list`              | `POST /api/apps/slack/usergroups.list`              | `getAllUserGroups()`                        |
-| 11 | `files.getUploadURLExternal`   | `POST /api/apps/slack/files.getUploadURLExternal`   | Redis state +`uploadFiles()` (V2 step 1)    |
-| 12 | _(binary upload)_              | `POST /api/apps/slack/_upload/:fileId`              | `uploadFiles()` (V2 step 2)                 |
-| 13 | `files.completeUploadExternal` | `POST /api/apps/slack/files.completeUploadExternal` | `findOrCreateConversation()` (V2 step 3)    |
+| 1  | `auth.test`                   | `GET/POST /api/apps/slack/auth.test`                | JWT auth context + user/workspace lookup      |
+| 2  | `chat.postMessage`             | `POST /api/apps/slack/chat.postMessage`             | `findOrCreateConversation()`                |
+| 3  | `chat.update`                  | `POST /api/apps/slack/chat.update`                  | `updateConversation()`                      |
+| 4  | `conversations.history`        | `GET/POST /api/apps/slack/conversations.history`    | `getChannelHistory()`                       |
+| 5  | `conversations.replies`        | `GET/POST /api/apps/slack/conversations.replies`    | `getConversationReplies()`                  |
+| 6  | `conversations.info`           | `GET/POST /api/apps/slack/conversations.info`       | `repositories.channels.findById()`          |
+| 7  | `conversations.list`           | `GET/POST /api/apps/slack/conversations.list`       | `repositories.channels.findManyPaginated()` |
+| 8  | `conversations.open`           | `POST /api/apps/slack/conversations.open`           | `unifiedDMService` / `findOrCreateDMChannel()` |
+| 9  | `users.info`                   | `GET/POST /api/apps/slack/users.info`               | `getUserData()`                             |
+| 10 | `users.lookupByEmail`          | `GET/POST /api/apps/slack/users.lookupByEmail`      | `repositories.users.findByEmailCaseInsensitive()` |
+| 11 | `files.upload`                 | `POST /api/apps/slack/files.upload`                 | `ingestAttachment()`                        |
+| 12 | `usergroups.list`              | `GET/POST /api/apps/slack/usergroups.list`          | `getAllUserGroups()`                        |
+| 13 | `files.getUploadURLExternal`   | `POST /api/apps/slack/files.getUploadURLExternal`   | Redis state +`uploadFiles()` (V2 step 1)    |
+| 14 | _(binary upload)_              | `POST /api/apps/slack/_upload/:fileId`              | `uploadFiles()` (V2 step 2)                 |
+| 15 | `files.completeUploadExternal` | `POST /api/apps/slack/files.completeUploadExternal` | `findOrCreateConversation()` (V2 step 3)    |
 
 ### 5.2 Xyne Endpoints with NO Slack Equivalent (Excluded)
 
@@ -206,7 +209,7 @@ The existing `authenticateApp` middleware is reused but **wrapped** in `slackAut
 
 1. `slackAuthenticateApp` intercepts `res.status()` and `res.json()` before calling `authenticateApp`
 2. If `authenticateApp` responds with HTTP 4xx/5xx, the wrapper converts it to `HTTP 200 + {ok: false, error: "not_authed"}` (or `"internal_error"` for 5xx)
-3. On success, `userId` and `appId` are saved to `req._slackAuth` for later retrieval via `getSlackAuthContext()`
+3. On success, `userId` and `appId` are saved to `req._slackAuth`; `getSlackAuthContext()` returns these plus `workspaceId` from `req.user?.workspaceId`
 4. A variant `slackRawBodyAuthenticateApp` handles the binary file upload endpoint (`_upload/:fileId`) where `req.body` is a raw `Buffer` — it temporarily replaces the body for auth, then restores it
 
 **JWT flow** (unchanged from core `authenticateApp`):
@@ -218,9 +221,13 @@ The existing `authenticateApp` middleware is reused but **wrapped** in `slackAut
 
 **What this means for bot developers**: Bots use their existing Xyne-issued JWT token. Only the base URL changes from `/api/apps/` to `/api/apps/slack/`. Token format is JWT, not Slack's `xoxb-*`.
 
+### Implemented: `auth.test`
+
+`GET/POST /api/apps/slack/auth.test` validates the Xyne app JWT and returns Slack-style identity fields: `{ ok, url, team, user, team_id, user_id, bot_id, is_enterprise_install }`.
+
 ### Future: Token Exchange
 
-Add `/api/apps/slack/auth.test` endpoint (Slack's token validation endpoint). Allow Slack-style token alias mapping to Xyne JWT. This enables full `@slack/web-api` SDK drop-in compatibility (SDKs call `auth.test` on startup).
+Allow Slack-style token alias mapping to Xyne JWT. Token format remains the main non-parity point: Xyne uses app JWTs, not Slack `xoxb-*` tokens.
 
 ---
 
@@ -240,6 +247,7 @@ Slack **always returns HTTP 200** with `{ ok: false, error: "error_code" }` for 
 | 403              | (access denied)         | `not_in_channel`                         |
 | 404              | `CHANNEL_NOT_FOUND`   | `channel_not_found`                      |
 | 404              | `NOT_FOUND` (user)    | `user_not_found`                         |
+| 404              | `NOT_FOUND` (email lookup) | `users_not_found`                  |
 | 404              | `NOT_FOUND` (message) | `message_not_found`                      |
 | 400              | `INVALID_CURSOR`      | `invalid_cursor`                         |
 | 400              | `MISSING_FILES`       | `no_file_data`                           |
@@ -292,19 +300,23 @@ Rationale: Most Slack SDKs treat `ts` as an opaque string identifier and never p
 | Slack Field                | Type                  | → | Xyne Field         | Type                       | Transform Logic                                                                                                                    |
 | -------------------------- | --------------------- | -- | ------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `channel`                | `string`            | → | `channelId`      | `string`                 | Direct map. Slack requires channel ID.                                                                                             |
-| `text`                   | `string`            | → | `text`           | `string`                 | Direct map. Slack mrkdwn format already handled by existing `SlackBlockKitParser` in `ChatController.processMessageContent()`. |
-| `blocks`                 | `SlackBlock[]`      | → | `text`           | `string`                 | Parse via existing `SlackBlockKitParser.parse({ blocks })` — outputs HTML for Xyne storage.                                     |
-| `attachments`            | `SlackAttachment[]` | → | `attachments`    | `any[]`                  | Direct map. Existing parser handles these.                                                                                         |
-| `thread_ts`              | `string`            | → | `conversationId` | `string`                 | Direct map — Xyne UUID used as-is (§8.1).                                                                                        |
-| `mrkdwn`                 | `boolean`           | → | `contentFormat`  | `ContentFormat`          | If `mrkdwn=true` (Slack default), set `contentFormat: 'markdown'`.                                                             |
+| `text`                   | `string`            | → | `text`           | `string`                 | Resolved via `resolveSlackMessageParts()` (mentions → Xyne spans), then parsed through `SlackBlockKitParser`.                    |
+| `blocks`                 | `SlackBlock[]`      | → | `text`           | `string`                 | Resolved via `resolveSlackMessageParts()`, then parsed via `SlackBlockKitParser` or converted to FlowJSON.                        |
+| `attachments`            | `SlackAttachment[]` | → | `attachments`    | `any[]`                  | Resolved via `resolveSlackMessageParts()`, then direct map.                                                                        |
+| `thread_ts`              | `string \| null`    | → | `conversationId` | `string?`                | If string, resolve via message lookup (§8.1). If `null`/omitted, post to main channel. `null` is coerced to `undefined`.          |
+| `mrkdwn`                 | `boolean`           | → | `contentFormat`  | `ContentFormat`          | Default `true`. If `mrkdwn=true`, set `contentFormat: 'markdown'`. If `mrkdwn=false`, text is resolved but not parsed as Block Kit. |
 | `metadata`               | `object`            | → | `metadata`       | `Record<string,unknown>` | Direct map.                                                                                                                        |
 | `reply_broadcast`        | `boolean`           | → | _(ignored)_      | —                         | Xyne has no equivalent of broadcasting thread replies to channel.                                                                  |
 | `unfurl_links`           | `boolean`           | → | _(ignored)_      | —                         | Not in Xyne apps API.                                                                                                              |
 | `unfurl_media`           | `boolean`           | → | _(ignored)_      | —                         | Not in Xyne apps API.                                                                                                              |
 | `icon_emoji`             | `string`            | → | _(ignored)_      | —                         | Not in Xyne apps API.                                                                                                              |
 | `icon_url`               | `string`            | → | _(ignored)_      | —                         | Not in Xyne apps API.                                                                                                              |
-| `username`               | `string`            | → | _(ignored)_      | —                         | Not in Xyne apps API.                                                                                                              |
+| `username`               | `string`            | → | _(echoed)_       | —                         | Not functional in Xyne, but echoed back in the response `message.username` field.                                                  |
 | _(from auth middleware)_ | —                    | → | `userId`         | `string`                 | Injected by `authenticateApp`.                                                                                                   |
+
+#### Length Limits
+
+Slack recommends keeping `text` under 4,000 characters and truncates plain `text` over 40,000 characters. Xyne's `MessageRepository` has a stricter stored `content` limit of 10,000 characters after Slack text/block/attachment transformation. Because Xyne cannot persist content above that cap, `chat.postMessage` returns Slack-style `{ ok: false, error: "msg_too_long" }` when transformed content exceeds 10,000 characters.
 
 #### Response Transform: Xyne → Slack
 
@@ -313,8 +325,7 @@ Rationale: Most Slack SDKs treat `ts` as an opaque string identifier and never p
 | _(success)_                     | —         | → | `ok`                | `boolean` | Always `true` on success.                                                          |
 | _(resolve from conversationId)_ | —         | → | `channel`           | `string`  | Resolve `channelId` from `conversationId` using existing `resolveChannelId()`. |
 | `messageId`                     | `string` | → | `ts`                | `string`  | Direct map (§8.1).                                                                  |
-| `conversationId`                | `string` | → | `message.thread_ts` | `string`  | Include if this is a thread reply.                                                   |
-| _(echo input text)_             | —         | → | `message`           | `object`  | Construct:`{ text, type: "message", subtype: "bot_message", ts, bot_id: appId }`.  |
+| _(echo input text)_             | —         | → | `message`           | `object`  | Construct:`{ text, type: "message", subtype: "bot_message", ts, bot_id: appId, username? }`.  |
 
 **Xyne source type**: `ChatActionResponse` = `{ eventType: ChatEventType, conversationId: string, messageId: string }`
 
@@ -328,11 +339,15 @@ Rationale: Most Slack SDKs treat `ts` as an opaque string identifier and never p
 
 | Slack Field     | Type                  | → | Xyne Field      | Type       | Transform Logic                          |
 | --------------- | --------------------- | -- | --------------- | ---------- | ---------------------------------------- |
-| `channel`     | `string`            | → | `channelId`   | `string` | Direct map.                              |
-| `ts`          | `string`            | → | `messageId`   | `string` | Direct map (§8.1).                      |
-| `text`        | `string`            | → | `text`        | `string` | Process through `SlackBlockKitParser`. |
-| `blocks`      | `SlackBlock[]`      | → | `text`        | `string` | Parse via `SlackBlockKitParser`.       |
-| `attachments` | `SlackAttachment[]` | → | `attachments` | `any[]`  | Direct map.                              |
+| `channel`     | `string`            | → | `channelId`   | `string` | Direct map.                                                                            |
+| `ts`          | `string`            | → | `messageId`   | `string` | Direct map (§8.1).                                                                    |
+| `text`        | `string`            | → | `text`        | `string` | Resolve mentions via `resolveSlackMessageParts()`, then process through `SlackBlockKitParser`. |
+| `blocks`      | `SlackBlock[]`      | → | `text`        | `string` | Resolve mentions, then parse via `SlackBlockKitParser`.                                |
+| `attachments` | `SlackAttachment[]` | → | `attachments` | `any[]`  | Resolve mentions, then direct map.                                                     |
+
+#### Length Limits
+
+Same as `chat.postMessage`: Xyne rejects transformed content over 10,000 characters with `{ ok: false, error: "msg_too_long" }` before calling the message repository.
 
 #### Response Transform: Xyne → Slack
 
@@ -395,7 +410,7 @@ Rationale: Most Slack SDKs treat `ts` as an opaque string identifier and never p
 | `include_num_members` | `boolean` | → | _(always included)_ | Xyne always returns `participantCount`. |
 | `include_locale`      | `boolean` | → | _(ignored)_         | Not in Xyne.                              |
 
-Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
+Note: Slack documents `conversations.info` as GET, and the adapter also supports POST for packages that call all Web API methods with POST.
 
 #### Response Transform: Xyne → Slack
 
@@ -443,7 +458,7 @@ Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
 | `userId`                          | `string`                | → | `messages[].user`               | `string`      | Direct map.                                                                   |
 | `createdAt`                       | `Date`                  | → | _(part of message object)_      | —              | Could optionally be included in a custom field. Not standard in Slack `ts`. |
 | —                                  | —                        | → | `messages[].type`               | `string`      | Always `"message"`.                                                         |
-| `attachments`                     | `AppEventAttachment[]?` | → | `messages[].files`              | `SlackFile[]` | Map `AppEventAttachment` → Slack file object (see §8.11).                 |
+| `attachments`                     | `AppEventAttachment[]?` | → | `messages[].files`              | `SlackFile[]` | Map `AppEventAttachment` → Slack file object (see §8.14).                 |
 | `hasMore`                         | `boolean`               | → | `has_more`                      | `boolean`     | Direct map.                                                                   |
 | `nextCursor`                      | `string?`               | → | `response_metadata.next_cursor` | `string`      | Direct map if `hasMore=true`; empty string otherwise.                       |
 
@@ -476,7 +491,7 @@ Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
 | `userId`                               | `string`                | → | `messages[].user`               | `string`      | Direct map.                          |
 | `createdAt`                            | `Date`                  | → | _(available)_                   | —              | Not standard in Slack `ts` format. |
 | —                                       | —                        | → | `messages[].type`               | `string`      | Always `"message"`.                |
-| `attachments`                          | `AppEventAttachment[]?` | → | `messages[].files`              | `SlackFile[]` | Map attachment format (§8.11).      |
+| `attachments`                          | `AppEventAttachment[]?` | → | `messages[].files`              | `SlackFile[]` | Map attachment format (§8.14).      |
 | `hasMore`                              | `boolean`               | → | `has_more`                      | `boolean`     | Direct map.                          |
 | `nextCursor`                           | `string?`               | → | `response_metadata.next_cursor` | `string`      | Direct map.                          |
 
@@ -492,12 +507,13 @@ Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
 
 | Slack Field     | Type        | → | Xyne Field       | Transform Logic                                                    |
 | --------------- | ----------- | -- | ---------------- | ------------------------------------------------------------------ |
-| `users`       | `string`  | → | `targetUserId` | Comma-separated user IDs. Takes first user only (single DM).       |
+| `users`       | `string`  | → | `targetUserIds` | Comma-separated user IDs. One user creates/resumes a bot DM; multiple users create/resume a GROUP_DM with the bot. |
+| `channel`     | `string`  | → | `channelId`    | Resume an existing IM/MPIM/channel by ID or name if the bot is already a participant. |
 | `return_im`   | `boolean` | → | _(ignored)_    | Xyne always returns channel info.                                  |
 | _(from auth)_ | —          | → | `userId`       | Bot's userId from JWT.                                             |
 | _(from auth)_ | —          | → | `workspaceId`  | Resolved from `repositories.users.findById(userId).workspaceId`. |
 
-**Implementation note**: `workspaceId` is resolved from the authenticated bot user's DB record (`botUser.workspaceId`). If the bot user has no workspace, the handler throws `"Workspace not found"` which maps to `internal_error`.
+**Implementation note**: `workspaceId` is resolved from the authenticated bot user's DB record (`botUser.workspaceId`). If the bot user has no workspace, the handler throws `"Workspace not found"` which maps to `internal_error`. Large GROUP_DM creation falls back to Xyne's existing private channel behavior when the participant-derived name would exceed DB limits.
 
 #### Response Transform: Xyne → Slack
 
@@ -505,7 +521,7 @@ Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
 | ------------- | ---------- | -- | ----------------- | ----------- | ----------------------- |
 | `channelId` | `string` | → | `ok`            | `boolean` | `true`.               |
 | `channelId` | `string` | → | `channel.id`    | `string`  | Direct map.             |
-| —            | —         | → | `channel.is_im` | `boolean` | Always `true` for DM. |
+| `scopeType`  | `string` | → | `channel.is_im` | `boolean` | `true` for DM, `false` for MPIM/GROUP_DM. |
 
 ---
 
@@ -533,7 +549,7 @@ Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
 | `picture`                   | `string?` | → | `user.profile.image_24` thru `image_512` | `string`  | Map single URL to all Slack image size fields.        |
 | `userType`                  | `string`  | → | `user.is_bot`                              | `boolean` | `true` if userType indicates bot.                   |
 | `userType`                  | `string`  | → | `user.is_admin`                            | `boolean` | `true` if userType indicates admin.                 |
-| `status`                    | `string`  | → | `user.deleted`                             | `boolean` | `"active"` → `false`, anything else → `true`. |
+| `status`                    | `string`  | → | `user.deleted`                             | `boolean` | `"ACTIVE"` → `false`, anything else → `true`. |
 | `joined`                    | `Date`    | → | `user.updated`                             | `number`  | Date → Unix timestamp (seconds).                     |
 | —                            | —          | → | `user.is_app_user`                         | `boolean` | `false` (default).                                  |
 | —                            | —          | → | `user.team_id`                             | `string`  | Empty string or resolved from context.                |
@@ -542,7 +558,31 @@ Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
 
 ---
 
-### 8.10 `files.upload`
+### 8.10 `users.lookupByEmail`
+
+**Slack docs**: https://docs.slack.dev/reference/methods/users.lookupByEmail
+
+#### Request Transform: Slack → Xyne
+
+| Slack Field | Type       | → | Xyne Field | Transform Logic |
+| ----------- | ---------- | -- | ---------- | --------------- |
+| `email`   | `string` | → | `email`  | Validate as email, then look up case-insensitively within the authenticated app user's workspace. |
+
+#### Response Transform: Xyne → Slack
+
+Uses the same Slack user object transformer as `users.info`.
+
+| Xyne Field (`UserResponse`) | Type       | → | Slack Field | Transform Logic |
+| ----------------------------- | ---------- | -- | ----------- | --------------- |
+| `userId`, `name`, `email`, `picture`, `userType`, `status`, `joined` | — | → | `user` | Same mapping as §8.9. |
+
+If no active user exists for the email in the authenticated workspace, return `{ ok: false, error: "users_not_found" }`.
+
+**Xyne source type**: `UserResponse` = `{ userId, name, email, picture, userType, status, joined }`
+
+---
+
+### 8.11 `files.upload`
 
 **Slack docs**: https://docs.slack.dev/reference/methods/files.upload (deprecated but widely used)
 
@@ -557,7 +597,7 @@ Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
 | `filetype`        | `string` | → | _(multer handles)_ | File type hint.                                                |
 | `initial_comment` | `string` | → | `text`             | Message text to accompany the upload.                          |
 | `title`           | `string` | → | _(metadata)_       | File title.                                                    |
-| `thread_ts`       | `string` | → | `conversationId`   | Direct map (§8.1).                                            |
+| `thread_ts`       | `string \| null` | → | `conversationId`   | If string, resolve via message lookup (§8.1). If `null`/omitted, upload to main channel. |
 | _(from auth)_     | —         | → | `userId`           | From JWT.                                                      |
 
 #### Response Transform: Xyne → Slack
@@ -571,24 +611,27 @@ Note: Slack uses GET, Xyne uses POST for channel info. Adapter bridges this.
 | `attachments[].url`               | `string` | → | `file.permalink`   | `string`  | Direct map.     |
 | `attachments[].size`              | `number` | → | `file.size`        | `number`  | Direct map.     |
 | `attachments[].mimeType`          | `string` | → | `file.mimetype`    | `string`  | Direct map.     |
+| `messageId`                       | `string` | → | `file.shares.public/private[channelId][].ts` | `string` | Direct map; share object includes `reply_users`, `reply_users_count`, `reply_count`, and optional `channel_name`. |
+| `channelId`                       | `string` | → | `file.channels[]` / `file.groups[]` / `file.ims[]` | `string[]` | Public channels go to `channels`, private channels to `groups`, DMs/group DMs to `ims`; non-matching arrays are empty. |
 
 **Xyne source type**: `FileUploadResponse` = `{ eventType, conversationId, messageId, attachments: FileAttachment[] }`
 
 ---
 
-### 8.11 `usergroups.list`
+### 8.12 `usergroups.list`
 
 **Slack docs**: https://docs.slack.dev/reference/methods/usergroups.list
 
 #### Request Transform: Slack → Xyne
 
-No parameters needed. Slack's `usergroups.list` accepts optional filters (`include_disabled`, `include_count`, `include_users`); Xyne returns all groups always.
+Slack's optional filters are supported where Xyne has equivalent data.
 
 | Slack Field          | → | Transform                                               |
 | -------------------- | -- | ------------------------------------------------------- |
-| `include_disabled` | → | _(ignored)_ — Xyne returns active groups by default. |
-| `include_count`    | → | _(ignored)_ — Xyne always includes `memberCount`.  |
-| `include_users`    | → | _(ignored)_ — Not supported in Xyne.                 |
+| `include_disabled` | → | `false` returns active groups only; `true` includes inactive groups. |
+| `include_count`    | → | `true` includes `user_count`; `false` omits it. |
+| `include_users`    | → | `true` includes `users[]` from Xyne user-group mappings. |
+| `team_id`          | → | Accepted and ignored; Xyne auth is already workspace-scoped. |
 
 #### Response Transform: Xyne → Slack
 
@@ -602,12 +645,13 @@ No parameters needed. Slack's `usergroups.list` accepts optional filters (`inclu
 | `memberCount`                    | `number`  | → | `usergroups[].user_count`  | `number` | Direct map.                                                                 |
 | `createdAt`                      | `Date`    | → | `usergroups[].date_create` | `number` | Date → Unix timestamp (seconds).                                           |
 | `updatedAt`                      | `Date`    | → | `usergroups[].date_update` | `number` | Date → Unix timestamp (seconds).                                           |
+| `userGroupMappings[].userId`     | `string`  | → | `usergroups[].users[]`     | `string[]` | Included only when `include_users=true`.                                  |
 
 **Xyne source type**: `UserGroupResponse` = `{ id, name, alias, description, isActive, memberCount, createdAt, updatedAt }`
 
 ---
 
-### 8.12 `files.getUploadURLExternal` / `files.completeUploadExternal` (V2 Upload)
+### 8.13 `files.getUploadURLExternal` / `files.completeUploadExternal` (V2 Upload)
 
 **Slack docs**: https://docs.slack.dev/reference/methods/files.getUploadURLExternal
 
@@ -615,7 +659,7 @@ The modern 3-step file upload flow used by `@slack/web-api` `filesUploadV2()`:
 
 #### Step 1: `files.getUploadURLExternal`
 
-Request: `{ filename: string, length: number }`
+Request: `{ filename: string, length: number, alt_text?: string, snippet_type?: string }`
 
 Response: `{ ok: true, upload_url: string, file_id: string }`
 
@@ -636,18 +680,18 @@ Implementation:
 
 #### Step 3: `files.completeUploadExternal`
 
-Request: `{ files: [{ id: string, title?: string }], channel_id: string, initial_comment?: string, thread_ts?: string }`
+Request: `{ files: [{ id: string, title?: string }], channel_id?: string, channels?: string, initial_comment?: string, thread_ts?: string | null }`
 
 Implementation:
 
-- Resolves channel, validates participant access
 - Retrieves each file's `UploadedFileResult` from Redis
 - Validates all files are `status: 'uploaded'` and owned by requesting user
-- Calls `findOrCreateConversation()` with uploaded file results
+- If `channel_id` or `channels` is provided, resolves the first channel, validates participant access, and calls `findOrCreateConversation()` with uploaded file results
+- If neither channel field is provided, returns `{ ok: true, files }` without creating a Xyne conversation; Slack's private unshared-file library has no direct Xyne equivalent in this adapter
 - Cleans up Redis keys
 - Returns `{ ok: true, files: SlackFileObject[] }`
 
-### 8.13 Attachment Format Mapping
+### 8.14 Attachment Format Mapping
 
 Used by `conversations.history` and `conversations.replies` response transformers.
 
@@ -673,7 +717,8 @@ Used by `conversations.history` and `conversations.replies` response transformer
 | `oldest`/`latest` time filters | `conversations.history` and `.replies` ignore time-range params. | Cursor-based pagination works. Time filtering could be added later. |
 | `reply_broadcast`                | Thread-to-channel broadcast not supported.                           | Silently ignored.                                                   |
 | Multi-channel `files.upload`     | Slack allows comma-separated channels. Xyne supports one.            | Uses first channel only.                                            |
-| All endpoints POST-only            | Slack accepts GET for some methods. Adapter uses POST for all.       | Slack SDKs always use POST anyway, so no practical impact.          |
+| Private unshared file library    | Slack can complete an upload with no channel. Xyne Apps API has no standalone private file library record. | `files.completeUploadExternal` returns file objects but does not create a conversation when no channel is supplied. |
+| Read/list/info HTTP method compatibility | Slack documents read/list/info methods as GET, while some Slack packages call every Web API method with POST. | Expose both GET and equivalent POST routes. GET parses `req.query`; POST parses `req.body`. |
 
 ### 9.2 Xyne-Only Features Not Exposed via Slack API
 
@@ -713,6 +758,10 @@ The adapter follows the repo's controller pattern:
 const controller = new SlackController();
 router.use(slackAuthenticateApp);
 router.post('/chat.postMessage', slackChannelValidation('body'), controller.chatPostMessage);
+
+// Read/list/info endpoints expose both GET and POST
+router.get('/conversations.history', slackChannelValidation('query'), controller.conversationsHistory);
+router.post('/conversations.history', slackChannelValidation('body'), controller.conversationsHistory);
 ```
 
 ### 10.2 Handler Pattern
@@ -720,9 +769,13 @@ router.post('/chat.postMessage', slackChannelValidation('body'), controller.chat
 Each handler in `SlackController` follows this pattern:
 
 ```typescript
+function getSlackParams(req: Request): unknown {
+  return req.method === 'GET' ? req.query : req.body;
+}
+
 chatPostMessage = wrapSlackHandler(async (req: Request, res: Response) => {
-  // 1. Validate with Zod
-  const parsed = PostMessageSchema.safeParse(req.body);
+  // 1. Validate with Zod (reads from query for GET, body for POST)
+  const parsed = PostMessageSchema.safeParse(getSlackParams(req));
   if (!parsed.success) { res.status(200).json({ ok: false, error: 'invalid_arguments' }); return; }
 
   // 2. Transform Slack request → Xyne args
@@ -754,24 +807,34 @@ export function wrapSlackHandler(handler: AsyncHandler): AsyncHandler {
 }
 ```
 
-### 10.4 Channel Validation Middleware
+### 10.4 Request Parameter Extraction
 
-`slackChannelValidation('body')` runs before handlers that need a channel:
+`getSlackParams(req)` is a small helper used by all read/list/info handlers:
 
-1. Reads `channel` from request body (or query for GET)
+- For **GET** requests, reads parameters from `req.query`
+- For **POST** requests, reads parameters from `req.body`
+
+This enables both `GET /conversations.history?channel=C123&limit=10` and `POST /conversations.history` with the same parameters in the body.
+
+### 10.5 Channel Validation Middleware
+
+`slackChannelValidation('body')` (or `'query'` for GET routes) runs before handlers that need a channel:
+
+1. Reads `channel` from request body for POST methods or query params for GET methods
 2. Resolves via `resolveSlackChannel()` — tries `findById`, then `findByName`
 3. Checks `channelParticipants.isParticipant()` — returns `not_in_channel` if unauthorized
 4. Sets `req._resolvedChannelId` for the handler
 
-### 10.5 Input Validation
+### 10.6 Input Validation
 
 Zod schemas handle Slack's `application/x-www-form-urlencoded` quirks:
 
 - `SlackBooleanSchema` — coerces `"true"`/`"false"` strings to booleans
 - `SlackArraySchema` — parses JSON-encoded array strings (e.g., `blocks` sent as string)
 - `SlackRecordSchema` — parses JSON-encoded object strings
+- `SlackOptionalStringSchema` — coerces `null` to `undefined`; used for nullable Slack fields such as `thread_ts`
 
-### 10.6 Core Functions Used (NO CHANGES TO THESE)
+### 10.7 Core Functions Used
 
 | Function                                             | File                                                                         | Used By                                                |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------ |
@@ -781,16 +844,19 @@ Zod schemas handle Slack's `application/x-www-form-urlencoded` quirks:
 | `getConversationReplies()`                         | `apps/core/conversationUtils.ts`                                           | `conversations.replies`                              |
 | `getUserData()`                                    | `apps/core/userUtils.ts`                                                   | `users.info`                                         |
 | `getAllUserGroups()`                               | `apps/core/userGroupUtils.ts`                                              | `usergroups.list`                                    |
-| `ingestAttachment()`                               | `apps/core/fileUtils.ts`                                                   | `files.upload`                                       |
+| `ingestAttachment()`                               | `apps/core/fileUtils.ts`                                                   | `files.upload` — accepts optional `workspaceId` param for mention resolution |
 | `uploadFiles()`                                    | `services/fileUploadService.ts`                                            | `_upload/:fileId` (V2 binary upload)                 |
+| `resolveSlackMessageParts()`                       | `integrations/adapters/slack-webhook-tickets/utils/slackUtils.ts`         | `chat.postMessage`, `chat.update` — resolves user/group/channel mentions before BlockKit parsing |
+| `resolveSlackText()`                               | `integrations/adapters/slack-webhook-tickets/utils/slackUtils.ts`         | `chat.postMessage`, `chat.update` — resolves mentions in plain text |
 | `unifiedDMService.getOrCreateBotDM()`              | `bots/unified/services/unified-dm-service.ts`                              | `conversations.open`                                 |
 | `repositories.channels.findById()`                 | `database/repositories`                                                    | `conversations.info`, channel resolution             |
 | `repositories.channels.findByName()`               | `database/repositories`                                                    | Channel resolution fallback                            |
 | `repositories.channels.findManyPaginated()`        | `database/repositories`                                                    | `conversations.list`                                 |
 | `repositories.messages.findById()`                 | `database/repositories`                                                    | `thread_ts` / `ts` → conversationId resolution    |
+| `repositories.users.findByEmailCaseInsensitive()`  | `database/repositories`                                                    | `users.lookupByEmail`                                |
 | `repositories.channelParticipants.isParticipant()` | `database/repositories`                                                    | Channel access validation                              |
 | `redisService.set/get/del()`                       | `services/redisService.ts`                                                 | File Upload V2 state management                        |
-| `SlackBlockKitParser.parse()`                      | `integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser.ts` | `chat.postMessage`, `chat.update`                  |
+| `SlackBlockKitParser.parse()`                      | `integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser.ts` | `chat.postMessage`, `chat.update` — called after `resolveSlackMessageParts()` |
 | `authenticateApp()`                                | `apps/middelware/authenticator.ts`                                         | All endpoints (wrapped by `slackAuthenticateApp`)    |
 
 ---
@@ -802,20 +868,19 @@ Zod schemas handle Slack's `application/x-www-form-urlencoded` quirks:
 | 1    | Foundation     | Generic interfaces, directory structure, registry, error transformer, Slack types                   |
 | 2    | Chat           | `chat.postMessage`, `chat.update` — request/response transformers + route handlers             |
 | 3    | Conversations  | `conversations.history`, `.replies`, `.info`, `.list`, `.open` — transformers + handlers |
-| 4    | Users + Groups | `users.info`, `usergroups.list` — transformers + handlers                                      |
+| 4    | Users + Groups | `users.info`, `users.lookupByEmail`, `usergroups.list` — transformers + handlers               |
 | 5    | Files          | `files.upload` — transformer + handler                                                           |
 | 6    | Mount + Wire   | Mount `/api/apps/slack` in apps router, register adapter                                          |
-| 7    | Test           | Integration tests for all 10 endpoints, test with `@slack/web-api` SDK                            |
+| 7    | Test           | Integration tests for all implemented endpoints, test with `@slack/web-api` SDK                   |
 
 ---
 
 ## 12. Verification Plan
 
-1. **Unit tests**: Each transformer tested in isolation — Slack input → expected Xyne input, Xyne output → expected Slack output.
-2. **Integration tests**: Send Slack-format HTTP requests to `/api/apps/slack/*`, verify responses match Slack API schema.
-3. **SDK compatibility test**: Point `@slack/web-api` WebClient at Xyne base URL. Verify `chat.postMessage`, `conversations.history` work end-to-end.
-4. **Error cases**: Invalid auth → `{ok: false, error: "not_authed"}`. Missing channel → `{ok: false, error: "channel_not_found"}`. All errors return HTTP 200.
-5. **Regression**: Verify existing `/api/apps/*` endpoints are completely unaffected.
+1. **Manual adapter check**: Point `@slack/web-api` WebClient at Xyne base URL and verify implemented methods end-to-end when credentials/server are available.
+2. **Shape check**: Confirm both query-param GET and body-param POST variants for read methods such as `users.lookupByEmail`, `users.info`, and `conversations.history`.
+3. **Error cases**: Invalid auth → `{ok: false, error: "not_authed"}`. Missing channel → `{ok: false, error: "channel_not_found"}`. All Web API adapter errors return HTTP 200.
+4. **Regression**: Verify existing `/api/apps/*` endpoints are completely unaffected.
 
 ---
 
@@ -824,9 +889,9 @@ Zod schemas handle Slack's `application/x-www-form-urlencoded` quirks:
 1. **`workspaceId` for `conversations.open`**: **Resolved** — resolved from `repositories.users.findById(userId).workspaceId` (the authenticated bot user's workspace).
 2. **Slack `types` filter mapping**: **Resolved** — `im` → `{scopeType: 'DM'}`, `mpim` → `{scopeType: 'GROUP_DM'}`, `public_channel` → `{scopeType: 'DEFAULT', visibility: 'PUBLIC'}`, `private_channel` → `{scopeType: 'DEFAULT', visibility: 'PRIVATE'}`. Single-type filter only; multi-type or unrecognized → no filter (returns all).
 3. **Block Kit in responses**: **Resolved** — `text` only. No Block Kit `blocks` in responses. `cleanContent` mapped to `text`.
+4. **`auth.test`**: **Resolved** — returns Slack-style token identity from the Xyne JWT auth context.
 
 ## 14. Open Questions
 
 1. **Rate limiting**: Should the Slack adapter have its own rate limiting to match Slack's tier system? Or rely on Xyne's existing rate limiting?
-2. **`auth.test`**: Should we implement a basic `auth.test` endpoint that returns `{ ok: true, user_id, team_id, bot_id }` so Slack SDKs don't fail on startup?
-3. **File Upload V2 partial failure cleanup**: If `files.completeUploadExternal` fails mid-way through a multi-file upload, earlier files' Redis state is not cleaned up (relies on TTL expiry). Should we add explicit cleanup on failure?
+2. **File Upload V2 partial failure cleanup**: If `files.completeUploadExternal` fails mid-way through a multi-file upload, earlier files' Redis state is not cleaned up (relies on TTL expiry). Should we add explicit cleanup on failure?

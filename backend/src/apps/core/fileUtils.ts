@@ -23,6 +23,7 @@ const IngestAttachmentParamsSchema = z.object({
   markdownText: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
   conversationId: z.string().trim().optional(),
+  workspaceId: z.string().trim().optional(),
 });
 
 /**
@@ -45,7 +46,7 @@ export async function ingestAttachment(
       throw new Error(`Validation error: ${errorMessages}`);
     }
 
-    const { files, channelId, userId, text, markdownText, metadata, conversationId } = paramsResult.data;
+    const { files, channelId, userId, text, markdownText, metadata, conversationId, workspaceId } = paramsResult.data;
 
     // Upload files to GCS
     logger.info(`[INGEST-ATTACHMENT] Uploading ${files.length} file(s)`);
@@ -63,7 +64,7 @@ export async function ingestAttachment(
       const botOauthToken = config.slackBotToken;
       let resolvedText = text;
       if (resolvedText) {
-        resolvedText = await resolveSlackMentions(resolvedText, botOauthToken);
+        resolvedText = await resolveSlackMentions(resolvedText, botOauthToken, false, workspaceId);
       }
       content = blockKitParser.parse({ text: resolvedText, attachments: undefined });
       isMarkdown = false;

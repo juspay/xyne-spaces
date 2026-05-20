@@ -24,6 +24,7 @@ export const ALLOWED_TAGS = new Set([
   'h6',
   'hr',
   'del',
+  's',
   'button',
   'hi',
   'table',

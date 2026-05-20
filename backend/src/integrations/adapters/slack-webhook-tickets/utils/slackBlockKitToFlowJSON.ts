@@ -21,6 +21,7 @@
 
 import type { FlowDefinition, FlowComponent } from '@xyne/shared';
 import { resolveSlackIds } from './slackUserResolver';
+import { parseMrkdwnBlocks } from './slackUtils';
 import type {
   SlackAttachment,
   SlackBlock,
@@ -270,7 +271,40 @@ export function mrkdwnToFlowComponent(
   const raw      = typeof textObj === 'string' ? textObj : textObj.text;
   const isMrkdwn = typeof textObj === 'string' || textObj.type === 'mrkdwn';
   const content  = isMrkdwn ? normalizeSlackMentions(raw, slackToXyneMap) : raw;
+  if (isMrkdwn) {
+    const structuredComponent = mrkdwnWithBlocksToFlowComponent(content);
+    if (structuredComponent) return structuredComponent;
+  }
   return { id: crypto.randomUUID(), type: 'text', props: { content } };
+}
+
+function mrkdwnWithBlocksToFlowComponent(content: string): FlowComponent | null {
+  if (!/(^|\n)(```|>\s?.+|\s*[-*•]\s+.+|\s*\d+\.\s+.+)/m.test(content)) return null;
+
+  const textComponent = (text: string): FlowComponent => ({
+    id: crypto.randomUUID(),
+    type: 'text',
+    props: { content: text },
+  });
+
+  const components = parseMrkdwnBlocks<FlowComponent>(content, {
+    onRegular: (lines) => textComponent(lines.join('\n')),
+    onQuote: (lines) => withChatQuoteStyle([textComponent(lines.join('\n'))]),
+    onList: (type, items) => {
+      const text = items
+        .map((item) => `${type === 'ul' ? '•' : `${item.num}.`} ${item.text}`)
+        .join('\n');
+      return textComponent(text);
+    },
+    onCode: (lines) => ({
+      id: crypto.randomUUID(),
+      type: 'text',
+      props: { content: lines.join('\n'), variant: 'muted', codeBlock: true },
+    }),
+  });
+
+  if (components.length === 1) return components[0];
+  return { id: crypto.randomUUID(), type: 'column', children: components };
 }
 
 // ============================================================================
@@ -302,6 +336,18 @@ function withColorStripe(children: FlowComponent[], color: string): FlowComponen
     id: crypto.randomUUID(),
     type: 'column',
     style: { borderLeft: `4px solid ${color}`, padding: '2px 0 2px 10px' },
+    children,
+  };
+}
+
+function withChatQuoteStyle(children: FlowComponent[]): FlowComponent {
+  return {
+    id: crypto.randomUUID(),
+    type: 'column',
+    style: {
+      borderLeft: '4px solid hsl(var(--muted-foreground))',
+      padding: '0 0 0 1rem',
+    },
     children,
   };
 }
@@ -560,35 +606,35 @@ function richTextBlockElementToComponent(
 ): FlowComponent | null {
   switch (el.type) {
     case 'rich_text_section': {
-      const parts = el.elements.map(e => richTextInlineToComponent(e, slackToXyneMap)).filter(Boolean) as FlowComponent[];
+      const parts = el.elements
+        .map(e => richTextInlineToComponent(e, slackToXyneMap))
+        .filter(Boolean) as FlowComponent[];
       if (!parts.length) return null;
       if (parts.length === 1) return parts[0];
       return { id: crypto.randomUUID(), type: 'row', children: parts };
     }
     case 'rich_text_list': {
-      const items = el.elements.map((item): FlowComponent => {
-        const parts = item.elements.map(e => richTextInlineToComponent(e, slackToXyneMap)).filter(Boolean) as FlowComponent[];
-        const bullet: FlowComponent = {
-          id: crypto.randomUUID(),
-          type: 'text',
-          props: { content: el.style === 'ordered' ? '' : '•' },
-        };
-        return {
-          id: crypto.randomUUID(),
-          type: 'row',
-          children: [bullet, ...(parts.length ? parts : [{ id: crypto.randomUUID(), type: 'text', props: { content: '' } } as FlowComponent])],
-        };
+      const lines = el.elements.map((item, index) => {
+        const marker = el.style === 'ordered' ? `${index + 1}.` : '•';
+        const content = item.elements
+          .map(e => richTextInlineToMrkdwn(e, slackToXyneMap))
+          .join('');
+        return `${marker} ${content}`;
       });
-      return { id: crypto.randomUUID(), type: 'column', children: items };
+      return { id: crypto.randomUUID(), type: 'text', props: { content: lines.join('\n') } };
     }
     case 'rich_text_preformatted': {
       const text = el.elements.map(richTextInlineToString).join('');
-      return { id: crypto.randomUUID(), type: 'text', props: { content: text, variant: 'muted' } };
+      return {
+        id: crypto.randomUUID(),
+        type: 'text',
+        props: { content: text, variant: 'muted', codeBlock: true },
+      };
     }
     case 'rich_text_quote': {
       const parts = el.elements.map(e => richTextInlineToComponent(e, slackToXyneMap)).filter(Boolean) as FlowComponent[];
       if (!parts.length) return null;
-      return withColorStripe(parts, '#d1d5db');
+      return withChatQuoteStyle(parts);
     }
     default:
       return null;
@@ -601,17 +647,18 @@ function richTextInlineToComponent(
 ): FlowComponent | null {
   switch (el.type) {
     case 'text': {
-      const props: Record<string, unknown> = { content: el.text };
+      const props: Record<string, unknown> = {
+        content: richTextTextToMrkdwn(el.text, el.style),
+      };
       if (el.style?.bold)   props['bold']   = true;
       if (el.style?.italic) props['italic'] = true;
-      if (el.style?.code)   props['variant'] = 'muted';
       return { id: crypto.randomUUID(), type: 'text', props };
     }
     case 'link': {
       // Emit as a parseable <url|label> token so TextNode renders it as an <a>.
       const label = el.text || el.url;
       const token = label !== el.url ? `<${el.url}|${label}>` : `<${el.url}>`;
-      const props: Record<string, unknown> = { content: token };
+      const props: Record<string, unknown> = { content: richTextTextToMrkdwn(token, el.style) };
       if (el.style?.bold)   props['bold']   = true;
       if (el.style?.italic) props['italic'] = true;
       return { id: crypto.randomUUID(), type: 'text', props };
@@ -632,6 +679,46 @@ function richTextInlineToComponent(
       return { id: crypto.randomUUID(), type: 'text', props: { content: `@${el.usergroup_id}` } };
     default:
       return null;
+  }
+}
+
+function richTextTextToMrkdwn(text: string, style?: { strike?: boolean; code?: boolean }): string {
+  let content = text;
+  if (style?.code) content = `\`${content}\``;
+  if (style?.strike) content = `~${content}~`;
+  return content;
+}
+
+function richTextInlineToMrkdwn(
+  el: SlackRichTextInlineElement,
+  slackToXyneMap?: Map<string, string>,
+): string {
+  switch (el.type) {
+    case 'text': {
+      let text = richTextTextToMrkdwn(el.text, el.style);
+      if (el.style?.bold) text = `*${text}*`;
+      if (el.style?.italic) text = `_${text}_`;
+      return text;
+    }
+    case 'link': {
+      const label = el.text || el.url;
+      const token = label !== el.url ? `<${el.url}|${label}>` : `<${el.url}>`;
+      return richTextTextToMrkdwn(token, el.style);
+    }
+    case 'emoji':
+      return `:${el.name}:`;
+    case 'user': {
+      const xyneId = slackToXyneMap?.get(el.user_id) ?? el.user_id;
+      return `<userid:${xyneId}>`;
+    }
+    case 'channel':
+      return `<channelid:${el.channel_id}>`;
+    case 'broadcast':
+      return `<broadcast:${el.range}>`;
+    case 'usergroup':
+      return `@${el.usergroup_id}`;
+    default:
+      return '';
   }
 }
 

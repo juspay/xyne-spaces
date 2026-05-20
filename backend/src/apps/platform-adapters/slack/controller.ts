@@ -35,7 +35,10 @@ import {
 	transformReplies,
 } from "./request-transformers/conversations";
 import { transformFilesUpload } from "./request-transformers/files";
-import { transformUsersInfo } from "./request-transformers/users";
+import {
+	transformUsersInfo,
+	transformUsersLookupByEmail,
+} from "./request-transformers/users";
 import {
 	transformPostMessageResponse,
 	transformUpdateResponse,
@@ -50,7 +53,7 @@ import {
 import { transformFilesUploadResponse } from "./response-transformers/files";
 import { transformUsergroupsListResponse } from "./response-transformers/usergroups";
 import { transformUsersInfoResponse } from "./response-transformers/users";
-import type { SlackFileObject } from "./types";
+import type { SlackAuthTestResponse, SlackFileObject } from "./types";
 
 // ========== Zod Schemas ==========
 
@@ -61,6 +64,10 @@ function parseJsonString(value: unknown): unknown {
 	} catch {
 		return value;
 	}
+}
+
+function getSlackParams(req: Request): unknown {
+	return req.method === "GET" ? req.query : req.body;
 }
 
 const SlackBooleanSchema = z.preprocess((value) => {
@@ -77,6 +84,36 @@ const SlackRecordSchema = z.preprocess(
 	parseJsonString,
 	z.record(z.unknown()).optional(),
 );
+const SlackOptionalStringSchema = z
+	.string()
+	.nullable()
+	.optional()
+	.transform((value) => value ?? undefined);
+
+const XYNE_MESSAGE_CONTENT_MAX_LENGTH = 10000;
+
+async function resolveSlackThreadConversationId(
+	threadTs: string | undefined,
+	channelId: string,
+): Promise<{ conversationId?: string; error?: "thread_not_found" }> {
+	if (!threadTs) {
+		return {};
+	}
+
+	const parentMsg = await repositories.messages.findById(threadTs);
+	if (!parentMsg) {
+		return { error: "thread_not_found" };
+	}
+
+	const parentConversation = await repositories.conversations.findById(
+		parentMsg.conversationId,
+	);
+	if (!parentConversation || parentConversation.channelId !== channelId) {
+		return { error: "thread_not_found" };
+	}
+
+	return { conversationId: parentMsg.conversationId };
+}
 
 const PostMessageSchema = z
 	.object({
@@ -84,9 +121,10 @@ const PostMessageSchema = z
 		text: z.string().optional(),
 		blocks: SlackArraySchema,
 		attachments: SlackArraySchema,
-		thread_ts: z.string().optional(),
-		mrkdwn: SlackBooleanSchema,
+		thread_ts: SlackOptionalStringSchema,
+		mrkdwn: SlackBooleanSchema.default(true),
 		metadata: SlackRecordSchema,
+		username: SlackOptionalStringSchema,
 	})
 	.refine(
 		(data) =>
@@ -150,19 +188,29 @@ const ConversationsListSchema = z.object({
 	cursor: z.string().optional(),
 });
 
-const ConversationsOpenSchema = z.object({
-	users: z.string().min(1, "users is required"),
-	return_im: SlackBooleanSchema,
-});
+const ConversationsOpenSchema = z
+	.object({
+		users: z.string().optional(),
+		channel: z.string().optional(),
+		return_im: SlackBooleanSchema,
+	})
+	.refine((data) => !!data.users || !!data.channel, {
+		message: "users or channel is required",
+		path: ["users"],
+	});
 
 const UsersInfoSchema = z.object({
 	user: z.string().min(1, "user is required"),
 });
 
+const UsersLookupByEmailSchema = z.object({
+	email: z.string().email("email is required"),
+});
+
 const FilesUploadSchema = z.object({
 	channels: z.string().min(1, "channels is required"),
 	initial_comment: z.string().optional(),
-	thread_ts: z.string().optional(),
+	thread_ts: SlackOptionalStringSchema,
 	title: z.string().optional(),
 	filename: z.string().optional(),
 	filetype: z.string().optional(),
@@ -189,9 +237,17 @@ const CompleteUploadExternalSchema = z.object({
 			)
 			.min(1),
 	),
-	channel_id: z.string().min(1, "channel_id is required"),
+	channel_id: z.string().optional(),
+	channels: z.string().optional(),
 	initial_comment: z.string().optional(),
-	thread_ts: z.string().optional(),
+	thread_ts: SlackOptionalStringSchema,
+});
+
+const UsergroupsListSchema = z.object({
+	include_users: SlackBooleanSchema.default(false),
+	include_disabled: SlackBooleanSchema.default(false),
+	include_count: SlackBooleanSchema.default(true),
+	team_id: z.string().optional(),
 });
 
 // ========== File Upload V2 State ==========
@@ -210,6 +266,32 @@ interface FileUploadV2State {
 // ========== Controller ==========
 
 export class SlackController {
+	authTest = wrapSlackHandler(async (req: Request, res: Response) => {
+		const context = getSlackAuthContext(req);
+		const user = await repositories.users.findById(context.userId);
+		if (!user) {
+			res.status(200).json({ ok: false, error: "user_not_found" });
+			return;
+		}
+
+		const workspaceId = user.workspaceId ?? context.workspaceId ?? "";
+		const workspace = workspaceId
+			? await repositories.workspaces.findById(workspaceId)
+			: null;
+		const response: SlackAuthTestResponse = {
+			ok: true,
+			url: "",
+			team: workspace?.name ?? "",
+			user: user.name ?? user.email,
+			team_id: workspaceId,
+			user_id: user.id,
+			bot_id: context.appId,
+			is_enterprise_install: false,
+		};
+
+		res.status(200).json(response);
+	});
+
 	chatPostMessage = wrapSlackHandler(async (req: Request, res: Response) => {
 		const parsed = PostMessageSchema.safeParse(req.body);
 		if (!parsed.success) {
@@ -223,15 +305,18 @@ export class SlackController {
 			{ ...parsed.data, channel: channelId },
 			context,
 		);
+		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+			res.status(200).json({ ok: false, error: "msg_too_long" });
+			return;
+		}
 
-		let conversationId = args.conversationId;
-		if (conversationId) {
-			const parentMsg = await repositories.messages.findById(conversationId);
-			if (!parentMsg) {
-				res.status(200).json({ ok: false, error: "thread_not_found" });
-				return;
-			}
-			conversationId = parentMsg.conversationId;
+		const threadResolution = await resolveSlackThreadConversationId(
+			args.conversationId,
+			channelId,
+		);
+		if (threadResolution.error) {
+			res.status(200).json({ ok: false, error: threadResolution.error });
+			return;
 		}
 
 		const result = await findOrCreateConversation(
@@ -239,7 +324,7 @@ export class SlackController {
 			args.userId,
 			args.content,
 			args.isMarkdown,
-			conversationId,
+			threadResolution.conversationId,
 			undefined,
 			MessageType.BOT,
 			args.metadata,
@@ -250,6 +335,7 @@ export class SlackController {
 			channelId,
 			parsed.data.text ?? "",
 			context.appId,
+			parsed.data.username,
 		);
 		res.status(200).json(slackResponse);
 	});
@@ -262,7 +348,11 @@ export class SlackController {
 		}
 
 		const context = getSlackAuthContext(req);
-		const args = await transformUpdate(parsed.data);
+		const args = await transformUpdate(parsed.data, context);
+		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+			res.status(200).json({ ok: false, error: "msg_too_long" });
+			return;
+		}
 		const channelId = getResolvedChannelId(req);
 
 		const existingMessage = await repositories.messages.findById(args.messageId);
@@ -300,7 +390,7 @@ export class SlackController {
 
 	conversationsHistory = wrapSlackHandler(
 		async (req: Request, res: Response) => {
-			const parsed = HistorySchema.safeParse(req.body);
+			const parsed = HistorySchema.safeParse(getSlackParams(req));
 			if (!parsed.success) {
 				res.status(200).json({ ok: false, error: "invalid_arguments" });
 				return;
@@ -320,7 +410,7 @@ export class SlackController {
 
 	conversationsReplies = wrapSlackHandler(
 		async (req: Request, res: Response) => {
-			const parsed = RepliesSchema.safeParse(req.body);
+			const parsed = RepliesSchema.safeParse(getSlackParams(req));
 			if (!parsed.success) {
 				res.status(200).json({ ok: false, error: "invalid_arguments" });
 				return;
@@ -349,7 +439,7 @@ export class SlackController {
 	);
 
 	conversationsInfo = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = ConversationsInfoSchema.safeParse(req.body);
+		const parsed = ConversationsInfoSchema.safeParse(getSlackParams(req));
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
 			return;
@@ -378,7 +468,7 @@ export class SlackController {
 	});
 
 	conversationsList = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = ConversationsListSchema.safeParse(req.body);
+		const parsed = ConversationsListSchema.safeParse(getSlackParams(req));
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
 			return;
@@ -417,31 +507,58 @@ export class SlackController {
 			return;
 		}
 
-		const [targetUserId] = parsed.data.users
-			.split(",")
-			.map((user) => user.trim())
-			.filter(Boolean);
-		if (!targetUserId) {
-			res.status(200).json({ ok: false, error: "user_not_found" });
-			return;
-		}
-
 		const { userId } = getSlackAuthContext(req);
 		const botUser = await repositories.users.findById(userId);
 		if (!botUser?.workspaceId) {
 			throw new Error("Workspace not found");
 		}
 
-		const channel = await unifiedDMService.getOrCreateBotDM(
-			targetUserId,
+		if (parsed.data.channel) {
+			const channelId = await resolveSlackChannel(parsed.data.channel);
+			const isParticipant =
+				await repositories.channelParticipants.isParticipant(channelId, userId);
+			if (!isParticipant) {
+				res.status(200).json({ ok: false, error: "not_in_channel" });
+				return;
+			}
+
+			const channel = await repositories.channels.findById(channelId);
+			res
+				.status(200)
+				.json(transformOpenResponse(channelId, channel?.scopeType === "DM"));
+			return;
+		}
+
+		const targetUserIds = (parsed.data.users ?? "")
+			.split(",")
+			.map((user) => user.trim())
+			.filter(Boolean);
+		if (targetUserIds.length === 0) {
+			res.status(200).json({ ok: false, error: "user_not_found" });
+			return;
+		}
+
+		if (targetUserIds.length === 1) {
+			const channel = await unifiedDMService.getOrCreateBotDM(
+				targetUserIds[0],
+				userId,
+				botUser.workspaceId,
+			);
+			res.status(200).json(transformOpenResponse(channel.id, true));
+			return;
+		}
+
+		const channelId = await repositories.channels.findOrCreateDMChannel(
 			userId,
+			targetUserIds,
+			repositories.channelParticipants,
 			botUser.workspaceId,
 		);
-		res.status(200).json(transformOpenResponse(channel.id));
+		res.status(200).json(transformOpenResponse(channelId, false));
 	});
 
 	usersInfo = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = UsersInfoSchema.safeParse(req.body);
+		const parsed = UsersInfoSchema.safeParse(getSlackParams(req));
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
 			return;
@@ -451,6 +568,43 @@ export class SlackController {
 		const result = await getUserData(args.userId);
 		const slackResponse = transformUsersInfoResponse(result);
 		res.status(200).json(slackResponse);
+	});
+
+	usersLookupByEmail = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = UsersLookupByEmailSchema.safeParse(getSlackParams(req));
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		const args = transformUsersLookupByEmail(parsed.data);
+		const { userId } = getSlackAuthContext(req);
+		const authUser = await repositories.users.findById(userId);
+		if (!authUser?.workspaceId) {
+			res.status(200).json({ ok: false, error: "users_not_found" });
+			return;
+		}
+
+		const user = await repositories.users.findByEmailCaseInsensitive(
+			args.email,
+			authUser.workspaceId,
+		);
+		if (!user || user.status !== "ACTIVE") {
+			res.status(200).json({ ok: false, error: "users_not_found" });
+			return;
+		}
+
+		res.status(200).json(
+			transformUsersInfoResponse({
+				userId: user.id,
+				name: user.name,
+				email: user.email,
+				picture: user.picture,
+				userType: user.userType,
+				status: user.status,
+				joined: user.createdAt,
+			}),
+		);
 	});
 
 	filesUpload = wrapSlackHandler(async (req: Request, res: Response) => {
@@ -467,13 +621,22 @@ export class SlackController {
 		}
 
 		const channelId = await resolveSlackChannel(args.channelId);
-		const { userId } = getSlackAuthContext(req);
+		const context = getSlackAuthContext(req);
 		const isParticipant = await repositories.channelParticipants.isParticipant(
 			channelId,
-			userId,
+			context.userId,
 		);
 		if (!isParticipant) {
 			res.status(200).json({ ok: false, error: "not_in_channel" });
+			return;
+		}
+		const channel = await repositories.channels.findById(channelId);
+		const threadResolution = await resolveSlackThreadConversationId(
+			args.conversationId,
+			channelId,
+		);
+		if (threadResolution.error) {
+			res.status(200).json({ ok: false, error: threadResolution.error });
 			return;
 		}
 
@@ -500,18 +663,55 @@ export class SlackController {
 		const result = await ingestAttachment({
 			files: uploadedFiles,
 			channelId,
-			userId,
+			userId: context.userId,
 			text: args.text,
-			conversationId: args.conversationId,
+			conversationId: threadResolution.conversationId,
 			metadata: args.metadata,
+			workspaceId: context.workspaceId,
 		});
 
-		res.status(200).json(transformFilesUploadResponse(result));
+		res.status(200).json(
+			transformFilesUploadResponse(result, {
+				channelId,
+				channelName: channel?.name,
+				scopeType: channel?.scopeType,
+				visibility: channel?.visibility,
+			}),
+		);
 	});
 
-	usergroupsList = wrapSlackHandler(async (_req: Request, res: Response) => {
-		const groups = await getAllUserGroups();
-		res.status(200).json(transformUsergroupsListResponse(groups));
+	usergroupsList = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = UsergroupsListSchema.safeParse(getSlackParams(req));
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		const groups = (await getAllUserGroups()).filter(
+			(group) => parsed.data.include_disabled || group.isActive,
+		);
+		const groupsWithUsers = parsed.data.include_users
+			? await Promise.all(
+					groups.map(async (group) => {
+						const withMappings =
+							await repositories.userGroups.findWithMappings(group.id);
+						return {
+							...group,
+							users:
+								withMappings?.userGroupMappings
+									?.map((mapping) => mapping.userId)
+									.filter(Boolean) ?? [],
+						};
+					}),
+				)
+			: groups;
+
+		res.status(200).json(
+			transformUsergroupsListResponse(groupsWithUsers, {
+				includeUsers: parsed.data.include_users,
+				includeCount: parsed.data.include_count,
+			}),
+		);
 	});
 
 	// ========== File Upload V2 ==========
@@ -627,16 +827,9 @@ export class SlackController {
 				return;
 			}
 
-			const { files, channel_id, initial_comment, thread_ts } = parsed.data;
+			const { files, channel_id, channels, initial_comment, thread_ts } =
+				parsed.data;
 			const { userId } = getSlackAuthContext(req);
-
-			const channelId = await resolveSlackChannel(channel_id);
-			const isParticipant =
-				await repositories.channelParticipants.isParticipant(channelId, userId);
-			if (!isParticipant) {
-				res.status(200).json({ ok: false, error: "not_in_channel" });
-				return;
-			}
 
 			const uploadedResults: UploadedFileResult[] = [];
 			const redisKeys: string[] = [];
@@ -663,39 +856,6 @@ export class SlackController {
 				redisKeys.push(redisKey);
 			}
 
-			let conversationId: string | undefined;
-			if (thread_ts) {
-				const parentMsg = await repositories.messages.findById(thread_ts);
-				if (!parentMsg) {
-					res.status(200).json({ ok: false, error: "thread_not_found" });
-					return;
-				}
-
-				const parentConversation = await repositories.conversations.findById(
-					parentMsg.conversationId,
-				);
-				if (!parentConversation || parentConversation.channelId !== channelId) {
-					res.status(200).json({ ok: false, error: "thread_not_found" });
-					return;
-				}
-
-				conversationId = parentMsg.conversationId;
-			}
-
-			await findOrCreateConversation(
-				channelId,
-				userId,
-				initial_comment ?? "",
-				false,
-				conversationId,
-				uploadedResults,
-				MessageType.BOT,
-			);
-
-			for (const key of redisKeys) {
-				await redisService.del(key);
-			}
-
 			const responseFiles: SlackFileObject[] = files.map((f, i) => {
 				const uploaded = uploadedResults[i];
 				return {
@@ -708,6 +868,50 @@ export class SlackController {
 					permalink: uploaded.fileUrl,
 				};
 			});
+
+			const [shareChannel] = (channel_id ?? channels ?? "")
+				.split(",")
+				.map((channel) => channel.trim())
+				.filter(Boolean);
+
+			if (!shareChannel) {
+				for (const key of redisKeys) {
+					await redisService.del(key);
+				}
+				res.status(200).json({ ok: true, files: responseFiles });
+				return;
+			}
+
+			const channelId = await resolveSlackChannel(shareChannel);
+			const isParticipant =
+				await repositories.channelParticipants.isParticipant(channelId, userId);
+			if (!isParticipant) {
+				res.status(200).json({ ok: false, error: "not_in_channel" });
+				return;
+			}
+
+			const threadResolution = await resolveSlackThreadConversationId(
+				thread_ts,
+				channelId,
+			);
+			if (threadResolution.error) {
+				res.status(200).json({ ok: false, error: threadResolution.error });
+				return;
+			}
+
+			await findOrCreateConversation(
+				channelId,
+				userId,
+				initial_comment ?? "",
+				false,
+				threadResolution.conversationId,
+				uploadedResults,
+				MessageType.BOT,
+			);
+
+			for (const key of redisKeys) {
+				await redisService.del(key);
+			}
 
 			res.status(200).json({ ok: true, files: responseFiles });
 		},

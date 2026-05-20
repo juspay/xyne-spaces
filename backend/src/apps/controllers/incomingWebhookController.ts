@@ -6,6 +6,7 @@ import { logger } from '@/utils/logger';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { findOrCreateConversation } from '../core/conversationUtils';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
+import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
 import { MessageType } from '@xyne/shared';
 import { outageAlertService } from '@/services/outageAlertService';
 import { config } from '@/config/env';
@@ -19,11 +20,20 @@ const IncomingWebhookParamsSchema = z.object({
 });
 
 const IncomingWebhookBodySchema = z.object({
-  text: z.string().min(1, 'text is required'),
+  text: z.string().optional(),
   blocks: z.array(z.any()).optional(),
   attachments: z.array(z.any()).optional(),
   conversationId: z.string().optional(),
-});
+}).refine(
+  (data) =>
+    !!data.text ||
+    (data.blocks && data.blocks.length > 0) ||
+    (data.attachments && data.attachments.length > 0),
+  {
+    message: 'text, blocks, or attachments is required',
+    path: ['text'],
+  },
+);
 
 const CreateWebhookBodySchema = z.object({
   installedAppId: z.string().min(1),
@@ -171,7 +181,17 @@ class IncomingWebhookController {
         return;
       }
 
-      const content = this.blockKitParser.parse({ text, blocks, attachments });
+      const resolvedMessageParts = await resolveSlackMessageParts({
+        text,
+        blocks,
+        attachments,
+      }, config.slackBotToken, workspaceId);
+
+      const content = this.blockKitParser.parse({
+        text: resolvedMessageParts.text,
+        blocks: resolvedMessageParts.blocks,
+        attachments: resolvedMessageParts.attachments,
+      });
 
       // Post the message to the channel
       const messageResult = await findOrCreateConversation(
@@ -190,12 +210,12 @@ class IncomingWebhookController {
 
       // Only run outage verification for the configured outage alerts channel
       if (config.outageVerification.channelId && channelId === config.outageVerification.channelId) {
-        outageAlertService.processOutageAlert(text, messageResult.conversationId)
+        outageAlertService.processOutageAlert(text ?? '', messageResult.conversationId)
           .then(async (result) => {
             if (result.uploadedFile) {
               try {
                 // Extract mention spans directly from the original webhook text
-                const mentionSpans = (text.match(/<span[^>]*data-mention-type="user"[^>]*>.*?<\/span>/gi) ?? []).join(' ');
+                const mentionSpans = (resolvedMessageParts.text?.match(/<span[^>]*data-mention-type="user"[^>]*>.*?<\/span>/gi) ?? []).join(' ');
                 const replyContent = mentionSpans ? `${mentionSpans} False Outage Report` : 'False Outage Report';
 
                 await findOrCreateConversation(
@@ -224,7 +244,7 @@ class IncomingWebhookController {
         params: req.params,
         error,
       });
-      res.status(500).send('server_error');
+      res.status(500).send('rollup_error');
     }
   };
 

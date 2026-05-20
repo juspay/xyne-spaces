@@ -108,12 +108,12 @@ Supported attachment fields: `color`, `pretext`, `author_name`, `author_link`, `
 
 ### Behavior
 
-- `text` field is **required** (at minimum)
+- `text`, `blocks`, or `attachments` is required. Slack recommends top-level `text` as fallback for `blocks`, but Xyne accepts blocks-only and attachments-only payloads to match Slack webhook behavior.
 - `blocks` — pass through to `SlackBlockKitParser` for rendering; falls back to `text` if blocks are empty/unsupported
 - `attachments` — pass through to `SlackBlockKitParser.parseAttachments()` for legacy Slack attachment rendering
 - **Channel membership required:** Bot and requesting user must both already be members of the target channel before a webhook can be created for it. Webhooks can only be created for channels where both are already present. **Slack difference:** In Slack, the bot is automatically added to the channel during webhook creation. In Xyne, the bot must be added to the channel first (via channel settings), then a channel member can create the webhook.
 - Response: `200 OK` with body `"ok"` on success (matches Slack behavior)
-- Errors: `400` (bad payload, invalid workspace/app/secret combo, inactive/revoked webhook, or bot not in channel — intentionally generic to avoid leaking internal details to external callers), `500` (internal error)
+- Errors: `400 no_text` for payloads with no message content, `400 invalid_payload` for malformed payloads or invalid workspace/app/secret combo, and `500 rollup_error` for internal failures. Xyne intentionally keeps invalid workspace/app/secret, inactive/revoked webhook, and bot-not-in-channel responses generic to avoid leaking valid identifiers.
 - **No `404` responses** — all validation failures return `400` to prevent external callers from probing valid workspace/app combinations
 
 ---
@@ -266,7 +266,7 @@ interface IncomingWebhookParams {
 
 ```typescript
 interface IncomingWebhookPayload {
-  text: string;                    // Required — message text
+  text?: string;                   // Optional when blocks or attachments are present
   blocks?: SlackBlock[];           // Optional — Slack Block Kit blocks
   attachments?: SlackAttachment[]; // Optional — legacy Slack attachments (colored sidebars, fields, images)
   conversationId?: string;         // Optional — Xyne conversation UUID to reply to (not Slack thread_ts — see Section 3)
