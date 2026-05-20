@@ -1,3 +1,21 @@
+## [1.146.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.145.1...v1.146.0) (2026-05-20)
+
+
+### Features
+
+* revert model to private-large ([f30187a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f30187a719f380b10b33f4047617a8c2497c2658)), closes [#6531](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6531)
+* Store lastVisitedChannelId per workspace ([bbcbe70](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bbcbe705fc5b891b9873a7b5caf967284efaa3f6)), closes [#6517](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6517)
+
+
+### Bug Fixes
+
+* add workspace id backfill routes ([354b037](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/354b037838f239b5cb0a7c801d863fc2e160bd0e)), closes [#6448](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6448)
+* External call sync ([d6ea4f4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d6ea4f461581dbc6c1703fede640defee0284a23)), closes [#6548](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6548)
+* External URL handling ([7064e3f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7064e3fd70636ec301b0272dd7c0681cb8165407)), closes [#6488](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6488)
+* Invitation template update ([261212f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/261212f6288318060f508e7ccfaa7f1e5dbdc660)), closes [#6518](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6518)
+* Slack compatible endpoint fixes ([21b3166](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/21b3166f31912cb860af7682d994bfa9858794b0)), closes [#6437](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6437)
+* support tab completion in mention selector ([dd34f38](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dd34f388d39b6de1e45e2698b31dd445a95b4fac)), closes [#6185](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6185)
+
 ## [1.145.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.145.0...v1.145.1) (2026-05-20)
 
 
