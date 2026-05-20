@@ -50,7 +50,7 @@ export function createSelectorPlugin<T extends BaseSelectorItem>(
             return true;
           }
 
-          if (event.key === 'Enter') {
+          if (event.key === 'Enter' || event.key === 'Tab') {
             event.preventDefault();
             dispatch(state.tr.setMeta(pluginKey, { shouldSelect: true }));
             return true;
