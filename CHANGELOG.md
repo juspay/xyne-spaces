@@ -1,3 +1,10 @@
+## [1.145.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.145.0...v1.145.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* add workspace and org level scoping in search ([da86212](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/da86212349e3f7c70e925b3b8fe85d7fc1683c2d)), closes [#6441](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6441)
+
 ## [1.145.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.144.0...v1.145.0) (2026-05-19)
 
 
