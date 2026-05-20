@@ -272,12 +272,17 @@ class CanvasAuthService {
 
       // Queue Vespa indexing for the canvas
       try {
+        const userWorkspace = await db.user.findUnique({
+          where: { id: userId },
+          select: { workspaceId: true },
+        });
         await vespaQueue.addJob({
           schema: fileSchema,
           docId: canvasId,
           jobType: 'feed',
           userId,
           app: SubApp.CANVAS,
+          ...(userWorkspace?.workspaceId ? { workspaceId: userWorkspace.workspaceId } : {}),
         });
         logger.info(`[CanvasAuthService] Queued Vespa indexing for canvas ${canvasId}`);
       } catch (vespaError) {

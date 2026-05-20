@@ -296,12 +296,14 @@ export class EmailService {
   }
   private async pushVespaJobForMail(
     emailId: string,
-    userId: string
+    userId: string,
+    workspaceId?: string
   ): Promise<void> {
     vespaQueue.addJob({
       schema: mailSchema,
       jobType: 'feed',
       docId: emailId,
+      ...(workspaceId ? { workspaceId } : {}),
     }).catch(async (error) => {
       logger.error('[EmailService] Error queuing Vespa job for mail:', error);
       try {
@@ -329,12 +331,14 @@ export class EmailService {
 
   private async pushVespaJobForTicket(
     ticketId: string,
-    userId: string
+    userId: string,
+    workspaceId?: string
   ): Promise<void> {
     vespaQueue.addJob({
       schema: ticketSchema,
       jobType: "feed",
       docId: ticketId,
+      ...(workspaceId ? { workspaceId } : {}),
     }).catch(async (error) => {
       logger.error('[EmailService] Error queuing Vespa job for ticket:', error);
       try {
@@ -817,7 +821,7 @@ export class EmailService {
     // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
     void dispatchEmailEventForEmailId(email.id);
 
-    this.pushVespaJobForTicket(ticket.id, userId).catch(error => {
+    this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
@@ -997,7 +1001,7 @@ export class EmailService {
 
     // Push Vespa job for mail indexing (Desk search). `email` is created
     // inside the conversation+email+ticket transaction earlier in this method.
-    this.pushVespaJobForMail(email.id, userId).catch(error => {
+    this.pushVespaJobForMail(email.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for mail ${email.id}:`, error);
     });
 
@@ -1167,7 +1171,7 @@ export class EmailService {
         }
       }
 
-      this.pushVespaJobForMail(email.id, conversation.createdBy).catch(error => {
+      this.pushVespaJobForMail(email.id, conversation.createdBy, channel?.workspaceId).catch(error => {
         logger.error(`[EmailService] Error pushing Vespa job for mail ${email.id}:`, error);
       });
 
@@ -1304,7 +1308,7 @@ export class EmailService {
       });
     });
 
-    this.pushVespaJobForTicket(ticket.id, userId).catch(error => {
+    this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
@@ -1917,12 +1921,12 @@ export class EmailService {
     }
 
     for (const e of insertedEmails) {
-      this.pushVespaJobForMail(e.id, userId).catch(error => {
+      this.pushVespaJobForMail(e.id, userId, channel.workspaceId).catch(error => {
         logger.error(`[EmailService] Vespa job push failed for mail ${e.id}:`, error);
       });
     }
     if (txResult.isNew && txResult.ticketId) {
-      this.pushVespaJobForTicket(txResult.ticketId, userId).catch(error => {
+      this.pushVespaJobForTicket(txResult.ticketId, userId, channel.workspaceId).catch(error => {
         logger.error(
           `[EmailService] Vespa job push failed for ticket ${txResult.ticketId}:`,
           error,

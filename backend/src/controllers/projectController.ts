@@ -80,7 +80,8 @@ export class ProjectController {
         schema: projectSchema,
         jobType: "feed",
         docId: project.id,
-        userId: userId
+        userId: userId,
+        workspaceId: req.user!.workspaceId!,
       }).catch(async (error) => {
         logger.error('Error queuing Vespa job for project:', error);
         // Log failed insertion to Postgres for later retry

@@ -138,7 +138,7 @@ export class EmailDemergeController {
 
       // Re-index moved emails in Vespa — conversationId (threadId) and permissions changed
       for (const id of emailIdsToMove) {
-        vespaQueue.addJob({ schema: mailSchema, jobType: 'feed', docId: id }).catch(err => {
+        vespaQueue.addJob({ schema: mailSchema, jobType: 'feed', docId: id, workspaceId: originalTicket.workspaceId || undefined }).catch(err => {
           logger.error(`[EmailDemergeController] Failed to queue Vespa re-feed for email ${id}:`, err);
         });
       }

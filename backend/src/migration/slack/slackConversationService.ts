@@ -22,11 +22,12 @@ import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 
-async function pushVespaJobForChannel(channelId: string, userId: string): Promise<void> {
+async function pushVespaJobForChannel(channelId: string, userId: string, workspaceId?: string): Promise<void> {
   vespaQueue.addJob({
     schema: channelSchema,
     jobType: 'feed',
     docId: channelId,
+    ...(workspaceId ? { workspaceId } : {}),
   }).catch(async (error) => {
     logger.error(`[SlackMigration] Error queuing Vespa job for channel ${channelId}:`, error);
     // Log failed insertion to Postgres for later retry
@@ -490,7 +491,7 @@ export async function addChannelParticipantsBeforeMigration(
 
     // Queue Vespa re-indexing for the channel (single job for all participants)
     const allUserIds = usersToBeAdded.map((u) => u.xyneUserId);
-    await pushVespaJobForChannel(xyneChannelId, allUserIds[0]);
+    await pushVespaJobForChannel(xyneChannelId, allUserIds[0], workspaceId || undefined);
   }
 }
 

@@ -1134,6 +1134,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           docId: attachment.id,
           jobType: 'feed',
           userId: attachment.createdBy,
+          workspaceId: this.ctx.workspaceId,
           app: SubApp.CHAT_ATTACHMENT,
         });
         logger.info(`[MessagesSideEffectHandler] Queued Vespa indexing for attachment ${attachment.id} in message ${messageId}`);

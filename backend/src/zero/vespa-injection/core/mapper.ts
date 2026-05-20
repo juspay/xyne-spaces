@@ -230,9 +230,36 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
   );
 };
 
+/**
+ * Resolve workspaceId and orgId for a Vespa document.
+ * Tries workspaceId first, then the fallback lookup, then derives orgId from
+ * the workspace table. The orgIdFallback is used when the workspace lookup also
+ * yields nothing (e.g. job-param orgId passed by the caller).
+ */
+const resolveOrgAndWorkspace = async (
+  workspaceId: string | undefined | null,
+  fallback?: () => Promise<string | undefined | null>,
+  orgIdFallback?: string | null
+): Promise<{ workspaceId: string | undefined; orgId: string | undefined }> => {
+  let wsId = workspaceId || undefined;
+  if (!wsId && fallback) {
+    wsId = (await fallback()) || undefined;
+  }
+  if (!wsId) {
+    return { workspaceId: undefined, orgId: orgIdFallback || undefined };
+  }
+  const workspace = await db.workspace.findUnique({
+    where: { id: wsId },
+    select: { orgId: true },
+  });
+  return { workspaceId: wsId, orgId: workspace?.orgId || orgIdFallback || undefined };
+};
+
 export const mapChannel = async (
   args: InsertValue<ChannelsSchema> | Channel,
-  participants?: string[]
+  participants?: string[],
+  workspaceId?: string,
+  orgId?: string
 ): Promise<VespaChatContainerDocument> => {
   let channelParticipants = participants
   if (!channelParticipants) {
@@ -240,6 +267,13 @@ export const mapChannel = async (
       where: { channelId: args.id }
     })).map(v => v.userId)
   }
+
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
+    ('workspaceId' in args && args.workspaceId) ? args.workspaceId : workspaceId,
+    () => db.channel.findUnique({ where: { id: args.id }, select: { workspaceId: true } }).then(r => r?.workspaceId),
+    orgId
+  );
+  if (!effectiveWorkspaceId) logger.warn(`[mapChannel] workspaceId not found for channel ${args.id}`);
 
   const channelName = await resolveChannelName(args.name, args.scopeType);
   const channelStats = await db.channelStats.findUnique({ where: { channelId: args.id } });
@@ -266,6 +300,8 @@ export const mapChannel = async (
     topic: "",// TODO: handle topic,
     memberCount: channelParticipants.length,
     isArchived: false, // TODO: handle archived state
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
   };
 }
 
@@ -460,16 +496,25 @@ export const mapMessage = async (
 }
 
 
-export const mapProject = (args: InsertValue<ProjectsSchema>): VespaProjectDocument => ({
-  docId: args.id,
-  docType: VespaDocType.PROJECT,
-  name: args.name,
-  description: args.description || "",
-  createdBy: args.createdBy,
-  createdAt: toTimestamp(args.createdAt),
-  updatedAt: toTimestamp(args.updatedAt),
-  updatedBy: args.updatedBy || ""
-})
+export const mapProject = async (args: InsertValue<ProjectsSchema>, workspaceId?: string, orgId?: string): Promise<VespaProjectDocument> => {
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
+    ('workspaceId' in args && args.workspaceId) ? args.workspaceId : workspaceId,
+    () => db.project.findUnique({ where: { id: args.id }, select: { workspaceId: true } }).then(r => r?.workspaceId),
+    orgId
+  );
+  return {
+    docId: args.id,
+    docType: VespaDocType.PROJECT,
+    name: args.name,
+    description: args.description || "",
+    createdBy: args.createdBy,
+    createdAt: toTimestamp(args.createdAt),
+    updatedAt: toTimestamp(args.updatedAt),
+    updatedBy: args.updatedBy || "",
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
+  };
+}
 
 
 export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<VespaTicketDocument> => {
@@ -590,11 +635,11 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     initialMessage: initialMessage,
     initialMessageSender: initialMessageSender,
     parentTicketXyneId: parentTicketXyneId,
-    childTicketXyneIds: childTicketXyneIds
+    childTicketXyneIds: childTicketXyneIds,
   }
 }
 
-export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<VespaFileDocument> => {
+export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
   // Get channel info if channelId exists
   let channelRef: string | undefined;
   if (args.channelId) {
@@ -631,6 +676,12 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<Vesp
     where: { id: args.channelId }
   })) : undefined;
 
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
+    workspaceId,
+    () => Promise.resolve(channel?.workspaceId),
+    orgId
+  );
+
   return {
     docId: args.id,
     docType: VespaDocType.FILE,
@@ -661,11 +712,13 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<Vesp
     mimeType: 'application/json',
     subApp: SubApp.CANVAS,
     channelRef,
-    conversationId: undefined
+    conversationId: undefined,
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
   };
 };
 
-export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promise<VespaFileDocument> => {
+export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
   // Get conversation and channel info from call data
   let channelRef: string | undefined;
   let conversationId: string | undefined;
@@ -674,6 +727,12 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promi
   if (args.channelId) {
     channelRef = getRef(channelSchema, args.channelId);
   }
+
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
+    workspaceId,
+    args.channelId ? () => db.channel.findUnique({ where: { id: args.channelId! }, select: { workspaceId: true } }).then(r => r?.workspaceId) : undefined,
+    orgId
+  );
 
   // Find conversation by callId (using externalId)
   const conversation = await db.conversation.findFirst({
@@ -754,11 +813,14 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promi
     subApp: SubApp.TRANSCRIPT,
     channelRef,
     conversationId,
-    callType: args.callType
+    callType: args.callType,
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
   };
 };
 
-export const mapRCA = (args: RCAWithRelations): VespaFileDocument => {
+export const mapRCA = async (args: RCAWithRelations, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(workspaceId, undefined, orgId);
   const chunks: string[] = [];
 
   if (args.title) chunks.push(`Title: ${args.title}`);
@@ -805,6 +867,8 @@ export const mapRCA = (args: RCAWithRelations): VespaFileDocument => {
     isPrivate: false,
     mimeType: 'text/markdown',
     subApp: SubApp.RCA,
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
   };
 };
 
@@ -817,7 +881,7 @@ export const mapRCA = (args: RCAWithRelations): VespaFileDocument => {
  * 3. Resolves the channel from the conversation
  * 4. Builds a complete VespaFileDocument for indexing
  */
-export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Promise<VespaFileDocument> => {
+export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
   // Resolve channel from conversation
   let channelRef: string | undefined;
   let channelId: string | undefined;
@@ -847,6 +911,12 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
   const channel = channelId ? (await db.channel.findUnique({
     where: { id: channelId }
   })) : undefined;
+
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
+    ('workspaceId' in args && args.workspaceId) ? args.workspaceId : workspaceId,
+    () => Promise.resolve(channel?.workspaceId),
+    orgId
+  );
 
   // If no channel participants found, fall back to conversation participants
   if (permissions.length === 0 && conversationId) {
@@ -935,7 +1005,9 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
     channelRef,
     conversationId,
     messageId: args.entityType === 'CHAT' ? args.entityId : undefined,
-    ticketId: args.entityType === 'TICKET' ? args.entityId : undefined
+    ticketId: args.entityType === 'TICKET' ? args.entityId : undefined,
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
   };
 };
 
@@ -968,7 +1040,7 @@ const chunkPlainText = (text: string, maxLen = 2000): string[] => {
  *   4. externalSource        → source name
  *   5. messageAttachment[]   → attachmentFilenames
  */
-export const mapEmail = async (email: Email): Promise<VespaMailDocument> => {
+export const mapEmail = async (email: Email, workspaceId?: string, orgId?: string): Promise<VespaMailDocument> => {
   // 1. Resolve conversation → channelId
   const conversation = await db.conversation.findUnique({
     where: { conversationId: email.conversationId },
@@ -976,6 +1048,11 @@ export const mapEmail = async (email: Email): Promise<VespaMailDocument> => {
   });
   const channelId = conversation?.channelId ?? '';
 
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
+    workspaceId,
+    channelId ? () => db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } }).then(r => r?.workspaceId) : undefined,
+    orgId
+  );
 
   // 3+4. Resolve source name via ExternalMessage → ExternalSource
   // Stays null if the lookup fails — intentional: null is visible, a hardcoded fallback is not.
@@ -1033,6 +1110,8 @@ export const mapEmail = async (email: Email): Promise<VespaMailDocument> => {
     cc: email.cc.length > 0 ? email.cc : undefined,
     bcc: email.bcc.length > 0 ? email.bcc : undefined,
     attachmentFilenames: attachmentFilenames.length > 0 ? attachmentFilenames : undefined,
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
   };
 };
 
@@ -1040,7 +1119,9 @@ export const mapBySchema = async (
   schemaName: VespaSchema,
   args: VespaPayload,
   jobType: VespaJobType,
-  app?: SubApp
+  app?: SubApp,
+  workspaceId?: string,
+  orgId?: string
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
   const docType = schemaToDocType[schemaName];
   if (!docType) {
@@ -1050,11 +1131,11 @@ export const mapBySchema = async (
   if (jobType === 'feed') {
     switch (schemaName) {
       case channelSchema:
-        return mapChannel(args as InsertValue<ChannelsSchema>);
+        return mapChannel(args as InsertValue<ChannelsSchema>, undefined, workspaceId, orgId);
       case messageSchema:
         return mapMessage(args as InsertValue<MessagesSchema>);
       case projectSchema:
-        return mapProject(args as InsertValue<ProjectsSchema>);
+        return mapProject(args as InsertValue<ProjectsSchema>, workspaceId, orgId);
       case ticketSchema:
         return mapTicket(args as InsertValue<TicketsSchema>);
       case fileSchema:
@@ -1063,19 +1144,19 @@ export const mapBySchema = async (
         }
         switch (app) {
           case SubApp.CANVAS:
-            return mapCanvas(args as InsertValue<CanvasesSchema>);
+            return mapCanvas(args as InsertValue<CanvasesSchema>, workspaceId, orgId);
           case SubApp.TRANSCRIPT:
-            return mapTranscript(args as InsertValue<TranscriptsSchema>);
+            return mapTranscript(args as InsertValue<TranscriptsSchema>, workspaceId, orgId);
           case SubApp.RCA:
-            return mapRCA(args as RCAWithRelations);
+            return mapRCA(args as RCAWithRelations, workspaceId, orgId);
           case SubApp.CHAT_ATTACHMENT:
           case SubApp.TICKET_ATTACHMENT:
-            return mapFile(args as InsertValue<MessageAttachmentsSchema>);
+            return mapFile(args as InsertValue<MessageAttachmentsSchema>, workspaceId, orgId);
           default:
             throw new Error(`No mapper defined for sub-app: ${app}`);
         }
       case mailSchema:
-        return mapEmail(args as unknown as Email);
+        return mapEmail(args as unknown as Email, workspaceId, orgId);
       case samTranscriptSchema:
         throw new Error(`${schemaName}: SAM transcripts must be queued with pre-transformed data. Pass the document via vespaQueue.addJob({ data: vespaDocument }).`);
       default:
@@ -1176,6 +1257,8 @@ export const fetchAndMapBySchema = async (
   docId: string,
   jobType: VespaJobType,
   app?: SubApp,
+  workspaceId?: string,
+  orgId?: string,
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
 
   if (jobType === 'delete') {
@@ -1206,7 +1289,7 @@ export const fetchAndMapBySchema = async (
     throw new Error(`Data not found for ${schema}/${docId}`);
   }
 
-  return await mapBySchema(schema, rawData, jobType, app);
+  return await mapBySchema(schema, rawData, jobType, app, workspaceId, orgId);
 }
 
 

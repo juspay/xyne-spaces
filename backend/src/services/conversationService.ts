@@ -167,12 +167,13 @@ export class ConversationService {
     };
   }
 
-  private async pushVespaJobForMessage(messageID: string, userId: string): Promise<void> {
+  private async pushVespaJobForMessage(messageID: string, userId: string, workspaceId?: string): Promise<void> {
     vespaQueue
       .addJob({
         schema: messageSchema,
         jobType: 'feed',
         docId: messageID,
+        ...(workspaceId ? { workspaceId } : {}),
       })
       .catch(async (error) => {
         logger.error('Error queuing Vespa job for channel:', error);
@@ -203,11 +204,13 @@ export class ConversationService {
   private async pushVespaJobForChannel(
     channelId: string,
     userId: string,
+    workspaceId?: string,
   ): Promise<void> {
     vespaQueue.addJob({
       schema: channelSchema,
       jobType: 'feed',
       docId: channelId,
+      ...(workspaceId ? { workspaceId } : {}),
     }).catch(async (error) => {
       logger.error(`[ConversationService] Error queuing Vespa job for channel ${channelId}:`, error);
       // Log failed insertion to Postgres for later retry
@@ -235,7 +238,8 @@ export class ConversationService {
 
   private async pushVespaJobForAttachments(
     attachments: Array<{ id: string; mimetype: string }>,
-    userId: string
+    userId: string,
+    workspaceId?: string
   ): Promise<void> {
     if (attachments.length === 0) return;
 
@@ -248,6 +252,7 @@ export class ConversationService {
         jobType: "feed",
         docId: attachment.id,
         app: SubApp.CHAT_ATTACHMENT,
+        ...(workspaceId ? { workspaceId } : {}),
       }).catch(async (error) => {
         logger.error(`[ConversationService] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
@@ -308,7 +313,7 @@ export class ConversationService {
         // Auto-add user as participant when they send first message
         await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
         // Re-index channel in Vespa so permissions/memberCount reflect the new participant
-        this.pushVespaJobForChannel(channelId, userId).catch((error) => {
+        this.pushVespaJobForChannel(channelId, userId, channel?.workspaceId).catch((error) => {
           logger.error(`[ConversationService] Error pushing Vespa job for channel ${channelId} after adding participant:`, error);
         });
       }
@@ -417,14 +422,14 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in conversation ${conversation.conversationId}:`, error);
         });
       }
     }
 
     // Push Vespa job for message indexing
-    this.pushVespaJobForMessage(message.messageId, userId).catch((error) => {
+    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId).catch((error) => {
       logger.error(
         `[ConversationService] Error pushing Vespa job for message ${message.messageId}:`,
         error
@@ -614,7 +619,7 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }
@@ -722,6 +727,9 @@ export class ConversationService {
       throw new Error(`Conversation not found: ${message.conversationId}`);
     }
 
+    // Fetch channel for workspaceId (used for attachments and Vespa job routing)
+    const channel = await this.channelRepository.findById(conversation.channelId);
+
     // 3. Handle file uploads - either from raw files or pre-uploaded files
     let processedFiles: UploadedFileResult[] = [];
 
@@ -775,8 +783,6 @@ export class ConversationService {
       await this.messageAttachmentRepository.deleteByMessageId(message.messageId);
 
       // Create new attachment records
-      // Fetch channel to get workspaceId for attachments
-      const channel = await this.channelRepository.findById(conversation.channelId);
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
@@ -801,7 +807,7 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, message.senderId).catch(error => {
+        this.pushVespaJobForAttachments(attachments, message.senderId, channel?.workspaceId).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }
@@ -820,7 +826,7 @@ export class ConversationService {
     }
 
     // Push Vespa job for message update indexing
-    this.pushVespaJobForMessage(updatedMessage.messageId, message.senderId).catch((error) => {
+    this.pushVespaJobForMessage(updatedMessage.messageId, message.senderId, channel?.workspaceId).catch((error) => {
       logger.error(
         `[ConversationService] Error pushing Vespa job for message ${updatedMessage.messageId}:`,
         error

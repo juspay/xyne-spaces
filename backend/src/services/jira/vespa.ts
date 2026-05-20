@@ -7,11 +7,12 @@ import { isSupportedMimeType } from '@/services/fileProcessor';
 
 const db = DatabaseClient.getInstance();
 
-export const queueJiraImportMessageVespaJob = (messageId: string, userId: string): void => {
+export const queueJiraImportMessageVespaJob = (messageId: string, userId: string, workspaceId?: string): void => {
   vespaQueue.addJob({
     schema: messageSchema,
     jobType: 'feed',
     docId: messageId,
+    ...(workspaceId ? { workspaceId } : {}),
   }).catch(async (error) => {
     logger.error('[JiraMigrationImport] Error queuing Vespa job for message', error, { messageId });
     try {
@@ -34,7 +35,7 @@ export const queueJiraImportMessageVespaJob = (messageId: string, userId: string
   });
 };
 
-export const queueJiraImportAttachmentVespaJob = async (attachmentId: string, userId: string, mimetype?: string): Promise<void> => {
+export const queueJiraImportAttachmentVespaJob = async (attachmentId: string, userId: string, mimetype?: string, workspaceId?: string): Promise<void> => {
   try {
     let resolvedMimetype = mimetype;
 
@@ -59,6 +60,7 @@ export const queueJiraImportAttachmentVespaJob = async (attachmentId: string, us
       jobType: 'feed',
       docId: attachmentId,
       app: SubApp.CHAT_ATTACHMENT,
+      ...(workspaceId ? { workspaceId } : {}),
     }).catch(async (error) => {
       logger.error('[JiraMigrationImport] Error queuing Vespa job for attachment', error, { attachmentId });
       try {
@@ -85,12 +87,13 @@ export const queueJiraImportAttachmentVespaJob = async (attachmentId: string, us
 };
 
 
-export const queueJiraImportTicketVespaJob = (ticketId: string, userId: string): void => {
+export const queueJiraImportTicketVespaJob = (ticketId: string, userId: string, workspaceId?: string): void => {
   vespaQueue.addJob({
     schema: ticketSchema,
     jobType: 'feed',
     docId: ticketId,
     userId,
+    ...(workspaceId ? { workspaceId } : {}),
   }).catch(async (error) => {
     logger.error('[JiraMigrationImport] Error queuing Vespa job for ticket', error, { ticketId });
     try {

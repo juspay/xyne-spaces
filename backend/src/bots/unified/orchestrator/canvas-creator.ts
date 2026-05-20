@@ -122,12 +122,14 @@ export async function createCanvasWithGeniusBlock(
     
     // Queue Vespa indexing for the canvas
     try {
+      const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
       await vespaQueue.addJob({
         schema: fileSchema,
         docId: canvasId,
         jobType: 'feed',
         userId,
         app: SubApp.CANVAS,
+        ...(channel?.workspaceId ? { workspaceId: channel.workspaceId } : {}),
       });
       logger.info(`[CanvasCreator] Queued Vespa indexing for canvas ${canvasId}`);
     } catch (vespaError) {
@@ -333,12 +335,14 @@ export async function processStreamAndCreateCanvas(
 
                 // Queue Vespa indexing for the canvas
                 try {
+                  const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
                   await vespaQueue.addJob({
                     schema: fileSchema,
                     docId: newCanvasId,
                     jobType: 'feed',
                     userId,
                     app: SubApp.CANVAS,
+                    ...(channel?.workspaceId ? { workspaceId: channel.workspaceId } : {}),
                   });
                   logger.info(`[CanvasCreator] Queued Vespa indexing for long response canvas ${newCanvasId}`);
                 } catch (vespaError) {

@@ -544,9 +544,9 @@ export class JiraMigrationImportService {
     queueJiraImportTicketVespaJob(ticketId, userId);
   }
 
-  private queueAttachmentVespaJobs(attachments: Array<{ attachmentId: string; userId: string; mimetype: string }>): void {
+  private queueAttachmentVespaJobs(attachments: Array<{ attachmentId: string; userId: string; mimetype: string; workspaceId?: string }>): void {
     for (const attachment of attachments) {
-      queueJiraImportAttachmentVespaJob(attachment.attachmentId, attachment.userId, attachment.mimetype);
+      queueJiraImportAttachmentVespaJob(attachment.attachmentId, attachment.userId, attachment.mimetype, attachment.workspaceId);
     }
   }
 
@@ -1882,7 +1882,7 @@ export class JiraMigrationImportService {
           direction: MessageDirection.INCOMING,
           entityType: ExternalEntityType.ATTACHMENT,
         });
-        queueJiraImportAttachmentVespaJob(result.createdAttachmentId, result.uploadedBy);
+        queueJiraImportAttachmentVespaJob(result.createdAttachmentId, result.uploadedBy, result.attachmentRow.mimetype, workspaceId);
       } else {
         skipped += 1;
       }
@@ -2017,7 +2017,8 @@ export class JiraMigrationImportService {
         attachmentsToCreate.map(attachment => ({
           attachmentId: attachment.id,
           userId: attachment.uploadedByUserId,
-          mimetype: attachment.mimetype
+          mimetype: attachment.mimetype,
+          workspaceId: attachment.workspaceId,
         })),
       );
       imported += attachmentsToCreate.length;

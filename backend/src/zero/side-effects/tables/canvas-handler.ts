@@ -125,6 +125,7 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
           docId: canvasId,
           jobType: 'feed',
           userId: canvas.createdBy,
+          workspaceId: this.ctx.workspaceId,
           app: SubApp.CANVAS,
         });
         logger.info(`[CanvasSideEffectHandler] Queued Vespa indexing for canvas ${canvasId}`);
@@ -163,6 +164,7 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
         docId: canvasId,
         jobType: 'feed', // Re-feed to update
         userId: canvas.createdBy,
+        workspaceId: this.ctx.workspaceId,
         app: SubApp.CANVAS,
       });
       logger.info(`[CanvasSideEffectHandler] Queued Vespa indexing for updated canvas ${canvasId}`);

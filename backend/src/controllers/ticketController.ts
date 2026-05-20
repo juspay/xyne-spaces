@@ -86,7 +86,8 @@ export class TicketController {
 
   private async pushVespaJobForAttachments(
     attachments: Array<{ id: string; mimetype: string }>,
-    userId: string
+    userId: string,
+    workspaceId?: string
   ): Promise<void> {
     if (attachments.length === 0) return;
 
@@ -98,7 +99,8 @@ export class TicketController {
         schema: fileSchema,
         jobType: "feed",
         docId: attachment.id,
-        app: SubApp.TICKET_ATTACHMENT
+        app: SubApp.TICKET_ATTACHMENT,
+        ...(workspaceId ? { workspaceId } : {}),
       }).catch(async (error) => {
         logger.error(`[TicketController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
@@ -749,7 +751,7 @@ export class TicketController {
           const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
           if (savedAttachments.length > 0) {
             const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-            this.pushVespaJobForAttachments(attachments, finalCreatedBy).catch((error: any) => {
+            this.pushVespaJobForAttachments(attachments, finalCreatedBy, ticketChannelWorkspaceId).catch((error: any) => {
               logger.error(`[TicketController] Error pushing Vespa job for ticket attachments ${ticket.id}:`, error);
             });
           }
@@ -761,7 +763,7 @@ export class TicketController {
           const convertedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
           if (convertedAttachments.length > 0) {
             const attachments = convertedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-            this.pushVespaJobForAttachments(attachments, finalCreatedBy).catch((error: any) => {
+            this.pushVespaJobForAttachments(attachments, finalCreatedBy, ticketChannelWorkspaceId).catch((error: any) => {
               logger.error(`[TicketController] Error pushing Vespa job for converted attachments in ticket ${ticket.id}:`, error);
             });
           }
@@ -821,7 +823,7 @@ export class TicketController {
 
             // Trigger Vespa re-indexing for transferred draft attachments
             const attachments = validDraftAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-            this.pushVespaJobForAttachments(attachments, userId!).catch((error: any) => {
+            this.pushVespaJobForAttachments(attachments, userId!, ticketChannelWorkspaceId).catch((error: any) => {
               logger.error(`[TicketController] Error pushing Vespa job for transferred draft attachments in ticket ${ticket.id}:`, error);
             });
           }
@@ -857,7 +859,8 @@ export class TicketController {
         schema: ticketSchema,
         jobType: "feed",
         docId: ticket.id,
-        userId: userId
+        userId: userId,
+        workspaceId: req.user?.workspaceId,
       }).catch(async (error) => {
         logger.error('Error queuing Vespa job for ticket:', error);
         // Log failed insertion to Postgres for later retry
@@ -1412,6 +1415,7 @@ export class TicketController {
       this.pushVespaJobForAttachments(
         attachments.map((a) => ({ id: a.id, mimetype: a.mimetype })),
         userId,
+        ticket.workspaceId,
       ).catch((err) => {
         logger.error(`[TicketController] Vespa re-index failed for attachments on ticket ${ticketId}:`, err);
       });

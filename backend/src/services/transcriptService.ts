@@ -1675,12 +1675,16 @@ Output ONLY the processed transcript, nothing else.`;
       }
     // Queue Vespa indexing for the transcript (using call.id as the identifier)
       try {
+        const callChannel = call.channelId
+          ? await db.channel.findUnique({ where: { id: call.channelId }, select: { workspaceId: true } })
+          : null;
         await vespaQueue.addJob({
           schema: fileSchema,
           docId: call.id,
           jobType: 'feed',
           userId: call.createdByUserId,
           app: SubApp.TRANSCRIPT,
+          ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
         });
         logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
       } catch (vespaError) {

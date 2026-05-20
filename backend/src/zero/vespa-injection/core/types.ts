@@ -16,6 +16,8 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   jobType: VespaJobType;
   docId: string;
   userId?: string; // For error logging and data fetching
+  workspaceId?: string;
+  orgId?: string;
   app?: SubApp; // when schema can belong to multiple sub-applications
   data?: SchemaDataMap[S] | Partial<SchemaDataMap[S]>;
 }

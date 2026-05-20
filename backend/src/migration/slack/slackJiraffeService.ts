@@ -158,12 +158,13 @@ async function fetchTicketsFromBitbot(
   return ticketResponse.tickets;
 }
 
-async function pushVespaJobForTicket(ticketId: string, userId: string): Promise<void> {
+async function pushVespaJobForTicket(ticketId: string, userId: string, workspaceId?: string): Promise<void> {
   vespaQueue
     .addJob({
       schema: ticketSchema,
       jobType: 'feed',
       docId: ticketId,
+      ...(workspaceId ? { workspaceId } : {}),
     })
     .catch(async (error) => {
       logger.error('[Migration] Error queuing Vespa job for ticket:', error);
@@ -362,7 +363,7 @@ async function ingestTicket(
         },
       });
       await syncConversationTicketMdFromPrismaTicket(db, updatedTicket);
-      pushVespaJobForTicket(updatedTicket.id, userId).catch((error) => {
+      pushVespaJobForTicket(updatedTicket.id, userId, workspaceId || undefined).catch((error) => {
         logger.error(
           `[Slack Jiraffe] Error pushing Vespa job for updated ticket ${updatedTicket.id}:`,
           error
@@ -484,7 +485,7 @@ async function ingestTicket(
     return newTicket;
   });
 
-  pushVespaJobForTicket(createdTicket.id, userId).catch((error) => {
+  pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch((error) => {
     logger.error(`[Slack Jiraffe] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
   });
 

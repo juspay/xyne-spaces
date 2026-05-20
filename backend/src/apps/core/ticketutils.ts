@@ -37,12 +37,14 @@ const CreateTicketParamsSchema = z.object({
 
 async function pushVespaJobForTicket(
   ticketId: string,
-  userId: string
+  userId: string,
+  workspaceId?: string
 ): Promise<void> {
   vespaQueue.addJob({
     schema: ticketSchema,
     jobType: "feed",
     docId: ticketId,
+    ...(workspaceId ? { workspaceId } : {}),
   }).catch(async (error) => {
     logger.error('[CREATE-TICKET] Error queuing Vespa job for ticket:', error);
     try {
@@ -163,7 +165,7 @@ export async function createTicketWithConversation(
         xyneId,
       }, tx);
 
-      pushVespaJobForTicket(createdTicket.id, userId).catch(error => {
+      pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch(error => {
         logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
       });
 
