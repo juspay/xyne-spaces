@@ -71,13 +71,13 @@ const ChatDirectory = ({
 }: ChatDirectoryProps): ReactElement | null => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const { workspaceId } = useParams<{ workspaceId: string }>();
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
   const { selfDmChannelId } = auth;
   const zero = useZero();
-  const lastVisitedChannelId = useLastVisitedChannel();
+  const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
   const { isMobile } = usePlatform();
 
   // Get unread activities count with cancelled reactions filtered out

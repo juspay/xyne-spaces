@@ -153,9 +153,9 @@ const actionableValues = new Set<ActivityTab>(['actionable', 'fyi']);
 
 const ActivityListView = (): ReactElement => {
   const { isMobile } = usePlatform();
-  const lastVisitedChannelId = useLastVisitedChannel();
   const location = useLocation();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
   const pathWithoutWorkspace = workspaceId
     ? location.pathname.slice(`/${workspaceId}`.length)
     : location.pathname;

@@ -179,7 +179,7 @@ interface StateMachineContext {
   allChannels: Channel[];
   permissions: UserPermission[];
   userChannelStatuses: UserChannelStatus[];
-  lastVisitedChannelId: string | null;
+  lastVisitedChannelIds: Record<string, string>;
   /** Per-route-keyword saved paths, populated by the SaveRoute HOC. */
   savedRoutes: Record<string, string>;
   drafts: DraftMessages; // Draft messages per channel/conversation
@@ -207,7 +207,7 @@ type StateMachineEvent =
   | { type: 'SET_USER_PERMISSIONS'; permissions: UserPermission[] }
   | { type: 'ADD_USER_CHANNEL_STATUSES'; userChannelStatuses: UserChannelStatus[] }
   | { type: 'UPDATE_USER_CHANNEL_STATUS'; channelId: string; updates: Partial<UserChannelStatus> }
-  | { type: 'SET_LAST_VISITED_CHANNEL'; channelId: string | null }
+  | { type: 'SET_LAST_VISITED_CHANNEL'; channelId: string | null; workspaceId: string }
   | { type: 'SET_SAVED_ROUTE'; keyword: string; path: string | null }
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
@@ -366,16 +366,20 @@ export const stateMachine = setup({
       },
     }),
     setLastVisitedChannel: assign({
-      lastVisitedChannelId: ({ context, event }) => {
+      lastVisitedChannelIds: ({ context, event }) => {
         if (event.type === 'SET_LAST_VISITED_CHANNEL') {
+          const key = `lastVisitedChannelId_${event.workspaceId}`;
           if (event.channelId) {
-            safeSetItem('lastVisitedChannelId', event.channelId);
+            safeSetItem(key, event.channelId);
+            return { ...context.lastVisitedChannelIds, [event.workspaceId]: event.channelId };
           } else {
-            safeRemoveItem('lastVisitedChannelId');
+            safeRemoveItem(key);
+            const next = { ...context.lastVisitedChannelIds };
+            delete next[event.workspaceId];
+            return next;
           }
-          return event.channelId;
         }
-        return context.lastVisitedChannelId;
+        return context.lastVisitedChannelIds;
       },
     }),
     setSavedRoute: assign({
@@ -607,7 +611,24 @@ export const stateMachine = setup({
     allChannels: [],
     permissions: [],
     userChannelStatuses: [],
-    lastVisitedChannelId: safeGetItem('lastVisitedChannelId'),
+    lastVisitedChannelIds: (() => {
+      const result: Record<string, string> = {};
+      try {
+        if (typeof localStorage !== 'undefined') {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key?.startsWith('lastVisitedChannelId_')) {
+              const wsId = key.slice('lastVisitedChannelId_'.length);
+              const value = localStorage.getItem(key);
+              if (value) result[wsId] = value;
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return result;
+    })(),
     savedRoutes: (() => {
       try {
         const raw = safeGetItem('savedRoutes');
