@@ -27,8 +27,8 @@ import { logger } from '@/utils/logger';
 // Xyne AI defaults
 const DEFAULT_XYNE_AI_TRACING_ENABLED = true;
 const DEFAULT_XYNE_AI_MASKING_ENABLED = true;
-const DEFAULT_XYNE_AI_MODEL_NAME = 'glm-latest';
-const DEFAULT_XYNE_AI_VISION_MODEL_NAME = 'glm-latest';
+const DEFAULT_XYNE_AI_MODEL_NAME = 'private-large';
+const DEFAULT_XYNE_AI_VISION_MODEL_NAME = 'private-large';
 
 // Other agents defaults
 const DEFAULT_TICKET_DUPLICATE_MODEL = 'glm-flash-experimental';

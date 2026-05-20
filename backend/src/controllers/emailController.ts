@@ -316,6 +316,7 @@ export class EmailController {
 
       logger.info('[EmailController] email_sent', {
         event: 'email_sent',
+        type,
         channelName: channel.name,
         userEmail: req.user?.email,
       });
@@ -754,8 +755,9 @@ export class EmailController {
           }
         }
 
-        logger.info('[EmailController] new email sent', {
-          event: 'email_compose_sent',
+        logger.info('[EmailController] email_sent', {
+          event: 'email_sent',
+          type: 'COMPOSE',
           channelName: channel.name,
           ticketId: ticket.id,
           userEmail: req.user?.email,
