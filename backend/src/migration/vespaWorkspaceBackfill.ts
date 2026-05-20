@@ -152,6 +152,22 @@ async function resolveFile(docId: string): Promise<{ workspaceId: string; orgId:
     }
   }
 
+  // RCA: docId is the RCA id → ticketId → ticket.workspaceId
+  const rca = await db.rCA.findUnique({
+    where: { id: docId },
+    select: { ticketId: true },
+  });
+  if (rca?.ticketId) {
+    const ticket = await db.ticket.findUnique({
+      where: { id: rca.ticketId },
+      select: { workspaceId: true },
+    });
+    if (ticket?.workspaceId) {
+      const orgId = await getOrgId(ticket.workspaceId);
+      if (orgId) return { workspaceId: ticket.workspaceId, orgId };
+    }
+  }
+
   return null;
 }
 
