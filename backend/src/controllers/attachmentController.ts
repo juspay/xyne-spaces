@@ -32,7 +32,8 @@ export class AttachmentController {
 
   private async pushVespaJobForAttachments(
     attachments: Array<{ id: string; mimetype: string }>,
-    userId: string
+    userId: string,
+    workspaceId?: string
   ): Promise<void> {
     if (attachments.length === 0) return;
 
@@ -44,7 +45,8 @@ export class AttachmentController {
         schema: fileSchema,
         jobType: "feed",
         docId: attachment.id,
-        app: SubApp.CHAT_ATTACHMENT
+        app: SubApp.CHAT_ATTACHMENT,
+        ...(workspaceId ? { workspaceId } : {}),
       }).catch(async (error: any) => {
         logger.error(`[AttachmentController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
@@ -471,7 +473,7 @@ export class AttachmentController {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, req.user?.workspaceId).catch(error => {
           logger.error(`[AttachmentController] Error pushing Vespa job for attachments for entity ${entityId}:`, error);
         });
       }

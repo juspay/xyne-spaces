@@ -895,7 +895,8 @@ export class ChannelController {
         schema: channelSchema,
         jobType: "feed",
         docId: channel.id,
-        userId: userId
+        userId: userId,
+        workspaceId: req.user!.workspaceId!,
       }).catch(async (error) => {
         logger.error('Error queuing Vespa job for channel:', error);
         // Log failed insertion to Postgres for later retry
@@ -1538,7 +1539,8 @@ export class ChannelController {
           schema: channelSchema,
           jobType: "feed",
           docId: channel.id,
-          userId: currentUserId
+          userId: currentUserId,
+          workspaceId: workspaceId,
         }).catch(error => {
           logger.error('Error queuing Vespa job for self-DM:', error);
         });
@@ -1652,7 +1654,8 @@ export class ChannelController {
           schema: channelSchema,
           jobType: "feed",
           docId: channel.id,
-          userId: currentUserId
+          userId: currentUserId,
+          workspaceId: workspaceId,
         }).catch(error => {
           logger.error('Error queuing Vespa job for DM:', error);
         });
@@ -1777,7 +1780,8 @@ export class ChannelController {
           schema: channelSchema,
           jobType: "feed",
           docId: channel.id,
-          userId: currentUserId
+          userId: currentUserId,
+          workspaceId: workspaceId,
         }).catch(error => {
           logger.error('Error queuing Vespa job for Group DM:', error);
         });

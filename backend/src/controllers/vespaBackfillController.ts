@@ -177,7 +177,7 @@ export class AdminBackfillController {
         take: AdminBackfillController.BATCH_SIZE,
         skip,
         orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' }, // Use updatedAt if filtering by time, otherwise createdAt
-        select: { id: true } // Only select ID initially
+        select: { id: true, workspaceId: true } // Select ID and workspaceId
       });
 
       if (channels.length === 0) {
@@ -195,7 +195,8 @@ export class AdminBackfillController {
           schema: channelSchema,
           jobType: 'feed',
           docId: channelRef.id,
-          userId: undefined // backfill jobs don't have a specific user
+          userId: undefined, // backfill jobs don't have a specific user
+          workspaceId: channelRef.workspaceId,
         });
         totalQueued++;
         } catch (error) {
@@ -258,7 +259,7 @@ export class AdminBackfillController {
         take: AdminBackfillController.BATCH_SIZE,
         skip,
         orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' }, // Use updatedAt if filtering by time, otherwise createdAt
-        select: { id: true } // Only select ID initially
+        select: { id: true, workspaceId: true } // Select ID and workspaceId
       });
 
       if (projects.length === 0) {
@@ -276,7 +277,8 @@ export class AdminBackfillController {
           schema: projectSchema,
           jobType: 'feed',
           docId: projectRef.id,
-          userId: undefined // backfill jobs don't have a specific user
+          userId: undefined, // backfill jobs don't have a specific user
+          workspaceId: projectRef.workspaceId,
         });
         totalQueued++;
         } catch (error) {
@@ -340,8 +342,8 @@ export class AdminBackfillController {
       logger.debug(`[Backfill] Fetching tickets batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
       //Todo: The ticket itself should contain ticketType as email or other types instead of joining with channel. This will optimize the query and speed up the backfill process. For now, we are joining with channel to filter by email type tickets.
       const tickets = filters?.channelType === ChannelType.EMAIL
-        ? await db.$queryRaw<{ id: string }[]>(Prisma.sql`
-            SELECT t.id
+        ? await db.$queryRaw<{ id: string; workspaceId: string }[]>(Prisma.sql`
+            SELECT t.id, t."workspaceId"
             FROM "tickets" t
             JOIN "channels" ch ON ch.id = t."channelId"
             WHERE ch.type = ${ChannelType.EMAIL}::"ChannelType"
@@ -361,7 +363,7 @@ export class AdminBackfillController {
             take: AdminBackfillController.BATCH_SIZE,
             skip,
             orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' }, // Use updatedAt if filtering by time, otherwise createdAt
-            select: { id: true } // Only select ID initially
+            select: { id: true, workspaceId: true } // Select ID and workspaceId
           });
 
       if (tickets.length === 0) {
@@ -379,7 +381,8 @@ export class AdminBackfillController {
           schema: ticketSchema,
           jobType: 'feed',
           docId: ticketRef.id,
-          userId: undefined // backfill jobs don't have a specific user
+          userId: undefined, // backfill jobs don't have a specific user
+          workspaceId: ticketRef.workspaceId,
         });
         totalQueued++;
         } catch (error) {
@@ -519,7 +522,7 @@ export class AdminBackfillController {
         take: AdminBackfillController.BATCH_SIZE,
         skip,
         orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' },
-        select: { id: true } // Only select ID initially
+        select: { id: true } // Only select ID (Canvas has no workspaceId field)
       });
 
       if (canvases.length === 0) {
@@ -604,7 +607,7 @@ export class AdminBackfillController {
         take: AdminBackfillController.BATCH_SIZE,
         skip,
         orderBy: { createdAt: 'asc' },
-        select: { id: true, createdBy: true, mimetype: true } // Select ID, createdBy, and mimetype
+        select: { id: true, createdBy: true, mimetype: true, workspaceId: true } // Select ID, createdBy, mimetype, and workspaceId
       });
 
       if (attachments.length === 0) {
@@ -630,6 +633,7 @@ export class AdminBackfillController {
             docId: attachmentRef.id,
             userId: attachmentRef.createdBy,
             app: SubApp.CHAT_ATTACHMENT,
+            workspaceId: attachmentRef.workspaceId,
           });
           totalQueued++;
         } catch (error) {
@@ -695,7 +699,7 @@ export class AdminBackfillController {
         take: AdminBackfillController.BATCH_SIZE,
         skip,
         orderBy: { createdAt: 'asc' },
-        select: { id: true, createdBy: true, mimetype: true } // Select ID, createdBy, and mimetype
+        select: { id: true, createdBy: true, mimetype: true, workspaceId: true } // Select ID, createdBy, mimetype, and workspaceId
       });
 
       if (attachments.length === 0) {
@@ -721,6 +725,7 @@ export class AdminBackfillController {
             docId: attachmentRef.id,
             userId: attachmentRef.createdBy,
             app: SubApp.TICKET_ATTACHMENT,
+            workspaceId: attachmentRef.workspaceId,
           });
           totalQueued++;
         } catch (error) {
@@ -788,7 +793,7 @@ export class AdminBackfillController {
         take: AdminBackfillController.BATCH_SIZE,
         skip,
         orderBy: cutoffTime ? { updatedAt: 'asc' } : { createdAt: 'asc' },
-        select: { id: true } // Only select ID initially
+        select: { id: true } // Only select ID (Call has no workspaceId field)
       });
 
       if (calls.length === 0) {

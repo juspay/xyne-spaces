@@ -263,12 +263,14 @@ export async function createKnowledgeCanvas(
 
     // Queue Vespa indexing job for the canvas
     try {
+      const user = await prisma.user.findUnique({ where: { id: createdByUserId }, select: { workspaceId: true } });
       await vespaQueue.addJob({
         schema: fileSchema,
         docId: canvasId,
         jobType: 'feed',
         userId: createdByUserId,
         app: SubApp.CANVAS,
+        ...(user?.workspaceId ? { workspaceId: user.workspaceId } : {}),
       });
       logger.info(`[CanvasService] Queued Vespa indexing for canvas ${canvasId}`);
     } catch (error) {
@@ -425,12 +427,14 @@ export async function approveKnowledgeCanvas(
 
     // Queue Vespa update for the canvas (metadata changed)
     try {
+      const user = await prisma.user.findUnique({ where: { id: approvedByUserId }, select: { workspaceId: true } });
       await vespaQueue.addJob({
         schema: fileSchema,
         docId: canvasId,
         jobType: 'feed', // Re-feed to update the document
         userId: approvedByUserId,
         app: SubApp.CANVAS,
+        ...(user?.workspaceId ? { workspaceId: user.workspaceId } : {}),
       });
       logger.info(`[CanvasService] Queued Vespa update for approved canvas ${canvasId}`);
     } catch (error) {

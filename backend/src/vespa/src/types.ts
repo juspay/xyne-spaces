@@ -123,6 +123,8 @@ export enum SubApp {
 export interface VespaDocument {
   docId: string;
   docType: VespaDocType;
+  orgId?: string;
+  workspaceId?: string;
 }
 
 export interface importedTicketFields {
@@ -196,7 +198,7 @@ export interface VespaChatContainerDocument extends VespaDocument {
   memberCount: number;
 }
 
-export interface VespaChatMessageDocument extends VespaDocument {
+export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
   text: string;
   userId: string;
   username: string;
@@ -231,7 +233,7 @@ export interface VespaProjectDocument extends VespaDocument {
   updatedAt: number;
 }
 
-export interface VespaTicketDocument extends VespaDocument {
+export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
   convId: string;
   userGroupId: string;
   channelRef: string;

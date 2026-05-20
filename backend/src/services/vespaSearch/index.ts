@@ -120,6 +120,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     const userId = (req as any).user?.id;
     const userEmail = (req as any).user?.email;
+    const workspaceId = (req as any).user?.workspaceId;
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
@@ -137,7 +138,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       slack: {},
       ticket: {},
       file: {},
-      mail: { userEmail }
+      mail: { userEmail },
+      workspaceId,
     };
     
      if (rankProfile) {

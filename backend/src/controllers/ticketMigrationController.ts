@@ -63,7 +63,7 @@ export class TicketMigrationController {
         const tickets = await db.ticket.findMany({
           where: { projectId: project.id },
           orderBy: { createdAt: 'asc' },
-          select: { id: true, xyneId: true }
+          select: { id: true, xyneId: true, workspaceId: true }
         });
 
         if (tickets.length === 0) {
@@ -96,7 +96,8 @@ export class TicketMigrationController {
                 schema: ticketSchema,
                 jobType: 'update',
                 docId: ticket.id,
-                userId: undefined
+                userId: undefined,
+                workspaceId: ticket.workspaceId,
               });
               vespaJobsQueued.push(ticket.id);
             } catch (err) {

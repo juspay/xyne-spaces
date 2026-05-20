@@ -97,6 +97,7 @@ buildYql(
   mailFilters: MailFilters = {},
   useFuzzy: boolean = false,
   useSemanticAnyway: boolean = true,
+  workspaceId?: string,
 ): string {
   const schemaNames = schemas.join(', ');
   const whereConditions: string[] = [];
@@ -229,6 +230,12 @@ buildYql(
     if (appConditions.length > 0) {
       whereConditions.push(`(${appConditions.join(' or ')})`);
     }
+
+    // Workspace isolation: restrict results to the caller's workspace
+    if (workspaceId) {
+      whereConditions.push(`workspaceId contains "${workspaceId}"`);
+    }
+
     let yql = `select * from sources ${schemaNames} where ${whereConditions.join(' and ')}`;
     if (groupBy && apps.length != 1) {
       const groupClause = this.buildGroupingClause(groupBy, limit);

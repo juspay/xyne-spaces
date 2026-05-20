@@ -186,6 +186,7 @@ export async function createCommitAnalysisCanvas(
         docId: canvasId,
         jobType: 'feed',
         userId: createdByUserId,
+        workspaceId: user.workspaceId,
         app: SubApp.CANVAS,
       });
       logger.info(`[CanvasService] Queued Vespa indexing for commit analysis canvas ${canvasId}`);

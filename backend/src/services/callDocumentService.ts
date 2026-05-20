@@ -568,7 +568,7 @@ export class CallDocumentService {
   /**
    * Queue Vespa indexing for a canvas.
    */
-  private async queueVespaIndexing(canvasId: string, userId: string, operation: 'create' | 'update'): Promise<void> {
+  private async queueVespaIndexing(canvasId: string, userId: string, operation: 'create' | 'update', workspaceId?: string): Promise<void> {
     try {
       await vespaQueue.addJob({
         schema: fileSchema,
@@ -576,6 +576,7 @@ export class CallDocumentService {
         jobType: 'feed',
         userId,
         app: SubApp.CANVAS,
+        ...(workspaceId ? { workspaceId } : {}),
       });
       const action = operation === 'create' ? 'indexing' : 're-indexing';
       logger.info(`[CallDocumentService] Queued Vespa ${action} for canvas ${canvasId}`);
@@ -829,19 +830,11 @@ export class CallDocumentService {
 
       logger.info(`[CallDocumentService] Created PRD canvas ${canvasId} for call ${callId}`);
 
+      // Fetch workspaceId from channel for Vespa job routing
+      const channel = await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
+
       // Queue Vespa indexing for the canvas
-      try {
-        await vespaQueue.addJob({
-          schema: fileSchema,
-          docId: canvasId,
-          jobType: 'feed',
-          userId: createdByUserId,
-          app: SubApp.CANVAS,
-        });
-        logger.info(`[CallDocumentService] Queued Vespa indexing for PRD canvas ${canvasId}`);
-      } catch (vespaError) {
-        logger.error(`[CallDocumentService] Failed to queue Vespa job for PRD canvas ${canvasId}:`, vespaError);
-      }
+      await this.queueVespaIndexing(canvasId, createdByUserId, 'create', channel?.workspaceId);
 
       return viewAccessId;
     } catch (error) {
@@ -966,7 +959,7 @@ export class CallDocumentService {
       }).catch(err => logger.error('[CallDocumentService] Canvas side-effect handler error:', err));
 
       // Queue Vespa indexing for the canvas
-      await this.queueVespaIndexing(canvasId, createdByUserId, 'create');
+      await this.queueVespaIndexing(canvasId, createdByUserId, 'create', user.workspaceId);
 
       return viewAccessId;
     } catch (error) {

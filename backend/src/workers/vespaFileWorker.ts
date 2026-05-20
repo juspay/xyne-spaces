@@ -190,7 +190,7 @@ export class VespaFileWorker {
 				mappedData = preTransformedData as InsertDocument;
 			} else {
 				logger.info(`[VESPA_FILE_WORKER] Fetching data from database for ${schema}/${docId}`);
-				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app);
+				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app, job.data.workspaceId, job.data.orgId);
 			}
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {

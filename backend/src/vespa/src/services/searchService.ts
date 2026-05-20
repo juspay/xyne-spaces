@@ -19,6 +19,7 @@ import {
 import { executeFuzzyFallback } from '../utils/fallback';
 import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
+import { db } from '@/database/client';
 
 function escapeQueryForUserInput(query: string): string {
   if (!query) return query;
@@ -58,6 +59,7 @@ interface SearchOptions {
   chunkLimit?: number;
   groupBy?: string;
   nativeRankThreshold?: number;
+  workspaceId?: string;
   slack?: SlackFilters;
   ticket?: TicketFilters;
   file?: FileFilters;
@@ -120,7 +122,13 @@ export class SearchService {
         mail = {},
         prefixBoostWeight = 0.2,
         presentationSummary,
+        workspaceId,
       } = options;
+
+      // Derive workspaceId from userId when not explicitly provided
+      const effectiveWorkspaceId = workspaceId
+        || (await db.user.findUnique({ where: { id: userId }, select: { workspaceId: true } }))?.workspaceId
+        || undefined;
 
       // Parse time keywords from query
       const parsedQuery: ParsedTimeQuery = parseTimeKeywords(query);
@@ -165,7 +173,7 @@ export class SearchService {
         }
       }
 
-      const buildPayload = (useFuzzy: boolean, useSemanticAnyway: boolean) => {
+      const buildPayload = (useFuzzy: boolean, useSemanticAnyway: boolean, wsId: string | undefined) => {
         const escapedQuery = escapeQueryForUserInput(searchQuery);
         const effectiveQuery = escapedQuery || '*';
         const yql = this.yqlBuilder.buildYql(
@@ -181,7 +189,8 @@ export class SearchService {
           userId,
           mail,
           useFuzzy,
-          useSemanticAnyway
+          useSemanticAnyway,
+          wsId
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
@@ -227,7 +236,12 @@ export class SearchService {
         false,
         {}
       );
-      const payload = buildPayload(false, useSemanticAnyway);
+      const enableWorkspaceFiltering = await superpositionClient.getBooleanValue(
+        'enableWorkSpaceFiltering',
+        false,
+        {}
+      );
+      const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
       this.logger.info(`Payload: ${JSON.stringify(payload)}`);
 
       const totalStartTime = Date.now();
@@ -278,7 +292,7 @@ export class SearchService {
         const fallbackResult = await executeFuzzyFallback(
         response,
         async () => {
-          const fuzzyPayload = buildPayload(true, useSemanticAnyway);
+          const fuzzyPayload = buildPayload(true, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
           this.logger.info(`Fuzzy Search Payload: ${JSON.stringify(fuzzyPayload)}`);
           return this.vespa.search<VespaSearchResponse>(fuzzyPayload);
         },

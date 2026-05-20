@@ -214,6 +214,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
             jobType: job.jobType,
             docId: job.docId,
             userId: authData!.sub,
+            workspaceId: authData!.workspaceId,
             ...(job.app ? { app: job.app } : {}),
             ...(job.jobType === "update" ? { data: job.data } : {})
           });
@@ -496,6 +497,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
             jobType: job.jobType,
             docId: job.docId,
             userId: authData.sub,
+            workspaceId: authData.workspaceId,
             ...(job.jobType === "update" ? { data: job.data } : {})
           });
         } catch (err) {
