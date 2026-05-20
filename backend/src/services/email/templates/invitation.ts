@@ -12,102 +12,109 @@ export function invitationEmailHtml({
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Invitation to Xyne Spaces</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.6;
-      color: #333;
-      max-width: 600px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #f5f5f5;
-    }
-    .container {
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 40px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    }
-    .header {
-      text-align: center;
-      margin-bottom: 32px;
-    }
-    .logo {
-      font-size: 28px;
-      font-weight: bold;
-      color: #000000;
-      letter-spacing: -0.5px;
-    }
-    .content {
-      margin-bottom: 32px;
-    }
-    .content h2 {
-      color: #1f2937;
-      margin-bottom: 16px;
-    }
-    .content p {
-      color: #4b5563;
-      margin-bottom: 16px;
-    }
-    .button-container {
-      text-align: center;
-      margin: 32px 0;
-    }
-    .button {
-      display: inline-block;
-      background: #000000;
-      color: #ffffff;
-      text-decoration: none;
-      padding: 14px 32px;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 16px;
-    }
-    .button:hover {
-      background: #333333;
-    }
-    .link-fallback {
-      font-size: 13px;
-      color: #6b7280;
-      word-break: break-all;
-    }
-    .link-fallback a {
-      color: #6366f1;
-    }
-    .footer {
-      text-align: center;
-      font-size: 12px;
-      color: #9ca3af;
-      margin-top: 32px;
-      padding-top: 24px;
-      border-top: 1px solid #e5e7eb;
-    }
-  </style>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <div class="logo">Xyne Spaces</div>
-    </div>
-    <div class="content">
-      <h2>You've been invited!</h2>
-      <p><strong>${inviterName}</strong> has invited you to join <strong>${workspaceName}</strong> on Xyne Spaces.</p>
-      <p>Xyne Spaces is a collaborative workspace for teams to communicate, manage tickets, and work together efficiently.</p>
-      <div class="button-container">
-        <a href="${invitationLink}" class="button" style="color: #ffffff;">Accept Invitation</a>
-      </div>
-      <p class="link-fallback">
-        Or copy and paste this link into your browser:
-        <a href="${invitationLink}">${invitationLink}</a>
-      </p>
-      <p style="margin-top: 24px; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-        Download the app from <a href="https://spaces.xyne.juspay.net/apps/downloads" style="color: #6366f1;">https://spaces.xyne.juspay.net/apps/downloads</a>
-      </p>
-    </div>
-    <div class="footer">
-      <p>This invitation was sent by Xyne Spaces.<br>If you weren't expecting this email, you can safely ignore it.</p>
-    </div>
-  </div>
+<body style="margin:0;padding:0;background-color:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;line-height:1.6;color:#333;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f5f5;">
+    <tr>
+      <td align="center" style="padding:20px;">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border-radius:12px;padding:40px;max-width:600px;">
+          <tr>
+            <td style="padding:40px;">
+
+              <!-- Header -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" style="padding-bottom:32px;">
+                    <span style="font-size:28px;font-weight:bold;color:#000000;letter-spacing:-0.5px;">Xyne Spaces</span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Greeting -->
+              <h2 style="color:#1f2937;margin:0 0 16px 0;font-size:22px;">You've been invited!</h2>
+              <p style="color:#4b5563;margin:0 0 24px 0;">
+                <strong>${inviterName}</strong> has invited you to join <strong>${workspaceName}</strong> on Xyne Spaces — a collaborative workspace for teams to communicate, manage tickets, and work together efficiently.
+              </p>
+
+              <!-- Warning Banner -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+                <tr>
+                  <td style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;">
+                    <strong style="display:block;color:#92400e;font-size:13px;margin-bottom:4px;">⚠️ Important: Complete both steps below in order.</strong>
+                    <span style="color:#92400e;font-size:13px;">You must download and install the Xyne Spaces desktop app <em>before</em> clicking the invitation link. The invitation will only work correctly inside the app.</span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Step 1 -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+                <tr>
+                  <td width="44" valign="top" style="padding-top:2px;">
+                    <table cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td width="32" height="32" align="center" valign="middle" style="background:#000000;border-radius:50%;color:#ffffff;font-weight:700;font-size:14px;width:32px;height:32px;text-align:center;line-height:32px;">
+                          1
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td valign="top">
+                    <strong style="display:block;color:#1f2937;font-size:15px;margin-bottom:6px;">Download &amp; Install the Xyne Spaces Desktop App</strong>
+                    <p style="color:#6b7280;font-size:13px;margin:0 0 14px 0;">The desktop app is required to access your workspace. Download it for your platform from the link below and complete the installation before proceeding.</p>
+                    <a href="https://spaces.xyne.juspay.net/apps/downloads" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:11px 24px;border-radius:8px;font-weight:600;font-size:14px;">Download Xyne Spaces App</a>
+                    <p style="color:#6b7280;font-size:12px;margin:10px 0 0 0;">
+                      Or visit: <a href="https://spaces.xyne.juspay.net/apps/downloads" style="color:#6366f1;word-break:break-all;">https://spaces.xyne.juspay.net/apps/downloads</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Divider -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+                <tr>
+                  <td style="border-top:1px solid #e5e7eb;"></td>
+                </tr>
+              </table>
+
+              <!-- Step 2 -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:32px;">
+                <tr>
+                  <td width="44" valign="top" style="padding-top:2px;">
+                    <table cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td width="32" height="32" align="center" valign="middle" style="background:#000000;border-radius:50%;color:#ffffff;font-weight:700;font-size:14px;width:32px;height:32px;text-align:center;line-height:32px;">
+                          2
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td valign="top">
+                    <strong style="display:block;color:#1f2937;font-size:15px;margin-bottom:6px;">Accept Your Invitation &amp; Log In</strong>
+                    <p style="color:#6b7280;font-size:13px;margin:0 0 6px 0;">Once the app is installed, click the button below to accept your invitation and log in to your workspace.</p>
+                    <p style="color:#6b7280;font-size:13px;margin:0 0 14px 0;"><strong style="color:#1f2937;">Do not open this link in a browser</strong> — it must be opened in the Xyne Spaces desktop app.</p>
+                    <a href="${invitationLink}" style="display:inline-block;background:#000000;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Accept Invitation</a>
+                    <p style="color:#6b7280;font-size:12px;margin:10px 0 0 0;word-break:break-all;">
+                      Or copy and paste this link: <a href="${invitationLink}" style="color:#6366f1;">${invitationLink}</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Footer -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" style="border-top:1px solid #e5e7eb;padding-top:24px;font-size:12px;color:#9ca3af;">
+                    <p style="margin:0;">This invitation was sent by Xyne Spaces.<br>If you weren't expecting this email, you can safely ignore it.</p>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
   `.trim();
@@ -121,11 +128,28 @@ export function invitationEmailText({
   return `
 You've been invited to join ${workspaceName} on Xyne Spaces!
 
-${inviterName} has invited you to collaborate.
+${inviterName} has invited you to collaborate on Xyne Spaces — a platform for teams to communicate, manage tickets, and work together efficiently.
 
-Accept your invitation: ${invitationLink}
+⚠️  IMPORTANT: You must complete BOTH steps below in order. The invitation will only work correctly inside the desktop app.
 
----
+──────────────────────────────────────────
+STEP 1 — Download & Install the Desktop App (REQUIRED)
+──────────────────────────────────────────
+Before doing anything else, download and install the Xyne Spaces desktop app for your platform:
+
+  https://spaces.xyne.juspay.net/apps/downloads
+
+Complete the installation before moving to Step 2.
+
+──────────────────────────────────────────
+STEP 2 — Accept Your Invitation & Log In
+──────────────────────────────────────────
+Once the app is installed, open the link below to accept your invitation and log in to your workspace.
+Do NOT open this link in a browser — it must be opened in the Xyne Spaces desktop app.
+
+  ${invitationLink}
+
+──────────────────────────────────────────
 This invitation was sent by Xyne Spaces. If you weren't expecting this email, you can safely ignore it.
   `.trim();
 }
