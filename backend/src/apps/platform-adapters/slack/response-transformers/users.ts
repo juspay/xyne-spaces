@@ -12,7 +12,7 @@ export function transformUsersInfoResponse(
 			id: result.userId,
 			name: result.name,
 			real_name: result.name,
-			deleted: result.status !== "active",
+			deleted: result.status !== "ACTIVE",
 			is_bot: result.userType === "BOT",
 			is_admin: result.userType === "ADMIN",
 			is_app_user: false,

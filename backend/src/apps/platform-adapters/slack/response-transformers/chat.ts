@@ -9,6 +9,7 @@ export function transformPostMessageResponse(
 	channelId: string,
 	text: string,
 	appId: string,
+	username?: string,
 ): SlackChatPostMessageResponse {
 	return {
 		ok: true,
@@ -20,7 +21,7 @@ export function transformPostMessageResponse(
 			ts: result.messageId,
 			bot_id: appId,
 			text,
-			thread_ts: result.conversationId,
+			...(username ? { username } : {}),
 		},
 	};
 }

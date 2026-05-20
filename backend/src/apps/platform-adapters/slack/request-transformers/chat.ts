@@ -1,5 +1,9 @@
 import { SlackBlockKitParser } from "@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser";
 import { convertBlockKitToFlowJSON } from "@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitToFlowJSON";
+import {
+	resolveSlackMessageParts,
+	resolveSlackText,
+} from "@/integrations/adapters/slack-webhook-tickets/utils/slackUtils";
 import { config } from "@/config/env";
 import type { TransformContext } from "../../types";
 import type {
@@ -27,7 +31,7 @@ const blockKitParser = new SlackBlockKitParser();
  * Convert BlockKit payload to content string.
  * When blocks or attachments are present, try to produce a FlowJSON data-div.
  * Falls back to the HTML BlockKitParser if the converter returns null.
- * Plain mrkdwn text is returned as-is (isMarkdown: true).
+ * mrkdwn:false returns resolved plain text (isMarkdown: true); mrkdwn:true (default) converts via blockKitParser.
  */
 async function processContent(
 	req: Pick<
@@ -53,23 +57,27 @@ async function processContent(
 		}
 
 		// Fallback: convert to HTML
+		const resolvedReq = await resolveSlackMessageParts(req, botToken, workspaceId);
 		return {
 			content: blockKitParser.parse({
-				text: req.text,
-				blocks: req.blocks,
-				attachments: req.attachments,
+				text: resolvedReq.text,
+				blocks: resolvedReq.blocks,
+				attachments: resolvedReq.attachments,
 			}),
 			isMarkdown: false,
 		};
 	}
 
-	if (req.mrkdwn !== false && req.text) {
-		return { content: req.text, isMarkdown: true };
+	// mrkdwn:false disables formatting but Slack still resolves mention tokens
+	if (req.mrkdwn !== true && req.text) {
+		const resolvedText = await resolveSlackText(req.text, botToken, workspaceId);
+		return { content: resolvedText, isMarkdown: false };
 	}
 
 	if (req.text) {
+		const resolvedText = await resolveSlackText(req.text, botToken, workspaceId);
 		return {
-			content: blockKitParser.parse({ text: req.text }),
+			content: blockKitParser.parse({ text: resolvedText }),
 			isMarkdown: false,
 		};
 	}
@@ -81,7 +89,7 @@ export async function transformPostMessage(
 	slackReq: SlackChatPostMessageRequest,
 	context: TransformContext,
 ): Promise<PostMessageArgs> {
-	const { content, isMarkdown } = await processContent(slackReq, config.slackBotToken, config.defaultWorkspaceId);
+	const { content, isMarkdown } = await processContent(slackReq, config.slackBotToken, context.workspaceId ?? config.defaultWorkspaceId);
 
 	return {
 		channelId: slackReq.channel,
@@ -95,8 +103,9 @@ export async function transformPostMessage(
 
 export async function transformUpdate(
 	slackReq: SlackChatUpdateRequest,
+	context?: Pick<TransformContext, "workspaceId">,
 ): Promise<UpdateMessageArgs> {
-	const { content } = await processContent(slackReq, config.slackBotToken, config.defaultWorkspaceId);
+	const { content } = await processContent(slackReq, config.slackBotToken, context?.workspaceId ?? config.defaultWorkspaceId);
 
 	return {
 		messageId: slackReq.ts,

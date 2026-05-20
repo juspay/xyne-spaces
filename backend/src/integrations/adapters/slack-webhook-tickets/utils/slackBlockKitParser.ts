@@ -4,6 +4,7 @@
  */
 
 import { escapeForSlackWithMarkdown, escapeForSlack } from '@clearfeed-ai/slack-to-html';
+import { parseMrkdwnBlocks } from './slackUtils';
 import {
   SlackBlock,
   SlackBlockKitMessage,
@@ -337,7 +338,7 @@ export class SlackBlockKitParser {
    */
   private parseRichTextPreformatted(preformatted: SlackRichTextPreformatted): string {
     const content = preformatted.elements.map((el) => this.parseRichTextInlineElement(el, true)).join('');
-    return `<pre style="${STYLES.codeBlock}"><code>${content}</code></pre>`;
+    return `<pre class="no-highlight" style="${STYLES.codeBlock}"><code>${content}</code></pre>`;
   }
 
   /**
@@ -414,14 +415,25 @@ export class SlackBlockKitParser {
    * Format Slack text object
    */
   private formatText(text: SlackTextObject): string {
-    return text.type === 'plain_text' ? escapeForSlack(text.text) : escapeForSlackWithMarkdown(text.text);
+    return text.type === 'plain_text' ? escapeForSlack(text.text) : this.formatMrkdwn(text.text);
   }
 
-  /**
-   * Format markdown text
-   */
   private formatMrkdwn(text: string): string {
-    return escapeForSlackWithMarkdown(text);
+    return parseMrkdwnBlocks<string>(text, {
+      onRegular: (lines) => escapeForSlackWithMarkdown(lines.join('\n')),
+      onQuote: (lines) => {
+        const content = escapeForSlackWithMarkdown(lines.join('\n'));
+        return `<blockquote class="border-l-4 border-muted-foreground pl-4 text-foreground"><p>${content}</p></blockquote>`;
+      },
+      onList: (type, items) => {
+        const html = items.map((item) => `<li>${escapeForSlackWithMarkdown(item.text)}</li>`).join('');
+        return `<${type}>${html}</${type}>`;
+      },
+      onCode: (lines) => {
+        const escaped = escapeForSlack(lines.join('\n'));
+        return `<pre class="no-highlight"><code>${escaped}</code></pre>`;
+      },
+    }).join('');
   }
 
   /**

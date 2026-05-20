@@ -142,7 +142,8 @@ export class ChatController {
    */
   private async processMessageContent(
     text?: string,
-    attachments?: SlackAttachment[]
+    attachments?: SlackAttachment[],
+    workspaceId?: string,
   ): Promise<string> {
     const botOauthToken = config.slackBotToken;
     let resolvedText = text;
@@ -150,13 +151,13 @@ export class ChatController {
 
     // Resolve mentions in text if text exists
     if (resolvedText) {
-      resolvedText = await resolveSlackMentions(resolvedText, botOauthToken);
+      resolvedText = await resolveSlackMentions(resolvedText, botOauthToken, false, workspaceId);
     }
 
     // Resolve mentions in attachments if attachments exist
     if (resolvedAttachments && resolvedAttachments.length > 0) {
       const attachmentsJson = JSON.stringify(resolvedAttachments);
-      const resolvedJson = await resolveSlackMentions(attachmentsJson, botOauthToken, true);
+      const resolvedJson = await resolveSlackMentions(attachmentsJson, botOauthToken, true, workspaceId);
       resolvedAttachments = JSON.parse(resolvedJson);
     }
 
@@ -249,7 +250,7 @@ export class ChatController {
       } else if (contentFormat === ContentFormat.MARKDOWN) {
         content = text || '';
       } else {
-          content = await this.processMessageContent(text, attachments);
+          content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
       }
 
       const result = await findOrCreateConversation(
@@ -326,7 +327,7 @@ export class ChatController {
       } else if (markdownText) {
         content = markdownText;
       } else {
-          content = await this.processMessageContent(text, attachments);
+          content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
       }
 
       const result = await updateConversation(messageId, content);

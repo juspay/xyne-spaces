@@ -3,6 +3,7 @@ import type { RequestHandler, Router } from "express";
 export interface TransformContext {
 	userId: string;
 	appId: string;
+	workspaceId?: string;
 }
 
 export interface IPlatformAdapter {

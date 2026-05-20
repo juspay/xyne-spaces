@@ -22,7 +22,9 @@ import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 //   <groupid:ID:alias>   → GroupMentionRenderer
 //   *bold*               → <strong>
 //   _italic_             → <em>
+//   ~strike~             → <s>
 //   `code`               → <code> badge
+//   <u>…</u>             → <u>
 //   <https://…|label>    → <a> with label
 //   <https://…>          → <a> bare URL
 //   plain text           → <span>
@@ -32,6 +34,8 @@ type InlinePart =
   | { type: 'text'; value: string }
   | { type: 'bold'; value: string }
   | { type: 'italic'; value: string }
+  | { type: 'strike'; value: string }
+  | { type: 'underline'; value: string }
   | { type: 'code'; value: string }
   | { type: 'link'; href: string; label: string }
   | { type: 'user'; value: string }
@@ -41,8 +45,18 @@ type InlinePart =
   | { type: 'emoji'; name: string };
 
 // Order of alternations is match priority.
+// Groups:
+//  1,2,3 → mention type/id/alias
+//  4     → bold
+//  5     → italic
+//  6     → strike
+//  7     → inline code
+//  8     → underline
+//  9,10  → labeled link
+//  11    → bare link
+//  12    → emoji shortcode
 const INLINE_RE =
-  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>|:([a-zA-Z0-9_+-]{1,50}):/g;
+  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~|`([^`\n]+)`|<u>([^<]*)<\/u>|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>|:([a-zA-Z0-9_+-]{1,50}):/g;
 
 function parseInlineContent(content: string): InlinePart[] {
   const parts: InlinePart[] = [];
@@ -68,13 +82,17 @@ function parseInlineContent(content: string): InlinePart[] {
     } else if (match[5] !== undefined) {
       parts.push({ type: 'italic', value: match[5] });
     } else if (match[6] !== undefined) {
-      parts.push({ type: 'code', value: match[6] });
-    } else if (match[7] !== undefined && match[8] !== undefined) {
-      parts.push({ type: 'link', href: match[7], label: match[8] });
-    } else if (match[9] !== undefined) {
-      parts.push({ type: 'link', href: match[9], label: match[9] });
-    } else if (match[10] !== undefined) {
-      parts.push({ type: 'emoji', name: match[10] });
+      parts.push({ type: 'strike', value: match[6] });
+    } else if (match[7] !== undefined) {
+      parts.push({ type: 'code', value: match[7] });
+    } else if (match[8] !== undefined) {
+      parts.push({ type: 'underline', value: match[8] });
+    } else if (match[9] !== undefined && match[10] !== undefined) {
+      parts.push({ type: 'link', href: match[9], label: match[10] });
+    } else if (match[11] !== undefined) {
+      parts.push({ type: 'link', href: match[11], label: match[11] });
+    } else if (match[12] !== undefined) {
+      parts.push({ type: 'emoji', name: match[12] });
     }
 
     lastIndex = INLINE_RE.lastIndex;
@@ -84,6 +102,89 @@ function parseInlineContent(content: string): InlinePart[] {
     parts.push({ type: 'text', value: content.slice(lastIndex) });
   }
   return parts;
+}
+
+// ---------------------------------------------------------------------------
+// Block-level segment parser
+//
+// Splits a mrkdwn string into logical rendering blocks before inline parsing:
+//
+//   ```                → code fence open
+//   ...code lines...
+//   ```                → code fence close  → BlockSegment 'codeblock'
+//
+//   - item text        → bullet line       → BlockSegment 'bullets' (consecutive)
+//
+//   everything else    → paragraph lines   → BlockSegment 'paragraph'
+// ---------------------------------------------------------------------------
+
+type BlockSegment =
+  | { type: 'paragraph'; lines: string[] }
+  | { type: 'codeblock'; code: string }
+  | { type: 'bullets'; items: string[] }
+  | { type: 'ordered'; items: string[] };
+
+function parseBlockSegments(content: string): BlockSegment[] {
+  const lines = content.split('\n');
+  const segments: BlockSegment[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i] ?? '';
+    const trimmed = line.trim();
+
+    // Code fence: line is exactly ``` (optionally with a language hint)
+    if (/^```/.test(trimmed)) {
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !/^```/.test((lines[i] ?? '').trim())) {
+        codeLines.push(lines[i] ?? '');
+        i++;
+      }
+      i++; // skip closing ```
+      segments.push({ type: 'codeblock', code: codeLines.join('\n') });
+      continue;
+    }
+
+    // Bullet line: starts with "- ", "* ", or "• " (allow leading whitespace)
+    if (/^\s*[-*•]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i] ?? '')) {
+        items.push((lines[i] ?? '').replace(/^\s*[-*•]\s+/, ''));
+        i++;
+      }
+      segments.push({ type: 'bullets', items });
+      continue;
+    }
+
+    // Ordered list line: starts with "1. ", "2. ", etc. (allow leading whitespace)
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i] ?? '')) {
+        items.push((lines[i] ?? '').replace(/^\s*\d+\.\s+/, ''));
+        i++;
+      }
+      segments.push({ type: 'ordered', items });
+      continue;
+    }
+
+    // Paragraph: accumulate until we hit a fence, bullet, or ordered list
+    const paraLines: string[] = [];
+    while (
+      i < lines.length &&
+      !/^```/.test((lines[i] ?? '').trim()) &&
+      !/^\s*[-*•]\s+/.test(lines[i] ?? '') &&
+      !/^\s*\d+\.\s+/.test(lines[i] ?? '')
+    ) {
+      paraLines.push(lines[i] ?? '');
+      i++;
+    }
+    if (paraLines.length > 0) {
+      segments.push({ type: 'paragraph', lines: paraLines });
+    }
+  }
+
+  return segments;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +227,7 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
         size?: 'xs' | 'sm' | 'base' | 'lg' | 'xl';
         bold?: boolean;
         italic?: boolean;
+        codeBlock?: boolean;
       }
     | undefined;
 
@@ -149,6 +251,20 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
   };
 
   if (!props?.content) return null;
+
+  if (props.codeBlock) {
+    return (
+      <pre
+        className={cn(
+          sizeClasses[props.size ?? 'base'],
+          'my-1 overflow-x-auto rounded bg-muted px-3 py-2 font-mono leading-relaxed text-foreground whitespace-pre-wrap',
+        )}
+        style={node.style}
+      >
+        {props.content}
+      </pre>
+    );
+  }
 
   const renderPart = (part: InlinePart, key: number): React.ReactNode => {
     switch (part.type) {
@@ -190,6 +306,10 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
         return <strong key={key}>{part.value}</strong>;
       case 'italic':
         return <em key={key}>{part.value}</em>;
+      case 'strike':
+        return <s key={key}>{part.value}</s>;
+      case 'underline':
+        return <u key={key}>{part.value}</u>;
       case 'code':
         return (
           <code
@@ -233,28 +353,76 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
     }
   };
 
-  // Render multi-line content inline with <br /> so the component stays a
-  // single <p> (no nested block elements).
-  const lines = props.content.split('\n');
+  const textClasses = cn(
+    sizeClasses[props.size ?? 'base'],
+    variantClasses[props.variant ?? 'default'],
+    props.bold && 'font-semibold',
+    props.italic && 'italic',
+    'leading-relaxed',
+  );
+
+  // Render a single paragraph's lines inline with <br />.
+  const renderParagraphLines = (lines: string[], keyPrefix: string) =>
+    lines.map((line, lineIndex) => (
+      <React.Fragment key={`${keyPrefix}-${lineIndex}`}>
+        {lineIndex > 0 && <br />}
+        {parseInlineContent(line).map((part, partIndex) => renderPart(part, partIndex))}
+      </React.Fragment>
+    ));
+
+  const segments = parseBlockSegments(props.content);
+
+  // If only one paragraph segment, keep the original single-<p> output for
+  // backwards compatibility with existing callers that style the wrapper.
+  const firstSeg = segments[0];
+  if (segments.length === 1 && firstSeg?.type === 'paragraph') {
+    return (
+      <p className={textClasses} style={node.style}>
+        {renderParagraphLines(firstSeg.lines, 'p0')}
+        {children}
+      </p>
+    );
+  }
 
   return (
-    <p
-      className={cn(
-        sizeClasses[props.size ?? 'base'],
-        variantClasses[props.variant ?? 'default'],
-        props.bold && 'font-semibold',
-        props.italic && 'italic',
-        'leading-relaxed',
-      )}
-      style={node.style}
-    >
-      {lines.map((line, lineIndex) => (
-        <React.Fragment key={lineIndex}>
-          {lineIndex > 0 && <br />}
-          {parseInlineContent(line).map((part, partIndex) => renderPart(part, partIndex))}
-        </React.Fragment>
-      ))}
+    <div className={cn(textClasses, 'flex flex-col gap-1')} style={node.style}>
+      {segments.map((seg, segIdx) => {
+        if (seg.type === 'codeblock') {
+          return (
+            <pre
+              key={segIdx}
+              className='bg-muted text-foreground rounded p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap'
+            >
+              <code>{seg.code}</code>
+            </pre>
+          );
+        }
+        if (seg.type === 'bullets') {
+          return (
+            <ul key={segIdx} className='list-disc pl-6 my-2'>
+              {seg.items.map((item, itemIdx) => (
+                <li key={itemIdx} className='my-1'>
+                  {parseInlineContent(item).map((part, partIndex) => renderPart(part, partIndex))}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        if (seg.type === 'ordered') {
+          return (
+            <ol key={segIdx} className='list-decimal pl-6 my-2'>
+              {seg.items.map((item, itemIdx) => (
+                <li key={itemIdx} className='my-1'>
+                  {parseInlineContent(item).map((part, partIndex) => renderPart(part, partIndex))}
+                </li>
+              ))}
+            </ol>
+          );
+        }
+        // paragraph
+        return <p key={segIdx}>{renderParagraphLines(seg.lines, `seg${segIdx}`)}</p>;
+      })}
       {children}
-    </p>
+    </div>
   );
 };

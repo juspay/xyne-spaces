@@ -1,5 +1,6 @@
 import { UserRepository } from '../../../../database/repositories/users';
 import { UserGroupRepository } from '../../../../database/repositories/userGroups';
+import { ChannelRepository } from '../../../../database/repositories/channelRepository';
 import { DatabaseClient } from '../../../../database/client';
 import { config } from '../../../../config/env';
 
@@ -66,8 +67,14 @@ function isSlackNativeId(id: string): boolean {
 }
 
 export function extractAllSlackIds(text: string, isUser: boolean): string[] {
-  const regex = isUser ? /<@([A-Za-z0-9]+)>/g : /<!subteam\^([A-Za-z0-9]+)>/g;
+  const regex = isUser ? /<@([^>|]+)(?:\|[^>]*)?>/g : /<!subteam\^([^>|]+)(?:\|[^>]*)?>/g;
   const matches = text.matchAll(new RegExp(regex, 'g'));
+  const ids = Array.from(matches, (match) => match[1]);
+  return [...new Set(ids)];
+}
+
+export function extractAllSlackChannelIds(text: string): string[] {
+  const matches = text.matchAll(/<#([^>|]+)(?:\|[^>]*)?>/g);
   const ids = Array.from(matches, (match) => match[1]);
   return [...new Set(ids)];
 }
@@ -152,7 +159,7 @@ async function resolveApiUser(
   return { dbUserId: user?.id, displayName };
 }
 
-async function resolveApiGroup(slackGroupId: string, botOauthToken: string): Promise<string | undefined> {
+async function resolveApiGroup(slackGroupId: string, botOauthToken: string, workspaceId?: string): Promise<string | undefined> {
   if (!slackGroupId || !botOauthToken) {
     return undefined;
   }
@@ -168,7 +175,7 @@ async function resolveApiGroup(slackGroupId: string, botOauthToken: string): Pro
     metadata: {
       slackGroupId: slackGroup.id,
     },
-    workspace: { connect: { id: config.defaultWorkspaceId } },
+    workspace: { connect: { id: workspaceId ?? config.defaultWorkspaceId } },
   });
   const userRepo = new UserRepository();
   const userResults = await Promise.allSettled(
@@ -237,7 +244,7 @@ export async function resolveSlackIds(
       slackIdsToFetch.map((slackId) =>
         type === 'user'
           ? resolveApiUser(slackId, botOauthToken, workspaceId ?? '')
-          : resolveApiGroup(slackId, botOauthToken).then((id) => ({ dbUserId: id, displayName: undefined }))
+          : resolveApiGroup(slackId, botOauthToken, workspaceId).then((id) => ({ dbUserId: id, displayName: undefined }))
       )
     );
 
@@ -260,50 +267,74 @@ function resolveSpecialMentions(text: string, isStringified: boolean = false): s
   const quote = isStringified ? "'" : '"';
   text = text.replace(broadcastRegex, (match: string) => {
     const display = match.startsWith('<!') ? `@${match.slice(2, -1)}` : match;
-    return `<span class=${quote}chat-input-special-mention${quote} data-mention-type=${quote}${display}${quote}>${display}</span>`;
+    const mentionType = display.slice(1);
+    return `<span class=${quote}chat-input-special-mention${quote} data-mention-type=${quote}${mentionType}${quote}>${display}</span>`;
   });
 
   return text;
 }
 
+function buildChannelMentionSpan(
+  channel: { id: string; name: string; visibility?: string | null; scopeType?: string | null },
+  quote: string,
+): string {
+  const isPrivate = channel.visibility === 'PRIVATE' || channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM';
+  const channelName = channel.name || channel.id;
+  return `<span data-channel-mention=${quote}${quote} data-channel-id=${quote}${escapeHtml(channel.id)}${quote} data-channel-name=${quote}${escapeHtml(channelName)}${quote} data-is-private=${quote}${String(isPrivate)}${quote} class=${quote}chat-input-channel-mention${quote}>#${escapeHtml(channelName)}</span>`;
+}
+
+function replaceSlackUserMention(currentText: string, slackId: string, newValue: string): string {
+  return currentText.replace(new RegExp(`<@${escapeRegExp(slackId)}(?:\\|[^>]*)?>`, 'g'), newValue);
+}
+
+function replaceSlackGroupMention(currentText: string, slackId: string, newValue: string): string {
+  return currentText.replace(new RegExp(`<!subteam\\^${escapeRegExp(slackId)}(?:\\|[^>]*)?>`, 'g'), newValue);
+}
+
+function replaceSlackChannelMention(currentText: string, channelId: string, newValue: string): string {
+  return currentText.replace(new RegExp(`<#${escapeRegExp(channelId)}(?:\\|[^>]*)?>`, 'g'), newValue);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export async function resolveSlackMentions(
   text: string,
-  botOauthToken: string,
+  botOauthToken: string = '',
   isStringified: boolean = false,
+  workspaceId?: string,
 ): Promise<string> {
   const userIds = extractAllSlackIds(text, true);
   const groupIds = extractAllSlackIds(text, false);
-  if (userIds.length === 0 && groupIds.length === 0) {
+  const channelIds = extractAllSlackChannelIds(text);
+  if (userIds.length === 0 && groupIds.length === 0 && channelIds.length === 0) {
     return resolveSpecialMentions(text, isStringified);
   }
 
   // Use provided workspaceId or fall back to default
-  const resolvedWorkspaceId = config.defaultWorkspaceId;
+  const resolvedWorkspaceId = workspaceId ?? config.defaultWorkspaceId;
 
   const userMapper = await resolveSlackIds(userIds, botOauthToken, 'user', resolvedWorkspaceId);
   const groupMapper = await resolveSlackIds(groupIds, botOauthToken, 'group', resolvedWorkspaceId);
   const quote = isStringified ? "'" : '"'
   const userRepo = new UserRepository();
   const groupRepo = new UserGroupRepository();
-
-  function replaceMention(currentText: string, isUser: boolean, slackId: string, newValue: string): string {
-    const regex = isUser ? new RegExp(`<@${slackId}>`, 'g') : new RegExp(`<!subteam\\^${slackId}>`, 'g');
-    return currentText.replace(regex, newValue);
-  }
+  const channelRepo = new ChannelRepository();
 
   if (userMapper) {
     for (const [slackId, { dbId, displayName }] of userMapper.entries()) {
       if (dbId) {
         const user = await userRepo.findById(dbId);
         if (user) {
-          text = replaceMention(text, true, slackId, `<span ${buildMentionAttrs(user.id, user.name, false, quote, undefined, undefined, user.email, user.picture || undefined).join(' ')}>@${user.name}</span>`);
+          text = replaceSlackUserMention(text, slackId, `<span ${buildMentionAttrs(user.id, user.name, false, quote, undefined, undefined, user.email, user.picture || undefined).join(' ')}>@${escapeHtml(user.name)}</span>`);
       } else {
         const name = displayName ?? 'unknown user';
-        text = replaceMention(text, true, slackId, `<span>@${name}</span>`);
+        text = replaceSlackUserMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
       }
       } else {
         const name = displayName ?? 'unknown user';
-        text = replaceMention(text, true, slackId, `<span>@${name}</span>`);
+        text = replaceSlackUserMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
       }
     }
   }
@@ -312,15 +343,23 @@ export async function resolveSlackMentions(
       if (dbId) {
         const group = await groupRepo.findById(dbId);
         if (group) {
-          text = replaceMention(text, false, slackId, `<span ${buildMentionAttrs(group.id, group.name, true, quote, group.alias || undefined, group.description || undefined).join(' ')}>@${group.alias}</span>`);
+          text = replaceSlackGroupMention(text, slackId, `<span ${buildMentionAttrs(group.id, group.name, true, quote, group.alias || undefined, group.description || undefined).join(' ')}>@${escapeHtml(group.alias || group.name)}</span>`);
         } else {
           const name = displayName ?? 'unknown group';
-          text = replaceMention(text, false, slackId, `<span>@${name}</span>`);
+          text = replaceSlackGroupMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
         }
       } else {
         const name = displayName ?? 'unknown group';
-        text = replaceMention(text, false, slackId, `<span>@${name}</span>`);
+        text = replaceSlackGroupMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
       }
+    }
+  }
+  for (const channelId of channelIds) {
+    const channel = await channelRepo.findById(channelId);
+    if (channel) {
+      text = replaceSlackChannelMention(text, channelId, buildChannelMentionSpan(channel, quote));
+    } else {
+      text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(channelId)}</span>`);
     }
   }
   return resolveSpecialMentions(text, isStringified);

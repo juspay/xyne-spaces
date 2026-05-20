@@ -8,24 +8,36 @@ function toUnixSeconds(value: Date): number {
 	return Math.floor(value.getTime() / 1000);
 }
 
-function transformUsergroup(group: UserGroupResponse): SlackUsergroupObject {
+function transformUsergroup(
+	group: UserGroupResponse & { users?: string[] },
+	includeUsers: boolean,
+	includeCount: boolean,
+): SlackUsergroupObject {
 	return {
 		id: group.id,
 		name: group.name,
 		handle: group.alias ?? group.name,
 		description: group.description ?? "",
 		date_delete: group.isActive ? 0 : toUnixSeconds(group.updatedAt),
-		user_count: group.memberCount,
 		date_create: toUnixSeconds(group.createdAt),
 		date_update: toUnixSeconds(group.updatedAt),
+		...(includeCount ? { user_count: group.memberCount } : {}),
+		...(includeUsers ? { users: group.users ?? [] } : {}),
 	};
 }
 
 export function transformUsergroupsListResponse(
-	groups: UserGroupResponse[],
+	groups: Array<UserGroupResponse & { users?: string[] }>,
+	options: { includeUsers?: boolean; includeCount?: boolean } = {},
 ): SlackUsergroupsListResponse {
 	return {
 		ok: true,
-		usergroups: groups.map(transformUsergroup),
+		usergroups: groups.map((group) =>
+			transformUsergroup(
+				group,
+				options.includeUsers === true,
+				options.includeCount !== false,
+			),
+		),
 	};
 }

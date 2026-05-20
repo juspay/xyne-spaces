@@ -7,12 +7,14 @@ import { transformSlackError } from "./error-transformer";
 export function getSlackAuthContext(req: Request): {
 	userId: string;
 	appId: string;
+	workspaceId?: string;
 } {
 	return {
 		userId:
 			(req.body?.userId as string | undefined) ?? req._slackAuth?.userId ?? "",
 		appId:
 			(req.body?.appId as string | undefined) ?? req._slackAuth?.appId ?? "",
+		workspaceId: req.user?.workspaceId,
 	};
 }
 

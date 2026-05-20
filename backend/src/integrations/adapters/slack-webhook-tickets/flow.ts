@@ -7,6 +7,7 @@ import { BaseFlow } from '../../core/baseFlow';
 import { TestPayloadResult } from '../../core/types';
 import { decrypt } from '../../../services/encryptionService';
 import { resolveSlackMentions } from './utils/slackUserResolver';
+import { ChannelRepository } from '../../../database/repositories/channelRepository';
 
 export class SlackFlow extends BaseFlow {
   /**
@@ -34,6 +35,11 @@ export class SlackFlow extends BaseFlow {
         return payload;
       }
 
+      const channelRepo = new ChannelRepository();
+      const workspaceId = source.channelId
+        ? (await channelRepo.findById(source.channelId))?.workspaceId
+        : undefined;
+
       // Determine the target object: for message_changed events, use nested message object
       const targetMessage =
         payload.event?.subtype === 'message_changed' && payload.event?.message
@@ -46,13 +52,13 @@ export class SlackFlow extends BaseFlow {
 
       // Resolve mentions in text
       if (targetMessage.text) {
-        targetMessage.text = await resolveSlackMentions(targetMessage.text, creds.botOauthToken);
+        targetMessage.text = await resolveSlackMentions(targetMessage.text, creds.botOauthToken, false, workspaceId);
       }
 
       // Resolve mentions in attachments
       if (targetMessage.attachments) {
         const attachmentsJson = JSON.stringify(targetMessage.attachments);
-        const resolvedJson = await resolveSlackMentions(attachmentsJson, creds.botOauthToken, true);
+        const resolvedJson = await resolveSlackMentions(attachmentsJson, creds.botOauthToken, true, workspaceId);
         targetMessage.attachments = JSON.parse(resolvedJson);
       }
 

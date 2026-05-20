@@ -28,9 +28,10 @@ export const highlightCodeBlocks = (html: string): string => {
   const codeBlocks = doc.querySelectorAll('pre code');
 
   codeBlocks.forEach(codeEl => {
-    // Skip empty or already-highlighted blocks
+    // Skip empty, already-highlighted, or explicitly opted-out blocks
     const raw = codeEl.textContent || '';
     if (!raw.trim()) return;
+    if (codeEl.closest('.no-highlight')) return;
     if (codeEl.querySelector('.hljs-comment, .hljs-keyword, [class*="hljs-"]')) return;
 
     let tree;

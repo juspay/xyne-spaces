@@ -214,6 +214,7 @@ export interface ChannelHistoryResponse extends PaginatedResponse<ChannelHistory
 export interface ConversationRepliesItem {
     messageId: string;
     conversationId: string;
+    parentMessageId: string;
     content: string;
     cleanContent: string;
     userId: string;
