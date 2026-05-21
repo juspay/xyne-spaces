@@ -8150,8 +8150,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          // 3. Create or update all attachments
-          for (const attachment of attachments) {
+  
+          for (const [index, attachment] of attachments.entries()) {
             const { attachmentId, mimetype, size, width, height } = attachment;
             const rawName = attachment.originalFilename || 'unnamed_file';
             const lastDotIdx = rawName.lastIndexOf('.');
@@ -8214,7 +8214,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   width,
                   height,
                   uploadedByUserId: authData.sub,
-                  createdAt: existingDraft?.createdAt || timestamp,
+                  createdAt: timestamp + index,
                   createdBy: authData.sub,
                   url: '', // Will be populated after upload completes
                   metadata: null,

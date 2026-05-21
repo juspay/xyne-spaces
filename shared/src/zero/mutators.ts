@@ -2625,8 +2625,8 @@ export const mutators = defineMutators({
           }
         }
 
-        // 3. Create or update all attachments
-        for (const attachment of attachments) {
+      
+        for (const [index, attachment] of attachments.entries()) {
           const { attachmentId, originalFilename, mimetype, size, width, height, duration } =
             attachment;
 
@@ -2693,7 +2693,7 @@ export const mutators = defineMutators({
               width,
               height,
               uploadedByUserId: ctx.userID,
-              createdAt: existingDraft?.createdAt || timestamp,
+              createdAt: timestamp + index,
               createdBy: ctx.userID,
               url: '', // Will be populated after upload completes
               workspaceId: ctx.workspaceId,
