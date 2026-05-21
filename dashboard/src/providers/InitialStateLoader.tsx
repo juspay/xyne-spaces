@@ -389,6 +389,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     updatedAtEnabled: true,
   });
 
+  const [userGroupMappings, userGroupMappingsDetails] = useCachedQuery(
+    queries.getUserGroupMappingsByUserId(),
+  );
+
   const [userDrafts, userDraftsDetails] = useCachedQuery(queries.userDrafts(), { ttl: '10m' });
   const [userDelayedMessages, userDelayedMessagesDetails] = useCachedQuery(
     queries.userDelayedMessages(),
@@ -447,6 +451,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
       stateMachineActor.send({ type: 'ADD_ALL_USER_GROUPS', userGroups: allUserGroups });
     }
 
+    if (isQueryCompleted(userGroupMappingsDetails)) {
+      stateMachineActor.send({ type: 'ADD_USER_GROUP_MAPPINGS', userGroupMappings });
+    }
+
     if (isQueryCompleted(userDraftsDetails)) {
       stateMachineActor.send({ type: 'ADD_USER_DRAFTS', draftMessages: userDrafts });
     }
@@ -472,6 +480,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     bookmarksDetails.type,
     allUserGroups,
     allUserGroupsDetails.type,
+    userGroupMappings,
+    userGroupMappingsDetails.type,
     userDrafts,
     userDraftsDetails.type,
     userDelayedMessages,

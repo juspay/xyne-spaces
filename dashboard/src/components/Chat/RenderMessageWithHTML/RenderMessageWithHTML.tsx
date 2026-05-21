@@ -38,6 +38,7 @@ import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useUserGroupMappings } from '../../../hooks/useUserGroup';
 import { API_BASE_URL } from '../../../config';
 import { FlowScreenManager } from '../../flowUI/FlowScreenManager';
 import type { FlowDefinition } from '@xyne/shared';
@@ -410,7 +411,7 @@ export function GroupMentionRenderer({
 }): JSX.Element {
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId: string }>();
-  const [userMemberships] = useCachedQuery(queries.getUserGroupMappingsByUserId());
+  const userMemberships = useUserGroupMappings();
 
   const isCurrentUserInGroup = useMemo(
     () => userMemberships?.some(m => m.userGroupId === groupId) ?? false,

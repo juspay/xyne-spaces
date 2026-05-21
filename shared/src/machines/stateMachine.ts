@@ -48,6 +48,7 @@ export type User = QueryResultType<typeof queries.getUsersV2>[number];
 export type Bookmarks = QueryResultType<typeof queries.userBookmarks>[number];
 export type VisibleChannel = NonNullable<QueryResultType<typeof queries.userVisibleChannelsV2>[number]['channel']>;
 export type UserGroup = QueryResultType<typeof queries.getAllUserGroups>[number];
+export type UserGroupMapping = QueryResultType<typeof queries.getUserGroupMappingsByUserId>[number];
 export type UserPermission = {
   resourceName: string;
   accessType: 'READ' | 'WRITE' | 'ADMIN';
@@ -186,6 +187,7 @@ interface StateMachineContext {
   draftMessages: DraftMessageDB[];
   delayedMessages: DelayedMessageDB[];
   allUserGroups: UserGroup[];
+  userGroupMappings: UserGroupMapping[];
   metrics: MetricsState;
   filteredTicketIds: string[];
   zeroRefreshCounter?: number;
@@ -212,6 +214,7 @@ type StateMachineEvent =
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
+  | { type: 'ADD_USER_GROUP_MAPPINGS'; userGroupMappings: UserGroupMapping[] }
   | { type: 'ADD_USER_DRAFTS'; draftMessages: DraftMessageDB[] }
   | { type: 'ADD_USER_DELAYED_MESSAGES'; delayedMessages: DelayedMessageDB[] }
   | { type: 'SET_METRICS'; metrics: Omit<MetricsState, 'loading' | 'error'> }
@@ -438,6 +441,14 @@ export const stateMachine = setup({
         return context.allUserGroups;
       },
     }),
+    addUserGroupMappings: assign({
+      userGroupMappings: ({ context, event }) => {
+        if (event.type === 'ADD_USER_GROUP_MAPPINGS') {
+          return event.userGroupMappings;
+        }
+        return context.userGroupMappings;
+      },
+    }),
     addUserDrafts: assign({
       draftMessages: ({ context, event }) => {
         if (event.type === 'ADD_USER_DRAFTS') {
@@ -646,6 +657,7 @@ export const stateMachine = setup({
     draftMessages: [],
     delayedMessages: [],
     allUserGroups: [],
+    userGroupMappings: [],
     metrics: initialMetricsState,
     filteredTicketIds: [],
     onlineUsers: [],
@@ -697,6 +709,9 @@ export const stateMachine = setup({
         },
         ADD_ALL_USER_GROUPS: {
           actions: 'addAllUserGroups',
+        },
+        ADD_USER_GROUP_MAPPINGS: {
+          actions: 'addUserGroupMappings',
         },
         ADD_USER_DRAFTS: {
           actions: 'addUserDrafts',

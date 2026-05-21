@@ -12,7 +12,7 @@ import {
   ExternalLink,
   Check,
 } from 'lucide-react';
-import { CanvasListProps, Canvas } from '../Canvas.types';
+import { CanvasListProps, Canvas, CanvasParticipant } from '../Canvas.types';
 import { CanvasRole, CanvasVisibility, DocType } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
@@ -76,11 +76,15 @@ const ParticipantsTray: React.FC<{
   const formattedParticipants: ParticipantItem[] = useMemo(() => {
     if (!participants) return [];
 
-    return participants.map(p => ({
-      id: p.id,
-      userId: p.userId,
-      role: p.role,
-    }));
+    return participants.reduce<ParticipantItem[]>((acc, p) => {
+      if (!p.userId) return acc;
+      acc.push({
+        id: p.id,
+        userId: p.userId,
+        role: p.role,
+      });
+      return acc;
+    }, []);
   }, [participants]);
 
   return (
@@ -821,6 +825,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             canvas={shareCanvas}
             isOwner={shareCanvas.createdBy === currentUserId}
             isEditor={shareCanvas.accessLevel === CanvasRole.EDITOR}
+            participants={
+              (shareCanvas as Canvas & { participants?: CanvasParticipant[] }).participants
+            }
             {...(shareCanvas.channelId && { channelId: shareCanvas.channelId })}
           />
         </Dialog>

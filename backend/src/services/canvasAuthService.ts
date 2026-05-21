@@ -66,6 +66,22 @@ class CanvasAuthService {
         select: { role: true },
       });
 
+      const groupIds = (
+        await db.userGroupMapping.findMany({
+          where: { userId },
+          select: { userGroupId: true },
+        })
+      ).map(mapping => mapping.userGroupId);
+      const groupParticipant = groupIds.length
+        ? await db.canvasParticipant.findFirst({
+            where: {
+              canvasId: canvas.id,
+              userGroupId: { in: groupIds },
+            },
+            select: { role: true },
+          })
+        : null;
+
       const hasEditAccessLink = canvas.editAccessId === canvasIdOrAccessId;
       const hasViewAccessLink = canvas.viewAccessId === canvasIdOrAccessId;
 
@@ -94,9 +110,10 @@ class CanvasAuthService {
         }
       }
 
-      const hasOwnerRole = participant?.role === CanvasRole.OWNER;
-      const hasEditorRole = participant?.role === CanvasRole.EDITOR;
-      const hasViewerRole = participant?.role === CanvasRole.VIEWER;
+      const effectiveRole = participant?.role ?? groupParticipant?.role;
+      const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
+      const hasEditorRole = effectiveRole === CanvasRole.EDITOR;
+      const hasViewerRole = effectiveRole === CanvasRole.VIEWER;
 
       const canEdit =
         isCreator || hasOwnerRole || hasEditorRole || hasEditAccessLink;
@@ -109,7 +126,7 @@ class CanvasAuthService {
       logger.debug(`[CanvasAuth] Access check for canvas ${canvas.id}:`, {
         userId,
         isCreator,
-        participantRole: participant?.role,
+        participantRole: effectiveRole,
         hasEditAccessLink,
         hasViewAccessLink,
         hasPublicVisibilityAccess,
@@ -121,7 +138,7 @@ class CanvasAuthService {
         hasAccess,
         canEdit,
         canView,
-        role: participant?.role,
+        role: effectiveRole,
         canvas: {
           id: canvas.id,
           createdBy: canvas.createdBy,

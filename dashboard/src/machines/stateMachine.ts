@@ -20,6 +20,7 @@ export type {
   Bookmarks,
   VisibleChannel,
   UserGroup,
+  UserGroupMapping,
   UserPermission,
   UserChannelStatus,
   Conversation,

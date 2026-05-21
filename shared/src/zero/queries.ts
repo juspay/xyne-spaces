@@ -41,6 +41,11 @@ const applyCanvasVisibilityQueryFilter = (
     helpers.or(
       helpers.cmp('createdBy', userId),
       helpers.exists('participants', (participant: any) => participant.where('userId', userId)),
+      helpers.exists('participants', (p: any) =>
+        p.whereExists('userGroup', (ug: any) =>
+          ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId)),
+        ),
+      ),
       ...(includePublicVisibility ? [helpers.cmp('visibility', CanvasVisibility.PUBLIC)] : []),
       ...(requestedCanvasId
         ? [
@@ -1679,6 +1684,11 @@ export const queries = defineQueries({
           return helpers.or(
             helpers.cmp('createdBy', ctx.userID),
             helpers.exists('participants', p => p.where('userId', ctx.userID)),
+            helpers.exists('participants', p =>
+              p.whereExists('userGroup', ug =>
+                ug.whereExists('userGroupMappings', m => m.where('userId', ctx.userID)),
+              ),
+            ),
           );
         })
         .orderBy('updatedAt', isBackward ? 'asc' : 'desc')
