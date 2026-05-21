@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
-const ASK_AI_VERSION_STORAGE_KEY = 'xyne-ask-ai-version';
+export const ASK_AI_VERSION_STORAGE_KEY = 'xyne-ask-ai-version';
 
 export type AskAIVersion = 'v1' | 'v2';
 

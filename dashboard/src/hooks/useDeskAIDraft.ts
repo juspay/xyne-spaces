@@ -6,7 +6,6 @@ import {
 } from '../services/XyneAI/XyneAISessionsService';
 import type { Message, DraftSource } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { logger, Event } from '../utils/logger';
-
 export interface DeskAIDraftHeaders {
   from?: string | null;
   to?: ReadonlyArray<string> | null;

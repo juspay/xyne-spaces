@@ -8,7 +8,6 @@ import type {
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { UserActivity } from '../hooks/useUserActivity';
-import { useAskAIVersion } from './useAskAIVersion';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
 
@@ -91,9 +90,6 @@ export const useXyneAIStream = ({
   activities,
 }: UseXyneAIStreamParams) => {
   const currentStreamIdRef = useRef<string | null>(null);
-
-  // Get Ask AI version from user settings
-  const { askAIVersion } = useAskAIVersion();
 
   const threadId = buildXyneAIStreamThreadId({
     channelId: channelId ?? null,
@@ -301,7 +297,6 @@ export const useXyneAIStream = ({
           canvasIds,
           callIds,
           attachedContext: combinedAttachedContext,
-          version: askAIVersion,
         },
         allMessages,
       );
@@ -326,7 +321,6 @@ export const useXyneAIStream = ({
       callIds,
       attachedContext,
       activities,
-      askAIVersion,
       streamSessionKey,
     ],
   );
