@@ -589,10 +589,14 @@ export function MentionPlugin({
             };
           }
         } else if (atMatch) {
+          // Strip trailing punctuation from mention query to avoid breaking
+          // Fuse.js fuzzy search (e.g., typing "@john." should still match "john.doe")
+          const rawQuery = atMatch[1] || '';
+          const normalizedQuery = rawQuery.replace(/[.,!?:;)]*$/, '');
           trigger = {
             type: 'user',
             text: '@',
-            query: atMatch[1] || '',
+            query: normalizedQuery,
             index: textBeforeCursor.lastIndexOf('@'),
           };
         } else if (hashMatch) {
