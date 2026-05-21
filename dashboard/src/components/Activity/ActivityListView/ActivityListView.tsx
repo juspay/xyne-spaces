@@ -371,7 +371,19 @@ const ActivityListView = (): ReactElement => {
 
     if (activitiesPage.length === 0) {
       if (fetchCursor === null) {
-        if (!showUnreadOnly) {
+        if (showUnreadOnly) {
+          // Keep only the currently-selected item (white/read styling).
+          // Covers "last 1 item clicked", "2 items → click second", and "mark all as read".
+          // Previously-selected items that are no longer active are removed here.
+          const currentSelectedId = new URLSearchParams(window.location.search).get(
+            'selectedActivity',
+          );
+          setActivities(prev =>
+            prev
+              .filter(a => a.id === currentSelectedId)
+              .map(a => ({ ...a, isRead: true as const })),
+          );
+        } else {
           setActivities([]);
         }
         setNextCursor(null);
@@ -381,17 +393,29 @@ const ActivityListView = (): ReactElement => {
     }
 
     setActivities(prev => {
-      if (showUnreadOnly) {
-        // In unread mode, keep already displayed activities stable even after
-        // they are marked read. Only add rows that have not been shown yet:
-        // new head rows go at the top, older paginated rows go at the bottom.
-        const existingIds = new Set(prev.map(item => item.id));
-        const newActivities = activitiesPage.filter(item => !existingIds.has(item.id));
-        return fetchCursor === null ? [...newActivities, ...prev] : [...prev, ...newActivities];
+      if (fetchCursor === null) {
+        if (showUnreadOnly) {
+          // When the unread toggle is on, keep the currently-selected activity in the
+          // list even after it gets marked as read (removed from activitiesPage by the
+          // isRead: false filter). It renders with white/read styling and only leaves
+          // the list when a different activity is selected (URL param changes).
+          const currentSelectedId = new URLSearchParams(window.location.search).get(
+            'selectedActivity',
+          );
+          const newPageIds = new Set(activitiesPage.map(a => a.id));
+          const keptSelected = prev
+            .filter(a => !newPageIds.has(a.id) && a.id === currentSelectedId)
+            .map(a => ({ ...a, isRead: true as const }));
+          if (keptSelected.length > 0) {
+            return [...activitiesPage, ...keptSelected].sort(
+              (a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt),
+            );
+          }
+        }
+        return activitiesPage;
       }
 
-      const combined =
-        fetchCursor === null ? [...activitiesPage, ...prev] : [...prev, ...activitiesPage];
+      const combined = [...prev, ...activitiesPage];
       const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
       return unique;
     });
