@@ -1865,6 +1865,17 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   background-color: rgba(59, 130, 246, 0.1);
 }
 
+/* --- Activity unread/read contrast --- */
+[data-theme="midnight"] [data-activity-id].bg-accent {
+  background-color: hsl(216 6% 24%) !important;
+}
+[data-theme="midnight"] [data-activity-id].bg-accent:hover {
+  background-color: hsl(216 6% 28%) !important;
+}
+[data-theme="midnight"] [data-activity-id].bg-card {
+  background-color: hsl(216 6% 10%) !important;
+}
+
 /* --- 2A: Status Badges --- */
 [data-theme="midnight"] .status-badge-opened {
   background-color: #1f2937 !important;
