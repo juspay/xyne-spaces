@@ -2199,7 +2199,7 @@ const SupportScreen = (): ReactElement => {
         {ticketId && (
           <Panel defaultSize={100} minSize={100} order={3}>
             <div className='h-full overflow-hidden'>
-              <SupportTicketDetail />
+              <SupportTicketDetail ticketFilter={ticketFilter} />
             </div>
           </Panel>
         )}
@@ -2385,7 +2385,15 @@ const TicketMetaRow = ({
   );
 };
 
-const SupportTicketDetail = (): ReactElement => {
+type SupportTicketDetailProps = {
+  ticketFilter: {
+    assignedTo: string[] | undefined;
+    priority: TicketPriority[] | undefined;
+    stageName: string[] | undefined;
+  };
+};
+
+const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
     channelId: channelIdParam,
@@ -2671,6 +2679,7 @@ const SupportTicketDetail = (): ReactElement => {
     queries.supportTicketsPageV2({
       channelId,
       isMember,
+      ...ticketFilter,
       limit: 1,
       start: cursorStart,
       dir: 'forward',
@@ -2681,6 +2690,7 @@ const SupportTicketDetail = (): ReactElement => {
     queries.supportTicketsPageV2({
       channelId,
       isMember,
+      ...ticketFilter,
       limit: 1,
       start: cursorStart,
       dir: 'backward',
