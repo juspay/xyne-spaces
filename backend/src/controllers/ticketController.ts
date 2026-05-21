@@ -43,6 +43,7 @@ import { BaseTicketType, FormContextType, FormEntityType, serializeTicketMd } fr
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
+
 import { z } from 'zod';
 
 const AddAttachmentsFromConversationBodySchema = z.object({
@@ -54,6 +55,8 @@ import { TicketIdService } from '@/services/ticketIdService';
 import { unifiedBotUserService } from '@/bots/unified';
 import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
+import { ticketService } from '@/services/ticketService';
+
 
 const prisma = DatabaseClient.getInstance();
 
@@ -490,9 +493,9 @@ export class TicketController {
             // Full role assignment will be done after ticket creation
             pendingFullRoleAssignment = true;
           } else {
-          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId);
-          if (assignmentResult.assignedUserId) {
-            finalAssignedTo = assignmentResult.assignedUserId;
+            const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId);
+            if (assignmentResult.assignedUserId) {
+              finalAssignedTo = assignmentResult.assignedUserId;
             }
           }
         } catch (error) {
@@ -1143,6 +1146,70 @@ export class TicketController {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
+
+  /**
+     * Update a ticket
+     * PATCH /api/tickets/:ticketId
+     *
+     * Path params:
+     * - ticketId: ID of the ticket to update
+     * - workspaceID
+     *
+     * Body (at least one update field required):
+     * - assigneeId: string - New assignee user ID
+     * - stage: string - New stage name (must exist on ticket's board)
+     * - groupId: string - User group ID to assign
+     * - title: string - New title
+     * - description: string - New description
+     * - priority: string - LOW | MEDIUM | HIGH | CRITICAL
+     * - status: string - TODO | STARTED | PAUSED | CANCELLED | COMPLETED
+     * - eta: string - Due date as ISO 8601 string
+     */
+  updateTicket = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      const ticketId = req.params.ticketId;
+      if (!ticketId) {
+        res.status(400).json({ error: 'ticketId is required (path param)' });
+        return;
+      }
+
+      const { assigneeId, stage, groupId, title, description, priority, status, eta } = req.body ?? {};
+
+      if (!assigneeId && !stage && !groupId && !title && !description && !priority && !status && !eta) {
+        res.status(400).json({
+          error: 'At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, or eta)',
+        });
+        return;
+      }
+
+      const updates = await ticketService.updateTicket(ticketId, userId, {
+        assigneeId, stage, groupId, title, description, priority, status, eta,
+      });
+
+      res.status(200).json({ success: true, updated: updates });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('[TicketController] Error updating ticket:', {
+        error: errorMessage,
+        ticketId: req.params.ticketId,
+        userId: req.user?.id,
+      });
+      res.status(500).json({
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+        message: errorMessage,
+      });
+    }
+  };
+
+
+
 
   checkDuplicateTickets = async (req: Request, res: Response): Promise<void> => {
     try {
