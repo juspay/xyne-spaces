@@ -1837,17 +1837,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           {/* Left Column */}
 
           <div className='space-y-4'>
-            {/* Status */}
-            <TicketKeyValuePair
-              ticketKey='Status Category'
-              value={
-                <span className='flex items-center gap-2'>
-                  {' '}
-                  {<TicketStatusIcon size={14} />} {ticket.statusV2}
-                </span>
-              }
-            />
-
             {/* Assignee */}
             <TicketKeyValuePair
               ticketKey='Assignee'
