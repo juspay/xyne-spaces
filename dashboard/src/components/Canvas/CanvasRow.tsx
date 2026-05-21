@@ -20,6 +20,7 @@ import {
 } from '../ui/dropdown-menu';
 import { Dialog } from '../ui/Dialog';
 import { CanvasShareModal } from './CanvasShareModal';
+import { formatDate } from '../../utils/dateUtils';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
@@ -55,6 +56,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
   const isQuartoDoc = canvas.docType === DocType.Quarto;
+  const createdDateText = `Created ${formatDate(canvas.createdAt)}`;
 
   return (
     <>
@@ -72,9 +74,12 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
           ) : (
             <FileText className='w-4 h-4 text-muted-foreground shrink-0' />
           )}
-          <span className='text-sm truncate'>{canvas.title || 'Untitled'}</span>
+          <div className='min-w-0 flex-1'>
+            <div className='text-sm truncate'>{canvas.title || 'Untitled'}</div>
+            <div className='text-xs text-muted-foreground truncate'>{createdDateText}</div>
+          </div>
           {!isQuartoDoc && (
-            <span className='ml-auto flex items-center gap-1 text-xs text-muted-foreground shrink-0'>
+            <span className='ml-3 flex items-center gap-1 text-xs text-muted-foreground shrink-0'>
               {canvas.visibility === CanvasVisibility.PUBLIC ? (
                 <>
                   <Globe className='w-3 h-3 text-green-500' />

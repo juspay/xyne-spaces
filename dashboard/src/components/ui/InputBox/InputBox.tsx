@@ -982,7 +982,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         setIsCanvasAttachmentModalOpen(false);
 
         // Open canvas editor in new tab for editing
-        const canvasUrl = `/chat/canvas/${newCanvasId}`;
+        const canvasUrl = `${shareableOrigin}/chat/canvas/${newCanvasId}`;
         window.open(canvasUrl, '_blank');
       } catch (error) {
         logger.error(Event.CANVAS_CREATE_FAILED, {
@@ -994,7 +994,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           description: 'Please try again.',
         });
       }
-    }, [channelId]);
+    }, [channelId, shareableOrigin]);
 
     const handleRemoveAttachedCanvas = useCallback(() => {
       setAttachedCanvas(null);

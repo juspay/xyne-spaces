@@ -14,10 +14,12 @@ import {
   buildGroupedCanvasSections,
   type CanvasHierarchySections,
 } from './CanvasListGrouped.utils';
+import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
 
 interface UseCanvasListGroupedDataParams {
   currentUserId?: string | undefined;
   collapsedProjects: ReadonlySet<string>;
+  excludeCallGeneratedCanvases: boolean;
 }
 
 interface UseCanvasListGroupedDataResult {
@@ -40,6 +42,7 @@ function toArray<T>(value: unknown): T[] {
 export function useCanvasListGroupedData({
   currentUserId,
   collapsedProjects,
+  excludeCallGeneratedCanvases,
 }: UseCanvasListGroupedDataParams): UseCanvasListGroupedDataResult {
   const allUsers = useUsers();
   const allVisibleChannels = useAllVisibleChannels();
@@ -83,8 +86,12 @@ export function useCanvasListGroupedData({
   );
   const lazyPersonalFolders = useMemo(() => personalFolders, [personalFolders]);
   const lazyPersonalCanvases = useMemo(
-    () => toArray<Canvas>(personalCanvasesResult),
-    [personalCanvasesResult],
+    () =>
+      filterExcludedCallGeneratedCanvases(
+        toArray<Canvas>(personalCanvasesResult),
+        excludeCallGeneratedCanvases,
+      ),
+    [excludeCallGeneratedCanvases, personalCanvasesResult],
   );
   const expandedProjectIds = useMemo(
     () => projectIds.filter(projectId => !collapsedProjects.has(projectId)),

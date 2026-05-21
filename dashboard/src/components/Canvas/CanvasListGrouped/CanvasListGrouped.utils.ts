@@ -10,6 +10,7 @@ export interface CanvasListGroupedProps {
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
   isPersonalSectionCollapsed: boolean;
   onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
+  excludeCallGeneratedCanvases?: boolean;
 }
 
 export interface FolderGroup {
