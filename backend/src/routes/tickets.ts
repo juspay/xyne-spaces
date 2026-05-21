@@ -16,6 +16,8 @@ const analyticsController = new AnalyticsController();
 
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);
+// Update a ticket (assignee, stage, group, title, description, priority, status, eta)
+router.patch('/:ticketId', ticketController.updateTicket);
 
 // Workflow metrics for tickets dashboard
 router.get('/workflow-metrics', analyticsController.getWorkflowMetrics);

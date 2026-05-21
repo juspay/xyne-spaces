@@ -6,6 +6,8 @@ import { DatabaseClient } from '@/database/client';
 import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { PRStatusEvent } from '@prisma/client';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+
 
 const prisma = DatabaseClient.getInstance();
 
@@ -135,6 +137,49 @@ export class TicketService {
     } catch (error) {
       logger.error(`[TicketService] Error assigning user group to ticket:`, error);
     }
+  }
+
+
+  /**
+   * Generic ticket update — all fields updated via direct Prisma update.
+   * Returns the list of fields that were updated.
+   */
+
+ async updateTicket(
+    ticketId: string,
+    userId: string,
+    params: {
+      assigneeId?: string;
+      stage?: string;
+      groupId?: string;
+      title?: string;
+      description?: string;
+      priority?: string;
+      status?: string;
+      eta?: string;
+    },
+  ): Promise<string[]> {
+    const updates: string[] = [];
+    const data: Record<string, unknown> = { updatedBy: userId, updatedAt: new Date() };
+
+    if (params.assigneeId) { data['assignedTo'] = params.assigneeId; updates.push('assignee'); }
+    if (params.stage) { data['stageName'] = params.stage; updates.push('stage'); }
+    if (params.groupId) { data['userGroupId'] = params.groupId; updates.push('group'); }
+    if (params.title) { data['title'] = params.title; updates.push('title'); }
+    if (params.description) { data['description'] = params.description; updates.push('description'); }
+    if (params.priority) { data['priority'] = params.priority; updates.push('priority'); }
+    if (params.status) { data['statusV2'] = params.status; updates.push('status'); }
+    if (params.eta) { data['eta'] = new Date(params.eta); updates.push('eta'); }
+
+    const updatedTicket = await prisma.ticket.update({
+      where: { id: ticketId },
+      data,
+    });
+
+    await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+
+    logger.info(`[TicketService] Updated ticket ${ticketId}: ${updates.join(', ')}`);
+    return updates;
   }
 
   /**
