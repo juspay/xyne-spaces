@@ -34,7 +34,7 @@ export interface ConversationWithTicket extends Conversation {
         conversationId: string;
       }
     | undefined;
-  participants?: readonly ConversationParticipant[] | undefined;
+  participants?: readonly ConversationParticipant[] | ConversationParticipant | undefined;
   initialMessage?:
     | {
         metadata?: unknown;
