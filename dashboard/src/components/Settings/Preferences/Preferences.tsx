@@ -1,4 +1,4 @@
-import { FC, ReactElement, useEffect, useMemo, useState } from 'react';
+import { FC, ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   X,
   Palette,
@@ -18,6 +18,7 @@ import { format } from 'date-fns';
 
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Switch } from '../../ui/Switch';
+import { RadioGroup, Radio } from '../../ui/RadioGroup';
 import { Button } from '../../ui/Button/Button';
 
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -64,6 +65,12 @@ const SectionHeader: FC<{ title: string; subtitle: string }> = ({ title, subtitl
     <p className='text-base font-semibold text-foreground'>{title}</p>
     <p className='text-sm text-muted-foreground mt-0.5'>{subtitle}</p>
   </div>
+);
+
+const KeyCap: FC<{ children: ReactNode }> = ({ children }) => (
+  <kbd className='inline-flex items-center rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-medium leading-none text-foreground align-middle'>
+    {children}
+  </kbd>
 );
 
 // ─── Appearance ─────────────────────────────────────────────────────────────
@@ -224,20 +231,20 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-4'>
     <SectionHeader title='Messaging' subtitle='Configure message composition and link behavior' />
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Press Enter to send</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          {state.enterSendsMessage
-            ? 'Shift + Enter starts a new line'
-            : 'Shift + Enter sends the message'}
-        </p>
-      </div>
-      <Switch
-        id='enter-sends-message'
-        checked={state.enterSendsMessage}
-        onCheckedChange={state.setEnterSendsMessage}
-      />
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <p className='text-sm font-medium text-foreground'>
+        When writing a message, press <KeyCap>Enter</KeyCap> to&hellip;
+      </p>
+      <RadioGroup
+        value={state.enterSendsMessage ? 'send' : 'newline'}
+        onChange={value => state.setEnterSendsMessage(value === 'send')}
+      >
+        <Radio value='send'>Send the message</Radio>
+        <Radio value='newline'>
+          Start a new line (use <KeyCap>Shift</KeyCap> / <KeyCap>⌘</KeyCap> + <KeyCap>Enter</KeyCap>{' '}
+          to send)
+        </Radio>
+      </RadioGroup>
     </div>
     {linkOpenPrefIsRelevant() && (
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>

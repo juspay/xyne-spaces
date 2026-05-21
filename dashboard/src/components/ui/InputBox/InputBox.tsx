@@ -75,6 +75,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
 import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
 import { EmojiClickData } from 'emoji-picker-react';
@@ -200,6 +201,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     } = useDraftAttachments();
     const { enterSendsMessage } = useEnterSendsMessage();
     const shareableOrigin = useShareableOrigin();
+    const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
 
@@ -575,8 +577,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           // Check if screen width is below 500px
           const isMobile = window.innerWidth < 500;
 
-          // Shift+Enter: new line (default) OR send message (when enterSendsMessage is false)
-          if (event.key === 'Enter' && event.shiftKey) {
+          // Shift+Enter / Cmd+Enter: new line (default) OR send message (when enterSendsMessage is false)
+          if (event.key === 'Enter' && (event.shiftKey || event.metaKey)) {
             if (!enterSendsMessage && !isMobile && !disableEnterToSend) {
               const mentionState = mentionPluginKey.getState(view.state);
               const channelMentionState = channelMentionPluginKey.getState(view.state);
@@ -640,8 +642,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             return true;
           }
 
-          // Enter key WITHOUT Shift: Send message or new line depending on preference
-          if (event.key === 'Enter' && !event.shiftKey) {
+          // Enter key WITHOUT Shift/Cmd: Send message or new line depending on preference
+          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey) {
             const mentionState = mentionPluginKey.getState(view.state);
             const channelMentionState = channelMentionPluginKey.getState(view.state);
             const commandState = commandPluginKey.getState(view.state);
@@ -1698,23 +1700,38 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           </div>
         </div>
 
-        {/* Typing Indicator - Always reserve space to prevent layout shift */}
-        <div className='mt-1 h-4 flex items-baseline justify-start px-1 mb-1 absolute -bottom-1 right-0 left-0 translate-y-full'>
-          {showTypingIndicator && typingUsers.length > 0 && (
-            <small className='text-[10px] text-muted-foreground flex items-baseline'>
-              {formatTypingMessage(typingUsers)}
-              <span className='flex items-center ml-1'>
-                <span className='animate-[loading-dots_1.4s_infinite_0.2s]'>
-                  <DotIcon className='size-2 text-muted-foreground' />
+        {/* Typing Indicator + Enter-behavior hint - Always reserve space to prevent layout shift */}
+        <div className='mt-1 h-4 flex items-baseline justify-between gap-2 px-1 mb-1 absolute -bottom-1 right-0 left-0 translate-y-full'>
+          <div className='flex items-baseline min-w-0'>
+            {showTypingIndicator && typingUsers.length > 0 && (
+              <small className='text-[10px] text-muted-foreground flex items-baseline'>
+                {formatTypingMessage(typingUsers)}
+                <span className='flex items-center ml-1'>
+                  <span className='animate-[loading-dots_1.4s_infinite_0.2s]'>
+                    <DotIcon className='size-2 text-muted-foreground' />
+                  </span>
+                  <span className='animate-[loading-dots_1.4s_infinite_0.4s]'>
+                    <DotIcon className='size-2 text-muted-foreground' />
+                  </span>
+                  <span className='animate-[loading-dots_1.4s_infinite_0.6s]'>
+                    <DotIcon className='size-2 text-muted-foreground' />
+                  </span>
                 </span>
-                <span className='animate-[loading-dots_1.4s_infinite_0.4s]'>
-                  <DotIcon className='size-2 text-muted-foreground' />
-                </span>
-                <span className='animate-[loading-dots_1.4s_infinite_0.6s]'>
-                  <DotIcon className='size-2 text-muted-foreground' />
-                </span>
-              </span>
-            </small>
+              </small>
+            )}
+          </div>
+          {!isMobile && !disableEnterToSend && hasSendableContent && (
+            <button
+              type='button'
+              onClick={() => setIsPreferencesOpen(true)}
+              className='text-[10px] text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap shrink-0'
+              title='Change message send behavior'
+              data-track-category='CHAT_INPUT'
+              data-track-name='OpenMessagingPreferences'
+            >
+              <span className='font-semibold'>Shift / ⌘ + Return</span>{' '}
+              {enterSendsMessage ? 'to add a new line' : 'to send'}
+            </button>
           )}
         </div>
 
@@ -1741,6 +1758,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               void onScheduleSend(scheduledFor, html, files);
               editor?.commands.clearContent(true);
             }}
+          />
+        )}
+
+        {/* Messaging preferences (Enter-to-send behavior) */}
+        {isPreferencesOpen && (
+          <Preferences
+            open
+            initialSection='messaging'
+            onClose={() => setIsPreferencesOpen(false)}
           />
         )}
       </div>
