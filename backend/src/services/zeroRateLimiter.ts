@@ -1,20 +1,20 @@
 import { redisService } from './redisService';
 import { logger } from '@/utils/logger';
 
-export async function checkRateLimit(endpoint: string, identifier: string): Promise<boolean> {
+export async function checkRateLimit(endpoint: string, identifier: string, count = 1): Promise<boolean> {
   try {
     const maxRequests = parseInt(process.env.ZERO_MAX_REQUESTS || '300', 10);
     const windowSeconds = parseInt(process.env.ZERO_REQUEST_WINDOW || '60', 10);
     const redis = redisService.getClient();
     const key = `rate:${endpoint}:${identifier}`;
 
-    // Execute INCR and EXPIRE in a single transaction
-    const results = await redis.multi().incr(key).expire(key, windowSeconds, 'NX').exec();
+    // Increment by the batch size (count) instead of 1
+    const results = await redis.multi().incrby(key, count).expire(key, windowSeconds, 'NX').exec();
 
-    // results[0] contains [error, count] from INCR
-    const count = results?.[0]?.[1] as number;
+    // results[0] contains [error, currentCount] from INCRBY
+    const currentCount = results?.[0]?.[1] as number;
 
-    return count <= maxRequests;
+    return currentCount <= maxRequests;
   } catch (error) {
     // If Redis is unavailable, log the error and allow the request through
     // This ensures the service remains available even when Redis is down

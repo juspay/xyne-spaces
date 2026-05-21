@@ -154,7 +154,19 @@ export async function handleMutate(request: Request): Promise<unknown> {
     throw new Error("Unauthorized")
   }
 
-  const isAllowed = await checkRateLimit("mutate", authData.sub);
+  // Clone the request so the body can be read again by handleMutateRequest
+  const clonedRequest = request.clone();
+  let batchSize = 1;
+  try {
+    const body = await clonedRequest.json() as { mutations?: unknown[] };
+    if (body.mutations && Array.isArray(body.mutations)) {
+      batchSize = Math.max(1, body.mutations.length);
+    }
+  } catch {
+    // If body parsing fails, fall back to counting as 1
+  }
+
+  const isAllowed = await checkRateLimit("mutate", authData.sub, batchSize);
   if (!isAllowed) {
     throw new Error("Rate limit exceeded");
   }
