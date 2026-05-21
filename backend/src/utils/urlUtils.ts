@@ -137,9 +137,10 @@ const INTERNAL_HOSTS_WITH_PORT = [
 ];
 
 // Pre-compiled regex for internal URL extraction (avoids creating new RegExp on each call)
-// Matches: production and sandbox domains
+// Matches: production and sandbox domains. Allows an optional `/{workspaceId}` segment
+// between the host and `/chat/...` (introduced by org/workspace routing, XYNE-11716).
 const INTERNAL_URL_REGEX =
-  /https?:\/\/(?:spaces\.xyne\.juspay\.net|spaces\.sandbox\.xyne\.juspay\.net|app\.spaces\.xyne\.juspay\.net|xyne-spaces\.web\.app|localhost:\d+|127\.0\.0\.1:\d+)\/chat\/[^\s<>"'\)\]]*/i;
+  /https?:\/\/(?:spaces\.xyne\.juspay\.net|spaces\.sandbox\.xyne\.juspay\.net|app\.spaces\.xyne\.juspay\.net|xyne-spaces\.web\.app|localhost:\d+|127\.0\.0\.1:\d+)(?:\/[^/\s]+)?\/chat\/[^\s<>"'\)\]]*/i;
 
 export interface InternalLinkInfo {
   type: 'message' | 'conversation' | 'ticket';
@@ -172,10 +173,11 @@ export function parseInternalUrl(url: string): InternalLinkInfo | null {
       INTERNAL_HOSTS.includes(parsed.hostname) || INTERNAL_HOSTS_WITH_PORT.includes(parsed.host);
     if (!isAllowedHost) return null;
 
-    // /chat/(dir|dm|bookmarks|activity)/:channelId[/:conversationId][/:ticketId]
-    // /chat/(dir|dm|bookmarks|activity)/:channelId/tickets/:ticketId
+    // [/:workspaceId]/chat/(dir|dm|bookmarks|activity)/:channelId[/:conversationId][/:ticketId]
+    // [/:workspaceId]/chat/(dir|dm|bookmarks|activity)/:channelId/tickets/:ticketId
+    // Workspace prefix added by org/workspace routing (XYNE-11716).
     const pathMatch = parsed.pathname.match(
-      /^\/chat\/(?:dir|dm|bookmarks|activity)\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?$/
+      /^(?:\/[^/]+)?\/chat\/(?:dir|dm|bookmarks|activity)\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?$/
     );
     if (!pathMatch) return null;
 
