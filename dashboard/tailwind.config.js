@@ -90,6 +90,7 @@ export default {
         sidebar: {
           DEFAULT: 'var(--sidebar)',
           'primary-foreground': 'var(--sidebar-primary-foreground)',
+          'unread-foreground': 'var(--sidebar-unread-foreground, var(--sidebar-primary-foreground))',
           'secondary-foreground': 'var(--sidebar-secondary-foreground)',
           'item-hover': 'var(--sidebar-item-hover)',
           'item-active': 'var(--sidebar-item-active)',

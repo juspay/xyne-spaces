@@ -221,6 +221,7 @@
     --sidebar: #18191b;
     --sidebar-background-blur: 12.5px;
     --sidebar-primary-foreground: #edeef0;
+    --sidebar-unread-foreground: #ffffff;
     --sidebar-secondary-foreground: #b0b4ba;
     --sidebar-item-hover: #272a2d;
     --sidebar-item-active: #2e3135;
