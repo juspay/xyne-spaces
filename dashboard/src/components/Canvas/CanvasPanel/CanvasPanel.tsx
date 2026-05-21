@@ -9,6 +9,8 @@ import type { Canvas } from '../Canvas.types';
 import { DocType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { Button } from '../../ui/Button';
+import { Switch } from '../../ui/Switch';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { PublishDocsModal } from '../QuartoInstructionsModal/QuartoInstructionsModal';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
@@ -42,7 +44,9 @@ const CanvasPanel = (): ReactElement => {
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
+  const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
+  const isQuartoDocsListView = viewMode === 'list' && activeFilter === 'quarto_docs';
 
   const handleCreateCanvas = useCallback(async () => {
     setIsCreatingCanvas(true);
@@ -177,7 +181,24 @@ const CanvasPanel = (): ReactElement => {
             )}
             <h2 className='text-lg font-semibold text-foreground'>Canvases</h2>
           </div>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-3'>
+            {!isQuartoDocsListView && (
+              <Tooltip
+                content={
+                  excludeCallGeneratedCanvases ? 'Show system generated' : 'Hide system generated'
+                }
+                side='bottom'
+                delayDuration={300}
+              >
+                <div>
+                  <Switch
+                    id='exclude-call-generated-canvases'
+                    checked={!excludeCallGeneratedCanvases}
+                    onCheckedChange={checked => setExcludeCallGeneratedCanvases(!checked)}
+                  />
+                </div>
+              </Tooltip>
+            )}
             <div className='flex items-center border border-border rounded-md'>
               <button
                 className={`p-1.5 rounded-l-md transition-colors ${
@@ -251,6 +272,7 @@ const CanvasPanel = (): ReactElement => {
             onDuplicate={handleDuplicateCanvas}
             isPersonalSectionCollapsed={isPersonalSectionCollapsed}
             onSetPersonalSectionCollapsed={setIsPersonalSectionCollapsed}
+            excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
           />
         ) : (
           <CanvasList
@@ -262,6 +284,7 @@ const CanvasPanel = (): ReactElement => {
             showQuartoDocsFilter={true}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
+            excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
             {...(selectedCanvasId ? { selectedCanvasId } : {})}
           />
         )}

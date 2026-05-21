@@ -131,6 +131,7 @@ export interface CanvasListProps {
   selectedCanvasId?: string;
   paginated?: boolean;
   channelId?: string;
+  excludeCallGeneratedCanvases?: boolean;
 }
 
 export interface CanvasHeaderProps {

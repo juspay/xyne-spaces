@@ -39,6 +39,7 @@ import { useCachedQuery } from '@xyne/shared/hooks';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShortcut } from '../../../shortcuts';
 import { openQuartoDoc } from '../openQuartoDoc';
+import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 type CanvasCursor = { id: string; updatedAt: number };
@@ -163,6 +164,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   selectedCanvasId,
   paginated = false,
   channelId,
+  excludeCallGeneratedCanvases = true,
 }) => {
   const navigate = useNavigate();
   const shareableOrigin = useShareableOrigin();
@@ -280,7 +282,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       return filtered;
     }
 
-    let filtered = rawItems;
+    let filtered = filterExcludedCallGeneratedCanvases(rawItems, excludeCallGeneratedCanvases);
 
     if (activeFilter === 'created_by_me' && currentUserId) {
       filtered = filtered.filter(canvas => canvas.createdBy === currentUserId);
@@ -293,7 +295,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     }
 
     return filtered;
-  }, [activeFilter, currentUserId, isQuartoDocs, rawItems, searchQuery]);
+  }, [
+    activeFilter,
+    currentUserId,
+    excludeCallGeneratedCanvases,
+    isQuartoDocs,
+    rawItems,
+    searchQuery,
+  ]);
 
   // j/k keyboard navigation through canvas list
   const canvasSelectedIdx = useRef(-1);
@@ -341,6 +350,27 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
     setPageCursor(nextCursor);
   }, [hasMore, isLoadingNext, nextCursor, pageCursor, paginated]);
+
+  useEffect(() => {
+    if (!paginated || !excludeCallGeneratedCanvases || isQuartoDocs || isLoadingNext || !hasMore) {
+      return;
+    }
+
+    if (filteredCanvases.length > 0 || rawItems.length === 0) {
+      return;
+    }
+
+    requestNextPage();
+  }, [
+    excludeCallGeneratedCanvases,
+    filteredCanvases.length,
+    hasMore,
+    isLoadingNext,
+    isQuartoDocs,
+    paginated,
+    rawItems.length,
+    requestNextPage,
+  ]);
 
   const handleVisibleRangeChanged = useCallback(
     (range: { startIndex: number; endIndex: number }): void => {

@@ -26,6 +26,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import type { CanvasUser, FolderGroup, ProjectGroup } from './CanvasListGrouped.utils';
 import { getChannelDisplayName } from './CanvasListGrouped.utils';
+import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
 
 const groupedCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Grouped',
@@ -49,6 +50,7 @@ interface FolderGroupSectionProps {
   renamingFolderName: string;
   setRenamingFolderName: React.Dispatch<React.SetStateAction<string>>;
   isCreatingCanvas: boolean;
+  excludeCallGeneratedCanvases: boolean;
   onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
@@ -72,6 +74,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   renamingFolderName,
   setRenamingFolderName,
   isCreatingCanvas,
+  excludeCallGeneratedCanvases,
   onSelect,
   onDelete,
   onDuplicate,
@@ -99,8 +102,12 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
     { enabled: !isCollapsed && !isProjectFolder },
   );
   const folderCanvases = useMemo(
-    () => toArray<Canvas>(isProjectFolder ? projectFolderCanvases : genericFolderCanvases),
-    [genericFolderCanvases, isProjectFolder, projectFolderCanvases],
+    () =>
+      filterExcludedCallGeneratedCanvases(
+        toArray<Canvas>(isProjectFolder ? projectFolderCanvases : genericFolderCanvases),
+        excludeCallGeneratedCanvases,
+      ),
+    [excludeCallGeneratedCanvases, genericFolderCanvases, isProjectFolder, projectFolderCanvases],
   );
   const isRenaming = renamingFolderId === folderGroup.folder.id;
   const isProjectDefaultFolder =
@@ -253,6 +260,7 @@ interface ChannelSectionProps extends Omit<
 > {
   channelGroup: ProjectGroup['channels'][number];
   onRegisterFolderIds: (folderIds: readonly string[]) => void;
+  excludeCallGeneratedCanvases: boolean;
 }
 
 const ChannelSection: React.FC<ChannelSectionProps> = ({
@@ -279,6 +287,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   onCancelRenameFolder,
   onDeleteFolder,
   onRegisterFolderIds,
+  excludeCallGeneratedCanvases,
 }) => {
   const isCollapsed = collapsedChannels.has(channelGroup.channel.id);
   const channelName = getChannelDisplayName(channelGroup.channel, currentUserId, usersById);
@@ -296,8 +305,12 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
     { enabled: !isCollapsed },
   );
   const channelRootCanvases = useMemo(
-    () => toArray<Canvas>(channelRootCanvasesResult),
-    [channelRootCanvasesResult],
+    () =>
+      filterExcludedCallGeneratedCanvases(
+        toArray<Canvas>(channelRootCanvasesResult),
+        excludeCallGeneratedCanvases,
+      ),
+    [channelRootCanvasesResult, excludeCallGeneratedCanvases],
   );
   const channelFolders = useMemo(
     () => toArray<CanvasFolder>(channelFoldersResult),
@@ -357,6 +370,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
               renamingFolderName={renamingFolderName}
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
+              excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
@@ -415,6 +429,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   onCancelRenameFolder,
   onDeleteFolder,
   onRegisterFolderIds,
+  excludeCallGeneratedCanvases,
 }) => {
   const isProjectCollapsed = collapsedProjects.has(group.project.id);
   const [projectFoldersResult] = useCachedQuery(
@@ -426,6 +441,10 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   const projectFolders = useMemo(
     () => toArray<CanvasFolder>(projectFoldersResult),
     [projectFoldersResult],
+  );
+  const projectRootCanvases = useMemo(
+    () => filterExcludedCallGeneratedCanvases(group.rootCanvases, excludeCallGeneratedCanvases),
+    [excludeCallGeneratedCanvases, group.rootCanvases],
   );
 
   useEffect(() => {
@@ -501,6 +520,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               renamingFolderName={renamingFolderName}
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
+              excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
@@ -530,6 +550,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               renamingFolderName={renamingFolderName}
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
+              excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
@@ -542,7 +563,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
             />
           ))}
 
-          {group.rootCanvases.map(canvas => (
+          {projectRootCanvases.map(canvas => (
             <CanvasRow
               key={canvas.id}
               canvas={canvas}
@@ -572,6 +593,7 @@ export interface CanvasListGroupedContentProps {
   usersById: Map<string, CanvasUser>;
   adminChannelIds: ReadonlySet<string>;
   isPersonalSectionCollapsed: boolean;
+  excludeCallGeneratedCanvases: boolean;
   collapsedProjects: ReadonlySet<string>;
   collapsedChannels: ReadonlySet<string>;
   collapsedFolders: ReadonlySet<string>;
@@ -611,6 +633,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   usersById,
   adminChannelIds,
   isPersonalSectionCollapsed,
+  excludeCallGeneratedCanvases,
   collapsedProjects,
   collapsedChannels,
   collapsedFolders,
@@ -635,6 +658,11 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   onDeleteFolder,
   onRegisterFolderIds,
 }) => {
+  const visiblePersonalCanvases = useMemo(
+    () => filterExcludedCallGeneratedCanvases(personalCanvases, excludeCallGeneratedCanvases),
+    [excludeCallGeneratedCanvases, personalCanvases],
+  );
+
   if (isEmpty) {
     return (
       <div className='flex flex-col items-center justify-center h-full text-center py-16'>
@@ -719,6 +747,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 renamingFolderName={renamingFolderName}
                 setRenamingFolderName={setRenamingFolderName}
                 isCreatingCanvas={isCreatingCanvas}
+                excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
                 onSelect={onSelect}
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
@@ -730,7 +759,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 onDeleteFolder={onDeleteFolder}
               />
             ))}
-            {personalCanvases.map(canvas => (
+            {visiblePersonalCanvases.map(canvas => (
               <CanvasRow
                 key={canvas.id}
                 canvas={canvas}
@@ -743,7 +772,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 onDuplicate={onDuplicate}
               />
             ))}
-            {personalFolderGroups.length === 0 && personalCanvases.length === 0 && (
+            {personalFolderGroups.length === 0 && visiblePersonalCanvases.length === 0 && (
               <div className='px-6 py-2 text-sm text-muted-foreground'>
                 Create a personal canvas or folder to get started.
               </div>
@@ -782,6 +811,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
           onCancelRenameFolder={onCancelRenameFolder}
           onDeleteFolder={onDeleteFolder}
           onRegisterFolderIds={onRegisterFolderIds}
+          excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
         />
       ))}
     </div>
