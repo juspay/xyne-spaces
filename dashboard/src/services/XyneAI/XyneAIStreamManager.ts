@@ -41,6 +41,14 @@ import {
   deriveStreamSlotKey,
   getStreamSlotKeyFromThreadId,
 } from '../../utils/xyneAIStreamThreadId';
+import { ASK_AI_VERSION_STORAGE_KEY } from '../../hooks/useAskAIVersion';
+import type { AskAIVersion } from '../../hooks/useAskAIVersion';
+
+function getStoredVersion(): AskAIVersion {
+  const stored = localStorage.getItem(ASK_AI_VERSION_STORAGE_KEY);
+  if (stored === 'v1' || stored === 'v2') return stored;
+  return 'v1';
+}
 
 export interface StreamState {
   streamId: string;
@@ -258,6 +266,7 @@ class XyneAIStreamManager {
             webSearchEnabled: record.webSearchEnabled,
             deepResearchEnabled: record.deepResearchEnabled ?? false,
             researchContext: null,
+            ...(record.version && { version: record.version }),
             ...(record.attachments.length > 0 && {
               attachments: record.attachments
                 .filter(
@@ -750,6 +759,8 @@ class XyneAIStreamManager {
   ): Promise<string> {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    request.version = getStoredVersion();
+
     // Handle any existing stream for this thread
     const existingStream = this.activeStreams.get(threadId);
     if (existingStream) {
@@ -796,6 +807,7 @@ class XyneAIStreamManager {
       request.deepResearchEnabled ?? false,
       request.attachments,
       initialMessages,
+      request.version,
     );
 
     // Start the actual streaming request
