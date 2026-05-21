@@ -9,7 +9,7 @@ import React, {
 import { useZeroWithFallback as useZero } from '../../../hooks/useZeroWithFallback';
 import { toast } from 'sonner';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
+
 import { InputBox } from '../../ui/InputBox';
 import {
   MessageType,
@@ -20,7 +20,6 @@ import {
   BaseTicketType,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
-import { queries } from '../../../zero/queries';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
 import { v4 as uuidv4 } from 'uuid';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
@@ -199,10 +198,6 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
     const [ticketDescription, setTicketDescription] = useState('');
     const [recentScheduledFor, setRecentScheduledFor] = useState<number | null>(null);
-    const [messagesData] = useCachedQuery(
-      queries.conversationMessagesV2({ conversationId: conversationId || '' }),
-      { enabled: !!conversationId },
-    );
     const channel = useChannel(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
     const upcomingScheduledInContext = useUpcomingDelayedMessage(channelId, conversationId ?? null);
@@ -351,16 +346,12 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
       if (isForwardedContent || initialContent) return initialContent;
-      if (messageId && messagesData) {
-        const message = messagesData.find(m => m.messageId === messageId);
-        return message?.content;
-      }
       // Load draft for this channel if not editing
       if (!messageId && !initialContent) {
         return draft;
       }
       return undefined;
-    }, [initialContent, messageId, messagesData, draft]);
+    }, [initialContent, messageId, draft]);
 
     const { displayName: channelName, avatarUserId } = useChannelDisplayName(
       channel,

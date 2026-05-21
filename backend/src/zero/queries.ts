@@ -187,6 +187,44 @@ export const queries = defineQueries({
   ),
 
 
+  // Enriched single query for thread panel — replaces getConversationById + ticketById +
+  // conversationMessagesV2 with one query and one IVM pipeline (4 queries → 1).
+  threadConversation: defineQuery(
+    z.object({
+      conversationId: z.string(),
+      channelId: z.string().optional(),
+      isMember: z.boolean().optional(),
+    }),
+    ({ ctx, args: { conversationId } }) => {
+      return zql.conversations
+        .where('conversationId', conversationId)
+        .related('ticket')
+        .related('call')
+        .related('participants', p =>
+          p.where('userId', ctx.userID).one(),
+        )
+        .related('messages', m =>
+          m.where(helpers =>
+            helpers.or(
+              helpers.cmp('visibleTo', 'IS', null),
+              helpers.cmp('visibleTo', '=', ctx.userID),
+            ),
+          )
+          .orderBy('createdAt', 'asc')
+          .related('attachments')
+          .related('nudgeCounts', nc =>
+            nc.where(helpers =>
+              helpers.or(
+                helpers.cmp('userId', '=', ctx.userID),
+                helpers.cmp('channelId', 'IS NOT', null),
+              ),
+            ),
+          ),
+        )
+        .one();
+    },
+  ),
+
   conversationParticipantByConversationId: defineQuery(
     z.object({ conversationId: z.string() }),
     ({ ctx, args: { conversationId } }) => {

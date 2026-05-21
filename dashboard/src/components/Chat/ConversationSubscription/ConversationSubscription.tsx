@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Bell, BellOff } from 'lucide-react';
 import { useQuery } from '../../../hooks/useQuery';
 import { useZero } from '../../../hooks/useZero';
@@ -7,31 +7,52 @@ import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 
+interface ParticipantData {
+  id: string;
+  isSubscribed: boolean;
+  participationType?: string | null;
+}
+
 interface ConversationSubscriptionProps {
   conversationId: string;
   conversation?: ConversationWithTicket;
-  variant?: 'icon-only' | 'full' | 'dropdown';
+  /** When provided, skips the separate participant query (data comes from parent's combined query) */
+  participant?: ParticipantData | null;
+  variant?: 'icon-only' | 'full' | 'dropdown' | 'lazy-icon';
   className?: string;
   menuOpen?: boolean;
 }
 
 export const ConversationSubscription: React.FC<ConversationSubscriptionProps> = ({
   conversationId,
+  participant: participantProp,
   variant = 'icon-only',
   className = '',
   menuOpen,
 }) => {
   const zero = useZero();
+  const [activated, setActivated] = useState(false);
 
-  const shouldFetch = variant === 'dropdown' || variant === 'full' ? menuOpen === true : true;
+  // Query is only enabled when participant is NOT provided from parent
+  const shouldFetch = participantProp !== undefined
+    ? false
+    : variant === 'lazy-icon'
+      ? activated
+      : variant === 'dropdown' || variant === 'full'
+        ? menuOpen === true
+        : true;
 
-  const [participant, participantDetails] = useQuery(
+  const [queriedParticipant, participantDetails] = useQuery(
     queries.conversationParticipantByConversationId({ conversationId }),
     { enabled: shouldFetch },
   );
 
-  if (!shouldFetch) return null;
-  if (participantDetails.type !== 'complete') return null;
+  const participant = participantProp !== undefined ? participantProp : queriedParticipant;
+
+  if (participantProp === undefined && variant !== 'lazy-icon') {
+    if (!shouldFetch) return null;
+    if (participantDetails.type !== 'complete') return null;
+  }
 
   const isSubscribed = participant?.isSubscribed ?? false;
   const participationType = participant?.participationType;
@@ -66,10 +87,18 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
     }
   };
 
-  if (variant === 'icon-only') {
+  if (variant === 'icon-only' || variant === 'lazy-icon') {
+    const handleClick = () => {
+      if (variant === 'lazy-icon' && !activated) {
+        setActivated(true);
+        return; // First click activates the query; next click toggles
+      }
+      handleToggleSubscription();
+    };
+
     return (
       <button
-        onClick={handleToggleSubscription}
+        onClick={handleClick}
         className={`text-foreground ${className}`}
         title={
           isSubscribed

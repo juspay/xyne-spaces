@@ -54,10 +54,15 @@ const ReplyLayout: React.FC<{
   const hasDraft = draft || hasDraftAttachments;
   if ((!replies || replies.replyCount === 0) && (!hasDraft || isThreadOpen)) return null;
 
-  const participants =
-    replies.conversation?.participants?.filter(
-      p => p.participationType === ConversationParticipation.AUTHOR,
-    ) || [];
+  const rawParticipants = replies.conversation?.participants;
+  const participantsArray = Array.isArray(rawParticipants)
+    ? rawParticipants
+    : rawParticipants
+      ? [rawParticipants]
+      : [];
+  const participants = participantsArray.filter(
+    p => p.participationType === ConversationParticipation.AUTHOR,
+  );
 
   return (
     <div
