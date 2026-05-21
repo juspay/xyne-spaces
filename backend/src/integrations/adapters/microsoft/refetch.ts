@@ -11,15 +11,18 @@ import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { BaseRefetch, RefetchOptions, RefetchResult } from '../../core/baseRefetch';
 import { MicrosoftTransformer } from './transformer';
 import { preDownloadGraphAttachments } from './attachments';
+import { graphFetchWithRetry } from './graphFetch';
 import { GraphMailMessage } from './types';
 import { emailService } from '@/services/emailService';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
 
 const TAG = '[MicrosoftRefetch]';
 const RANGE_MAX_MESSAGES = 2000;
 const transformer = new MicrosoftTransformer();
 const preferenceRepo = new EmailChannelPreferenceRepository();
+const externalMessageRepo = new ExternalMessageRepository();
 
 const GRAPH_MESSAGE_FIELDS = [
   'id', 'subject', 'body', 'bodyPreview', 'from',
@@ -28,7 +31,12 @@ const GRAPH_MESSAGE_FIELDS = [
   'hasAttachments', 'parentFolderId',
 ].join(',');
 
-type GraphMessageStub = { id: string; receivedDateTime: string; conversationId?: string };
+type GraphMessageStub = {
+  id: string;
+  receivedDateTime: string;
+  conversationId?: string;
+  internetMessageId?: string;
+};
 
 export class MicrosoftRefetch extends BaseRefetch {
   async refetch(source: ExternalSource, options?: RefetchOptions): Promise<RefetchResult> {
@@ -68,6 +76,27 @@ export class MicrosoftRefetch extends BaseRefetch {
       else groupedByThread.set(threadId, [m]);
     }
 
+    const stubLookupId = (s: GraphMessageStub): string => s.internetMessageId ?? s.id;
+    const allLookupIds = Array.from(groupedByThread.values()).flatMap(stubs =>
+      stubs.map(stubLookupId),
+    );
+    if (allLookupIds.length > 0) {
+      const existing = await externalMessageRepo.findByExternalIds(source.id, allLookupIds);
+      if (existing.length > 0) {
+        const existingSet = new Set(existing.map(e => e.externalId));
+        let skippedBeforeFetch = 0;
+        for (const [threadId, stubs] of Array.from(groupedByThread.entries())) {
+          const remaining = stubs.filter(s => !existingSet.has(stubLookupId(s)));
+          skippedBeforeFetch += stubs.length - remaining.length;
+          if (remaining.length === 0) groupedByThread.delete(threadId);
+          else if (remaining.length !== stubs.length) groupedByThread.set(threadId, remaining);
+        }
+        logger.info(
+          `${TAG} pre-dedup: skipped ${skippedBeforeFetch} already-ingested messages; ${groupedByThread.size} threads remain`,
+        );
+      }
+    }
+
     // Step 3: process threads in parallel up to batchSize. Each thread's
     // messages flow into a single ingestEmailThread call.
     let processed = 0;
@@ -85,35 +114,34 @@ export class MicrosoftRefetch extends BaseRefetch {
           .sort((a, b) => a.receivedDateTime.localeCompare(b.receivedDateTime))
           .map(s => s.id);
 
-        const fetched = await Promise.all(
-          sortedIds.map(async id => {
-            const msgResponse = await fetch(
-              `${config.microsoftGraph.baseUrl}/me/messages/${id}?$select=${GRAPH_MESSAGE_FIELDS}`,
-              { headers: { Authorization: `Bearer ${accessToken}` } },
-            );
-            if (!msgResponse.ok) throw new Error(`fetch message ${id}: ${msgResponse.status}`);
-            const email = (await msgResponse.json()) as GraphMailMessage;
+        const fetched = [];
+        for (const id of sortedIds) {
+          const msgResponse = await graphFetchWithRetry(
+            `${config.microsoftGraph.baseUrl}/me/messages/${id}?$select=${GRAPH_MESSAGE_FIELDS}`,
+            { headers: { Authorization: `Bearer ${accessToken}` } },
+          );
+          if (!msgResponse.ok) throw new Error(`fetch message ${id}: ${msgResponse.status}`);
+          const email = (await msgResponse.json()) as GraphMailMessage;
 
-            const preDownloadedAttachments = email.hasAttachments
-              ? await preDownloadGraphAttachments({
-                  accessToken,
-                  graphMessageId: id,
-                  sourceName: source.name,
-                })
-              : [];
+          const preDownloadedAttachments = email.hasAttachments
+            ? await preDownloadGraphAttachments({
+                accessToken,
+                graphMessageId: id,
+                sourceName: source.name,
+              })
+            : [];
 
-            const parsed = await transformer.transform({
-              emails: [email],
-              ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
-            });
-            if (!parsed.success || !parsed.data) throw new Error(parsed.error);
-            return {
-              data: parsed.data,
-              uploadedFiles:
-                AttachmentConversionService.convertDownloadedToUploaded(preDownloadedAttachments),
-            };
-          }),
-        );
+          const parsed = await transformer.transform({
+            emails: [email],
+            ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
+          });
+          if (!parsed.success || !parsed.data) throw new Error(parsed.error);
+          fetched.push({
+            data: parsed.data,
+            uploadedFiles:
+              AttachmentConversionService.convertDownloadedToUploaded(preDownloadedAttachments),
+          });
+        }
 
         const validParsed = fetched.filter(
           d => !!d.data.emailData?.from && !!d.data.emailData?.to,
@@ -173,7 +201,7 @@ export class MicrosoftRefetch extends BaseRefetch {
     const initialUrl = new URL(`${config.microsoftGraph.baseUrl}/me/messages`);
     initialUrl.searchParams.set('$filter', filter);
     initialUrl.searchParams.set('$orderby', 'receivedDateTime asc');
-    initialUrl.searchParams.set('$select', 'id,receivedDateTime,conversationId');
+    initialUrl.searchParams.set('$select', 'id,receivedDateTime,conversationId,internetMessageId');
     initialUrl.searchParams.set('$top', '100');
 
     const collected: GraphMessageStub[] = [];
