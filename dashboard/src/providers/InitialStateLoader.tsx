@@ -1,5 +1,4 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import { useSelector } from '@xstate/react';
 import { useConnectionState } from '@rocicorp/zero/react';
 import { useZero } from '../hooks/useZero';
 import { useQuery as useTanStackQuery } from '@tanstack/react-query';
@@ -10,10 +9,11 @@ import { stateMachineActor, User } from '../machines/stateMachine';
 import {
   setupQueryCachePersistence,
   hydrateQueryCacheFromIndexedDB,
+  queryCacheActor,
 } from '../machines/queryCacheMachine';
 import { UserPermission } from '../machines/stateMachine';
 import { apiInstance } from '../services/clients/apiClient';
-import { useDeltaSubscription } from '../hooks/useDeltaSubscription';
+import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
 import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
 import { initializeMetrics, cleanupMetrics } from '../services/metricsService';
@@ -29,7 +29,6 @@ import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
-import { Channel } from '@xyne/shared/index';
 import { SharedAuthProvider } from '@xyne/shared/hooks';
 
 interface InitialStateLoaderProps {
@@ -79,18 +78,6 @@ const areQueriesCompleted = (obj: QueryDetails[]): boolean => {
 
 // Show modal after 60 seconds of disconnected/error state
 const MODAL_DELAY_MS = 60000;
-
-const computeUsersWatermark = (users: User[]): number =>
-  users.reduce((max, u) => {
-    const userWm = u.updatedAt ?? 0;
-    return userWm > max ? userWm : max;
-  }, 0);
-
-const computeChannelsWatermark = (channels: Channel[]): number =>
-  channels.reduce((max, c) => {
-    const wm = c.updatedAt ?? 0;
-    return wm > max ? wm : max;
-  }, 0);
 
 const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): ReactNode => {
   const isRefreshing = useRef(false);
@@ -254,6 +241,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
           error,
         });
       } finally {
+        queryCacheActor.send({ type: 'SET_HYDRATED' });
         setIsHydrated(true);
       }
     };
@@ -373,60 +361,20 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     };
   }, [state.name]);
 
-  // Read from state machine — watermarks and loaded state
-  const { usersUpdatedAt, allChannelsUpdatedAt } = useSelector(
-    stateMachineActor,
-    state => state.context.watermark,
-  );
+  // Users: fallback-hydrated query (REST initial + Zero delta)
+  const [users, usersDetails] = useFallbackHydratedQuery(queries.getUsersV2());
 
-  const setLoggerEmail = (users: User[]): void => {
+  // Channels: fallback-hydrated query (REST initial + Zero delta)
+  const [allChannels, allChannelsDetails] = useFallbackHydratedQuery(queries.userAllChannels());
+
+  const setLoggerEmail = (usersList: User[]): void => {
     if (context.userID) {
-      const currentUser = users.find(u => u.id === context.userID);
+      const currentUser = usersList.find(u => u.id === context.userID);
       if (currentUser?.email) {
         logger.setEmailId(currentUser.email);
       }
     }
   };
-
-  // Users: initial bulk fetch + live delta subscription via generic hook
-  const { isInitialFetchDone: usersLoaded } = useDeltaSubscription({
-    query: queries.getUsersV2(),
-    watermark: usersUpdatedAt,
-    computeWatermark: computeUsersWatermark,
-    isLoaded: usersUpdatedAt > 0,
-    isHydrated,
-    onInitialLoad: (users, wm) => {
-      stateMachineActor.send({ type: 'ADD_USERS', users, usersUpdatedAt: wm });
-      setLoggerEmail(users);
-    },
-    onDeltaMerge: (users, wm) => {
-      stateMachineActor.send({ type: 'MERGE_USERS', users, usersUpdatedAt: wm });
-      setLoggerEmail(users);
-    },
-  });
-
-  // Channels: initial bulk fetch + live delta subscription via generic hook
-  const { isInitialFetchDone: channelsLoaded } = useDeltaSubscription({
-    query: queries.userAllChannels(),
-    watermark: allChannelsUpdatedAt,
-    computeWatermark: computeChannelsWatermark,
-    isLoaded: allChannelsUpdatedAt > 0,
-    isHydrated,
-    onInitialLoad: (channels, wm) => {
-      stateMachineActor.send({
-        type: 'ADD_ALL_CHANNELS',
-        channels,
-        allChannelsUpdatedAt: wm,
-      });
-    },
-    onDeltaMerge: (channels, wm) => {
-      stateMachineActor.send({
-        type: 'MERGE_ALL_CHANNELS',
-        channels,
-        allChannelsUpdatedAt: wm,
-      });
-    },
-  });
 
   const [bookmarks, bookmarksDetails] = useCachedQuery(queries.userBookmarks(), {
     ttl: '10m',
@@ -463,6 +411,15 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   }, [context.userID]);
 
   useEffect(() => {
+    if (usersDetails.type === 'complete' && users) {
+      stateMachineActor.send({ type: 'ADD_USERS', users });
+      setLoggerEmail(users as User[]);
+    }
+
+    if (allChannelsDetails.type === 'complete' && allChannels) {
+      stateMachineActor.send({ type: 'ADD_ALL_CHANNELS', channels: allChannels });
+    }
+
     if (isQueryCompleted(visibleChannelsDetails)) {
       const channels = (visibleChannels || [])
         .map(s => s.channel)
@@ -503,6 +460,11 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    users,
+    usersDetails.type,
+    context.userID,
+    allChannels,
+    allChannelsDetails.type,
     visibleChannels,
     visibleChannelsDetails.type,
     permissionsQuery.data,
@@ -517,9 +479,12 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   ]);
 
   const areAllQueriesCompleted =
-    usersLoaded &&
-    channelsLoaded &&
-    areQueriesCompleted([bookmarksDetails, visibleChannelsDetails]) &&
+    areQueriesCompleted([
+      usersDetails,
+      allChannelsDetails,
+      bookmarksDetails,
+      visibleChannelsDetails,
+    ]) &&
     permissionsQuery.isSuccess &&
     permissionsQuery.data?.success === true &&
     permissionsHydrated;

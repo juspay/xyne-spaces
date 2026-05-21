@@ -41,6 +41,7 @@ export interface CacheEntry<T> {
 export interface QueryCacheContext {
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
   cache: Map<string, CacheEntry<any>>;
+  isHydrated: boolean;
   channelConversations: {
     [channelId: string]: Conversation[];
   };
@@ -71,7 +72,8 @@ export type QueryCacheEvent =
   | { type: 'MERGE_CALL_HISTORY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
   | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState }
   | { type: 'MERGE_RECORDINGS_PAGE'; page: RecordingEntry[]; hasMore: boolean }
-  | { type: 'HYDRATE_RECORDINGS'; data: RecordingsState };
+  | { type: 'HYDRATE_RECORDINGS'; data: RecordingsState }
+  | { type: 'SET_HYDRATED' };
 
 export const FINGERPRINT_FIELD = '__conversationFingerprint__';
 
@@ -192,11 +194,13 @@ export const queryCacheMachine = setup({
         return event.data;
       },
     }),
+    setHydrated: assign({ isHydrated: true }),
   },
 }).createMachine({
   id: 'queryCache',
   context: {
     cache: new Map(),
+    isHydrated: false,
     channelConversations: {},
     callHistory: { calls: [], hasMore: true },
     recordings: { recordings: [], hasMore: true },
@@ -225,6 +229,9 @@ export const queryCacheMachine = setup({
     },
     HYDRATE_RECORDINGS: {
       actions: 'hydrateRecordings',
+    },
+    SET_HYDRATED: {
+      actions: 'setHydrated',
     },
   },
 });
