@@ -212,7 +212,7 @@ export const AppsTable = ({
       renderCell: (_value, app) => {
         const status = getStatus(app);
         const isInstalled = status === 'Installed';
-        const canCopy = canEditApp(app);
+        const canCopy = hasAdminAccess || app.createdBy === currentUserId;
 
         if (!isInstalled) {
           return <span className='text-muted-foreground text-xs'>Install app first</span>;

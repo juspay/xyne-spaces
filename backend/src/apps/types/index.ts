@@ -326,7 +326,10 @@ export interface UserResponse {
     picture: string | null;
     userType: string;
     status: string;
-    joined: Date; 
+    joined: Date;
+    statusEmoji: string | null;
+    statusContent: string | null;
+    statusExpiryAt: Date | null;
 }
 
 /**
