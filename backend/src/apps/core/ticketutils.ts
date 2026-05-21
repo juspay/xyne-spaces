@@ -32,6 +32,9 @@ const CreateTicketParamsSchema = z.object({
   assignedTo: z.string().trim().optional(),
   userGroupId: z.string().trim().optional(),
   text: z.string().trim().optional(),
+  stageName: z.string().trim().optional(),
+  eta: z.date().optional(),
+  ticketType: z.string().trim().optional(),
 });
 
 
@@ -104,6 +107,9 @@ export async function createTicketWithConversation(
       assignedTo,
       userGroupId,
       text,
+      stageName,
+      eta,
+      ticketType,
     } = paramsResult.data;
 
     const prisma = DatabaseClient.getInstance();
@@ -163,6 +169,9 @@ export async function createTicketWithConversation(
         boardId,
         priority: priority || TicketPriority.LOW,
         xyneId,
+        stageName,
+        eta,
+        ticketType,
       }, tx);
 
       pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch(error => {

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority } from '@prisma/client';
+import { TicketPriority, TicketStatusV2 } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -27,27 +27,48 @@ const CreateTicketBodySchema = z.object({
   priority: z.nativeEnum(TicketPriority).optional(),
   assignedToEmail: z.string().email('Invalid email format').trim().optional(),
   assignedUserGroupAlias: z.string().trim().optional(),
-  userId: z.string().min(1, 'User ID is required').trim(),
+  stageName: z.string().trim().optional(),
+  eta: z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }).optional(),
+  ticketType: z.string().trim().optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName,
   { message: 'Either channelId or channelName is required', path: ['channelId'] }
+).refine(
+  data => !data.eta || new Date(data.eta) > new Date(),
+  { message: 'ETA must be a future date', path: ['eta'] }
 );
 
 const UpdateTicketBodySchema = z.object({
   ticketId: z.string().min(1, 'Ticket ID is required').trim(),
-  userId: z.string().min(1, 'User ID is required').trim(),
   channelId: z.string().trim().optional(),
   channelName: z.string().trim().optional(),
   conversationId: z.string().trim().optional(),
   assigneeId: z.string().trim().optional(),
-  stage: z.string().trim().optional(),
+  assignedToEmail: z.string().email('Invalid email format').trim().optional(),
+  stageName: z.string().trim().optional(),
+  statusV2: z.nativeEnum(TicketStatusV2).optional(),
   groupId: z.string().trim().optional(),
+  title: z.string().min(1, 'Title cannot be empty').trim().optional(),
+  description: z.string().min(1, 'Description cannot be empty').trim().optional(),
+  priority: z.nativeEnum(TicketPriority).optional(),
+  eta: z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }).optional(),
+  ticketType: z.string().trim().optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
 ).refine(
-  data => !!data.assigneeId || !!data.stage || !!data.groupId,
-  { message: 'At least one of assigneeId, stage, or groupId is required', path: ['assigneeId'] }
+  data => !!(
+    data.assigneeId || data.assignedToEmail || data.stageName || data.groupId ||
+    data.title || data.description || data.priority || data.eta ||
+    data.ticketType || data.statusV2
+  ),
+  { message: 'At least one field to update is required', path: ['assigneeId'] }
+).refine(
+  data => !(data.assigneeId && data.assignedToEmail),
+  { message: 'Provide either assigneeId or assignedToEmail, not both', path: ['assigneeId'] }
+).refine(
+  data => !data.eta || new Date(data.eta) > new Date(),
+  { message: 'ETA must be a future date', path: ['eta'] }
 );
 
 export class TicketController {
@@ -95,8 +116,12 @@ export class TicketController {
         assignedToEmail,
         assignedUserGroupAlias,
         text,
-        userId,
+        stageName: requestedStageName,
+        eta: etaString,
+        ticketType,
       } = bodyResult.data;
+
+      const userId = req.user!.id;
 
       const board = await repositories.boards.findById(boardId);
       if (!board) {
@@ -112,6 +137,34 @@ export class TicketController {
           code: 'BOARD_PROJECT_MISMATCH',
         });
         return;
+      }
+
+      let resolvedStageName: string | undefined;
+      if (requestedStageName) {
+        const stage = await prismaClient.stage.findFirst({
+          where: { boardId, name: requestedStageName },
+          select: { name: true },
+        });
+        if (!stage) {
+          res.status(400).json({
+            error: `Stage "${requestedStageName}" does not exist on board ${boardId}`,
+            code: 'STAGE_NOT_FOUND',
+          });
+          return;
+        }
+        resolvedStageName = stage.name;
+      }
+
+      let etaDate: Date | undefined;
+      if (etaString) {
+        etaDate = new Date(etaString);
+        if (etaDate <= new Date()) {
+          res.status(400).json({
+            error: 'ETA must be a future date',
+            code: 'INVALID_ETA',
+          });
+          return;
+        }
       }
 
       // Resolve channelId from channelName if not provided
@@ -195,6 +248,9 @@ export class TicketController {
         assignedTo: resolvedAssignedTo,
         userGroupId,
         text,
+        stageName: resolvedStageName,
+        eta: etaDate,
+        ticketType,
       });
 
       // Check for duplicate tickets and persist references
@@ -290,29 +346,120 @@ export class TicketController {
         return;
       }
 
-      const { ticketId, userId, assigneeId, stage, groupId } = bodyResult.data;
+      const {
+        ticketId,
+        assigneeId,
+        assignedToEmail,
+        stageName,
+        groupId,
+        title,
+        description,
+        priority,
+        eta: etaString,
+        ticketType,
+        statusV2,
+      } = bodyResult.data;
+
+      const userId = req.user!.id;
 
       logger.info(`[TicketController] Updating ticket: ${ticketId}`, {
-        userId,
-        assigneeId,
-        stage,
-        groupId,
+        userId, assigneeId, assignedToEmail, stageName, groupId,
+        title: !!title, description: !!description, priority, eta: etaString, ticketType, statusV2,
       });
 
-      // Execute updates based on provided fields
-      if (assigneeId) {
-        await ticketService.updateTicketAssignee(ticketId, userId, assigneeId);
+      // Fetch the ticket to validate it exists and get board/project context
+      const ticket = await prismaClient.ticket.findUnique({
+        where: { id: ticketId },
+        select: { id: true, boardId: true, projectId: true, workspaceId: true, conversationId: true },
+      });
+      if (!ticket) {
+        res.status(404).json({
+          error: `Ticket with ID ${ticketId} not found`,
+          code: 'TICKET_NOT_FOUND',
+        });
+        return;
+      }
+
+      // --- Validate stageName exists on the ticket's board ---
+      if (stageName) {
+        const stage = await prismaClient.stage.findFirst({
+          where: { boardId: ticket.boardId, name: stageName },
+          select: { name: true, defaultTicketStatusV2: true },
+        });
+        if (!stage) {
+          res.status(400).json({
+            error: `Stage "${stageName}" does not exist on board ${ticket.boardId}`,
+            code: 'STAGE_NOT_FOUND',
+          });
+          return;
+        }
+      }
+
+      // --- Validate ETA is in the future ---
+      let etaDate: Date | undefined;
+      if (etaString) {
+        etaDate = new Date(etaString);
+        if (etaDate <= new Date()) {
+          res.status(400).json({
+            error: 'ETA must be a future date',
+            code: 'INVALID_ETA',
+          });
+          return;
+        }
+      }
+
+      // --- Resolve assignedToEmail to a userId ---
+      let resolvedAssigneeId: string | undefined = assigneeId;
+      if (assignedToEmail) {
+        const user = await repositories.users.findByEmail(assignedToEmail, req.user!.workspaceId!);
+        if (!user) {
+          res.status(404).json({
+            error: `User with email ${assignedToEmail} not found`,
+            code: 'USER_NOT_FOUND',
+          });
+          return;
+        }
+        resolvedAssigneeId = user.id;
+      }
+
+      // --- Execute updates ---
+
+      // Assignee
+      if (resolvedAssigneeId) {
+        await ticketService.updateTicketAssignee(ticketId, userId, resolvedAssigneeId);
         logger.info(`[TicketController] Ticket assignee updated: ${ticketId}`);
       }
 
-      if (stage) {
-        await ticketService.updateTicketStageForWorkflow(ticketId, userId, stage);
+      // Stage (updateTicketStageForWorkflow also updates statusV2 via defaultTicketStatusV2)
+      if (stageName) {
+        await ticketService.updateTicketStageForWorkflow(ticketId, userId, stageName);
         logger.info(`[TicketController] Ticket stage updated: ${ticketId}`);
       }
 
+      // User group
       if (groupId) {
         await ticketService.asignUserGroupToTicket(ticketId, userId, groupId);
         logger.info(`[TicketController] User group assigned: ${ticketId}`);
+      }
+
+      // Direct field updates: title, description, priority, eta, ticketType, statusV2
+      const directUpdates: Record<string, unknown> = {};
+      if (title !== undefined) directUpdates.title = title;
+      if (description !== undefined) directUpdates.description = description;
+      if (priority !== undefined) directUpdates.priority = priority;
+      if (etaDate !== undefined) directUpdates.eta = etaDate;
+      if (ticketType !== undefined) directUpdates.ticketType = ticketType;
+      if (statusV2 !== undefined) directUpdates.statusV2 = statusV2;
+
+      if (Object.keys(directUpdates).length > 0) {
+        directUpdates.updatedBy = userId;
+        directUpdates.updatedAt = new Date();
+        const updatedTicket = await prismaClient.ticket.update({
+          where: { id: ticketId },
+          data: directUpdates as Parameters<typeof prismaClient.ticket.update>[0]['data'],
+        });
+        await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+        logger.info(`[TicketController] Ticket direct fields updated: ${ticketId}`, { fields: Object.keys(directUpdates) });
       }
 
       res.status(200).json({ success: true });

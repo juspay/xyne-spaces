@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { AccessType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { CreateAppInput } from '@/database/repositories/appsRepository';
 import { logger } from '@/utils/logger';
@@ -20,6 +21,13 @@ const ConfigureWebhookBodySchema = z.object({
 });
 
 export class AppController {
+
+  private async isAclAdmin(userId: string): Promise<boolean> {
+    const resource = await repositories.resources.findByName('XYNE-APPS');
+    if (!resource) return false;
+    return await repositories.resourceAccess.hasAccess(userId, resource.id, AccessType.ADMIN);
+  }
+
   /**
    * Create a new app
    * POST /api/apps
@@ -214,6 +222,36 @@ export class AppController {
       }
 
       const { appId } = paramsResult.data;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({
+          error: 'Authentication required',
+          code: 'UNAUTHORIZED'
+        });
+        return;
+      }
+
+      const [app, isAdmin] = await Promise.all([
+        repositories.apps.findById(appId),
+        this.isAclAdmin(userId)
+      ]);
+
+      if (!app) {
+        res.status(404).json({
+          error: 'App not found',
+          code: 'NOT_FOUND'
+        });
+        return;
+      }
+
+      if (!isAdmin && app.createdBy !== userId) {
+        res.status(403).json({
+          error: 'Unauthorized: Only admin or app creator can regenerate JWT',
+          code: 'FORBIDDEN'
+        });
+        return;
+      }
 
       const result = await regenerateJwt(appId);
 
@@ -253,7 +291,6 @@ export class AppController {
 
       const { appId } = paramsResult.data;
       const userId = req.user?.id;
-      const isAdmin = req.user?.role === 'admin';
 
       if (!userId) {
         res.status(401).json({
@@ -263,6 +300,7 @@ export class AppController {
         return;
       }
 
+      const isAdmin = await this.isAclAdmin(userId);
       const result = await getSigningSecret(appId, userId, isAdmin);
 
       res.status(200).json(result);

@@ -24,6 +24,9 @@ export async function getUserData(userId: string): Promise<UserResponse> {
       userType: user.userType,
       status: user.status,
       joined: user.createdAt,
+      statusEmoji: user.statusEmoji ?? null,
+      statusContent: user.statusContent ?? null,
+      statusExpiryAt: user.statusExpiryAt ?? null,
     };
   } catch (error) {
     logger.error('[USER-UTILS] Error fetching user data:', error);
