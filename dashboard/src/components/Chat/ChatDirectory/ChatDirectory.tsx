@@ -287,7 +287,7 @@ const ChatDirectory = ({
           className={cn(
             'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
             activityCount > 0
-              ? 'text-sidebar-primary-foreground'
+              ? 'text-sidebar-unread-foreground'
               : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
           )}
           onClick={() => {
@@ -370,7 +370,7 @@ const ChatDirectory = ({
           className={cn(
             'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
             dmCount > 0
-              ? 'text-sidebar-primary-foreground'
+              ? 'text-sidebar-unread-foreground'
               : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
           )}
           onClick={() => {
@@ -431,7 +431,7 @@ const ChatDirectory = ({
           className={cn(
             'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
             threadCount > 0
-              ? 'text-sidebar-primary-foreground'
+              ? 'text-sidebar-unread-foreground'
               : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
           )}
           onClick={() => {
@@ -460,7 +460,7 @@ const ChatDirectory = ({
           className={cn(
             'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
             recapUnreadCount > 0
-              ? 'text-sidebar-primary-foreground'
+              ? 'text-sidebar-unread-foreground'
               : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
           )}
           onMouseEnter={() => {

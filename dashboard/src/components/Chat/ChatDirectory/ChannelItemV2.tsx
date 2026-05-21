@@ -181,7 +181,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
             isActive
               ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
               : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
-            shouldShowBold && '!font-semibold text-sidebar-primary-foreground',
+            shouldShowBold && '!font-semibold text-sidebar-unread-foreground',
           )}
           style={shouldShowBold ? { fontWeight: '700' } : undefined}
         >
