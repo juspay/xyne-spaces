@@ -136,9 +136,17 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
     return null;
   }
 
+  const orderedAttachments = [...attachments].sort(
+    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+  );
+
   // Separate attachments by deleted status first
-  const activeAttachments = attachments.filter(a => !(a as { isDeleted?: boolean }).isDeleted);
-  const deletedAttachments = attachments.filter(a => (a as { isDeleted?: boolean }).isDeleted);
+  const activeAttachments = orderedAttachments.filter(
+    a => !(a as { isDeleted?: boolean }).isDeleted,
+  );
+  const deletedAttachments = orderedAttachments.filter(
+    a => (a as { isDeleted?: boolean }).isDeleted,
+  );
 
   // Separate active attachments by type
   const videoAttachments = activeAttachments.filter(a => a.mimetype.startsWith('video/'));
@@ -156,8 +164,8 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   const useFilePillForAllFiles = nonPreviewableFiles.length > 0;
 
   const handleFileClick = (attachment: AttachmentType) => {
-    // Build attachment refs for the viewer
-    const allRefs: AttachmentRef[] = attachments.map(att => ({
+    // Build attachment refs for the viewer (same order as rendered)
+    const allRefs: AttachmentRef[] = orderedAttachments.map(att => ({
       attachmentId: att.id,
       fileName: att.originalFilename,
       fileUrl: `/attachments/${att.id}/download`,
@@ -237,7 +245,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
               <MessageAttachment
                 attachment={attachment}
-                allAttachments={attachments}
+                allAttachments={orderedAttachments}
                 {...(conversationId && { conversationId })}
                 {...(channelId && { channelId })}
                 {...(replyCount !== undefined && { replyCount })}
@@ -259,7 +267,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                 >
                   <MessageAttachment
                     attachment={attachment}
-                    allAttachments={attachments}
+                    allAttachments={orderedAttachments}
                     isInMultiImageGroup={imageAttachments.length > 1}
                     {...(conversationId && { conversationId })}
                     {...(channelId && { channelId })}
@@ -283,7 +291,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                 >
                   <MessageAttachment
                     attachment={attachment}
-                    allAttachments={attachments}
+                    allAttachments={orderedAttachments}
                     {...(conversationId && { conversationId })}
                     {...(channelId && { channelId })}
                     {...(replyCount !== undefined && { replyCount })}

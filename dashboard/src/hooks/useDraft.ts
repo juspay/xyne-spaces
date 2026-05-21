@@ -389,9 +389,12 @@ export function useDraftAttachments() {
 
       // Build a map of attachmentId -> File | UploadedFile
       const result = new Map<string, File | UploadedFile>();
+      const orderedAttachments = [...draftMessage.attachments].sort(
+        (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+      );
 
       // Process all attachments in parallel
-      draftMessage.attachments.forEach(attachment => {
+      orderedAttachments.forEach(attachment => {
         // Check if we have the full File object (newly uploaded files)
         const cachedFile = filesMapRef[attachment.id];
 
