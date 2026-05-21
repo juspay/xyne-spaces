@@ -58,6 +58,10 @@ const MAX_HTML_LENGTH = 100000;
 
 const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
 
+const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
+const CODE_BLOCK_PREVIEW_LINES = 10;
+const CODE_BLOCK_PREVIEW_MAX_HEIGHT = CODE_BLOCK_PREVIEW_LINES * 24 + 32;
+
 const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
   switch (kind) {
     case 'ticket':
@@ -487,6 +491,45 @@ function CollapsibleConversationHistory({
         }}
       >
         {children}
+      </div>
+    </div>
+  );
+}
+
+function CollapsibleCodeBlock({
+  children,
+  keyPrefix,
+  lineCount,
+}: {
+  children: React.ReactNode;
+  keyPrefix: string;
+  lineCount: number;
+}): JSX.Element {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const toggleExpanded = (): void => {
+    setIsExpanded(prev => !prev);
+  };
+
+  return (
+    <div className='collapsible-code-block relative' key={`${keyPrefix}-collapsible-code`}>
+      <div
+        className='relative overflow-hidden'
+        style={{
+          maxHeight: isExpanded ? 'none' : `${CODE_BLOCK_PREVIEW_MAX_HEIGHT}px`,
+        }}
+      >
+        {children}
+        <button
+          type='button'
+          onClick={toggleExpanded}
+          className='absolute bottom-4 right-3 z-10 rounded-md border border-muted-foreground/30 bg-background px-2 py-1 text-xs font-medium text-primary shadow-sm hover:bg-muted hover:text-primary/80 cursor-pointer'
+          data-track-category='MESSAGE'
+          data-track-name='TOGGLE_CODE_BLOCK'
+          data-track-metadata={JSON.stringify({ isExpanded, lineCount })}
+        >
+          {isExpanded ? 'Collapse' : `Expand (${lineCount} lines)`}
+        </button>
       </div>
     </div>
   );
@@ -1170,6 +1213,22 @@ const parseNode = (
       return tableResult.wrapper;
     }
     props = tableResult.props;
+  }
+
+  if (tag === 'pre') {
+    const codeText = el.textContent ?? '';
+    const lineCount = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
+    if (lineCount > CODE_BLOCK_COLLAPSE_THRESHOLD) {
+      return (
+        <CollapsibleCodeBlock
+          key={`${keyPrefix}-collapsible-pre-${idx}`}
+          keyPrefix={`${keyPrefix}-${idx}`}
+          lineCount={lineCount}
+        >
+          {React.createElement(tag, props, ...children)}
+        </CollapsibleCodeBlock>
+      );
+    }
   }
 
   return React.createElement(tag, props, ...children);
