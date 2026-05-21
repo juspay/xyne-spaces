@@ -9,12 +9,10 @@ import Input from '../../components/ui/Input/Input';
 import { UserGroupListItem } from '../../components/UserGroup/UserGroupListItem/UserGroupListItem';
 import { UserGroupForm } from '../../components/UserGroup/UserGroupForm/UserGroupForm';
 import { apiInstance } from '../../services/clients/apiClient';
-import { queries } from '../../zero/queries';
 import type { UserGroup as ZeroUserGroup } from '@xyne/shared';
 import { UserResponsibility } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { useUserGroups } from '../../hooks/useUserGroup';
+import { useUserGroups, useUserGroupMappings } from '../../hooks/useUserGroup';
 import { usePlatform } from '../../hooks/usePlatform';
 
 const UserGroupsScreen = (): ReactElement => {
@@ -27,7 +25,7 @@ const UserGroupsScreen = (): ReactElement => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const userGroups = useUserGroups();
   // Fetch current user's group memberships to find which groups they manage
-  const [userMemberships] = useCachedQuery(queries.getUserGroupMappingsByUserId());
+  const userMemberships = useUserGroupMappings();
 
   const loading = userGroups === undefined;
 

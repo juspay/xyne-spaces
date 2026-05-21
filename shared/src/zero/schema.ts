@@ -1696,7 +1696,9 @@ export const canvasParticipantTable = table('canvas_participants')
   .columns({
     id: string(),
     canvasId: string(),
-    userId: string(),
+    userId: string().optional(),
+    userGroupId: string().optional(),
+    channelId: string().optional(),
     role: enumeration<CanvasRole>(),
     joinedAt: number(),
     updatedAt: number(),
@@ -3470,7 +3472,17 @@ export const canvasParticipantTableRelationships = relationships(canvasParticipa
     sourceField: ['userId'],
     destField: ['id'],
     destSchema: userTable,
-  })
+  }),
+  userGroup: one({
+    sourceField: ['userGroupId'],
+    destField: ['id'],
+    destSchema: userGroupTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({

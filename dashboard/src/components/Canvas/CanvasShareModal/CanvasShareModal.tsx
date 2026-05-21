@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { CanvasVisibility, CanvasRole } from '@xyne/shared';
-import type { Canvas } from '../Canvas.types';
+import type { Canvas, CanvasParticipant } from '../Canvas.types';
 import type { User } from '@xyne/shared';
 import { Globe, Crown, Shield, Eye, X, CornerDownRight } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
@@ -20,12 +20,14 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useUserGroups } from '@/hooks/useUserGroup';
 
 export interface CanvasShareModalProps {
   canvas: Canvas;
   isOwner: boolean;
   isEditor: boolean;
   channelId?: string;
+  participants?: CanvasParticipant[] | undefined;
 }
 
 export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
@@ -33,6 +35,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   isOwner,
   isEditor,
   channelId,
+  participants: preloadedParticipants,
 }) => {
   const { user: currentUser } = useAuth();
   const z = useZero();
@@ -44,10 +47,20 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   const [confirmationModal, setConfirmationModal] = useState<{
     isOpen: boolean;
     userId: string | null;
-  }>({ isOpen: false, userId: null });
+    userGroupId: string | null;
+  }>({ isOpen: false, userId: null, userGroupId: null });
 
-  const [participants] = useCachedQuery(queries.canvasParticipants({ canvasId: canvas.id }));
-  const participantUserIds = participants ? participants.map(p => p.userId) : [];
+  const [queriedParticipants] = useCachedQuery(
+    queries.canvasParticipants({ canvasId: canvas.id }),
+    {
+      enabled: !preloadedParticipants,
+    },
+  );
+  const participants = preloadedParticipants ?? queriedParticipants;
+  const participantUserIds = participants
+    ? participants.map(p => p.userId).filter((userId): userId is string => Boolean(userId))
+    : [];
+  const allUserGroups = useUserGroups();
   const allUsers = useUsers();
   const usersById = useMemo(() => {
     const map = new Map<string, User>();
@@ -56,6 +69,13 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
     }
     return map;
   }, [allUsers]);
+  const groupsById = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const group of allUserGroups) {
+      map.set(group.id, { id: group.id, name: group.name });
+    }
+    return map;
+  }, [allUserGroups]);
 
   const handleVisibilityToggle = (): void => {
     if (!isOwner || !z) return;
@@ -131,23 +151,36 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
     }
   };
 
-  const handleRemoveParticipant = (userId: string): void => {
+  const handleRemoveParticipant = (userId?: string, userGroupId?: string): void => {
     if (!z) return;
-    setConfirmationModal({ isOpen: true, userId });
+    setConfirmationModal({
+      isOpen: true,
+      userId: userId ?? null,
+      userGroupId: userGroupId ?? null,
+    });
   };
 
   const confirmRemoveParticipant = (): void => {
-    if (!z || !confirmationModal.userId) return;
+    if (!z) return;
 
     try {
-      z.mutate(
-        mutators.canvas.removeParticipant({
-          canvasId: canvas.id,
-          userId: confirmationModal.userId,
-        }),
-      );
+      if (confirmationModal.userId) {
+        z.mutate(
+          mutators.canvas.removeParticipant({
+            canvasId: canvas.id,
+            userId: confirmationModal.userId,
+          }),
+        );
+      } else if (confirmationModal.userGroupId) {
+        z.mutate(
+          mutators.canvas.removeGroupParticipant({
+            canvasId: canvas.id,
+            userGroupId: confirmationModal.userGroupId,
+          }),
+        );
+      }
       toast.success('Participant Removed', {
-        description: 'User has been removed from the canvas',
+        description: 'Participant has been removed from the canvas',
         duration: 2000,
       });
     } catch {
@@ -156,22 +189,36 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         duration: 2000,
       });
     } finally {
-      setConfirmationModal({ isOpen: false, userId: null });
+      setConfirmationModal({ isOpen: false, userId: null, userGroupId: null });
     }
   };
 
-  const handleUpdateRole = (userId: string, newRole: CanvasRole): void => {
+  const handleUpdateRole = (
+    newRole: CanvasRole,
+    participant: Pick<CanvasParticipant, 'userId' | 'userGroupId' | 'channelId'>,
+  ): void => {
     if (!z) return;
 
     try {
-      z.mutate(
-        mutators.canvas.updateParticipantRole({
-          canvasId: canvas.id,
-          userId,
-          role: newRole,
-          timestamp: Date.now(),
-        }),
-      );
+      if (participant.userId) {
+        z.mutate(
+          mutators.canvas.updateParticipantRole({
+            canvasId: canvas.id,
+            userId: participant.userId,
+            role: newRole,
+            timestamp: Date.now(),
+          }),
+        );
+      } else if (participant.userGroupId) {
+        z.mutate(
+          mutators.canvas.updateGroupParticipantRole({
+            canvasId: canvas.id,
+            userGroupId: participant.userGroupId,
+            role: newRole,
+            timestamp: Date.now(),
+          }),
+        );
+      }
       toast.success('Role Updated', {
         description: 'Participant role has been updated successfully',
         duration: 2000,
@@ -372,20 +419,34 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         <div className='max-h-60 overflow-y-auto space-y-1'>
           {participants?.map(participant => (
             <div
-              key={participant.userId}
+              key={participant.id}
               className='flex items-center justify-between py-2 px-2 hover:bg-accent rounded-lg'
             >
               <div className='flex items-center gap-3 flex-1 min-w-0'>
-                <Avatar userId={participant.userId} size='md' />
+                {participant.userId ? (
+                  <Avatar userId={participant.userId} size='md' />
+                ) : (
+                  <div className='w-8 h-8 rounded-full bg-muted' />
+                )}
                 <div className='flex-1 min-w-0'>
                   <p className='text-sm font-medium text-foreground truncate'>
-                    {usersById.get(participant.userId)?.name || 'Unknown User'}
+                    {participant.userId
+                      ? usersById.get(participant.userId)?.name || 'Unknown User'
+                      : groupsById.get(participant.userGroupId || '')?.name ||
+                        participant.userGroupId ||
+                        'Unknown Group'}
                     {participant.userId === currentUser?.id && (
                       <span className='ml-2 text-xs text-muted-foreground'>(You)</span>
                     )}
                   </p>
                   <p className='text-xs text-muted-foreground truncate'>
-                    {usersById.get(participant.userId)?.email || ''}
+                    {participant.userId
+                      ? usersById.get(participant.userId)?.email || ''
+                      : participant.userGroupId
+                        ? 'User group'
+                        : participant.channelId
+                          ? 'Channel'
+                          : ''}
                   </p>
                 </div>
               </div>
@@ -397,9 +458,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 participant.userId !== canvas.createdBy ? (
                   <Select.Root
                     value={participant.role}
-                    onValueChange={value =>
-                      void handleUpdateRole(participant.userId, value as CanvasRole)
-                    }
+                    onValueChange={value => void handleUpdateRole(value as CanvasRole, participant)}
                   >
                     <Select.Trigger className='w-[100px] h-8 text-xs flex items-center justify-between px-2 border border-border rounded bg-background'>
                       <Select.Value />
@@ -445,7 +504,12 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                   participant.userId !== currentUser?.id &&
                   participant.userId !== canvas.createdBy && (
                     <button
-                      onClick={() => void handleRemoveParticipant(participant.userId)}
+                      onClick={() =>
+                        void handleRemoveParticipant(
+                          participant.userId ?? undefined,
+                          participant.userGroupId ?? undefined,
+                        )
+                      }
                       className='p-1 hover:bg-red-100 rounded text-red-600'
                       title='Remove participant'
                       data-track-category='CANVAS'
@@ -453,6 +517,8 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                       data-track-metadata={JSON.stringify({
                         canvasId: canvas.id,
                         userId: participant.userId,
+                        userGroupId: participant.userGroupId,
+                        channelId: participant.channelId,
                         role: participant.role,
                       })}
                     >
@@ -469,7 +535,9 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
       {confirmationModal.isOpen && (
         <Dialog
           open={confirmationModal.isOpen}
-          onOpenChange={open => !open && setConfirmationModal({ isOpen: false, userId: null })}
+          onOpenChange={open =>
+            !open && setConfirmationModal({ isOpen: false, userId: null, userGroupId: null })
+          }
           title='Remove Participant'
         >
           <div className='p-6'>
@@ -479,7 +547,9 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             <div className='flex justify-end gap-3'>
               <Button
                 variant='secondary'
-                onClick={() => setConfirmationModal({ isOpen: false, userId: null })}
+                onClick={() =>
+                  setConfirmationModal({ isOpen: false, userId: null, userGroupId: null })
+                }
                 data-track-category='CANVAS'
                 data-track-name='Cancel_Remove_Participant'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
@@ -494,6 +564,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 data-track-metadata={JSON.stringify({
                   canvasId: canvas.id,
                   userId: confirmationModal.userId,
+                  userGroupId: confirmationModal.userGroupId,
                 })}
               >
                 Remove

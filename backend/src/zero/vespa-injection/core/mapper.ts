@@ -670,7 +670,9 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
   const canvasParticipants = await db.canvasParticipant.findMany({
     where: { canvasId: args.id }
   });
-  const permissions = canvasParticipants.map(p => p.userId);
+  const permissions = canvasParticipants
+    .map(p => p.userId)
+    .filter((userId): userId is string => Boolean(userId));
 
   const channel = args.channelId ? (await db.channel.findUnique({
     where: { id: args.channelId }

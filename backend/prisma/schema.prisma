@@ -2835,19 +2835,25 @@ model Canvas {
 }
 
 model CanvasParticipant {
-  id        String     @id @default(cuid())
-  canvasId  String // Canvas ID (no FK constraint)
-  userId    String // User ID (no FK constraint)
-  role      CanvasRole @default(VIEWER) // OWNER | EDITOR | VIEWER
-  joinedAt  DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id          String     @id @default(cuid())
+  canvasId    String // Canvas ID (no FK constraint)
+  userId      String? // User ID (no FK constraint)
+  userGroupId String? // User group share target (no FK constraint)
+  channelId   String? // Channel/DM share target (not canvas home channel, no FK constraint)
+  role        CanvasRole @default(VIEWER) // OWNER | EDITOR | VIEWER
+  joinedAt    DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
-  // Relations
-  canvas Canvas @relation(fields: [canvasId], references: [id])
+  // Relations (no FK constraints - consistent with userId and canvasId)
+  canvas    Canvas     @relation(fields: [canvasId], references: [id])
 
   @@unique([canvasId, userId]) // User can only have one role per canvas
+  @@unique([canvasId, userGroupId]) // Group can only have one role per canvas
+  @@unique([canvasId, channelId]) // Channel can only have one role per canvas
   @@index([canvasId])
   @@index([userId])
+  @@index([userGroupId])
+  @@index([channelId])
   @@map("canvas_participants")
   @@schema("public")
 }

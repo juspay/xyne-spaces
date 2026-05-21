@@ -29,6 +29,12 @@ export interface CanvasEditorProps {
   initialBlockIdToFocus?: string | undefined;
   /** Auto-focus the editor on mount */
   autoFocus?: boolean;
+  /** Optional preloaded canvas participants to avoid duplicate query */
+  canvasParticipants?: CanvasParticipant[] | undefined;
+  /** Optional preloaded canvas creator */
+  canvasCreatedBy?: string | undefined;
+  /** Effective role of current user on this canvas */
+  currentUserRole?: CanvasRole | null;
 }
 
 export interface CollaborativeCanvasEditorRef {
@@ -114,7 +120,9 @@ export interface Canvas {
 export interface CanvasParticipant {
   id: string;
   canvasId: string;
-  userId: string;
+  userId?: string | null;
+  userGroupId?: string | null;
+  channelId?: string | null;
   role: CanvasRole;
   joinedAt: number;
   updatedAt: number;
