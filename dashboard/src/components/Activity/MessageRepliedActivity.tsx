@@ -38,6 +38,8 @@ export const MessageRepliedActivity = ({
       description={<span className='text-muted-foreground text-sm'>replied in</span>}
       targetPath={targetPath}
       supportTargetPath={supportTargetPath}
+      linkedItemCreatedAt={message.conversation.createdAt}
+      useActivityCutoff
       isExpanded={isExpanded}
       isSelected={isSelected}
     >

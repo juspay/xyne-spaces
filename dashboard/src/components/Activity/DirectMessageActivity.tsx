@@ -39,6 +39,8 @@ export const DirectMessageActivity = ({
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>sent you a DM in</span>}
       targetPath={targetPath}
+      linkedItemCreatedAt={message.conversation.createdAt}
+      useActivityCutoff
       isExpanded={isExpanded}
       isSelected={isSelected}
       className='flex items-start'

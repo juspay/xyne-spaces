@@ -42,6 +42,8 @@ export const MessageMentionActivity = ({
       description={<span className='text-muted-foreground text-sm'>mentioned you in</span>}
       targetPath={targetPath}
       supportTargetPath={supportTargetPath}
+      linkedItemCreatedAt={message.conversation.createdAt}
+      useActivityCutoff
       isExpanded={isExpanded}
       isSelected={isSelected}
       showUnreadDot

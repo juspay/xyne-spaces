@@ -42,6 +42,8 @@ export const ReactionAddedActivity = ({
         </>
       }
       targetPath={targetPath}
+      linkedItemCreatedAt={message.conversation.createdAt}
+      useActivityCutoff
       isExpanded={isExpanded}
       isSelected={isSelected}
     >

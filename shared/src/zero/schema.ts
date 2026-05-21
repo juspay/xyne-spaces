@@ -1505,6 +1505,7 @@ export const activityTable = table('activities')
     channelId: string().optional(),
     canvasId: string().optional(),
     blockId: string().optional(),
+    conversationSeenCutoffAt: number().optional(),
     actorId: string(),
     classification: enumeration<ActivityClassification>(),
     classificationConfidence: number().optional(),

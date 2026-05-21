@@ -15,10 +15,12 @@ export interface CreateActivityParams {
   reactionId?: string;
   callId?: string;
   ticketId?: string;
+  conversationId?: string;
   channelId?: string;
   pullRequestId?: string;
   canvasId?: string;
   blockId?: string;
+  conversationSeenCutoffAt?: Date | null;
   actorId: string;
   classification?: ActivityClassification;
   classificationConfidence?: number | null;
@@ -28,53 +30,241 @@ export interface CreateActivityParams {
 export class ActivityService {
   constructor(private prisma: PrismaClient) {}
 
+  private getActivityMessageId(params: CreateActivityParams): string | null {
+    return params.messageId ?? (params.actionSource === 'message' ? params.actionSourceId : null);
+  }
+
+  private async getConversationSeenCutoffAt(
+    channelId: string,
+    targetConversationCreatedAt: Date,
+  ): Promise<Date | null> {
+    const conversations = await this.prisma.conversation.findMany({
+      where: {
+        channelId,
+        createdAt: { lte: targetConversationCreatedAt },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+      select: { createdAt: true },
+    });
+
+    return conversations[conversations.length - 1]?.createdAt ?? null;
+  }
+
+  private async getConversationSeenCutoffAtForConversation(
+    conversationId: string,
+    fallbackChannelId?: string,
+  ): Promise<Date | null> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { conversationId },
+      select: {
+        channelId: true,
+        createdAt: true,
+      },
+    });
+
+    if (!conversation) {
+      return null;
+    }
+
+    return this.getConversationSeenCutoffAt(
+      fallbackChannelId ?? conversation.channelId,
+      conversation.createdAt,
+    );
+  }
+
+  private async enrichActivityWithConversationCutoff(
+    params: CreateActivityParams,
+  ): Promise<CreateActivityParams> {
+    if (params.conversationSeenCutoffAt !== undefined) {
+      return params;
+    }
+
+    const messageId = this.getActivityMessageId(params);
+    if (!messageId) {
+      return params;
+    }
+
+    const message = await this.prisma.message.findUnique({
+      where: { messageId },
+      select: {
+        messageId: true,
+        conversationId: true,
+        conversation: {
+          select: {
+            channelId: true,
+            createdAt: true,
+            initialMessageId: true,
+          },
+        },
+      },
+    });
+
+    if (!message?.conversation) {
+      return params;
+    }
+
+    const channelId = params.channelId ?? message.conversation.channelId;
+    return {
+      ...params,
+      conversationId: params.conversationId ?? message.conversationId,
+      channelId,
+      conversationSeenCutoffAt: await this.getConversationSeenCutoffAt(
+        channelId,
+        message.conversation.createdAt,
+      ),
+    };
+  }
+
+  private async enrichActivitiesWithConversationCutoff(
+    activities: CreateActivityParams[],
+  ): Promise<CreateActivityParams[]> {
+    const messageIds = [
+      ...new Set(
+        activities
+          .filter(activity => activity.conversationSeenCutoffAt === undefined)
+          .map(activity => this.getActivityMessageId(activity))
+          .filter((messageId): messageId is string => Boolean(messageId)),
+      ),
+    ];
+
+    if (messageIds.length === 0) {
+      return activities;
+    }
+
+    const messages = await this.prisma.message.findMany({
+      where: { messageId: { in: messageIds } },
+      select: {
+        messageId: true,
+        conversationId: true,
+        conversation: {
+          select: {
+            channelId: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    const messageById = new Map(messages.map(message => [message.messageId, message]));
+    const cutoffInputsByConversation = new Map<
+      string,
+      { channelId: string; targetConversationCreatedAt: Date }
+    >();
+
+    for (const activity of activities) {
+      if (activity.conversationSeenCutoffAt !== undefined) {
+        continue;
+      }
+
+      const messageId = this.getActivityMessageId(activity);
+      if (!messageId) {
+        continue;
+      }
+
+      const message = messageById.get(messageId);
+      if (!message?.conversation) {
+        continue;
+      }
+
+      const channelId = activity.channelId ?? message.conversation.channelId;
+      cutoffInputsByConversation.set(message.conversationId, {
+        channelId,
+        targetConversationCreatedAt: message.conversation.createdAt,
+      });
+    }
+
+    const cutoffEntries = await Promise.all(
+      [...cutoffInputsByConversation.entries()].map(
+        async ([conversationId, input]): Promise<[string, Date | null]> => [
+          conversationId,
+          await this.getConversationSeenCutoffAt(
+            input.channelId,
+            input.targetConversationCreatedAt,
+          ),
+        ],
+      ),
+    );
+    const cutoffByConversationId = new Map<string, Date | null>(cutoffEntries);
+
+    return activities.map(activity => {
+      if (activity.conversationSeenCutoffAt !== undefined) {
+        return activity;
+      }
+
+      const messageId = this.getActivityMessageId(activity);
+      if (!messageId) {
+        return activity;
+      }
+
+      const message = messageById.get(messageId);
+      if (!message?.conversation) {
+        return activity;
+      }
+
+      return {
+        ...activity,
+        conversationId: activity.conversationId ?? message.conversationId,
+        channelId: activity.channelId ?? message.conversation.channelId,
+        conversationSeenCutoffAt: cutoffByConversationId.get(message.conversationId) ?? null,
+      };
+    });
+  }
+
   /**
    * Create a single activity
    */
   async createActivity(params: CreateActivityParams): Promise<void> {
+    const activity = await this.enrichActivityWithConversationCutoff(params);
     logger.info('[ActivityService] Creating activity', {
-      activityId: params.id,
-      userId: params.userId,
-      actorAction: params.actorAction,
-      actionSource: params.actionSource,
-      actionSourceId: params.actionSourceId,
-      messageId: params.messageId,
-      reactionId: params.reactionId,
-      callId: params.callId,
-      ticketId: params.ticketId,
-      channelId: params.channelId,
-      actorId: params.actorId,
-      classification: params.classification,
+      activityId: activity.id,
+      userId: activity.userId,
+      actorAction: activity.actorAction,
+      actionSource: activity.actionSource,
+      actionSourceId: activity.actionSourceId,
+      messageId: activity.messageId,
+      reactionId: activity.reactionId,
+      callId: activity.callId,
+      ticketId: activity.ticketId,
+      conversationId: activity.conversationId,
+      channelId: activity.channelId,
+      conversationSeenCutoffAt: activity.conversationSeenCutoffAt,
+      actorId: activity.actorId,
+      classification: activity.classification,
     });
     await this.prisma.activity.create({
       data: {
-        ...(params.id ? { id: params.id } : {}),
-        userId: params.userId,
-        actorAction: params.actorAction,
-        actionSource: params.actionSource,
-        actionSourceId: params.actionSourceId,
-        ...(params.messageId ? { messageId: params.messageId } : {}),
-        ...(params.reactionId ? { reactionId: params.reactionId } : {}),
-        ...(params.callId ? { callId: params.callId } : {}),
-        ...(params.ticketId ? { ticketId: params.ticketId } : {}),
-        ...(params.pullRequestId ? { pullRequestId: params.pullRequestId } : {}),
-        ...(params.canvasId ? { canvasId: params.canvasId } : {}),
-        ...(params.blockId ? { blockId: params.blockId } : {}),
-        channelId: params.channelId,
-        actorId: params.actorId,
-        ...(params.classification ? { classification: params.classification } : {}),
-        ...(params.classificationJobType !== undefined
-          ? { classificationJobType: params.classificationJobType }
+        ...(activity.id ? { id: activity.id } : {}),
+        userId: activity.userId,
+        actorAction: activity.actorAction,
+        actionSource: activity.actionSource,
+        actionSourceId: activity.actionSourceId,
+        ...(activity.messageId ? { messageId: activity.messageId } : {}),
+        ...(activity.reactionId ? { reactionId: activity.reactionId } : {}),
+        ...(activity.callId ? { callId: activity.callId } : {}),
+        ...(activity.ticketId ? { ticketId: activity.ticketId } : {}),
+        ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
+        ...(activity.pullRequestId ? { pullRequestId: activity.pullRequestId } : {}),
+        ...(activity.canvasId ? { canvasId: activity.canvasId } : {}),
+        ...(activity.blockId ? { blockId: activity.blockId } : {}),
+        ...(activity.conversationSeenCutoffAt
+          ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
           : {}),
-        ...(params.classificationConfidence !== undefined
-          ? { classificationConfidence: params.classificationConfidence }
+        channelId: activity.channelId,
+        actorId: activity.actorId,
+        ...(activity.classification ? { classification: activity.classification } : {}),
+        ...(activity.classificationJobType !== undefined
+          ? { classificationJobType: activity.classificationJobType }
           : {}),
-        isRead: params.actionSource === 'reaction',
+        ...(activity.classificationConfidence !== undefined
+          ? { classificationConfidence: activity.classificationConfidence }
+          : {}),
+        isRead: activity.actionSource === 'reaction',
       },
     });
     logger.info('[ActivityService] Activity persisted', {
-      activityId: params.id,
-      userId: params.userId,
+      activityId: activity.id,
+      userId: activity.userId,
     });
   }
 
@@ -83,26 +273,27 @@ export class ActivityService {
    */
   async createActivities(activities: CreateActivityParams[]): Promise<void> {
     if (activities.length === 0) return;
+    const enrichedActivities = await this.enrichActivitiesWithConversationCutoff(activities);
 
     logger.info('[ActivityService] Creating activities batch', {
-      count: activities.length,
-      activityIds: activities.map(activity => activity.id).filter(Boolean),
-      actorActions: [...new Set(activities.map(activity => activity.actorAction))],
-      actionSources: [...new Set(activities.map(activity => activity.actionSource))],
+      count: enrichedActivities.length,
+      activityIds: enrichedActivities.map(activity => activity.id).filter(Boolean),
+      actorActions: [...new Set(enrichedActivities.map(activity => activity.actorAction))],
+      actionSources: [...new Set(enrichedActivities.map(activity => activity.actionSource))],
       channelIds: [
         ...new Set(
-          activities
+          enrichedActivities
             .map(activity => activity.channelId)
-            .filter((channelId): channelId is string => Boolean(channelId))
+            .filter((channelId): channelId is string => Boolean(channelId)),
         ),
       ],
       classifications: [
-        ...new Set(activities.map(activity => activity.classification).filter(Boolean)),
+        ...new Set(enrichedActivities.map(activity => activity.classification).filter(Boolean)),
       ],
     });
 
     await this.prisma.activity.createMany({
-      data: activities.map(a => ({
+      data: enrichedActivities.map(a => ({
         ...(a.id ? { id: a.id } : {}),
         userId: a.userId,
         actorAction: a.actorAction,
@@ -112,8 +303,13 @@ export class ActivityService {
         ...(a.reactionId ? { reactionId: a.reactionId } : {}),
         ...(a.callId ? { callId: a.callId } : {}),
         ...(a.ticketId ? { ticketId: a.ticketId } : {}),
+        ...(a.conversationId ? { conversationId: a.conversationId } : {}),
+        ...(a.pullRequestId ? { pullRequestId: a.pullRequestId } : {}),
         ...(a.canvasId ? { canvasId: a.canvasId } : {}),
         ...(a.blockId ? { blockId: a.blockId } : {}),
+        ...(a.conversationSeenCutoffAt
+          ? { conversationSeenCutoffAt: a.conversationSeenCutoffAt }
+          : {}),
         channelId: a.channelId,
         actorId: a.actorId,
         ...(a.classification ? { classification: a.classification } : {}),
@@ -175,11 +371,26 @@ export class ActivityService {
     });
 
     if (existingActivity) {
+      const activity = await this.enrichActivityWithConversationCutoff({
+        userId: messageAuthorId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+        actionSourceId: messageId,
+        messageId,
+        channelId,
+        actorId,
+      });
+
+      const conversationSeenCutoffAt = existingActivity.conversationSeenCutoffAt
+        ? null
+        : activity.conversationSeenCutoffAt;
+
       await this.prisma.activity.update({
         where: { id: existingActivity.id },
         data: {
           actorId: actorId,
           isRead: false,
+          ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
         },
       });
 
@@ -192,17 +403,32 @@ export class ActivityService {
       return 'updated';
     }
 
+    const activity = await this.enrichActivityWithConversationCutoff({
+      userId: messageAuthorId,
+      actorAction: 'added_v2',
+      actionSource: 'message',
+      actionSourceId: messageId,
+      messageId,
+      channelId,
+      actorId,
+      classification: ActivityClassification.FYI,
+    });
+
     await this.prisma.activity.create({
       data: {
-        userId: messageAuthorId,
-        actorAction: 'added_v2',
-        actionSource: 'message',
-        actionSourceId: messageId,
-        messageId: messageId,
-        channelId: channelId,
-        actorId: actorId,
+        userId: activity.userId,
+        actorAction: activity.actorAction,
+        actionSource: activity.actionSource,
+        actionSourceId: activity.actionSourceId,
+        messageId: activity.messageId,
+        ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
+        channelId: activity.channelId,
+        actorId: activity.actorId,
         isRead: false,
-        classification: ActivityClassification.FYI,
+        classification: activity.classification,
+        ...(activity.conversationSeenCutoffAt
+          ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
+          : {}),
       },
     });
 
@@ -277,6 +503,10 @@ export class ActivityService {
     });
 
     if (existingActivity) {
+      const conversationSeenCutoffAt =
+        existingActivity.conversationSeenCutoffAt ??
+        (await this.getConversationSeenCutoffAtForConversation(conversationId, channelId));
+
       await this.prisma.activity.update({
         where: { id: existingActivity.id },
         data: {
@@ -284,6 +514,7 @@ export class ActivityService {
           isRead: false,
           messageId: latestReplyMessageId,
           actionSourceId: latestReplyMessageId,
+          ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
         },
       });
 
@@ -295,6 +526,11 @@ export class ActivityService {
 
       return 'updated';
     }
+
+    const conversationSeenCutoffAt = await this.getConversationSeenCutoffAtForConversation(
+      conversationId,
+      channelId,
+    );
 
     await this.prisma.activity.create({
       data: {
@@ -308,6 +544,7 @@ export class ActivityService {
         actorId: actorId,
         isRead: false,
         classification: ActivityClassification.FYI,
+        ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
       },
     });
 

@@ -61,6 +61,12 @@ import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
 
+const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
+
+function dispatchChatMessageSentEvent(channelId: string): void {
+  window.dispatchEvent(new CustomEvent(CHAT_MESSAGE_SENT_EVENT, { detail: { channelId } }));
+}
+
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
   type: 'typing_updated';
@@ -623,10 +629,17 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             );
 
             saveDraft(lookupId, '', '');
-            handleMutationResult(result, restoreDraft, undefined, {
-              channelId,
-              isNewConversation: true,
-            });
+            handleMutationResult(
+              result,
+              restoreDraft,
+              () => {
+                dispatchChatMessageSentEvent(channelId);
+              },
+              {
+                channelId,
+                isNewConversation: true,
+              },
+            );
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,

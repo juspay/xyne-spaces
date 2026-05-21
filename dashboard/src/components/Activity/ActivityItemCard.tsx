@@ -36,6 +36,8 @@ interface ActivityItemCardProps {
   actorAction?: string;
   isSelected?: boolean | undefined;
   showUnreadDot?: boolean;
+  linkedItemCreatedAt?: number;
+  useActivityCutoff?: boolean;
 }
 
 export const ActivityItemCard = ({
@@ -54,6 +56,8 @@ export const ActivityItemCard = ({
   actorAction,
   isSelected,
   showUnreadDot = false,
+  linkedItemCreatedAt,
+  useActivityCutoff = true,
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
@@ -98,6 +102,14 @@ export const ActivityItemCard = ({
 
     if (path) {
       const pathWithActivityId = appendSelectedActivity(path);
+      const state = {
+        activityNavigationNonce: Date.now(),
+        ...(linkedItemCreatedAt !== undefined ? { linkedItemCreatedAt } : {}),
+        ...(useActivityCutoff && activity.conversationSeenCutoffAt
+          ? { linkedCutoffCreatedAt: activity.conversationSeenCutoffAt }
+          : {}),
+      };
+
       if (nofocusRef.current) {
         const separator = pathWithActivityId.includes('?') ? '&' : '?';
         const hashIdx = pathWithActivityId.indexOf('#');
@@ -105,15 +117,11 @@ export const ActivityItemCard = ({
           hashIdx >= 0 ? pathWithActivityId.slice(0, hashIdx) : pathWithActivityId;
         const hash = hashIdx >= 0 ? pathWithActivityId.slice(hashIdx) : '';
         void navigate(`${pathWithoutHash}${separator}nofocus=1${hash}`, {
-          state: {
-            activityNavigationNonce: Date.now(),
-          },
+          state,
         });
       } else {
         void navigate(pathWithActivityId, {
-          state: {
-            activityNavigationNonce: Date.now(),
-          },
+          state,
         });
       }
     }

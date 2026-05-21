@@ -1,6 +1,6 @@
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useGetChannelUserStatus, useVisibleChannel } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
@@ -32,6 +32,7 @@ export type ChatListProps = {
   projectId?: string | undefined;
   cachedConversations: Conversation[];
   linkedItemCreatedAt?: Anchor;
+  linkedCutoffCreatedAt?: Anchor;
   linkedConversationId?: string;
   channelScopeType?: ChannelScopeType | undefined;
   skipMarkAsReadRef: React.RefObject<boolean>;
@@ -48,6 +49,7 @@ type UpdatedConveresationsAnchor = {
 };
 
 const PAGE_SIZE = 50;
+const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
 function dedupeAndSort(a: Conversation[], b: Conversation[]): Conversation[] {
   const map = new Map<string, Conversation>();
@@ -188,6 +190,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   projectId,
   cachedConversations,
   linkedItemCreatedAt,
+  linkedCutoffCreatedAt,
   linkedConversationId,
   channelScopeType,
   skipMarkAsReadRef,
@@ -196,7 +199,20 @@ const ChatListV3: React.FC<ChatListProps> = ({
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   // window.location.pathname is already updated by React Router before cleanup runs.
   useEffect(() => {
+    const handleCurrentUserMessageSent = (event: Event): void => {
+      const { channelId: eventChannelId } = (event as CustomEvent<{ channelId: string }>).detail;
+      if (eventChannelId !== channelId) return;
+
+      setTimeout(() => {
+        virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' });
+      }, 80);
+    };
+
+    window.addEventListener(CHAT_MESSAGE_SENT_EVENT, handleCurrentUserMessageSent);
+
     return () => {
+      window.removeEventListener(CHAT_MESSAGE_SENT_EVENT, handleCurrentUserMessageSent);
+
       const pathname = window.location.pathname;
       const atBottom = isAtBottomRef.current;
       const convId = topVisibleConvIdRef.current;
@@ -236,6 +252,23 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const [inViewAnchor, setInViewAnchor] = useState<UpdatedConveresationsAnchor | null>(null);
 
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations);
+  const conversationsRef = useRef<Conversation[]>(cachedConversations);
+  const setConversationsState = useCallback(
+    (next: Conversation[] | ((prev: Conversation[]) => Conversation[])): void => {
+      if (typeof next !== 'function') {
+        conversationsRef.current = next;
+        setConversations(next);
+        return;
+      }
+
+      setConversations(prev => {
+        const resolved = next(prev);
+        conversationsRef.current = resolved;
+        return resolved;
+      });
+    },
+    [],
+  );
 
   const [latestConversationsList, setLatestConversationsList] = useState<Conversation[]>([]);
   const latestConversationsListRef = useRef<Conversation[]>([]);
@@ -251,8 +284,6 @@ const ChatListV3: React.FC<ChatListProps> = ({
   // (from initialTopMostItemIndex) has settled. Prevents fetchOlderMessages from being
   // triggered by atTopStateChange during the initial mount/scroll race.
   const initialPositionSetRef = useRef(false);
-
-  const lastAutoScrollKeyRef = useRef<string | undefined>(undefined);
 
   /** Tracks the new-message boundary: its array index and whether user has seen it. */
   type NewConversationBoundary = { index: number; seenConvId: string | null };
@@ -320,16 +351,16 @@ const ChatListV3: React.FC<ChatListProps> = ({
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
-  const lastConversationAutoScrollKey = useMemo(() => {
-    const lastConversation = conversations[conversations.length - 1];
-    if (!lastConversation) return '';
-    return `${lastConversation.conversationId}:${lastConversation.initial_message_md ?? ''}`;
-  }, [conversations]);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const isFetchingRef = useRef(false);
-  const shouldUseCutoffQuery =
-    channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+
+  const activityCutoffCreatedAt = linkedCutoffCreatedAt?.createdAt ?? null;
+  const channelSeenCutoffCreatedAt = !linkedConversationId
+    ? (channelParticipation?.conversationSeenCutoffAt ?? null)
+    : null;
+  const initialCutoffCreatedAt = activityCutoffCreatedAt ?? channelSeenCutoffCreatedAt;
+  const shouldUseCutoffQuery = initialCutoffCreatedAt !== null && isMember;
 
   const [updatedConversations, updatedConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
@@ -344,7 +375,6 @@ const ChatListV3: React.FC<ChatListProps> = ({
     },
   );
 
-  const initialCutoffCreatedAt = channelParticipation?.conversationSeenCutoffAt ?? null;
   const [cutoffAnchor, setCutoffAnchor] = useState<Anchor | null>(
     initialCutoffCreatedAt !== null ? { createdAt: initialCutoffCreatedAt } : null,
   );
@@ -430,7 +460,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
           : older.length;
 
         setFirstItemIndex(prev => prev - actualNewPrepended);
-        setConversations(merged);
+        setConversationsState(merged);
         setIsInitialLoadComplete(true);
       })
       .catch(err => console.error('[V11] initial load error:', err));
@@ -448,8 +478,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
     const sortedCutoffConversations = [...cutoffConversations].sort(
       (a, b) => a.createdAt - b.createdAt,
     );
+    const mergedWithCached = mergeWithCached(conversations, sortedCutoffConversations);
     const { merged, latestClear } = mergeWithLatest(
-      sortedCutoffConversations,
+      mergedWithCached,
       latestConversationsListRef.current,
       true,
     );
@@ -466,7 +497,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       setNewConversationsAnchor({ createdAt: merged[merged.length - 1]!.createdAt });
     }
 
-    setConversations(merged);
+    setConversationsState(merged);
     setIsInitialLoadComplete(true);
   }, [
     shouldUseCutoffQuery,
@@ -488,7 +519,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       (a, b) => a.createdAt - b.createdAt,
     );
 
-    setConversations(prev => {
+    setConversationsState(prev => {
       const merged = reconcileConversationWindow(prev, sortedCutoffConversations);
       if (isSameConversationList(prev, merged)) {
         return prev;
@@ -511,101 +542,107 @@ const ChatListV3: React.FC<ChatListProps> = ({
     isInitialLoadComplete,
   ]);
 
-  const fetchOlderMessages = useCallback(() => {
-    if (!isInitialLoadComplete) return;
-    zero
-      .run(
-        queries.channelConversationsPaginatedV3({
-          channelId,
-          isMember,
-          start: oldConversationsAnchor,
-          direction: 'forward',
-          limit: PAGE_SIZE,
-        }),
-        { type: 'complete' },
-      )
-      .then(older => {
-        const newItems = older.filter(
-          c => !conversations.some(v => v.conversationId === c.conversationId),
-        );
-        if (newItems.length === 0) {
-          return;
-        }
-        const fetched = dedupeAndSort(older, conversations);
-        const { merged, latestClear } = mergeWithLatest(
-          fetched,
-          latestConversationsListRef.current,
-          true,
-        );
-        if (latestClear) {
-          setLatestConversationsList([]);
-          latestConversationsListRef.current = [];
-          setNewConversationsAnchor(null);
-        }
-        if (merged[0]) {
-          setOldestConversationsAnchor({ createdAt: merged[0].createdAt });
-        }
+  const fetchOlderMessages = useCallback(
+    (anchor = oldConversationsAnchor) => {
+      if (!isInitialLoadComplete) return;
+      zero
+        .run(
+          queries.channelConversationsPaginatedV3({
+            channelId,
+            isMember,
+            start: anchor,
+            direction: 'forward',
+            limit: PAGE_SIZE,
+          }),
+          { type: 'complete' },
+        )
+        .then(older => {
+          const currentConversations = conversationsRef.current;
+          const newItems = older.filter(
+            c => !currentConversations.some(v => v.conversationId === c.conversationId),
+          );
+          if (newItems.length === 0) {
+            return;
+          }
+          const fetched = dedupeAndSort(older, currentConversations);
+          const { merged, latestClear } = mergeWithLatest(
+            fetched,
+            latestConversationsListRef.current,
+            true,
+          );
+          if (latestClear) {
+            setLatestConversationsList([]);
+            latestConversationsListRef.current = [];
+            setNewConversationsAnchor(null);
+          }
+          if (merged[0]) {
+            setOldestConversationsAnchor({ createdAt: merged[0].createdAt });
+          }
 
-        setFirstItemIndex(prev => prev - newItems.length);
-        setConversations(merged);
-      })
-      .catch(err => console.error('[V11] fetchOlderMessages error:', err));
-  }, [
-    channelId,
-    oldConversationsAnchor,
-    conversations,
-    latestConversationsList,
-    isInitialLoadComplete,
-    shouldUseCutoffQuery,
-    zero,
-  ]);
+          setFirstItemIndex(prev => prev - newItems.length);
+          setConversationsState(merged);
+        })
+        .catch(err => console.error('[V11] fetchOlderMessages error:', err));
+    },
+    [
+      channelId,
+      oldConversationsAnchor,
+      latestConversationsList,
+      isInitialLoadComplete,
+      shouldUseCutoffQuery,
+      zero,
+    ],
+  );
 
-  const fetchNewerMessages = useCallback(() => {
-    if (!newConversationsAnchor || isFetchingRef.current || !isInitialLoadComplete) return;
-    isFetchingRef.current = true;
-    zero
-      .run(
-        queries.channelConversationsPaginatedV3({
-          channelId,
-          isMember,
-          start: newConversationsAnchor,
-          direction: 'backward',
-          limit: PAGE_SIZE,
-        }),
-        { type: 'complete' },
-      )
-      .then(newer => {
-        const fetched = dedupeAndSort(conversations, newer);
-        const { merged, latestClear } = mergeWithLatest(
-          fetched,
-          latestConversationsListRef.current,
-          true,
-        );
+  const fetchNewerMessages = useCallback(
+    (anchor = newConversationsAnchor) => {
+      if (!anchor || isFetchingRef.current || !isInitialLoadComplete) return;
+      isFetchingRef.current = true;
+      zero
+        .run(
+          queries.channelConversationsPaginatedV3({
+            channelId,
+            isMember,
+            start: anchor,
+            direction: 'backward',
+            limit: PAGE_SIZE,
+          }),
+          { type: 'complete' },
+        )
+        .then(newer => {
+          const currentConversations = conversationsRef.current;
+          const fetched = dedupeAndSort(currentConversations, newer);
+          const { merged, latestClear } = mergeWithLatest(
+            fetched,
+            latestConversationsListRef.current,
+            true,
+          );
 
-        if (latestClear) {
-          setLatestConversationsList([]);
-          latestConversationsListRef.current = [];
-          setNewConversationsAnchor(null);
-        } else if (newer.length > 0) {
-          setNewConversationsAnchor({ createdAt: newer[newer.length - 1]!.createdAt });
-        }
+          if (latestClear) {
+            setLatestConversationsList([]);
+            latestConversationsListRef.current = [];
+            setNewConversationsAnchor(null);
+          } else if (newer.length > 0) {
+            setNewConversationsAnchor({ createdAt: newer[newer.length - 1]!.createdAt });
+          }
 
-        setConversations(merged);
-        isFetchingRef.current = false;
-      })
-      .catch(err => {
-        console.error('[V11] fetchNewerMessages error:', err);
-        isFetchingRef.current = false;
-      });
-  }, [
-    channelId,
-    newConversationsAnchor,
-    conversations,
-    latestConversationsList,
-    isInitialLoadComplete,
-    shouldUseCutoffQuery,
-    zero,
-  ]);
+          setConversationsState(merged);
+          isFetchingRef.current = false;
+        })
+        .catch(err => {
+          console.error('[V11] fetchNewerMessages error:', err);
+          isFetchingRef.current = false;
+        });
+    },
+    [
+      channelId,
+      newConversationsAnchor,
+      latestConversationsList,
+      isInitialLoadComplete,
+      shouldUseCutoffQuery,
+      zero,
+    ],
+  );
 
   useEffect(() => {
     if (!channelParticipation?.lastViewedAt || !isInitialLoadComplete) {
@@ -662,55 +699,48 @@ const ChatListV3: React.FC<ChatListProps> = ({
     }
 
     setInitialTopMostItemIndex(computed);
-    lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isInitialLoadComplete, combinedMessages, lastConversationAutoScrollKey]);
+  }, [isInitialLoadComplete, combinedMessages]);
 
   useEffect(() => {
     if (!linkedItemCreatedAt || !linkedConversationId || !isInitialLoadComplete) return;
     const navigationKey = `${linkedConversationId}:${location.key}:${activityNavigationNonce}`;
     if (navigationKey === initialLinkedIdRef.current) return;
-    initialLinkedIdRef.current = navigationKey;
 
     const idx = combinedMessages.findIndex(
       item => item.data.conversationId === linkedConversationId,
     );
     if (idx !== -1) {
       const isLast = idx === combinedMessages.length - 1;
+      const scrollIndex = isLast ? firstItemIndex + idx : idx;
+      initialLinkedIdRef.current = navigationKey;
       // align to the actual rendered node after Virtuoso re-measures row heights.
       requestAnimationFrame(() => {
-        virtuosoRef.current?.scrollIntoView({
-          index: isLast ? firstItemIndex + idx : idx,
-          align: isLast ? 'end' : 'start',
-          behavior: 'smooth',
-        });
+        hasSkippedInitialCutoffRangeRef.current = false;
+        const scrollToLinkedConversation = (): void => {
+          virtuosoRef.current?.scrollIntoView({
+            index: scrollIndex,
+            align: isLast ? 'end' : 'start',
+            behavior: 'smooth',
+          });
+        };
+
+        scrollToLinkedConversation();
+        window.setTimeout(scrollToLinkedConversation, 80);
       });
     } else {
+      if (linkedCutoffCreatedAt) {
+        setCutoffAnchor(prev =>
+          prev?.createdAt === linkedCutoffCreatedAt.createdAt ? prev : linkedCutoffCreatedAt,
+        );
+        return;
+      }
       setOldestConversationsAnchor(linkedItemCreatedAt);
       setNewConversationsAnchor(linkedItemCreatedAt);
+      fetchNewerMessages(linkedItemCreatedAt);
+      fetchOlderMessages(linkedItemCreatedAt);
     }
-  }, [linkedConversationId, activityNavigationNonce, isInitialLoadComplete]);
-
-  useEffect(() => {
-    if (!isInitialLoadComplete) return;
-    const last = conversations[conversations.length - 1];
-    if (!last) return;
-
-    if (lastAutoScrollKeyRef.current === undefined) {
-      lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
-      return;
-    }
-
-    if (lastConversationAutoScrollKey === lastAutoScrollKeyRef.current) return;
-    const lastInitMsg = getInitialMessageFromConversation(last);
-    const isOwnMessage = lastInitMsg?.senderId === user?.id;
-    if (isNearBottomRef.current || isOwnMessage) {
-      lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
-      setTimeout(() => {
-        virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' });
-      }, 80);
-    }
-  }, [conversations, isInitialLoadComplete, lastConversationAutoScrollKey, user?.id]);
+  }, [linkedConversationId, activityNavigationNonce, isInitialLoadComplete, combinedMessages]);
 
   useEffect(() => {
     if (shouldUseCutoffQuery) return;
@@ -758,21 +788,22 @@ const ChatListV3: React.FC<ChatListProps> = ({
           if (item) return item;
           return conv;
         });
-      setConversations(updated);
+      setConversationsState(updated);
     }
   }, [channelId, updatedConversations, isInitialLoadComplete, shouldUseCutoffQuery]);
 
   useEffect(() => {
     if (latestConversationsDetails.type !== 'complete' || latestConversations.length === 0) return;
     const sortedLatest = [...latestConversations].sort((a, b) => a.createdAt - b.createdAt);
+    const currentConversations = conversationsRef.current;
     const { merged, latestClear } = mergeWithLatest(
-      conversations,
+      currentConversations,
       sortedLatest,
       isInitialLoadComplete,
     );
 
     if (latestClear) {
-      setConversations(merged);
+      setConversationsState(merged);
       setLatestConversationsList([]);
       latestConversationsListRef.current = [];
       setNewConversationsAnchor(null);
@@ -1000,7 +1031,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
     const latestConversation = latestConversationsList[latestConversationsList.length - 1];
     const oldLatestConversation = latestConversationsList[0];
     if (latestConversation && oldLatestConversation) {
-      setConversations(latestConversationsList);
+      setConversationsState(latestConversationsList);
       setOldestConversationsAnchor(oldLatestConversation);
       setNewConversationsAnchor(null);
       setLatestConversationsList([]);
