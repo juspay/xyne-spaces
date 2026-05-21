@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { Hash, Lock, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { ChannelScopeType, Ticket, ticketSnapshotToTicket } from '@xyne/shared';
+import {
+  ChannelScopeType,
+  Ticket,
+  TicketPreviewSnapshot,
+  ticketSnapshotToTicket,
+} from '@xyne/shared';
 
 import type { InternalMessageLinkMetadata } from './LinkPreview';
 import { formatRelativeTimestamp } from '../../../utils/dateUtils';
@@ -10,6 +15,8 @@ import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import Avatar from '../../ui/Avatar/Avatar';
 import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { TicketCard } from '../../Tickets/TicketCard/TicketCard';
+import { queries } from '../../../zero/queries';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 interface InternalMessagePreviewProps {
   metadata: InternalMessageLinkMetadata;
@@ -195,6 +202,29 @@ const TicketPreview: React.FC<{
   </PreviewContainer>
 );
 
+// Subscribes to the live ticket via Zero so the unfurl card reflects edits
+// to the source ticket (title, status, assignee, etc.). Falls back to the
+// snapshot serialized into link_preview_md while the query is loading or
+// when the ticket is no longer accessible.
+const LiveTicketPreview: React.FC<{
+  ticketSnapshot: TicketPreviewSnapshot;
+  channelName: string;
+  onNavigate: (event?: React.MouseEvent | React.KeyboardEvent) => void;
+  onClose?: (() => void) | undefined;
+}> = ({ ticketSnapshot, channelName, onNavigate, onClose }) => {
+  const [liveTicket] = useCachedQuery(queries.ticketById({ ticketId: ticketSnapshot.id }));
+  const ticket = (liveTicket ?? ticketSnapshotToTicket(ticketSnapshot)) as Ticket;
+
+  return (
+    <TicketPreview
+      ticket={ticket}
+      channelName={channelName}
+      onNavigate={onNavigate}
+      onClose={onClose}
+    />
+  );
+};
+
 const AttachmentPreview: React.FC<{
   senderId?: string | undefined;
   senderName: string;
@@ -338,8 +368,8 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
 
   if (ticket) {
     return (
-      <TicketPreview
-        ticket={ticketSnapshotToTicket(ticket) as Ticket}
+      <LiveTicketPreview
+        ticketSnapshot={ticket}
         channelName={channelName}
         onNavigate={handleNavigate}
         onClose={onClose}
