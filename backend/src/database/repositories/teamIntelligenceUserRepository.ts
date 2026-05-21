@@ -1,0 +1,360 @@
+import { db } from '@/database/client';
+
+export interface UserDetailsDateRangeFilters {
+  from: Date;
+  to: Date;
+  userEmail: string;
+  page: number;
+  limit: number;
+}
+
+export interface UserOverviewDateRangeFilters {
+  from: Date;
+  to: Date;
+  userEmail: string;
+}
+
+export interface UserAiUsageAggregate {
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  cost: {
+    amount: number;
+    currency: string;
+  };
+}
+
+const AI_USAGE_NUMERIC_KEYS = [
+  'total_tokens',
+  'prompt_tokens',
+  'completion_tokens',
+  'total_spend',
+] as const;
+
+type AiUsageNumericKey = (typeof AI_USAGE_NUMERIC_KEYS)[number];
+
+function isAiUsageNumericKey(key: string): key is AiUsageNumericKey {
+  return (AI_USAGE_NUMERIC_KEYS as readonly string[]).includes(key);
+}
+
+function transformAiUsageFormat(raw: {
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_spend: number;
+  currency: string;
+}): UserAiUsageAggregate {
+  return {
+    totalTokens: raw.total_tokens,
+    promptTokens: raw.prompt_tokens,
+    completionTokens: raw.completion_tokens,
+    cost: {
+      amount: Math.round(raw.total_spend * 1_000_000) / 1_000_000,
+      currency: raw.currency,
+    },
+  };
+}
+
+export interface UserDetailsDateRangeResult {
+  from: string;
+  to: string;
+  userEmail: string;
+  page: number;
+  limit: number;
+  pullRequests: {
+    total: number;
+    totalPages: number;
+    items: Record<string, unknown>[];
+  };
+  soloCommits: Record<string, unknown>[];
+  aiUsages: UserAiUsageAggregate;
+  productivityMetrics: Record<string, number>;
+  teamInsights: {
+    items: Record<string, unknown>[];
+    keyFocusAreas: string[];
+  };
+}
+
+export interface UserPullRequestsDateRangeResult {
+  from: string;
+  to: string;
+  userEmail: string;
+  page: number;
+  limit: number;
+  pullRequests: {
+    total: number;
+    totalPages: number;
+    items: Record<string, unknown>[];
+  };
+}
+
+export interface UserOverviewDateRangeResult {
+  from: string;
+  to: string;
+  userEmail: string;
+  soloCommits: Record<string, unknown>[];
+  aiUsages: UserAiUsageAggregate;
+  productivityMetrics: Record<string, number>;
+  teamInsights: {
+    items: Record<string, unknown>[];
+    keyFocusAreas: string[];
+  };
+}
+
+function paginateArray<T>(items: T[], page: number, limit: number): { total: number; totalPages: number; items: T[] } {
+  const total = items.length;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+  const start = (page - 1) * limit;
+  const end = start + limit;
+
+  return {
+    total,
+    totalPages,
+    items: items.slice(start, end),
+  };
+}
+
+class TeamIntelligenceUserRepository {
+  private async getUserIngestions(filters: UserOverviewDateRangeFilters) {
+    const { from, to, userEmail } = filters;
+
+    const rangeStart = new Date(from);
+    rangeStart.setUTCHours(0, 0, 0, 0);
+
+    const rangeEnd = new Date(to);
+    rangeEnd.setUTCHours(23, 59, 59, 999);
+
+    const ingestions = await db.teamIntelligenceUserIngestion.findMany({
+      where: {
+        reportDate: { gte: rangeStart, lte: rangeEnd },
+        userEmail: {
+          equals: userEmail,
+          mode: 'insensitive',
+        },
+      },
+      orderBy: [{ reportDate: 'desc' }, { updatedAt: 'desc' }],
+      select: {
+        userEmail: true,
+        teamName: true,
+        reportDate: true,
+        pullRequests: true,
+        soloCommits: true,
+        aiUsage: true,
+        employeeSummary: true,
+        summaryMetadata: true,
+      },
+    });
+
+    return { ingestions, rangeStart, rangeEnd };
+  }
+
+  private buildUserAggregateData(ingestions: Array<{
+    teamName: string | null;
+    reportDate: Date;
+    pullRequests: unknown;
+    soloCommits: unknown;
+    aiUsage: unknown;
+    employeeSummary: unknown;
+    summaryMetadata: unknown;
+  }>) {
+
+    const pullRequests: Record<string, unknown>[] = [];
+    const soloCommits: Record<string, unknown>[] = [];
+    const teamInsights: Record<string, unknown>[] = [];
+    const keyFocusAreas: string[] = [];
+
+    const rawAiUsages = {
+      total_tokens: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_spend: 0,
+      currency: 'USD',
+    };
+
+    const productivityMetrics: Record<string, number> = {};
+
+    for (const ingestion of ingestions) {
+      if (Array.isArray(ingestion.pullRequests)) {
+        for (const pr of ingestion.pullRequests as Array<Record<string, unknown>>) {
+          if (pr && typeof pr === 'object' && !Array.isArray(pr)) {
+            pullRequests.push(pr);
+          }
+        }
+      }
+
+      if (Array.isArray(ingestion.soloCommits)) {
+        for (const commit of ingestion.soloCommits as Array<Record<string, unknown>>) {
+          if (commit && typeof commit === 'object' && !Array.isArray(commit)) {
+            soloCommits.push(commit);
+          }
+        }
+      }
+
+      const usage = ingestion.aiUsage as Record<string, unknown> | null;
+      if (usage && typeof usage === 'object' && !Array.isArray(usage)) {
+        for (const [key, value] of Object.entries(usage)) {
+          if (key === 'provider' || key === 'model') {
+            continue;
+          }
+
+          if (key === 'currency') {
+            if (typeof value === 'string' && value.trim()) {
+              rawAiUsages.currency = value.trim();
+            }
+            continue;
+          }
+
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            if (isAiUsageNumericKey(key)) {
+              rawAiUsages[key] += value;
+            }
+          }
+        }
+      }
+
+      const metadata = ingestion.summaryMetadata as Record<string, unknown> | null;
+      if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+        const metricsCandidate = (metadata.productivityMetrics ?? metadata.metrics) as Record<string, unknown> | undefined;
+        if (metricsCandidate && typeof metricsCandidate === 'object' && !Array.isArray(metricsCandidate)) {
+          for (const [key, value] of Object.entries(metricsCandidate)) {
+            if (typeof value === 'number' && Number.isFinite(value)) {
+              productivityMetrics[key] = (productivityMetrics[key] ?? 0) + value;
+            }
+          }
+        }
+
+        const metadataFocusAreas = metadata.keyFocusAreas;
+        if (Array.isArray(metadataFocusAreas)) {
+          for (const area of metadataFocusAreas) {
+            if (typeof area === 'string' && area.trim()) {
+              keyFocusAreas.push(area.trim());
+            }
+          }
+        }
+
+        const metadataInsights = metadata.teamInsights;
+        if (Array.isArray(metadataInsights)) {
+          for (const insight of metadataInsights) {
+            if (!insight || typeof insight !== 'object' || Array.isArray(insight)) {
+              continue;
+            }
+
+            const focusAreas = (insight as Record<string, unknown>).keyFocusAreas;
+            if (!Array.isArray(focusAreas)) {
+              continue;
+            }
+
+            for (const area of focusAreas) {
+              if (typeof area === 'string' && area.trim()) {
+                keyFocusAreas.push(area.trim());
+              }
+            }
+          }
+        }
+      }
+
+      const employeeSummary = ingestion.employeeSummary as unknown;
+      if (Array.isArray(employeeSummary)) {
+        for (const item of employeeSummary) {
+          if (item && typeof item === 'object' && !Array.isArray(item)) {
+            const summaryItem = item as Record<string, unknown>;
+            const areasCandidate = summaryItem.keyFocusAreas;
+            if (Array.isArray(areasCandidate)) {
+              for (const area of areasCandidate) {
+                if (typeof area === 'string' && area.trim()) {
+                  keyFocusAreas.push(area.trim());
+                }
+              }
+            }
+
+            const insightText = summaryItem.insight;
+            if (typeof insightText === 'string' && insightText.trim()) {
+              keyFocusAreas.push(insightText.trim());
+            }
+
+            teamInsights.push(summaryItem);
+            continue;
+          }
+
+          if (typeof item === 'string' && item.trim()) {
+            keyFocusAreas.push(item.trim());
+            teamInsights.push({
+              insight: item.trim(),
+              reportDate: ingestion.reportDate.toISOString().slice(0, 10),
+              teamName: ingestion.teamName,
+            });
+          }
+        }
+      }
+    }
+
+    const aiUsages = transformAiUsageFormat(rawAiUsages);
+
+    return {
+      pullRequests,
+      soloCommits,
+      aiUsages,
+      productivityMetrics,
+      teamInsights,
+      keyFocusAreas,
+    };
+  }
+
+  async getUserDetailsByDate(filters: UserDetailsDateRangeFilters): Promise<UserDetailsDateRangeResult> {
+    const { page, limit, userEmail } = filters;
+    const { ingestions, rangeStart, rangeEnd } = await this.getUserIngestions(filters);
+    const aggregateData = this.buildUserAggregateData(ingestions);
+
+    return {
+      from: rangeStart.toISOString().slice(0, 10),
+      to: rangeEnd.toISOString().slice(0, 10),
+      userEmail,
+      page,
+      limit,
+      pullRequests: paginateArray(aggregateData.pullRequests, page, limit),
+      soloCommits: aggregateData.soloCommits,
+      aiUsages: aggregateData.aiUsages,
+      productivityMetrics: aggregateData.productivityMetrics,
+      teamInsights: {
+        items: aggregateData.teamInsights,
+        keyFocusAreas: aggregateData.keyFocusAreas,
+      },
+    };
+  }
+
+  async getUserPullRequestsByDate(filters: UserDetailsDateRangeFilters): Promise<UserPullRequestsDateRangeResult> {
+    const { page, limit, userEmail } = filters;
+    const { ingestions, rangeStart, rangeEnd } = await this.getUserIngestions(filters);
+    const aggregateData = this.buildUserAggregateData(ingestions);
+
+    return {
+      from: rangeStart.toISOString().slice(0, 10),
+      to: rangeEnd.toISOString().slice(0, 10),
+      userEmail,
+      page,
+      limit,
+      pullRequests: paginateArray(aggregateData.pullRequests, page, limit),
+    };
+  }
+
+  async getUserOverviewByDate(filters: UserOverviewDateRangeFilters): Promise<UserOverviewDateRangeResult> {
+    const { userEmail } = filters;
+    const { ingestions, rangeStart, rangeEnd } = await this.getUserIngestions(filters);
+    const aggregateData = this.buildUserAggregateData(ingestions);
+
+    return {
+      from: rangeStart.toISOString().slice(0, 10),
+      to: rangeEnd.toISOString().slice(0, 10),
+      userEmail,
+      soloCommits: aggregateData.soloCommits,
+      aiUsages: aggregateData.aiUsages,
+      productivityMetrics: aggregateData.productivityMetrics,
+      teamInsights: {
+        items: aggregateData.teamInsights,
+        keyFocusAreas: aggregateData.keyFocusAreas,
+      },
+    };
+  }
+}
+
+export const teamIntelligenceUserRepository = new TeamIntelligenceUserRepository();

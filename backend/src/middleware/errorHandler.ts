@@ -23,8 +23,14 @@ export const errorHandler = (
 ): void => {
   let error = err;
 
-if (!(error instanceof AppError)) {
-    const statusCode = 500;
+  if (!(error instanceof AppError)) {
+    const isJsonParseError =
+      err instanceof SyntaxError &&
+      typeof (err as { status?: unknown }).status === 'number' &&
+      (err as { status?: number }).status === 400 &&
+      'body' in (err as object);
+
+    const statusCode = isJsonParseError ? 400 : 500;
     const message = err.message || 'Internal Server Error';
     error = new AppError(message, statusCode);
   }

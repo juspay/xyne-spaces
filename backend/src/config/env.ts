@@ -70,6 +70,7 @@ const envSchema = Joi.object({
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
+  ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   BACKEND_URL: Joi.string().default(''),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
@@ -154,6 +155,8 @@ const envSchema = Joi.object({
   TRANSCRIPTION_AGENT_API_KEY: Joi.string().default(''),
   // Mettle user sync webhook API Key (for S2S authentication)
   METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
+  // Team intelligence sync API Key (for S2S authentication)
+  TEAM_INTELLIGENCE_SYNC_API_KEY: Joi.string().allow('').default(''),
   // Mettle API Configuration (for fetching employee details)
   METTLE_API_BASE_URL: Joi.string().uri().default(''),
   METTLE_TOKEN: Joi.string().allow('').default(''),
@@ -364,6 +367,7 @@ export const config = {
   enableEtaDeadlineWorker: envVars.ENABLE_ETA_DEADLINE_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
+  enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,
@@ -453,6 +457,7 @@ export const config = {
   },
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
   mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
+  teamIntelligenceSyncApiKey: envVars.TEAM_INTELLIGENCE_SYNC_API_KEY,
   mettleApiBaseUrl: envVars.METTLE_API_BASE_URL,
   mettleToken: envVars.METTLE_TOKEN,
   bitbucket: {
