@@ -23,7 +23,7 @@ export type FallbackQueryExecutor = (name: string, args: unknown) => Promise<unk
 const FallbackExecutorContext = createContext<FallbackQueryExecutor | null>(null);
 export const FallbackExecutorProvider = FallbackExecutorContext.Provider;
 
-const useFallbackExecutor = (): FallbackQueryExecutor | null => {
+export const useFallbackExecutor = (): FallbackQueryExecutor | null => {
   return useContext(FallbackExecutorContext);
 };
 

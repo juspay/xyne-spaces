@@ -52,8 +52,10 @@ export type { UseCachedQueryOptions } from './useCachedQuery.js';
 export { ZeroFallbackProvider, useZeroFallbackConfig } from './ZeroFallbackContext.js';
 export type { ZeroFallbackConfig, FallbackPlatformServices } from './ZeroFallbackContext.js';
 
-export { useFallbackQuery, FallbackExecutorProvider } from './useFallbackQuery.js';
+export { useFallbackQuery, FallbackExecutorProvider, useFallbackExecutor } from './useFallbackQuery.js';
 export type { FallbackQueryExecutor } from './useFallbackQuery.js';
+
+export { useFallbackHydratedQuery } from './useFallbackHydratedQuery.js';
 
 export { useZeroConnectionInfo } from './useZeroConnectionState.js';
 export type { ZeroConnectionInfo } from './useZeroConnectionState.js';

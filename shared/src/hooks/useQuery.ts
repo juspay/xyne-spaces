@@ -95,7 +95,8 @@ export function useQuery<
         metrics.recordLatency('zero.query.latency', latency, { query: queryName });
       }
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'success' });
-      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, args, skewed });
+      const rowCount = Array.isArray(data) ? data.length : data != null ? 1 : 0;
+      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, args, skewed, rowCount });
     } else if (details.type === 'error') {
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'error' });
       logger.error(Event.ZERO_QUERY_FAILED, { query: queryName, error: details.error });
@@ -138,7 +139,8 @@ export function useRawQuery<
         metrics.recordLatency('zero.query.latency', latency, { query: queryName });
       }
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'success' });
-      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, skewed });
+      const rowCount = Array.isArray(data) ? data.length : data != null ? 1 : 0;
+      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, skewed, rowCount });
     } else if (details.type === 'error') {
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'error' });
       logger.error(Event.ZERO_QUERY_FAILED, { query: queryName, error: details.error });

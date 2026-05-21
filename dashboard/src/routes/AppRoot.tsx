@@ -455,8 +455,8 @@ const AppRoot = (): ReactElement => {
   return (
     <InstrumentationProvider value={dashboardInstrumentation}>
       <ZeroProvider>
-        <InitialStateLoader>
-          <ZeroFallbackProvider>
+        <ZeroFallbackProvider>
+          <InitialStateLoader>
             <ShareRecordingHandler />
             <AIOnboardingProvider>
               <AIOnboardingTrigger isOnboarding={isOnboarding} />
@@ -649,8 +649,8 @@ const AppRoot = (): ReactElement => {
                 )}
               </EditProvider>
             </AIOnboardingProvider>
-          </ZeroFallbackProvider>
-        </InitialStateLoader>
+          </InitialStateLoader>
+        </ZeroFallbackProvider>
       </ZeroProvider>
     </InstrumentationProvider>
   );
@@ -1140,16 +1140,18 @@ export const router = createBrowserRouter([
         path: '/newWindow/chat/dir',
         element: (
           <ZeroProvider>
-            <InitialStateLoader>
-              <EditProvider>
-                <div className='h-full bg-background'>
-                  <Outlet />
-                </div>
-                <AttachmentGalleryModal />
-                <AttachmentCitationPreview />
-                <ThreadCitationModal />
-              </EditProvider>
-            </InitialStateLoader>
+            <ZeroFallbackProvider>
+              <InitialStateLoader>
+                <EditProvider>
+                  <div className='h-full bg-background'>
+                    <Outlet />
+                  </div>
+                  <AttachmentGalleryModal />
+                  <AttachmentCitationPreview />
+                  <ThreadCitationModal />
+                </EditProvider>
+              </InitialStateLoader>
+            </ZeroFallbackProvider>
           </ZeroProvider>
         ),
         children: [
