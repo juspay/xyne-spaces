@@ -152,6 +152,7 @@ const ConversationPanelV2 = ({
 
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const routerLocation = useLocation();
   const skipInputAutoFocus = searchParams.get('nofocus') === '1';
 
   // Strip the `nofocus` param from the URL after each channel navigation so it
@@ -172,6 +173,18 @@ const ConversationPanelV2 = ({
 
   const urlCreatedAtMatch = location.hash.match(/createdAt=([^&#]+)/);
   const urlConversationId = urlHashValue ? urlHashValue[1] : null;
+  const activityNavigationState = routerLocation.state as {
+    linkedItemCreatedAt?: number;
+    linkedCutoffCreatedAt?: number | null;
+  } | null;
+  const stateLinkedItemCreatedAt =
+    typeof activityNavigationState?.linkedItemCreatedAt === 'number'
+      ? activityNavigationState.linkedItemCreatedAt
+      : null;
+  const stateLinkedCutoffCreatedAt =
+    typeof activityNavigationState?.linkedCutoffCreatedAt === 'number'
+      ? activityNavigationState.linkedCutoffCreatedAt
+      : null;
 
   const tab = searchParams.get('tab') || getDefaultTab();
   const ticketId = searchParams.get('ticketId');
@@ -184,15 +197,15 @@ const ConversationPanelV2 = ({
       channelId: channelId || '',
       isMember: !!participationStatus,
     }),
-    { enabled: !!urlConversationId && !urlCreatedAtMatch },
+    { enabled: !!urlConversationId && !urlCreatedAtMatch && stateLinkedItemCreatedAt === null },
   );
 
+  const hashLinkedItemCreatedAt =
+    urlCreatedAtMatch && urlCreatedAtMatch[1] ? parseInt(urlCreatedAtMatch[1], 10) : null;
   const urlCreatedAt =
-    urlCreatedAtMatch && urlCreatedAtMatch[1]
-      ? parseInt(urlCreatedAtMatch[1], 10)
-      : urlConversationId
-        ? initialMessageById?.createdAt
-        : null;
+    hashLinkedItemCreatedAt ??
+    stateLinkedItemCreatedAt ??
+    (urlConversationId ? initialMessageById?.createdAt : null);
 
   // Skip mark as read functionality
   const skipMarkAsReadRef = useRef(false);
@@ -249,6 +262,9 @@ const ConversationPanelV2 = ({
                 <ChatListV3
                   {...(urlConversationId && { linkedConversationId: urlConversationId })}
                   {...(urlCreatedAt && { linkedItemCreatedAt: { createdAt: urlCreatedAt } })}
+                  {...(stateLinkedCutoffCreatedAt && {
+                    linkedCutoffCreatedAt: { createdAt: stateLinkedCutoffCreatedAt },
+                  })}
                   cachedConversations={cachedConversations}
                   channelId={channelId}
                   projectId={channel?.projectId}
