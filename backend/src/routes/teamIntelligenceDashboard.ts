@@ -1,0 +1,20 @@
+import { Router } from 'express';
+import { teamIntelligenceOrgController } from '@/controllers/teamIntelligenceOrgController';
+import { mettleTeamSyncController } from '@/controllers/mettleTeamSyncController';
+
+const router = Router();
+
+// GET /api/team-intelligence-dashboard/org/summary?from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get('/summary', teamIntelligenceOrgController.getOrgSummary);
+
+// GET /api/team-intelligence-dashboard/org/teams?from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get('/teams', teamIntelligenceOrgController.getOrgTeams);
+
+// GET /api/team-intelligence-dashboard/org/bullets?from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&limit=20
+router.get('/bullets', teamIntelligenceOrgController.getOrgBullets);
+
+// GET /api/team-intelligence-dashboard/org/mettle-teams
+// Fetch list of teams directly from Mettle API
+router.get('/mettle-teams', mettleTeamSyncController.getTeamsFromMettle);
+
+export default router;

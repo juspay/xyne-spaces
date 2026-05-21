@@ -120,6 +120,11 @@ import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
 import samRoutes from '@/routes/sam';
 import mettleUserSyncRoutes from '@/routes/mettleUserSync';
+import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
+import teamIntelligenceRoutes from '@/team-intelligence/routes';
+import teamIntelligenceDashboardRoutes from '@/routes/teamIntelligenceDashboard';
+import teamIntelligenceTeamDashboardRoutes from '@/routes/teamIntelligenceTeamDashboard';
+import teamIntelligenceUserDashboardRoutes from '@/routes/teamIntelligenceUserDashboard';
 import mettleEmployeeDetailsRoutes from '@/routes/mettleEmployeeDetailsRoutes';
 import memoryRoutes from '@/routes/memory';
 import queueManagementRoutes from '@/routes/clearqueueManagement';
@@ -138,6 +143,7 @@ import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
+import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -262,6 +268,17 @@ export class App {
 
     // Mettle user sync route (API key auth - called by Mettle)
     this.app.use('/api/mettle', mettleUserSyncRoutes);
+
+    // Mettle team members lookup route (authenticated wrapper around external Mettle API)
+    this.app.use('/api/mettle/team-members', authMiddleware.authenticate, mettleTeamMembersRoutes);
+
+    // Team intelligence sync route (S2S auth - called by Mettle)
+    this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
+
+    // Team intelligence dashboard routes (JWT auth - called by dashboard)
+    this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, teamIntelligenceDashboardRoutes);
+    this.app.use('/api/team-intelligence-dashboard/team', authMiddleware.authenticate, teamIntelligenceTeamDashboardRoutes);
+    this.app.use('/api/team-intelligence-dashboard/user', authMiddleware.authenticate, teamIntelligenceUserDashboardRoutes);
 
     // Mettle employee details route (JWT auth - fetch employee information)
     this.app.use('/api/mettle/employee', authMiddleware.authenticate, mettleEmployeeDetailsRoutes);
@@ -622,6 +639,10 @@ export class App {
           logger.info('Initializing scheduled message queue...');
           await scheduledMessageQueue.initialize();
         })(),
+        (async () => {
+          logger.info('Initializing team intelligence queue...');
+          await teamIntelligenceQueue.initialize();
+        })(),
       ]);
 
       logger.info('[TEST MODE] All queues initialized');
@@ -658,6 +679,9 @@ export class App {
 
       logger.info('Initializing scheduled message queue...');
       await scheduledMessageQueue.initialize();
+
+      logger.info('Initializing team intelligence queue...');
+      await teamIntelligenceQueue.initialize();
     }
 
     // Initialize WebSocket server
@@ -746,6 +770,9 @@ export class App {
 
     logger.info('Initializing conversation ingest queue (producer)...');
     await conversationIngestQueue.initialize();
+
+    logger.info('Initializing team intelligence queue (producer)...');
+    await teamIntelligenceQueue.initialize();
 
     logger.info('Initializing document ingest queue (producer)...');
     await documentIngestQueue.initialize();

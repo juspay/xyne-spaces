@@ -28,6 +28,7 @@ import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
+import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { recoveryService } from './workflows/services/recovery-service'
 config()
 
@@ -184,6 +185,11 @@ class WorkerService {
         await emailFetchWorker.start();
       }
 
+      if (appConfig.enableTeamIntelligenceWorker) {
+        logger.info('Starting team intelligence worker...');
+        await teamIntelligenceWorker.start();
+      }
+
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {
         logger.info('Starting document ingestion worker...');
@@ -301,6 +307,10 @@ class WorkerService {
 
       if (appConfig.enableEmailFetchWorker) {
         await emailFetchWorker.shutdown();
+      }
+
+      if (appConfig.enableTeamIntelligenceWorker) {
+        await teamIntelligenceWorker.shutdown();
       }
 
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';

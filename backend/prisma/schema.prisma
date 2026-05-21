@@ -1425,6 +1425,167 @@ model PullRequests {
   @@schema("public")
 }
 
+enum TeamIntelligenceBatchStatus {
+  RECEIVED
+  QUEUED
+  PARTIALLY_QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@schema("public")
+}
+
+enum TeamIntelligenceUserIngestionStatus {
+  RECEIVED
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@schema("public")
+}
+
+enum TeamIntelligenceBulletCategory {
+  SHIPPED
+  ACHIEVEMENT
+  COLLABORATION
+  LEARNING
+  RECOGNITION
+  LEARNED
+  HELPED
+  MILESTONE
+
+  @@schema("public")
+}
+
+model TeamIntelligenceIngestionBatch {
+  id              String                         @id @default(cuid())
+  reportDate      DateTime
+  source          String
+  idempotencyKey  String                         @unique
+  requestChecksum  String
+  requestPayload  Json
+  totalUsers      Int
+  queuedUsers     Int                            @default(0)
+  failedUsers     Int                            @default(0)
+  status          TeamIntelligenceBatchStatus    @default(RECEIVED)
+  receivedAt      DateTime                       @default(now())
+  queuedAt        DateTime?
+  completedAt     DateTime?
+  errorMessage    String?
+  createdAt       DateTime                       @default(now())
+  updatedAt       DateTime                       @updatedAt
+
+  users TeamIntelligenceUserIngestion[]
+  teamSummaries TeamIntelligenceTeamSummary[]
+  orgSummary TeamIntelligenceOrgSummary?
+
+  @@index([reportDate])
+  @@index([source, reportDate])
+  @@index([status, receivedAt])
+  @@map("team_intelligence_ingestion_batches")
+  @@schema("public")
+}
+
+model TeamIntelligenceUserIngestion {
+  id               String                              @id @default(cuid())
+  batchId          String
+  reportDate       DateTime
+  source           String
+  userEmail        String
+  userName         String
+  teamName         String?
+  rawPayload       Json
+  pullRequests     Json
+  soloCommits      Json
+  aiUsage          Json?
+  employeeSummary  Json?
+  summaryMetadata  Json?
+  processingStatus TeamIntelligenceUserIngestionStatus @default(RECEIVED)
+  queueJobId       String?
+  queuedAt         DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  failedAt         DateTime?
+  errorMessage     String?
+  createdAt        DateTime                            @default(now())
+  updatedAt        DateTime                            @updatedAt
+
+  batch TeamIntelligenceIngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, userEmail])
+  @@index([reportDate, userEmail])
+  @@index([batchId, processingStatus])
+  @@index([source, reportDate])
+  @@map("team_intelligence_user_ingestions")
+  @@schema("public")
+}
+
+model TeamIntelligenceTeamSummary {
+  id              String                      @id @default(cuid())
+  batchId         String
+  reportDate      DateTime
+  source          String
+  teamName        String
+  idempotencyKey  String                      @unique
+  totalUsers      Int
+  completedUsers  Int                         @default(0)
+  failedUsers     Int                         @default(0)
+  summaryText     Json?
+  summaryMetadata Json?
+  provenance      Json?
+  status          TeamIntelligenceBatchStatus @default(RECEIVED)
+  queueJobId      String?
+  queuedAt        DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  failedAt        DateTime?
+  errorMessage    String?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  batch TeamIntelligenceIngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, teamName])
+  @@index([reportDate, teamName])
+  @@index([batchId, status])
+  @@index([source, reportDate])
+  @@map("team_intelligence_team_summaries")
+  @@schema("public")
+}
+
+model TeamIntelligenceOrgSummary {
+  id              String                      @id @default(cuid())
+  batchId         String                      @unique
+  reportDate      DateTime
+  source          String
+  idempotencyKey  String                      @unique
+  totalTeams      Int
+  completedTeams  Int                         @default(0)
+  failedTeams     Int                         @default(0)
+  summaryText     Json?
+  summaryMetadata Json?
+  provenance      Json?
+  status          TeamIntelligenceBatchStatus @default(RECEIVED)
+  queueJobId      String?
+  queuedAt        DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  failedAt        DateTime?
+  errorMessage    String?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  batch TeamIntelligenceIngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([reportDate])
+  @@index([source, reportDate])
+  @@index([status, createdAt])
+  @@map("team_intelligence_org_summaries")
+  @@schema("public")
+}
+
 // Chat Feature Models - New Schema Design
 
 // Organization Models
