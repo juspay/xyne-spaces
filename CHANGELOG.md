@@ -1,3 +1,13 @@
+## [1.146.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.146.0...v1.146.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* add rca mapper ([c22a2c4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c22a2c4e45ecaeb3476754c8e6c656cf384d17be)), closes [#6549](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6549)
+* allow dot in @ mention query so firstName.lastName usernames work ([75b384b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75b384b4aede91c05c73cc144733ac46b870fe0c)), closes [#6338](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6338)
+* cmd+return to send message ([6dfc6fb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6dfc6fbb50683741f7e2045c5481c25e0ef0f899)), closes [#6429](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6429)
+* preserve single-message attachment upload order ([d2f38b3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d2f38b32753675cf7c18c76c80c50b08f0ac7d4c)), closes [#6431](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6431)
+
 ## [1.146.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.145.1...v1.146.0) (2026-05-20)
 
 
