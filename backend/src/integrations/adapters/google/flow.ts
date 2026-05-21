@@ -7,10 +7,12 @@ import { ExternalSource } from '@prisma/client';
 import { BaseFlow } from '../../core/baseFlow';
 import { logger } from '../../../utils/logger';
 import { GoogleService } from '@/services/googleService';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { preDownloadGmailAttachments } from './attachments';
 import { GooglePubSubMessage, GooglePubSubData } from './types';
 
 const TAG = '[GoogleFlow]';
+const externalMessageRepo = new ExternalMessageRepository();
 
 export class GoogleFlow extends BaseFlow {
   async preprocess(rawPayload: any, source?: ExternalSource): Promise<any> {
@@ -27,6 +29,12 @@ export class GoogleFlow extends BaseFlow {
 
       const messageId = await this.resolveMessageId(googleService, pubsubData.historyId);
       if (!messageId) return { authenticated: false };
+
+      const existing = await externalMessageRepo.findByExternalIds(source.id, [messageId]);
+      if (existing.length > 0) {
+        logger.info(`${TAG} skipping already-ingested message ${messageId}`);
+        return { __skipIngestion: true, __skipReason: `duplicate-webhook:${messageId}` };
+      }
 
       const messageData = await googleService.getMessageById(messageId);
       if (!messageData) {

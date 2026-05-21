@@ -13,11 +13,13 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { emailService } from '@/services/emailService';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
 
 const TAG = '[GoogleRefetch]';
 const transformer = new GoogleTransformer();
 const preferenceRepo = new EmailChannelPreferenceRepository();
+const externalMessageRepo = new ExternalMessageRepository();
 
 export class GoogleRefetch extends BaseRefetch {
   async refetch(source: ExternalSource, options?: RefetchOptions): Promise<RefetchResult> {
@@ -51,7 +53,26 @@ export class GoogleRefetch extends BaseRefetch {
       if (ids) ids.push(m.id);
       else grouped.set(m.threadId, [m.id]);
     }
-    const threadGroups = Array.from(grouped.entries()); // [threadId, messageIds[]]
+    let threadGroups = Array.from(grouped.entries()); // [threadId, messageIds[]]
+
+    const allMessageIds = threadGroups.flatMap(([, ids]) => ids);
+    if (allMessageIds.length > 0) {
+      const existing = await externalMessageRepo.findByExternalIds(source.id, allMessageIds);
+      if (existing.length > 0) {
+        const existingSet = new Set(existing.map(e => e.externalId));
+        let skippedBeforeFetch = 0;
+        const filtered: typeof threadGroups = [];
+        for (const [threadId, ids] of threadGroups) {
+          const remaining = ids.filter(id => !existingSet.has(id));
+          skippedBeforeFetch += ids.length - remaining.length;
+          if (remaining.length > 0) filtered.push([threadId, remaining]);
+        }
+        threadGroups = filtered;
+        logger.info(
+          `${TAG} pre-dedup: skipped ${skippedBeforeFetch} already-ingested messages; ${threadGroups.length} threads remain`,
+        );
+      }
+    }
 
     // Step 3: process threads in parallel up to batchSize, but each
     // thread's messages flow into a single ingestEmailThread call.

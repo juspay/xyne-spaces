@@ -14,6 +14,7 @@ import { TestPayloadResult } from '../../core/types';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { preDownloadGraphAttachments } from './attachments';
+import { graphFetchWithRetry } from './graphFetch';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { GraphChangeNotification, GraphMailMessage } from './types';
@@ -105,7 +106,7 @@ export class MicrosoftFlow extends BaseFlow {
 
     logger.info(`Microsoft flow: fetching email ${messageId}`);
 
-    const response = await fetch(
+    const response = await graphFetchWithRetry(
       `${config.microsoftGraph.baseUrl}/me/messages/${messageId}?$select=${GRAPH_MESSAGE_FIELDS}`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
@@ -115,6 +116,14 @@ export class MicrosoftFlow extends BaseFlow {
     }
 
     const email = (await response.json()) as GraphMailMessage;
+    const lookupId = email.internetMessageId ?? email.id;
+    
+    const existing = await externalMessageRepo.findByExternalIds(source.id, [lookupId]);
+    if (existing.length > 0) {
+      logger.info(`Microsoft flow: skipping already-ingested message ${lookupId}`);
+      return { __skipIngestion: true, __skipReason: `duplicate-webhook:${lookupId}` };
+    }
+
     const credentials = source.credentials as { email?: string };
     const mailboxEmail = typeof credentials.email === 'string' ? credentials.email.toLowerCase() : undefined;
     const fromAddress = email.from?.emailAddress?.address?.toLowerCase();

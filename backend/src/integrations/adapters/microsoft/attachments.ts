@@ -15,6 +15,7 @@ import {
   DownloadedAttachment,
 } from '@/services/externalAttachmentService';
 import { logger } from '@/utils/logger';
+import { graphFetchWithRetry } from './graphFetch';
 
 interface GraphAttachment {
   id: string;
@@ -35,7 +36,7 @@ export async function preDownloadGraphAttachments(params: {
 
   let parts: GraphAttachment[];
   try {
-    const res = await fetch(
+    const res = await graphFetchWithRetry(
       `${config.microsoftGraph.baseUrl}/me/messages/${graphMessageId}/attachments?$top=50`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
