@@ -1089,25 +1089,26 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
 
-          const messageIds = Array.from(
-            new Map(
-              unreadActivities.map(a => [
-                a.actionSourceId,
-                { activityId: a.id, sourceId: a.actionSourceId },
-              ]),
-            ).values(),
+          const activityBySourceId = new Map(
+            unreadActivities.map(a => [a.actionSourceId, a]),
+          );
+          const uniqueSourceIds = [...activityBySourceId.keys()];
+
+          const messages = await tx.run(
+            zql.messages
+              .where('messageId', 'IN', uniqueSourceIds)
+              .related('conversation'),
           );
 
-          const messages = await Promise.all(
-            messageIds.map(messagePair =>
-              tx.run(zql.messages.where('messageId', messagePair.sourceId).related('conversation').one()),
-            ),
+          const messageByMessageId = new Map(
+            messages.map(m => [m.messageId, m]),
           );
 
-          for (const [index, message] of messages.entries()) {
+          for (const [sourceId, activity] of activityBySourceId) {
+            const message = messageByMessageId.get(sourceId);
             if (message?.conversation?.initialMessageId === message?.messageId) {
               await tx.mutate.activities.update({
-                id: messageIds[index].activityId,
+                id: activity.id,
                 isRead: true,
               });
             }
@@ -4180,25 +4181,26 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             return;
           }
 
-          const messageIds = Array.from(
-            new Map(
-              unreadActivities.map(a => [
-                a.actionSourceId,
-                { activityId: a.id, sourceId: a.actionSourceId },
-              ]),
-            ).values(),
+          const activityBySourceId = new Map(
+            unreadActivities.map(a => [a.actionSourceId, a]),
+          );
+          const uniqueSourceIds = [...activityBySourceId.keys()];
+
+          const messages = await tx.run(
+            zql.messages
+              .where('messageId', 'IN', uniqueSourceIds)
+              .related('conversation'),
           );
 
-          const messages = await Promise.all(
-            messageIds.map(messagePair =>
-              tx.run(zql.messages.where('messageId', messagePair.sourceId).related('conversation').one()),
-            ),
+          const messageByMessageId = new Map(
+            messages.map(m => [m.messageId, m]),
           );
 
-          for (const [index, message] of messages.entries()) {
+          for (const [sourceId, activity] of activityBySourceId) {
+            const message = messageByMessageId.get(sourceId);
             if (message?.conversation?.initialMessageId !== message?.messageId) {
               await tx.mutate.activities.update({
-                id: messageIds[index].activityId,
+                id: activity.id,
                 isRead: true,
               });
             }

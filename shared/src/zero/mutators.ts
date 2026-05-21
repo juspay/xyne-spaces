@@ -716,30 +716,48 @@ export const mutators = defineMutators({
           return;
         }
 
-        const messageIds = Array.from(
-          new Map(
-            unreadActivities.map(a => [
-              a.actionSourceId,
-              { activityId: a.id, sourceId: a.actionSourceId },
-            ]),
-          ).values(),
+        const activityBySourceId = new Map(
+          unreadActivities.map(a => [a.actionSourceId, a]),
+        );
+        const uniqueSourceIds = [...activityBySourceId.keys()];
+
+        // Batch fetch messages
+        const foundMessages = await tx.run(
+          zql.messages.where('messageId', 'IN', uniqueSourceIds),
+        );
+        const messageByMessageId = new Map(
+          foundMessages.map(m => [m.messageId, m]),
         );
 
-        const messages = await Promise.all(
-          messageIds.map(messagePair => resolveMessage(tx, messagePair.sourceId)),
+        // For messages not found, try resolveMessage fallback individually
+        const missingIds = uniqueSourceIds.filter(id => !messageByMessageId.has(id));
+        for (const id of missingIds) {
+          const resolved = await resolveMessage(tx, id);
+          if (resolved) {
+            messageByMessageId.set(resolved.messageId, resolved);
+          }
+        }
+
+        // Batch fetch conversations for all found messages
+        const conversationIds = [...new Set(
+          [...messageByMessageId.values()].map(m => m.conversationId),
+        )];
+        const conversations = await tx.run(
+          zql.conversations.where('conversationId', 'IN', conversationIds),
+        );
+        const convByConversationId = new Map(
+          conversations.map(c => [c.conversationId, c]),
         );
 
-        for (const [index, message] of messages.entries()) {
-          const messagePair = messageIds[index];
-          if (!message || !messagePair) {
+        for (const [sourceId, activity] of activityBySourceId) {
+          const message = messageByMessageId.get(sourceId);
+          if (!message) {
             continue;
           }
-          const conv = await tx.run(
-            zql.conversations.where('conversationId', message.conversationId).one(),
-          );
+          const conv = convByConversationId.get(message.conversationId);
           if (conv?.initialMessageId === message.messageId) {
             await tx.mutate.activities.update({
-              id: messagePair.activityId,
+              id: activity.id,
               isRead: true,
             });
           }
