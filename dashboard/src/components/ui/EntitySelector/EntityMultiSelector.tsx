@@ -12,7 +12,6 @@ interface EntityMultiSelectorProps extends EntitySelectorProps {
   showSearch?: boolean;
   collapseSelectedAfter?: number;
   collapsedLabel?: string;
-  onOpenChange?: (open: boolean) => void;
 }
 
 export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
@@ -32,14 +31,9 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   showSearch = false,
   collapseSelectedAfter,
   collapsedLabel = 'items',
-  onOpenChange,
 }) => {
   // ==================== STATE ====================
-  const [isOpen, _setIsOpen] = useState(false);
-  const setIsOpen = (open: boolean) => {
-    _setIsOpen(open);
-    onOpenChange?.(open);
-  };
+  const [isOpen, setIsOpen] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
