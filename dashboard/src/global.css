@@ -1734,9 +1734,13 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   margin: 0;
 }
 
-/* Base markdown content styling */
+/* Base markdown content styling with text wrapping for overflow prevention */
 .bot-markdown-content {
   margin: 8px 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: normal;
 }
 
 /* Markdown Call Summary - Figma style with section dividers */

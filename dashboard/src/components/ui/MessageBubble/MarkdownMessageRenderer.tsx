@@ -120,7 +120,7 @@ export const MarkdownMessageRenderer: FC<MarkdownMessageRendererProps> = ({
       : 'bot-markdown-content';
 
   return (
-    <div className={className}>
+    <div className={`${className} min-w-0`}>
       <Markdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
