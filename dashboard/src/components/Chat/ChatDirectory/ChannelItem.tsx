@@ -6,8 +6,7 @@ import { VisibleChannel } from '../../../machines/stateMachine';
 import { isDMChannel } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
-import { useSelector } from '@xstate/react';
-import { roomActor } from '../../../machines/roomMachine';
+import { useChannelHasActiveCall } from '../../../hooks/useCalls';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -40,9 +39,7 @@ const ChannelItem = ({
   const isPrivate = channel.visibility === ChannelVisibility.PRIVATE;
   const isDM = isDMChannel(channel.scopeType);
 
-  // Get active calls from roomActor
-  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
-  const hasActiveCall = activeCalls?.some(call => call.channelId === channel.id);
+  const hasActiveCall = useChannelHasActiveCall(channel.id);
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserID);
 

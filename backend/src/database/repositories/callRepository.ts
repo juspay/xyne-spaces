@@ -59,6 +59,7 @@ export interface CreateCallWithParticipantsInput {
   endsAt: Date;
   targetUserIds?: string[];
   metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
+  callUpdatesChannel?: string | null;
 }
 
 export class CallRepository {
@@ -360,6 +361,7 @@ export class CallRepository {
         updatedAt: new Date(),
         lastActivityAt: new Date(),
         ...(params.metadata && { metadata: params.metadata as Prisma.InputJsonValue }),
+        ...(params.callUpdatesChannel !== undefined && { callUpdatesChannel: params.callUpdatesChannel }),
       },
     });
 
@@ -869,13 +871,14 @@ export class CallRepository {
       } | null;
 
       if (!callMetadata?.conversationId) {
-        // First join: create conversation + system message, then activate
+        // First join: create conversation + system message, then activate.
+        // Post to callUpdatesChannel when set (post-to-channel mode), otherwise to the call's own channel.
         const conversationId = uuidv4();
         const messageId = uuidv4();
         await this.createConversationAndSystemMessage(tx, {
           conversationId,
           messageId,
-          channelId: call.channelId ?? '',
+          channelId: call.callUpdatesChannel ?? call.channelId ?? '',
           callId: call.externalId,
           initiatorName,
         });
@@ -1258,8 +1261,10 @@ export class CallRepository {
     channelId?: string;
     addUserIds?: string[];
     removeUserIds?: string[];
+    metadata?: Record<string, unknown>;
+    callUpdatesChannel?: string | null;
   }): Promise<Call> {
-    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds } = params;
+    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, metadata, callUpdatesChannel } = params;
     const db = DatabaseClient.getInstance();
 
     return await db.$transaction(async (tx) => {
@@ -1268,6 +1273,8 @@ export class CallRepository {
       if (startsAt !== undefined) updateData.startsAt = startsAt;
       if (endsAt !== undefined) updateData.endsAt = endsAt;
       if (channelId !== undefined) updateData.channelId = channelId;
+      if (metadata !== undefined) updateData.metadata = metadata as Prisma.InputJsonValue;
+      if (callUpdatesChannel !== undefined) updateData.callUpdatesChannel = callUpdatesChannel;
 
       const updatedCall = await tx.call.update({
         where: { id: callId },
