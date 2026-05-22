@@ -31,7 +31,7 @@ export interface SelectorOption {
   icon: ReactNode;
 
   /** Optional secondary text (e.g., email for users) */
-  subtitle?: string;
+  subtitle?: string | null;
 
   /** Whether this option is disabled and cannot be selected */
   disabled?: boolean;
