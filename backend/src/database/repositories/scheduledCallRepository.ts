@@ -129,14 +129,14 @@ export class ScheduledCallRepository {
   async findScheduledInstances(params: {
     seriesId: string;
     tx: Prisma.TransactionClient;
-  }): Promise<{ id: string; externalId: string; startsAt: Date | null; endsAt: Date | null }[]> {
+  }): Promise<{ id: string; externalId: string; startsAt: Date | null; endsAt: Date | null; metadata: unknown }[]> {
     const { seriesId, tx } = params;
     return tx.call.findMany({
       where: {
         recurringSeriesId: seriesId,
         status: CallStatus.SCHEDULED,
       },
-      select: { id: true, externalId: true, startsAt: true, endsAt: true },
+      select: { id: true, externalId: true, startsAt: true, endsAt: true, metadata: true },
     });
   }
 

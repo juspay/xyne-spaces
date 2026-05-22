@@ -51,6 +51,7 @@ export interface EditCallData {
   participants: Array<{ userId: string }>;
   channelId?: string | null;
   recurringSeriesId?: string | null;
+  callUpdatesChannel?: string | null;
 }
 
 interface ScheduleCallModalProps {
@@ -512,10 +513,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const callStart = new Date(initialCall.startsAt);
       const callEnd = new Date(initialCall.endsAt);
 
-      // Only show a channel pill if the call was explicitly created for a real
-      // (DEFAULT-scope) channel. DM/GROUP_DM channels are auto-created by the
-      // backend as an internal routing detail — in those cases show the
-      // individual participants the user actually invited.
+      // callUpdatesChannel tells us whether this is a post-to-channel call.
+      // Null means the call is either channel-scoped (channelId is a real DEFAULT channel)
+      // or a direct group call (channelId is an auto-created GROUP_DM).
+      // Non-null means call updates are posted to that channel while participants are in a GROUP_DM.
       const callChannel = initialCall.channelId
         ? allVisibleChannels.find(c => c.id === initialCall.channelId)
         : null;
@@ -523,9 +524,14 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         callChannel &&
         callChannel.scopeType !== ChannelScopeType.DM &&
         callChannel.scopeType !== ChannelScopeType.GROUP_DM;
-      const participantValues: string[] = isExplicitChannel
-        ? [`channel:${initialCall.channelId}`]
-        : initialCall.participants.filter(p => p.userId !== user?.id).map(p => `user:${p.userId}`);
+      const callUpdatesChannel = initialCall.callUpdatesChannel ?? null;
+
+      const participantValues: string[] =
+        isExplicitChannel && !callUpdatesChannel
+          ? [`channel:${initialCall.channelId}`]
+          : initialCall.participants
+              .filter(p => p.userId !== user?.id)
+              .map(p => `user:${p.userId}`);
 
       reset({
         title: initialCall.title,
@@ -533,6 +539,15 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         endsAt: callEnd,
         participants: participantValues,
       });
+
+      if (callUpdatesChannel) {
+        setPostCallUpdates(true);
+        setUpdateChannelId(callUpdatesChannel);
+      } else {
+        setPostCallUpdates(false);
+        setUpdateChannelId(null);
+      }
+
       setRecurringStartTime(toHHMM(callStart));
       setRecurringEndTime(toHHMM(callEnd));
       // Default to editing single instance (checkbox unchecked)
@@ -1118,9 +1133,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             });
             return;
           }
+          const resolvedChannelId =
+            postCallUpdates && updateChannelId ? updateChannelId : channelId;
           await callService.updateRecurringSeries(initialCall.recurringSeriesId, {
             title: data.title,
-            ...(channelId && { channelId }),
+            ...(resolvedChannelId && { channelId: resolvedChannelId }),
             ...(userIds.length > 0 && { targetUserIds: userIds }),
             recurrenceRule: buildRrule(),
             timezone,
@@ -1136,12 +1153,14 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           });
         } else {
           // Edit single occurrence
+          const resolvedChannelId =
+            postCallUpdates && updateChannelId ? updateChannelId : channelId;
           await callService.updateScheduledCall(initialCall.externalId, {
             title: data.title,
             startsAt: new Date(data.startsAt).getTime(),
             endsAt: new Date(data.endsAt).getTime(),
             ...(userIds.length > 0 && { targetUserIds: userIds }),
-            ...(channelId && { channelId }),
+            ...(resolvedChannelId && { channelId: resolvedChannelId }),
           });
           toast.success('Call Updated', {
             description: 'This occurrence has been updated.',

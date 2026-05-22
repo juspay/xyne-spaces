@@ -549,6 +549,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       participants: [...(call.participants ?? [])],
       channelId: call.channelId,
       recurringSeriesId: call.recurringSeriesId,
+      callUpdatesChannel: call.callUpdatesChannel ?? null,
     });
     setEditModalOpen(true);
   };

@@ -2658,6 +2658,7 @@ model Call {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   metadata         Json?       // LiveKit room config, max participants, etc.
+  callUpdatesChannel String?   // Non-null = post call updates to this channel (Case 3); null = no broadcast
 
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])
@@ -2721,9 +2722,10 @@ model RecurringCallSeries {
   status         RecurringCallSeriesStatus @default(ACTIVE)
   startsOn       DateTime                  // Series start date (first possible occurrence)
   endsOn         DateTime?                 // Series end date (null = indefinite)
-  metadata       Json?                     // Extra config e.g. { "reminderMinutes": 10 }
-  createdAt      DateTime                  // Set explicitly in code
-  updatedAt      DateTime                  @updatedAt
+  metadata           Json?                     // Extra config e.g. { "reminderMinutes": 10 }
+  callUpdatesChannel String?                   // Non-null = post call updates to this channel (Case 3); null = no broadcast
+  createdAt          DateTime                  // Set explicitly in code
+  updatedAt          DateTime                  @updatedAt
 
   // Relations
   instances Call[] // All Call instances generated from this series

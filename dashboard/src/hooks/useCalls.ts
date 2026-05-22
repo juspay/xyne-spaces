@@ -177,6 +177,20 @@ export const useIsOnlyParticipant = (participants: CallParticipants) => {
 };
 
 /**
+ * Check if a channel has an active call, respecting callUpdatesChannel for post-to-channel calls.
+ * @param channelId - The channel ID to check
+ * @returns true if any active call is broadcasting to this channel
+ */
+export const useChannelHasActiveCall = (channelId: string): boolean => {
+  const activeCalls = useActiveCalls();
+  return useMemo(
+    () =>
+      activeCalls?.some(call => (call.callUpdatesChannel ?? call.channelId) === channelId) ?? false,
+    [activeCalls, channelId],
+  );
+};
+
+/**
  * Custom hook to check if a specific call is active
  * @param callId - The external call ID to check
  * @returns true if the call is active, false otherwise

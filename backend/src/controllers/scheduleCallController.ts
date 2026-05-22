@@ -185,11 +185,29 @@ export class ScheduleCallController {
         endsOn,
       } = RecurringScheduleCallSchema.parse(req.body);
 
-      // update-channel mode: channelId is the broadcast channel, targetUserIds are the actual participants
-      const isUpdateChannelMode = !!(channelId && targetUserIds?.length);
+      // When a channelId (broadcast target) and targetUserIds (explicit participants) are both
+      // provided, the user wants to post call updates to a channel while the actual call is
+      // between a specific set of people. We create a GROUP_DM for those participants and use
+      // it as series.channelId so participant lookups always return the right people.
+      // The broadcast channel is stored separately in callUpdatesChannel.
+      const isPostCallUpdatesMode = !!(channelId && targetUserIds?.length);
 
       let finalChannelId = channelId;
-      if (!channelId && targetUserIds?.length) {
+      let callUpdatesChannel: string | null = null;
+
+      if (isPostCallUpdatesMode) {
+        // Post-to-channel: create a GROUP_DM for the explicit participants so that
+        // series.channelId is always the group of people in the call, not the broadcast channel.
+        finalChannelId = await repositories.channels.findOrCreateDMChannel(
+          userId,
+          targetUserIds!,
+          repositories.channelParticipants,
+          req.user!.workspaceId!,
+          title,
+        );
+        callUpdatesChannel = channelId!;
+      } else if (!channelId && targetUserIds?.length) {
+        // Direct group call with no broadcast channel — create a GROUP_DM for the participants.
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           targetUserIds,
@@ -198,11 +216,6 @@ export class ScheduleCallController {
           title,
         );
       }
-
-      // Always include the organizer in the participant list
-      const finalTargetUserIds = isUpdateChannelMode
-        ? [...new Set([userId, ...targetUserIds!])]
-        : undefined;
 
       const seriesId = uuidv4();
       const dbClient = DatabaseClient.getInstance();
@@ -240,10 +253,13 @@ export class ScheduleCallController {
             endsOn: resolvedEndsOn,
             createdAt: new Date(),
             updatedAt: new Date(),
+            callUpdatesChannel,
           },
         });
 
-        // Pre-create all instances for the next buffer period
+        // Pre-create all instances for the next buffer period.
+        // series.channelId is always a GROUP_DM when participants are explicit, so
+        // getChannelParticipants(series.channelId) always returns the right people — no need to pass targetUserIds.
         const fromDate = new Date(startsOn);
         const toDate = new Date(Date.now() + INSTANCE_BUFFER_DAYS);
         const finalToDate = resolvedEndsOn && resolvedEndsOn < toDate ? resolvedEndsOn : toDate;
@@ -253,7 +269,8 @@ export class ScheduleCallController {
           fromDate,
           finalToDate,
           tx,
-          finalTargetUserIds,
+          undefined,
+          callUpdatesChannel,
         );
       });
 
@@ -294,24 +311,37 @@ export class ScheduleCallController {
         invitation,
       } = ScheduleCallSchema.parse(req.body);
 
-      // update-channel mode: channelId is the broadcast channel, targetUserIds are the actual participants
-      const isUpdateChannelMode = !!(channelId && targetUserIds?.length);
+      // When a channelId (broadcast target) and targetUserIds (explicit participants) are both
+      // provided, the user wants to post call updates to a channel while the actual call is
+      // between a specific set of people. We create a GROUP_DM for those participants so that
+      // call.channelId always points to the people in the call, not the broadcast channel.
+      // The broadcast channel is stored separately in callUpdatesChannel.
+      const isPostCallUpdatesMode = !!(channelId && targetUserIds?.length);
 
       let finalChannelId = channelId;
-      if (!channelId && targetUserIds?.length) {
+      let callUpdatesChannel: string | null = null;
+
+      if (isPostCallUpdatesMode) {
+        // Post-to-channel: create a GROUP_DM for the explicit participants so that
+        // call.channelId is the group of people in the call, not the broadcast channel.
+        finalChannelId = await repositories.channels.findOrCreateDMChannel(
+          userId,
+          targetUserIds!,
+          repositories.channelParticipants,
+          req.user!.workspaceId!,
+          title,
+        );
+        callUpdatesChannel = channelId!;
+      } else if (!channelId && targetUserIds?.length) {
+        // Direct group call with no broadcast channel — create a GROUP_DM for the participants.
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           targetUserIds,
           repositories.channelParticipants,
           req.user!.workspaceId!,
-          title
+          title,
         );
       }
-
-      // Always include the organizer in the participant list
-      const finalTargetUserIds = isUpdateChannelMode
-        ? [...new Set([userId, ...targetUserIds!])]
-        : undefined;
 
       // Generate IDs
       const callId = uuidv4();
@@ -339,8 +369,8 @@ export class ScheduleCallController {
           isRecurring: false,
           startsAt: new Date(startsAt),
           endsAt: new Date(endsAt),
-          ...(finalTargetUserIds && { targetUserIds: finalTargetUserIds }),
           ...(conversationId && { metadata: { conversationId } }),
+          callUpdatesChannel,
         }, tx);
 
         if (hasExternals) {
@@ -466,23 +496,48 @@ export class ScheduleCallController {
         return;
       }
 
-      // Resolve the channel: explicit channelId → find/create DM from targetUserIds → keep existing
+      // Resolve the channel and callUpdatesChannel based on what the user changed.
+      // Both reqChannelId and targetUserIds present → post-to-channel mode: GROUP_DM for participants,
+      //   reqChannelId stored as callUpdatesChannel (the broadcast target).
+      // Only reqChannelId → channel-scoped call (the whole channel is the call scope), no broadcast.
+      // Only targetUserIds → direct group call, GROUP_DM for participants, no broadcast.
+      const modeChanged = reqChannelId !== undefined || targetUserIds !== undefined;
+      const newIsPostCallUpdatesMode = !!(reqChannelId && targetUserIds?.length);
+
       let resolvedChannelId: string | undefined;
-      if (reqChannelId) {
-        resolvedChannelId = reqChannelId;
-        logger.info(`[updateScheduledCall] using explicit channelId=${resolvedChannelId}`);
-      } else if (targetUserIds !== undefined && targetUserIds.length > 0) {
-        logger.info(`[updateScheduledCall] resolving DM channel for targetUserIds=${JSON.stringify(targetUserIds)}`);
-        resolvedChannelId = await repositories.channels.findOrCreateDMChannel(
-          userId,
-          targetUserIds,
-          repositories.channelParticipants,
-          req.user!.workspaceId!,
-          title ?? call.title ?? undefined,
-        );
-        logger.info(`[updateScheduledCall] resolvedChannelId from DM lookup/create=${resolvedChannelId}`);
+      let newCallUpdatesChannel: string | null | undefined; // undefined = don't touch
+
+      if (modeChanged) {
+        if (newIsPostCallUpdatesMode) {
+          // Post-to-channel: create a GROUP_DM for the explicit participants.
+          logger.info(`[updateScheduledCall] post-to-channel: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
+          resolvedChannelId = await repositories.channels.findOrCreateDMChannel(
+            userId,
+            targetUserIds!,
+            repositories.channelParticipants,
+            req.user!.workspaceId!,
+            title ?? call.title ?? undefined,
+          );
+          newCallUpdatesChannel = reqChannelId!;
+        } else if (reqChannelId) {
+          // Channel-scoped call: the channel itself defines who is in the call.
+          resolvedChannelId = reqChannelId;
+          newCallUpdatesChannel = null;
+        } else if (targetUserIds !== undefined && targetUserIds.length > 0) {
+          // Direct group call with no broadcast channel.
+          logger.info(`[updateScheduledCall] group call: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
+          resolvedChannelId = await repositories.channels.findOrCreateDMChannel(
+            userId,
+            targetUserIds,
+            repositories.channelParticipants,
+            req.user!.workspaceId!,
+            title ?? call.title ?? undefined,
+          );
+          newCallUpdatesChannel = null;
+        }
+        logger.info(`[updateScheduledCall] resolvedChannelId=${resolvedChannelId} newCallUpdatesChannel=${newCallUpdatesChannel}`);
       } else {
-        logger.info(`[updateScheduledCall] no channelId change requested — keeping existing channelId=${call.channelId}`);
+        logger.info(`[updateScheduledCall] no channel/participant change — keeping existing channelId=${call.channelId}`);
       }
 
       // Compute participant delta when targetUserIds is provided, OR when the channel changes
@@ -512,6 +567,7 @@ export class ScheduleCallController {
         channelId: resolvedChannelId,
         addUserIds,
         removeUserIds,
+        callUpdatesChannel: newCallUpdatesChannel,
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
@@ -624,21 +680,46 @@ export class ScheduleCallController {
         return;
       }
 
-      // Resolve the channel: explicit channelId → find/create DM from targetUserIds → keep existing
+      // Resolve the channel and callUpdatesChannel based on what the user changed.
+      // Both reqChannelId and targetUserIds present → post-to-channel mode: GROUP_DM for participants,
+      //   reqChannelId stored as callUpdatesChannel (the broadcast target).
+      // Only reqChannelId → channel-scoped call (the whole channel is the call scope), no broadcast.
+      // Only targetUserIds → direct group call, GROUP_DM for participants, no broadcast.
+      const seriesModeChanged = reqChannelId !== undefined || targetUserIds !== undefined;
+      const newIsPostCallUpdatesMode = !!(reqChannelId && targetUserIds?.length);
+
       let resolvedChannelId: string | undefined;
-      if (reqChannelId) {
-        resolvedChannelId = reqChannelId;
-        logger.info(`[updateRecurringSeries] using explicit channelId=${resolvedChannelId}`);
-      } else if (targetUserIds !== undefined && targetUserIds.length > 0) {
-        logger.info(`[updateRecurringSeries] resolving DM channel for targetUserIds=${JSON.stringify(targetUserIds)}`);
-        resolvedChannelId = await repositories.channels.findOrCreateDMChannel(
-          userId,
-          targetUserIds,
-          repositories.channelParticipants,
-          req.user!.workspaceId!,
-          title ?? series.title ?? undefined,
-        );
-        logger.info(`[updateRecurringSeries] resolvedChannelId from DM lookup/create=${resolvedChannelId}`);
+      let newCallUpdatesChannel: string | null | undefined; // undefined = don't touch
+
+      if (seriesModeChanged) {
+        if (newIsPostCallUpdatesMode) {
+          // Post-to-channel: create a GROUP_DM for the explicit participants.
+          logger.info(`[updateRecurringSeries] post-to-channel: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
+          resolvedChannelId = await repositories.channels.findOrCreateDMChannel(
+            userId,
+            targetUserIds!,
+            repositories.channelParticipants,
+            req.user!.workspaceId!,
+            title ?? series.title ?? undefined,
+          );
+          newCallUpdatesChannel = reqChannelId!;
+        } else if (reqChannelId) {
+          // Channel-scoped call: the channel itself defines who is in the call.
+          resolvedChannelId = reqChannelId;
+          newCallUpdatesChannel = null;
+        } else if (targetUserIds !== undefined && targetUserIds.length > 0) {
+          // Direct group call with no broadcast channel.
+          logger.info(`[updateRecurringSeries] group call: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
+          resolvedChannelId = await repositories.channels.findOrCreateDMChannel(
+            userId,
+            targetUserIds,
+            repositories.channelParticipants,
+            req.user!.workspaceId!,
+            title ?? series.title ?? undefined,
+          );
+          newCallUpdatesChannel = null;
+        }
+        logger.info(`[updateRecurringSeries] resolvedChannelId=${resolvedChannelId} newCallUpdatesChannel=${newCallUpdatesChannel}`);
       } else {
         logger.info(`[updateRecurringSeries] no channelId change — keeping existing channelId=${series.channelId}`);
       }
@@ -657,6 +738,7 @@ export class ScheduleCallController {
       if (timezone !== undefined) seriesUpdate.timezone = timezone;
       if (endsOn !== undefined) seriesUpdate.endsOn = new Date(endsOn);
       if (resolvedChannelId !== undefined) seriesUpdate.channelId = resolvedChannelId;
+      if (newCallUpdatesChannel !== undefined) seriesUpdate.callUpdatesChannel = newCallUpdatesChannel;
       // NOTE: We intentionally do NOT update startsOn. The original series.startsOn is the
       // RRULE dtstart anchor and must remain unchanged. The frontend may send startsOn as the
       // instance date, but overwriting the series start would corrupt the recurrence calculation.
@@ -685,7 +767,11 @@ export class ScheduleCallController {
           startsOn: series.startsOn,  // Use ORIGINAL startsOn, not the updated one
           recurrenceRule: recurrenceRule ?? updatedSeries.recurrenceRule,
         };
-        await recurringCallService.regenerateFutureInstances(seriesForRegeneration, baseDate);
+        // updatedSeries.callUpdatesChannel is already the correct value (series was just updated above).
+        await recurringCallService.regenerateFutureInstances(
+          seriesForRegeneration,
+          baseDate,
+        );
       } else {
         // No regeneration needed — cascade title, channelId, and/or time changes to ALL SCHEDULED instances
         // Update all SCHEDULED instances (not just future ones) to keep the series consistent
@@ -739,6 +825,9 @@ export class ScheduleCallController {
             logger.info(`[updateRecurringSeries] updated instance ${instance.id} time: ${existingStart.toISOString()} -> ${newStartsAt.toISOString()}`);
           }
         }
+
+        // Cascade callUpdatesChannel when mode changed — safe to use updateMany on a plain column
+        if (newCallUpdatesChannel !== undefined) instanceCascade.callUpdatesChannel = newCallUpdatesChannel;
 
         if (Object.keys(instanceCascade).length > 0 && allScheduledInstances.length > 0) {
           logger.info(`[updateRecurringSeries] cascading ${JSON.stringify(instanceCascade)} to ${allScheduledInstances.length} instances`);

@@ -1611,6 +1611,7 @@ export const callTable = table('calls')
     createdAt: number(),
     updatedAt: number(),
     metadata: json().optional(),
+    callUpdatesChannel: string().optional(),
   })
   .primaryKey('id');
 
@@ -1648,6 +1649,7 @@ export const recurringCallSeriesTable = table('recurring_call_series')
     endsOn: number().optional(),
     createdAt: number(),
     updatedAt: number(),
+    callUpdatesChannel: string().optional(),
   })
   .primaryKey('id');
 
