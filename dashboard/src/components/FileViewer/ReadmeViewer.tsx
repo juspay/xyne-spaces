@@ -4,7 +4,6 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import type { Components } from 'react-markdown';
-import 'highlight.js/styles/github.css';
 import { BaseViewerProps } from './utils';
 
 // Loading spinner

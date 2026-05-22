@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useMemo, memo, useCallback, useRef } from 'react';
 import type { BaseViewerProps } from './utils';
 import hljs from 'highlight.js';
-import 'highlight.js/styles/github.css';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import ReadmeViewer from './ReadmeViewer';
 
