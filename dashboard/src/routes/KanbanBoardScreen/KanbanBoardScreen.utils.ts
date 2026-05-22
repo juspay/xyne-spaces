@@ -421,6 +421,13 @@ export const applyTicketFilters = (
       }
     }
 
+    // Ticket type filter
+    if (filters.ticketTypes && filters.ticketTypes.length > 0) {
+      if (!ticket.ticketType || !filters.ticketTypes.includes(ticket.ticketType)) {
+        return false;
+      }
+    }
+
     // Dynamic form field filters
     if (filters.dynamicFields && formValuesByTicketId && formFieldsById) {
       const ticketFormValues = formValuesByTicketId.get(ticket.id);

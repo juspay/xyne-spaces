@@ -115,3 +115,90 @@ export const queueJiraImportTicketVespaJob = (ticketId: string, userId: string, 
     }
   });
 };
+
+export const queueJiraPurgeTicketVespaDeleteJob = (ticketId: string, userId: string, workspaceId?: string): void => {
+  vespaQueue.addJob({
+    schema: ticketSchema,
+    jobType: 'delete',
+    docId: ticketId,
+    userId,
+    ...(workspaceId ? { workspaceId } : {}),
+  }).catch(async (error) => {
+    logger.error('[JiraMigrationPurge] Error queuing Vespa delete job for ticket', error, { ticketId });
+    try {
+      await db.vespaInsertionLogs.create({
+        data: {
+          status: 'FAILED',
+          type: 'DELETE',
+          entityId: ticketId,
+          entityType: ticketSchema,
+          namespace: NAMESPACE,
+          errorMessage: `Failed to enqueue Vespa delete job: ${error instanceof Error ? error.message : String(error)}`,
+          errorDetails: JSON.stringify(error),
+          userId,
+          createdAt: new Date(),
+        },
+      });
+    } catch (dbError) {
+      logger.error('[JiraMigrationPurge] Failed to log Vespa ticket deletion error', dbError, { ticketId });
+    }
+  });
+};
+
+export const queueJiraPurgeMessageVespaDeleteJob = (messageId: string, userId: string, workspaceId?: string): void => {
+  vespaQueue.addJob({
+    schema: messageSchema,
+    jobType: 'delete',
+    docId: messageId,
+    userId,
+    ...(workspaceId ? { workspaceId } : {}),
+  }).catch(async (error) => {
+    logger.error('[JiraMigrationPurge] Error queuing Vespa delete job for message', error, { messageId });
+    try {
+      await db.vespaInsertionLogs.create({
+        data: {
+          status: 'FAILED',
+          type: 'DELETE',
+          entityId: messageId,
+          entityType: messageSchema,
+          namespace: NAMESPACE,
+          errorMessage: `Failed to enqueue Vespa delete job: ${error instanceof Error ? error.message : String(error)}`,
+          errorDetails: JSON.stringify(error),
+          userId,
+          createdAt: new Date(),
+        },
+      });
+    } catch (dbError) {
+      logger.error('[JiraMigrationPurge] Failed to log Vespa message deletion error', dbError, { messageId });
+    }
+  });
+};
+
+export const queueJiraPurgeAttachmentVespaDeleteJob = (attachmentId: string, userId: string, workspaceId?: string): void => {
+  vespaQueue.addJob({
+    schema: fileSchema,
+    jobType: 'delete',
+    docId: attachmentId,
+    userId,
+    ...(workspaceId ? { workspaceId } : {}),
+  }).catch(async (error) => {
+    logger.error('[JiraMigrationPurge] Error queuing Vespa delete job for attachment', error, { attachmentId });
+    try {
+      await db.vespaInsertionLogs.create({
+        data: {
+          status: 'FAILED',
+          type: 'DELETE',
+          entityId: attachmentId,
+          entityType: fileSchema,
+          namespace: NAMESPACE,
+          errorMessage: `Failed to enqueue Vespa delete job: ${error instanceof Error ? error.message : String(error)}`,
+          errorDetails: JSON.stringify(error),
+          userId,
+          createdAt: new Date(),
+        },
+      });
+    } catch (dbError) {
+      logger.error('[JiraMigrationPurge] Failed to log Vespa attachment deletion error', dbError, { attachmentId });
+    }
+  });
+};

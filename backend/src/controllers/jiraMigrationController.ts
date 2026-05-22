@@ -14,6 +14,11 @@ import { config } from '@/config/env';
 import { getCachedJiraUserEmailMappings } from '@/services/jira/jiraUserMapCsv';
 import { getCanvasUrl } from '@/services/canvasService';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import {
+  queueJiraPurgeAttachmentVespaDeleteJob,
+  queueJiraPurgeMessageVespaDeleteJob,
+  queueJiraPurgeTicketVespaDeleteJob,
+} from '@/services/jira/vespa';
 
 const db = DatabaseClient.getInstance();
 
@@ -196,14 +201,21 @@ export class JiraMigrationController {
         return;
       }
 
-      const { projectId, confirmText, dryRun } = req.body as {
+      const { projectId, confirmText, dryRun, externalSourceId, jiraProjectKey } = req.body as {
         projectId?: string;
         confirmText?: string;
         dryRun?: boolean;
+        externalSourceId?: string;
+        jiraProjectKey?: string;
       };
 
       if (!projectId) {
         res.status(400).json({ error: 'projectId is required' });
+        return;
+      }
+
+      if (!externalSourceId && !jiraProjectKey) {
+        res.status(400).json({ error: 'externalSourceId or jiraProjectKey is required to scope the purge to a specific Jira migration' });
         return;
       }
 
@@ -222,10 +234,26 @@ export class JiraMigrationController {
       });
       const channelIds = channels.map(c => c.id);
 
+      const normalizedJiraProjectKey = jiraProjectKey?.trim().toUpperCase();
       const externalSources = await db.externalSource.findMany({
-        where: { sourceType: 'jira', ...(channelIds.length > 0 ? { channelId: { in: channelIds } } : {}) },
-        select: { id: true, name: true, channelId: true },
+        where: {
+          sourceType: 'jira',
+          ...(channelIds.length > 0 ? { channelId: { in: channelIds } } : {}),
+          ...(externalSourceId
+            ? { id: externalSourceId }
+            : normalizedJiraProjectKey
+              ? { displayName: { contains: normalizedJiraProjectKey, mode: 'insensitive' } }
+              : {}),
+        },
+        select: { id: true, name: true, channelId: true, displayName: true },
       });
+
+      if (externalSources.length === 0) {
+        res.status(404).json({
+          error: 'No Jira migration source found for this project with the given externalSourceId/jiraProjectKey',
+        });
+        return;
+      }
       const externalSourceIds = externalSources.map(s => s.id);
 
       const externalMessages = externalSourceIds.length
@@ -249,7 +277,7 @@ export class JiraMigrationController {
             select: { id: true, conversationId: true },
           })
         : [];
-      const conversationIds = Array.from(new Set(tickets.map(t => t.conversationId).filter(Boolean)));
+      const conversationIds = Array.from(new Set(tickets.map(t => t.conversationId).filter(Boolean))) as string[];
 
       const messageIds = Array.from(
         new Set(
@@ -269,6 +297,8 @@ export class JiraMigrationController {
 
       const stats = {
         projectId,
+        jiraProjectKey: normalizedJiraProjectKey ?? externalSources[0]?.displayName ?? null,
+        externalSourceIds,
         channelCount: channelIds.length,
         jiraExternalSourceCount: externalSources.length,
         externalMessageCount: externalMessages.length,
@@ -278,47 +308,119 @@ export class JiraMigrationController {
         mappedAttachmentCount: attachmentIds.length,
       };
 
-      if (dryRun !== false) {
+      if (isDryRun) {
         res.json({ success: true, data: { dryRun: true, stats, externalSources } });
         return;
       }
 
-      // Throttle ticket deletes to avoid DB overload: 50 ticketIds per second.
-      const ticketChunkSize = 50;
-      const ticketChunkDelayMs = 1000;
+      const jobId = randomUUID();
+      await jiraMigrationProgressService.createPurgeJob(jobId, projectId, {
+        externalMessageCount: externalMessages.length,
+        ticketCount: ticketIds.length,
+        messageCount: messageIds.length,
+        attachmentCount: attachmentIds.length,
+        conversationCount: conversationIds.length,
+      });
 
-      // Phase 1: remove external mappings + messages/conversations/attachments.
-      // Chunked to avoid long-running/unbounded transactions on large migrations.
+      res.json({ success: true, data: { jobId, stats } });
+
+      void this.runPurgeJob(jobId, projectId, {
+        actorUserId,
+        externalSourceIds,
+        externalMessageCount: externalMessages.length,
+        messageIds,
+        conversationIds,
+        attachmentIds,
+        ticketIds,
+        stats,
+      });
+    } catch (error) {
+      logger.error('Jira migration purge project failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to purge project migration' });
+    }
+  };
+
+  private async runPurgeJob(
+    jobId: string,
+    projectId: string,
+    data: {
+      actorUserId: string;
+      externalSourceIds: string[];
+      externalMessageCount: number;
+      messageIds: string[];
+      conversationIds: string[];
+      attachmentIds: string[];
+      ticketIds: string[];
+      stats: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    const { actorUserId, externalSourceIds, externalMessageCount, messageIds, conversationIds, attachmentIds, ticketIds, stats } = data;
+
+    try {
+      await jiraMigrationProgressService.patchJob(jobId, {
+        status: 'running',
+        currentStep: 'purging_external_mappings',
+      });
+
+      let processedUnits = 0;
+      let deletedExternalMessages = 0;
+      let deletedMessages = 0;
+      let deletedAttachments = 0;
+      let deletedTickets = 0;
+
       const phase1ExternalSourceChunkSize = 500;
       const phase1MessageChunkSize = 1000;
       const phase1ConversationChunkSize = 100;
       const phase1AttachmentChunkSize = 1000;
+      const ticketChunkSize = 50;
+      const ticketChunkDelayMs = 1000;
 
-      // 1) External mappings (safe to delete outside a single transaction).
+      // Phase 1a: external mappings.
       if (externalSourceIds.length) {
-        const externalSourceChunks = chunkArray(externalSourceIds, phase1ExternalSourceChunkSize);
-        for (const chunk of externalSourceChunks) {
+        const chunks = chunkArray(externalSourceIds, phase1ExternalSourceChunkSize);
+        for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          await db.externalMessage.deleteMany({ where: { externalSourceId: { in: chunk } } });
+          const result = await db.externalMessage.deleteMany({ where: { externalSourceId: { in: chunk } } });
+          deletedExternalMessages += result.count;
         }
       }
 
-      // 2) Reactions tied to the messages we mapped from Jira comments.
+      processedUnits += externalMessageCount;
+      await jiraMigrationProgressService.patchJob(jobId, { processedIssues: processedUnits });
+
+      await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_reactions' });
+
+      // Phase 1b: reactions tied to Jira comment messages.
       if (messageIds.length) {
-        const messageChunks = chunkArray(messageIds, phase1MessageChunkSize);
-        for (const chunk of messageChunks) {
+        const chunks = chunkArray(messageIds, phase1MessageChunkSize);
+        for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          await db.$transaction(async tx => {
-            await tx.reactionCount.deleteMany({ where: { messageId: { in: chunk } } });
-            await tx.reaction.deleteMany({ where: { messageId: { in: chunk } } });
-          });
+          const [, , , attachmentResult, messageResult] = await db.$transaction([
+            db.reactionCount.deleteMany({ where: { messageId: { in: chunk } } }),
+            db.reaction.deleteMany({ where: { messageId: { in: chunk } } }),
+            db.messageSearch.deleteMany({ where: { messageId: { in: chunk } } }),
+            db.messageAttachment.deleteMany({ where: { entityId: { in: chunk } } }),
+            db.message.deleteMany({ where: { messageId: { in: chunk } } }),
+          ]);
+          deletedAttachments += attachmentResult.count;
+          deletedMessages += messageResult.count;
+
+          // Best-effort: remove messages from Vespa search index.
+          for (const messageId of chunk) {
+            queueJiraPurgeMessageVespaDeleteJob(messageId, actorUserId);
+          }
+
+          processedUnits += chunk.length;
+          await jiraMigrationProgressService.patchJob(jobId, { processedIssues: processedUnits });
         }
       }
 
-      // 3) Conversation graph (participants, attachments, messages, conversations).
+      await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_conversations' });
+
+      // Phase 1c: conversation graph.
       if (conversationIds.length) {
-        const conversationChunks = chunkArray(conversationIds, phase1ConversationChunkSize);
-        for (const chunk of conversationChunks) {
+        const chunks = chunkArray(conversationIds, phase1ConversationChunkSize);
+        for (const chunk of chunks) {
           if (chunk.length === 0) continue;
           await db.$transaction(async tx => {
             await tx.conversationParticipant.deleteMany({ where: { conversationId: { in: chunk } } });
@@ -329,47 +431,68 @@ export class JiraMigrationController {
         }
       }
 
-      // 4) Defensive cleanup for mapped attachment ids (typically already covered by conversation deletes above).
+      processedUnits += conversationIds.length;
+      await jiraMigrationProgressService.patchJob(jobId, { processedIssues: processedUnits });
+
+      // Phase 1d: defensive attachment cleanup.
       if (attachmentIds.length) {
-        // Only delete attachments for conversations in this project to avoid accidentally deleting attachments from
-        // other conversations if `attachmentIds` contains unrelated IDs.
-        if (conversationIds.length === 0) {
-          logger.warn('[JiraMigration] purgeProjectMigration: attachmentIds present but no conversations found; skipping attachmentId cleanup', {
-            projectId,
-            attachmentIdsCount: attachmentIds.length,
-          });
-        } else {
-        const attachmentChunks = chunkArray(attachmentIds, phase1AttachmentChunkSize);
-        for (const chunk of attachmentChunks) {
+        const chunks = chunkArray(attachmentIds, phase1AttachmentChunkSize);
+        for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          await db.messageAttachment.deleteMany({
-            where: { id: { in: chunk }, conversationId: { in: conversationIds } },
+
+          // Delete by attachment row id. We intentionally do NOT require conversationIds here because
+          // comment attachments may exist even when conversationIds cannot be resolved.
+          const attachmentResult = await db.messageAttachment.deleteMany({
+            where: { id: { in: chunk } },
           });
-        }
+          deletedAttachments += attachmentResult.count;
+
+          // Best-effort: remove attachments from Vespa search index.
+          for (const attachmentId of chunk) {
+            queueJiraPurgeAttachmentVespaDeleteJob(attachmentId, actorUserId);
+          }
+
+          processedUnits += chunk.length;
+          await jiraMigrationProgressService.patchJob(jobId, { processedIssues: processedUnits });
         }
       }
 
-      // Phase 2: ticket-related deletes in chunks.
+      await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_tickets' });
+
+      // Phase 2: ticket-related deletes in chunks with throttle.
       const ticketChunks = chunkArray(ticketIds, ticketChunkSize);
       for (let index = 0; index < ticketChunks.length; index += 1) {
         const chunk = ticketChunks[index];
         if (chunk.length === 0) continue;
 
-        await db.$transaction(async tx => {
-          await tx.ticketReferenceMapping.deleteMany({
+        const ticketTxnResults = await db.$transaction([
+          db.ticketReferenceMapping.deleteMany({
             where: { OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }] },
-          });
-          await tx.ticketActivity.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.ticketAssignment.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.ticketEntityMapping.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.ticketTag.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.ticketStageEta.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } });
-          await tx.emailRead.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.workflow.deleteMany({ where: { ticketId: { in: chunk } } });
-          await tx.ticket.deleteMany({ where: { id: { in: chunk } } });
+          }),
+          db.ticketActivity.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketAssignment.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketEntityMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketTag.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketStageEta.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.subTicket.updateMany({ where: { mappedTicketId: { in: chunk } }, data: { mappedTicketId: null } }),
+          db.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } }),
+          db.emailRead.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.workflow.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticket.deleteMany({ where: { id: { in: chunk } } }),
+        ]);
+        const ticketDeleteResult = ticketTxnResults[ticketTxnResults.length - 1];
+        deletedTickets += ticketDeleteResult.count;
+
+        // Best-effort: remove tickets from Vespa search index so UI/search doesn't show stale results.
+        for (const ticketId of chunk) {
+          queueJiraPurgeTicketVespaDeleteJob(ticketId, actorUserId);
+        }
+
+        processedUnits += chunk.length;
+        await jiraMigrationProgressService.patchJob(jobId, {
+          processedIssues: processedUnits,
         });
 
         if (index < ticketChunks.length - 1) {
@@ -377,15 +500,67 @@ export class JiraMigrationController {
         }
       }
 
+      await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_sources' });
+
       // Phase 3: remove Jira external sources last.
       if (externalSourceIds.length) {
         await db.externalSource.deleteMany({ where: { id: { in: externalSourceIds } } });
       }
 
-      res.json({ success: true, data: { dryRun: false, stats } });
+      const remainingExternalMessageCount = externalSourceIds.length
+        ? await db.externalMessage.count({ where: { externalSourceId: { in: externalSourceIds } } })
+        : 0;
+      const remainingTicketCount = ticketIds.length ? await db.ticket.count({ where: { id: { in: ticketIds } } }) : 0;
+      const remainingMessageCount = messageIds.length
+        ? await db.message.count({ where: { messageId: { in: messageIds } } })
+        : 0;
+      const remainingAttachmentCount = attachmentIds.length
+        ? await db.messageAttachment.count({ where: { id: { in: attachmentIds } } })
+        : 0;
+
+      if (
+        remainingExternalMessageCount > 0 ||
+        remainingTicketCount > 0 ||
+        remainingMessageCount > 0 ||
+        remainingAttachmentCount > 0
+      ) {
+        const errorMessage = `Purge incomplete: remaining externalMessages=${remainingExternalMessageCount} tickets=${remainingTicketCount} messages=${remainingMessageCount} attachments=${remainingAttachmentCount}`;
+        logger.error('[JiraMigration] Purge job completed with leftovers', {
+          jobId,
+          projectId,
+          errorMessage,
+          deletedExternalMessages,
+          deletedTickets,
+          deletedMessages,
+          deletedAttachments,
+        });
+        await jiraMigrationProgressService.patchJob(jobId, {
+          status: 'failed',
+          currentStep: 'failed',
+          completedAt: new Date().toISOString(),
+          errorMessage,
+          processedIssues: processedUnits,
+        });
+        return;
+      }
+
+      await jiraMigrationProgressService.patchJob(jobId, {
+        status: 'completed',
+        currentStep: 'completed',
+        completedAt: new Date().toISOString(),
+        processedIssues: processedUnits,
+        importedTickets: ticketIds.length,
+      });
+
+      logger.info('[JiraMigration] Purge job completed', { jobId, projectId, stats });
     } catch (error) {
-      logger.error('Jira migration purge project failed', error);
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to purge project migration' });
+      logger.error('[JiraMigration] Background purge job failed', error, { jobId, projectId });
+      await jiraMigrationProgressService.patchJob(jobId, {
+        status: 'failed',
+        currentStep: 'failed',
+        completedAt: new Date().toISOString(),
+        errorMessage: error instanceof Error ? error.message : 'Unknown purge error',
+      });
     }
   };
 

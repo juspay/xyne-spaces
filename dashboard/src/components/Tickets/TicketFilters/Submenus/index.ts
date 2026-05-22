@@ -6,3 +6,4 @@ export { BoardSubmenu } from './BoardSubmenu/BoardSubmenu';
 export { TagsSubmenu } from './TagsSubmenu/TagsSubmenu';
 export { StagesSubmenu } from './StagesSubmenu/StagesSubmenu';
 export { DynamicFieldSubmenu } from './DynamicFieldSubmenu/DynamicFieldSubmenu';
+export { TicketTypeSubmenu } from './TicketTypeSubmenu/TicketTypeSubmenu';

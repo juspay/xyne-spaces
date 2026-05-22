@@ -45,6 +45,47 @@ class JiraMigrationProgressService {
     return `jira:migration:job:${jobId}`;
   }
 
+  async createPurgeJob(
+    jobId: string,
+    projectId: string,
+    totals: { externalMessageCount: number; ticketCount: number; messageCount?: number; attachmentCount?: number; conversationCount?: number },
+  ): Promise<JiraMigrationJobProgress> {
+    const progress: JiraMigrationJobProgress = {
+      jobId,
+      status: 'queued',
+      controlStatus: 'running',
+      jiraProjectKey: `purge:${projectId}`,
+      targetProjectId: projectId,
+      targetBoardId: '',
+      targetChannelId: '',
+      stageSequence: undefined,
+      // For purge, "totalIssues" is repurposed as total work units (across phases).
+      totalIssues:
+        (totals.externalMessageCount || 0) +
+        (totals.messageCount || 0) +
+        (totals.attachmentCount || 0) +
+        (totals.conversationCount || 0) +
+        (totals.ticketCount || 0),
+      processedIssues: 0,
+      importedTickets: 0,
+      skippedTickets: 0,
+      importedComments: 0,
+      skippedComments: 0,
+      importedAttachments: 0,
+      skippedAttachments: 0,
+      currentIssueKey: null,
+      currentStep: 'queued',
+      warnings: [],
+      issueResults: [],
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      completedAt: null,
+    };
+
+    await this.setProgress(progress);
+    return progress;
+  }
+
   async createJob(jobId: string, input: JiraMigrationExecuteInput): Promise<JiraMigrationJobProgress> {
     const progress: JiraMigrationJobProgress = {
       jobId,

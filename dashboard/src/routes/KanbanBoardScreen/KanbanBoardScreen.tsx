@@ -142,6 +142,9 @@ function valuesToFilters(
       case 'stages':
         result.stages = [...(result.stages ?? []), fieldValue];
         break;
+      case 'ticketTypes':
+        result.ticketTypes = [...(result.ticketTypes ?? []), fieldValue];
+        break;
       case 'dueDateStart':
         result.dueDateStart = Number(fieldValue);
         break;
