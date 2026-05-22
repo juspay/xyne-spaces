@@ -295,10 +295,13 @@ export interface JiraMigrationPurgeProjectMigrationRequest {
   projectId: string;
   confirmText?: string;
   dryRun?: boolean;
+  externalSourceId?: string;
+  jiraProjectKey?: string;
 }
 
 export interface JiraMigrationPurgeProjectMigrationResponse {
-  dryRun: boolean;
+  dryRun?: boolean;
+  jobId?: string;
   stats: {
     projectId: string;
     channelCount: number;

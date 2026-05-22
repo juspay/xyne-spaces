@@ -5,7 +5,13 @@ import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { Switch } from '../../ui/Switch';
-import { SavedConfigContextType, SavedConfigVisibility, SavedConfigEntityName } from '@xyne/shared';
+import {
+  SavedConfigContextType,
+  SavedConfigVisibility,
+  SavedConfigEntityName,
+  LookupType,
+  BaseTicketType,
+} from '@xyne/shared';
 import {
   ListFilter,
   ChevronRight,
@@ -23,6 +29,7 @@ import {
   X,
   Circle,
   Loader2,
+  Layers,
 } from 'lucide-react';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -36,6 +43,7 @@ import {
   TagsSubmenu,
   DynamicFieldSubmenu,
   StagesSubmenu,
+  TicketTypeSubmenu,
 } from './Submenus';
 import { TicketFiltersProps, DateRange } from './types';
 import type { TicketFilters } from './types';
@@ -69,6 +77,7 @@ const ARRAY_FILTER_KEYS = [
   'qaAssigned',
   'tags',
   'stages',
+  'ticketTypes',
 ] as const satisfies (keyof TicketFilters)[];
 
 const NUMERIC_FILTER_KEYS = [
@@ -88,6 +97,7 @@ const FILTER_MENU_ITEMS: FilterMenuItem[] = [
   { id: 'createdAt', label: 'Created At', icon: Calendar, filterKey: 'createdAt' },
   { id: 'tags', label: 'Tags', icon: Tag, filterKey: 'tags' },
   { id: 'stages', label: 'Stages', icon: Circle, filterKey: 'stages' },
+  { id: 'ticketTypes', label: 'Task Type', icon: Layers, filterKey: 'ticketTypes' },
 ];
 
 export const TicketFiltersDropdown = ({
@@ -184,6 +194,17 @@ export const TicketFiltersDropdown = ({
     }
     return allBoardsRaw;
   }, [allBoardsRaw, availableBoards, isMyTicketsMode]);
+
+  const [ticketTypesResult] = useCachedQuery(
+    queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
+  );
+
+  const availableTicketTypes = useMemo(() => {
+    if (ticketTypesResult && ticketTypesResult.length > 0) {
+      return ticketTypesResult.map(t => t.value).filter((value): value is string => Boolean(value));
+    }
+    return Object.values(BaseTicketType);
+  }, [ticketTypesResult]);
 
   // Derive selectedBoard from fetched boards
   const selectedBoard = useMemo(() => {
@@ -444,6 +465,7 @@ export const TicketFiltersDropdown = ({
     if (filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined) count++;
     if (filters.tags?.length) count++;
     if (filters.stages?.length) count++;
+    if (filters.ticketTypes?.length) count++;
     if (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) {
       count += Object.keys(filters.dynamicFields).length;
     }
@@ -667,6 +689,14 @@ export const TicketFiltersDropdown = ({
             selectedStages={filters.stages || []}
             onChange={(stages: string[]) => handleFilterChange('stages', stages)}
             availableStages={availableStages ?? []}
+          />
+        );
+      case 'ticketTypes':
+        return (
+          <TicketTypeSubmenu
+            selectedTypes={filters.ticketTypes || []}
+            onChange={(types: string[]) => handleFilterChange('ticketTypes', types)}
+            availableTypes={availableTicketTypes}
           />
         );
       default:

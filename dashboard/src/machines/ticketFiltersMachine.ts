@@ -119,6 +119,9 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const stages = params.getAll('stages');
   if (stages.length) filters.stages = stages;
 
+  const ticketTypes = params.getAll('ticketTypes');
+  if (ticketTypes.length) filters.ticketTypes = ticketTypes;
+
   const dueDateStart = params.get('dueDateStart');
   if (dueDateStart) filters.dueDateStart = Number(dueDateStart);
 
@@ -186,6 +189,7 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   params.delete('qaAssigned');
   params.delete('tags');
   params.delete('stages');
+  params.delete('ticketTypes');
   params.delete('dueDateStart');
   params.delete('dueDateEnd');
   params.delete('createdDateStart');
@@ -210,6 +214,7 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   filters.qaAssigned?.forEach((u: string) => params.append('qaAssigned', u));
   filters.tags?.forEach((t: string) => params.append('tags', t));
   filters.stages?.forEach((s: string) => params.append('stages', s));
+  filters.ticketTypes?.forEach((t: string) => params.append('ticketTypes', t));
 
   if (filters.dueDateStart !== undefined) {
     params.set('dueDateStart', filters.dueDateStart.toString());

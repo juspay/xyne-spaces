@@ -2650,6 +2650,18 @@ export class JiraMigrationImportService {
       })
       .map(field => field.id);
 
+    const sprintFieldIds = fieldDefinitions
+      .filter(field => {
+        const normalizedCustom = normalize(field.schema?.custom || '');
+        const normalizedName = normalize(field.name || '');
+        return normalizedCustom.includes('ghsprint') || normalizedName === 'sprint';
+      })
+      .map(field => field.id);
+
+    for (const sprintFieldId of sprintFieldIds) {
+      skippedCustomFieldIds.add(sprintFieldId);
+    }
+
     const {
       externalSourceId,
       created: externalSourceCreated,
@@ -3063,17 +3075,28 @@ export class JiraMigrationImportService {
             );
 
             const createdTicketId = ticket.id;
-            if (Array.isArray(issue.fields.labels) && issue.fields.labels.length > 0) {
-              const uniqueLabels = [...new Set((issue.fields.labels as string[]).filter(Boolean))];
-              if (uniqueLabels.length > 0) {
-                await db.ticketTag.createMany({
-                  data: uniqueLabels.map(name => ({
-                    ticketId: createdTicketId,
-                    name,
-                  })),
-                  skipDuplicates: true,
-                });
-              }
+            const allTagNames: string[] = [];
+
+            if (Array.isArray(issue.fields.labels)) {
+              allTagNames.push(...(issue.fields.labels as string[]).filter(Boolean));
+            }
+
+            for (const sprintFieldId of sprintFieldIds) {
+              const sprintValue = issue.fields[sprintFieldId];
+              if (sprintValue == null) continue;
+              const sprintNames = extractMeaningfulJiraCustomFieldValues(sprintValue);
+              allTagNames.push(...sprintNames);
+            }
+
+            const uniqueTagNames = [...new Set(allTagNames.filter(Boolean))];
+            if (uniqueTagNames.length > 0) {
+              await db.ticketTag.createMany({
+                data: uniqueTagNames.map(name => ({
+                  ticketId: createdTicketId,
+                  name,
+                })),
+                skipDuplicates: true,
+              });
             }
 
             importedTickets += 1;

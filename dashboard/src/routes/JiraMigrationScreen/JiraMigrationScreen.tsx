@@ -207,18 +207,37 @@ const JiraMigrationScreen = (): ReactElement => {
   const [isCreatorChangeLoading, setIsCreatorChangeLoading] = useState(false);
   const [creatorChangeSearch, setCreatorChangeSearch] = useState('');
   const [purgeProjectId, setPurgeProjectId] = useState('');
+  const [purgeExternalSourceId, setPurgeExternalSourceId] = useState('');
   const [purgeConfirmText, setPurgeConfirmText] = useState('');
   const [purgeDryRun, setPurgeDryRun] = useState(true);
   const [purgeResult, setPurgeResult] = useState<JiraMigrationPurgeProjectMigrationResponse | null>(
     null,
   );
   const [isPurgeLoading, setIsPurgeLoading] = useState(false);
+  const [purgeJobId, setPurgeJobId] = useState<string | null>(null);
+  const [purgeJobProgress, setPurgeJobProgress] = useState<JiraMigrationJobProgress | null>(null);
   const [scanResolvedMappings, setScanResolvedMappings] = useState<
     JiraMigrationResolveUsersResponse['resolvedUserMappings']
   >([]);
   const [scanResolvedMappingsTruncated, setScanResolvedMappingsTruncated] = useState(false);
   const [resolvedUsersPage, setResolvedUsersPage] = useState(0);
   const RESOLVED_USERS_PER_PAGE = 50;
+
+  const purgeChannels = useChannelsByProjectId(purgeProjectId || undefined);
+  const purgeChannelIdSet = useMemo(
+    () => new Set(purgeChannels.map(channel => channel.id)),
+    [purgeChannels],
+  );
+  const purgeMigrationHistory = useMemo(
+    () => migrationHistory.filter(item => purgeChannelIdSet.has(item.targetChannelId)),
+    [migrationHistory, purgeChannelIdSet],
+  );
+
+  useEffect(() => {
+    if (!purgeExternalSourceId) return;
+    if (purgeMigrationHistory.some(item => item.externalSourceId === purgeExternalSourceId)) return;
+    setPurgeExternalSourceId('');
+  }, [purgeExternalSourceId, purgeMigrationHistory]);
 
   // Board mode state
   const [jiraBoards, setJiraBoards] = useState<JiraBoard[]>([]);
@@ -370,6 +389,10 @@ const JiraMigrationScreen = (): ReactElement => {
       toast.error('Select a project to purge');
       return;
     }
+    if (!purgeExternalSourceId.trim()) {
+      toast.error('Select a Jira migration source to purge');
+      return;
+    }
     if (!purgeDryRun) {
       if (!purgeConfirmText.trim()) {
         toast.error(`Type 'DELETE ${purgeProjectId}' to confirm`);
@@ -381,6 +404,7 @@ const JiraMigrationScreen = (): ReactElement => {
     try {
       const payload = {
         projectId: purgeProjectId.trim(),
+        externalSourceId: purgeExternalSourceId.trim(),
         dryRun: purgeDryRun,
         ...(!purgeDryRun && purgeConfirmText.trim()
           ? { confirmText: purgeConfirmText.trim() }
@@ -388,11 +412,18 @@ const JiraMigrationScreen = (): ReactElement => {
       };
       const result = await jiraMigrationService.purgeProjectMigration(payload);
       setPurgeResult(result);
-      toast.success(purgeDryRun ? 'Dry run complete' : 'Purge complete');
+      if (result.jobId) {
+        setPurgeJobId(result.jobId);
+        setPurgeJobProgress(null);
+        toast.success('Purge started — running in background');
+        // isPurgeLoading stays true until polling completes
+      } else {
+        toast.success('Dry run complete');
+        setIsPurgeLoading(false);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to purge migration';
       toast.error('Purge failed', { description: message });
-    } finally {
       setIsPurgeLoading(false);
     }
   };
@@ -736,6 +767,49 @@ const JiraMigrationScreen = (): ReactElement => {
       window.clearInterval(intervalId);
     };
   }, [activeJobId, resolvedDateFrom, ticketRange]);
+
+  useEffect(() => {
+    if (!purgeJobId) return undefined;
+
+    let cancelled = false;
+
+    const pollPurgeStatus = async (): Promise<void> => {
+      try {
+        const status = await jiraMigrationService.getMigrationStatus(purgeJobId);
+        if (cancelled) return;
+        setPurgeJobProgress(status);
+
+        if (status.status === 'completed' || status.status === 'failed') {
+          setPurgeJobId(null);
+          setIsPurgeLoading(false);
+          if (status.status === 'completed') {
+            toast.success('Purge completed');
+            void loadMigrationHistory();
+          } else {
+            toast.error('Purge failed', {
+              description: status.errorMessage || 'Background purge job failed',
+            });
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : 'Failed to fetch purge status';
+        toast.error('Purge status check failed', { description: message });
+        setPurgeJobId(null);
+        setIsPurgeLoading(false);
+      }
+    };
+
+    void pollPurgeStatus();
+    const intervalId = window.setInterval(() => {
+      void pollPurgeStatus();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [purgeJobId]);
 
   const canPreview =
     jiraProjectKey.trim() !== '' &&
@@ -1633,6 +1707,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       onSelect={value => {
                         const next = value ?? '';
                         setPurgeProjectId(next);
+                        setPurgeExternalSourceId('');
                         setPurgeConfirmText('');
                         setPurgeResult(null);
                       }}
@@ -1641,6 +1716,39 @@ const JiraMigrationScreen = (): ReactElement => {
                       width='100%'
                       testId='jira-purge-project'
                     />
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Jira Migration Source
+                    </p>
+                    <EntitySelector
+                      options={purgeMigrationHistory.map(item => ({
+                        value: item.externalSourceId,
+                        label: item.jiraProjectKey,
+                        icon: null,
+                        subtitle: item.displayName,
+                      }))}
+                      selectedValue={purgeExternalSourceId || null}
+                      onSelect={value => {
+                        setPurgeExternalSourceId(value ?? '');
+                        setPurgeConfirmText('');
+                        setPurgeResult(null);
+                      }}
+                      placeholder={
+                        purgeProjectId
+                          ? purgeMigrationHistory.length === 0
+                            ? 'No migrations found for this project'
+                            : 'Select Jira project'
+                          : 'Select a project first'
+                      }
+                      searchPlaceholder='Search Jira projects...'
+                      width='100%'
+                      testId='jira-purge-external-source'
+                    />
+                    <p className='mt-2 text-xs text-muted-foreground'>
+                      Select the specific Jira project migration to purge.
+                    </p>
                   </div>
 
                   <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
@@ -1771,9 +1879,57 @@ const JiraMigrationScreen = (): ReactElement => {
                       </div>
                       <div>
                         <div className='text-[11px] uppercase text-muted-foreground'>Dry Run</div>
-                        <div className='font-semibold'>{String(purgeResult.dryRun)}</div>
+                        <div className='font-semibold'>{String(purgeResult.dryRun ?? false)}</div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {purgeJobProgress && (
+                  <div className='rounded-2xl border border-border/70 bg-card/60 p-4 text-sm space-y-2'>
+                    <div className='flex items-center justify-between'>
+                      <span className='text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                        Purge Progress
+                      </span>
+                      <span
+                        className={cn(
+                          'text-xs font-medium px-2 py-0.5 rounded-full',
+                          purgeJobProgress.status === 'completed'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : purgeJobProgress.status === 'failed'
+                              ? 'bg-rose-100 text-rose-700'
+                              : 'bg-sky-100 text-sky-700',
+                        )}
+                      >
+                        {purgeJobProgress.status}
+                      </span>
+                    </div>
+                    {purgeJobProgress.currentStep && (
+                      <p className='text-xs text-muted-foreground font-mono'>
+                        {purgeJobProgress.currentStep}
+                      </p>
+                    )}
+                    {purgeJobProgress.totalIssues !== null && purgeJobProgress.totalIssues > 0 && (
+                      <div className='space-y-1'>
+                        <div className='flex justify-between text-xs text-muted-foreground'>
+                          <span>Tickets deleted</span>
+                          <span>
+                            {purgeJobProgress.processedIssues} / {purgeJobProgress.totalIssues}
+                          </span>
+                        </div>
+                        <div className='h-1.5 rounded-full bg-muted overflow-hidden'>
+                          <div
+                            className='h-full rounded-full bg-sky-500 transition-all'
+                            style={{
+                              width: `${Math.round((purgeJobProgress.processedIssues / purgeJobProgress.totalIssues) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {purgeJobProgress.errorMessage && (
+                      <p className='text-xs text-rose-600'>{purgeJobProgress.errorMessage}</p>
+                    )}
                   </div>
                 )}
               </div>
