@@ -2588,6 +2588,10 @@ export const queries = defineQueries({
       .orderBy('joinedAt', 'asc');
   }),
 
+  getOrgMemberById: defineQuery(z.object({ memberId: z.string() }), ({ args: { memberId } }) => {
+    return zql.org_members.where('memberId', memberId).one();
+  }),
+
   // Get all workspace invitations (filtered client-side by workspaceId)
   getAllInvitations: defineQuery(z.object({}), () => {
     return zql.invitations.orderBy('createdAt', 'desc');
