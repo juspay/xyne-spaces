@@ -5,7 +5,7 @@ import { PencilIcon } from 'lucide-react';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { formatRelativeTime } from '../../../utils/dateUtils';
 import { ViewNewerRepliesButton } from '../../ui/MessageBubble/ThreadMessageIndicators';
-import { ConversationParticipation } from '@xyne/shared';
+import { ConversationParticipation, ConversationParticipant } from '@xyne/shared';
 
 const ReplyLayout: React.FC<{
   replies: ThreadData;
@@ -56,12 +56,12 @@ const ReplyLayout: React.FC<{
 
   const rawParticipants = replies.conversation?.participants;
   const participantsArray = Array.isArray(rawParticipants)
-    ? rawParticipants
+    ? (rawParticipants as ConversationParticipant[])
     : rawParticipants
-      ? [rawParticipants]
+      ? [rawParticipants as ConversationParticipant]
       : [];
   const participants = participantsArray.filter(
-    p => p.participationType === ConversationParticipation.AUTHOR,
+    (p: ConversationParticipant) => p.participationType === ConversationParticipation.AUTHOR,
   );
 
   return (
@@ -86,7 +86,7 @@ const ReplyLayout: React.FC<{
         {/* Participant Avatars */}
         {participants.length > 0 && (
           <AvatarGroup
-            userIds={participants.map(participant => participant.userId)}
+            userIds={participants.map((participant: ConversationParticipant) => participant.userId)}
             size='sm'
             count={3}
           />

@@ -603,6 +603,9 @@ export class SlackController {
 				userType: user.userType,
 				status: user.status,
 				joined: user.createdAt,
+				statusEmoji: user.statusEmoji,
+				statusContent: user.statusContent,
+				statusExpiryAt: user.statusExpiryAt,
 			}),
 		);
 	});

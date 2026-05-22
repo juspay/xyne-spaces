@@ -34,13 +34,14 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
   const [activated, setActivated] = useState(false);
 
   // Query is only enabled when participant is NOT provided from parent
-  const shouldFetch = participantProp !== undefined
-    ? false
-    : variant === 'lazy-icon'
-      ? activated
-      : variant === 'dropdown' || variant === 'full'
-        ? menuOpen === true
-        : true;
+  const shouldFetch =
+    participantProp !== undefined
+      ? false
+      : variant === 'lazy-icon'
+        ? activated
+        : variant === 'dropdown' || variant === 'full'
+          ? menuOpen === true
+          : true;
 
   const [queriedParticipant, participantDetails] = useQuery(
     queries.conversationParticipantByConversationId({ conversationId }),
