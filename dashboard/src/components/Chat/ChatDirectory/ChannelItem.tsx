@@ -1,7 +1,7 @@
 import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X } from 'lucide-react';
-import { ChannelVisibility } from '@xyne/shared';
+import { ChannelVisibility, NotificationLevel } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { isDMChannel } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -45,12 +45,14 @@ const ChannelItem = ({
 
   const status = useGetChannelUserStatus(channel.id);
   const hasUnreadCount = unreadCount > 0;
+  const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
   const shouldShowBold = isDM
     ? hasUnreadCount
-    : hasUnreadCount ||
-      (!!status?.lastViewedAt &&
-        !!channel.channelStats?.lastActivityAt &&
-        channel.channelStats?.lastActivityAt > status.lastViewedAt);
+    : !isMuted &&
+      (hasUnreadCount ||
+        (!!status?.lastViewedAt &&
+          !!channel.channelStats?.lastActivityAt &&
+          channel.channelStats?.lastActivityAt > status.lastViewedAt));
 
   const handleCloseDm = (e: React.MouseEvent): void => {
     e.preventDefault();

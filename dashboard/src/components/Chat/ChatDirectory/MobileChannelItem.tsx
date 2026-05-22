@@ -1,7 +1,7 @@
 import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones } from 'lucide-react';
-import { ChannelVisibility } from '@xyne/shared';
+import { ChannelVisibility, NotificationLevel } from '@xyne/shared';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -49,12 +49,14 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
 
   const status = useGetChannelUserStatus(channel.id);
   const hasUnreadCount = unreadCount > 0;
+  const isMuted = status?.mobileNotificationLevel === NotificationLevel.NONE;
   const shouldShowBold = isDM
     ? hasUnreadCount
-    : hasUnreadCount ||
-      (!!status?.lastViewedAt &&
-        !!channel.channelStats?.lastActivityAt &&
-        channel.channelStats?.lastActivityAt > status.lastViewedAt);
+    : !isMuted &&
+      (hasUnreadCount ||
+        (!!status?.lastViewedAt &&
+          !!channel.channelStats?.lastActivityAt &&
+          channel.channelStats?.lastActivityAt > status.lastViewedAt));
 
   /**
    * Returns the icon for the channel type:
