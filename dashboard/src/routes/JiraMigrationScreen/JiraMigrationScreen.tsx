@@ -1,16 +1,18 @@
-import { type ChangeEvent, ReactElement, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { useChannelsByProjectId } from '../../hooks/useChannels';
 import { usePlatform } from '../../hooks/usePlatform';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import {
   jiraMigrationService,
+  type JiraBoard,
   type JiraMigrationExecuteRequest,
   type JiraMigrationExecuteResponse,
   type JiraMigrationFilters,
   type JiraMigrationHistoryItem,
   type JiraMigrationJobProgress,
   type JiraMigrationPreviewResponse,
+  type JiraMigrationPurgeProjectMigrationResponse,
   type JiraMigrationResolveUsersResponse,
 } from '../../services/JiraMigration/jiraMigrationService';
 import { Button } from '../../components/ui/Button/Button';
@@ -19,6 +21,7 @@ import Dialog from '../../components/ui/Dialog';
 import { toast } from 'sonner';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../components/ui/EntitySelector/EntityMultiSelector';
+import { cn } from '../../utils/classNames';
 import { FolderKanban, LayoutTemplate, Hash, User, Tag } from 'lucide-react';
 import { isAxiosError } from 'axios';
 
@@ -49,6 +52,21 @@ type TicketRange = 'all' | 'last_1_month' | 'last_6_months' | 'last_1_year';
 type PreviewSection = 'overview' | 'fields' | 'issues';
 type TicketStatusV2Option = 'TODO' | 'STARTED' | 'COMPLETED' | 'PAUSED' | 'CANCELLED';
 type MigrationPhase = 'setup' | 'map-statuses' | 'migrate';
+type MigrationMode = 'all-to-one' | 'per-board';
+type JiraMigrationUseCase = 'issues' | 'channel-only' | 'ticket-created-by' | 'purge-project';
+
+type PerBoardMapping = {
+  jiraBoard: JiraBoard;
+  xyneBoardId: string;
+};
+
+type PerBoardJobEntry = {
+  jiraBoard: JiraBoard;
+  xyneBoardId: string;
+  jobId: string | null;
+  progress: JiraMigrationJobProgress | null;
+  pollError: string | null;
+};
 
 const TICKET_STATUS_V2_OPTIONS: TicketStatusV2Option[] = [
   'TODO',
@@ -135,6 +153,7 @@ const JiraMigrationScreen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const [projects] = useCachedQuery(queries.getAllProjects());
   const [workspaceUsers] = useCachedQuery(queries.getUsersV2());
+  const [useCase, setUseCase] = useState<JiraMigrationUseCase>('issues');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [targetChannelId, setTargetChannelId] = useState('');
@@ -175,12 +194,40 @@ const JiraMigrationScreen = (): ReactElement => {
   const [scanIncludeComments, setScanIncludeComments] = useState(true);
   const [scanIncludeAttachments, setScanIncludeAttachments] = useState(true);
   const channels = useChannelsByProjectId(selectedProjectId || undefined);
+  const [channelMoveSourceProjectId, setChannelMoveSourceProjectId] = useState('');
+  const [channelMoveTargetProjectId, setChannelMoveTargetProjectId] = useState('');
+  const [channelMoveChannelId, setChannelMoveChannelId] = useState('');
+  const [channelMoveUpdatedAt, setChannelMoveUpdatedAt] = useState('');
+  const [isChannelMoveLoading, setIsChannelMoveLoading] = useState(false);
+  const channelMoveChannels = useChannelsByProjectId(channelMoveSourceProjectId || undefined);
+  const [creatorChangeTicketId, setCreatorChangeTicketId] = useState('');
+  const [creatorChangeNewUserId, setCreatorChangeNewUserId] = useState('');
+  const [creatorChangeUpdatedAt, setCreatorChangeUpdatedAt] = useState('');
+  const [creatorChangeCascade, setCreatorChangeCascade] = useState(false);
+  const [isCreatorChangeLoading, setIsCreatorChangeLoading] = useState(false);
+  const [creatorChangeSearch, setCreatorChangeSearch] = useState('');
+  const [purgeProjectId, setPurgeProjectId] = useState('');
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [purgeDryRun, setPurgeDryRun] = useState(true);
+  const [purgeResult, setPurgeResult] = useState<JiraMigrationPurgeProjectMigrationResponse | null>(
+    null,
+  );
+  const [isPurgeLoading, setIsPurgeLoading] = useState(false);
   const [scanResolvedMappings, setScanResolvedMappings] = useState<
     JiraMigrationResolveUsersResponse['resolvedUserMappings']
   >([]);
   const [scanResolvedMappingsTruncated, setScanResolvedMappingsTruncated] = useState(false);
   const [resolvedUsersPage, setResolvedUsersPage] = useState(0);
   const RESOLVED_USERS_PER_PAGE = 50;
+
+  // Board mode state
+  const [jiraBoards, setJiraBoards] = useState<JiraBoard[]>([]);
+  const [isFetchingBoards, setIsFetchingBoards] = useState(false);
+  const [migrationMode, setMigrationMode] = useState<MigrationMode | null>(null);
+  const boardSectionRef = useRef<HTMLDivElement>(null);
+  const [perBoardMappings, setPerBoardMappings] = useState<PerBoardMapping[]>([]);
+  const [perBoardJobs, setPerBoardJobs] = useState<PerBoardJobEntry[]>([]);
+  const [isPerBoardImportLoading, setIsPerBoardImportLoading] = useState(false);
 
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: selectedProjectId || 'placeholder' }),
@@ -201,6 +248,154 @@ const JiraMigrationScreen = (): ReactElement => {
     () => channels.find(channel => channel.id === targetChannelId) || null,
     [channels, targetChannelId],
   );
+
+  const creatorChangeOptions = useMemo(() => {
+    const users = (workspaceUsers || []).filter(u => Boolean(u?.id));
+    const query = creatorChangeSearch.trim().toLowerCase();
+
+    const results: Array<{
+      value: string;
+      label: string;
+      subtitle?: string;
+      icon: ReactElement;
+    }> = [];
+
+    if (!query) {
+      for (const user of users) {
+        if (!user?.id) continue;
+        const subtitle = user.email ? user.email : undefined;
+        results.push({
+          value: user.id,
+          label: user.name || user.email || user.id,
+          ...(subtitle ? { subtitle } : {}),
+          icon: <User className='w-4 h-4 text-muted-foreground' />,
+        });
+        if (results.length >= 50) break;
+      }
+      return results;
+    }
+
+    for (const user of users) {
+      if (!user?.id) continue;
+      const email = (user.email || '').toLowerCase();
+      const name = (user.name || '').toLowerCase();
+      if (email.includes(query) || name.includes(query) || user.id.toLowerCase().includes(query)) {
+        const subtitle = user.email ? user.email : undefined;
+        results.push({
+          value: user.id,
+          label: user.name || user.email || user.id,
+          ...(subtitle ? { subtitle } : {}),
+          icon: <User className='w-4 h-4 text-muted-foreground' />,
+        });
+        if (results.length >= 50) break;
+      }
+    }
+    return results;
+  }, [workspaceUsers, creatorChangeSearch]);
+
+  const handleMoveChannelProject = async (): Promise<void> => {
+    if (!channelMoveSourceProjectId.trim()) {
+      toast.error('Select a source project');
+      return;
+    }
+    if (!channelMoveChannelId.trim()) {
+      toast.error('Select a channel to move');
+      return;
+    }
+    if (!channelMoveTargetProjectId.trim()) {
+      toast.error('Select a target project');
+      return;
+    }
+    if (channelMoveSourceProjectId === channelMoveTargetProjectId) {
+      toast.error('Source and target project must be different');
+      return;
+    }
+
+    setIsChannelMoveLoading(true);
+    try {
+      const payload = {
+        channelId: channelMoveChannelId.trim(),
+        sourceProjectId: channelMoveSourceProjectId.trim(),
+        targetProjectId: channelMoveTargetProjectId.trim(),
+        ...(channelMoveUpdatedAt.trim() ? { updatedAt: channelMoveUpdatedAt.trim() } : {}),
+      };
+      const result = await jiraMigrationService.moveChannelProject(payload);
+      toast.success('Channel moved', {
+        description: result.channel
+          ? `${result.channel.name} → ${result.channel.projectId}`
+          : `Updated: ${result.updatedCount}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to move channel';
+      toast.error('Channel move failed', { description: message });
+    } finally {
+      setIsChannelMoveLoading(false);
+    }
+  };
+
+  const handleChangeTicketCreatedBy = async (): Promise<void> => {
+    if (!creatorChangeTicketId.trim()) {
+      toast.error('Enter a ticketId');
+      return;
+    }
+    if (!creatorChangeNewUserId.trim()) {
+      toast.error('Select a new creator');
+      return;
+    }
+
+    setIsCreatorChangeLoading(true);
+    try {
+      const payload = {
+        ticketId: creatorChangeTicketId.trim(),
+        newCreatedByUserId: creatorChangeNewUserId.trim(),
+        ...(creatorChangeUpdatedAt.trim() ? { updatedAt: creatorChangeUpdatedAt.trim() } : {}),
+        ...(creatorChangeCascade ? { cascadeConversationAndMessages: true } : {}),
+      };
+      const result = await jiraMigrationService.changeTicketCreatedBy(payload);
+      toast.success('Ticket updated', {
+        description: result.ticket
+          ? `${result.ticket.xyneId}: ${result.ticket.title}${creatorChangeCascade ? ` • convo:${result.conversationUpdatedCount ?? 0} msgs:${result.messageUpdatedCount ?? 0}` : ''}`
+          : `Updated: ${result.updatedCount}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to change ticket creator';
+      toast.error('Update failed', { description: message });
+    } finally {
+      setIsCreatorChangeLoading(false);
+    }
+  };
+
+  const handlePurgeProjectMigration = async (): Promise<void> => {
+    if (!purgeProjectId.trim()) {
+      toast.error('Select a project to purge');
+      return;
+    }
+    if (!purgeDryRun) {
+      if (!purgeConfirmText.trim()) {
+        toast.error(`Type 'DELETE ${purgeProjectId}' to confirm`);
+        return;
+      }
+    }
+
+    setIsPurgeLoading(true);
+    try {
+      const payload = {
+        projectId: purgeProjectId.trim(),
+        dryRun: purgeDryRun,
+        ...(!purgeDryRun && purgeConfirmText.trim()
+          ? { confirmText: purgeConfirmText.trim() }
+          : {}),
+      };
+      const result = await jiraMigrationService.purgeProjectMigration(payload);
+      setPurgeResult(result);
+      toast.success(purgeDryRun ? 'Dry run complete' : 'Purge complete');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to purge migration';
+      toast.error('Purge failed', { description: message });
+    } finally {
+      setIsPurgeLoading(false);
+    }
+  };
 
   const UnresolvedUserMappingRow = ({
     item,
@@ -683,6 +878,7 @@ const JiraMigrationScreen = (): ReactElement => {
         jiraProjectKey: jiraProjectKey.trim().toUpperCase(),
         nextPageToken: null,
         hasNextPage: false,
+        boardNextStartAt: null,
         totalIssuesScanned: 0,
         jiraUsersSeen: 0,
         resolvedUsers: 0,
@@ -703,6 +899,190 @@ const JiraMigrationScreen = (): ReactElement => {
     } finally {
       setIsResolveUsersLoading(false);
     }
+  };
+
+  const handleFetchBoards = async (): Promise<void> => {
+    const key = jiraProjectKey.trim().toUpperCase();
+    if (!key) {
+      toast.error('Enter a Jira project key first');
+      return;
+    }
+    setIsFetchingBoards(true);
+    setJiraBoards([]);
+    setMigrationMode(null);
+    setPerBoardMappings([]);
+    setPerBoardJobs([]);
+    try {
+      const boards = await jiraMigrationService.fetchBoards(key);
+      setJiraBoards(boards);
+      if (boards.length === 0) {
+        toast.warning('No boards found for this project');
+      } else {
+        if (boards.length === 1) {
+          setMigrationMode('all-to-one');
+        }
+        toast.success(`${boards.length} board${boards.length > 1 ? 's' : ''} found`);
+        setTimeout(
+          () => boardSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+          100,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch boards';
+      toast.error('Board fetch failed', { description: message });
+    } finally {
+      setIsFetchingBoards(false);
+    }
+  };
+
+  const handlePerBoardImport = async (): Promise<void> => {
+    const readyMappings = perBoardMappings.filter(m => m.xyneBoardId.trim() !== '');
+    if (readyMappings.length === 0) {
+      toast.error('Map at least one Jira board to a Xyne board');
+      return;
+    }
+    if (!targetChannelId.trim()) {
+      toast.error('Select a target channel');
+      return;
+    }
+    if (!hasCompleteStatusV2Mappings) {
+      toast.error('Run preview and map all statuses first');
+      return;
+    }
+
+    setIsPerBoardImportLoading(true);
+    const strictStatusV2Mappings = Object.fromEntries(
+      orderedStageSequence.map(jiraStatus => [
+        jiraStatus,
+        statusV2Mappings[jiraStatus]?.trim() || '',
+      ]),
+    );
+    const selectedSkipCustomFieldIds =
+      preview?.customFieldMappings
+        .filter(
+          m => m.action === 'create_board_custom_field' && skippedCustomFieldIds[m.jiraFieldId],
+        )
+        .map(m => m.jiraFieldId) ?? [];
+
+    const initialJobs: PerBoardJobEntry[] = readyMappings.map(m => ({
+      jiraBoard: m.jiraBoard,
+      xyneBoardId: m.xyneBoardId,
+      jobId: null,
+      progress: null,
+      pollError: null,
+    }));
+    setPerBoardJobs(initialJobs);
+
+    const bulkJobsPayload: JiraMigrationExecuteRequest[] = readyMappings.map(mapping => ({
+      jiraProjectKey: jiraProjectKey.trim().toUpperCase(),
+      targetProjectId: selectedProjectId,
+      targetBoardId: mapping.xyneBoardId,
+      targetChannelId: targetChannelId.trim(),
+      jiraBoardId: mapping.jiraBoard.id,
+      jiraBoardName: mapping.jiraBoard.name,
+      statusV2Mappings: strictStatusV2Mappings,
+      skipCustomFieldIds: selectedSkipCustomFieldIds,
+      excludedStageNames: Object.keys(excludedStageNames).filter(n => excludedStageNames[n]),
+      ...(Object.keys(userEmailMappings).length > 0 ? { userEmailMappings } : {}),
+      ...(resolvedDateFrom ? { dateFrom: resolvedDateFrom } : {}),
+    }));
+
+    let hadFailure = false;
+    try {
+      const bulkStart = await jiraMigrationService.startBulkMigration({ jobs: bulkJobsPayload });
+      const jobIdsInOrder = bulkStart.jobs.map(job => job.jobId);
+
+      setPerBoardJobs(prev =>
+        prev.map((entry, idx) => ({
+          ...entry,
+          jobId: jobIdsInOrder[idx] ?? null,
+          pollError: null,
+        })),
+      );
+      toast.success(`Started ${jobIdsInOrder.length} board migration job(s)`);
+      toast.message('Note', {
+        description:
+          'Bulk migration jobs run sequentially on the server. If the server restarts mid-run, you may need to re-run the remaining boards.',
+      });
+
+      // Poll each job in order (server runs sequentially; polling sequentially keeps UI simple).
+      for (let i = 0; i < jobIdsInOrder.length; i += 1) {
+        const jobId = jobIdsInOrder[i];
+        const mapping = readyMappings[i];
+        if (!jobId || !mapping) continue;
+
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise<void>(resolve => {
+          const startedAt = Date.now();
+          const maxPollMs = 30 * 60 * 1000; // 30 minutes per board
+          const poll = async () => {
+            if (Date.now() - startedAt > maxPollMs) {
+              hadFailure = true;
+              toast.warning('Migration polling timed out', {
+                description: `Job ${jobId} is still running. You can check status later in History.`,
+              });
+              setPerBoardJobs(prev =>
+                prev.map((entry, idx) =>
+                  idx === i ? { ...entry, pollError: 'Polling timed out' } : entry,
+                ),
+              );
+              resolve();
+              return;
+            }
+            try {
+              const progress = await jiraMigrationService.getMigrationStatus(jobId);
+              setPerBoardJobs(prev =>
+                prev.map((entry, idx) =>
+                  idx === i ? { ...entry, progress, pollError: null } : entry,
+                ),
+              );
+              if (progress.status === 'completed' || progress.status === 'failed') {
+                if (progress.status === 'failed') {
+                  hadFailure = true;
+                }
+                resolve();
+              } else {
+                setTimeout(() => {
+                  void poll();
+                }, 2000);
+              }
+            } catch (error) {
+              hadFailure = true;
+              const message = error instanceof Error ? error.message : 'Polling failed';
+              setPerBoardJobs(prev =>
+                prev.map((entry, idx) =>
+                  idx === i
+                    ? {
+                        ...entry,
+                        pollError: message,
+                      }
+                    : entry,
+                ),
+              );
+              toast.error('Polling failed', {
+                description: `Job ${jobId}: ${message}. Continuing; check History for latest status.`,
+              });
+              resolve();
+            }
+          };
+          void poll();
+        });
+      }
+    } catch (error) {
+      hadFailure = true;
+      const message = error instanceof Error ? error.message : 'Failed to start bulk migration';
+      toast.error('Bulk start failed', { description: message });
+    } finally {
+      setIsPerBoardImportLoading(false);
+    }
+
+    const history = await jiraMigrationService.getMigrationHistory();
+    setMigrationHistory(history);
+    if (!hadFailure) toast.success('Per-board migration complete');
+    else
+      toast.warning('Per-board migration finished with warnings', {
+        description: 'Some boards failed or could not be polled. Check History.',
+      });
   };
 
   const buildPayload = (nextPageToken?: string) => ({
@@ -932,6 +1312,60 @@ const JiraMigrationScreen = (): ReactElement => {
                 Preview Jira issue mappings, validate board fit, and run a resumable import into the
                 selected Xyne project, board, and channel.
               </p>
+              <div className='mt-4 inline-flex rounded-xl border border-border bg-background/70 p-1'>
+                <button
+                  type='button'
+                  data-track-category='jira_migration'
+                  data-track-name='use_case_issues'
+                  onClick={() => setUseCase('issues')}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    useCase === 'issues'
+                      ? 'bg-foreground text-background'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Issue Migration
+                </button>
+                <button
+                  type='button'
+                  data-track-category='jira_migration'
+                  data-track-name='use_case_channel_only'
+                  onClick={() => setUseCase('channel-only')}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    useCase === 'channel-only'
+                      ? 'bg-foreground text-background'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Move Channel
+                </button>
+                <button
+                  type='button'
+                  data-track-category='jira_migration'
+                  data-track-name='use_case_ticket_created_by'
+                  onClick={() => setUseCase('ticket-created-by')}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    useCase === 'ticket-created-by'
+                      ? 'bg-foreground text-background'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Change Ticket Creator
+                </button>
+                <button
+                  type='button'
+                  data-track-category='jira_migration'
+                  data-track-name='use_case_purge_project'
+                  onClick={() => setUseCase('purge-project')}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    useCase === 'purge-project'
+                      ? 'bg-foreground text-background'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Purge Migration
+                </button>
+              </div>
             </div>
             <div className='grid grid-cols-2 gap-3 text-left lg:min-w-[320px]'>
               <div className='rounded-xl border border-border bg-background/80 p-3 shadow-sm'>
@@ -955,390 +1389,1009 @@ const JiraMigrationScreen = (): ReactElement => {
         </div>
 
         <div className='p-6 space-y-6'>
-          <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
-            <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
-              <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
-                <div>
-                  <h3 className='text-sm font-semibold text-foreground'>Migration Inputs</h3>
-                  <p className='mt-1 text-xs text-muted-foreground'>
-                    Choose the Jira scope and the exact Xyne destination before previewing the
-                    import.
+          {useCase === 'channel-only' ? (
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+              <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
+                <div className='flex flex-col gap-1'>
+                  <h3 className='text-sm font-semibold text-foreground'>
+                    Move Channel (No tickets)
+                  </h3>
+                  <p className='text-xs text-muted-foreground'>
+                    Updates the channel&apos;s `projectId` and marks it migrated. Does not touch
+                    tickets.
                   </p>
                 </div>
-                <div className='flex flex-wrap items-center gap-2'>
-                  <span className='rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-800'>
-                    Project → Board → Channel
-                  </span>
-                  <span className='rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-medium text-sky-800'>
-                    {ticketRangeLabelMap[ticketRange]}
-                  </span>
-                </div>
               </div>
-            </div>
 
-            <div className='p-5'>
-              <div className='grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr,0.9fr]'>
-                <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+              <div className='p-5'>
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
                   <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <label
-                      htmlFor='jira-project-key'
-                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                    >
-                      Jira Project Key
-                    </label>
-                    <Input
-                      id='jira-project-key'
-                      autoFocus={!isMobile}
-                      value={jiraProjectKey}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                        setJiraProjectKey(e.target.value.toUpperCase());
-                        setStatusV2Mappings({});
-                        setSkippedCustomFieldIds({});
-                        setMigrationPhase('setup');
-                        setFilters({});
-                        setIsFilterEnabled(false);
-                        setPreview(null);
-                        setResult(null);
-                        setPageTokens([undefined]);
-                        setPageIndex(0);
-                      }}
-                      placeholder='EUL'
-                    />
-                    <p className='mt-2 text-xs text-muted-foreground'>
-                      Short Jira project identifier, for example `EUL`.
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Source Project
                     </p>
-                  </div>
-
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <label
-                      htmlFor='jira-target-project'
-                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                    >
-                      Target Project
-                    </label>
                     <EntitySelector
                       options={(projects || []).map(project => ({
                         value: project.id,
                         label: project.name,
                         icon: <FolderKanban className='w-4 h-4 text-muted-foreground' />,
                       }))}
-                      selectedValue={selectedProjectId || null}
+                      selectedValue={channelMoveSourceProjectId || null}
                       onSelect={value => {
-                        setSelectedProjectId(value ?? '');
-                        setSelectedBoardId('');
-                        setTargetChannelId('');
-                        setStatusV2Mappings({});
-                        setSkippedCustomFieldIds({});
-                        setMigrationPhase('setup');
-                        setFilters({});
-                        setIsFilterEnabled(false);
-                        setPreview(null);
-                        setResult(null);
-                        setPageTokens([undefined]);
-                        setPageIndex(0);
+                        setChannelMoveSourceProjectId(value ?? '');
+                        setChannelMoveChannelId('');
                       }}
                       placeholder='Select project'
                       searchPlaceholder='Search projects...'
                       width='100%'
-                      testId='jira-target-project'
+                      testId='jira-move-channel-source-project'
                     />
                   </div>
 
                   <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <label
-                      htmlFor='jira-target-board'
-                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                    >
-                      Target Board
-                    </label>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Channel
+                    </p>
                     <EntitySelector
-                      options={(boards || []).map(board => ({
-                        value: board.id,
-                        label: board.name,
-                        icon: <LayoutTemplate className='w-4 h-4 text-muted-foreground' />,
-                      }))}
-                      selectedValue={selectedBoardId || null}
-                      onSelect={value => {
-                        setSelectedBoardId(value ?? '');
-                        setStatusV2Mappings({});
-                        setSkippedCustomFieldIds({});
-                        setMigrationPhase('setup');
-                        setFilters({});
-                        setIsFilterEnabled(false);
-                        setPreview(null);
-                        setResult(null);
-                        setPageTokens([undefined]);
-                        setPageIndex(0);
-                      }}
-                      placeholder='Select board'
-                      searchPlaceholder='Search boards...'
-                      width='100%'
-                      testId='jira-target-board'
-                    />
-                  </div>
-
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <label
-                      htmlFor='jira-target-channel'
-                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                    >
-                      Target Channel
-                    </label>
-                    <EntitySelector
-                      options={channels.map(channel => ({
+                      options={(channelMoveChannels || []).map(channel => ({
                         value: channel.id,
                         label: channel.name,
                         icon: <Hash className='w-4 h-4 text-muted-foreground' />,
                       }))}
-                      selectedValue={targetChannelId || null}
-                      onSelect={value => {
-                        setTargetChannelId(value ?? '');
-                        setStatusV2Mappings({});
-                        setSkippedCustomFieldIds({});
-                        setMigrationPhase('setup');
-                        setFilters({});
-                        setIsFilterEnabled(false);
-                        setPreview(null);
-                        setResult(null);
-                        setPageTokens([undefined]);
-                        setPageIndex(0);
-                      }}
+                      selectedValue={channelMoveChannelId || null}
+                      onSelect={value => setChannelMoveChannelId(value ?? '')}
                       placeholder='Select channel'
                       searchPlaceholder='Search channels...'
                       width='100%'
-                      testId='jira-target-channel'
+                      testId='jira-move-channel-channel'
+                    />
+                    <p className='mt-2 text-xs text-muted-foreground'>
+                      Must currently belong to the source project.
+                    </p>
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Target Project
+                    </p>
+                    <EntitySelector
+                      options={(projects || []).map(project => ({
+                        value: project.id,
+                        label: project.name,
+                        icon: <FolderKanban className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={channelMoveTargetProjectId || null}
+                      onSelect={value => setChannelMoveTargetProjectId(value ?? '')}
+                      placeholder='Select project'
+                      searchPlaceholder='Search projects...'
+                      width='100%'
+                      testId='jira-move-channel-target-project'
                     />
                   </div>
                 </div>
 
-                <div className='rounded-2xl border border-border/70 bg-slate-50/80 p-4 shadow-sm'>
-                  <label
-                    htmlFor='jira-ticket-range'
-                    className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                  >
-                    Ticket Range
-                  </label>
-                  <select
-                    id='jira-ticket-range'
-                    data-track-category='jira_migration'
-                    data-track-name='select_ticket_range'
-                    value={ticketRange}
-                    onChange={e => {
-                      setTicketRange(e.target.value as TicketRange);
-                      setStatusV2Mappings({});
-                      setSkippedCustomFieldIds({});
-                      setMigrationPhase('setup');
-                      setFilters({});
-                      setIsFilterEnabled(false);
-                      setPreview(null);
-                      setResult(null);
-                      setPageTokens([undefined]);
-                      setPageIndex(0);
-                    }}
-                    className='w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground shadow-sm'
-                  >
-                    <option value='all'>All Time</option>
-                    <option value='last_1_month'>Last 1 Month</option>
-                    <option value='last_6_months'>Last 6 Months</option>
-                    <option value='last_1_year'>Last 1 Year</option>
-                  </select>
-
-                  <div className='mt-4 rounded-2xl border border-border/70 bg-background p-4'>
-                    <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
-                      Target Context
-                    </p>
-                    <p className='mt-2 text-sm font-medium text-foreground'>
-                      {selectedProject && selectedBoard
-                        ? `${selectedProject.name} / ${selectedBoard.name}${selectedChannel ? ` / ${selectedChannel.name}` : ''}`
-                        : 'Select project, board, and channel'}
-                    </p>
+                <div className='mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr,auto]'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <label
+                      htmlFor='jira-move-channel-updated-at'
+                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                    >
+                      updatedAt (optional)
+                    </label>
+                    <Input
+                      id='jira-move-channel-updated-at'
+                      value={channelMoveUpdatedAt}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setChannelMoveUpdatedAt(e.target.value)
+                      }
+                      placeholder='2026-05-19T13:23:47.000Z'
+                    />
                     <p className='mt-2 text-xs text-muted-foreground'>
-                      Range: {ticketRangeLabelMap[ticketRange]}
-                      {resolvedDateFrom ? ` • Since ${resolvedDateFrom}` : ''}
+                      Leave empty to use current time.
                     </p>
                   </div>
 
-                  <div className='mt-4 rounded-2xl border border-border/70 bg-background p-4'>
-                    <div className='flex items-start justify-between gap-3'>
+                  <div className='flex items-end'>
+                    <Button
+                      className='w-full lg:w-auto'
+                      onClick={() => void handleMoveChannelProject()}
+                      disabled={isChannelMoveLoading}
+                    >
+                      {isChannelMoveLoading ? 'Moving…' : 'Move Channel'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : useCase === 'ticket-created-by' ? (
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+              <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
+                <div className='flex flex-col gap-1'>
+                  <h3 className='text-sm font-semibold text-foreground'>Change Ticket Creator</h3>
+                  <p className='text-xs text-muted-foreground'>
+                    Updates `Ticket.createdBy` (and sets `updatedBy` to you). Does not modify Jira.
+                  </p>
+                </div>
+              </div>
+
+              <div className='p-5'>
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <label
+                      htmlFor='jira-change-ticket-id'
+                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                    >
+                      Ticket ID
+                    </label>
+                    <Input
+                      id='jira-change-ticket-id'
+                      value={creatorChangeTicketId}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setCreatorChangeTicketId(e.target.value)
+                      }
+                      placeholder='cxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+                    />
+                    <p className='mt-2 text-xs text-muted-foreground'>
+                      Xyne `Ticket.id` or `Ticket.xyneId` (example: `LP-268`).
+                    </p>
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      New Creator
+                    </p>
+                    <EntitySelector
+                      options={creatorChangeOptions}
+                      selectedValue={creatorChangeNewUserId || null}
+                      onSelect={value => setCreatorChangeNewUserId(value ?? '')}
+                      onSearchChange={setCreatorChangeSearch}
+                      disableClientFiltering={true}
+                      placeholder='Select user'
+                      searchPlaceholder='Search users...'
+                      width='100%'
+                      testId='jira-change-ticket-creator'
+                    />
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <label
+                      htmlFor='jira-change-ticket-updated-at'
+                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                    >
+                      updatedAt (optional)
+                    </label>
+                    <Input
+                      id='jira-change-ticket-updated-at'
+                      value={creatorChangeUpdatedAt}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setCreatorChangeUpdatedAt(e.target.value)
+                      }
+                      placeholder='2026-05-19T13:23:47.000Z'
+                    />
+                    <p className='mt-2 text-xs text-muted-foreground'>
+                      Leave empty to use current time.
+                    </p>
+                  </div>
+                </div>
+
+                <div className='mt-4 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                    Cascade (optional)
+                  </p>
+                  <label className='flex items-start gap-3 text-sm text-foreground'>
+                    <input
+                      type='checkbox'
+                      className='mt-0.5 h-4 w-4 rounded border-border'
+                      checked={creatorChangeCascade}
+                      onChange={e => setCreatorChangeCascade(e.target.checked)}
+                      data-track-category='jira_migration'
+                      data-track-name='cascade_conversation_messages'
+                    />
+                    <span>
+                      Also update `Conversation.createdBy`, `Message.senderId`, and attachments in
+                      this ticket’s conversation (only where they match old creator).
+                    </span>
+                  </label>
+                </div>
+
+                <div className='mt-4 flex justify-end'>
+                  <Button
+                    onClick={() => void handleChangeTicketCreatedBy()}
+                    disabled={isCreatorChangeLoading}
+                  >
+                    {isCreatorChangeLoading ? 'Updating…' : 'Update Ticket'}
+                  </Button>
+                </div>
+              </div>
+            </section>
+          ) : useCase === 'purge-project' ? (
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+              <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(225,29,72,0.08),rgba(14,165,233,0.04),transparent)] px-5 py-4'>
+                <div className='flex flex-col gap-1'>
+                  <h3 className='text-sm font-semibold text-foreground'>
+                    Purge Jira Migration (Danger)
+                  </h3>
+                  <p className='text-xs text-muted-foreground'>
+                    Deletes imported Jira migration data for the selected Xyne project (tickets,
+                    comments/messages, attachments, external mappings).
+                  </p>
+                </div>
+              </div>
+
+              <div className='p-5 space-y-4'>
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Project
+                    </p>
+                    <EntitySelector
+                      options={(projects || []).map(project => ({
+                        value: project.id,
+                        label: project.name,
+                        icon: <FolderKanban className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={purgeProjectId || null}
+                      onSelect={value => {
+                        const next = value ?? '';
+                        setPurgeProjectId(next);
+                        setPurgeConfirmText('');
+                        setPurgeResult(null);
+                      }}
+                      placeholder='Select project'
+                      searchPlaceholder='Search projects...'
+                      width='100%'
+                      testId='jira-purge-project'
+                    />
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <label
+                      htmlFor='jira-purge-confirm'
+                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                    >
+                      Confirm
+                    </label>
+                    <Input
+                      id='jira-purge-confirm'
+                      value={purgeConfirmText}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setPurgeConfirmText(e.target.value)
+                      }
+                      placeholder={
+                        purgeProjectId ? `DELETE ${purgeProjectId}` : 'Select project first'
+                      }
+                    />
+                    <p className='mt-2 text-xs text-muted-foreground'>
+                      Must exactly match:{' '}
+                      <span className='font-mono'>
+                        {purgeProjectId ? `DELETE ${purgeProjectId}` : 'DELETE <projectId>'}
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Mode
+                    </p>
+                    <div className='flex items-center gap-2'>
+                      <button
+                        type='button'
+                        data-track-category='jira_migration'
+                        data-track-name='purge_mode_dry_run'
+                        onClick={() => setPurgeDryRun(true)}
+                        className={cn(
+                          'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
+                          purgeDryRun
+                            ? 'bg-foreground text-background border-foreground'
+                            : 'border-border text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        Dry run
+                      </button>
+                      <button
+                        type='button'
+                        data-track-category='jira_migration'
+                        data-track-name='purge_mode_delete'
+                        onClick={() => setPurgeDryRun(false)}
+                        className={cn(
+                          'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
+                          !purgeDryRun
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'border-border text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <p className='mt-2 text-xs text-muted-foreground'>
+                      Start with Dry run to see counts.
+                    </p>
+                  </div>
+                </div>
+
+                <div className='flex justify-end'>
+                  <Button
+                    variant={purgeDryRun ? 'outline' : 'default'}
+                    onClick={() => void handlePurgeProjectMigration()}
+                    disabled={isPurgeLoading}
+                  >
+                    {isPurgeLoading
+                      ? 'Running…'
+                      : purgeDryRun
+                        ? 'Run Dry Run'
+                        : 'Delete Migration Data'}
+                  </Button>
+                </div>
+
+                {purgeResult?.stats && (
+                  <div className='rounded-2xl border border-border/70 bg-card/60 p-4 text-sm'>
+                    <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
                       <div>
-                        <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
-                          Ticket Filters
-                        </p>
-                        <p className='mt-2 text-sm font-medium text-foreground'>
-                          Apply assignee, reporter, creator, and label filters only when needed.
-                        </p>
-                        <p className='mt-1 text-xs text-muted-foreground'>
-                          Filters are optional. If disabled, preview uses the standard Jira flow and
-                          does not load filter metadata.
-                        </p>
+                        <div className='text-[11px] uppercase text-muted-foreground'>Channels</div>
+                        <div className='font-semibold'>{purgeResult.stats.channelCount}</div>
                       </div>
-                      {preview && isFilterEnabled && (
-                        <span className='rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-medium text-sky-800'>
-                          {preview.filteredIssueCount} matching issues
-                        </span>
-                      )}
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>
+                          Jira Sources
+                        </div>
+                        <div className='font-semibold'>
+                          {purgeResult.stats.jiraExternalSourceCount}
+                        </div>
+                      </div>
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>
+                          External Mappings
+                        </div>
+                        <div className='font-semibold'>
+                          {purgeResult.stats.externalMessageCount}
+                        </div>
+                      </div>
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>Tickets</div>
+                        <div className='font-semibold'>{purgeResult.stats.ticketCount}</div>
+                      </div>
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>
+                          Conversations
+                        </div>
+                        <div className='font-semibold'>{purgeResult.stats.conversationCount}</div>
+                      </div>
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>
+                          Mapped Messages
+                        </div>
+                        <div className='font-semibold'>{purgeResult.stats.mappedMessageCount}</div>
+                      </div>
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>
+                          Mapped Attachments
+                        </div>
+                        <div className='font-semibold'>
+                          {purgeResult.stats.mappedAttachmentCount}
+                        </div>
+                      </div>
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>Dry Run</div>
+                        <div className='font-semibold'>{String(purgeResult.dryRun)}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          ) : (
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+              <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
+                <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
+                  <div>
+                    <h3 className='text-sm font-semibold text-foreground'>Migration Inputs</h3>
+                    <p className='mt-1 text-xs text-muted-foreground'>
+                      Choose the Jira scope and the exact Xyne destination before previewing the
+                      import.
+                    </p>
+                  </div>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <span className='rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-800'>
+                      Project → Board → Channel
+                    </span>
+                    <span className='rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-medium text-sky-800'>
+                      {ticketRangeLabelMap[ticketRange]}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className='p-5'>
+                <div className='grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr,0.9fr]'>
+                  <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                      <label
+                        htmlFor='jira-project-key'
+                        className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                      >
+                        Jira Project Key
+                      </label>
+                      <Input
+                        id='jira-project-key'
+                        autoFocus={!isMobile}
+                        value={jiraProjectKey}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                          setJiraProjectKey(e.target.value.toUpperCase());
+                          setStatusV2Mappings({});
+                          setSkippedCustomFieldIds({});
+                          setMigrationPhase('setup');
+                          setFilters({});
+                          setIsFilterEnabled(false);
+                          setPreview(null);
+                          setResult(null);
+                          setPageTokens([undefined]);
+                          setPageIndex(0);
+                          setJiraBoards([]);
+                          setMigrationMode(null);
+                          setPerBoardMappings([]);
+                          setPerBoardJobs([]);
+                        }}
+                        placeholder='EUL'
+                      />
+                      <p className='mt-2 text-xs text-muted-foreground'>
+                        Short Jira project identifier, for example `EUL`.
+                      </p>
+                      <Button
+                        variant='outline'
+                        className='mt-3 w-full'
+                        onClick={() => void handleFetchBoards()}
+                        disabled={isFetchingBoards || !jiraProjectKey.trim()}
+                      >
+                        {isFetchingBoards ? 'Fetching boards…' : 'Fetch Boards'}
+                      </Button>
                     </div>
 
-                    <div className='mt-4 flex items-center justify-between rounded-xl border border-border bg-muted/10 px-4 py-3'>
-                      <div>
-                        <p className='text-sm font-medium text-foreground'>Enable Filters</p>
-                        <p className='mt-1 text-xs text-muted-foreground'>
-                          Turn this on only if you want to filter by assignee, reporter, creator, or
-                          labels.
-                        </p>
-                      </div>
-                      <input
-                        type='checkbox'
-                        data-track-category='jira_migration'
-                        data-track-name='toggle_filters'
-                        checked={isFilterEnabled}
-                        onChange={event => {
-                          const checked = event.target.checked;
-                          setIsFilterEnabled(checked);
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                      <label
+                        htmlFor='jira-target-project'
+                        className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                      >
+                        Target Project
+                      </label>
+                      <EntitySelector
+                        options={(projects || []).map(project => ({
+                          value: project.id,
+                          label: project.name,
+                          icon: <FolderKanban className='w-4 h-4 text-muted-foreground' />,
+                        }))}
+                        selectedValue={selectedProjectId || null}
+                        onSelect={value => {
+                          setSelectedProjectId(value ?? '');
+                          setSelectedBoardId('');
+                          setTargetChannelId('');
+                          setStatusV2Mappings({});
+                          setSkippedCustomFieldIds({});
+                          setMigrationPhase('setup');
                           setFilters({});
+                          setIsFilterEnabled(false);
                           setPreview(null);
                           setResult(null);
                           setPageTokens([undefined]);
                           setPageIndex(0);
                         }}
-                        className='h-4 w-4 rounded border-border text-emerald-600 focus:ring-emerald-500'
+                        placeholder='Select project'
+                        searchPlaceholder='Search projects...'
+                        width='100%'
+                        testId='jira-target-project'
                       />
                     </div>
 
-                    {isFilterEnabled ? (
-                      preview ? (
-                        <div className='mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4'>
-                          <div>
-                            <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                              Assignee
-                            </p>
-                            <EntityMultiSelector
-                              options={preview.filterOptions.assignees.map(user => ({
-                                value: user.accountId,
-                                label: user.displayName,
-                                ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
-                                icon: <User className='w-4 h-4 text-muted-foreground' />,
-                              }))}
-                              selectedValues={filters.assigneeAccountIds || []}
-                              onMultiSelect={values =>
-                                setFilters(previous => ({
-                                  ...previous,
-                                  assigneeAccountIds: values,
-                                }))
-                              }
-                              placeholder='Search assignees...'
-                              searchPlaceholder='Search assignees...'
-                              width='100%'
-                              inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
-                            />
-                          </div>
-                          <div>
-                            <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                              Reporter
-                            </p>
-                            <EntityMultiSelector
-                              options={preview.filterOptions.reporters.map(user => ({
-                                value: user.accountId,
-                                label: user.displayName,
-                                ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
-                                icon: <User className='w-4 h-4 text-muted-foreground' />,
-                              }))}
-                              selectedValues={filters.reporterAccountIds || []}
-                              onMultiSelect={values =>
-                                setFilters(previous => ({
-                                  ...previous,
-                                  reporterAccountIds: values,
-                                }))
-                              }
-                              placeholder='Search reporters...'
-                              searchPlaceholder='Search reporters...'
-                              width='100%'
-                              inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
-                            />
-                          </div>
-                          <div>
-                            <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                              Creator
-                            </p>
-                            <EntityMultiSelector
-                              options={preview.filterOptions.creators.map(user => ({
-                                value: user.accountId,
-                                label: user.displayName,
-                                ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
-                                icon: <User className='w-4 h-4 text-muted-foreground' />,
-                              }))}
-                              selectedValues={filters.creatorAccountIds || []}
-                              onMultiSelect={values =>
-                                setFilters(previous => ({ ...previous, creatorAccountIds: values }))
-                              }
-                              placeholder='Search creators...'
-                              searchPlaceholder='Search creators...'
-                              width='100%'
-                              inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
-                            />
-                          </div>
-                          <div>
-                            <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                              Labels
-                            </p>
-                            <EntityMultiSelector
-                              options={preview.filterOptions.labels.map(label => ({
-                                value: label,
-                                label,
-                                icon: <Tag className='w-4 h-4 text-muted-foreground' />,
-                              }))}
-                              selectedValues={filters.labels || []}
-                              onMultiSelect={values =>
-                                setFilters(previous => ({ ...previous, labels: values }))
-                              }
-                              placeholder='Search labels...'
-                              searchPlaceholder='Search labels...'
-                              width='100%'
-                              inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className='mt-4 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground'>
-                          Click Load Preview after enabling filters to fetch assignee, reporter,
-                          creator, and label options for this Jira project.
-                        </div>
-                      )
-                    ) : (
-                      <div className='mt-4 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground'>
-                        Filters are off. Preview and migration will include the normal Jira scope
-                        without loading filter option data.
-                      </div>
-                    )}
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                      <label
+                        htmlFor='jira-target-board'
+                        className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                      >
+                        {migrationMode === 'per-board'
+                          ? 'Preview Board (for status mapping)'
+                          : 'Target Board'}
+                      </label>
+                      <EntitySelector
+                        options={(boards || []).map(board => ({
+                          value: board.id,
+                          label: board.name,
+                          icon: <LayoutTemplate className='w-4 h-4 text-muted-foreground' />,
+                        }))}
+                        selectedValue={selectedBoardId || null}
+                        onSelect={value => {
+                          setSelectedBoardId(value ?? '');
+                          setStatusV2Mappings({});
+                          setSkippedCustomFieldIds({});
+                          setMigrationPhase('setup');
+                          setFilters({});
+                          setIsFilterEnabled(false);
+                          setPreview(null);
+                          setResult(null);
+                          setPageTokens([undefined]);
+                          setPageIndex(0);
+                        }}
+                        placeholder='Select board'
+                        searchPlaceholder='Search boards...'
+                        width='100%'
+                        testId='jira-target-board'
+                      />
+                    </div>
+
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                      <label
+                        htmlFor='jira-target-channel'
+                        className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                      >
+                        Target Channel
+                      </label>
+                      <EntitySelector
+                        options={channels.map(channel => ({
+                          value: channel.id,
+                          label: channel.name,
+                          icon: <Hash className='w-4 h-4 text-muted-foreground' />,
+                        }))}
+                        selectedValue={targetChannelId || null}
+                        onSelect={value => {
+                          setTargetChannelId(value ?? '');
+                          setStatusV2Mappings({});
+                          setSkippedCustomFieldIds({});
+                          setMigrationPhase('setup');
+                          setFilters({});
+                          setIsFilterEnabled(false);
+                          setPreview(null);
+                          setResult(null);
+                          setPageTokens([undefined]);
+                          setPageIndex(0);
+                        }}
+                        placeholder='Select channel'
+                        searchPlaceholder='Search channels...'
+                        width='100%'
+                        testId='jira-target-channel'
+                      />
+                    </div>
                   </div>
 
-                  <div className='mt-4 flex flex-wrap gap-2'>
-                    <Button
-                      onClick={() => {
+                  {/* Board mode picker — shown after boards are fetched */}
+                  {jiraBoards.length > 0 && (
+                    <div
+                      ref={boardSectionRef}
+                      className='col-span-full rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'
+                    >
+                      <p className='text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2'>
+                        Jira Boards Found
+                      </p>
+                      <div className='flex flex-wrap gap-2 mb-4'>
+                        {jiraBoards.map(b => (
+                          <span
+                            key={b.id}
+                            className='inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-800'
+                          >
+                            {b.name}
+                            {b.type ? <span className='text-sky-500'>· {b.type}</span> : null}
+                          </span>
+                        ))}
+                      </div>
+                      <p className='text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-3'>
+                        Migration Mode
+                      </p>
+                      <div className='flex flex-wrap gap-3 mb-4'>
+                        <button
+                          type='button'
+                          data-track-category='jira_migration'
+                          data-track-name='migration_mode_all_to_one'
+                          onClick={() => {
+                            setMigrationMode('all-to-one');
+                            setPerBoardMappings([]);
+                            setPerBoardJobs([]);
+                          }}
+                          className={`rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${migrationMode === 'all-to-one' ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-border bg-background text-foreground hover:bg-muted/30'}`}
+                        >
+                          All boards → one Xyne board
+                        </button>
+                        <button
+                          type='button'
+                          data-track-category='jira_migration'
+                          data-track-name='migration_mode_per_board'
+                          onClick={() => {
+                            setMigrationMode('per-board');
+                            setPerBoardMappings(
+                              jiraBoards.map(b => ({ jiraBoard: b, xyneBoardId: '' })),
+                            );
+                            setPerBoardJobs([]);
+                          }}
+                          className={`rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${migrationMode === 'per-board' ? 'border-sky-500 bg-sky-50 text-sky-800' : 'border-border bg-background text-foreground hover:bg-muted/30'}`}
+                        >
+                          Separate boards per Jira board
+                        </button>
+                      </div>
+
+                      {/* Per-board mapping table */}
+                      {migrationMode === 'per-board' && (
+                        <div className='overflow-x-auto'>
+                          <table className='w-full text-sm'>
+                            <thead>
+                              <tr className='border-b border-border'>
+                                <th className='pb-2 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+                                  Jira Board
+                                </th>
+                                <th className='pb-2 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+                                  Type
+                                </th>
+                                <th className='pb-2 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+                                  Xyne Board (pre-created)
+                                </th>
+                                <th className='pb-2 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+                                  Status
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {perBoardMappings.map((mapping, idx) => {
+                                const job = perBoardJobs.find(
+                                  j => j.jiraBoard.id === mapping.jiraBoard.id,
+                                );
+                                return (
+                                  <tr
+                                    key={mapping.jiraBoard.id}
+                                    className='border-b border-border/40'
+                                  >
+                                    <td className='py-2 pr-4 font-medium text-foreground'>
+                                      {mapping.jiraBoard.name}
+                                    </td>
+                                    <td className='py-2 pr-4 text-muted-foreground'>
+                                      {mapping.jiraBoard.type || '—'}
+                                    </td>
+                                    <td className='py-2 pr-4'>
+                                      <EntitySelector
+                                        options={(boards || []).map(board => ({
+                                          value: board.id,
+                                          label: board.name,
+                                          icon: (
+                                            <LayoutTemplate className='w-4 h-4 text-muted-foreground' />
+                                          ),
+                                        }))}
+                                        selectedValue={mapping.xyneBoardId || null}
+                                        onSelect={value => {
+                                          setPerBoardMappings(prev =>
+                                            prev.map((m, i) =>
+                                              i === idx ? { ...m, xyneBoardId: value ?? '' } : m,
+                                            ),
+                                          );
+                                        }}
+                                        placeholder='Select Xyne board'
+                                        searchPlaceholder='Search boards...'
+                                        width='220px'
+                                        testId={`per-board-selector-${mapping.jiraBoard.id}`}
+                                      />
+                                    </td>
+                                    <td className='py-2 text-xs'>
+                                      {job?.pollError ? (
+                                        <span className='inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-800'>
+                                          poll error
+                                        </span>
+                                      ) : job?.progress ? (
+                                        <span
+                                          className={`inline-flex rounded-full px-2 py-0.5 font-medium ${job.progress.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : job.progress.status === 'failed' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}
+                                        >
+                                          {job.progress.status === 'completed'
+                                            ? `✓ ${job.progress.importedTickets} tickets`
+                                            : job.progress.status === 'failed'
+                                              ? 'failed'
+                                              : `${job.progress.processedIssues}/${job.progress.totalIssues ?? '?'}`}
+                                        </span>
+                                      ) : job?.jobId ? (
+                                        <span className='inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800'>
+                                          running…
+                                        </span>
+                                      ) : (
+                                        <span className='text-muted-foreground'>pending</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+
+                          {perBoardJobs.length === 0 && (
+                            <div className='mt-4 space-y-2'>
+                              {!preview && (
+                                <p className='text-xs text-amber-600'>
+                                  Run preview and map all statuses before migrating.
+                                </p>
+                              )}
+                              {preview && !hasCompleteStatusV2Mappings && (
+                                <p className='text-xs text-amber-600'>
+                                  Map all Jira statuses to StatusV2 before migrating.
+                                </p>
+                              )}
+                              <Button
+                                onClick={() => void handlePerBoardImport()}
+                                disabled={
+                                  isPerBoardImportLoading ||
+                                  !hasCompleteStatusV2Mappings ||
+                                  !targetChannelId.trim() ||
+                                  !selectedProjectId.trim() ||
+                                  perBoardMappings.every(m => !m.xyneBoardId.trim())
+                                }
+                              >
+                                {isPerBoardImportLoading
+                                  ? 'Starting bulk migration…'
+                                  : 'Start Bulk Migration (Mapped Boards)'}
+                              </Button>
+                            </div>
+                          )}
+
+                          {perBoardJobs.length > 0 && (
+                            <div className='mt-4 space-y-2'>
+                              {perBoardJobs.map(job => (
+                                <div
+                                  key={job.jiraBoard.id}
+                                  className='rounded-lg border border-border bg-muted/10 p-3'
+                                >
+                                  <div className='flex items-center justify-between gap-3'>
+                                    <p className='text-sm font-medium text-foreground'>
+                                      {job.jiraBoard.name}
+                                    </p>
+                                    {job.progress && (
+                                      <span
+                                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${job.progress.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : job.progress.status === 'failed' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}
+                                      >
+                                        {job.progress.status}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {job.pollError && (
+                                    <p className='mt-2 text-xs text-rose-700'>
+                                      Poll error: {job.pollError}
+                                    </p>
+                                  )}
+                                  {job.progress && (
+                                    <div className='mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground'>
+                                      <span>Imported: {job.progress.importedTickets}</span>
+                                      <span>Skipped: {job.progress.skippedTickets}</span>
+                                      <span>Comments: {job.progress.importedComments}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className='rounded-2xl border border-border/70 bg-slate-50/80 p-4 shadow-sm'>
+                    <label
+                      htmlFor='jira-ticket-range'
+                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                    >
+                      Ticket Range
+                    </label>
+                    <select
+                      id='jira-ticket-range'
+                      data-track-category='jira_migration'
+                      data-track-name='select_ticket_range'
+                      value={ticketRange}
+                      onChange={e => {
+                        setTicketRange(e.target.value as TicketRange);
+                        setStatusV2Mappings({});
+                        setSkippedCustomFieldIds({});
+                        setMigrationPhase('setup');
+                        setFilters({});
+                        setIsFilterEnabled(false);
+                        setPreview(null);
+                        setResult(null);
                         setPageTokens([undefined]);
                         setPageIndex(0);
-                        void handlePreview();
                       }}
-                      disabled={isPreviewLoading || isImportLoading || !canPreview}
+                      className='w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground shadow-sm'
                     >
-                      {isPreviewLoading
-                        ? 'Loading Preview...'
-                        : preview
-                          ? 'Refresh Preview'
-                          : 'Load Preview'}
-                    </Button>
-                    <Button
-                      variant='outline'
-                      onClick={() => setIsHistoryModalOpen(true)}
-                      disabled={migrationHistory.length === 0}
-                    >
-                      View Migrated Projects
-                    </Button>
+                      <option value='all'>All Time</option>
+                      <option value='last_1_month'>Last 1 Month</option>
+                      <option value='last_6_months'>Last 6 Months</option>
+                      <option value='last_1_year'>Last 1 Year</option>
+                    </select>
+
+                    <div className='mt-4 rounded-2xl border border-border/70 bg-background p-4'>
+                      <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
+                        Target Context
+                      </p>
+                      <p className='mt-2 text-sm font-medium text-foreground'>
+                        {selectedProject && selectedBoard
+                          ? `${selectedProject.name} / ${selectedBoard.name}${selectedChannel ? ` / ${selectedChannel.name}` : ''}`
+                          : 'Select project, board, and channel'}
+                      </p>
+                      <p className='mt-2 text-xs text-muted-foreground'>
+                        Range: {ticketRangeLabelMap[ticketRange]}
+                        {resolvedDateFrom ? ` • Since ${resolvedDateFrom}` : ''}
+                      </p>
+                    </div>
+
+                    <div className='mt-4 rounded-2xl border border-border/70 bg-background p-4'>
+                      <div className='flex items-start justify-between gap-3'>
+                        <div>
+                          <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
+                            Ticket Filters
+                          </p>
+                          <p className='mt-2 text-sm font-medium text-foreground'>
+                            Apply assignee, reporter, creator, and label filters only when needed.
+                          </p>
+                          <p className='mt-1 text-xs text-muted-foreground'>
+                            Filters are optional. If disabled, preview uses the standard Jira flow
+                            and does not load filter metadata.
+                          </p>
+                        </div>
+                        {preview && isFilterEnabled && (
+                          <span className='rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-medium text-sky-800'>
+                            {preview.filteredIssueCount} matching issues
+                          </span>
+                        )}
+                      </div>
+
+                      <div className='mt-4 flex items-center justify-between rounded-xl border border-border bg-muted/10 px-4 py-3'>
+                        <div>
+                          <p className='text-sm font-medium text-foreground'>Enable Filters</p>
+                          <p className='mt-1 text-xs text-muted-foreground'>
+                            Turn this on only if you want to filter by assignee, reporter, creator,
+                            or labels.
+                          </p>
+                        </div>
+                        <input
+                          type='checkbox'
+                          data-track-category='jira_migration'
+                          data-track-name='toggle_filters'
+                          checked={isFilterEnabled}
+                          onChange={event => {
+                            const checked = event.target.checked;
+                            setIsFilterEnabled(checked);
+                            setFilters({});
+                            setPreview(null);
+                            setResult(null);
+                            setPageTokens([undefined]);
+                            setPageIndex(0);
+                          }}
+                          className='h-4 w-4 rounded border-border text-emerald-600 focus:ring-emerald-500'
+                        />
+                      </div>
+
+                      {isFilterEnabled ? (
+                        preview ? (
+                          <div className='mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4'>
+                            <div>
+                              <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                                Assignee
+                              </p>
+                              <EntityMultiSelector
+                                options={preview.filterOptions.assignees.map(user => ({
+                                  value: user.accountId,
+                                  label: user.displayName,
+                                  ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
+                                  icon: <User className='w-4 h-4 text-muted-foreground' />,
+                                }))}
+                                selectedValues={filters.assigneeAccountIds || []}
+                                onMultiSelect={values =>
+                                  setFilters(previous => ({
+                                    ...previous,
+                                    assigneeAccountIds: values,
+                                  }))
+                                }
+                                placeholder='Search assignees...'
+                                searchPlaceholder='Search assignees...'
+                                width='100%'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                              />
+                            </div>
+                            <div>
+                              <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                                Reporter
+                              </p>
+                              <EntityMultiSelector
+                                options={preview.filterOptions.reporters.map(user => ({
+                                  value: user.accountId,
+                                  label: user.displayName,
+                                  ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
+                                  icon: <User className='w-4 h-4 text-muted-foreground' />,
+                                }))}
+                                selectedValues={filters.reporterAccountIds || []}
+                                onMultiSelect={values =>
+                                  setFilters(previous => ({
+                                    ...previous,
+                                    reporterAccountIds: values,
+                                  }))
+                                }
+                                placeholder='Search reporters...'
+                                searchPlaceholder='Search reporters...'
+                                width='100%'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                              />
+                            </div>
+                            <div>
+                              <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                                Creator
+                              </p>
+                              <EntityMultiSelector
+                                options={preview.filterOptions.creators.map(user => ({
+                                  value: user.accountId,
+                                  label: user.displayName,
+                                  ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
+                                  icon: <User className='w-4 h-4 text-muted-foreground' />,
+                                }))}
+                                selectedValues={filters.creatorAccountIds || []}
+                                onMultiSelect={values =>
+                                  setFilters(previous => ({
+                                    ...previous,
+                                    creatorAccountIds: values,
+                                  }))
+                                }
+                                placeholder='Search creators...'
+                                searchPlaceholder='Search creators...'
+                                width='100%'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                              />
+                            </div>
+                            <div>
+                              <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                                Labels
+                              </p>
+                              <EntityMultiSelector
+                                options={preview.filterOptions.labels.map(label => ({
+                                  value: label,
+                                  label,
+                                  icon: <Tag className='w-4 h-4 text-muted-foreground' />,
+                                }))}
+                                selectedValues={filters.labels || []}
+                                onMultiSelect={values =>
+                                  setFilters(previous => ({ ...previous, labels: values }))
+                                }
+                                placeholder='Search labels...'
+                                searchPlaceholder='Search labels...'
+                                width='100%'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className='mt-4 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground'>
+                            Click Load Preview after enabling filters to fetch assignee, reporter,
+                            creator, and label options for this Jira project.
+                          </div>
+                        )
+                      ) : (
+                        <div className='mt-4 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground'>
+                          Filters are off. Preview and migration will include the normal Jira scope
+                          without loading filter option data.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className='mt-4 flex flex-wrap gap-2'>
+                      <Button
+                        onClick={() => {
+                          setPageTokens([undefined]);
+                          setPageIndex(0);
+                          void handlePreview();
+                        }}
+                        disabled={isPreviewLoading || isImportLoading || !canPreview}
+                      >
+                        {isPreviewLoading
+                          ? 'Loading Preview...'
+                          : preview
+                            ? 'Refresh Preview'
+                            : 'Load Preview'}
+                      </Button>
+                      <Button
+                        variant='outline'
+                        onClick={() => setIsHistoryModalOpen(true)}
+                        disabled={migrationHistory.length === 0}
+                      >
+                        View Migrated Projects
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </section>
+            </section>
+          )}
 
           {/* Step Indicator */}
           {migrationPhase !== 'setup' && (

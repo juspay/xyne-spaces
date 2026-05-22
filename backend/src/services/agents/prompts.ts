@@ -13,9 +13,11 @@ function buildTicketTypeInstructions(): string {
   const typeDescriptions: Record<ClassifiableTicketType, string> = {
     [BaseTicketType.Fix]: 'Bug reports, errors, broken functionality, issues, crashes, something not working',
     [BaseTicketType.Feature]: 'New features, enhancements, additions, improvements, new functionality',
+    [BaseTicketType.Story]: 'User stories (deliverable product work), typically feature-sized, can be planned in sprints',
     [BaseTicketType.Hotfix]: 'Critical/urgent production issues, outages, blockers requiring immediate attention',
     [BaseTicketType.Support]: 'General support requests, questions, non-urgent issues, user assistance',
     [BaseTicketType.DESK]: 'Tickets originating from a desk email inbox (customer email threads, conversations from connected mailboxes)',
+    [BaseTicketType.Epic]: 'Large initiative or body of work spanning multiple features or sprints',
   };
 
   return ClassifiableTicketTypes.map((type: ClassifiableTicketType) => `- "${type}": ${typeDescriptions[type] || ''}`).join('\n');

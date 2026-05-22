@@ -230,7 +230,12 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
+    .allow('')
+    .default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
+  // Default to a conservative delay to avoid accidental Jira API hammering in environments
+  // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
   JIRA_MIGRATION_BATCH_DELAY_MS: Joi.number().integer().min(0).max(600000).default(5000),
   // Confluence migration configuration
   CONFLUENCE_BASE_URL: Joi.string().allow('').default(''),
@@ -555,6 +560,7 @@ export const config = {
     eulerBotAuthToken: envVars.JIRA_EULER_BOT_AUTH_TOKEN as string,
     migrationBotEmail: envVars.JIRA_MIGRATION_BOT_EMAIL as string, 
     migrationBotAuthToken: envVars.JIRA_MIGRATION_BOT_AUTH_TOKEN as string,
+    migrationUserMapCsvLocation: envVars.JIRA_MIGRATION_USER_MAP_CSV_LOCATION as string,
   },
   jiraMigration: {
     issuePageSize: envVars.JIRA_MIGRATION_ISSUE_PAGE_SIZE as number,

@@ -12,6 +12,8 @@ export interface JiraMigrationJobProgress {
   status: JiraMigrationJobStatus;
   controlStatus: 'running' | 'paused' | 'cancel_requested';
   jiraProjectKey: string;
+  jiraBoardId?: number;
+  jiraBoardName?: string;
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
@@ -49,6 +51,8 @@ class JiraMigrationProgressService {
       status: 'queued',
       controlStatus: 'running',
       jiraProjectKey: input.jiraProjectKey.trim().toUpperCase(),
+      ...(typeof input.jiraBoardId === 'number' ? { jiraBoardId: input.jiraBoardId } : {}),
+      ...(input.jiraBoardName ? { jiraBoardName: input.jiraBoardName } : {}),
       targetProjectId: input.targetProjectId,
       targetBoardId: input.targetBoardId,
       targetChannelId: input.targetChannelId,
