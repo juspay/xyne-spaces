@@ -249,6 +249,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isVoiceRecording, setIsVoiceRecording] = useState(false);
     const [isVoiceTranscribing, setIsVoiceTranscribing] = useState(false);
     const voiceInputRef = React.useRef<VoiceInputHandle>(null);
+    const handleVoiceStateChange = useCallback(
+      ({ isRecording, isTranscribing }: { isRecording: boolean; isTranscribing: boolean }) => {
+        setIsVoiceRecording(isRecording);
+        setIsVoiceTranscribing(isTranscribing);
+      },
+      [],
+    );
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [sendMode, setSendMode] = useState<'message' | 'ticket'>('message');
@@ -1158,10 +1165,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 voiceMentionItems={voiceMentionItems}
                 disabled={disabled}
                 isSending={isSending}
-                onStateChange={({ isRecording, isTranscribing }) => {
-                  setIsVoiceRecording(isRecording);
-                  setIsVoiceTranscribing(isTranscribing);
-                }}
+                onStateChange={handleVoiceStateChange}
               />
             )}
 
@@ -1479,10 +1483,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     voiceMentionItems={voiceMentionItems}
                     disabled={disabled}
                     isSending={isSending}
-                    onStateChange={({ isRecording, isTranscribing }) => {
-                      setIsVoiceRecording(isRecording);
-                      setIsVoiceTranscribing(isTranscribing);
-                    }}
+                    onStateChange={handleVoiceStateChange}
                   />
 
                   {!hideSendButton && (
