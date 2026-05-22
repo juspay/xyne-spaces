@@ -71,7 +71,7 @@ const CodeBlock = ({
   };
 
   return (
-    <div className='xyne-code-block my-3 rounded-lg overflow-hidden border border-border'>
+    <div className='xyne-code-block my-3 rounded-lg overflow-hidden border border-border max-w-full'>
       {/* Header bar */}
       <div className='flex items-center justify-between px-4 py-2 bg-muted border-b border-border'>
         <span className='text-xs font-mono text-muted-foreground select-none'>
@@ -125,6 +125,19 @@ export const createMarkdownComponents = (messageId: string): Components => ({
     children,
   }: React.HTMLAttributes<HTMLPreElement> & { children?: React.ReactNode }): React.ReactElement => (
     <>{children}</>
+  ),
+
+  // Override <table> — wrap in a scrollable container so wide tables scroll
+  // horizontally instead of overflowing the message bubble or entire view.
+  table: ({
+    children,
+    ...props
+  }: React.TableHTMLAttributes<HTMLTableElement> & {
+    children?: React.ReactNode;
+  }): React.ReactElement => (
+    <div style={{ overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
+      <table {...props}>{children}</table>
+    </div>
   ),
 
   a: ({
