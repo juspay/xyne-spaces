@@ -908,6 +908,20 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
  * and have the highest specificity
  * ============================================================================ */
 
+/* Code block container — base (light) + dark theme override.
+ * Token colors below are theme-agnostic; only the container background and
+ * base text color flip with the theme. (Replaces the old light-only
+ * `highlight.js/styles/github.css` import.) */
+.hljs {
+  color: #24292e;
+  background: #ffffff;
+}
+
+[data-theme="midnight"] .hljs {
+  color: #c9d1d9;
+  background: #0d1117;
+}
+
 /* Comments and Documentation */
 .hljs-comment,
 .hljs-quote,
@@ -1016,6 +1030,96 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 .hljs-strong {
   font-weight: 700;
+}
+
+/* ----------------------------------------------------------------------------
+ * Dark theme (midnight) token overrides.
+ * The token colors above are tuned for a light background; on the dark
+ * `.hljs` container (#0d1117) the dark grays become unreadable. These mirror
+ * the GitHub Dark palette so functions, variables, operators, etc. stay legible.
+ * -------------------------------------------------------------------------- */
+[data-theme="midnight"] .hljs-comment,
+[data-theme="midnight"] .hljs-quote,
+[data-theme="midnight"] .hljs-doctag {
+  color: #8b949e !important;
+}
+
+[data-theme="midnight"] .hljs-keyword,
+[data-theme="midnight"] .hljs-selector-tag,
+[data-theme="midnight"] .hljs-literal,
+[data-theme="midnight"] .hljs-type,
+[data-theme="midnight"] .hljs-built_in,
+[data-theme="midnight"] .hljs-selector-id,
+[data-theme="midnight"] .hljs-selector-class {
+  color: #ff7b72 !important;
+}
+
+[data-theme="midnight"] .hljs-string,
+[data-theme="midnight"] .hljs-regexp,
+[data-theme="midnight"] .hljs-template-tag,
+[data-theme="midnight"] .hljs-template-variable {
+  color: #a5d6ff !important;
+}
+
+[data-theme="midnight"] .hljs-number,
+[data-theme="midnight"] .hljs-attr {
+  color: #79c0ff !important;
+}
+
+[data-theme="midnight"] .hljs-function,
+[data-theme="midnight"] .hljs-title,
+[data-theme="midnight"] .hljs-title.function_,
+[data-theme="midnight"] .hljs-title.class_,
+[data-theme="midnight"] .hljs-class .hljs-title {
+  color: #d2a8ff !important;
+}
+
+[data-theme="midnight"] .hljs-params,
+[data-theme="midnight"] .hljs-variable,
+[data-theme="midnight"] .hljs-variable.language_,
+[data-theme="midnight"] .hljs-variable.constant_ {
+  color: #c9d1d9 !important;
+}
+
+[data-theme="midnight"] .hljs-attribute,
+[data-theme="midnight"] .hljs-property {
+  color: #79c0ff !important;
+}
+
+[data-theme="midnight"] .hljs-tag,
+[data-theme="midnight"] .hljs-name,
+[data-theme="midnight"] .hljs-selector-pseudo {
+  color: #7ee787 !important;
+}
+
+[data-theme="midnight"] .hljs-meta,
+[data-theme="midnight"] .hljs-meta .hljs-string {
+  color: #79c0ff !important;
+}
+
+[data-theme="midnight"] .hljs-operator,
+[data-theme="midnight"] .hljs-punctuation {
+  color: #c9d1d9 !important;
+}
+
+[data-theme="midnight"] .hljs-symbol,
+[data-theme="midnight"] .hljs-bullet,
+[data-theme="midnight"] .hljs-link {
+  color: #ffa657 !important;
+}
+
+[data-theme="midnight"] .hljs-section {
+  color: #1f6feb !important;
+}
+
+[data-theme="midnight"] .hljs-deletion {
+  color: #ffdcd7 !important;
+  background-color: #67060c;
+}
+
+[data-theme="midnight"] .hljs-addition {
+  color: #aff5b4 !important;
+  background-color: #033a16;
 }
 
 @layer utilities {
