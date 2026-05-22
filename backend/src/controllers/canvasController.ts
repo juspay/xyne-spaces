@@ -25,7 +25,7 @@ export class CanvasController {
     this.messageAttachmentRepository = messageAttachmentRepository;
   }
 
-createCanvas = async (req: Request, res: Response): Promise<void> => {
+    createCanvas = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
       if (!userId) {
@@ -33,7 +33,7 @@ createCanvas = async (req: Request, res: Response): Promise<void> => {
         return;
       }
 
-      const { title, markdown, visibility } = req.body;
+      const { title, markdown, visibility, channelId } = req.body;
       if (!title || !markdown) {
         res.status(400).json({ error: 'Title and markdown are required' });
         return;
@@ -59,6 +59,7 @@ createCanvas = async (req: Request, res: Response): Promise<void> => {
             createdBy: creatorId,  // <-- AUTHENTICATED USER
             viewAccessId,
             editAccessId: null,
+            channelId: channelId || null,  // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
             visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
             isTemplate: false,
             isCollaborative: true,
@@ -94,6 +95,7 @@ createCanvas = async (req: Request, res: Response): Promise<void> => {
         title,
         url: canvasUrl,
         visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
+        channelId: channelId || null,
       });
     } catch (error) {
       logger.error('[CANVAS-CREATE] Error:', error);
