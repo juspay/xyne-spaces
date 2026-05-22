@@ -24,10 +24,12 @@ import {
   serializeTicketMd,
   type InitialMessageSummary,
   type TicketCardSummary,
+  BaseTicketType,
 } from '@xyne/shared';
 import { adfToHtmlAsync, adfToText } from '@/services/jira/adfHtml';
 import { JiraMigrationClient } from '@/services/jira/client';
 import { JiraUserResolver, type UnresolvedJiraUser } from '@/services/jira/userResolver';
+import { getCachedJiraUserEmailMappings } from '@/services/jira/jiraUserMapCsv';
 import { TicketIdService } from '@/services/ticketIdService';
 import { UserRepository } from '@/database/repositories/users';
 import { jiraMigrationProjectIndexService, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';
@@ -118,6 +120,7 @@ export interface JiraMigrationExecuteInput {
   targetBoardId: string;
   targetChannelId: string;
   jiraBoardId?: number;
+  jiraBoardName?: string;
   issueKeys?: string[];
   dateFrom?: string;
   filters?: JiraMigrationFilters;
@@ -139,12 +142,15 @@ export interface JiraMigrationResolveUsersInput {
   userEmailMappings?: Record<string, string>;
   nextPageToken?: string | null;
   pageSize?: number;
+  jiraBoardId?: number;
+  boardStartAt?: number;
 }
 
 export interface JiraMigrationResolveUsersResult {
   jiraProjectKey: string;
   nextPageToken: string | null;
   hasNextPage: boolean;
+  boardNextStartAt: number | null;
   totalIssuesScanned: number;
   jiraUsersSeen: number;
   resolvedUsers: number;
@@ -257,12 +263,25 @@ const isOpaqueJiraCustomFieldString = (value: string): boolean => {
   );
 };
 
+// Jira Automation "smart values" look like `{{reporter.emailAddress}}`.
+// These are placeholders stored as literal text in Jira custom fields; we can't reliably resolve them (and Jira Cloud
+// usually doesn't expose emails anyway). Treat them as non-meaningful so we don't create/import noisy custom fields.
+const isJiraAutomationSmartValuePlaceholder = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return /\{\{[^{}]+\}\}/.test(trimmed);
+};
+
 const extractMeaningfulJiraCustomFieldValues = (value: unknown): string[] => {
   if (value === null || value === undefined) return [];
 
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    return trimmed && !isOpaqueJiraCustomFieldString(trimmed) ? [trimmed] : [];
+    return trimmed &&
+      !isOpaqueJiraCustomFieldString(trimmed) &&
+      !isJiraAutomationSmartValuePlaceholder(trimmed)
+      ? [trimmed]
+      : [];
   }
 
   if (typeof value === 'number' || typeof value === 'boolean') {
@@ -279,7 +298,12 @@ const extractMeaningfulJiraCustomFieldValues = (value: unknown): string[] => {
     const directCandidates = [obj.displayName, obj.name, obj.value, obj.label]
       .filter((candidate): candidate is string => typeof candidate === 'string')
       .map(candidate => candidate.trim())
-      .filter(candidate => candidate && !isOpaqueJiraCustomFieldString(candidate));
+      .filter(
+        candidate =>
+          candidate &&
+          !isOpaqueJiraCustomFieldString(candidate) &&
+          !isJiraAutomationSmartValuePlaceholder(candidate),
+      );
 
     if (directCandidates.length > 0) {
       return [...new Set(directCandidates)];
@@ -469,6 +493,20 @@ const resolveJiraParentIssueKey = (
   }
 
   return null;
+};
+
+const mapJiraIssueTypeToTicketType = (jiraIssueTypeName?: string): BaseTicketType => {
+  const normalized = (jiraIssueTypeName || '').trim().toLowerCase().replace(/[^a-z]/g, '');
+  switch (normalized) {
+    case 'epic': return BaseTicketType.Epic;
+    case 'bug': return BaseTicketType.Fix;
+    case 'incident': return BaseTicketType.Fix;
+    case 'hotfix': return BaseTicketType.Hotfix;
+    case 'story': return BaseTicketType.Story;
+    // Jira "Task" doesn't have a direct type in Xyne; treat as Feature by default.
+    case 'task': return BaseTicketType.Feature;
+    default: return BaseTicketType.Feature;
+  }
 };
 
 const buildJiraMigrationProjectLogPrefix = (jiraProjectKey: string): string =>
@@ -2529,7 +2567,12 @@ export class JiraMigrationImportService {
     onProgress?: (update: JiraMigrationProgressUpdate) => Promise<void> | void,
     getControlStatus?: () => Promise<'running' | 'paused' | 'cancel_requested' | null | undefined> | 'running' | 'paused' | 'cancel_requested' | null | undefined,
   ): Promise<JiraMigrationExecuteResult> {
-    this.userResolver.setManualEmailMap(input.userEmailMappings ?? null);
+    const csvEmailMappings = await getCachedJiraUserEmailMappings();
+    const mergedEmailMappings = {
+      ...csvEmailMappings,
+      ...(input.userEmailMappings || {}),
+    };
+    this.userResolver.setManualEmailMap(Object.keys(mergedEmailMappings).length > 0 ? mergedEmailMappings : null);
     this.resetExecutionCaches();
     const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
     const warnings: string[] = [];
@@ -2630,9 +2673,11 @@ export class JiraMigrationImportService {
         .filter(Boolean);
     } else {
       try {
-        jiraStatusOrder =
-          (await this.jiraClient.fetchProjectBoardStatusOrder(jiraProjectKey)) ||
-          (await this.jiraClient.fetchProjectStatusOrder(jiraProjectKey));
+        jiraStatusOrder = input.jiraBoardId
+          ? (await this.jiraClient.fetchBoardStatusOrderById(input.jiraBoardId)) ||
+            (await this.jiraClient.fetchProjectStatusOrder(jiraProjectKey))
+          : (await this.jiraClient.fetchProjectBoardStatusOrder(jiraProjectKey)) ||
+            (await this.jiraClient.fetchProjectStatusOrder(jiraProjectKey));
       } catch (error) {
         logger.warn(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Failed to fetch Jira status order; falling back to append ordering`, {
           error: error instanceof Error ? error.message : 'Unknown error',
@@ -2912,6 +2957,12 @@ export class JiraMigrationImportService {
 
               const xyneId = await TicketIdService.generateTicketId(tx as any, project.id);
 
+              const dueDateRaw = issue.fields.duedate;
+              const eta =
+                typeof dueDateRaw === 'string' && dueDateRaw.trim()
+                  ? new Date(dueDateRaw)
+                  : undefined;
+
               const createdTicket = await this.ticketRepository.createTicket(
                 {
                   title: summary,
@@ -2926,10 +2977,11 @@ export class JiraMigrationImportService {
                   statusV2: stageMatch.statusV2,
                   priority: mapPriority(issue.fields.priority?.name),
                   xyneId,
-                  ticketType: issue.fields.issuetype?.name || undefined,
+                  ticketType: mapJiraIssueTypeToTicketType(issue.fields.issuetype?.name),
 	                  stageName: stageMatch.stageName,
 	                  createdAt: createdAt.toISOString(),
 	                  workspaceId,
+                  ...(eta ? { eta } : {}),
 	                },
 	                tx as any,
 	              );
@@ -3350,6 +3402,31 @@ export class JiraMigrationImportService {
     } else if (input.filters) {
       totalIssues = 0;
       await ensureInitialProgress();
+    } else if (input.jiraBoardId) {
+      let startAt = 0;
+      let hasNextPage = true;
+      const pageSize = config.jiraMigration.issuePageSize;
+
+      while (hasNextPage) {
+        await checkControl();
+        const page = await this.jiraClient.fetchBoardIssuesPage(input.jiraBoardId, startAt, pageSize, input.dateFrom);
+        if (!initialProgressPublished) {
+          totalIssues = page.total;
+          await ensureInitialProgress();
+        }
+
+        await processIssuesChunk(page.issues);
+        if (config.jiraMigration.batchDelayMs > 0 && page.issues.length > 0) {
+          await sleep(config.jiraMigration.batchDelayMs);
+        }
+
+        startAt = page.nextStartAt;
+        hasNextPage = page.hasNextPage;
+
+        if (page.issues.length === 0) {
+          break;
+        }
+      }
     } else {
       let nextPageToken: string | undefined;
       let hasNextPage = true;
@@ -3453,7 +3530,12 @@ export class JiraMigrationImportService {
     const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
     const unresolvedUsers = new Map<string, UnresolvedJiraUser>();
 
-    this.userResolver.setManualEmailMap(input.userEmailMappings ?? null);
+    const csvEmailMappings = await getCachedJiraUserEmailMappings();
+    const mergedEmailMappings = {
+      ...csvEmailMappings,
+      ...(input.userEmailMappings || {}),
+    };
+    this.userResolver.setManualEmailMap(Object.keys(mergedEmailMappings).length > 0 ? mergedEmailMappings : null);
     this.userResolver.reset();
 
     const includeComments = input.includeComments !== false;
@@ -3479,12 +3561,25 @@ export class JiraMigrationImportService {
     }>();
     const RESOLVED_MAPPINGS_CAP = 500;
 
-    const page = await this.jiraClient.fetchIssuesPage(
-      jiraProjectKey,
-      nextPageToken || undefined,
-      pageSize,
-      input.dateFrom,
-    );
+    const page = input.jiraBoardId
+      ? await this.jiraClient.fetchBoardIssuesPage(
+          input.jiraBoardId,
+          input.boardStartAt ?? 0,
+          pageSize,
+          input.dateFrom,
+        ).then(p => ({
+          issues: p.issues,
+          nextPageToken: null as string | null,
+          hasNextPage: p.hasNextPage,
+          total: p.total,
+          boardNextStartAt: p.nextStartAt,
+        }))
+      : await this.jiraClient.fetchIssuesPage(
+          jiraProjectKey,
+          nextPageToken || undefined,
+          pageSize,
+          input.dateFrom,
+        ).then(p => ({ ...p, boardNextStartAt: null as number | null }));
 
     const commentsByIssueKey = new Map<string, JiraComment[]>();
     if (includeComments) {
@@ -3564,6 +3659,7 @@ export class JiraMigrationImportService {
       jiraProjectKey,
       nextPageToken,
       hasNextPage,
+      boardNextStartAt: page.boardNextStartAt,
       totalIssuesScanned,
       jiraUsersSeen,
       resolvedUsers,

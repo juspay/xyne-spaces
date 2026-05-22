@@ -39,6 +39,13 @@ interface JiraSearchResponse {
   total?: number;
 }
 
+interface JiraAgileIssueResponse {
+  startAt: number;
+  maxResults: number;
+  total: number;
+  issues: JiraIssueRecord[];
+}
+
 export interface JiraCommentRecord {
   id: string;
   body?: unknown;
@@ -295,6 +302,46 @@ export class JiraMigrationClient {
     return issueChunks;
   }
 
+  async fetchBoardIssuesPage(
+    boardId: number,
+    startAt: number = 0,
+    maxResults: number = 100,
+    dateFrom?: string,
+    fields: string[] = ['*all'],
+  ) {
+    const params = new URLSearchParams({
+      startAt: String(startAt),
+      maxResults: String(maxResults),
+      fields: fields.join(','),
+    });
+    if (dateFrom) {
+      params.set('jql', `created >= "${dateFrom}"`);
+    }
+
+    const result = await this.fetchJson<JiraAgileIssueResponse>(
+      `/rest/agile/1.0/board/${boardId}/issue?${params.toString()}`,
+    );
+
+    const returnedCount = (result.issues || []).length;
+
+    logger.info('[JiraMigrationImport] Jira board issues page fetched', {
+      boardId,
+      startAt,
+      maxResults,
+      returnedIssueCount: returnedCount,
+      total: result.total,
+      sampleIssueKeys: (result.issues || []).slice(0, 5).map(issue => issue.key),
+    });
+
+    return {
+      total: typeof result.total === 'number' ? result.total : returnedCount,
+      issues: result.issues || [],
+      nextStartAt: startAt + returnedCount,
+      hasNextPage: startAt + returnedCount < (result.total ?? 0),
+      pageSize: maxResults,
+    };
+  }
+
   async fetchIssuesMetadataPage(
     projectKey: string,
     requestPageToken?: string,
@@ -388,6 +435,34 @@ export class JiraMigrationClient {
 
     logger.info('[JiraMigrationImport] Fetched Jira board status order from Agile configuration', {
       projectKey,
+      boardId,
+      statusCount: ordered.length,
+      sampleStatuses: ordered.slice(0, 10),
+    });
+
+    return ordered.length > 0 ? ordered : null;
+  }
+
+  async fetchBoardStatusOrderById(boardId: number): Promise<string[] | null> {
+    const configResponse = await this.fetchJson<JiraAgileBoardConfigurationResponse>(
+      `/rest/agile/1.0/board/${boardId}/configuration`,
+    );
+
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+
+    for (const column of configResponse.columnConfig?.columns || []) {
+      for (const status of column.statuses || []) {
+        const name = status.name?.trim();
+        if (!name) continue;
+        const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        ordered.push(normalized);
+      }
+    }
+
+    logger.info('[JiraMigrationImport] Fetched Jira board status order by boardId', {
       boardId,
       statusCount: ordered.length,
       sampleStatuses: ordered.slice(0, 10),

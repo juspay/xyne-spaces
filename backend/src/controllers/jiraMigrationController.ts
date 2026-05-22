@@ -10,12 +10,419 @@ import {
 import { jiraMigrationProgressService } from '@/services/jiraMigrationProgressService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
+import { getCachedJiraUserEmailMappings } from '@/services/jira/jiraUserMapCsv';
 import { getCanvasUrl } from '@/services/canvasService';
 import { messageMetadataService } from '@/services/messageMetadataService';
 
 const db = DatabaseClient.getInstance();
 
+const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
+  if (chunkSize <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) chunks.push(items.slice(i, i + chunkSize));
+  return chunks;
+};
+
+const sleep = async (ms: number): Promise<void> => {
+  if (ms <= 0) return;
+  await new Promise(resolve => setTimeout(resolve, ms));
+};
+
 export class JiraMigrationController {
+  moveChannelProject = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const actorUserId = req.user?.id;
+      if (!actorUserId) {
+        res.status(401).json({ error: 'Authenticated user required for Jira migration operations' });
+        return;
+      }
+
+      const { channelId, sourceProjectId, targetProjectId, updatedAt } = req.body as {
+        channelId?: string;
+        sourceProjectId?: string;
+        targetProjectId?: string;
+        updatedAt?: string;
+      };
+
+      if (!channelId || !sourceProjectId || !targetProjectId) {
+        res.status(400).json({ error: 'channelId, sourceProjectId, and targetProjectId are required' });
+        return;
+      }
+
+      if (sourceProjectId === targetProjectId) {
+        res.status(400).json({ error: 'sourceProjectId and targetProjectId must be different' });
+        return;
+      }
+
+      const resolvedUpdatedAt = updatedAt ? new Date(updatedAt) : new Date();
+      if (Number.isNaN(resolvedUpdatedAt.getTime())) {
+        res.status(400).json({ error: 'updatedAt must be a valid ISO datetime string' });
+        return;
+      }
+
+      const result = await db.channel.updateMany({
+        where: { id: channelId, projectId: sourceProjectId },
+        data: { projectId: targetProjectId, isMigrated: true, updatedAt: resolvedUpdatedAt },
+      });
+
+      if (result.count === 0) {
+        res.status(404).json({
+          error: 'Channel not found for the provided channelId + sourceProjectId (no updates applied)',
+        });
+        return;
+      }
+
+      const updatedChannel = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { id: true, projectId: true, isMigrated: true, updatedAt: true, name: true },
+      });
+
+      res.json({ success: true, data: { updatedCount: result.count, channel: updatedChannel } });
+    } catch (error) {
+      logger.error('Jira migration channel move failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to move channel projectId' });
+    }
+  };
+
+  changeTicketCreatedBy = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const actorUserId = req.user?.id;
+      if (!actorUserId) {
+        res.status(401).json({ error: 'Authenticated user required for Jira migration operations' });
+        return;
+      }
+
+      const { ticketId, newCreatedByUserId, updatedAt } = req.body as {
+        ticketId?: string; // accepts Ticket.id or Ticket.xyneId
+        newCreatedByUserId?: string;
+        updatedAt?: string;
+        cascadeConversationAndMessages?: boolean;
+      };
+
+      if (!ticketId || !newCreatedByUserId) {
+        res.status(400).json({ error: 'ticketId and newCreatedByUserId are required' });
+        return;
+      }
+
+      const resolvedUpdatedAt = updatedAt ? new Date(updatedAt) : new Date();
+      if (Number.isNaN(resolvedUpdatedAt.getTime())) {
+        res.status(400).json({ error: 'updatedAt must be a valid ISO datetime string' });
+        return;
+      }
+
+      const userExists = await db.user.findUnique({ where: { id: newCreatedByUserId }, select: { id: true } });
+      if (!userExists) {
+        res.status(404).json({ error: 'newCreatedByUserId user not found' });
+        return;
+      }
+
+      const cascade = Boolean((req.body as { cascadeConversationAndMessages?: boolean })?.cascadeConversationAndMessages);
+
+      const existingTicket = await db.ticket.findFirst({
+        where: { OR: [{ id: ticketId }, { xyneId: ticketId }] },
+        select: { id: true, xyneId: true, conversationId: true, createdBy: true },
+      });
+      if (!existingTicket) {
+        res.status(404).json({ error: 'Ticket not found (no updates applied)' });
+        return;
+      }
+
+      const result = await db.$transaction(async tx => {
+        const ticketUpdate = await tx.ticket.updateMany({
+          where: { id: existingTicket.id },
+          data: { createdBy: newCreatedByUserId, updatedBy: actorUserId, updatedAt: resolvedUpdatedAt },
+        });
+
+        let conversationUpdatedCount = 0;
+        let messageUpdatedCount = 0;
+        let attachmentUpdatedCount = 0;
+
+        if (cascade) {
+          const convUpdate = await tx.conversation.updateMany({
+            where: { conversationId: existingTicket.conversationId, createdBy: existingTicket.createdBy },
+            data: { createdBy: newCreatedByUserId },
+          });
+          conversationUpdatedCount = convUpdate.count;
+
+          const msgUpdate = await tx.message.updateMany({
+            where: { conversationId: existingTicket.conversationId, senderId: existingTicket.createdBy },
+            data: { senderId: newCreatedByUserId },
+          });
+          messageUpdatedCount = msgUpdate.count;
+
+          const attachUpdate = await tx.messageAttachment.updateMany({
+            where: { conversationId: existingTicket.conversationId, createdBy: existingTicket.createdBy },
+            data: { createdBy: newCreatedByUserId, uploadedByUserId: newCreatedByUserId },
+          });
+          attachmentUpdatedCount = attachUpdate.count;
+        }
+
+        return { ticketUpdate, conversationUpdatedCount, messageUpdatedCount, attachmentUpdatedCount };
+      });
+
+      if (result.ticketUpdate.count === 0) {
+        res.status(404).json({ error: 'Ticket not found (no updates applied)' });
+        return;
+      }
+
+      const updatedTicket = await db.ticket.findFirst({
+        where: { id: existingTicket.id },
+        select: { id: true, createdBy: true, updatedBy: true, updatedAt: true, xyneId: true, title: true, projectId: true, channelId: true },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          updatedCount: result.ticketUpdate.count,
+          ticket: updatedTicket,
+          cascadeConversationAndMessages: cascade,
+          conversationUpdatedCount: result.conversationUpdatedCount,
+          messageUpdatedCount: result.messageUpdatedCount,
+          attachmentUpdatedCount: result.attachmentUpdatedCount,
+        },
+      });
+    } catch (error) {
+      logger.error('Jira migration change ticket createdBy failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to change ticket createdBy' });
+    }
+  };
+
+  purgeProjectMigration = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const actorUserId = req.user?.id;
+      if (!actorUserId) {
+        res.status(401).json({ error: 'Authenticated user required for Jira migration operations' });
+        return;
+      }
+
+      const { projectId, confirmText, dryRun } = req.body as {
+        projectId?: string;
+        confirmText?: string;
+        dryRun?: boolean;
+      };
+
+      if (!projectId) {
+        res.status(400).json({ error: 'projectId is required' });
+        return;
+      }
+
+      const isDryRun = dryRun !== false;
+      if (!isDryRun) {
+        const expectedConfirm = `DELETE ${projectId}`;
+        if (!confirmText || confirmText.trim() !== expectedConfirm) {
+          res.status(400).json({ error: `confirmText must exactly equal '${expectedConfirm}'` });
+          return;
+        }
+      }
+
+      const channels = await db.channel.findMany({
+        where: { projectId },
+        select: { id: true },
+      });
+      const channelIds = channels.map(c => c.id);
+
+      const externalSources = await db.externalSource.findMany({
+        where: { sourceType: 'jira', ...(channelIds.length > 0 ? { channelId: { in: channelIds } } : {}) },
+        select: { id: true, name: true, channelId: true },
+      });
+      const externalSourceIds = externalSources.map(s => s.id);
+
+      const externalMessages = externalSourceIds.length
+        ? await db.externalMessage.findMany({
+            where: { externalSourceId: { in: externalSourceIds } },
+            select: { id: true, entityType: true, entityId: true },
+          })
+        : [];
+
+      const ticketIds = Array.from(
+        new Set(
+          externalMessages
+            .filter(m => m.entityType === 'TICKET' && typeof m.entityId === 'string' && m.entityId.length > 0)
+            .map(m => m.entityId as string),
+        ),
+      );
+
+      const tickets = ticketIds.length
+        ? await db.ticket.findMany({
+            where: { id: { in: ticketIds } },
+            select: { id: true, conversationId: true },
+          })
+        : [];
+      const conversationIds = Array.from(new Set(tickets.map(t => t.conversationId).filter(Boolean)));
+
+      const messageIds = Array.from(
+        new Set(
+          externalMessages
+            .filter(m => m.entityType === 'MESSAGE' && typeof m.entityId === 'string' && m.entityId.length > 0)
+            .map(m => m.entityId as string),
+        ),
+      );
+
+      const attachmentIds = Array.from(
+        new Set(
+          externalMessages
+            .filter(m => m.entityType === 'ATTACHMENT' && typeof m.entityId === 'string' && m.entityId.length > 0)
+            .map(m => m.entityId as string),
+        ),
+      );
+
+      const stats = {
+        projectId,
+        channelCount: channelIds.length,
+        jiraExternalSourceCount: externalSources.length,
+        externalMessageCount: externalMessages.length,
+        ticketCount: ticketIds.length,
+        conversationCount: conversationIds.length,
+        mappedMessageCount: messageIds.length,
+        mappedAttachmentCount: attachmentIds.length,
+      };
+
+      if (dryRun !== false) {
+        res.json({ success: true, data: { dryRun: true, stats, externalSources } });
+        return;
+      }
+
+      // Throttle ticket deletes to avoid DB overload: 50 ticketIds per second.
+      const ticketChunkSize = 50;
+      const ticketChunkDelayMs = 1000;
+
+      // Phase 1: remove external mappings + messages/conversations/attachments.
+      // Chunked to avoid long-running/unbounded transactions on large migrations.
+      const phase1ExternalSourceChunkSize = 500;
+      const phase1MessageChunkSize = 1000;
+      const phase1ConversationChunkSize = 100;
+      const phase1AttachmentChunkSize = 1000;
+
+      // 1) External mappings (safe to delete outside a single transaction).
+      if (externalSourceIds.length) {
+        const externalSourceChunks = chunkArray(externalSourceIds, phase1ExternalSourceChunkSize);
+        for (const chunk of externalSourceChunks) {
+          if (chunk.length === 0) continue;
+          await db.externalMessage.deleteMany({ where: { externalSourceId: { in: chunk } } });
+        }
+      }
+
+      // 2) Reactions tied to the messages we mapped from Jira comments.
+      if (messageIds.length) {
+        const messageChunks = chunkArray(messageIds, phase1MessageChunkSize);
+        for (const chunk of messageChunks) {
+          if (chunk.length === 0) continue;
+          await db.$transaction(async tx => {
+            await tx.reactionCount.deleteMany({ where: { messageId: { in: chunk } } });
+            await tx.reaction.deleteMany({ where: { messageId: { in: chunk } } });
+          });
+        }
+      }
+
+      // 3) Conversation graph (participants, attachments, messages, conversations).
+      if (conversationIds.length) {
+        const conversationChunks = chunkArray(conversationIds, phase1ConversationChunkSize);
+        for (const chunk of conversationChunks) {
+          if (chunk.length === 0) continue;
+          await db.$transaction(async tx => {
+            await tx.conversationParticipant.deleteMany({ where: { conversationId: { in: chunk } } });
+            await tx.messageAttachment.deleteMany({ where: { conversationId: { in: chunk } } });
+            await tx.message.deleteMany({ where: { conversationId: { in: chunk } } });
+            await tx.conversation.deleteMany({ where: { conversationId: { in: chunk } } });
+          });
+        }
+      }
+
+      // 4) Defensive cleanup for mapped attachment ids (typically already covered by conversation deletes above).
+      if (attachmentIds.length) {
+        // Only delete attachments for conversations in this project to avoid accidentally deleting attachments from
+        // other conversations if `attachmentIds` contains unrelated IDs.
+        if (conversationIds.length === 0) {
+          logger.warn('[JiraMigration] purgeProjectMigration: attachmentIds present but no conversations found; skipping attachmentId cleanup', {
+            projectId,
+            attachmentIdsCount: attachmentIds.length,
+          });
+        } else {
+        const attachmentChunks = chunkArray(attachmentIds, phase1AttachmentChunkSize);
+        for (const chunk of attachmentChunks) {
+          if (chunk.length === 0) continue;
+          await db.messageAttachment.deleteMany({
+            where: { id: { in: chunk }, conversationId: { in: conversationIds } },
+          });
+        }
+        }
+      }
+
+      // Phase 2: ticket-related deletes in chunks.
+      const ticketChunks = chunkArray(ticketIds, ticketChunkSize);
+      for (let index = 0; index < ticketChunks.length; index += 1) {
+        const chunk = ticketChunks[index];
+        if (chunk.length === 0) continue;
+
+        await db.$transaction(async tx => {
+          await tx.ticketReferenceMapping.deleteMany({
+            where: { OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }] },
+          });
+          await tx.ticketActivity.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.ticketAssignment.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.ticketEntityMapping.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.ticketTag.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.ticketStageEta.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } });
+          await tx.emailRead.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.workflow.deleteMany({ where: { ticketId: { in: chunk } } });
+          await tx.ticket.deleteMany({ where: { id: { in: chunk } } });
+        });
+
+        if (index < ticketChunks.length - 1) {
+          await sleep(ticketChunkDelayMs);
+        }
+      }
+
+      // Phase 3: remove Jira external sources last.
+      if (externalSourceIds.length) {
+        await db.externalSource.deleteMany({ where: { id: { in: externalSourceIds } } });
+      }
+
+      res.json({ success: true, data: { dryRun: false, stats } });
+    } catch (error) {
+      logger.error('Jira migration purge project failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to purge project migration' });
+    }
+  };
+
+  userMapLookup = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const actorUserId = req.user?.id;
+      if (!actorUserId) {
+        res.status(401).json({ error: 'Authenticated user required for Jira migration operations' });
+        return;
+      }
+
+      const { accountId } = req.body as { accountId?: string };
+      if (!accountId || !accountId.trim()) {
+        res.status(400).json({ error: 'accountId is required' });
+        return;
+      }
+
+      const mappings = await getCachedJiraUserEmailMappings();
+      const key = `accountId:${accountId.trim()}`.toLowerCase();
+      const mappedEmail = mappings[key] || null;
+
+      res.json({
+        success: true,
+        data: {
+          location: (config.jira.migrationUserMapCsvLocation || '').trim() || null,
+          rows: Object.keys(mappings).length,
+          accountId: accountId.trim(),
+          key,
+          mappedEmail,
+        },
+      });
+    } catch (error) {
+      logger.error('Jira migration user map lookup failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to lookup user map' });
+    }
+  };
+
   preview = async (req: Request, res: Response): Promise<void> => {
     try {
       const { jiraProjectKey, targetProjectId, targetBoardId, targetChannelId } = req.body as {
@@ -133,6 +540,7 @@ export class JiraMigrationController {
         targetChannelId,
         issueKeys: Array.isArray(req.body.issueKeys) ? req.body.issueKeys : undefined,
         ...(typeof req.body.jiraBoardId === 'number' ? { jiraBoardId: req.body.jiraBoardId } : {}),
+        ...(typeof req.body.jiraBoardName === 'string' ? { jiraBoardName: req.body.jiraBoardName } : {}),
         dateFrom: typeof req.body.dateFrom === 'string' ? req.body.dateFrom : undefined,
         filters: req.body.filters && typeof req.body.filters === 'object' ? {
           ...(Array.isArray(req.body.filters.reporterAccountIds) ? { reporterAccountIds: req.body.filters.reporterAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
@@ -176,6 +584,99 @@ export class JiraMigrationController {
       logger.error('Jira migration execution failed', error);
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to execute Jira migration',
+      });
+    }
+  };
+
+  bulkExecute = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const actorUserId = req.user?.id;
+      if (!actorUserId) {
+        res.status(401).json({ error: 'Authenticated user required for Jira migration' });
+        return;
+      }
+
+      const jobsRaw = (req.body as { jobs?: unknown }).jobs;
+      if (!Array.isArray(jobsRaw) || jobsRaw.length === 0) {
+        res.status(400).json({ error: 'jobs is required and must be a non-empty array' });
+        return;
+      }
+
+      const jobs: JiraMigrationExecuteInput[] = [];
+      for (const item of jobsRaw) {
+        if (!item || typeof item !== 'object') {
+          res.status(400).json({ error: 'Each job must be an object' });
+          return;
+        }
+        const job = item as Partial<JiraMigrationExecuteInput> & Record<string, unknown>;
+        if (!job.jiraProjectKey || !job.targetProjectId || !job.targetBoardId || !job.targetChannelId) {
+          res.status(400).json({
+            error: 'Each job must include jiraProjectKey, targetProjectId, targetBoardId, and targetChannelId',
+          });
+          return;
+        }
+        if (!job.statusV2Mappings || typeof job.statusV2Mappings !== 'object' || Array.isArray(job.statusV2Mappings)) {
+          res.status(400).json({ error: 'Each job must include statusV2Mappings' });
+          return;
+        }
+        if (Object.keys(job.statusV2Mappings as Record<string, string>).length === 0) {
+          res.status(400).json({ error: 'Each job must include non-empty statusV2Mappings' });
+          return;
+        }
+
+        jobs.push(job as JiraMigrationExecuteInput);
+      }
+
+      const startedJobs = await Promise.all(
+        jobs.map(async input => {
+          const jobId = randomUUID();
+          await jiraMigrationProgressService.createJob(jobId, input);
+          return {
+            jobId,
+            jiraProjectKey: input.jiraProjectKey.trim().toUpperCase(),
+            jiraBoardId: input.jiraBoardId ?? null,
+            jiraBoardName: input.jiraBoardName ?? null,
+            targetProjectId: input.targetProjectId,
+            targetBoardId: input.targetBoardId,
+            targetChannelId: input.targetChannelId,
+          };
+        }),
+      );
+
+      res.json({ success: true, data: { jobs: startedJobs } });
+
+      // Run sequentially to avoid hammering Jira API / DB.
+      void (async () => {
+        for (let index = 0; index < jobs.length; index += 1) {
+          const input = jobs[index];
+          const started = startedJobs[index];
+          if (!input || !started) continue;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await this.runMigrationJob(started.jobId, input, actorUserId);
+          } catch (error) {
+            logger.error('Jira migration bulk execution failed for job', error, {
+              jobId: started.jobId,
+              jiraProjectKey: input.jiraProjectKey,
+              jiraBoardId: input.jiraBoardId,
+              targetBoardId: input.targetBoardId,
+            });
+            // Ensure a terminal state even if runMigrationJob throws unexpectedly.
+            // eslint-disable-next-line no-await-in-loop
+            await jiraMigrationProgressService.patchJob(started.jobId, {
+              status: 'failed',
+              currentStep: 'failed',
+              currentIssueKey: null,
+              completedAt: new Date().toISOString(),
+              errorMessage: error instanceof Error ? error.message : 'Bulk migration failed',
+            });
+          }
+        }
+      })();
+    } catch (error) {
+      logger.error('Jira migration bulk execution failed', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to bulk execute Jira migration',
       });
     }
   };
@@ -295,6 +796,23 @@ export class JiraMigrationController {
     }
   };
 
+
+  boards = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const projectKey = (req.query.projectKey as string || '').trim().toUpperCase();
+      if (!projectKey) {
+        res.status(400).json({ error: 'projectKey query param is required' });
+        return;
+      }
+      const boards = await jiraMigrationPreviewService.fetchProjectBoards(projectKey);
+      res.json({ success: true, data: boards });
+    } catch (error) {
+      logger.error('Jira migration boards fetch failed', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to fetch Jira boards',
+      });
+    }
+  };
 
   history = async (_req: Request, res: Response): Promise<void> => {
     try {

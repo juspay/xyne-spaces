@@ -480,7 +480,7 @@ export class JiraMigrationPreviewService {
     }
   }
 
-  private async fetchProjectBoards(projectKey: string): Promise<Array<{ id: number; name: string; type: string | null }>> {
+  async fetchProjectBoards(projectKey: string): Promise<Array<{ id: number; name: string; type: string | null }>> {
     try {
       const boards = await this.fetchJson<{
         values?: Array<{ id?: number; name?: string; type?: string }>;

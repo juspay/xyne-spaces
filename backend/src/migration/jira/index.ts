@@ -8,9 +8,15 @@ const router = Router();
 const controller = new JiraMigrationController();
 const jiraMigrationAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 
+router.get('/boards', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.boards);
 router.post('/preview', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.preview);
 router.post('/resolve-users', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.resolveUsers);
 router.post('/execute', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.execute);
+router.post('/bulk-execute', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.bulkExecute);
+router.post('/move-channel-project', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveChannelProject);
+router.post('/change-ticket-created-by', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.changeTicketCreatedBy);
+router.post('/purge-project-migration', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.purgeProjectMigration);
+router.post('/user-map/lookup', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.userMapLookup);
 router.get('/status/:jobId', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.status);
 router.post('/pause/:jobId', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.pause);
 router.post('/resume/:jobId', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.resume);

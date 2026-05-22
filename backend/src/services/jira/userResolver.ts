@@ -41,6 +41,8 @@ type ManualUserEmailMapping = Record<string, string>;
 
 const normalizeMappingKey = (value?: string | null): string => (value || '').trim().toLowerCase();
 
+const stripDisplayNamePrefixes = (value: string): string => value.trim().replace(/^[!@]+/, '').trim();
+
 export class JiraUserResolver {
   private resolvedUserCache = new Map<string, string>();
   private userResolutionLookup: UserResolutionLookup | null = null;
@@ -114,7 +116,9 @@ export class JiraUserResolver {
     if (this.userResolutionLookup) return;
 
     const users = await db.user.findMany({
-      where: { workspaceId: this.workspaceId },
+      where: {
+        workspaceId: this.workspaceId,
+      },
       select: {
         id: true,
         name: true,
@@ -212,20 +216,22 @@ export class JiraUserResolver {
     }
 
     if (user.displayName) {
-      const normalizedDisplayName = normalizeComparableValue(user.displayName);
-      const emailInDisplayName = extractEmailFromDisplayName(user.displayName);
-      const inferredEmails = inferEmailCandidatesFromDisplayName(user.displayName);
+      const cleanedDisplayName = stripDisplayNamePrefixes(user.displayName);
+      const normalizedDisplayName = normalizeComparableValue(cleanedDisplayName);
+      const emailInDisplayName = extractEmailFromDisplayName(cleanedDisplayName);
+      const inferredEmails = inferEmailCandidatesFromDisplayName(cleanedDisplayName);
 
-      const exactNameMatch = this.userResolutionLookup?.byExactName.get(user.displayName.toLowerCase());
+      const exactNameMatch = this.userResolutionLookup?.byExactName.get(cleanedDisplayName.toLowerCase());
       if (exactNameMatch) {
         if (userCacheKey) this.resolvedUserCache.set(userCacheKey, exactNameMatch);
         return exactNameMatch;
       }
 
-      const profileDisplayNameMatch = this.userResolutionLookup?.byProfileDisplayName.get(user.displayName.toLowerCase());
+      const profileDisplayNameMatch = this.userResolutionLookup?.byProfileDisplayName.get(cleanedDisplayName.toLowerCase());
       if (profileDisplayNameMatch) {
         logger.info('[JiraMigration] Resolved Jira user by user profile display name', {
           displayName: user.displayName,
+          cleanedDisplayName,
           resolvedUserId: profileDisplayNameMatch,
         });
         if (userCacheKey) this.resolvedUserCache.set(userCacheKey, profileDisplayNameMatch);
@@ -236,6 +242,7 @@ export class JiraUserResolver {
       if (normalizedLookupMatch) {
         logger.info('[JiraMigration] Resolved Jira user by normalized name match', {
           displayName: user.displayName,
+          cleanedDisplayName,
           resolvedUserId: normalizedLookupMatch,
         });
         if (userCacheKey) this.resolvedUserCache.set(userCacheKey, normalizedLookupMatch);
@@ -362,7 +369,20 @@ export class JiraUserResolver {
       unresolvedUsers.set(unresolvedUserKey, {
         displayName: user.displayName || null,
         accountId: user.accountId || null,
-        suggestedEmails: inferredEmails,
+        suggestedEmails: manuallyMappedEmail
+          ? [...new Set([manuallyMappedEmail, ...inferredEmails, ...(existingUnresolvedUser?.suggestedEmails || [])])]
+          : [...new Set([...inferredEmails, ...(existingUnresolvedUser?.suggestedEmails || [])])],
+        issueKeys: [...new Set([...(existingUnresolvedUser?.issueKeys || []), ...(issueKey ? [issueKey] : [])])],
+      });
+    }
+
+    if (!user.displayName && manuallyMappedEmail) {
+      const unresolvedUserKey = this.unresolvedUserKey(user);
+      const existingUnresolvedUser = unresolvedUsers.get(unresolvedUserKey);
+      unresolvedUsers.set(unresolvedUserKey, {
+        displayName: null,
+        accountId: user.accountId || null,
+        suggestedEmails: [...new Set([manuallyMappedEmail, ...(existingUnresolvedUser?.suggestedEmails || [])])],
         issueKeys: [...new Set([...(existingUnresolvedUser?.issueKeys || []), ...(issueKey ? [issueKey] : [])])],
       });
     }

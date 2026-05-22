@@ -1,7 +1,13 @@
 import { API_BASE_URL, isLocalhost, isSandboxLocal, isTestEnv } from '../../config';
 import { apiInstance } from '../clients/apiClient';
 
-const JIRA_MIGRATION_BASE_URL = API_BASE_URL.replace(
+// API_BASE_URL is expected to end with "/api". If it doesn't, fall back to appending it to avoid silently
+// calling the wrong route.
+const normalizedApiBaseUrl = API_BASE_URL.endsWith('/api')
+  ? API_BASE_URL
+  : `${API_BASE_URL.replace(/\/$/, '')}/api`;
+
+const JIRA_MIGRATION_BASE_URL = normalizedApiBaseUrl.replace(
   /\/api$/,
   isLocalhost || isTestEnv || isSandboxLocal
     ? '/api/migration/jira'
@@ -122,13 +128,30 @@ export interface JiraMigrationPreviewRequest {
   loadFilterOptions?: boolean;
 }
 
-export interface JiraMigrationExecuteRequest extends JiraMigrationPreviewRequest {
+export interface JiraMigrationBaseRequest {
+  jiraProjectKey: string;
+  targetProjectId: string;
+  targetBoardId: string;
+  targetChannelId: string;
+  jiraBoardId?: number;
+  dateFrom?: string;
+  filters?: JiraMigrationFilters;
+}
+
+export interface JiraMigrationExecuteRequest extends JiraMigrationBaseRequest {
   issueKeys?: string[];
   statusV2Mappings: Record<string, string>;
   skipCustomFieldIds?: string[];
   jiraStatusSequence?: string[];
   excludedStageNames?: string[];
   userEmailMappings?: Record<string, string>;
+  jiraBoardName?: string;
+}
+
+export interface JiraBoard {
+  id: number;
+  name: string;
+  type: string | null;
 }
 
 export interface JiraMigrationIssueResult {
@@ -175,6 +198,18 @@ export interface JiraMigrationStartResponse {
   jobId: string;
 }
 
+export interface JiraMigrationBulkStartResponse {
+  jobs: Array<{
+    jobId: string;
+    jiraProjectKey: string;
+    jiraBoardId: number | null;
+    jiraBoardName: string | null;
+    targetProjectId: string;
+    targetBoardId: string;
+    targetChannelId: string;
+  }>;
+}
+
 export interface JiraMigrationResolveUsersRequest {
   jiraProjectKey: string;
   issueKeys?: string[];
@@ -183,6 +218,8 @@ export interface JiraMigrationResolveUsersRequest {
   includeAttachments?: boolean;
   nextPageToken?: string | null;
   pageSize?: number;
+  jiraBoardId?: number;
+  boardStartAt?: number;
   userEmailMappings?: Record<string, string>;
 }
 
@@ -190,6 +227,7 @@ export interface JiraMigrationResolveUsersResponse {
   jiraProjectKey: string;
   nextPageToken: string | null;
   hasNextPage: boolean;
+  boardNextStartAt: number | null;
   totalIssuesScanned: number;
   jiraUsersSeen: number;
   resolvedUsers: number;
@@ -210,6 +248,70 @@ export interface JiraMigrationResolveUsersResponse {
   }>;
 }
 
+export interface JiraMigrationMoveChannelProjectRequest {
+  channelId: string;
+  sourceProjectId: string;
+  targetProjectId: string;
+  updatedAt?: string;
+}
+
+export interface JiraMigrationMoveChannelProjectResponse {
+  updatedCount: number;
+  channel: {
+    id: string;
+    name: string;
+    projectId: string;
+    isMigrated: boolean;
+    updatedAt: string;
+  } | null;
+}
+
+export interface JiraMigrationChangeTicketCreatedByRequest {
+  ticketId: string;
+  newCreatedByUserId: string;
+  updatedAt?: string;
+  cascadeConversationAndMessages?: boolean;
+}
+
+export interface JiraMigrationChangeTicketCreatedByResponse {
+  updatedCount: number;
+  cascadeConversationAndMessages?: boolean;
+  conversationUpdatedCount?: number;
+  messageUpdatedCount?: number;
+  attachmentUpdatedCount?: number;
+  ticket: {
+    id: string;
+    xyneId: string;
+    title: string;
+    projectId: string;
+    channelId: string;
+    createdBy: string;
+    updatedBy: string;
+    updatedAt: string;
+  } | null;
+}
+
+export interface JiraMigrationPurgeProjectMigrationRequest {
+  projectId: string;
+  confirmText?: string;
+  dryRun?: boolean;
+}
+
+export interface JiraMigrationPurgeProjectMigrationResponse {
+  dryRun: boolean;
+  stats: {
+    projectId: string;
+    channelCount: number;
+    jiraExternalSourceCount: number;
+    externalMessageCount: number;
+    ticketCount: number;
+    conversationCount: number;
+    mappedMessageCount: number;
+    mappedAttachmentCount: number;
+  };
+  externalSources?: Array<{ id: string; name: string; channelId: string | null }>;
+}
+
 export interface JiraMigrationHistoryItem {
   externalSourceId: string;
   jiraProjectKey: string;
@@ -226,6 +328,8 @@ export interface JiraMigrationJobProgress {
   status: 'queued' | 'running' | 'completed' | 'failed';
   controlStatus: 'running' | 'paused' | 'cancel_requested';
   jiraProjectKey: string;
+  jiraBoardId?: number;
+  jiraBoardName?: string;
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
@@ -271,6 +375,17 @@ class JiraMigrationService {
     return response.data.data;
   }
 
+  async startBulkMigration(payload: {
+    jobs: JiraMigrationExecuteRequest[];
+  }): Promise<JiraMigrationBulkStartResponse> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: JiraMigrationBulkStartResponse;
+    }>(`${JIRA_MIGRATION_BASE_URL}/bulk-execute`, payload);
+
+    return response.data.data;
+  }
+
   async resolveUsers(
     payload: JiraMigrationResolveUsersRequest,
   ): Promise<JiraMigrationResolveUsersResponse> {
@@ -279,6 +394,13 @@ class JiraMigrationService {
       data: JiraMigrationResolveUsersResponse;
     }>(`${JIRA_MIGRATION_BASE_URL}/resolve-users`, payload);
 
+    return response.data.data;
+  }
+
+  async fetchBoards(projectKey: string): Promise<JiraBoard[]> {
+    const response = await apiInstance.get<{ success: true; data: JiraBoard[] }>(
+      `${JIRA_MIGRATION_BASE_URL}/boards?projectKey=${encodeURIComponent(projectKey)}`,
+    );
     return response.data.data;
   }
 
@@ -320,6 +442,36 @@ class JiraMigrationService {
     const response = await apiInstance.post<{ success: true; data: JiraMigrationJobProgress }>(
       `${JIRA_MIGRATION_BASE_URL}/resume/${jobId}`,
     );
+    return response.data.data;
+  }
+
+  async moveChannelProject(
+    payload: JiraMigrationMoveChannelProjectRequest,
+  ): Promise<JiraMigrationMoveChannelProjectResponse> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: JiraMigrationMoveChannelProjectResponse;
+    }>(`${JIRA_MIGRATION_BASE_URL}/move-channel-project`, payload);
+    return response.data.data;
+  }
+
+  async changeTicketCreatedBy(
+    payload: JiraMigrationChangeTicketCreatedByRequest,
+  ): Promise<JiraMigrationChangeTicketCreatedByResponse> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: JiraMigrationChangeTicketCreatedByResponse;
+    }>(`${JIRA_MIGRATION_BASE_URL}/change-ticket-created-by`, payload);
+    return response.data.data;
+  }
+
+  async purgeProjectMigration(
+    payload: JiraMigrationPurgeProjectMigrationRequest,
+  ): Promise<JiraMigrationPurgeProjectMigrationResponse> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: JiraMigrationPurgeProjectMigrationResponse;
+    }>(`${JIRA_MIGRATION_BASE_URL}/purge-project-migration`, payload);
     return response.data.data;
   }
 }
