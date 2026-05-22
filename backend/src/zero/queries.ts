@@ -2705,6 +2705,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  getOrgMemberById: defineQuery(
+    z.object({ memberId: z.string() }),
+    ({ args: { memberId } }) => {
+      return zql.org_members.where('memberId', memberId).one();
+    },
+  ),
+
   getEmailChannelPreference: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {

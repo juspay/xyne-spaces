@@ -9,6 +9,7 @@ import {
   ChevronRight,
   UserPlus,
   CheckCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
@@ -270,8 +271,24 @@ export const OrganisationsScreen = (): ReactElement => {
   const z = useZero();
   const workspaceId = self?.workspaceId ?? '';
 
-  const [linkedOrgs] = useCachedQuery(queries.workspaceOrganizations({ workspaceId }), {
+  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId }), {
     enabled: !!workspaceId,
+  });
+
+  const workspaceOrgId = workspace?.orgId ?? '';
+
+  const [selfOrgMember] = useCachedQuery(
+    queries.getOrgMemberById({ memberId: self?.orgMemberId ?? '' }),
+    { enabled: !!self?.orgMemberId },
+  );
+
+  const orgMismatch =
+    !!workspaceOrgId &&
+    !!selfOrgMember &&
+    (selfOrgMember as unknown as { orgId: string }).orgId !== workspaceOrgId;
+
+  const [linkedOrgs] = useCachedQuery(queries.workspaceOrganizations({ workspaceId }), {
+    enabled: !!workspaceId && !orgMismatch,
   });
 
   const [expandedOrgId, setExpandedOrgId] = useState<string | null>(null);
@@ -333,226 +350,247 @@ export const OrganisationsScreen = (): ReactElement => {
       data-testid='organisations-page'
       className='h-full bg-muted flex flex-col md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'
     >
-      <div className='flex-1 overflow-y-auto p-6'>
-        <div className='max-w-4xl mx-auto space-y-6'>
-          {/* ── Header + Create button ── */}
-          <div className='flex items-start justify-between gap-4'>
-            <div className='flex items-center gap-3'>
-              <Building2 className='w-8 h-8 text-primary shrink-0' />
-              <div>
-                <h1 className='text-2xl font-semibold text-foreground'>Organisations</h1>
-                <p className='text-muted-foreground'>Manage organisations and their members</p>
-              </div>
+      {/* ── Org mismatch guard ── */}
+      {orgMismatch ? (
+        <div className='flex-1 flex items-center justify-center p-8'>
+          <div className='max-w-md w-full rounded-xl border border-border bg-card shadow-sm p-8 flex flex-col items-center gap-4 text-center'>
+            <div className='w-14 h-14 rounded-full bg-destructive/10 flex items-center justify-center'>
+              <AlertTriangle className='w-7 h-7 text-destructive' />
             </div>
-            <Button
-              variant='outline'
-              className='gap-2 shrink-0'
-              onClick={() => setShowCreateDialog(true)}
-              data-track-category='Organisations'
-              data-track-name='OpenCreateOrgDialog'
-            >
-              <Plus className='w-4 h-4' />
-              Create New Org
-            </Button>
-          </div>
-
-          {/* ── Linked orgs accordion list ── */}
-          <Card>
-            {!linkedOrgs || linkedOrgs.length === 0 ? (
-              <div className='p-8 text-center text-muted-foreground'>
-                <Building2 className='w-12 h-12 mx-auto mb-3 opacity-50' />
-                <p>No organisations linked</p>
-                <p className='text-sm mt-1'>Create a new organisation to get started</p>
-              </div>
-            ) : (
-              <div className='divide-y divide-border'>
-                {linkedOrgs.map(linkedOrg => {
-                  const org = linkedOrg.organization;
-                  if (!org) return null;
-                  const isExpanded = expandedOrgId === org.orgId;
-
-                  return (
-                    <div key={linkedOrg.id}>
-                      {/* Org header row — click to expand */}
-                      <button
-                        type='button'
-                        className='w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors text-left'
-                        onClick={() => handleToggleExpand(org.orgId)}
-                        data-track-category='Organisations'
-                        data-track-name='ToggleOrgExpand'
-                        data-track-metadata={JSON.stringify({ orgId: org.orgId })}
-                      >
-                        <div className='flex items-center gap-3'>
-                          <div className='w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0'>
-                            <Building2 className='w-5 h-5 text-primary' />
-                          </div>
-                          <div>
-                            <p className='font-medium text-foreground'>{org.name}</p>
-                            {org.description && (
-                              <p className='text-sm text-muted-foreground'>{org.description}</p>
-                            )}
-                            <p className='text-xs text-muted-foreground mt-0.5'>
-                              Linked {new Date(linkedOrg.createdAt).toLocaleDateString()}
-                            </p>
-                          </div>
-                        </div>
-                        {isExpanded ? (
-                          <ChevronDown className='w-4 h-4 text-muted-foreground shrink-0' />
-                        ) : (
-                          <ChevronRight className='w-4 h-4 text-muted-foreground shrink-0' />
-                        )}
-                      </button>
-
-                      {/* Expanded members section */}
-                      {isExpanded && (
-                        <OrgMembersSection
-                          orgId={org.orgId}
-                          orgCreatedBy={org.createdBy}
-                          selfEmail={self?.email}
-                          selfId={self?.id}
-                          z={z}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-
-          {/* ── Info card ── */}
-          <Card className='p-6 bg-muted/50 border-dashed'>
-            <div className='flex items-start gap-3'>
-              <CheckCircle className='w-5 h-5 text-primary mt-0.5 shrink-0' />
-              <div>
-                <h3 className='font-medium text-foreground'>About Organisations</h3>
-                <ul className='mt-2 text-sm text-muted-foreground space-y-1 list-disc list-inside'>
-                  <li>Organisations group users across one or more workspaces</li>
-                  <li>A user can only belong to one organisation at a time</li>
-                  <li>Only org admins and owners can add or remove members</li>
-                  <li>Removing a member from an org does not remove them from this workspace</li>
-                </ul>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      {/* ── Create Organisation Dialog ── */}
-      <Dialog
-        open={showCreateDialog}
-        onOpenChange={setShowCreateDialog}
-        className='max-w-md rounded-xl'
-        {...(!isMobile ? { focusRef: orgNameInputRef } : {})}
-      >
-        <div className='p-6 space-y-4'>
-          {/* Dialog header */}
-          <div className='flex items-center justify-between'>
             <div>
-              <h2 className='text-lg font-semibold text-foreground'>Create Organisation</h2>
-              <p className='text-sm text-muted-foreground mt-1'>
-                An invitation will be sent to the owner&apos;s email
+              <h2 className='text-lg font-semibold text-foreground'>Cannot Manage Organisation</h2>
+              <p className='mt-2 text-sm text-muted-foreground'>
+                You cannot manage organisation from this workspace.
               </p>
             </div>
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => setShowCreateDialog(false)}
-              className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
-              disabled={isCreatingOrg}
-              data-track-category='Organisations'
-              data-track-name='CloseCreateOrgDialog'
-            >
-              <X className='size-4' />
-            </Button>
-          </div>
-
-          {/* Organisation Name field */}
-          <div className='space-y-2'>
-            <label htmlFor='org-name' className='text-sm font-medium text-foreground'>
-              Organisation Name <span className='text-destructive'>*</span>
-            </label>
-            <Input
-              ref={orgNameInputRef}
-              id='org-name'
-              type='text'
-              placeholder='Enter organisation name...'
-              value={newOrgName}
-              onChange={e => setNewOrgName(e.target.value)}
-              disabled={isCreatingOrg}
-            />
-          </div>
-
-          {/* Workspace Name field */}
-          <div className='space-y-2'>
-            <label htmlFor='workspace-name' className='text-sm font-medium text-foreground'>
-              Workspace Name <span className='text-destructive'>*</span>
-            </label>
-            <Input
-              id='workspace-name'
-              type='text'
-              placeholder='Enter workspace name...'
-              value={newWorkspaceName}
-              onChange={e => setNewWorkspaceName(e.target.value)}
-              disabled={isCreatingOrg}
-            />
-          </div>
-
-          {/* Owner Email field */}
-          <div className='space-y-2'>
-            <label htmlFor='owner-email' className='text-sm font-medium text-foreground'>
-              Owner Email <span className='text-destructive'>*</span>
-            </label>
-            <Input
-              id='owner-email'
-              type='email'
-              placeholder='owner@example.com'
-              value={newOwnerEmail}
-              onChange={e => setNewOwnerEmail(e.target.value)}
-              disabled={isCreatingOrg}
-            />
-          </div>
-
-          {/* Actions */}
-          <div className='flex gap-3 justify-end pt-2'>
-            <Button
-              variant='outline'
-              disabled={isCreatingOrg}
-              onClick={() => setShowCreateDialog(false)}
-              size='sm'
-              data-track-category='Organisations'
-              data-track-name='CancelCreateOrg'
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => void handleCreateOrg()}
-              disabled={
-                !newOrgName.trim() ||
-                !newWorkspaceName.trim() ||
-                !newOwnerEmail.trim() ||
-                isCreatingOrg
-              }
-              className='gap-2'
-              size='sm'
-              data-track-category='Organisations'
-              data-track-name='ConfirmCreateOrg'
-            >
-              {isCreatingOrg ? (
-                <>
-                  <Loader2 className='size-4 animate-spin' />
-                  Creating...
-                </>
-              ) : (
-                <>
-                  <Plus className='size-4' />
-                  Create
-                </>
-              )}
-            </Button>
           </div>
         </div>
-      </Dialog>
+      ) : (
+        <>
+          <div className='flex-1 overflow-y-auto p-6'>
+            <div className='max-w-4xl mx-auto space-y-6'>
+              {/* ── Header + Create button ── */}
+              <div className='flex items-start justify-between gap-4'>
+                <div className='flex items-center gap-3'>
+                  <Building2 className='w-8 h-8 text-primary shrink-0' />
+                  <div>
+                    <h1 className='text-2xl font-semibold text-foreground'>Organisations</h1>
+                    <p className='text-muted-foreground'>Manage organisations and their members</p>
+                  </div>
+                </div>
+                <Button
+                  variant='outline'
+                  className='gap-2 shrink-0'
+                  onClick={() => setShowCreateDialog(true)}
+                  data-track-category='Organisations'
+                  data-track-name='OpenCreateOrgDialog'
+                >
+                  <Plus className='w-4 h-4' />
+                  Create New Org
+                </Button>
+              </div>
+
+              {/* ── Linked orgs accordion list ── */}
+              <Card>
+                {!linkedOrgs || linkedOrgs.length === 0 ? (
+                  <div className='p-8 text-center text-muted-foreground'>
+                    <Building2 className='w-12 h-12 mx-auto mb-3 opacity-50' />
+                    <p>No organisations linked</p>
+                    <p className='text-sm mt-1'>Create a new organisation to get started</p>
+                  </div>
+                ) : (
+                  <div className='divide-y divide-border'>
+                    {linkedOrgs.map(linkedOrg => {
+                      const org = linkedOrg.organization;
+                      if (!org) return null;
+                      const isExpanded = expandedOrgId === org.orgId;
+
+                      return (
+                        <div key={linkedOrg.id}>
+                          {/* Org header row — click to expand */}
+                          <button
+                            type='button'
+                            className='w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors text-left'
+                            onClick={() => handleToggleExpand(org.orgId)}
+                            data-track-category='Organisations'
+                            data-track-name='ToggleOrgExpand'
+                            data-track-metadata={JSON.stringify({ orgId: org.orgId })}
+                          >
+                            <div className='flex items-center gap-3'>
+                              <div className='w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0'>
+                                <Building2 className='w-5 h-5 text-primary' />
+                              </div>
+                              <div>
+                                <p className='font-medium text-foreground'>{org.name}</p>
+                                {org.description && (
+                                  <p className='text-sm text-muted-foreground'>{org.description}</p>
+                                )}
+                                <p className='text-xs text-muted-foreground mt-0.5'>
+                                  Linked {new Date(linkedOrg.createdAt).toLocaleDateString()}
+                                </p>
+                              </div>
+                            </div>
+                            {isExpanded ? (
+                              <ChevronDown className='w-4 h-4 text-muted-foreground shrink-0' />
+                            ) : (
+                              <ChevronRight className='w-4 h-4 text-muted-foreground shrink-0' />
+                            )}
+                          </button>
+
+                          {/* Expanded members section */}
+                          {isExpanded && (
+                            <OrgMembersSection
+                              orgId={org.orgId}
+                              orgCreatedBy={org.createdBy}
+                              selfEmail={self?.email}
+                              selfId={self?.id}
+                              z={z}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+
+              {/* ── Info card ── */}
+              <Card className='p-6 bg-muted/50 border-dashed'>
+                <div className='flex items-start gap-3'>
+                  <CheckCircle className='w-5 h-5 text-primary mt-0.5 shrink-0' />
+                  <div>
+                    <h3 className='font-medium text-foreground'>About Organisations</h3>
+                    <ul className='mt-2 text-sm text-muted-foreground space-y-1 list-disc list-inside'>
+                      <li>Organisations group users across one or more workspaces</li>
+                      <li>A user can only belong to one organisation at a time</li>
+                      <li>Only org admins and owners can add or remove members</li>
+                      <li>
+                        Removing a member from an org does not remove them from this workspace
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
+
+          {/* ── Create Organisation Dialog ── */}
+          <Dialog
+            open={showCreateDialog}
+            onOpenChange={setShowCreateDialog}
+            className='max-w-md rounded-xl'
+            {...(!isMobile ? { focusRef: orgNameInputRef } : {})}
+          >
+            <div className='p-6 space-y-4'>
+              {/* Dialog header */}
+              <div className='flex items-center justify-between'>
+                <div>
+                  <h2 className='text-lg font-semibold text-foreground'>Create Organisation</h2>
+                  <p className='text-sm text-muted-foreground mt-1'>
+                    An invitation will be sent to the owner&apos;s email
+                  </p>
+                </div>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={() => setShowCreateDialog(false)}
+                  className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
+                  disabled={isCreatingOrg}
+                  data-track-category='Organisations'
+                  data-track-name='CloseCreateOrgDialog'
+                >
+                  <X className='size-4' />
+                </Button>
+              </div>
+
+              {/* Organisation Name field */}
+              <div className='space-y-2'>
+                <label htmlFor='org-name' className='text-sm font-medium text-foreground'>
+                  Organisation Name <span className='text-destructive'>*</span>
+                </label>
+                <Input
+                  ref={orgNameInputRef}
+                  id='org-name'
+                  type='text'
+                  placeholder='Enter organisation name...'
+                  value={newOrgName}
+                  onChange={e => setNewOrgName(e.target.value)}
+                  disabled={isCreatingOrg}
+                />
+              </div>
+
+              {/* Workspace Name field */}
+              <div className='space-y-2'>
+                <label htmlFor='workspace-name' className='text-sm font-medium text-foreground'>
+                  Workspace Name <span className='text-destructive'>*</span>
+                </label>
+                <Input
+                  id='workspace-name'
+                  type='text'
+                  placeholder='Enter workspace name...'
+                  value={newWorkspaceName}
+                  onChange={e => setNewWorkspaceName(e.target.value)}
+                  disabled={isCreatingOrg}
+                />
+              </div>
+
+              {/* Owner Email field */}
+              <div className='space-y-2'>
+                <label htmlFor='owner-email' className='text-sm font-medium text-foreground'>
+                  Owner Email <span className='text-destructive'>*</span>
+                </label>
+                <Input
+                  id='owner-email'
+                  type='email'
+                  placeholder='owner@example.com'
+                  value={newOwnerEmail}
+                  onChange={e => setNewOwnerEmail(e.target.value)}
+                  disabled={isCreatingOrg}
+                />
+              </div>
+
+              {/* Actions */}
+              <div className='flex gap-3 justify-end pt-2'>
+                <Button
+                  variant='outline'
+                  disabled={isCreatingOrg}
+                  onClick={() => setShowCreateDialog(false)}
+                  size='sm'
+                  data-track-category='Organisations'
+                  data-track-name='CancelCreateOrg'
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => void handleCreateOrg()}
+                  disabled={
+                    !newOrgName.trim() ||
+                    !newWorkspaceName.trim() ||
+                    !newOwnerEmail.trim() ||
+                    isCreatingOrg
+                  }
+                  className='gap-2'
+                  size='sm'
+                  data-track-category='Organisations'
+                  data-track-name='ConfirmCreateOrg'
+                >
+                  {isCreatingOrg ? (
+                    <>
+                      <Loader2 className='size-4 animate-spin' />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className='size-4' />
+                      Create
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </Dialog>
+        </>
+      )}
     </div>
   );
 };
