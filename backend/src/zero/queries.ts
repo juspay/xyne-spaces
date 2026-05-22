@@ -338,8 +338,12 @@ export const queries = defineQueries({
 
       // Exclude Support tickets from regular board/project views
       // Support tickets are handled by IT Support Workflow
+      // Allow NULL ticketType values (NULL != 'Support' evaluates to NULL, not TRUE)
       query = query.where(helpers =>
-        helpers.and(helpers.cmp('ticketType', '!=', BaseTicketType.Support)),
+        helpers.or(
+          helpers.cmp('ticketType', 'IS', null),
+          helpers.cmp('ticketType', '!=', BaseTicketType.Support),
+        ),
       );
 
       // Build the base query with related data
