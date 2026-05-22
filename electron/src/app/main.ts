@@ -24,6 +24,7 @@ import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
 import { browserSettingsService } from '../services/browser-settings';
 import { clearAllCookies } from '../services/cookies';
+import { setupWebviewShortcuts } from '../services/webview-shortcuts';
 import Sentry from "@sentry/electron/main";
 
 
@@ -269,6 +270,10 @@ app.on('web-contents-created', (_event, webContents) => {
       
       return { action: 'deny' };
     });
+
+    // Keyboard shortcuts for webview (Cmd+T, Cmd+F, Cmd+R, etc.).
+    // To add new shortcuts edit services/webview-shortcuts.ts.
+    setupWebviewShortcuts(webContents);
   }
 });
 
