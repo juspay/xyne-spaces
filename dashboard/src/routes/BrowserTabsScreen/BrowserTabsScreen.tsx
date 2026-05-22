@@ -83,9 +83,7 @@ interface WebviewTabProps {
   webviewRefs: React.MutableRefObject<Record<string, WebviewTag | null>>;
   onUpdate: (tabId: string, patch: Partial<BrowserTab>) => void;
   onUrlUpdate: (tabId: string, url: string) => void;
-  onNewWindow: (url: string) => void;
   onFindResults?: (tabId: string, result: FindInPageResult) => void;
-  onShortcut?: (shortcut: string) => void;
   isPanel: boolean;
   popupsEnabled: boolean;
 }
@@ -96,9 +94,7 @@ function WebviewTab({
   webviewRefs,
   onUpdate,
   onUrlUpdate,
-  onNewWindow,
   onFindResults,
-  onShortcut,
   isPanel,
 }: WebviewTabProps) {
   const ref = useRef<WebviewTag>(null);
@@ -137,10 +133,6 @@ function WebviewTab({
     };
     const onStart = () => onUpdate(tab.id, { isLoading: true });
     const onStop = () => onUpdate(tab.id, { isLoading: false });
-    const onNewWin = (e: Event) => {
-      const detail = (e as CustomEvent<{ url: string }>).detail;
-      onNewWindow(detail.url);
-    };
 
     // Handle Ask AI requests from webview
     const onAskAI = (e: Event) => {
@@ -186,29 +178,13 @@ function WebviewTab({
       onFindResults?.(tab.id, detail);
     };
 
-    // Handle shortcuts from webview (Cmd+T, Cmd+F, etc.)
-    const onShortcutMessage = (e: Event) => {
-      const ipcEvent = e as WebviewIPCMessageEvent;
-      const channel = ipcEvent.channel;
-      const args = ipcEvent.args || [];
-
-      if (channel !== 'webview-shortcut') return;
-
-      const shortcut = args[0] as string;
-      if (shortcut) {
-        onShortcut?.(shortcut);
-      }
-    };
-
     wv.addEventListener('page-title-updated', onTitle);
     wv.addEventListener('page-favicon-updated', onFavicon);
     wv.addEventListener('did-navigate', onNav);
     wv.addEventListener('did-navigate-in-page', onNav);
     wv.addEventListener('did-start-loading', onStart);
     wv.addEventListener('did-stop-loading', onStop);
-    wv.addEventListener('new-window', onNewWin);
     wv.addEventListener('ipc-message', onAskAI);
-    wv.addEventListener('ipc-message', onShortcutMessage);
     wv.addEventListener('found-in-page', onFoundInPage);
 
     return () => {
@@ -218,9 +194,7 @@ function WebviewTab({
       wv.removeEventListener('did-navigate-in-page', onNav);
       wv.removeEventListener('did-start-loading', onStart);
       wv.removeEventListener('did-stop-loading', onStop);
-      wv.removeEventListener('new-window', onNewWin);
       wv.removeEventListener('ipc-message', onAskAI);
-      wv.removeEventListener('ipc-message', onShortcutMessage);
       wv.removeEventListener('found-in-page', onFoundInPage);
       delete webviewRefs.current[tab.id];
     };
@@ -333,6 +307,32 @@ export function BrowserTabsScreen({
     // Clear pendingUrls after processing (both panel and fullscreen)
     browserPanelActor.send({ type: 'OPEN_URLS', urls: [] });
   }, [pendingUrls, isPanel, tabs]);
+
+  // Handle Cmd/Ctrl+T and Cmd/Ctrl+F shortcuts sent from the main process
+  // via before-input-event on the webview webContents.  This path works in
+  // packaged builds where the webview preload script may not load.
+  useEffect(() => {
+    if (!isElectronApp()) return;
+    const api = window.electronAPI;
+
+    const cleanupNewTab = api?.onBrowserNewTab?.(() => {
+      handleCreateNewTab('https://www.google.com');
+    });
+
+    const cleanupFindInPage = api?.onBrowserFindInPage?.(() => {
+      setIsFindBarOpen(true);
+      setTimeout(() => {
+        findInputRef.current?.focus();
+        findInputRef.current?.select();
+      }, 50);
+    });
+
+    return () => {
+      cleanupNewTab?.();
+      cleanupFindInPage?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load settings on mount
   useEffect(() => {
@@ -838,24 +838,12 @@ export function BrowserTabsScreen({
             webviewRefs={webviewRefs}
             onUpdate={handleUpdateTab}
             onUrlUpdate={handleUrlUpdate}
-            onNewWindow={handleCreateTab}
             onFindResults={(tabId, result) => {
               if (tabId === activeTabId) {
                 setFindResults({
                   activeMatch: result.activeMatchOrdinal,
                   matches: result.matches,
                 });
-              }
-            }}
-            onShortcut={shortcut => {
-              if (shortcut === 'new-tab') {
-                handleCreateNewTab('https://www.google.com');
-              } else if (shortcut === 'find-in-page') {
-                setIsFindBarOpen(true);
-                setTimeout(() => {
-                  findInputRef.current?.focus();
-                  findInputRef.current?.select();
-                }, 50);
               }
             }}
             isPanel={isPanel}

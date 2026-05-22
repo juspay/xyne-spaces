@@ -537,7 +537,11 @@ const AppRoot = (): ReactElement => {
                       <Panel
                         id='app-root-left'
                         ref={browserPanelLeftRef}
-                        defaultSize={browserPanelState === 'open' ? 65 : 100}
+                        defaultSize={
+                          browserPanelState === 'open' && !location.pathname.endsWith('/browser')
+                            ? 65
+                            : 100
+                        }
                       >
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
@@ -547,7 +551,7 @@ const AppRoot = (): ReactElement => {
                           </main>
                         </div>
                       </Panel>
-                      {browserPanelState === 'open' && (
+                      {browserPanelState === 'open' && !location.pathname.endsWith('/browser') && (
                         <>
                           <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
                             <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
