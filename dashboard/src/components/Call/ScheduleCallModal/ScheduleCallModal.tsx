@@ -3,9 +3,11 @@ import { RRule } from 'rrule';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
-import { useSelf, useActiveUsers } from '../../../hooks/useUsers';
+import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
+import { useZero } from '../../../hooks/useZero';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
+import { useUserGroupSearch } from '../../../hooks/useUserGroupSearch';
 import { callService, type ScheduleCallRequest } from '../../../services/Call/callService';
 import DOMPurify from 'dompurify';
 import { queries } from '../../../zero/queries';
@@ -19,7 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { ChevronDown, ChevronUp, Hash, Info, Lock, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Hash, Info, Lock, Users, X } from 'lucide-react';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TimePicker } from '../../ui/TimePicker/TimePicker';
 import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
@@ -177,7 +179,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   initialParticipants,
 }) => {
   const user = useSelf();
+  const zero = useZero();
   const allUsers = useActiveUsers();
+  const fullUserList = useUsers();
   const allVisibleChannels = useAllVisibleChannels();
 
   // When opened from a thread, fetch channel participants to restrict the picker
@@ -390,8 +394,14 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   const hasParticipantChannel = participants.some(v => v.startsWith('channel:'));
   const showPostCallUpdates = participants.length > 0 && !hasParticipantChannel;
 
+  const participantLabel = useMemo(() => {
+    if (participants.some(v => v.startsWith('channel:'))) return 'Selected Channel';
+    return 'Internal Users';
+  }, [participants]);
+
   // Search query state (not in form)
   const [searchQuery, setSearchQuery] = React.useState('');
+  const userGroups = useUserGroupSearch(searchQuery, 10);
   const [notFoundUsers, setNotFoundUsers] = React.useState<string[]>([]);
 
   // Recurring call state
@@ -699,6 +709,15 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       type: 'channel' as const,
     }));
 
+    const userGroupOptions = userGroups.map(group => ({
+      ...group,
+      label: group.name,
+      value: `user_group:${group.id}`,
+      icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
+      subtitle: group.alias || group.description,
+      type: 'user_group' as const,
+    }));
+
     // In edit mode, the call's existing channel may be a DM (filtered out of `channels`).
     // Inject it into options so it remains searchable/selectable.
     if (isEditMode && initialCall?.channelId) {
@@ -749,7 +768,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       });
     }
 
-    return [...userOptions, ...channelOptions].sort((a, b) => a.label.localeCompare(b.label));
+    return [...userOptions, ...channelOptions, ...userGroupOptions].sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
   }, [
     allUsers,
     channels,
@@ -759,6 +780,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     initialParticipants,
     allVisibleChannels,
     channelParticipantUserIds,
+    userGroups,
+    fullUserList,
   ]);
 
   const parseTimeAndUpdateDate = useCallback(
@@ -1142,7 +1165,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         const recurringRequest: Parameters<typeof callService.createRecurringSeries>[0] = {
           title: data.title,
           ...(postCallUpdates && updateChannelId
-            ? { channelId: updateChannelId, ...(userIds.length > 0 && { targetUserIds: userIds }) }
+            ? {
+                channelId: updateChannelId,
+                ...(userIds.length > 0 && { targetUserIds: userIds }),
+              }
             : {
                 ...(channelId !== undefined && { channelId }),
                 ...(userIds.length > 0 && { targetUserIds: userIds }),
@@ -1251,6 +1277,30 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       return true;
     },
     [participants, allUsers, user?.id, setValue],
+  );
+
+  const expandGroupSelections = useCallback(
+    async (values: string[]): Promise<string[]> => {
+      const expanded = new Set<string>();
+      for (const value of values) {
+        if (value.startsWith('user_group:')) {
+          const groupId = value.replace('user_group:', '');
+          const mappings = await zero.run(queries.getUserGroupMembers({ userGroupId: groupId }), {
+            type: 'complete',
+          });
+          const memberIds = mappings
+            .map((m: { userId: string }) => m.userId)
+            .filter((id: string) => id !== user?.id);
+          for (const id of memberIds) {
+            expanded.add(`user:${id}`);
+          }
+        } else {
+          expanded.add(value);
+        }
+      }
+      return Array.from(expanded);
+    },
+    [user?.id, zero],
   );
 
   // Reset form and close modal
@@ -1430,6 +1480,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 variant='outline'
                 size='icon'
                 tabIndex={-1}
+                type='button'
                 className='size-7 rounded-lg'
                 onClick={handleClose}
               >
@@ -2150,7 +2201,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
               {/* Internal Users — channel members (Xyne users). */}
               <div className='space-y-2'>
-                <p className='text-muted-foreground text-[13px] leading-5'>Internal Users</p>
+                <p className='text-muted-foreground text-[13px] leading-5'>{participantLabel}</p>
                 <Controller
                   name='participants'
                   control={control}
@@ -2158,7 +2209,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                     <SearchParticipants
                       options={inviteUserOrChannelOptions}
                       selectedValues={field.value}
-                      onMultiSelect={field.onChange}
+                      onMultiSelect={async (values: string[]) => {
+                        const expanded = await expandGroupSelections(values);
+                        field.onChange(expanded);
+                      }}
                       searchQuery={searchQuery}
                       setSearchQuery={(q: string) => {
                         setSearchQuery(q);
@@ -2172,15 +2226,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       }
                     />
                   )}
-                  rules={{
-                    validate: value => value.length > 0 || 'At least one participant is required',
-                  }}
                 />
-                {participants.length === 0 && !errors.participants && (
-                  <p className='text-[11px] text-muted-foreground'>
-                    Add at least one teammate from this channel to host the call.
-                  </p>
-                )}
                 {errors.participants && (
                   <p className='text-red-500 text-xs'>{errors.participants.message}</p>
                 )}
@@ -2369,6 +2415,7 @@ const SubmitFooter: React.FC<{
         className='rounded-lg text-[13px] px-4 h-9'
         onClick={onCancel}
         disabled={isSubmitting}
+        type='button'
       >
         Cancel
       </Button>

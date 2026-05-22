@@ -12,7 +12,7 @@ interface ParticipantOptions extends SelectorOption {
 interface SearchParticipantsProps {
   options: ParticipantOptions[];
   selectedValues: string[];
-  onMultiSelect: (tags: string[]) => void;
+  onMultiSelect: (tags: string[]) => void | Promise<void>;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   ref?: React.RefObject<HTMLInputElement | null>;
@@ -59,13 +59,19 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     });
   }, [selectedValues, options]);
 
+  const hasGroupSelected = useMemo(() => {
+    return selectedValues.some(v => v.startsWith('user_group:'));
+  }, [selectedValues]);
+
   // Filter options based on search query
   const filteredOptions = useMemo(() => {
     let opts = options;
 
-    // Filter out channels if a user is already selected
-    if (hasUserSelected) {
-      opts = opts.filter(opt => !opt.value.startsWith('channel:'));
+    // Filter out channels, user groups if a user or user group is already selected
+    if (hasUserSelected || hasGroupSelected) {
+      opts = opts.filter(
+        opt => !opt.value.startsWith('channel:') && !opt.value.startsWith('user_group:'),
+      );
     }
 
     if (!searchQuery.trim()) return opts;
@@ -75,7 +81,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
         opt.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
         opt.subtitle?.toLowerCase().includes(searchQuery.toLowerCase()),
     );
-  }, [options, searchQuery, hasUserSelected]);
+  }, [options, searchQuery, hasUserSelected, hasGroupSelected]);
 
   const selectedOptions = useMemo(() => {
     return selectedValues
@@ -100,8 +106,13 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
 
   const toggleValue = (value: string) => {
     const isChannel = value.startsWith('channel:');
+    const isUserGroup = value.startsWith('user_group:');
 
-    if (!selectedValues.includes(value) && hasChannelSelected) {
+    if (!selectedValues.includes(value) && hasChannelSelected && !isChannel) {
+      return;
+    }
+
+    if (!selectedValues.includes(value) && hasGroupSelected && (isChannel || isUserGroup)) {
       return;
     }
 
@@ -110,20 +121,31 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       if (option) {
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
       }
-      onMultiSelect([value]);
+      void onMultiSelect([value]);
+      setSearchQuery('');
+      setIsOpen(false);
+      return;
+    }
+
+    if (isUserGroup && !selectedValues.includes(value)) {
+      const option = options.find(opt => opt.value === value);
+      if (option) {
+        setSelectedOptionsMap(prev => new Map(prev).set(value, option));
+      }
+      void onMultiSelect([...selectedValues.filter(v => !v.startsWith('user_group:')), value]);
       setSearchQuery('');
       setIsOpen(false);
       return;
     }
 
     if (selectedValues.includes(value)) {
-      onMultiSelect(selectedValues.filter(v => v !== value));
+      void onMultiSelect(selectedValues.filter(v => v !== value));
     } else {
       const option = options.find(opt => opt.value === value);
       if (option) {
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
       }
-      onMultiSelect([...selectedValues, value]);
+      void onMultiSelect([...selectedValues, value]);
       setSearchQuery('');
     }
   };
@@ -218,53 +240,93 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     }
   };
 
-  const renderTrigger = () => (
-    <div className='relative'>
-      <div
-        onClick={() => {
-          if (!hasChannelSelected) {
+  const renderTrigger = () => {
+    const selectedGroupOrChannel = selectedOptions.find(opt => opt.value.startsWith('channel:'));
+
+    if (selectedGroupOrChannel) {
+      return (
+        <div className='flex items-center gap-3'>
+          <div className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'>
+            {selectedGroupOrChannel.icon && <span>{selectedGroupOrChannel.icon}</span>}
+            <span className='truncate max-w-48 text-foreground'>
+              {selectedGroupOrChannel.label}
+            </span>
+            <button
+              type='button'
+              onClick={e => {
+                e.stopPropagation();
+                toggleValue(selectedGroupOrChannel.value);
+              }}
+              className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
+              data-track-category='calls'
+              data-track-name='remove-participant'
+            >
+              <X className='size-3' />
+            </button>
+          </div>
+          <button
+            type='button'
+            onClick={e => {
+              e.stopPropagation();
+              void onMultiSelect([]);
+            }}
+            className='text-xs text-muted-foreground hover:text-foreground transition-colors'
+            data-track-category='calls'
+            data-track-name='change-selection'
+          >
+            Change
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className='relative'>
+        <div
+          onClick={() => {
             inputRef.current?.focus();
-          }
-        }}
-        onKeyDown={e => {
-          if ((e.key === 'Enter' || e.key === ' ') && !hasChannelSelected) {
-            inputRef.current?.focus();
-          }
-        }}
-        role='button'
-        tabIndex={0}
-        className='relative flex items-center h-10 border border-border rounded-lg focus-within:border-foreground duration-300 ease-in-out bg-background'
-        data-track-category='calls'
-        data-track-name='search-participants-input'
-      >
-        <span className='px-2 bg-background'>
-          <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-muted-foreground z-50 pointer-events-none bg-background' />
-        </span>
-        <div ref={inputContainerRef} className='flex-1 pl-6'>
-          <Input
-            type='text'
-            role='combobox'
-            ref={inputRef}
-            placeholder='Search by user or channel name'
-            value={!hasChannelSelected ? searchQuery : ''}
-            disabled={hasChannelSelected}
-            onKeyDown={handleKeyDown}
-            onChange={e => setSearchQuery(e.target.value)}
-            className='pl-0.5 w-full border-0 shadow-none placeholder:text-muted-foreground text-foreground focus-visible:ring-0 bg-background'
-            aria-expanded={isOpen}
-            aria-controls='participant-listbox'
-            aria-activedescendant={
-              isOpen && filteredOptions[index]
-                ? `option-${filteredOptions[index].value}`
-                : undefined
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              inputRef.current?.focus();
             }
-            aria-autocomplete='list'
-            data-testid='search-participants-input'
-          />
+          }}
+          role='button'
+          tabIndex={0}
+          className='relative flex items-center h-10 border border-border rounded-lg focus-within:border-foreground duration-300 ease-in-out bg-background'
+          data-track-category='calls'
+          data-track-name='search-participants-input'
+        >
+          <span className='px-2 bg-background'>
+            <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-muted-foreground z-50 pointer-events-none bg-background' />
+          </span>
+          <div ref={inputContainerRef} className='flex-1 pl-6'>
+            <Input
+              type='text'
+              role='combobox'
+              ref={inputRef}
+              placeholder={
+                hasUserSelected ? 'Search by user name' : 'Search by user, channel, or group name'
+              }
+              value={searchQuery}
+              onKeyDown={handleKeyDown}
+              onChange={e => setSearchQuery(e.target.value)}
+              className='pl-0.5 w-full border-0 shadow-none placeholder:text-muted-foreground text-foreground focus-visible:ring-0 bg-background'
+              aria-expanded={isOpen}
+              aria-controls='participant-listbox'
+              aria-activedescendant={
+                isOpen && filteredOptions[index]
+                  ? `option-${filteredOptions[index].value}`
+                  : undefined
+              }
+              aria-autocomplete='list'
+              data-testid='search-participants-input'
+            />
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className='relative'>
@@ -352,35 +414,46 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       </Popover.Root>
 
       {/* Selected participants rendered below the search bar */}
-      {selectedOptions.length > 0 && (
-        <div className='flex flex-wrap gap-1.5 mt-2 max-h-32 overflow-y-auto'>
-          {selectedOptions.map(option => (
-            <div
-              key={option.value}
-              className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'
-            >
-              {option.icon && <span>{option.icon}</span>}
-              <span className='truncate max-w-60 text-foreground'>{option.label}</span>
-              <button
-                type='button'
-                onClick={e => {
-                  e.stopPropagation();
-                  toggleValue(option.value);
-                }}
-                className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
-                data-track-category='calls'
-                data-track-name='remove-participant'
+      {selectedOptions.length > 0 && !hasChannelSelected && (
+        <div className='flex items-start justify-between mt-2'>
+          <div className='flex flex-wrap gap-1.5 max-h-32 overflow-y-auto flex-1'>
+            {selectedOptions.map(option => (
+              <div
+                key={option.value}
+                className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'
               >
-                <X className='size-3' />
-              </button>
-            </div>
-          ))}
+                {option.icon && <span>{option.icon}</span>}
+                <span className='truncate max-w-60 text-foreground'>{option.label}</span>
+                <button
+                  type='button'
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleValue(option.value);
+                  }}
+                  className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
+                  data-track-category='calls'
+                  data-track-name='remove-participant'
+                >
+                  <X className='size-3' />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type='button'
+            onClick={() => void onMultiSelect([])}
+            className='ml-2 shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5'
+            data-track-category='calls'
+            data-track-name='clear-all-participants'
+          >
+            Clear all
+          </button>
         </div>
       )}
 
       {hasChannelSelected && (
         <p className='text-xs text-muted-foreground mt-1 px-1'>
-          Only one channel selection is allowed
+          You can start a call with one channel at a time.
         </p>
       )}
 

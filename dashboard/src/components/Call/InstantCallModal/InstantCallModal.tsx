@@ -1,8 +1,11 @@
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
-import { Hash, Lock, X } from 'lucide-react';
+import { Hash, Lock, Users, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useSelf, useActiveUsers } from '../../../hooks/useUsers';
+import { useUserGroupSearch } from '../../../hooks/useUserGroupSearch';
+import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
+import { useZero } from '../../../hooks/useZero';
+import { queries } from '../../../zero/queries';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 import {
@@ -26,12 +29,14 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   onSubmit,
 }) => {
   const user = useSelf();
+  const zero = useZero();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const [notFoundUsers, setNotFoundUsers] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const activeUsers = useActiveUsers();
+  const allUsers = useUsers();
 
   // Focus on Search Participant Input when modal opens
   useEffect(() => {
@@ -43,6 +48,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   }, [isOpen]);
 
   const allVisibleChannels = useAllVisibleChannels();
+  const userGroups = useUserGroupSearch(searchQuery, 10);
 
   // Filter for DEFAULT public channels only (not DMs)
   const channels = useMemo(() => {
@@ -111,8 +117,19 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       type: 'channel' as const,
     }));
 
-    return [...userOptions, ...channelOptions].sort((a, b) => a.label.localeCompare(b.label));
-  }, [activeUsers, channels]);
+    const userGroupOptions = userGroups.map(group => ({
+      ...group,
+      label: group.name,
+      value: `user_group:${group.id}`,
+      icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
+      subtitle: group.alias || group.description,
+      type: 'user_group' as const,
+    }));
+
+    return [...userOptions, ...channelOptions, ...userGroupOptions].sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [activeUsers, channels, userGroups, allUsers, user?.id]);
 
   const handleSubmit = () => {
     onSubmit(selectedParticipants);
@@ -161,6 +178,11 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     return true;
   };
 
+  const participantLabel = useMemo(() => {
+    if (selectedParticipants.some(v => v.startsWith('channel:'))) return 'Selected Channel';
+    return 'Add participants';
+  }, [selectedParticipants]);
+
   const notFoundMessage =
     notFoundUsers.length > 0
       ? `${notFoundUsers.length} user${notFoundUsers.length === 1 ? '' : 's'} not found`
@@ -173,8 +195,25 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     }
   };
 
-  const handleMultiSelect = (participants: string[]) => {
-    setSelectedParticipants(participants);
+  const handleMultiSelect = async (participants: string[]) => {
+    const expanded = new Set<string>();
+    for (const value of participants) {
+      if (value.startsWith('user_group:')) {
+        const groupId = value.replace('user_group:', '');
+        const mappings = await zero.run(queries.getUserGroupMembers({ userGroupId: groupId }), {
+          type: 'complete',
+        });
+        const memberIds = mappings
+          .map((m: { userId: string }) => m.userId)
+          .filter((id: string) => id !== user?.id);
+        for (const id of memberIds) {
+          expanded.add(`user:${id}`);
+        }
+      } else {
+        expanded.add(value);
+      }
+    }
+    setSelectedParticipants(Array.from(expanded));
     if (notFoundUsers.length > 0) {
       setNotFoundUsers([]);
     }
@@ -206,7 +245,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
           </div>
           <div className='p-5 space-y-5'>
             <div className='space-y-2'>
-              <p className='text-muted-foreground text-[13px] leading-5'>Add Participants</p>
+              <p className='text-muted-foreground text-[13px] leading-5'>{participantLabel}</p>
               <SearchParticipants
                 options={inviteUserOrChannelOptions}
                 selectedValues={selectedParticipants}
