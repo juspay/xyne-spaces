@@ -74,6 +74,7 @@ export interface MeetingFilters {
 
 export interface MailFilters {
   userEmail?: string;
+  channelId?: string[];
   createdBefore?: string;
   createdAfter?: string;
   createdOn?: string;
@@ -237,7 +238,14 @@ buildYql(
     }
 
     let yql = `select * from sources ${schemaNames} where ${whereConditions.join(' and ')}`;
-    if (groupBy && apps.length != 1) {
+
+    const isMailOnly = apps.length === 1 && apps[0].toLowerCase() === 'mail';
+
+    if (isMailOnly) {
+      // Deduplicate mail results by conversation: one result per threadId,
+      // keeping the highest-relevance hit within each thread.
+      yql += ` | all(group(threadId) max(${limit}) order(-max(relevance())) each(max(1) each(output(summary(default)))))`;
+    } else if (groupBy && apps.length != 1) {
       const groupClause = this.buildGroupingClause(groupBy, limit);
       yql += `| ${groupClause}`;
     }
@@ -672,6 +680,13 @@ buildYql(
     const conditions: string[] = [`entity contains "support_desk"`];
 
     conditions.push(`permissions contains "${userId}"`);
+
+    if (filters.channelId && filters.channelId.length > 0) {
+      const channels = filters.channelId
+        .map(id => `channelId contains "${id.trim()}"`)
+        .join(' or ');
+      conditions.push(`(${channels})`);
+    }
 
     if (filters.createdBefore) {
       const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');

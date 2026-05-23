@@ -214,6 +214,11 @@ else
     echo -e "${BLUE}Creating database schema...${NC}"
     npx dotenv -e .env.local -- npx prisma db push --force-reset --accept-data-loss --skip-generate
 
+    # Regenerate Prisma client to ensure it matches the current schema
+    echo -e "${BLUE}Generating Prisma client...${NC}"
+    npx prisma generate
+    echo -e "${GREEN}✓ Prisma client generated${NC}"
+
     # Seed ACL system
     echo -e "${BLUE}🌱 Seeding ACL system...${NC}"
     npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts

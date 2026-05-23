@@ -562,13 +562,22 @@ import { PrismaClient } from '@prisma/client';
      doc: VespaMailDocument,
      mailMap: MailMap,
    ): TransformedSearchResult {
-     // Pick the first chunk that contains a <hi>...</hi> bolding span (the chunk
-     // Vespa actually matched on). Fall back to the first chunk. Do NOT substring
+     // Pick the chunk with the densest <hi>...</hi> highlights (the chunk most
+     // relevant to the query). Fall back to the first chunk. Do NOT substring
      // the string — it could cut a <hi> tag in half; the dashboard's
      // SearchSnippetRenderer will pick a smart window around the highlights.
      let previewChunk = '';
      if (doc.chunks && doc.chunks.length > 0) {
-       previewChunk = doc.chunks.find((c) => typeof c === 'string' && c.includes('<hi>')) || doc.chunks[0];
+       let bestCount = 0;
+       for (const c of doc.chunks) {
+         if (typeof c !== 'string') continue;
+         const count = (c.match(/<hi>/g) || []).length;
+         if (count > bestCount) {
+           bestCount = count;
+           previewChunk = c;
+         }
+       }
+       if (!previewChunk) previewChunk = doc.chunks[0];
      }
      const sentAt = doc.timestamp ? new Date(doc.timestamp).toISOString() : new Date().toISOString();
 

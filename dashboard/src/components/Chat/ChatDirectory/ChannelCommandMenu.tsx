@@ -23,7 +23,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
-import { Channel, ChannelVisibility } from '@xyne/shared';
+import { Channel, ChannelVisibility, ChannelType } from '@xyne/shared';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -175,6 +175,7 @@ const ChannelCommandMenu = ({
   inline = false,
   onTabChange,
   initialTab,
+  hideTabs = false,
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
@@ -636,11 +637,16 @@ const ChannelCommandMenu = ({
   // against participant searchableNames.
 
   // Regular channels (excludes DMs) - used for `in:` and `in:#` triggers
+  // When DESK tab is active, show only email channels; otherwise exclude them.
   const availableRegularChannels = useMemo(() => {
     if (mentionSearchType !== MentionType.CHANNEL) return [];
 
-    // Filter to only regular channels (no DMs)
-    const regularChannels = allChannels.filter(({ channel }) => !isDMChannel(channel.scopeType));
+    // Filter to only regular channels (no DMs), then scope by active tab
+    const regularChannels = allChannels.filter(({ channel }) => {
+      if (isDMChannel(channel.scopeType)) return false;
+      if (activeTab === TabType.DESK) return channel.type === ChannelType.EMAIL;
+      return true;
+    });
 
     // Apply search filtering
     const filtered = filterChannelsBySearchableNames(regularChannels, mentionSearchQuery, {
@@ -659,7 +665,7 @@ const ChannelCommandMenu = ({
     }
 
     return filtered.map(({ channel }) => ({ channel, displayName: channel.name }));
-  }, [allChannels, mentionSearchQuery, mentionSearchType]);
+  }, [allChannels, mentionSearchQuery, mentionSearchType, activeTab]);
 
   // Helper to get display name for a DM channel - includes self-DMs (notes to yourself)
   const getDMDisplayNameWithSelf = useCallback(
@@ -695,8 +701,10 @@ const ChannelCommandMenu = ({
   );
 
   // DMs and Group DMs - used for `in:` trigger (includes self-DMs / notes to yourself)
+  // Hidden when DESK tab is active — only email channels are relevant there.
   const availableDMs = useMemo(() => {
     if (mentionSearchType !== MentionType.CHANNEL) return [];
+    if (activeTab === TabType.DESK) return [];
 
     // Filter to only DM channels
     const dmChannels = allChannels.filter(({ channel }) => isDMChannel(channel.scopeType));
@@ -768,6 +776,7 @@ const ChannelCommandMenu = ({
     getDMDisplayNameWithSelf,
     usersById,
     currentUserID,
+    activeTab,
   ]);
 
   // Legacy export for backward compatibility (combines both)
@@ -2016,8 +2025,10 @@ const ChannelCommandMenu = ({
             }
           }}
         >
-          {/* Tabs - hidden when bot is selected */}
-          <div className={`overflow-x-auto no-scrollbar p-2 ${isMobile ? 'mx-1' : 'ml-4'}`}>
+          {/* Tabs - hidden when bot is selected or hideTabs is true */}
+          <div
+            className={`overflow-x-auto no-scrollbar p-2 ${isMobile ? 'mx-1' : 'ml-4'} ${hideTabs ? 'hidden' : ''}`}
+          >
             <Tabs.Root value={activeTab}>
               <Tabs.List
                 className='flex items-center justify-start gap-1.5'

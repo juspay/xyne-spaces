@@ -132,4 +132,6 @@ export interface ChannelCommandMenuProps {
   initialTab?: TabType;
   /** When true, the search input will not steal focus on open (used when parent wants to keep focus elsewhere) */
   disableAutoFocus?: boolean;
+  /** When true, hides the tab bar. The search scope is still controlled by initialTab. */
+  hideTabs?: boolean;
 }
