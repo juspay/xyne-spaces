@@ -21,6 +21,7 @@ import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel'
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
 import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
+import { vespaQueue } from '@/queues/vespaQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
 import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
 import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
@@ -46,6 +47,9 @@ class WorkerService {
       // Register workflow definitions
       logger.info('Registering workflow definitions in worker...')
       registerAllWorkflows()
+
+      logger.info('Initializing Vespa queue (producer)...')
+      await vespaQueue.initialize()
 
       // Initialize OpenCode only if enabled
       if (appConfig.openCode.enabled) {
