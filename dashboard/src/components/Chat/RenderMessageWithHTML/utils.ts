@@ -8,9 +8,9 @@
  */
 
 import { toHtml } from 'hast-util-to-html';
-import { common, createLowlight } from 'lowlight';
+import { all, createLowlight } from 'lowlight';
 
-const lowlight = createLowlight(common);
+const lowlight = createLowlight(all);
 
 // Regex to detect language-xxxxx class quickly
 const LANG_CLASS_REGEX = /language-([\w-]+)/;
