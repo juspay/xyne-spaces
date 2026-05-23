@@ -43,6 +43,12 @@ export interface ConversationWithTicket extends Conversation {
     | undefined;
   initialMessageAttachments?: readonly MessageAttachment[] | undefined;
   initialMessageNudgeCounts?: readonly MessageNudgeCountRow[] | undefined;
+  ticket?:
+    | {
+        attachments?: readonly MessageAttachment[] | undefined;
+        [key: string]: unknown;
+      }
+    | undefined;
 }
 
 export interface MessageBubbleProps {

@@ -23,6 +23,7 @@ import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
+import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 
 export interface MobileMessageMyBubbleProps {
   message: MessageWithOptionalNudgeCounts;
@@ -84,6 +85,11 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   const isWorkflowMessage =
     (isSystemMessage && metadata?.workflowId && metadata?.ticketId) ||
     (isBotMessage && metadata?.xyneId && metadata?.ticketId);
+  const isTicketCardMessage =
+    !!conversation?.ticket_md &&
+    conversation?.initialMessageId === message.messageId &&
+    !isWorkflowMessage;
+  const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isActiveCall = useIsCallActive(metadata?.callId);
   const { isMobile } = usePlatform();
   const actionableCount = useMemo(
@@ -279,15 +285,6 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               )
             )}
 
-            {conversation && conversation.ticket_md && !isWorkflowMessage && (
-              <BotBubble
-                context={context}
-                messageId={message.messageId}
-                {...(channelId && { channelId: channelId })}
-                {...(conversation && { conversation: conversation })}
-              />
-            )}
-
             {isWorkflowMessage && metadata?.workflowId && (
               <WorkflowBubble
                 workflowName={metadata.workflowName}
@@ -306,6 +303,30 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               </div>
             )}
           </div>
+
+          {isTicketCardMessage && ticketAttachments && ticketAttachments.length > 0 && (
+            <div className='mt-2 flex flex-wrap gap-2 self-stretch'>
+              {ticketAttachments.map(attachment => (
+                <MessageAttachment
+                  key={attachment.id}
+                  attachment={attachment}
+                  allAttachments={ticketAttachments}
+                  compact
+                />
+              ))}
+            </div>
+          )}
+
+          {conversation && conversation.ticket_md && !isWorkflowMessage && (
+            <div className='w-full'>
+              <BotBubble
+                context={context}
+                messageId={message.messageId}
+                {...(channelId && { channelId: channelId })}
+                {...(conversation && { conversation: conversation })}
+              />
+            </div>
+          )}
 
           {!contentOnly && (
             <SurfaceNudgeList

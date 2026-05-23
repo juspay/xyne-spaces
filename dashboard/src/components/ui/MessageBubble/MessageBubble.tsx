@@ -501,6 +501,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isWorkflowMessage =
     (isSystemMessage && metadata?.workflowId && metadata?.ticketId && !metadata?.messageSubtype) ||
     (isBotMessage && metadata?.xyneId && metadata?.ticketId);
+  const isTicketCardMessage =
+    !!conversation?.ticket_md &&
+    conversation?.initialMessageId === message.messageId &&
+    !isWorkflowMessage;
+  const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isCallMessage = metadata?.isCallMessage === true;
   const isActiveCall = useIsCallActive(metadata?.callId);
   const hasTranscript = attachments.some(
@@ -1221,6 +1226,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     </div>
                   )}
                 </>
+              )}
+
+              {isTicketCardMessage && ticketAttachments && ticketAttachments.length > 0 && (
+                <div className='mb-2 flex flex-wrap gap-2'>
+                  {ticketAttachments.map(attachment => (
+                    <MessageAttachment
+                      key={attachment.id}
+                      attachment={attachment}
+                      allAttachments={ticketAttachments}
+                      compact
+                    />
+                  ))}
+                </div>
               )}
 
               {conversation && conversation.ticket_md && !isWorkflowMessage && (

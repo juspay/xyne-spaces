@@ -2286,6 +2286,11 @@ export const agentToolsMappingTableRelationships = relationships(
 );
 
 export const ticketTableRelationships = relationships(ticketTable, ({ one, many }) => ({
+  attachments: many({
+    sourceField: ['id'],
+    destField: ['entityId'],
+    destSchema: messageAttachmentTable,
+  }),
   createdByUser: one({
     sourceField: ['createdBy'],
     destField: ['id'],

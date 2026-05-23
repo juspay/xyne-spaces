@@ -422,6 +422,71 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   // to respond once firstRespondedAt is set. Resolution SLA is shown by the
   // existing DueDateDisplay (ticket.eta = resolution deadline set at creation).
 
+  // ---- Conversation (chat) variant --------------------------------------
+  // When rendered inside a chat bubble or a linked-ticket preview
+  // (`isConversation`), show a single-row strip instead of the tall board
+  // card: ticket ID + title + status + assignee. Board / Kanban / table
+  // views never pass `isConversation`, so they keep the full card.
+  if (isConversation) {
+    const conversationAssignee = assignedUser ? (
+      <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+        <Avatar
+          userId={assignedUser.id}
+          showActiveStatus={false}
+          className='size-5 flex items-center justify-center'
+        />
+      </Tooltip>
+    ) : assignedGroup ? (
+      <Tooltip content={assignedGroup.name}>
+        <div className='w-5 h-5 rounded-lg bg-border flex items-center justify-center'>
+          <span className='text-[10px] font-medium text-muted-foreground'>
+            {assignedGroup.name.charAt(0).toUpperCase()}
+          </span>
+        </div>
+      </Tooltip>
+    ) : (
+      <Tooltip content='Unassigned'>
+        <div className='w-5 h-5 rounded-lg border border-dashed border-muted-foreground bg-background flex items-center justify-center'>
+          <User className='w-3 h-3 text-muted-foreground' strokeWidth={1.5} />
+        </div>
+      </Tooltip>
+    );
+
+    return (
+      <div className={cn(width, 'flex flex-col gap-1.5 max-w-lg')}>
+        <button
+          type='button'
+          onClick={e => onClick?.(e)}
+          data-testid={`ticket-card-${ticket.id}`}
+          className={cn(
+            `flex items-center gap-3 text-left ${releaseBoardBgColor} rounded-md border w-full px-3 py-1.5 hover:shadow-sm transition-all cursor-pointer group shadow-sm`,
+          )}
+          data-track-category='Tickets'
+          data-track-name='OpenTicketCard'
+          data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
+        >
+          <span className='text-xs font-medium text-muted-foreground font-mono shrink-0'>
+            {ticket.xyneId}
+          </span>
+          <h3
+            data-testid='ticket-card-title'
+            className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'
+          >
+            {ticket.title}
+          </h3>
+          <div className='flex items-center gap-2.5 shrink-0'>
+            <TicketStatusWithStages
+              currentStageName={ticket.stageName}
+              showLeadingDot={false}
+              labelClassName='max-w-[120px] truncate'
+            />
+            {conversationAssignee}
+          </div>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <button
       type='button'
