@@ -238,6 +238,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     if (inChannel) {
       options.slack.channelId = inChannel;
       options.ticket.channelId = inChannel;
+      options.mail.channelId = inChannel;
     }
     
     // Add unified filters (apply to both slack and ticket)

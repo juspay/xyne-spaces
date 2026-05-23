@@ -29,6 +29,7 @@ import {
   Hash,
   Inbox,
   CheckCheck,
+  Search,
 } from 'lucide-react';
 import { ChannelVisibility, EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
@@ -92,7 +93,7 @@ import type { Ticket, BoardMetadata, TicketStageRequest } from '@xyne/shared';
 import type { Stage } from '../KanbanBoardScreen/KanbanBoardScreen.types';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
 import { getDraft } from '../../hooks/useDraft';
-import { useShortcut } from '../../shortcuts';
+import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -552,7 +553,6 @@ const SupportScreen = (): ReactElement => {
   const [assigneeFilterOpen, setAssigneeFilterOpen] = useState(false);
   const [priorityFilterOpen, setPriorityFilterOpen] = useState(false);
   const [stageFilterOpen, setStageFilterOpen] = useState(false);
-
   // Build the filter args once — reused by both the kanban query and the list view.
   // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
   const ticketFilter = useMemo(
@@ -1402,6 +1402,19 @@ const SupportScreen = (): ReactElement => {
                     )}
                   </div>
                   <div className='flex items-center gap-2'>
+                    {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                      <Tooltip content='Search emails' side='bottom'>
+                        <button
+                          onClick={() => invokeShortcut('mod+f')}
+                          className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
+                          data-track-category='Support'
+                          data-track-name='OpenDeskSearch'
+                          data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                        >
+                          <Search size={16} />
+                        </button>
+                      </Tooltip>
+                    )}
                     {isSelectedChannelJoined && (
                       <>
                         <button

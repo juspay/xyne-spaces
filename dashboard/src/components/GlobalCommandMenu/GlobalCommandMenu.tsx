@@ -32,6 +32,9 @@ interface GlobalCommandMenuProps {
   inline?: boolean;
   onTabChange?: (tab: TabType) => void;
   disableAutoFocus?: boolean;
+  initialMention?: MentionData | null;
+  initialTab?: TabType;
+  hideTabs?: boolean;
 }
 
 const GlobalCommandMenu = ({
@@ -45,14 +48,29 @@ const GlobalCommandMenu = ({
   inline,
   onTabChange,
   disableAutoFocus,
+  initialMention: externalInitialMention,
+  initialTab: externalInitialTab,
+  hideTabs,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
   const visibleAllChannels = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
   const [internalOpen, setInternalOpen] = useState(false);
-  const [initialMention, setInitialMention] = useState<MentionData | null>(null);
-  const [contextualTab, setContextualTab] = useState<TabType | undefined>(undefined);
+  const [internalInitialMention, setInternalInitialMention] = useState<MentionData | null>(null);
+  const [internalContextualTab, setInternalContextualTab] = useState<TabType | undefined>(
+    undefined,
+  );
+  const [internalHideTabs, setInternalHideTabs] = useState(false);
+  const [internalEnabledTabs, setInternalEnabledTabs] = useState<TabType[] | undefined>(undefined);
+
+  // External props take priority over internal state (e.g. when opened from SupportScreen)
+  const initialMention =
+    externalInitialMention !== undefined ? externalInitialMention : internalInitialMention;
+  const contextualTab =
+    externalInitialTab !== undefined ? externalInitialTab : internalContextualTab;
+  const effectiveHideTabs = hideTabs !== undefined ? hideTabs : internalHideTabs;
+  const effectiveEnabledTabs = enabledTabs !== undefined ? enabledTabs : internalEnabledTabs;
   const location = useLocation();
   const allUsers = useUsers();
 
@@ -65,8 +83,10 @@ const GlobalCommandMenu = ({
     (newOpen: boolean) => {
       onOpenChange(newOpen);
       if (!newOpen) {
-        setInitialMention(null);
-        setContextualTab(undefined);
+        setInternalInitialMention(null);
+        setInternalContextualTab(undefined);
+        setInternalHideTabs(false);
+        setInternalEnabledTabs(undefined);
       }
     },
     [onOpenChange],
@@ -74,16 +94,6 @@ const GlobalCommandMenu = ({
 
   const handleFindInChannel = useCallback(() => {
     const pathParts = location.pathname.split('/').filter(Boolean);
-
-    const getDeskSelectedChannelId = (): string | null => {
-      try {
-        const saved = localStorage.getItem('support-selected-channel');
-        if (!saved || saved === 'all') return null;
-        return saved;
-      } catch {
-        return null;
-      }
-    };
 
     const buildChannelMention = (channel: (typeof channelData)[number]): MentionData => {
       let channelName = channel.name;
@@ -99,18 +109,23 @@ const GlobalCommandMenu = ({
       return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
     };
 
-    if (pathParts[0] === 'tickets' || pathParts[0] === 'projects') {
-      setInitialMention(null);
-      setContextualTab(TabType.TICKETS);
+    if (pathParts.includes('tickets') || pathParts.includes('projects')) {
+      setInternalInitialMention(null);
+      setInternalContextualTab(TabType.TICKETS);
+      setInternalHideTabs(false);
+      setInternalEnabledTabs(undefined);
       onOpenChange(true);
       return;
     }
 
-    if (pathParts[0] === 'support') {
-      const deskChannelId = getDeskSelectedChannelId();
+    const supportIndex = pathParts.indexOf('support');
+    if (supportIndex !== -1) {
+      const deskChannelId = pathParts[supportIndex + 1] || null;
       const deskChannel = deskChannelId ? channelData.find(c => c.id === deskChannelId) : undefined;
-      setInitialMention(deskChannel ? buildChannelMention(deskChannel) : null);
-      setContextualTab(TabType.DESK);
+      setInternalInitialMention(deskChannel ? buildChannelMention(deskChannel) : null);
+      setInternalContextualTab(TabType.DESK);
+      setInternalHideTabs(true);
+      setInternalEnabledTabs([TabType.DESK]);
       onOpenChange(true);
       return;
     }
@@ -134,8 +149,10 @@ const GlobalCommandMenu = ({
       if (channel) {
         // Desk (support) channel → open with Desk tab + in:<channel> scope
         if (channel.type === ChannelType.SUPPORT) {
-          setInitialMention(buildChannelMention(channel));
-          setContextualTab(TabType.DESK);
+          setInternalInitialMention(buildChannelMention(channel));
+          setInternalContextualTab(TabType.DESK);
+          setInternalHideTabs(false);
+          setInternalEnabledTabs(undefined);
           onOpenChange(true);
           return;
         }
@@ -143,21 +160,27 @@ const GlobalCommandMenu = ({
         // `?tab=tickets`) → open with the Tickets tab + in:<channel> scope.
         const activeChannelTab = new URLSearchParams(location.search).get('tab');
         if (activeChannelTab === 'tickets') {
-          setContextualTab(TabType.TICKETS);
-          setInitialMention(buildChannelMention(channel));
+          setInternalContextualTab(TabType.TICKETS);
+          setInternalInitialMention(buildChannelMention(channel));
+          setInternalHideTabs(false);
+          setInternalEnabledTabs(undefined);
           onOpenChange(true);
           return;
         }
-        setContextualTab(TabType.MESSAGES);
-        setInitialMention(buildChannelMention(channel));
+        setInternalContextualTab(TabType.MESSAGES);
+        setInternalInitialMention(buildChannelMention(channel));
+        setInternalHideTabs(false);
+        setInternalEnabledTabs(undefined);
         onOpenChange(true);
         return;
       }
     }
 
     // Fallback — open normally (ALL tab)
-    setContextualTab(undefined);
-    setInitialMention(null);
+    setInternalContextualTab(undefined);
+    setInternalInitialMention(null);
+    setInternalHideTabs(false);
+    setInternalEnabledTabs(undefined);
     onOpenChange(true);
   }, [location.pathname, location.search, channelData, allUsers, onOpenChange, context.userID]);
 
@@ -178,6 +201,10 @@ const GlobalCommandMenu = ({
     }) as VisibleChannel[];
     const grouped = groupChannelsByScope(visibleChannels, allChannelsUserStatus);
 
+    // groupChannelsByScope excludes EMAIL channels (they live in Desk, not chat sidebar).
+    // Re-include them so the search `in:` picker can scope to desk channels.
+    const emailChannels = visibleChannels.filter(c => c.type === ChannelType.EMAIL);
+
     const sortByActivity = (list: typeof visibleChannels) =>
       [...list].sort(
         (a, b) =>
@@ -187,10 +214,10 @@ const GlobalCommandMenu = ({
 
     return {
       starred: sortByActivity(grouped.starred),
-      channels: sortByActivity(grouped.channels),
+      channels: sortByActivity([...grouped.channels, ...emailChannels]),
       directMessages: sortByActivity(grouped.directMessages),
     };
-  }, [channelData, allChannelsUserStatus]);
+  }, [channelData, allChannelsUserStatus, visibleAllChannels]);
 
   if (!context.userID) return null;
 
@@ -208,11 +235,12 @@ const GlobalCommandMenu = ({
       {...(contextItems !== undefined ? { contextItems } : {})}
       {...(onContextItemToggle !== undefined ? { onContextItemToggle } : {})}
       {...(onContextSelectionConfirm !== undefined ? { onContextSelectionConfirm } : {})}
-      {...(enabledTabs !== undefined ? { enabledTabs } : {})}
+      {...(effectiveEnabledTabs !== undefined ? { enabledTabs: effectiveEnabledTabs } : {})}
       {...(inline !== undefined ? { inline } : {})}
       {...(onTabChange !== undefined ? { onTabChange } : {})}
       {...(contextualTab !== undefined ? { initialTab: contextualTab } : {})}
       {...(disableAutoFocus !== undefined ? { disableAutoFocus } : {})}
+      {...(effectiveHideTabs ? { hideTabs: effectiveHideTabs } : {})}
     />
   );
 };
