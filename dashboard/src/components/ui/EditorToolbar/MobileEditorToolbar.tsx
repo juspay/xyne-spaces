@@ -8,6 +8,7 @@ import {
   Link,
   List,
   ListOrdered,
+  Strikethrough,
   TextQuote,
   X,
 } from 'lucide-react';
@@ -32,6 +33,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
   const [isActive, setIsActive] = useState({
     bold: false,
     italic: false,
+    strike: false,
     code: false,
     codeBlock: false,
     link: false,
@@ -47,6 +49,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
       setIsActive({
         bold: editor.isActive('bold'),
         italic: editor.isActive('italic'),
+        strike: editor.isActive('strike'),
         code: editor.isActive('code'),
         codeBlock: editor.isActive('codeBlock'),
         link: editor.isActive('link'),
@@ -72,6 +75,10 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
 
   const handleItalic = useCallback(() => {
     editor?.chain().focus().toggleItalic().run();
+  }, [editor]);
+
+  const handleStrikethrough = useCallback(() => {
+    editor?.chain().focus().toggleStrike().run();
   }, [editor]);
 
   const handleCode = useCallback(() => {
@@ -177,6 +184,18 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
           onMouseDown={e => e.preventDefault()}
         >
           <Italic className='h-4 w-4' />
+        </button>
+
+        {/* Strikethrough */}
+        <button
+          type='button'
+          onClick={handleStrikethrough}
+          className={buttonClass(isActive.strike)}
+          aria-label='Strikethrough'
+          aria-pressed={isActive.strike}
+          onMouseDown={e => e.preventDefault()}
+        >
+          <Strikethrough className='h-4 w-4' />
         </button>
 
         {/* Inline Code */}

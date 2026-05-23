@@ -451,6 +451,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               class: 'italic',
             },
           },
+          strike: {
+            HTMLAttributes: {
+              class: 'line-through',
+            },
+          },
           code: {
             HTMLAttributes: {
               class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
@@ -646,6 +651,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           if (event.key === 'Escape' && onCancel) {
             event.preventDefault();
             onCancel();
+            return true;
+          }
+
+          // Strikethrough: ⌘⇧X (Mac) / Ctrl+Shift+X (Windows/Linux)
+          // Use lowercase check since Shift+key often produces uppercase letter
+          if (
+            (event.key === 'x' || event.key === 'X') &&
+            event.shiftKey &&
+            (event.metaKey || event.ctrlKey)
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            editor?.chain().focus().toggleStrike().run();
             return true;
           }
 

@@ -9,6 +9,7 @@ import {
   Link,
   List,
   ListOrdered,
+  Strikethrough,
   TextQuote,
   X,
 } from 'lucide-react';
@@ -23,6 +24,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   const [isActive, setIsActive] = useState({
     bold: false,
     italic: false,
+    strike: false,
     code: false,
     codeBlock: false,
     link: false,
@@ -48,6 +50,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       setIsActive({
         bold: editor.isActive('bold'),
         italic: editor.isActive('italic'),
+        strike: editor.isActive('strike'),
         code: editor.isActive('code'),
         codeBlock: editor.isActive('codeBlock'),
         link: editor.isActive('link'),
@@ -83,6 +86,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   const handleItalic = useCallback(() => {
     editor?.chain().focus().toggleItalic().run();
+  }, [editor]);
+
+  const handleStrikethrough = useCallback(() => {
+    editor?.chain().focus().toggleStrike().run();
   }, [editor]);
 
   const handleCode = useCallback(() => {
@@ -258,6 +265,18 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               aria-pressed={isActive.italic}
             >
               <Italic className='h-4 w-4' />
+            </button>
+          </Tooltip>
+
+          <Tooltip content='Strikethrough (⌘⇧X)'>
+            <button
+              type='button'
+              onClick={handleStrikethrough}
+              className={buttonClass(isActive.strike)}
+              aria-label='Strikethrough'
+              aria-pressed={isActive.strike}
+            >
+              <Strikethrough className='h-4 w-4' />
             </button>
           </Tooltip>
 
