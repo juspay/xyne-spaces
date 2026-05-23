@@ -76,7 +76,8 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
       if (!ed) return null;
       const trigger = detectFunc(ed);
       if (trigger) {
-        onMentionSearch?.(trigger.query);
+        const searchQuery = trigger.query.replace(/[.,!?:;)]*$/, '');
+        onMentionSearch?.(searchQuery);
       }
       return trigger;
     },
@@ -93,7 +94,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
       const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\0');
 
       // Match pattern based on trigger character
-      const pattern = triggerChar === '#' ? /#([\w-]*)$/ : /@([\w\s-]*)$/;
+      const pattern = triggerChar === '#' ? /#([\w-]*)$/ : /@([\w\s.-]*)$/;
       const mentionMatch = textBefore.match(pattern);
 
       if (mentionMatch) {
