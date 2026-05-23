@@ -24,7 +24,7 @@ const VoiceShimmerMark = Mark.create({
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { common, createLowlight } from 'lowlight';
+import { all, createLowlight } from 'lowlight';
 import {
   ArrowUp,
   AtSign,
@@ -100,7 +100,7 @@ const getFileExtension = (name: string): string => {
 };
 import { preloadEmojiData } from '../../../utils/emojiLookup';
 
-const lowlight = createLowlight(common);
+const lowlight = createLowlight(all);
 
 const MAX_LIST_DEPTH = 5;
 const LIST_TYPES = new Set(['bulletList', 'orderedList']);
