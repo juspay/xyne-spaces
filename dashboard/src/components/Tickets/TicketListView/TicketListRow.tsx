@@ -7,7 +7,6 @@ import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
 import { AssigneePicker } from './AssigneePicker';
-import { StagePicker } from './StagePicker';
 import { PriorityPicker } from './PriorityPicker';
 
 interface TicketListRowProps {
@@ -17,12 +16,6 @@ interface TicketListRowProps {
   showExtraFields?: boolean;
   isSelected?: boolean;
   onToggleSelect?: () => void;
-  stageOptions?: ReadonlyArray<string>;
-  onStageChange?: (
-    ticketId: string,
-    newStageName: string,
-    currentStageName: string | null | undefined,
-  ) => void;
 }
 
 const formatStatusText = (status: string): string => {
@@ -78,8 +71,6 @@ export const TicketListRow = ({
   showExtraFields = false,
   isSelected = false,
   onToggleSelect,
-  stageOptions,
-  onStageChange,
 }: TicketListRowProps): ReactElement => {
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,7 +92,7 @@ export const TicketListRow = ({
   const statusLabel = isHumanInterventionTicket
     ? 'Human Intervention'
     : (ticket.stageName ?? formatStatusText(ticket.status));
-  const emailCount = ticket.emails?.length ?? 0;
+  const emailCount = ticket.emailCount ?? 0;
   const draftKind = useMemo((): 'user' | 'auto' | null => {
     const drafts = (ticket.emailDrafts ?? []) as ReadonlyArray<{
       userId: string | null;
@@ -111,22 +102,18 @@ export const TicketListRow = ({
     return 'auto';
   }, [ticket.emailDrafts]);
 
-  // Thread-level unread: compare the thread's most recent email id against
-  // the id the current user last saw (stored in email_reads.lastReadEmailId).
-  // Mismatch OR no stored row → unread. Assignment state doesn't short-circuit
-  // — auto-assign boards would otherwise mark every inbound email read for
-  // everyone instantly.
+  // Thread-level unread: email_reads.lastReadEmailAt is a snapshot of
+  // ticket.lastEmailAt taken when the user last read. Unread = no row, or that
+  // snapshot is older than the current lastEmailAt (a newer email arrived).
+  // Assignment state doesn't short-circuit — auto-assign boards would otherwise
+  // mark every inbound email read for everyone instantly.
   const { userID } = useAuthContextValues();
   const ticketReads = ticket.emailReads as
-    | ReadonlyArray<{ userId: string; lastReadEmailId: string }>
+    | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>
     | undefined;
-  const latestEmailId = useMemo(() => {
-    const emails = (ticket.emails ?? []) as ReadonlyArray<{ id: string; createdAt: number }>;
-    if (emails.length === 0) return null;
-    return emails.reduce((latest, e) => (e.createdAt > latest.createdAt ? e : latest)).id;
-  }, [ticket.emails]);
   const userRow = (ticketReads ?? []).find(r => r.userId === userID);
-  const hasUnread = emailCount > 0 && (!userRow || userRow.lastReadEmailId !== latestEmailId);
+  const ticketLastEmailAt = ticket.lastEmailAt ?? 0;
+  const hasUnread = emailCount > 0 && (!userRow || userRow.lastReadEmailAt < ticketLastEmailAt);
   const handleRowClick = (e: MouseEvent<HTMLDivElement>): void => {
     if ((e.target as HTMLElement).closest('[data-ticket-row-checkbox]')) return;
     onClick();
@@ -254,13 +241,12 @@ export const TicketListRow = ({
       </div>
       <div className='flex items-center justify-center gap-3 flex-shrink-0'>
         <div className='w-[100px] flex justify-start'>
-          <StagePicker
-            ticketId={ticket.id}
-            stageName={ticket.stageName}
-            stageLabel={statusLabel}
-            {...(stageOptions ? { stageOptions } : {})}
-            {...(onStageChange ? { onStageChange } : {})}
-          />
+          <span
+            className='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground truncate max-w-full'
+            title={ticket.stageName ?? undefined}
+          >
+            {statusLabel}
+          </span>
         </div>
         <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} />
         <Tooltip delayDuration={300} content={formatDateTime(dueDate)} side='top'>

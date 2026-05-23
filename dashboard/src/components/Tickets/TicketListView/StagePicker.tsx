@@ -3,6 +3,8 @@ import { ChevronDown } from 'lucide-react';
 import { Popover } from '../../ui/Popover/Popover';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { queries } from '../../../zero/queries';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { getStageColor } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { cn } from '../../../utils/classNames';
 
@@ -10,7 +12,7 @@ interface StagePickerProps {
   ticketId: string;
   stageName: string | null | undefined;
   stageLabel: string;
-  stageOptions?: ReadonlyArray<string>;
+  boardId?: string | null;
   /** When provided, called instead of directly mutating zero — allows the parent to intercept and show a form. */
   onStageChange?: (
     ticketId: string,
@@ -25,14 +27,19 @@ export function StagePicker({
   ticketId,
   stageName,
   stageLabel,
-  stageOptions,
+  boardId,
   onStageChange,
 }: StagePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const zero = useZero();
 
   const currentStage = stageName ?? '';
-  const availableStages = stageOptions && stageOptions.length > 0 ? stageOptions : SUPPORT_STAGES;
+  const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: boardId ?? '' }), {
+    enabled: open && !!boardId,
+  });
+  const availableStages: ReadonlyArray<string> = boardId
+    ? (stages?.map(s => s.name) ?? [])
+    : SUPPORT_STAGES;
 
   const setStage = (next: string): void => {
     if (next !== currentStage) {

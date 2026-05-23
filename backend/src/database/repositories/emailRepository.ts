@@ -1,5 +1,6 @@
 import { DatabaseClient } from '../client';
 import { Email, EmailType } from '@prisma/client';
+import { syncTicketEmailCount } from '../syncTicketEmailCount';
 
 export class EmailRepository {
   private db = DatabaseClient.getInstance();
@@ -22,7 +23,7 @@ export class EmailRepository {
       throw new Error('At least one recipient is required');
     }
 
-    return await this.db.email.upsert({
+    const email = await this.db.email.upsert({
       where: { externalMessageId: data.externalMessageId },
       update: {},
       create: {
@@ -40,6 +41,8 @@ export class EmailRepository {
         ...(data.createdAt && { createdAt: data.createdAt }),
       },
     });
+    await syncTicketEmailCount(this.db, data.conversationId);
+    return email;
   }
 
   async findById(id: string): Promise<Email | null> {

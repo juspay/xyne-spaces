@@ -811,6 +811,7 @@ export const ticketTable = table('tickets')
     isArchived: boolean(),
     kanbanPosition: string().optional(),
     lastEmailAt: number(),
+    emailCount: number().optional(),
     classificationData: json().optional(),
     aiCategory: string().optional(),
     aiSubCategory: string().optional(),
@@ -1806,6 +1807,7 @@ export const emailReadTable = table('email_reads') // Prisma model: EmailRead
     ticketId: string(),
     userId: string(),
     lastReadEmailId: string(),
+    lastReadEmailAt: number(),
     createdAt: number(),
     updatedAt: number(),
   })

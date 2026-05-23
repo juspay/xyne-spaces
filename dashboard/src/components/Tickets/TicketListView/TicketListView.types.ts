@@ -12,7 +12,7 @@ export interface TicketListItem {
   priority?: TicketPriority | string | null;
   assignedTo?: string | null;
   metadata?: unknown;
-  emails?: readonly unknown[] | null;
+  emailCount?: number | null;
   emailDrafts?: readonly { userId: string | null }[] | null;
   emailReads?: readonly unknown[] | null;
   conversation?: unknown;

@@ -6,25 +6,27 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { useZeroVirtualizer } from '@rocicorp/zero-virtual/react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { cn } from '../../../utils/classNames';
 import { Skeleton } from '../../ui/Skeleton';
 import { TicketListRow } from './TicketListRow';
 import { queries } from '../../../zero/queries';
 import { useShortcut } from '../../../shortcuts';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
+import { useZero } from '../../../hooks/useZero';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
+import { logger, Event } from '../../../utils/logger';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { TicketListItem } from './TicketListView.types';
 import { TicketPriority } from '@xyne/shared';
 
-const ROW_HEIGHT = 45;
-const SCROLL_POSITIONS = new Map<string, number>();
+const PAGE_SIZE = 50;
+const SCROLL_INDEX_POSITIONS = new Map<string, number>();
 
 export type SupportTicketRow = NonNullable<
-  QueryResultType<typeof queries.supportTicketsPageV2>[number]
+  QueryResultType<typeof queries.supportTicketsPageV3>[number]
 >;
-
-type TicketStart = { id: string; lastEmailAt: number };
 
 interface TicketListViewProps {
   filter: {
@@ -41,32 +43,20 @@ interface TicketListViewProps {
   className?: string;
   selectedIds?: ReadonlySet<string>;
   onToggleSelect?: (row: SelectableRow) => void;
-  stageOptions?: ReadonlyArray<string>;
-  onStageChange?: (
-    ticketId: string,
-    newStageName: string,
-    currentStageName: string | null | undefined,
-  ) => void;
+  onBoardIdReady?: (boardId: string) => void;
 }
 
 export interface SelectableRow {
   id: string;
-  emails?: ReadonlyArray<{ id: string; createdAt: number }>;
-  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailId: string }>;
+  lastEmailAt: number;
+  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
 }
 
 /** Imperative handle exposed to parent via ref — used for "Select All". */
 export interface TicketListViewHandle {
-  /** Returns all rows currently loaded in the virtualizer (have emails/emailReads data). */
+  /** Returns all rows currently loaded in the list (merged first page + older pages). */
   getLoadedRows: () => SelectableRow[];
 }
-
-const toStartRow = (row: SupportTicketRow): TicketStart => ({
-  id: row.id,
-  lastEmailAt: row.lastEmailAt,
-});
-
-const getRowKey = (row: SupportTicketRow): string => row.id;
 
 export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListViewProps>(
   function TicketListView(
@@ -80,12 +70,12 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
       className,
       selectedIds,
       onToggleSelect,
-      stageOptions,
-      onStageChange,
+      onBoardIdReady,
     }: TicketListViewProps,
     ref,
   ): React.ReactElement {
-    const scrollRef = useRef<HTMLDivElement>(null);
+    const virtuosoRef = useRef<VirtuosoHandle>(null);
+    const zero = useZero();
 
     const { channelId, assignedTo, priority, stageName } = filter;
     // Feeds TicketsACL fast-path (scalar EXISTS on channel_participants) instead
@@ -93,91 +83,26 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
     const channelUserStatus = useGetChannelUserStatus(channelId);
     const isMember = !!channelUserStatus;
 
-    const getPageQuery = useCallback(
-      ({
-        limit,
-        start,
-        dir,
-      }: {
-        limit: number;
-        start: TicketStart | null;
-        dir: 'forward' | 'backward';
-      }) => ({
-        query: queries.supportTicketsPageV2({
-          channelId,
-          isMember,
-          assignedTo,
-          priority,
-          stageName,
-          limit,
-          start,
-          dir,
-        }),
+    const [firstPage, firstPageDetails] = useCachedQuery(
+      queries.supportTicketsPageV3({
+        channelId,
+        isMember,
+        assignedTo,
+        priority,
+        stageName,
+        limit: PAGE_SIZE,
+        start: null,
+        dir: 'forward',
       }),
-      [channelId, isMember, assignedTo, priority, stageName],
     );
 
-    const getSingleQuery = useCallback(
-      ({ id }: { id: string }) => ({
-        query: queries.supportTicketRowV2({ id, channelId, isMember }),
-      }),
-      [channelId, isMember],
-    );
+    const [olderPages, setOlderPages] = useState<SupportTicketRow[][]>([]);
+    const [hasMore, setHasMore] = useState(true);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const loadStartTimeRef = useRef<number | null>(Date.now());
 
-    const getScrollElement = useCallback(() => scrollRef.current, []);
-    const estimateSize = useCallback(() => ROW_HEIGHT, []);
-
-    const listContextParams = useMemo(
-      () => ({ channelId, assignedTo, priority, stageName }),
-      [channelId, assignedTo, priority, stageName],
-    );
-
-    const virt = useZeroVirtualizer({
-      listContextParams,
-      getScrollElement,
-      estimateSize,
-      getRowKey,
-      toStartRow,
-      getPageQuery,
-      getSingleQuery,
-    });
-    const { virtualizer, rowAt, complete, rowsEmpty } = virt;
-
-    // Expose loaded rows to parent so "Select All" only acts on rows that have
-    // full emails/emailReads data (from supportTicketsPageV2), not the full
-    // unloaded dataset which lacks that data.
-    useImperativeHandle(
-      ref,
-      () => ({
-        getLoadedRows: (): SelectableRow[] => {
-          const count = virtualizer.options.count;
-          const loaded: SelectableRow[] = [];
-          for (let i = 0; i < count; i++) {
-            const row = rowAt(i);
-            if (!row) continue;
-            const entry: SelectableRow = { id: row.id };
-            if (row.emails !== undefined) {
-              entry.emails = row.emails as ReadonlyArray<{ id: string; createdAt: number }>;
-            }
-            if (row.emailReads !== undefined) {
-              entry.emailReads = row.emailReads as ReadonlyArray<{
-                userId: string;
-                lastReadEmailId: string;
-              }>;
-            }
-            loaded.push(entry);
-          }
-          return loaded;
-        },
-      }),
-      [virtualizer, rowAt],
-    );
-
-    const virtualItems = virtualizer.getVirtualItems();
-    const totalSize = virtualizer.getTotalSize();
-    const showInitialSkeletons = !complete && virtualItems.length === 0 && !rowsEmpty;
-
-    const scrollKey = useMemo(
+    // Filter key — reset accumulator when filter changes (new view = new data).
+    const filterKey = useMemo(
       () =>
         JSON.stringify({
           c: channelId,
@@ -188,33 +113,127 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
       [channelId, assignedTo, priority, stageName],
     );
 
-    const hasRestoredRef = useRef<string | null>(null);
     useEffect(() => {
-      if (hasRestoredRef.current === scrollKey) return;
-      if (totalSize <= 0) return;
-      const el = scrollRef.current;
-      if (!el) return;
-      const saved = SCROLL_POSITIONS.get(scrollKey);
-      if (typeof saved === 'number' && saved > 0) {
-        el.scrollTop = saved;
-      }
-      hasRestoredRef.current = scrollKey;
-    }, [scrollKey, totalSize]);
+      setOlderPages([]);
+      setHasMore(true);
+      loadStartTimeRef.current = Date.now();
+    }, [filterKey]);
 
-    const handleScroll = useCallback(
-      (e: React.UIEvent<HTMLDivElement>) => {
-        // Only persist after the initial restore has run — otherwise an early scroll
-        // event with scrollTop=0 (mount before restore) would clobber the saved value.
-        if (hasRestoredRef.current !== scrollKey) return;
-        SCROLL_POSITIONS.set(scrollKey, e.currentTarget.scrollTop);
-      },
-      [scrollKey],
+    // Record first-page load duration once it becomes complete.
+    useEffect(() => {
+      if (firstPageDetails.type !== 'complete') return;
+      if (loadStartTimeRef.current === null) return;
+      const duration = Date.now() - loadStartTimeRef.current;
+      logger.info(Event.SUPPORT_TICKETS_LOADED, {
+        source: 'TicketListView',
+        message: 'Support tickets first page loaded',
+        durationMs: duration,
+        channelId,
+        url: window.location.href,
+      });
+      safeRecordMetric(() => {
+        dataLoadDuration.record(duration, {
+          source: 'TicketListView',
+          event: Event.SUPPORT_TICKETS_LOADED,
+          platform: logger.platformName,
+        });
+      });
+      loadStartTimeRef.current = null;
+    }, [firstPageDetails.type, filterKey, channelId]);
+
+    const tickets = useMemo<SupportTicketRow[]>(() => {
+      const all = [...((firstPage as SupportTicketRow[] | undefined) ?? []), ...olderPages.flat()];
+      const seen = new Set<string>();
+      const unique: SupportTicketRow[] = [];
+      for (const t of all) {
+        if (!seen.has(t.id)) {
+          seen.add(t.id);
+          unique.push(t);
+        }
+      }
+      unique.sort((a, b) => {
+        if (b.lastEmailAt !== a.lastEmailAt) return b.lastEmailAt - a.lastEmailAt;
+        return b.id.localeCompare(a.id);
+      });
+      return unique;
+    }, [firstPage, olderPages]);
+
+    const complete = firstPageDetails.type === 'complete';
+    const rowsEmpty = complete && tickets.length === 0;
+    const showInitialSkeletons = !complete && tickets.length === 0;
+    const loadMore = useCallback(async () => {
+      if (!hasMore || isLoadingMore) return;
+      const last = tickets[tickets.length - 1];
+      if (!last) return;
+      setIsLoadingMore(true);
+      try {
+        const next = (await zero.run(
+          queries.supportTicketsPageV3({
+            channelId,
+            isMember,
+            assignedTo,
+            priority,
+            stageName,
+            limit: PAGE_SIZE,
+            start: { id: last.id, lastEmailAt: last.lastEmailAt },
+            dir: 'forward',
+          }),
+          { type: 'complete' },
+        )) as SupportTicketRow[];
+        if (next.length === 0) {
+          setHasMore(false);
+        } else {
+          setOlderPages(prev => [...prev, next]);
+          if (next.length < PAGE_SIZE) setHasMore(false);
+        }
+      } finally {
+        setIsLoadingMore(false);
+      }
+    }, [
+      tickets,
+      hasMore,
+      isLoadingMore,
+      zero,
+      channelId,
+      isMember,
+      assignedTo,
+      priority,
+      stageName,
+    ]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        getLoadedRows: (): SelectableRow[] =>
+          tickets.map(t => {
+            const entry: SelectableRow = { id: t.id, lastEmailAt: t.lastEmailAt };
+            const emailReads = t.emailReads as
+              | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>
+              | undefined;
+            if (emailReads !== undefined) {
+              entry.emailReads = emailReads;
+            }
+            return entry;
+          }),
+      }),
+      [tickets],
     );
 
+    const firstRowBoardId = tickets[0]?.boardId;
+    useEffect(() => {
+      if (firstRowBoardId) onBoardIdReady?.(firstRowBoardId);
+    }, [firstRowBoardId, onBoardIdReady]);
+
+    // Scroll restoration via Virtuoso's initialTopMostItemIndex + rangeChanged.
+    const restoredIndex = SCROLL_INDEX_POSITIONS.get(filterKey) ?? 0;
+    const hasRestoredRef = useRef(false);
+    useEffect(() => {
+      hasRestoredRef.current = false;
+    }, [filterKey]);
+
     // Keyboard navigation: j/k to move, Enter to open the highlighted row.
-    // Null = no row highlighted yet (first j/k starts at 0).
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-    const rowCount = virtualizer.options.count;
+    const rowCount = tickets.length;
 
     const moveBy = useCallback(
       (delta: number) => {
@@ -225,11 +244,11 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
                 ? 0
                 : Math.max(0, rowCount - 1)
               : Math.max(0, Math.min(rowCount - 1, prev + delta));
-          virtualizer.scrollToIndex(next, { align: 'auto' });
+          virtuosoRef.current?.scrollToIndex({ index: next, align: 'center' });
           return next;
         });
       },
-      [rowCount, virtualizer],
+      [rowCount],
     );
 
     useShortcut('j', () => moveBy(1), {
@@ -248,7 +267,7 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
       'enter',
       () => {
         if (selectedIndex === null) return;
-        const row = rowAt(selectedIndex);
+        const row = tickets[selectedIndex];
         if (row) onTicketClick(row);
       },
       {
@@ -259,28 +278,29 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
       },
     );
 
-    return (
-      <div
-        ref={scrollRef}
-        data-slot='ticket-list-view'
-        role='list'
-        aria-label='Tickets'
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-        tabIndex={0}
-        onFocus={e => {
-          if (e.target !== e.currentTarget) return;
-          if (selectedIndex === null && !rowsEmpty) {
-            setSelectedIndex(0);
-          }
-        }}
-        onScroll={handleScroll}
-        className={cn('h-full w-full overflow-y-auto outline-none', className)}
-      >
-        {rowsEmpty ? (
-          <div className='flex items-center justify-center py-12 text-muted-foreground text-sm'>
+    if (rowsEmpty) {
+      return (
+        <div
+          data-slot='ticket-list-view'
+          role='list'
+          aria-label='Tickets'
+          className={cn('h-full w-full flex items-center justify-center', className)}
+        >
+          <div className='py-12 text-muted-foreground text-sm'>
             {emptyState ?? 'No tickets found'}
           </div>
-        ) : showInitialSkeletons ? (
+        </div>
+      );
+    }
+
+    if (showInitialSkeletons) {
+      return (
+        <div
+          data-slot='ticket-list-view'
+          role='list'
+          aria-label='Tickets'
+          className={cn('h-full w-full overflow-y-auto outline-none', className)}
+        >
           <div className='flex flex-col'>
             {Array.from({ length: skeletonRowCount }).map((_, i) => (
               <div key={i} className='flex items-center gap-3 px-6 py-3 border-b border-border'>
@@ -292,70 +312,66 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
               </div>
             ))}
           </div>
-        ) : (
-          <div style={{ height: totalSize, position: 'relative', width: '100%' }}>
-            {virtualItems.map(virtualRow => {
-              const row = rowAt(virtualRow.index);
-              const ticketIdValue = row?.xyneId || row?.id || '';
-              const isActive =
-                !!row &&
-                (activeTicketId
-                  ? activeTicketId === ticketIdValue
-                  : selectedIndex !== null && virtualRow.index === selectedIndex);
+        </div>
+      );
+    }
 
-              return (
-                <div
-                  key={virtualRow.key}
-                  data-index={virtualRow.index}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                >
-                  {row ? (
-                    <TicketListRow
-                      ticket={row as TicketListItem}
-                      isActive={isActive}
-                      showExtraFields={showExtraFields}
-                      {...(stageOptions ? { stageOptions } : {})}
-                      {...(onStageChange ? { onStageChange } : {})}
-                      {...(onToggleSelect
-                        ? {
-                            isSelected: selectedIds?.has(row.id) ?? false,
-                            onToggleSelect: () => {
-                              const emails = row.emails as
-                                | ReadonlyArray<{ id: string; createdAt: number }>
-                                | undefined;
-                              const emailReads = row.emailReads as
-                                | ReadonlyArray<{ userId: string; lastReadEmailId: string }>
-                                | undefined;
-                              onToggleSelect({
-                                id: row.id,
-                                ...(emails ? { emails } : {}),
-                                ...(emailReads ? { emailReads } : {}),
-                              });
-                            },
-                          }
-                        : {})}
-                      onClick={() => onTicketClick(row)}
-                    />
-                  ) : (
-                    <div className='flex items-center gap-3 px-6 py-3 border-b border-border h-full'>
-                      <Skeleton className='h-3.5 w-3.5 rounded-full flex-shrink-0' />
-                      <Skeleton className='h-3 w-24 flex-shrink-0' />
-                      <Skeleton className='h-3.5 w-full max-w-[300px]' />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+    return (
+      <Virtuoso
+        ref={virtuosoRef}
+        data={tickets}
+        data-slot='ticket-list-view'
+        tabIndex={0}
+        onFocus={(e: React.FocusEvent<HTMLDivElement>) => {
+          if (e.target !== e.currentTarget) return;
+          if (selectedIndex === null && !rowsEmpty) {
+            setSelectedIndex(0);
+          }
+        }}
+        className={cn('h-full w-full outline-none', className)}
+        initialTopMostItemIndex={restoredIndex}
+        rangeChanged={range => {
+          if (!hasRestoredRef.current) {
+            hasRestoredRef.current = true;
+            return;
+          }
+          SCROLL_INDEX_POSITIONS.set(filterKey, range.startIndex);
+        }}
+        endReached={() => void loadMore()}
+        increaseViewportBy={{ top: 0, bottom: 200 }}
+        itemContent={(index, row) => {
+          const ticketIdValue = row?.xyneId || row?.id || '';
+          const isActive =
+            !!row &&
+            (activeTicketId
+              ? activeTicketId === ticketIdValue
+              : selectedIndex !== null && index === selectedIndex);
+          return (
+            <TicketListRow
+              ticket={row as TicketListItem}
+              isActive={isActive}
+              showExtraFields={showExtraFields}
+              {...(onToggleSelect
+                ? {
+                    isSelected: selectedIds?.has(row.id) ?? false,
+                    onToggleSelect: () => {
+                      const emailReads = row.emailReads as
+                        | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>
+                        | undefined;
+                      onToggleSelect({
+                        id: row.id,
+                        lastEmailAt: row.lastEmailAt,
+                        ...(emailReads ? { emailReads } : {}),
+                      });
+                    },
+                  }
+                : {})}
+              onClick={() => onTicketClick(row)}
+            />
+          );
+        }}
+        components={{}}
+      />
     );
   },
 );

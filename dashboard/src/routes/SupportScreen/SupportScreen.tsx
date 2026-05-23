@@ -29,9 +29,8 @@ import {
   Hash,
   Inbox,
   CheckCheck,
-  SquareCheck,
 } from 'lucide-react';
-import { ChannelVisibility, EmailType, EmailMergeMode, AutoDraftMode } from '@xyne/shared';
+import { ChannelVisibility, EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -56,7 +55,7 @@ import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
 import { UserSubmenu } from '../../components/Tickets/TicketFilters/Submenus/UserSubmenu/UserSubmenu';
 import { PrioritySubmenu } from '../../components/Tickets/TicketFilters/Submenus/PrioritySubmenu/PrioritySubmenu';
-import { StagesSubmenu } from '../../components/Tickets/TicketFilters/Submenus/StagesSubmenu/StagesSubmenu';
+import { StageFilterPopup } from '../../components/Tickets/TicketFilters/Submenus/StagesSubmenu/StageFilterPopup';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from '../../components/Chat/DragAndDropOverlay';
@@ -69,7 +68,6 @@ import Badge from '../../components/ui/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
-import type { TicketListViewHandle } from '../../components/Tickets/TicketListView/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import {
   DndContext,
@@ -126,16 +124,7 @@ interface BotMessageBrief {
   timestamp: number;
   sources: DraftSource[];
 }
-import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
-import { InboxSettings } from '../../components/xyne-desk/InboxSettings/InboxSettings';
-import { ClassificationSettings } from '../../components/xyne-desk/ClassificationSettings/ClassificationSettings';
-import { PrioritySettings } from '../../components/xyne-desk/PrioritySettings';
-import { useUserGroups } from '../../hooks/useUserGroup';
-import { DeskIntegrationCard } from '../../components/xyne-desk/DeskIntegrationCard/DeskIntegrationCard';
-import {
-  useEmailChannelPreference,
-  useUpdateEmailChannelPreference,
-} from '../../hooks/useEmailChannelPreference';
+import { InboxSettingsPanel } from '../../components/xyne-desk/InboxSettings/InboxSettingsPanel';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import {
   useChannelConnectedEmail,
@@ -167,9 +156,6 @@ const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: numbe
   color: getStageColor(stage.name.toLowerCase().replace(/\s+/g, '_')),
   ...(stage.sequenceNumber !== undefined && { sequenceNumber: stage.sequenceNumber }),
 });
-
-const getStageOptions = (stages: ReadonlyArray<{ name: string }> | undefined): string[] =>
-  stages?.map(stage => stage.name) ?? [];
 
 const ChannelInfoModal = ({
   channelId,
@@ -322,7 +308,7 @@ const clearInstanceStorage = (userId: string, instanceId: string, channelId: str
   }
 };
 type Email = NonNullable<
-  NonNullable<QueryResultType<typeof queries.supportTicketRowV2>>['emails']
+  NonNullable<QueryResultType<typeof queries.supportTicketDetail>>['emails']
 >[number];
 
 /**
@@ -517,165 +503,26 @@ const SupportScreen = (): ReactElement => {
   // A bare /support visit renders the empty state prompting the user to pick one.
   const selectedChannelId = channelIdParam ?? null;
 
-  // Fetch email channel preference for assignee user group and boardId
-  const emailChannelPreference = useEmailChannelPreference(selectedChannelId);
-  const selectedChannelForSettings = useVisibleChannel(selectedChannelId ?? '');
-
-  // Inbox settings panel form state — drafts for owner + assignee user group with a single
-  // Save button rendered in the panel header.
-  const updateEmailChannelPreference = useUpdateEmailChannelPreference();
-  const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
-  const currentInboxAssigneeUserGroupId = emailChannelPreference?.assigneeUserGroupId ?? null;
-  const currentInboxSendAsEmail = emailChannelPreference?.sendAsEmail ?? null;
-  const currentInboxDefaultCc = emailChannelPreference?.defaultCc ?? null;
-  const currentInboxEmailMergeMode: EmailMergeMode =
-    emailChannelPreference?.emailMergeMode ?? EmailMergeMode.ENABLED;
-  const currentInboxAutoDraftMode: AutoDraftMode =
-    emailChannelPreference?.autoDraftMode ?? AutoDraftMode.OFF;
-  const [draftInboxOwnerUserId, setDraftInboxOwnerUserId] = useState<string | null>(
-    currentInboxOwnerUserId,
-  );
-  const [draftInboxAssigneeUserGroupId, setDraftInboxAssigneeUserGroupId] = useState<string | null>(
-    currentInboxAssigneeUserGroupId,
-  );
-  const [draftInboxSendAsEmail, setDraftInboxSendAsEmail] = useState<string | null>(
-    currentInboxSendAsEmail,
-  );
-  const [draftInboxEmailMergeMode, setDraftInboxEmailMergeMode] = useState<EmailMergeMode>(
-    currentInboxEmailMergeMode,
-  );
-  const [draftInboxAutoDraftMode, setDraftInboxAutoDraftMode] =
-    useState<AutoDraftMode>(currentInboxAutoDraftMode);
-  const [isSavingInboxSettings, setIsSavingInboxSettings] = useState(false);
-  const [isSavingDefaultCc, setIsSavingDefaultCc] = useState(false);
+  const [channelBoardId, setChannelBoardId] = useState<string | null>(null);
   useEffect(() => {
-    setDraftInboxOwnerUserId(currentInboxOwnerUserId);
-  }, [currentInboxOwnerUserId]);
+    setChannelBoardId(null);
+  }, [selectedChannelId]);
+  const boardId = channelBoardId ?? undefined;
 
-  useEffect(() => {
-    setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
-  }, [currentInboxAssigneeUserGroupId]);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('support-view-mode');
+    return (saved as ViewMode) || 'list';
+  });
 
-  useEffect(() => {
-    setDraftInboxSendAsEmail(currentInboxSendAsEmail);
-  }, [currentInboxSendAsEmail]);
-
-  useEffect(() => {
-    setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
-  }, [currentInboxEmailMergeMode]);
-
-  useEffect(() => {
-    setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
-  }, [currentInboxAutoDraftMode]);
-
-  const canEditSendAsEmail =
-    !!userID &&
-    !!selectedChannelForSettings &&
-    (selectedChannelForSettings.createdBy === userID || currentInboxOwnerUserId === userID);
-
-  const inboxSettingsHasChanges =
-    !!selectedChannelId &&
-    (draftInboxOwnerUserId !== currentInboxOwnerUserId ||
-      draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId ||
-      (canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail) ||
-      draftInboxEmailMergeMode !== currentInboxEmailMergeMode ||
-      draftInboxAutoDraftMode !== currentInboxAutoDraftMode);
-
-  const handleSaveInboxSettings = useCallback(async () => {
-    if (!selectedChannelId) {
-      return;
-    }
-    setIsSavingInboxSettings(true);
-    try {
-      await updateEmailChannelPreference.mutateAsync({
-        channelId: selectedChannelId,
-        ...(draftInboxOwnerUserId !== currentInboxOwnerUserId && draftInboxOwnerUserId
-          ? { ownerUserId: draftInboxOwnerUserId }
-          : {}),
-        ...(draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId
-          ? { assigneeUserGroupId: draftInboxAssigneeUserGroupId }
-          : {}),
-        ...(canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail
-          ? { sendAsEmail: draftInboxSendAsEmail }
-          : {}),
-        ...(draftInboxEmailMergeMode !== currentInboxEmailMergeMode
-          ? { emailMergeMode: draftInboxEmailMergeMode }
-          : {}),
-        ...(draftInboxAutoDraftMode !== currentInboxAutoDraftMode
-          ? { autoDraftMode: draftInboxAutoDraftMode }
-          : {}),
-      });
-    } catch (error) {
-      setDraftInboxOwnerUserId(currentInboxOwnerUserId);
-      setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
-      setDraftInboxSendAsEmail(currentInboxSendAsEmail);
-      setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
-      setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
-      console.error('Failed to update email channel preference:', error);
-    } finally {
-      setIsSavingInboxSettings(false);
-    }
-  }, [
-    selectedChannelId,
-    draftInboxOwnerUserId,
-    currentInboxOwnerUserId,
-    draftInboxAssigneeUserGroupId,
-    currentInboxAssigneeUserGroupId,
-    canEditSendAsEmail,
-    draftInboxSendAsEmail,
-    currentInboxSendAsEmail,
-    draftInboxEmailMergeMode,
-    currentInboxEmailMergeMode,
-    draftInboxAutoDraftMode,
-    currentInboxAutoDraftMode,
-    updateEmailChannelPreference,
-  ]);
-
-  const handleCancelInboxSettings = useCallback(() => {
-    setDraftInboxOwnerUserId(currentInboxOwnerUserId);
-    setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
-    setDraftInboxSendAsEmail(currentInboxSendAsEmail);
-    setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
-    setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
-  }, [
-    currentInboxOwnerUserId,
-    currentInboxAssigneeUserGroupId,
-    currentInboxSendAsEmail,
-    currentInboxEmailMergeMode,
-    currentInboxAutoDraftMode,
-  ]);
-
-  const allUserGroups = useUserGroups();
-
-  const handleSaveDefaultCc = useCallback(
-    async (value: string | null) => {
-      if (!selectedChannelId) return;
-      setIsSavingDefaultCc(true);
-      try {
-        await updateEmailChannelPreference.mutateAsync({
-          channelId: selectedChannelId,
-          defaultCc: value,
-        });
-      } catch (error) {
-        console.error('Failed to save default CC:', error);
-      } finally {
-        setIsSavingDefaultCc(false);
-      }
-    },
-    [selectedChannelId, updateEmailChannelPreference],
-  );
-
-  // Fetch stages for the board configured in email channel preference
-  const boardId = emailChannelPreference?.boardId;
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: boardId || '' }), {
-    enabled: !!boardId,
+    enabled: !!boardId && viewMode === 'kanban',
   });
 
   // Fetch board metadata to determine the active SLA mechanism.
   // getBoardById is lightweight (board + project only, no stages) and is a
   // separate subscription from stagesByBoard, which returns stages not board rows.
   const [boardForSla] = useCachedQuery(queries.getBoardById({ boardId: boardId || '' }), {
-    enabled: !!boardId,
+    enabled: !!boardId && viewMode === 'kanban',
   });
   const isBoardPrioritySla =
     (boardForSla?.metadata as BoardMetadata | null | undefined)?.slaPolicyType === 'priority';
@@ -698,10 +545,6 @@ const SupportScreen = (): ReactElement => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('support-sidebar-open');
     return saved ? saved === 'true' : true;
-  });
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    const saved = localStorage.getItem('support-view-mode');
-    return (saved as ViewMode) || 'list';
   });
   const [selectedPriorities, setSelectedPriorities] = useState<TicketPriority[]>([]);
   const [selectedStages, setSelectedStages] = useState<string[]>([]);
@@ -1014,7 +857,7 @@ const SupportScreen = (): ReactElement => {
       isMember: kanbanIsMember,
       ...ticketFilter,
     }),
-    { enabled: !!selectedChannelId },
+    { enabled: !!selectedChannelId && viewMode === 'kanban' },
   );
 
   // Email channels are already sorted by the useEmailChannels hook
@@ -1073,10 +916,9 @@ const SupportScreen = (): ReactElement => {
 
   type SelectedTicket = {
     id: string;
-    emails: ReadonlyArray<{ id: string; createdAt: number }>;
-    emailReads: ReadonlyArray<{ userId: string; lastReadEmailId: string }>;
+    lastEmailAt: number;
+    emailReads: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
   };
-  const listViewRef = useRef<TicketListViewHandle>(null);
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
   );
@@ -1087,8 +929,8 @@ const SupportScreen = (): ReactElement => {
   const toggleTicketSelected = useCallback(
     (row: {
       id: string;
-      emails?: ReadonlyArray<{ id: string; createdAt: number }>;
-      emailReads?: ReadonlyArray<{ userId: string; lastReadEmailId: string }>;
+      lastEmailAt: number;
+      emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
     }): void => {
       setSelectedTickets(prev => {
         const next = new Map(prev);
@@ -1097,7 +939,7 @@ const SupportScreen = (): ReactElement => {
         } else {
           next.set(row.id, {
             id: row.id,
-            emails: row.emails ?? [],
+            lastEmailAt: row.lastEmailAt,
             emailReads: row.emailReads ?? [],
           });
         }
@@ -1127,7 +969,6 @@ const SupportScreen = (): ReactElement => {
   // Stages fetched dynamically from the board configured in EmailChannelPreference.
   // Empty if no board is configured — dropdown and kanban will show no stages.
   const stageColumns = useMemo(() => stages?.map(toStageColumn) ?? [], [stages]);
-  const stageOptions = useMemo(() => getStageOptions(stages), [stages]);
 
   // Full stage objects (with formId and approvers) used for drag-and-drop and form checks.
   const stagesForDragDrop = useMemo<Stage[]>(() => {
@@ -1188,22 +1029,6 @@ const SupportScreen = (): ReactElement => {
     }
   }, [displayedTickets]);
 
-  const handleSelectAll = useCallback((): void => {
-    const rows = listViewRef.current?.getLoadedRows() ?? [];
-    if (rows.length === 0) return;
-    setSelectedTickets(() => {
-      const next = new Map<string, SelectedTicket>();
-      for (const row of rows) {
-        next.set(row.id, {
-          id: row.id,
-          emails: row.emails ?? [],
-          emailReads: row.emailReads ?? [],
-        });
-      }
-      return next;
-    });
-  }, []);
-
   const ticketsByStage = useMemo(
     () => groupTicketsByStage(localTickets, stageColumns),
     [localTickets, stageColumns],
@@ -1248,61 +1073,6 @@ const SupportScreen = (): ReactElement => {
       setShowBackwardConfirmDialog(true);
     },
     [],
-  );
-
-  // Handler for list-view StagePicker — mirrors the form-check logic used by drag-and-drop.
-  const handleListViewStageChange = useCallback(
-    async (ticketId: string, newStageName: string, currentStageName: string | null | undefined) => {
-      const targetStage = stagesForDragDrop.find(s => s.name === newStageName);
-      const currentStage = stagesForDragDrop.find(s => s.name === currentStageName);
-
-      if (!targetStage) {
-        // Fallback: no stage info, do a direct update
-        void zero.mutate(
-          mutators.ticket.update({ id: ticketId, stageName: newStageName, updatedAt: Date.now() }),
-        );
-        return;
-      }
-
-      // Check for backward movement
-      if (
-        currentStage &&
-        targetStage.sequenceNumber !== undefined &&
-        currentStage.sequenceNumber !== undefined &&
-        targetStage.sequenceNumber < currentStage.sequenceNumber
-      ) {
-        setBackwardStageChange({
-          stageName: newStageName,
-          fromSequenceNumber: currentStage.sequenceNumber,
-          ticketId,
-        });
-        setShowBackwardConfirmDialog(true);
-        return;
-      }
-
-      // Check if target stage has a form
-      const targetStageFormId = stageFormMap.get(targetStage.id);
-      if (targetStageFormId) {
-        const hasApprovers = stagesForDragDrop.some(s => s.approvers && s.approvers.length > 0);
-        // Fetch the ticket to pass to the form modal
-        const ticket = localTickets.find(t => t.id === ticketId);
-        if (ticket) {
-          await handleStageFormRequired({
-            ticket,
-            targetStage,
-            formId: targetStageFormId,
-            hasApprovers,
-          });
-          return;
-        }
-      }
-
-      // No form required — direct update
-      void zero.mutate(
-        mutators.ticket.update({ id: ticketId, stageName: newStageName, updatedAt: Date.now() }),
-      );
-    },
-    [stagesForDragDrop, stageFormMap, zero, localTickets, handleStageFormRequired],
   );
 
   const { activeTicket, handleDragStart, handleDragEnd } = useDragAndDrop({
@@ -1723,15 +1493,10 @@ const SupportScreen = (): ReactElement => {
                             sideOffset={6}
                             className='z-[60]'
                           >
-                            <StagesSubmenu
+                            <StageFilterPopup
+                              boardId={channelBoardId}
                               selectedStages={selectedStages}
                               onChange={setSelectedStages}
-                              availableStages={
-                                stages?.map(s => ({
-                                  name: s.name,
-                                  status: s.defaultTicketStatusV2,
-                                })) ?? []
-                              }
                             />
                           </Popover.Content>
                         </Popover.Root>
@@ -1934,20 +1699,6 @@ const SupportScreen = (): ReactElement => {
                     <Button
                       type='button'
                       size='sm'
-                      variant='outline'
-                      onClick={handleSelectAll}
-                      data-track-category='Support'
-                      data-track-name='SelectAllTickets'
-                      data-track-metadata={JSON.stringify({
-                        channelId: refetchChannelId,
-                      })}
-                    >
-                      <SquareCheck size={14} />
-                      Select all
-                    </Button>
-                    <Button
-                      type='button'
-                      size='sm'
                       variant='default'
                       onClick={handleMarkSelectedAsRead}
                       data-track-category='Support'
@@ -1975,84 +1726,11 @@ const SupportScreen = (): ReactElement => {
                 </div>
               </div>
               {isSettingsOpen && (
-                <div className='absolute inset-0 z-10 bg-background flex flex-col overflow-y-auto'>
-                  <div className='flex-shrink-0 h-14 px-4 border-b border-border flex items-center justify-between'>
-                    <span className='text-sm font-semibold text-foreground'>Inbox Settings</span>
-                    <div className='flex items-center gap-2'>
-                      {inboxSettingsHasChanges && (
-                        <>
-                          <Button
-                            size='sm'
-                            variant='outline'
-                            onClick={handleCancelInboxSettings}
-                            disabled={isSavingInboxSettings}
-                            data-track-category='inbox-settings'
-                            data-track-name='cancel-inbox-settings'
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            size='sm'
-                            onClick={() => void handleSaveInboxSettings()}
-                            disabled={isSavingInboxSettings || !draftInboxOwnerUserId}
-                            data-track-category='inbox-settings'
-                            data-track-name='save-inbox-settings'
-                          >
-                            {isSavingInboxSettings ? 'Saving...' : 'Save Changes'}
-                          </Button>
-                        </>
-                      )}
-                      <button
-                        onClick={() => void navigate(-1)}
-                        className='p-1.5 rounded hover:bg-accent text-muted-foreground transition-colors'
-                        data-track-category='inbox-settings'
-                        data-track-name='close-inbox-settings'
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className='p-4 space-y-6'>
-                    {selectedChannelId && (
-                      <>
-                        <InboxSettings
-                          ownerUserId={draftInboxOwnerUserId}
-                          onOwnerChange={setDraftInboxOwnerUserId}
-                          assigneeUserGroupId={draftInboxAssigneeUserGroupId}
-                          onAssigneeChange={setDraftInboxAssigneeUserGroupId}
-                          sendAsEmail={draftInboxSendAsEmail}
-                          onSendAsEmailChange={setDraftInboxSendAsEmail}
-                          canEditSendAsEmail={canEditSendAsEmail}
-                          defaultCc={currentInboxDefaultCc}
-                          onSaveDefaultCc={value => void handleSaveDefaultCc(value)}
-                          isSavingDefaultCc={isSavingDefaultCc}
-                          emailMergeMode={draftInboxEmailMergeMode}
-                          onEmailMergeModeChange={setDraftInboxEmailMergeMode}
-                          autoDraftMode={draftInboxAutoDraftMode}
-                          onAutoDraftModeChange={setDraftInboxAutoDraftMode}
-                          disabled={isSavingInboxSettings}
-                        />
-                        <div className='border-t border-border' />
-                        <DeskIntegrationCard
-                          channelId={selectedChannelId}
-                          canManage={canEditSendAsEmail}
-                        />
-                        <ClassificationSettings
-                          channelId={selectedChannelId}
-                          userGroups={allUserGroups.map(g => ({ id: g.id, name: g.name }))}
-                          canManage={canEditSendAsEmail}
-                        />
-                        <div className='border-t border-border' />
-                        <PrioritySettings
-                          channelId={selectedChannelId}
-                          canManage={canEditSendAsEmail}
-                        />
-                        <div className='border-t border-border' />
-                      </>
-                    )}
-                    <SignatureEditor />
-                  </div>
-                </div>
+                <InboxSettingsPanel
+                  channelId={selectedChannelId}
+                  userID={userID}
+                  onClose={() => void navigate(-1)}
+                />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                 {!selectedChannelId ? (
@@ -2167,7 +1845,6 @@ const SupportScreen = (): ReactElement => {
                       </DndContext>
                     ) : (
                       <TicketListView
-                        ref={listViewRef}
                         filter={{
                           channelId: selectedChannelId,
                           ...ticketFilter,
@@ -2176,10 +1853,7 @@ const SupportScreen = (): ReactElement => {
                         activeTicketId={ticketId}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
-                        stageOptions={stageOptions}
-                        onStageChange={(ticketId, newStageName, currentStageName) =>
-                          void handleListViewStageChange(ticketId, newStageName, currentStageName)
-                        }
+                        onBoardIdReady={setChannelBoardId}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
@@ -2349,7 +2023,7 @@ const SupportScreen = (): ReactElement => {
 
 const TicketMetaRow = ({
   ticket,
-  stageOptions,
+  boardId,
 }: {
   ticket:
     | {
@@ -2360,7 +2034,7 @@ const TicketMetaRow = ({
       }
     | undefined
     | null;
-  stageOptions: ReadonlyArray<string>;
+  boardId: string | null;
 }): ReactElement | null => {
   const resolvedAssigneeId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
   const assignee = useUser(resolvedAssigneeId);
@@ -2378,7 +2052,7 @@ const TicketMetaRow = ({
         ticketId={ticket.id}
         stageName={ticket.stageName}
         stageLabel={stage}
-        stageOptions={stageOptions}
+        boardId={boardId}
       />
       <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} label={assigneeName} />
     </div>
@@ -2462,26 +2136,18 @@ const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactE
 
   // Single consolidated fetch: the ticket row with `.related('emails')` gives us emails,
   // channelId (scalar on ticket), conversationId, and everything else we need — replaces
-  // getEmailsForTicket + getConversationById. Use id when we have it (from list navigation
-  // state), otherwise fall back to xyneId lookup (direct URL loads).
-  const [ticketById] = useCachedQuery(
-    queries.supportTicketRowV2({
-      id: ticketId || '',
+  // getEmailsForTicket + getConversationById. supportTicketDetail looks up by `id` when
+  // list navigation supplied it (router state), else by `xyneId` from the URL path param.
+  const [ticket] = useCachedQuery(
+    queries.supportTicketDetail({
+      id: ticketId || undefined,
+      xyneId: ticketIdParam || undefined,
+      workspaceId,
       channelId: routeChannelId,
       isMember,
     }),
-    { enabled: !!ticketId && !!routeChannelId },
+    { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
-  const [ticketByXyneId] = useCachedQuery(
-    queries.supportTicketByXyneIdV3({
-      xyneId: ticketIdParam || '',
-      workspaceId: workspaceId,
-      channelId: routeChannelId,
-      isMember,
-    }),
-    { enabled: !ticketId && !!ticketIdParam && !!routeChannelId },
-  );
-  const ticket = ticketById ?? ticketByXyneId;
   const ticketEmailDrafts = (
     ticket as
       | {
@@ -2557,12 +2223,7 @@ const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactE
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
-  const emailChannelPreference = useEmailChannelPreference(channelId || null);
-  const boardId = emailChannelPreference?.boardId ?? null;
-  const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: boardId || '' }), {
-    enabled: !!boardId,
-  });
-  const stageOptions = useMemo(() => getStageOptions(stages), [stages]);
+  const boardId = ticket?.boardId ?? null;
 
   useEffect(() => {
     if (!conversationId) {
@@ -2676,7 +2337,7 @@ const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactE
       ? { id: ticket.id, lastEmailAt: ticket.lastEmailAt }
       : null;
   const [nextPage] = useCachedQuery(
-    queries.supportTicketsPageV2({
+    queries.supportTicketsPageV3({
       channelId,
       isMember,
       ...ticketFilter,
@@ -2687,7 +2348,7 @@ const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactE
     { enabled: !!cursorStart && !!channelId },
   );
   const [prevPage] = useCachedQuery(
-    queries.supportTicketsPageV2({
+    queries.supportTicketsPageV3({
       channelId,
       isMember,
       ...ticketFilter,
@@ -3118,7 +2779,7 @@ const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactE
               </div>
               <div className='flex items-center gap-2 flex-shrink-0'>
                 <div className='pl-9'>
-                  <TicketMetaRow ticket={ticket} stageOptions={stageOptions} />
+                  <TicketMetaRow ticket={ticket} boardId={boardId} />
                 </div>
               </div>
             </div>
@@ -3312,9 +2973,10 @@ const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactE
                   <EmailThread
                     collapseState={emailCollapseState}
                     ticketId={ticket?.id}
+                    lastEmailAt={ticket?.lastEmailAt}
                     emailReads={
                       ticket?.emailReads as
-                        | Array<{ userId: string; lastReadEmailId: string }>
+                        | Array<{ userId: string; lastReadEmailAt: number }>
                         | undefined
                     }
                     onReplyToEmail={(emailId, mode) => {
@@ -3752,23 +3414,30 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
 const EmailThread = ({
   collapseState,
   ticketId,
+  lastEmailAt,
   emailReads,
   onReplyToEmail,
   deskEmail,
 }: {
   collapseState: EmailCollapseState;
   ticketId?: string | null | undefined;
-  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailId: string }> | undefined;
+  lastEmailAt?: number | null | undefined;
+  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }> | undefined;
   onReplyToEmail?: (emailId: string, mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
   const rootEmail = sortedEmails[0];
-  // Thread-level: upsert the current user's email_reads row with the id of
-  // the newest email in this thread. `isRead` is derived by comparing that
-  // stored id to the current latest email, so every email header in the
-  // thread flips read/unread together.
-  const { isRead } = useMarkEmailRead(ticketId, lastEmailId ?? null, emailReads, true);
+  // Thread-level: upsert the current user's email_reads row. `isRead` compares
+  // the stored lastReadEmailAt snapshot against the ticket's lastEmailAt, so
+  // every email header in the thread flips read/unread together.
+  const { isRead } = useMarkEmailRead(
+    ticketId,
+    lastEmailId ?? null,
+    lastEmailAt ?? null,
+    emailReads,
+    true,
+  );
   const threadAttachments = useMemo(
     () => sortedEmails.flatMap(e => e.attachments ?? []),
     [sortedEmails],

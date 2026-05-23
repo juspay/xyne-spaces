@@ -8,6 +8,7 @@
 
 import { Request, Response } from 'express';
 import { EmailRepository } from '@/database/repositories/emailRepository';
+import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { emailService } from '@/services/emailService';
 import { logger } from '@/utils/logger';
@@ -134,6 +135,8 @@ export class EmailDemergeController {
             conversationId: newConversation.conversationId,
           },
         });
+        await syncTicketEmailCount(tx, originalTicket.conversationId);
+        await syncTicketEmailCount(tx, newConversation.conversationId);
       });
 
       // Re-index moved emails in Vespa — conversationId (threadId) and permissions changed

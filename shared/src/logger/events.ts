@@ -26,6 +26,7 @@ export const Event = {
   THREAD_MESSAGES_LOADED: 'thread_messages_loaded',
   ACTIVITIES_LOADED: 'activities_loaded',
   CALL_HISTORY_LOADED: 'call_history_loaded',
+  SUPPORT_TICKETS_LOADED: 'support_tickets_loaded',
   VESPA_SEARCH_SESSION_START: 'vespa_search_session_start',
   VESPA_SEARCH_IMPRESSION: 'vespa_search_impression',
   VESPA_SEARCH_CLICK: 'vespa_search_click',
