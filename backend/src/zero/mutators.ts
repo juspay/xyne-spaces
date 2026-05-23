@@ -477,6 +477,7 @@ async function createNonParticipantSystemMessages(
         participationType: ConversationParticipation.AUTHOR,
         isSubscribed: true,
         joinedAt: now,
+              lastReplyAt: now,
         channelId: channelId,
       });
 
@@ -768,6 +769,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: timestamp,
+            lastReplyAt: timestamp,
             channelId: channelId,
           });
         },
@@ -1403,6 +1405,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: now,
+              lastReplyAt: now,
             channelId: channelId,
           });
         },
@@ -1606,6 +1609,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: now,
+              lastReplyAt: now,
             channelId: channelId,
           });
         },
@@ -1877,6 +1881,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.MENTIONED,
             isSubscribed: true,
             joinedAt: now,
+              lastReplyAt: now,
             channelId: channelId,
           });
 
@@ -1906,6 +1911,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   participationType: ConversationParticipation.MENTIONED,
                   isSubscribed: true,
                   joinedAt: now,
+              lastReplyAt: now,
                   channelId: channelId,
                 });
               }
@@ -2304,6 +2310,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: now,
+              lastReplyAt: now,
             channelId: targetChannelId,
           });
 
@@ -2355,6 +2362,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: null as any, // Manual subscription (null = not AUTHOR/MENTIONED)
             isSubscribed: true,
             joinedAt: timestamp,
+            lastReplyAt: timestamp,
             channelId: conversation.channelId,
           });
         }
@@ -2593,6 +2601,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               participationType: ConversationParticipation.AUTHOR,
               isSubscribed: true,
               joinedAt: timestamp,
+            lastReplyAt: timestamp,
               channelId: conversation.channelId,
             });
           }
@@ -2623,6 +2632,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   participationType: ConversationParticipation.MENTIONED,
                   isSubscribed: true,
                   joinedAt: timestamp,
+            lastReplyAt: timestamp,
                   channelId: conversation.channelId,
                 });
               }
@@ -2651,6 +2661,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   participationType: ConversationParticipation.MENTIONED,
                   isSubscribed: true,
                   joinedAt: timestamp,
+            lastReplyAt: timestamp,
                   channelId: conversation.channelId,
                 });
               }
@@ -2828,6 +2839,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   participationType: ConversationParticipation.MENTIONED,
                   isSubscribed: true,
                   joinedAt: now,
+              lastReplyAt: now,
                   channelId: mentionConversation?.channelId,
                 });
               }
@@ -4258,6 +4270,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               conversationId,
               userId: authData.sub,
               joinedAt: timestamp,
+            lastReplyAt: timestamp,
               channelId: channelId,
               lastReadAt: timestamp,
               isSubscribed: false,
