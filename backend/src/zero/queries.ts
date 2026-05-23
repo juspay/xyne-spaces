@@ -589,6 +589,30 @@ export const queries = defineQueries({
     }
   ),
 
+  supportTicketDetail: defineQuery(
+    z.object({
+      id: z.string().optional(),
+      xyneId: z.string().optional(),
+      workspaceId: z.string(),
+      channelId: z.string(),
+      isMember: z.boolean(),
+    }),
+    ({ ctx, args: { id, xyneId, workspaceId } }) => {
+      const base = id
+        ? zql.tickets.where('id', id)
+        : zql.tickets.where('xyneId', xyneId ?? '').where('workspaceId', workspaceId);
+      return base
+        .related('emails', q => q.related('attachments'))
+        .related('emailDrafts', q =>
+          q.where(({ or, cmp }) =>
+            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+          ),
+        )
+        .related('emailReads', q => q.where('userId', ctx.userID))
+        .related('conversation')
+        .one();
+    }
+  ),
   // Paginated variant of supportTicketsFiltered for use with @rocicorp/zero-virtual.
   // Cursor = (lastEmailAt, id) matching the orderBy. Active threads bubble up.
   // channelId + isMember are forwarded to TicketsACL for membership gating.
@@ -681,6 +705,53 @@ export const queries = defineQueries({
         )
         .related('emailReads', q => q.where('userId', ctx.userID))
         .related('conversation');
+    }
+  ),
+
+  supportTicketsPageV3: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      assignedTo: z.array(z.string()).optional(),
+      priority: z.array(z.nativeEnum(TicketPriority)).optional(),
+      stageName: z.array(z.string()).optional(),
+      limit: z.number(),
+      start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
+      dir: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, limit, start, dir } }) => {
+      let query = zql.tickets.where('channelId', channelId);
+
+      if (assignedTo && assignedTo.length > 0) {
+        query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
+      }
+
+      if (priority && priority.length > 0) {
+        query = query.where(({ or, cmp }) => or(...priority.map((p) => cmp('priority', p))));
+      }
+
+      if (stageName && stageName.length > 0) {
+        query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
+      }
+
+      const orderDirection = dir === 'forward' ? 'desc' : 'asc';
+      query = query.orderBy('lastEmailAt', orderDirection);
+
+      if (start) {
+        query = query.start(
+          { lastEmailAt: start.lastEmailAt, id: start.id },
+          { inclusive: false },
+        );
+      }
+
+      return query
+        .limit(limit)
+        .related('emailDrafts', q =>
+          q.where(({ or, cmp }) =>
+            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+          ),
+        )
+        .related('emailReads', q => q.where('userId', ctx.userID));
     }
   ),
 

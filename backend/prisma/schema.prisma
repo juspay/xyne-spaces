@@ -439,6 +439,7 @@ model Ticket {
   isArchived       Boolean           @default(false)
   kanbanPosition   String?
   lastEmailAt      DateTime          // Timestamp of most recent email in the ticket's conversation; powers Gmail-style ordering. No @default(now()) because Zero needs every write to flow through the application — every ticket-create call site sets this explicitly.
+  emailCount       Int?              // Denormalized count of emails in the conversation; lets the list row show the count badge without fetching the emails relation. Nullable until backfilled.
   classificationData   Json?             // Full AI classification output (rawOutput, resolvedGroupId, isManualOverride, classifiedAt)
   aiCategory           String?           // Top-level category from AI classification (indexed for querying)
   aiSubCategory        String?           // Sub-category from AI classification
@@ -2051,6 +2052,7 @@ model EmailRead {
   ticketId        String
   userId          String
   lastReadEmailId String
+  lastReadEmailAt DateTime
   createdAt       DateTime
   updatedAt       DateTime @updatedAt
 

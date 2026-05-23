@@ -8,8 +8,8 @@ import { logger, Event as LoggerEvent } from '../utils/logger';
 
 export interface BulkMarkTicket {
   id: string;
-  emails?: ReadonlyArray<{ id: string; createdAt: number }>;
-  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailId: string }>;
+  lastEmailAt: number;
+  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
 }
 
 export function useMarkTicketsAsRead(): {
@@ -20,20 +20,16 @@ export function useMarkTicketsAsRead(): {
 
   const markAsRead = useCallback(
     (tickets: ReadonlyArray<BulkMarkTicket>): number => {
-      const items: Array<{ id: string; ticketId: string; lastReadEmailId: string }> = [];
+      const items: Array<{ id: string; ticketId: string }> = [];
 
       for (const ticket of tickets) {
-        const emails = ticket.emails ?? [];
-        if (emails.length === 0) continue;
-
-        const latestEmailId = emails.reduce((latest, e) =>
-          e.createdAt > latest.createdAt ? e : latest,
-        ).id;
-
         const userRow = (ticket.emailReads ?? []).find(r => r.userId === userID);
-        if (userRow?.lastReadEmailId === latestEmailId) continue;
 
-        items.push({ id: uuidv4(), ticketId: ticket.id, lastReadEmailId: latestEmailId });
+        if (userRow && userRow.lastReadEmailAt >= ticket.lastEmailAt) {
+          continue;
+        }
+
+        items.push({ id: uuidv4(), ticketId: ticket.id });
       }
 
       if (items.length === 0) {

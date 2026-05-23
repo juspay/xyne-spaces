@@ -4,16 +4,16 @@ import { useZero } from './useZero';
 import { useAuthContextValues } from './useAuth';
 import { mutators } from '../zero/mutators';
 
-type EmailReadRow = { userId: string; lastReadEmailId: string };
+type EmailReadRow = { userId: string; lastReadEmailAt: number };
 
 /**
  * Thread-level read state for the xyne desk.
  *
- * Rule: a ticket (= one email thread) is "read" for a user only when that
- * user has an `email_reads` row whose `lastReadEmailId` equals the id of the
- * latest email currently in the thread. Opening the ticket upserts that row
- * with the current latest email id. When a reply arrives, the latest email
- * id changes, and the existing row naturally represents "stale" — unread.
+ * Rule: a ticket (= one email thread) is "read" for a user when their
+ * `email_reads.lastReadEmailAt` — a snapshot of `ticket.lastEmailAt` taken
+ * when they last opened the thread — is at or after the ticket's current
+ * `lastEmailAt`. Opening the ticket upserts that row. When a reply arrives,
+ * `lastEmailAt` advances past the stored snapshot — unread.
  *
  * Assignment state is intentionally NOT a shortcut — auto-assigned boards
  * would otherwise mark every inbound email read for everyone instantly.
@@ -21,6 +21,7 @@ type EmailReadRow = { userId: string; lastReadEmailId: string };
 export function useMarkEmailRead(
   ticketId: string | null | undefined,
   latestEmailId: string | null | undefined,
+  lastEmailAt: number | null | undefined,
   emailReads: readonly EmailReadRow[] | undefined,
   shouldMark: boolean,
 ): { isRead: boolean } {
@@ -28,7 +29,9 @@ export function useMarkEmailRead(
   const zero = useZero();
 
   const userRow = (emailReads ?? []).find(r => r.userId === userID);
-  const isRead = !!latestEmailId && userRow?.lastReadEmailId === latestEmailId;
+  const lastReadAt = userRow?.lastReadEmailAt;
+  const isRead =
+    typeof lastEmailAt === 'number' && typeof lastReadAt === 'number' && lastReadAt >= lastEmailAt;
 
   const markedRef = useRef<string | null>(null);
 

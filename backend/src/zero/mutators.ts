@@ -8168,6 +8168,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           updatedAt: z.number(),
         }),
         async ({ tx, ctx, args: { id, ticketId, lastReadEmailId, updatedAt } }) => {
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          const lastReadEmailAt = ticket?.lastEmailAt ?? updatedAt;
           const existing = await tx.run(
             zql.email_reads
               .where('ticketId', ticketId)
@@ -8175,10 +8177,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .one(),
           );
           if (existing) {
-            if (existing.lastReadEmailId !== lastReadEmailId) {
+            const existingAt = existing.lastReadEmailAt;
+            if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt) {
               await tx.mutate.email_reads.update({
                 id: existing.id,
                 lastReadEmailId,
+                lastReadEmailAt,
                 updatedAt,
               });
             }
@@ -8188,6 +8192,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ticketId,
               userId: ctx.userID,
               lastReadEmailId,
+              lastReadEmailAt,
               createdAt: updatedAt,
               updatedAt,
             });
@@ -8201,7 +8206,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             z.object({
               id: z.string(),
               ticketId: z.string(),
-              lastReadEmailId: z.string(),
             }),
           ),
           timestamp: z.number(),
@@ -8210,6 +8214,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (items.length === 0) return;
 
           const ticketIds = items.map(i => i.ticketId);
+          const tickets = await tx.run(
+            zql.tickets
+              .where(h => h.cmp('id', 'IN', ticketIds))
+              .related('emails', q => q.orderBy('createdAt', 'desc').limit(1)),
+          );
+          const lastEmailAtByTicket = new Map(tickets.map(t => [t.id, t.lastEmailAt]));
+          const latestEmailIdByTicket = new Map(
+            tickets.map(t => {
+              const emails = t.emails as ReadonlyArray<{ id: string }> | undefined;
+              return [t.id, emails?.[0]?.id ?? null];
+            }),
+          );
           const existing = await tx.run(
             zql.email_reads
               .where('userId', ctx.userID)
@@ -8219,12 +8235,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           await Promise.all(
             items.map(item => {
+              const lastReadEmailAt = lastEmailAtByTicket.get(item.ticketId);
+              if (typeof lastReadEmailAt !== 'number') return undefined;
+              const lastReadEmailId = latestEmailIdByTicket.get(item.ticketId);
+              if (!lastReadEmailId) return undefined;
               const ex = existingByTicket.get(item.ticketId);
               if (ex) {
-                if (ex.lastReadEmailId === item.lastReadEmailId) return;
+                if (
+                  typeof ex.lastReadEmailAt === 'number' &&
+                  ex.lastReadEmailAt >= lastReadEmailAt
+                ) {
+                  return undefined;
+                }
                 return tx.mutate.email_reads.update({
                   id: ex.id,
-                  lastReadEmailId: item.lastReadEmailId,
+                  lastReadEmailAt,
+                  lastReadEmailId,
                   updatedAt: timestamp,
                 });
               }
@@ -8232,7 +8258,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 id: item.id,
                 ticketId: item.ticketId,
                 userId: ctx.userID,
-                lastReadEmailId: item.lastReadEmailId,
+                lastReadEmailAt,
+                lastReadEmailId,
                 createdAt: timestamp,
                 updatedAt: timestamp,
               });

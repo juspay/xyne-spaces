@@ -10,6 +10,7 @@ import {
 } from '@/database/repositories/conversationRepository';
 import { MessageRepository, CreateMessageInput } from '@/database/repositories/messageRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
+import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import {
   MessageAttachmentRepository,
   CreateMessageAttachmentInput,
@@ -787,6 +788,7 @@ export class EmailService {
           projectId,
           workspaceId: channel.workspaceId,
           boardId,
+          emailCount: 1,
           lastEmailAt: receivedAt ?? new Date(),
           stageName: firstStage.name,
           priority: ticketPriority,
@@ -1510,6 +1512,7 @@ export class EmailService {
         externalMessageId,
       } as Prisma.EmailUncheckedCreateInput,
     });
+    await syncTicketEmailCount(client, params.conversationId);
 
     try {
       await client.externalMessage.create({
@@ -1824,6 +1827,7 @@ export class EmailService {
           data: emailRows.map(row => ({ ...row, conversationId })),
           skipDuplicates: true,
         });
+        await syncTicketEmailCount(tx, conversationId);
 
         await tx.externalMessage.createMany({
           data: emailRows.map(row => ({

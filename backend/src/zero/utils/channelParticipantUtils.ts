@@ -17,8 +17,8 @@ function getDefaultNotificationLevel(scopeType?: string | null): 'ALL' | 'THREAD
  * Per-(channel, user) unread count for email channels.
  * A ticket is unread if:
  *   - the user has no email_reads row for it, OR
- *   - their email_reads.updatedAt is older than ticket.lastEmailAt (i.e. a
- *     newer email arrived after they last read the thread).
+ *   - their email_reads.lastReadEmailAt is older than ticket.lastEmailAt (i.e.
+ *     a newer email arrived after they last read the thread).
  *
  * This catches the "read but a reply arrived since" case that a plain
  * `tickets - email_reads` subtraction would miss.
@@ -44,14 +44,14 @@ async function computeUnreadCountForUser(
       .where('userId', userId)
       .where((helpers: any) => helpers.cmp('ticketId', 'IN', ticketIds)),
   );
-  const readAtByTicket = new Map<string, number>(
-    reads.map(r => [r.ticketId, r.updatedAt]),
+  const readAtByTicket = new Map<string, number | null>(
+    reads.map(r => [r.ticketId, r.lastReadEmailAt]),
   );
 
   let unread = 0;
   for (const t of tickets) {
     const readAt = readAtByTicket.get(t.id);
-    if (readAt === undefined || readAt < t.lastEmailAt) unread += 1;
+    if (readAt == null || readAt < t.lastEmailAt) unread += 1;
   }
   return unread;
 }
