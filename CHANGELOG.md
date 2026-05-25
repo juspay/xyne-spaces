@@ -1,3 +1,30 @@
+## [1.148.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.147.0...v1.148.0) (2026-05-25)
+
+
+### Features
+
+* added mark as unread for threads ([ac010a4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ac010a4eca512d21975111f509551dc4e6251a8a)), closes [#6255](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6255)
+* notification count update on workspace switch button, /no-access refresh page fix ([531d646](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/531d646f499426c637b60e7f880eb3afb0bbe62f)), closes [#6633](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6633)
+* Notification improvements ([76fbb23](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/76fbb23f7bf65eb4cce0f701ec583afbe39d6613)), closes [#6561](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6561)
+* remove redundant ticket queries ([4bd58cc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4bd58cc4ea5006f24aa414d20df52ea6ca75db3f)), closes [#6638](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6638)
+* xyne desk perf ([d63b71d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d63b71d471f5302f0f69218e06f379f3ba021e9f)), closes [#6681](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6681)
+
+
+### Bug Fixes
+
+* add filetype field to Slack-compatible file responses and tighten mrkdwn inline formatting regex ([b2c4261](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b2c426197b5e7de6bdbddca3d38fbdacf168db81)), closes [#6585](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6585)
+* Add short circuit to RSVP click ([2cf5f42](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2cf5f4253861d8080d8109617380a5d47013ae04)), closes [#6712](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6712)
+* add userVisibleChannelsV3 excluding EMAIL channels from channelStats ([f206d28](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f206d28cce47a70b7f53e8e15816f24c7b48088e)), closes [#6690](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6690)
+* dark mode fix ([aa4794f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aa4794ffd1f917524b7296f203f30c5053994990)), closes [#6583](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6583)
+* desk auto sync fixes ([50efaa5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/50efaa5303bd79e9e3d2aa8394e4a8ded661393a)), closes [#6693](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6693)
+* fixed the transformWrapper w/ explicit Height ([6af3cde](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6af3cdee6f838162cc58d7e4a693dad8dfff58b7))
+* flowJSON fix for notification and render ([5d51f09](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5d51f091b2f10c5d386d244aacee57704acf17c4))
+* migration from public to non_zero ([5efb90a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5efb90a961e0e5738e07ffa5e522267df5d15e84)), closes [#6700](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6700)
+* open ticket description links in BrowserPanel side panel ([1b9b2ed](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1b9b2ed0f862935f2166faaf7e65718eaad5dc77)), closes [#6697](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6697)
+* Out of Order mutation hotfix ([8cdd4ba](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8cdd4baacea48ab5baf9c9c99cc3e9f4e64cd971)), closes [#6635](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6635)
+* passed project id and project name for claw ([10d4aec](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/10d4aec7d73b6ffbce7b46d7c32d328ca0531bdb)), closes [#6592](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6592)
+* sync-participant user creation (Workspace independent) ([612107f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/612107f106abb8d9af75e69775df9d61175cdc3a)), closes [#6646](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6646)
+
 ## [1.147.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.146.1...v1.147.0) (2026-05-25)
 
 
