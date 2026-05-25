@@ -155,6 +155,41 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     }
 });
 
+  // Plain <a href> clicks bypass setWindowOpenHandler; intercept here to keep the app from being replaced.
+  mainWindow.webContents.on('will-navigate', (event, navUrl) => {
+    try {
+      const navUrlObj = new URL(navUrl);
+      if (navUrlObj.protocol !== 'http:' && navUrlObj.protocol !== 'https:') {
+        return;
+      }
+
+      const currentAppUrl = new URL(config.FRONTEND_URL);
+      const currentUrl = mainWindow?.webContents.getURL();
+      const currentUrlObj = new URL(currentUrl || '');
+
+      // Allow in-app navigation (same origin as configured frontend or current page)
+      if (
+        navUrlObj.origin === currentAppUrl.origin ||
+        navUrlObj.origin === currentUrlObj.origin
+      ) {
+        return;
+      }
+
+      // Mirror the mTLS branch from setWindowOpenHandler
+      if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
+        event.preventDefault();
+        shell.openExternal(navUrl);
+        return;
+      }
+
+      // External URL → route to side panel instead of replacing the app
+      event.preventDefault();
+      mainWindow?.webContents.send('open-in-browser-panel', navUrl);
+    } catch (err) {
+      log.warn('[WindowManager] Failed to handle will-navigate:', navUrl, err);
+    }
+  });
+
   console.log('✅ setWindowOpenHandler configured for main window');
 
 

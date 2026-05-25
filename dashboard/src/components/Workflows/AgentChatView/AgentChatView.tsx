@@ -52,6 +52,42 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import Tooltip from '../../ui/Tooltip/Tooltip';
 
+//external URLs get target="_blank" so they route to the BrowserPanel.
+const externalAwareAnchor = ({
+  node: _node,
+  href,
+  children,
+  ...props
+}: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+  node?: unknown;
+  children?: React.ReactNode;
+}): React.ReactElement => {
+  const isExternal = ((): boolean => {
+    if (!href) {
+      return false;
+    }
+    try {
+      return new URL(href, window.location.origin).origin !== window.location.origin;
+    } catch {
+      return true;
+    }
+  })();
+
+  if (isExternal) {
+    return (
+      <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  );
+};
+
 const StatusIcon: React.FC<{ status: string; size?: number }> = ({ status, size = 12 }) => {
   const containerClass = 'flex items-center justify-center rounded-md p-0.5';
   switch (status) {
@@ -105,6 +141,7 @@ const MarkdownContent: React.FC<{ content: string; small?: boolean }> = ({
         }}
         // eslint-disable-next-line @typescript-eslint/naming-convention
         wrapperElement={{ 'data-color-mode': theme === 'midnight' ? 'dark' : 'light' }}
+        components={{ a: externalAwareAnchor }}
       />
     </div>
   );
@@ -185,6 +222,7 @@ const TruncatableMarkdownContent: React.FC<TruncatableMarkdownContentProps> = ({
           }}
           // eslint-disable-next-line @typescript-eslint/naming-convention
           wrapperElement={{ 'data-color-mode': theme === 'midnight' ? 'dark' : 'light' }}
+          components={{ a: externalAwareAnchor }}
         />
       </div>
       {needsTruncation && (
