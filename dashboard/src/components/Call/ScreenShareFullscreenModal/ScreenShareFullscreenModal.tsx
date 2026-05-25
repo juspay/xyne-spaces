@@ -209,7 +209,10 @@ export function ScreenShareFullscreenModal({
         onPanningStop={handlePanStop}
       >
         <TransformComponent wrapperClass='!w-full !h-full'>
-          <div className='w-full h-full flex items-center justify-center px-4 pt-6 pb-24'>
+          <div
+            className='flex items-center justify-center px-4 pt-6 pb-24'
+            style={{ width: '100vw', height: '100vh' }}
+          >
             <VideoTrack trackRef={trackRef} className='max-w-full max-h-full object-contain' />
           </div>
         </TransformComponent>
