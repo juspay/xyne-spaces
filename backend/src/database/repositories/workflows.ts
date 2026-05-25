@@ -203,6 +203,126 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
       where: { workflowName },
     });
   }
+
+  async findByautomationSeriesId(automationSeriesId: string): Promise<Workflow[]> {
+    return await this.db.workflow.findMany({
+      where: { automationSeriesId, workflowType: 'Automations' },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findPendingProposals(): Promise<Workflow[]> {
+    return await this.db.workflow.findMany({
+      where: {
+        workflowType: 'Automations',
+        status: 'PENDING_APPROVAL',
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async findSiblingPendingProposals(
+    automationSeriesId: string,
+    excludeId: string,
+  ): Promise<Workflow[]> {
+    return await this.db.workflow.findMany({
+      where: {
+        workflowType: 'Automations',
+        automationSeriesId,
+        status: 'PENDING_APPROVAL',
+        id: { not: excludeId },
+      },
+    });
+  }
+
+  async findLiveForLineage(automationSeriesId: string): Promise<Workflow | null> {
+    return await this.db.workflow.findFirst({
+      where: {
+        workflowType: 'Automations',
+        automationSeriesId,
+        status: { in: ['ACTIVE', 'DISABLED'] },
+      },
+    });
+  }
+
+  async approveProposal(
+    proposalId: string,
+  ): Promise<{ approved: Workflow; autoRevoked: Workflow[] }> {
+    return await this.db.$transaction(async tx => {
+      const proposal = await tx.workflow.findUnique({ where: { id: proposalId } });
+      if (
+        !proposal ||
+        proposal.workflowType !== 'Automations' ||
+        !proposal.automationSeriesId
+      ) {
+        throw new Error(`Cannot approve proposal ${proposalId}: not an automation row.`);
+      }
+
+      const approved =
+        proposal.status === 'DISABLED'
+          ? proposal
+          : await tx.workflow.update({
+              where: { id: proposal.id },
+              data: { status: 'DISABLED' },
+            });
+
+      const siblings = await tx.workflow.findMany({
+        where: {
+          workflowType: 'Automations',
+          automationSeriesId: proposal.automationSeriesId,
+          status: 'PENDING_APPROVAL',
+          id: { not: proposal.id },
+        },
+      });
+      const autoRevoked = await Promise.all(
+        siblings.map(s =>
+          tx.workflow.update({
+            where: { id: s.id },
+            data: { status: 'AUTO_REVOKED' },
+          }),
+        ),
+      );
+
+      return { approved, autoRevoked };
+    });
+  }
+
+  async archivePriorLiveInLineage(
+    automationSeriesId: string,
+    keepId: string,
+  ): Promise<Workflow[]> {
+    const prior = await this.db.workflow.findMany({
+      where: {
+        workflowType: 'Automations',
+        automationSeriesId,
+        status: { in: ['ACTIVE', 'DISABLED'] },
+        id: { not: keepId },
+      },
+    });
+    if (prior.length === 0) return [];
+    return await Promise.all(
+      prior.map(row =>
+        this.db.workflow.update({
+          where: { id: row.id },
+          data: { status: 'ARCHIVED' },
+        }),
+      ),
+    );
+  }
+
+  async rejectProposal(proposalId: string): Promise<Workflow> {
+    return await this.db.workflow.update({
+      where: { id: proposalId },
+      data: { status: 'REJECTED' },
+    });
+  }
+
+  async revokeProposal(proposalId: string): Promise<Workflow> {
+    return await this.db.workflow.update({
+      where: { id: proposalId },
+      data: { status: 'REVOKED' },
+    });
+  }
 }
 
 export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecution, CreateWorkflowExecutionInput, UpdateWorkflowExecutionInput> {
@@ -362,7 +482,7 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
 
   async findRunningExecutionIds(): Promise<string[]> {
     const executions = await this.db.workflowExecution.findMany({
-      where: { status: 'RUNNING' },
+      where: { status: 'RUNNING', NOT: { workflowType: 'Automations' } },
       select: { id: true },
     })
     return executions.map(e => e.id)
@@ -371,7 +491,7 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
   async resetExecutionsToPending(ids: string[]): Promise<void> {
     if (ids.length === 0) return
     await this.db.workflowExecution.updateMany({
-      where: { id: { in: ids }, status: 'RUNNING' },
+      where: { id: { in: ids }, status: 'RUNNING', NOT: { workflowType: 'Automations' } },
       data: { status: 'PENDING' },
     })
   }

@@ -10,8 +10,12 @@ export interface TicketPreviousValue {
   assignedTo: string | null;
   stageName: string | null;
   statusV2: string | null;
+  priority: string | null;
+  title: string | null;
+  description: string | null;
   eta: number | null;
   boardId: string | null;
+  userGroupId: string | null;
   createdBy: string;
   channelId: string | null;
 }

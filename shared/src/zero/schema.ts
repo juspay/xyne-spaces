@@ -1038,13 +1038,23 @@ export const userExpertiseMappingTable = table('user_expertise_mappings')
 export const workflowTable = table('workflows')
   .columns({
     id: string(),
+    // Nullable in Prisma — automation rows (`workflowType='Automations'`)
+    // never link to a ticket, so this is null for those.
     ticketId: string().optional(),
+    // Workspace owner. Denormalized (mirrors `Ticket.workspaceId`) so automation
+    // rows can be scoped without a ticket. Required on every row.
+    workspaceId: string(),
     context: string().optional(),
     status: string(),
     workflowName: string().optional(),
     metadata: string().optional(),
     configuration: string().optional(),
     workflowType: string().optional(),
+    // Trigger discriminator for automation rows. `NO_OP` for everything else.
+    // Stored as the Postgres `WorkflowEventType` enum; surfaced here as a
+    // string so the existing Zero schema typing doesn't need an enum import.
+    eventType: string(),
+    automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),

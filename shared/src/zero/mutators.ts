@@ -8114,4 +8114,211 @@ export const mutators = defineMutators({
       },
     ),
   },
+  // ---------------------------------------------------------------------------
+  // Automations — pure DB writes on the `workflows` table for the rows where
+  // `workflowType === 'Automations'`. Activate / disable stay on REST because
+  // they have trigger-register side-effects (CRON Bull job lifecycle). Manual
+  // fire stays on REST (Bull job enqueue).
+  // ---------------------------------------------------------------------------
+  automations: {
+    createProposal: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string().min(1).max(80),
+        configJson: z.string(),
+        metadataJson: z.string(),
+        eventType: z.string(),
+        automationSeriesId: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        ctx,
+        tx,
+        args: { id, name, configJson, metadataJson, eventType, automationSeriesId, timestamp },
+      }) => {
+        await tx.mutate.workflows.insert({
+          id,
+          workflowType: 'Automations',
+          workflowName: name,
+          eventType,
+          status: 'DRAFT',
+          automationSeriesId: automationSeriesId ?? id,
+          context: configJson,
+          metadata: metadataJson,
+          ticketId: null,
+          workspaceId: ctx.workspaceId,
+          configuration: null,
+          scheduledAt: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string().min(1).max(80).optional(),
+        /** Pre-stringified updated config (`AutomationConfig`). */
+        configJson: z.string().optional(),
+        /** Pre-stringified updated metadata blob (full replacement of `{description, createdById}`). */
+        metadataJson: z.string().optional(),
+        eventType: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        args: { id, name, configJson, metadataJson, eventType, timestamp },
+      }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        if (existing.status !== 'DRAFT') {
+          throw new Error(
+            `Automation "${id}" is ${existing.status}; only DRAFT proposals can be edited.`,
+          );
+        }
+
+        await tx.mutate.workflows.update({
+          id,
+          updatedAt: timestamp,
+          ...(name !== undefined && { workflowName: name }),
+          ...(metadataJson !== undefined && { metadata: metadataJson }),
+          ...(configJson !== undefined && { context: configJson }),
+          ...(configJson !== undefined && eventType !== undefined && { eventType }),
+        });
+      },
+    ),
+    delete: defineMutator(
+      z.object({ id: z.string() }),
+      async ({ tx, args: { id } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (existing && existing.workflowType === 'Automations') {
+          if (existing.status !== 'DRAFT') {
+            throw new Error(
+              `Cannot delete "${id}": only DRAFT proposals can be deleted (status is ${existing.status}).`,
+            );
+          }
+        }
+        await tx.mutate.workflows.delete({ id });
+      },
+    ),
+    submitForApproval: defineMutator(
+      z.object({ id: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { id, timestamp } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        if (existing.status !== 'DRAFT') {
+          throw new Error(
+            `Automation "${id}" is ${existing.status}; only DRAFT proposals can be submitted.`,
+          );
+        }
+        await tx.mutate.workflows.update({
+          id,
+          status: 'PENDING_APPROVAL',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    revoke: defineMutator(
+      z.object({ id: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { id, timestamp } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        if (existing.status !== 'PENDING_APPROVAL') {
+          throw new Error(
+            `Automation "${id}" is ${existing.status}; only PENDING_APPROVAL proposals can be revoked.`,
+          );
+        }
+        await tx.mutate.workflows.update({
+          id,
+          status: 'REVOKED',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    approve: defineMutator(
+      z.object({
+        id: z.string(),
+        note: z.string().nullable().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { id, timestamp } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        await tx.mutate.workflows.update({
+          id,
+          status: 'DISABLED',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    reject: defineMutator(
+      z.object({
+        id: z.string(),
+        note: z.string().min(1),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { id, timestamp } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        if (existing.status !== 'PENDING_APPROVAL') {
+          throw new Error(
+            `Automation "${id}" is ${existing.status}; only PENDING_APPROVAL proposals can be rejected.`,
+          );
+        }
+        await tx.mutate.workflows.update({
+          id,
+          status: 'REJECTED',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    activate: defineMutator(
+      z.object({ id: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { id, timestamp } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        if (existing.status !== 'ACTIVE' && existing.status !== 'DISABLED') {
+          throw new Error(
+            `Automation "${id}" is ${existing.status}; only LIVE rows can be activated.`,
+          );
+        }
+        await tx.mutate.workflows.update({
+          id,
+          status: 'ACTIVE',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    disable: defineMutator(
+      z.object({ id: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { id, timestamp } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        if (existing.status !== 'ACTIVE' && existing.status !== 'DISABLED') {
+          throw new Error(
+            `Automation "${id}" is ${existing.status}; only LIVE rows can be disabled.`,
+          );
+        }
+        await tx.mutate.workflows.update({
+          id,
+          status: 'DISABLED',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
 });

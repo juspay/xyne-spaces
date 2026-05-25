@@ -38,6 +38,7 @@ import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { replaceCustomEmojiShortcodesWithImg } from '@/utils/customEmojiUtils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
+import { emitTicketCommented } from '@/automations/triggers/ticket-commented.trigger';
 
 interface UserInfo {
   id: string;
@@ -698,6 +699,20 @@ export class ConversationService {
 
     // Also broadcast via Redis for horizontal scaling (using session method for now)
     // await redisService.broadcastMessageToSession(conversationId, chatMessage);
+
+    // Fan out the automation `TICKET_COMMENTED` event. Fire-and-forget; the
+    // helper itself filters out bot/system messages and conversations not
+    // tied to a ticket, so it's safe to invoke unconditionally. Failures are
+    // logged inside the helper and must not fail the message write.
+    void emitTicketCommented({
+      messageId: message.messageId,
+      conversationId,
+      content: message.content ?? undefined,
+      msgType: message.msgType,
+      isBot,
+      userId,
+      createdAt: message.createdAt,
+    });
 
     return {
       conversation,

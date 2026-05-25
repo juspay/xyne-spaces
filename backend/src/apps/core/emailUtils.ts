@@ -4,6 +4,7 @@ import { repositories } from '@/database/repositories';
 import { decodeCursor, paginateResults } from './paginationUtils';
 import { EmailRepliesCursor, EmailRepliesItem, EmailRepliesResponse, AppEventType, BaseAppEvent, EmailEventPayload } from '../types';
 import { handleEventSubscriptionsForUsers } from './eventSubscriptionUtils';
+import { emitEmailReceived } from '@/automations/triggers/email-received.trigger';
 
 /**
  * Get all emails in a conversation thread with cursor-based pagination
@@ -93,6 +94,11 @@ export async function dispatchEmailEventForEmailId(emailId: string): Promise<voi
     // Only fire for incoming mail. Outgoing REPLY / REPLY_ALL rows are mail
     // we sent ourselves and must not be re-broadcast to subscribed apps.
     if (email.type !== EmailType.DEFAULT) return;
+
+    // Fan out to the automation EMAIL_RECEIVED trigger as well as the legacy
+    // app-subscriber dispatch below. Fire-and-forget — automation hiccups
+    // must not break email persistence.
+    void emitEmailReceived(emailId);
 
     const channelParticipants = await repositories.channelParticipants.getChannelParticipants(
       email.channelId,

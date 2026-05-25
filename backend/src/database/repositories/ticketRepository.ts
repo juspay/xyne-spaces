@@ -7,6 +7,9 @@ import { calculateETADeadline } from '@/utils/etaCalculation';
 import { BaseTicketType, PRActivityValue } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateKeyBetween } from 'fractional-indexing';
+import { eventRouter } from '@/automations/engine/event-router';
+import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
+import { emitTicketUpdated, type TicketChanges } from '@/automations/triggers/ticket-updated.trigger';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -208,6 +211,17 @@ export class TicketRepository {
     //   // Don't throw - ticket is still created in DB
     // }
 
+    void (async (): Promise<void> => {
+      try {
+        await eventRouter.emit(
+          { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+          ticket.workspaceId,
+        );
+      } catch (err) {
+        logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
+      }
+    })();
+
     return ticket;
   }
 
@@ -402,6 +416,21 @@ export class TicketRepository {
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
+    if (stageChanged || statusChanged) {
+      const changes: TicketChanges = {};
+      if (stageChanged) {
+        changes.stageName = { previousValue: oldStageName ?? null, newValue: newStageName };
+      }
+      if (statusChanged && newStatusV2) {
+        changes.statusV2 = { previousValue: oldStatusV2 ?? null, newValue: newStatusV2 };
+      }
+      void emitTicketUpdated({
+        ticket: updatedTicket,
+        changes,
+        performedById: updatedBy,
+      });
+    }
+
     // Create activity record for the stage change
     if (source === ActivitySource.WEBHOOK && prActivityData) {
       // For WEBHOOK source: Create PR activity with stage change info
@@ -590,7 +619,7 @@ export class TicketRepository {
   async findFirstByConversationId(conversationId: string) {
     return await prisma.ticket.findFirst({
       where: { conversationId },
-      select: { id: true },
+      select: { id: true, workspaceId: true },
     });
   }
 
@@ -669,6 +698,12 @@ export class TicketRepository {
   }
 
   async updateTicketAssignee(ticketId: string, newAssigneeId: string, updatedBy: string): Promise<void> {
+    const previous = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { assignedTo: true },
+    });
+    const previousAssigneeId = previous?.assignedTo ?? null;
+
     const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data: {
@@ -679,6 +714,16 @@ export class TicketRepository {
     });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+
+    if (previousAssigneeId !== newAssigneeId) {
+      void emitTicketUpdated({
+        ticket: updatedTicket,
+        changes: {
+          assignedTo: { previousValue: previousAssigneeId, newValue: newAssigneeId },
+        },
+        performedById: updatedBy,
+      });
+    }
   }
 
   async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
@@ -717,5 +762,118 @@ export class TicketRepository {
     });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+  }
+
+  async updateTicketFields(
+    ticketId: string,
+    fields: {
+      title?: string;
+      description?: string;
+      priority?: TicketPriority;
+      statusV2?: TicketStatusV2;
+      isArchived?: boolean;
+      closedAt?: Date | null;
+      closedBy?: string | null;
+    },
+    updatedBy: string,
+  ): Promise<void> {
+    const data: Record<string, unknown> = { updatedBy, updatedAt: new Date() };
+    if (fields.title !== undefined) data.title = fields.title;
+    if (fields.description !== undefined) data.description = fields.description;
+    if (fields.priority !== undefined) data.priority = fields.priority;
+    if (fields.statusV2 !== undefined) data.statusV2 = fields.statusV2;
+    if (fields.isArchived !== undefined) data.isArchived = fields.isArchived;
+    if (fields.closedAt !== undefined) data.closedAt = fields.closedAt;
+    if (fields.closedBy !== undefined) data.closedBy = fields.closedBy;
+
+    if (Object.keys(data).length <= 2) {
+      return;
+    }
+
+    const needsPrevRead =
+      fields.statusV2 !== undefined ||
+      fields.title !== undefined ||
+      fields.description !== undefined ||
+      fields.priority !== undefined;
+
+    let prevSnapshot: {
+      statusV2: TicketStatusV2 | null;
+      title: string | null;
+      description: string | null;
+      priority: TicketPriority | null;
+    } | null = null;
+    if (needsPrevRead) {
+      const prev = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { statusV2: true, title: true, description: true, priority: true },
+      });
+      prevSnapshot = prev
+        ? {
+            statusV2: prev.statusV2,
+            title: prev.title,
+            description: prev.description,
+            priority: prev.priority,
+          }
+        : null;
+    }
+    const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
+
+    const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
+    await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+
+    // Consolidate all field changes into a single TICKET_UPDATED emit.
+    if (prevSnapshot) {
+      const changes: TicketChanges = {};
+      if (
+        fields.statusV2 !== undefined &&
+        previousStatus !== fields.statusV2
+      ) {
+        changes.statusV2 = { previousValue: previousStatus, newValue: fields.statusV2 };
+      }
+      if (fields.title !== undefined && prevSnapshot.title !== fields.title) {
+        changes.title = { previousValue: prevSnapshot.title, newValue: fields.title };
+      }
+      if (
+        fields.description !== undefined &&
+        prevSnapshot.description !== fields.description
+      ) {
+        changes.description = {
+          previousValue: prevSnapshot.description,
+          newValue: fields.description,
+        };
+      }
+      if (fields.priority !== undefined && prevSnapshot.priority !== fields.priority) {
+        changes.priority = { previousValue: prevSnapshot.priority, newValue: fields.priority };
+      }
+      if (Object.keys(changes).length > 0) {
+        void emitTicketUpdated({
+          ticket: updatedTicket,
+          changes,
+          performedById: updatedBy,
+        });
+      }
+    }
+  }
+
+  async addTagsByName(
+    ticketId: string,
+    tags: string[],
+  ): Promise<{ added: string[]; alreadyPresent: string[] }> {
+    const requested = Array.from(new Set(tags.map(t => t.trim()).filter(t => t.length > 0)));
+    if (requested.length === 0) return { added: [], alreadyPresent: [] };
+
+    const existing = await prisma.ticketTag.findMany({
+      where: { ticketId, name: { in: requested } },
+      select: { name: true },
+    });
+    const alreadyPresent = existing.map(r => r.name);
+    const toAdd = requested.filter(t => !alreadyPresent.includes(t));
+    if (toAdd.length === 0) return { added: [], alreadyPresent };
+
+    await prisma.ticketTag.createMany({
+      data: toAdd.map(name => ({ ticketId, name })),
+      skipDuplicates: true,
+    });
+    return { added: toAdd, alreadyPresent };
   }
 }

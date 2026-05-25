@@ -1,5 +1,11 @@
 import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
-import { useEditor, EditorContent, ReactNodeViewRenderer, type Editor } from '@tiptap/react';
+import {
+  useEditor,
+  EditorContent,
+  ReactNodeViewRenderer,
+  type Editor,
+  type Extensions,
+} from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
@@ -83,6 +89,8 @@ interface EmailEditorProps {
   footerSlot?: ReactNode;
   onCitationClick?: (ref: string) => void;
   onCitationOrderChange?: (orderedRefs: string[]) => void;
+  toolbarRightSlot?: React.ReactNode;
+  extraExtensions?: Extensions;
 }
 
 export const EmailEditor = ({
@@ -100,6 +108,8 @@ export const EmailEditor = ({
   footerSlot,
   onCitationClick,
   onCitationOrderChange,
+  toolbarRightSlot,
+  extraExtensions,
 }: EmailEditorProps): ReactElement => {
   const cb = useRef({
     onChange,
@@ -146,6 +156,7 @@ export const EmailEditor = ({
             style: 'text-decoration: line-through;',
           },
         },
+        link: false,
       }),
       LinkExtension.configure({ openOnClick: false }),
       Placeholder.configure({ placeholder }),
@@ -171,6 +182,7 @@ export const EmailEditor = ({
       }),
       CitationMark,
       ...TableExtensions,
+      ...(extraExtensions ?? []),
     ],
     onCreate: ({ editor }) => {
       cb.current.onEditorReady?.(editor);
@@ -272,7 +284,7 @@ export const EmailEditor = ({
   return (
     <div className={`flex flex-col min-h-0 ${className}`}>
       <div className='flex-shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
-        <EmailEditorToolbar editor={editor} />
+        <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} />
       </div>
       {/* Padding lives on the ProseMirror element (via editorProps class)
           so clicks anywhere in the visible area land on the editor and

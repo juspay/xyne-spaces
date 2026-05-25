@@ -26,6 +26,7 @@ import * as Popover from '@radix-ui/react-popover';
 
 interface EmailEditorToolbarProps {
   editor: Editor | null;
+  rightSlot?: React.ReactNode;
 }
 
 // Font size options (in pixels)
@@ -118,7 +119,7 @@ const HIGHLIGHT_COLORS = [
   '#424242',
 ];
 
-export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({ editor }) => {
+export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({ editor, rightSlot }) => {
   const [isActive, setIsActive] = useState({
     bold: false,
     italic: false,
@@ -723,6 +724,8 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({ editor }
           <RemoveFormatting className='h-3.5 w-3.5' />
         </button>
       </Tooltip>
+
+      {rightSlot && <div className='ml-auto flex items-center gap-1'>{rightSlot}</div>}
     </div>
   );
 };

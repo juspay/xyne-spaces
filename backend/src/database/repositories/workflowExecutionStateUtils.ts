@@ -124,6 +124,116 @@ export async function updateExecutionState(
   await upsertExecutionState(workflowExecutionId, data);
 }
 
+export async function persistAutomationPauseState(
+  workflowExecutionId: string,
+  data: { context: string; currentStepIndex: number }
+): Promise<void> {
+  await prisma.workflowExecutionState.upsert({
+    where: { workflowExecutionId },
+    create: {
+      workflowExecutionId,
+      context: data.context,
+      currentStepIndex: data.currentStepIndex,
+    },
+    update: {
+      context: data.context,
+      currentStepIndex: data.currentStepIndex,
+    },
+  });
+}
+
+export async function persistAutomationState(
+  workflowExecutionId: string,
+  data: {
+    context: string;
+    currentStepIndex?: number;
+  },
+): Promise<void> {
+  await prisma.workflowExecutionState.upsert({
+    where: { workflowExecutionId },
+    create: {
+      workflowExecutionId,
+      context: data.context,
+      ...(data.currentStepIndex !== undefined
+        ? { currentStepIndex: data.currentStepIndex }
+        : {}),
+    },
+    update: {
+      context: data.context,
+      ...(data.currentStepIndex !== undefined
+        ? { currentStepIndex: data.currentStepIndex }
+        : {}),
+    },
+  });
+}
+
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+]);
+
+export async function markAutomationFailed(
+  workflowExecutionId: string,
+  errorMessage: string,
+): Promise<'marked' | 'skipped-terminal' | 'not-found'> {
+  const execution = await prisma.workflowExecution.findUnique({
+    where: { id: workflowExecutionId },
+    select: { id: true, status: true },
+  });
+  if (!execution) return 'not-found';
+  if (TERMINAL_RUN_STATUSES.has(execution.status)) return 'skipped-terminal';
+
+  const state = await prisma.workflowExecutionState.findUnique({
+    where: { workflowExecutionId },
+    select: { context: true },
+  });
+  let mergedContext: Record<string, unknown> = {};
+  if (state?.context) {
+    try {
+      const parsed = JSON.parse(state.context);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        mergedContext = parsed as Record<string, unknown>;
+      }
+    } catch {
+      mergedContext = {};
+    }
+  }
+  const existingMeta =
+    (mergedContext['__meta'] as { error?: string | null; chain?: readonly string[] } | undefined) ??
+    {};
+  mergedContext['__meta'] = {
+    error: errorMessage,
+    chain: existingMeta.chain ?? [],
+  };
+
+  await prisma.$transaction([
+    prisma.workflowExecution.update({
+      where: { id: workflowExecutionId },
+      data: { status: 'FAILED' },
+    }),
+    prisma.workflowExecutionState.upsert({
+      where: { workflowExecutionId },
+      create: { workflowExecutionId, context: JSON.stringify(mergedContext) },
+      update: { context: JSON.stringify(mergedContext) },
+    }),
+  ]);
+  return 'marked';
+}
+
+export async function getAutomationPauseState(
+  workflowExecutionId: string,
+): Promise<{ context: string | null; currentStepIndex: number } | null> {
+  const state = await prisma.workflowExecutionState.findUnique({
+    where: { workflowExecutionId },
+  });
+  if (!state) return null;
+  return {
+    context: state.context,
+    currentStepIndex: state.currentStepIndex,
+  };
+}
+
 /**
  * Deletes execution state when deleting a workflow execution
  */

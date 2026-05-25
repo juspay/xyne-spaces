@@ -853,6 +853,17 @@ export const queries = defineQueries({
     }
   ),
 
+  automationsList: defineQuery(() => {
+    return zql.workflows
+      .where('workflowType', 'Automations')
+      .orderBy('createdAt', 'desc');
+  }),
+  automationById: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
+    return zql.workflows
+      .where('id', id)
+      .where('workflowType', 'Automations')
+      .one();
+  }),
   subTicketsForTicket: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.ticket_sub_ticket_mappings
       .where('ticketId', ticketId)

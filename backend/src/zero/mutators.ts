@@ -1,4 +1,5 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators } from '@rocicorp/zero';
+import { AutomationStatus } from '../automations/types/status';
 import {
   ChannelRole,
   ChannelType,
@@ -10892,6 +10893,300 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           });
         }
+      ),
+    },
+    automations: {
+      // Create a fresh PROPOSAL row. New automation: omit `automationSeriesId`, row
+      // uses its own id as the lineage seed. Edit existing LIVE: pass
+      // `automationSeriesId` from the LIVE row + a copy of its config/metadata.
+      createProposal: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().min(1).max(80),
+          configJson: z.string(),
+          metadataJson: z.string(),
+          eventType: z.string(),
+          automationSeriesId: z.string().optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          ctx,
+          tx,
+          args: { id, name, configJson, metadataJson, eventType, automationSeriesId, timestamp },
+        }) => {
+          await tx.mutate.workflows.insert({
+            id,
+            workflowType: 'Automations',
+            workflowName: name,
+            eventType,
+            status: 'DRAFT',
+            automationSeriesId: automationSeriesId ?? id,
+            context: configJson,
+            metadata: metadataJson,
+            ticketId: null,
+            workspaceId: ctx.workspaceId,
+            configuration: null,
+            scheduledAt: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().min(1).max(80).optional(),
+          configJson: z.string().optional(),
+          metadataJson: z.string().optional(),
+          eventType: z.string().optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: { id, name, configJson, metadataJson, eventType, timestamp },
+        }) => {
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            throw new Error(`Automation "${id}" not found`);
+          }
+          if (existing.status !== 'DRAFT') {
+            throw new Error(
+              `Automation "${id}" is ${existing.status}; only DRAFT proposals can be edited.`,
+            );
+          }
+
+          await tx.mutate.workflows.update({
+            id,
+            updatedAt: timestamp,
+            ...(name !== undefined && { workflowName: name }),
+            ...(metadataJson !== undefined && { metadata: metadataJson }),
+            ...(configJson !== undefined && { context: configJson }),
+            ...(configJson !== undefined && eventType !== undefined && { eventType }),
+          });
+          logger.info(`[Mutator] automations.update OK id=${id}`);
+        },
+      ),
+      delete: defineMutator(
+        z.object({ id: z.string() }),
+        async ({ tx, args: { id } }) => {
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (existing && existing.workflowType === 'Automations' && existing.status !== 'DRAFT') {
+            throw new Error(
+              `Cannot delete "${id}": only DRAFT proposals can be deleted (status is ${existing.status}).`,
+            );
+          }
+          await tx.mutate.workflows.delete({ id });
+        },
+      ),
+      submitForApproval: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          logger.info(`[Mutator] automations.submitForApproval START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            throw new Error(`Automation "${id}" not found`);
+          }
+          await tx.mutate.workflows.update({
+            id,
+            status: 'PENDING_APPROVAL',
+            updatedAt: timestamp,
+          });
+          asyncTasks.push(async () => {
+            try {
+              const { approvalService } = await import(
+                '../automations/services/approval.service'
+              );
+              await approvalService.submitForApproval(id, authData.sub);
+              logger.info(`[Mutator] submitForApproval asyncTask OK id=${id}`);
+            } catch (err) {
+              logger.error('[Mutator] submitForApproval asyncTask FAIL', {
+                automationId: id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          });
+        },
+      ),
+      revoke: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          logger.info(`[Mutator] automations.revoke START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            throw new Error(`Automation "${id}" not found`);
+          }
+          await tx.mutate.workflows.update({
+            id,
+            status: 'REVOKED',
+            updatedAt: timestamp,
+          });
+          asyncTasks.push(async () => {
+            try {
+              const { approvalService } = await import(
+                '../automations/services/approval.service'
+              );
+              await approvalService.revoke(id, authData.sub);
+              logger.info(`[Mutator] revoke asyncTask OK id=${id}`);
+            } catch (err) {
+              logger.error('[Mutator] revoke asyncTask FAIL', {
+                automationId: id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          });
+        },
+      ),
+      approve: defineMutator(
+        z.object({
+          id: z.string(),
+          note: z.string().nullable().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, note, timestamp } }) => {
+          logger.info(`[Mutator] automations.approve START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            throw new Error(`Automation "${id}" not found`);
+          }
+          await tx.mutate.workflows.update({
+            id,
+            status: 'DISABLED',
+            updatedAt: timestamp,
+          });
+          asyncTasks.push(async () => {
+            const t0 = Date.now();
+            try {
+              const { approvalService } = await import(
+                '../automations/services/approval.service'
+              );
+              const result = await approvalService.approve(id, authData.sub, note ?? null);
+              logger.info(
+                `[Mutator] approve asyncTask OK id=${id} autoRevokedCount=${result.autoRevoked.length} elapsedMs=${Date.now() - t0}`,
+              );
+            } catch (err) {
+              logger.error('[Mutator] approve asyncTask FAIL', {
+                automationId: id,
+                elapsedMs: Date.now() - t0,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          });
+        },
+      ),
+      reject: defineMutator(
+        z.object({
+          id: z.string(),
+          note: z.string().min(1),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, note, timestamp } }) => {
+          logger.info(`[Mutator] automations.reject START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            throw new Error(`Automation "${id}" not found`);
+          }
+          await tx.mutate.workflows.update({
+            id,
+            status: 'REJECTED',
+            updatedAt: timestamp,
+          });
+          asyncTasks.push(async () => {
+            try {
+              const { approvalService } = await import(
+                '../automations/services/approval.service'
+              );
+              await approvalService.reject(id, authData.sub, note);
+              logger.info(`[Mutator] reject asyncTask OK id=${id}`);
+            } catch (err) {
+              logger.error('[Mutator] reject asyncTask FAIL', {
+                automationId: id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          });
+        },
+      ),
+      activate: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          logger.info(`[Mutator] automations.activate START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            logger.warn(`[Mutator] automations.activate REJECT id=${id} reason=not-found`);
+            throw new Error(`Automation "${id}" not found`);
+          }
+          if (existing.status !== 'ACTIVE' && existing.status !== 'DISABLED') {
+            throw new Error(
+              `Automation "${id}" is ${existing.status}; only LIVE rows can be activated.`,
+            );
+          }
+          await tx.mutate.workflows.update({
+            id,
+            status: 'ACTIVE',
+            updatedAt: timestamp,
+          });
+          logger.info(`[Mutator] automations.activate OPTIMISTIC id=${id} status=ACTIVE`);
+
+          asyncTasks.push(async () => {
+            const t0 = Date.now();
+            try {
+              const { approvalService } = await import(
+                '../automations/services/approval.service'
+              );
+              await approvalService.toggleLive(id, authData.sub, AutomationStatus.ACTIVE);
+              logger.info(
+                `[Mutator] automations.activate asyncTask OK id=${id} elapsedMs=${Date.now() - t0}`,
+              );
+            } catch (err) {
+              logger.error('[Mutator] automations.activate asyncTask FAIL', {
+                automationId: id,
+                elapsedMs: Date.now() - t0,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          });
+        },
+      ),
+      disable: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          logger.info(`[Mutator] automations.disable START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            logger.warn(`[Mutator] automations.disable REJECT id=${id} reason=not-found`);
+            throw new Error(`Automation "${id}" not found`);
+          }
+          if (existing.status !== 'ACTIVE' && existing.status !== 'DISABLED') {
+            throw new Error(
+              `Automation "${id}" is ${existing.status}; only LIVE rows can be disabled.`,
+            );
+          }
+          await tx.mutate.workflows.update({
+            id,
+            status: 'DISABLED',
+            updatedAt: timestamp,
+          });
+          logger.info(`[Mutator] automations.disable OPTIMISTIC id=${id} status=DISABLED`);
+
+          asyncTasks.push(async () => {
+            const t0 = Date.now();
+            try {
+              const { approvalService } = await import(
+                '../automations/services/approval.service'
+              );
+              await approvalService.toggleLive(id, authData.sub, AutomationStatus.DISABLED);
+              logger.info(
+                `[Mutator] automations.disable asyncTask OK id=${id} elapsedMs=${Date.now() - t0}`,
+              );
+            } catch (err) {
+              logger.error('[Mutator] automations.disable asyncTask FAIL', {
+                automationId: id,
+                elapsedMs: Date.now() - t0,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          });
+        },
       ),
     },
   });

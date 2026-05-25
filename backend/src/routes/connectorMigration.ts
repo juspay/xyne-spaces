@@ -94,6 +94,7 @@ router.post('/trigger', async (req, res) => {
     const workflow = await repositories.workflows.create({
       id: workflowId,
       ticketId: ticket.id,
+      workspaceId: ticket.workspaceId,
       workflowName: 'Connector Migration',
       workflowType: WorkflowType.CONNECTOR_MIGRATION,
       status: 'NEW',

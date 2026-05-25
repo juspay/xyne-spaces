@@ -491,7 +491,16 @@ export const queries = defineQueries({
         dateRangeFilter,
       },
     }) => {
-      let query = zql.workflows;
+      // Exclude automation rows — they live on the same `workflows` table
+      // (workflowType='Automations') but have their own builder UI / run
+      // history. Use an OR-with-IS-NULL because `!= 'Automations'` alone
+      // would also exclude legacy rows with `workflowType = NULL`.
+      let query = zql.workflows.where(helpers =>
+        helpers.or(
+          helpers.cmp('workflowType', 'IS', null),
+          helpers.cmp('workflowType', '!=', 'Automations'),
+        ),
+      );
 
       if (searchQuery && searchQuery.trim()) {
         const q = searchQuery.trim();
@@ -982,6 +991,41 @@ export const queries = defineQueries({
     z.object({ ticketIds: z.array(z.string()) }),
     ({ args: { ticketIds } }) => {
       return zql.tickets.where(helpers => helpers.cmp('id', 'IN', ticketIds));
+    },
+  ),
+  /**
+   * Automations live on the `workflows` table with `workflowType='Automations'`.
+   * The four queries below are the Zero-backed reads the dashboard uses in
+   * place of the legacy `/api/automations/*` GETs. Live-sync means the list
+   * + builder + run history all auto-update as the worker mutates the rows
+   * (status flips DRAFT→ACTIVE, new `workflow_executions` rows appear as
+   * runs fire, etc.).
+   *
+   * Workspace scoping: every read takes `workspaceId` and filters at the query
+   * level. Execution rows have no `workspaceId` of their own — they're scoped
+   * via the parent workflow (`workflow.workspaceId`).
+   */
+  automationsList: defineQuery(
+    z.object({ workspaceId: z.string() }),
+    ({ args: { workspaceId } }) => {
+      // Order by creation time, not last-update — activating / disabling
+      // a row updates `updatedAt`, and ordering by that would shuffle the
+      // toggled row to the top of the list, which is jarring while the
+      // user is scanning rows.
+      return zql.workflows
+        .where('workflowType', 'Automations')
+        .where('workspaceId', workspaceId)
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+  automationById: defineQuery(
+    z.object({ id: z.string(), workspaceId: z.string() }),
+    ({ args: { id, workspaceId } }) => {
+      return zql.workflows
+        .where('id', id)
+        .where('workflowType', 'Automations')
+        .where('workspaceId', workspaceId)
+        .one();
     },
   ),
   getWorkflowForTicket: defineQuery(
