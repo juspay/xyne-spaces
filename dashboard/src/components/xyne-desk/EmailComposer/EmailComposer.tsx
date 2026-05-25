@@ -66,6 +66,7 @@ import {
   buildContactPool,
   buildSuggestions,
   makeRecipientKeyDownHandler,
+  splitAndValidateEmails,
   type RecipientField,
 } from './recipients';
 import { useComposerResize } from './useComposerResize';
@@ -736,10 +737,7 @@ export const EmailComposer = ({
       return;
     }
     if (channelPreference?.defaultCc) {
-      const parsed = channelPreference.defaultCc
-        .split(',')
-        .map((e: string) => e.trim())
-        .filter((e: string) => e.length > 0 && e.includes('@'));
+      const parsed = splitAndValidateEmails(channelPreference.defaultCc, []);
       if (parsed.length > 0) {
         setCcEmails(parsed);
         setShowCc(true);
@@ -823,6 +821,7 @@ export const EmailComposer = ({
   useEffect(() => {
     // In compose mode there's no thread to derive recipients from — start blank.
     if (isComposeMode) return;
+    if (channelPreferenceDetails?.type !== 'complete') return;
     if (recipientsStorageKey) {
       try {
         const raw = localStorage.getItem(recipientsStorageKey);
@@ -937,6 +936,17 @@ export const EmailComposer = ({
           }
         }
 
+        // Merge defaultCc from channel preference, skipping duplicates already
+        // in nextTo or nextCc (keyed by bare lowercase address).
+        if (channelPreference?.defaultCc) {
+          const existingBare = [...nextTo, ...nextCc].map(addr => extractEmail(addr));
+          const defaultCcAddresses = splitAndValidateEmails(
+            channelPreference.defaultCc,
+            existingBare,
+          );
+          nextCc.push(...defaultCcAddresses);
+        }
+
         setToEmails(nextTo);
         setCcEmails(nextCc);
         setBccEmails(nextBcc);
@@ -954,6 +964,8 @@ export const EmailComposer = ({
     replyMode,
     recipientsStorageKey,
     isComposeMode,
+    channelPreference?.defaultCc,
+    channelPreferenceDetails?.type,
   ]);
 
   useEffect(() => {
@@ -1413,9 +1425,9 @@ export const EmailComposer = ({
   });
 
   const handleToBlur = (): void => {
-    const email = toInputValue.trim().replace(',', '');
-    if (email && email.includes('@') && !toEmails.includes(email)) {
-      setToEmails([...toEmails, email]);
+    const newEmails = splitAndValidateEmails(toInputValue, toEmails);
+    if (newEmails.length > 0) {
+      setToEmails([...toEmails, ...newEmails]);
       setToInputValue('');
     }
     blurSuggest('to');
@@ -1821,9 +1833,9 @@ export const EmailComposer = ({
                       onKeyDown={handleCcKeyDown}
                       onFocus={() => focusSuggest('cc')}
                       onBlur={() => {
-                        const email = ccInputValue.trim().replace(',', '');
-                        if (email && email.includes('@') && !ccEmails.includes(email)) {
-                          setCcEmails([...ccEmails, email]);
+                        const newEmails = splitAndValidateEmails(ccInputValue, ccEmails);
+                        if (newEmails.length > 0) {
+                          setCcEmails([...ccEmails, ...newEmails]);
                           setCcInputValue('');
                         }
                         blurSuggest('cc');
@@ -1904,9 +1916,9 @@ export const EmailComposer = ({
                       onKeyDown={handleBccKeyDown}
                       onFocus={() => focusSuggest('bcc')}
                       onBlur={() => {
-                        const email = bccInputValue.trim().replace(',', '');
-                        if (email && email.includes('@') && !bccEmails.includes(email)) {
-                          setBccEmails([...bccEmails, email]);
+                        const newEmails = splitAndValidateEmails(bccInputValue, bccEmails);
+                        if (newEmails.length > 0) {
+                          setBccEmails([...bccEmails, ...newEmails]);
                           setBccInputValue('');
                         }
                         blurSuggest('bcc');

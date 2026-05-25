@@ -138,6 +138,22 @@ interface KeyDownDeps {
 }
 
 /**
+ * Split a raw input string on commas / whitespace and trim each segment. Return only
+ * segments that look like an email address (contain '@') and are not
+ * already in `existing`.
+ */
+export const splitAndValidateEmails = (raw: string, existing: ReadonlyArray<string>): string[] => {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const existingSet = new Set(existing.map(e => e.trim().toLowerCase()));
+  return trimmed
+    .split(/[,\s]+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0 && s.includes('@'))
+    .filter(s => !existingSet.has(s.toLowerCase()));
+};
+
+/**
  * Build a recipient-field keyDown handler. Same shape works for To, Cc,
  * Bcc — the field-specific bits (which suggestions, which emails array,
  * which setters) are passed in via `deps`.
@@ -179,9 +195,9 @@ export const makeRecipientKeyDownHandler = (
     }
     if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
       e.preventDefault();
-      const email = deps.inputValue.trim().replace(',', '');
-      if (email && email.includes('@') && !deps.emails.includes(email)) {
-        deps.setEmails([...deps.emails, email]);
+      const newEmails = splitAndValidateEmails(deps.inputValue, deps.emails);
+      if (newEmails.length > 0) {
+        deps.setEmails([...deps.emails, ...newEmails]);
         deps.setInputValue('');
       }
     } else if (e.key === 'Backspace' && !deps.inputValue && deps.emails.length > 0) {
