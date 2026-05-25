@@ -248,7 +248,7 @@ async function ingestTicket(
       // Transform each reply
       for (const rawReply of rawReplies) {
         try {
-          const transformedReply = await transformReply(rawReply, userInfoCache, true, allowedBots);
+          const transformedReply = await transformReply(rawReply, userInfoCache, true, allowedBots, false, undefined, workspaceId || config.defaultWorkspaceId || '');
           // Force showInChannel to false — we don't want bot status updates broadcast as top-level messages
           threadReplies.push({ ...transformedReply, showInChannel: false });
         } catch (error) {

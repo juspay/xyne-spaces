@@ -105,7 +105,7 @@ interface UserToAdd {
 
 const BATCH_SIZE_DAYS = 30;
 const BATCH_DELAY_MS = 60000; // 1 minute
-const ENABLE_NOTIFICATIONS = true; // Control Slack postMessage calls
+const ENABLE_NOTIFICATIONS = config.slackMigrationNotificationsEnabled; // Controlled via SLACK_MIGRATION_NOTIFICATIONS_ENABLED env var
 
 // ============================================================================
 // Utility Functions
@@ -187,6 +187,15 @@ async function processBatch(
     throw new Error('channelId is required');
   }
 
+  // Resolve workspaceId from the target Xyne channel up-front so it can be
+  // threaded into extractChannelHistory for correct user lookups/creation.
+  const channelRepo = new ChannelRepository();
+  const xyneChannel = xyneSpaceChannelId ? await channelRepo.findById(xyneSpaceChannelId) : null;
+  const workspaceId = xyneChannel?.workspaceId || config.defaultWorkspaceId;
+  if (!workspaceId) {
+    throw new Error('workspaceId is required for Slack conversation ingestion');
+  }
+
   // Convert dates to Unix timestamps
   const oldestDate = new Date(batch.startDate);
   oldestDate.setHours(0, 0, 0, 0);
@@ -208,6 +217,7 @@ async function processBatch(
   // Extract channel history
   const conversationHistory = await extractChannelHistory({
     channelId,
+    workspaceId,
     oldest: oldestTimestamp,
     latest: latestTimestamp,
     includeThreads: syncOptions?.includes('include_threads'),
@@ -227,15 +237,9 @@ async function processBatch(
 
   // Ingest if xyneSpaceChannelId is provided
   if (xyneSpaceChannelId && conversationHistory.length > 0) {
-    // Get workspaceId from the channel
-    const channelRepo = new ChannelRepository();
-    const channel = await channelRepo.findById(xyneSpaceChannelId);
-    const workspaceId = channel?.workspaceId || config.defaultWorkspaceId;
-    
-    if (!workspaceId) {
+    if (!xyneChannel) {
       throw new Error('workspaceId is required for Slack conversation ingestion');
     }
-    
     await ingestConversationSlack({
       slackMessages: conversationHistory,
       externalSourceName,
@@ -336,7 +340,7 @@ export async function addChannelParticipantsBeforeMigration(
   for (let i = 0; i < channelMemberIds.length; i++) {
     const memberId = channelMemberIds[i];
     try {
-      const userInfo = await getUserInfo(memberId, userInfoCache);
+      const userInfo = await getUserInfo(memberId, userInfoCache, workspaceId);
       if (userInfo?.isBot) {
         logger.info('[Migration] Skipping bot member', { memberId });
         continue;

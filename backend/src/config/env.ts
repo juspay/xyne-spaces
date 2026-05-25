@@ -80,6 +80,7 @@ const envSchema = Joi.object({
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
   SLACK_MIGRATION_FINAL_MESSAGE: Joi.string().allow('').default(''), // Custom message appended to the final migration notification
   SLACK_MIGRATION_LOG_CHANNEL_ID: Joi.string().allow('').default(''), // Slack channel ID for migration progress/error logs (defaults to #slack-migration-update)
+  SLACK_MIGRATION_NOTIFICATIONS_ENABLED: Joi.boolean().default(true), // Enable/disable Slack postMessage notifications during migration
   // Zoho Integration
   ZOHO_AUTO_WORKFLOW_ENABLED: Joi.boolean().default(true),
   // SAM Service Configuration
@@ -392,6 +393,7 @@ export const config = {
     ? Buffer.from(envVars.SLACK_MIGRATION_FINAL_MESSAGE, 'base64').toString('utf-8')
     : '',
   slackMigrationLogChannelId: envVars.SLACK_MIGRATION_LOG_CHANNEL_ID,
+  slackMigrationNotificationsEnabled: envVars.SLACK_MIGRATION_NOTIFICATIONS_ENABLED,
   zoho: {
     autoWorkflowEnabled: envVars.ZOHO_AUTO_WORKFLOW_ENABLED,
   },

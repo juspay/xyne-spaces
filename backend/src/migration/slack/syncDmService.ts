@@ -183,7 +183,7 @@ export async function runMigrationAllDms({
 
   for (const slackId of allParticipantIds) {
     try {
-      const userInfo = await getUserInfo(slackId, userInfoCache);
+      const userInfo = await getUserInfo(slackId, userInfoCache, workspaceId);
       if (!userInfo || userInfo.isBot) continue;
       if (!userInfo.userEmail || !userInfo.userName) continue;
       if (!userInfo.userId) {
