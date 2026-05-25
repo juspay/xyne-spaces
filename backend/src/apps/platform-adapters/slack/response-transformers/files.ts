@@ -1,5 +1,22 @@
+import path from "node:path";
+import mime from "mime";
 import type { FileUploadResponse } from "@/apps/types";
 import type { SlackFileObject, SlackFilesUploadResponse } from "../types";
+
+export function deriveFiletype(filename: string | undefined, mimetype: string | undefined): string {
+	if (filename) {
+		const ext = path.extname(filename).replace(/^\./, "").toLowerCase();
+		if (ext) return ext;
+	}
+
+	if (!mimetype) return "binary";
+
+	const fromMime = mime.getExtension(mimetype);
+	if (fromMime) return fromMime;
+
+	const sub = mimetype.split("/")[1] ?? "";
+	return sub.replace(/^x-/, "").split(";")[0] || "binary";
+}
 
 interface SlackFileShareContext {
 	channelId: string;
@@ -36,6 +53,7 @@ function transformFile(
 		id: file.fileid,
 		name: file.originalFilename,
 		title: file.originalFilename,
+		filetype: deriveFiletype(file.originalFilename, file.mimeType),
 		size: file.size,
 		mimetype: file.mimeType,
 		url_private: file.url,

@@ -15,12 +15,14 @@ import type {
 	SlackFileObject,
 	SlackMessageObject,
 } from "../types";
+import { deriveFiletype } from "./files";
 
 function transformAttachmentToFile(att: AppEventAttachment): SlackFileObject {
 	return {
 		id: att.attachmentId,
 		name: att.fileName,
 		title: att.fileName,
+		filetype: deriveFiletype(att.fileName, att.mimeType),
 		size: att.fileSize,
 		mimetype: att.mimeType,
 		url_private: att.fileUrl,

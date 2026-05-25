@@ -93,6 +93,7 @@ export interface SlackFileObject {
 	id: string;
 	name: string;
 	title: string;
+	filetype: string;
 	size: number;
 	mimetype: string;
 	url_private: string;
