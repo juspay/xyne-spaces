@@ -46,7 +46,7 @@ const DRAFT_STORAGE_KEY = 'channel-draft-message';
 
 export type User = QueryResultType<typeof queries.getUsersV2>[number];
 export type Bookmarks = QueryResultType<typeof queries.userBookmarks>[number];
-export type VisibleChannel = NonNullable<QueryResultType<typeof queries.userVisibleChannelsV2>[number]['channel']>;
+export type VisibleChannel = NonNullable<QueryResultType<typeof queries.userVisibleChannelsV3>[number]['channel']>;
 export type UserGroup = QueryResultType<typeof queries.getAllUserGroups>[number];
 export type UserGroupMapping = QueryResultType<typeof queries.getUserGroupMappingsByUserId>[number];
 export type UserPermission = {
