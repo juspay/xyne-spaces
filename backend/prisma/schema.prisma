@@ -1434,7 +1434,7 @@ enum TeamIntelligenceBatchStatus {
   COMPLETED
   FAILED
 
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 enum TeamIntelligenceUserIngestionStatus {
@@ -1444,7 +1444,7 @@ enum TeamIntelligenceUserIngestionStatus {
   COMPLETED
   FAILED
 
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 enum TeamIntelligenceBulletCategory {
@@ -1457,7 +1457,7 @@ enum TeamIntelligenceBulletCategory {
   HELPED
   MILESTONE
 
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 model TeamIntelligenceIngestionBatch {
@@ -1486,7 +1486,7 @@ model TeamIntelligenceIngestionBatch {
   @@index([source, reportDate])
   @@index([status, receivedAt])
   @@map("team_intelligence_ingestion_batches")
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 model TeamIntelligenceUserIngestion {
@@ -1496,6 +1496,7 @@ model TeamIntelligenceUserIngestion {
   source           String
   userEmail        String
   userName         String
+  teamId           String?
   teamName         String?
   rawPayload       Json
   pullRequests     Json
@@ -1520,7 +1521,7 @@ model TeamIntelligenceUserIngestion {
   @@index([batchId, processingStatus])
   @@index([source, reportDate])
   @@map("team_intelligence_user_ingestions")
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 model TeamIntelligenceTeamSummary {
@@ -1528,6 +1529,7 @@ model TeamIntelligenceTeamSummary {
   batchId         String
   reportDate      DateTime
   source          String
+  teamId          String?
   teamName        String
   idempotencyKey  String                      @unique
   totalUsers      Int
@@ -1548,12 +1550,12 @@ model TeamIntelligenceTeamSummary {
 
   batch TeamIntelligenceIngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
-  @@unique([batchId, teamName])
-  @@index([reportDate, teamName])
+  @@unique([batchId, teamId, teamName])
+  @@index([reportDate, teamId, teamName])
   @@index([batchId, status])
   @@index([source, reportDate])
   @@map("team_intelligence_team_summaries")
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 model TeamIntelligenceOrgSummary {
@@ -1584,7 +1586,7 @@ model TeamIntelligenceOrgSummary {
   @@index([source, reportDate])
   @@index([status, createdAt])
   @@map("team_intelligence_org_summaries")
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 // Chat Feature Models - New Schema Design

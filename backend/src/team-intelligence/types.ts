@@ -44,6 +44,7 @@ export interface TeamIntelligenceAiUsageInput {
 export interface TeamIntelligenceUserInput {
   userEmail: string;
   userName: string;
+  teamId?: string;
   teamName?: string;
   source?: string;
   pullRequests: TeamIntelligencePullRequestInput[];
@@ -75,6 +76,7 @@ export interface TeamIntelligenceNormalizedPullRequest extends TeamIntelligenceP
 export interface TeamIntelligenceNormalizedUserRecord {
   userEmail: string;
   userName: string;
+  teamId: string | null;
   teamName: string | null;
   source: string;
   pullRequests: TeamIntelligenceNormalizedPullRequest[];
@@ -94,6 +96,7 @@ export interface TeamIntelligenceQueuedJobData {
   reportDate: string;
   userEmail: string;
   userName: string;
+  teamId: string | null;
   teamName: string | null;
   source: string;
 }
@@ -102,6 +105,7 @@ export interface TeamIntelligenceTeamSummaryQueuedJobData {
   batchId: string;
   teamSummaryId: string;
   reportDate: string;
+  teamId: string | null;
   teamName: string;
   source: string;
 }
@@ -128,6 +132,7 @@ export interface TeamIntelligenceTeamSummaryUserInput {
   userId?: string;
   userEmail: string;
   userName: string;
+  teamId?: string | null;
   teamName: string;
   role?: string | null;
   source?: string;
