@@ -21,6 +21,7 @@ import { SlackBlockKitParser } from '../../../integrations/adapters/slack-webhoo
 
 export interface ChannelHistoryOptions {
   channelId: string;
+  workspaceId: string; // Target workspace — used to scope user lookups/creation
   oldest: string; // Date string (YYYY-MM-DD) or Unix timestamp
   latest?: string; // Optional end date/timestamp, defaults to now
   includeThreads?: boolean; // Fetch all thread replies (default: true)
@@ -334,7 +335,7 @@ function transformFiles(rawFiles: any[] | undefined, includeAttachments: boolean
  * Get user info from cache, database, or fetch from Slack API
  * Caches both database lookups (userId) and API-fetched results to avoid unnecessary calls
  */
-export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promise<{
+export async function getUserInfo(slackUID: string, cache: UserInfoCache, workspaceId: string): Promise<{
   userEmail?: string;
   userName?: string;
   userId?: string;
@@ -352,13 +353,20 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
     const user = await userRepo.findByMetadataField('slackId', slackUID);
     
     if (user) {
-      const result = {
-        userId: user.id,
-        userEmail: user.email,
-        userName: user.name,
-      };
-      cache.set(slackUID, result);
-      return result;
+      // findByMetadataField is cross-workspace — verify the user exists in the TARGET workspace.
+      // If not, fall through so findOrCreateUser creates them in the correct workspace.
+      const userInWorkspace = await userRepo.findByEmail(user.email, workspaceId);
+      if (userInWorkspace) {
+        const result = {
+          userId: userInWorkspace.id,
+          userEmail: userInWorkspace.email,
+          userName: userInWorkspace.name,
+        };
+        logger.info('[getUserInfo] Returning user in target workspace', { slackUID, workspaceId, userId: userInWorkspace.id });
+        cache.set(slackUID, result);
+        return result;
+      }
+      logger.info('[getUserInfo] User not in target workspace — falling through to create', { slackUID, userEmail: user.email, workspaceId });
     }
   } catch (error) {
     logger.debug('[Migration] User not found in database by slackId, fetching from Slack API', {
@@ -394,12 +402,8 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
 
   try {
     const userRepo = new UserRepository();
-    // Migration context - workspaceId from config (same pattern as qa-alert-bot)
     const emailLower = userInfo.profile.email.toLowerCase();
-    const workspaceId = config.defaultWorkspaceId;
-    if (!workspaceId) {
-      return {};
-    }
+    // Use the caller-supplied workspaceId (from the target channel) for exact-workspace lookups.
     const userByEmail = await userRepo.findByEmailCaseInsensitive(emailLower, workspaceId);
 
     if (userByEmail) {
@@ -450,7 +454,7 @@ function extractUniqueUserIds(rawMessages: any[], threadRepliesMap: Map<string, 
 /**
  * Pre-fetch all user info in controlled batches to avoid rate limits
  */
-async function prefetchUserInfo(userIds: string[], cache: UserInfoCache): Promise<void> {
+async function prefetchUserInfo(userIds: string[], cache: UserInfoCache, workspaceId: string): Promise<void> {
   const uncachedUserIds = userIds.filter((id) => id && !cache.has(id));
 
   if (uncachedUserIds.length === 0) {
@@ -465,7 +469,7 @@ async function prefetchUserInfo(userIds: string[], cache: UserInfoCache): Promis
   await processBatch(
     uncachedUserIds,
     async (userId) => {
-      await getUserInfo(userId, cache);
+      await getUserInfo(userId, cache, workspaceId);
     },
     {
       batchSize: USER_FETCH_BATCH_SIZE,
@@ -684,10 +688,11 @@ export async function transformReply(
   includeAttachments: boolean,
   allowedBots: string[] = [],
   includeBotMessages: boolean = false,
-  pinnedMessageTs?: Set<string>,
+  pinnedMessageTs: Set<string> | undefined,
+  workspaceId: string,
 ): Promise<SlackReply> {
   const isBot = !!reply.bot_id;
-  const userInfo = !isBot && reply.user ? await getUserInfo(reply.user, cache) : {};
+  const userInfo = !isBot && reply.user ? await getUserInfo(reply.user, cache, workspaceId) : {};
   const botName = isBot
     ? (reply.username || reply.app_name || reply.bot_profile?.name)
     : undefined;
@@ -742,10 +747,11 @@ async function transformMessage(
   includeAttachments: boolean,
   includeDeactivatedUsers: boolean,
   includeBotMessages: boolean = false,
-  pinnedMessageTs?: Set<string>,
+  pinnedMessageTs: Set<string> | undefined,
+  workspaceId: string,
 ): Promise<SlackMessage> {
   const isBot = !!rawMessage.bot_id;
-  const userInfo = !isBot && rawMessage.user ? await getUserInfo(rawMessage.user, cache) : {};
+  const userInfo = !isBot && rawMessage.user ? await getUserInfo(rawMessage.user, cache, workspaceId) : {};
   const botName = isBot
     ? (rawMessage.username || rawMessage.app_name || rawMessage.bot_profile?.name)
     : undefined;
@@ -754,7 +760,7 @@ async function transformMessage(
   let replies: SlackReply[] | undefined;
   if (threadReplies?.length) {
     replies = await Promise.all(
-      threadReplies.map((reply) => transformReply(reply, cache, includeAttachments, [], includeBotMessages, pinnedMessageTs))
+      threadReplies.map((reply) => transformReply(reply, cache, includeAttachments, [], includeBotMessages, pinnedMessageTs, workspaceId))
     );
 
     // Filter replies
@@ -802,6 +808,7 @@ export async function extractChannelHistory(
 ): Promise<SlackMessage[]> {
   const {
     channelId,
+    workspaceId,
     oldest,
     latest,
     includeThreads = false,
@@ -854,7 +861,7 @@ export async function extractChannelHistory(
   logger.info('[Migration] Extracted unique users', {
     totalUniqueUsers: allUserIds.length,
   });
-  await prefetchUserInfo(allUserIds, userCache);
+  await prefetchUserInfo(allUserIds, userCache, workspaceId);
 
   if (postingUserIds) {
     for (const userId of allUserIds) {
@@ -876,6 +883,7 @@ export async function extractChannelHistory(
         includeDeactivatedUsers,
         includeBotMessages,
         pinnedMessageTs,
+        workspaceId,
       )
     )
   );
