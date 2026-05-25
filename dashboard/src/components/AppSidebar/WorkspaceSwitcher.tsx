@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { Plus, Check, Loader2, LogIn, ChevronDown, ChevronRight } from 'lucide-react';
@@ -9,6 +9,7 @@ import {
   setLastActiveWorkspaceId,
 } from '../../machines/authMachine';
 import { queryClient } from '../../services/clients/queryClient';
+import { websocketService } from '../../services/clients/socketClient';
 
 interface WorkspaceItem {
   id: string;
@@ -21,9 +22,36 @@ interface WorkspacesResponse {
   workspaces: WorkspaceItem[];
 }
 
+interface WorkspaceCountItem {
+  workspaceId: string;
+  userId: string;
+  count: number;
+}
+
+interface WorkspaceCountsResponse {
+  counts: WorkspaceCountItem[];
+}
+
 interface CreateWorkspaceResponse {
   workspace: { id: string; name: string };
   user: { id: string; email: string; name: string; workspaceId: string };
+}
+
+interface NotificationReceivedData {
+  notification: {
+    id: string;
+    userId: string;
+    type: string;
+    title: string;
+    message: string;
+  };
+  timestamp: string;
+}
+
+interface NotificationUpdatedData {
+  notificationId: string;
+  status: string;
+  timestamp: string;
 }
 
 export const WorkspaceSwitcher: React.FC = () => {
@@ -37,6 +65,7 @@ export const WorkspaceSwitcher: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([]);
+  const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -47,6 +76,11 @@ export const WorkspaceSwitcher: React.FC = () => {
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Map notificationId -> workspaceId for decrementing on read/dismiss
+  const notificationWorkspaceMap = useRef<Map<string, string>>(new Map());
+  // Map userId -> workspaceId for incrementing on received
+  const userWorkspaceMap = useRef<Map<string, string>>(new Map());
 
   const currentWorkspace = workspaces.find(w => w.id === workspaceId);
 
@@ -74,6 +108,57 @@ export const WorkspaceSwitcher: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const fetchNotificationCounts = async (): Promise<void> => {
+    try {
+      const res = await axios.get<WorkspaceCountsResponse>(
+        `${API_BASE_URL}/notifications/workspace-counts`,
+        { withCredentials: true },
+      );
+      const counts = new Map<string, number>();
+      const userMap = new Map<string, string>();
+
+      for (const item of res.data.counts) {
+        counts.set(item.workspaceId, item.count);
+        userMap.set(item.userId, item.workspaceId);
+      }
+
+      setNotificationCounts(counts);
+      userWorkspaceMap.current = userMap;
+      // notificationWorkspaceMap is built incrementally from WS events
+    } catch {
+      // silently ignore
+    }
+  };
+
+  // WebSocket handlers for real-time notification updates
+  const handleNotificationReceived = useCallback((data: NotificationReceivedData): void => {
+    const userId = data.notification?.userId;
+    const workspaceId_ = userWorkspaceMap.current.get(userId);
+    if (workspaceId_) {
+      setNotificationCounts(prev => {
+        const next = new Map(prev);
+        next.set(workspaceId_, (next.get(workspaceId_) || 0) + 1);
+        return next;
+      });
+      notificationWorkspaceMap.current.set(data.notification.id, workspaceId_);
+    }
+  }, []);
+
+  const handleNotificationUpdated = useCallback((data: NotificationUpdatedData): void => {
+    const workspaceId_ = notificationWorkspaceMap.current.get(data.notificationId);
+    if (workspaceId_ && (data.status === 'READ' || data.status === 'DISMISSED')) {
+      setNotificationCounts(prev => {
+        const next = new Map(prev);
+        const current = next.get(workspaceId_) || 0;
+        if (current > 0) {
+          next.set(workspaceId_, current - 1);
+        }
+        return next;
+      });
+      notificationWorkspaceMap.current.delete(data.notificationId);
+    }
+  }, []);
 
   // On mount: if name isn't cached yet, do a one-time silent fetch to populate it.
   // After first load the name lives in localStorage and no API call is needed.
@@ -103,6 +188,7 @@ export const WorkspaceSwitcher: React.FC = () => {
   useEffect(() => {
     if (isOpen) {
       void fetchWorkspaces();
+      void fetchNotificationCounts();
     } else {
       setShowCreateForm(false);
       setShowSignInList(false);
@@ -110,6 +196,22 @@ export const WorkspaceSwitcher: React.FC = () => {
       setError(null);
     }
   }, [isOpen]);
+
+  // Fetch notification counts on mount so badge is visible immediately
+  useEffect(() => {
+    void fetchNotificationCounts();
+  }, []);
+
+  // Setup WebSocket listeners for real-time updates
+  useEffect(() => {
+    websocketService.on('notification_received', handleNotificationReceived);
+    websocketService.on('notification_updated', handleNotificationUpdated);
+
+    return () => {
+      websocketService.removeListener('notification_received', handleNotificationReceived);
+      websocketService.removeListener('notification_updated', handleNotificationUpdated);
+    };
+  }, [handleNotificationReceived, handleNotificationUpdated]);
 
   // Close on outside click
   useEffect(() => {
@@ -220,13 +322,16 @@ export const WorkspaceSwitcher: React.FC = () => {
   const initial = displayName?.[0]?.toUpperCase() ?? '?';
   const bgColor = displayName ? getInitialColor(displayName) : '#607d8b';
 
+  // Total unread across all workspaces
+  const totalUnread = Array.from(notificationCounts.values()).reduce((sum, c) => sum + c, 0);
+
   return (
     <div className='relative'>
       {/* Trigger: shows initials with deterministic color */}
       <button
         ref={triggerRef}
         onClick={() => setIsOpen(prev => !prev)}
-        className='size-8 rounded-lg flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:opacity-85 transition-opacity'
+        className='size-8 rounded-lg flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:opacity-85 transition-opacity relative'
         style={{ backgroundColor: bgColor }}
         aria-label='Switch workspace'
         data-testid='workspace-switcher-trigger'
@@ -235,6 +340,11 @@ export const WorkspaceSwitcher: React.FC = () => {
         title={displayName || 'Workspace'}
       >
         {initial}
+        {totalUnread > 0 && (
+          <span className='absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
+            {totalUnread > 99 ? '99+' : totalUnread}
+          </span>
+        )}
       </button>
 
       {isOpen && (
@@ -261,6 +371,7 @@ export const WorkspaceSwitcher: React.FC = () => {
               workspaces.map(ws => {
                 const isActive = ws.id === workspaceId;
                 const isSwitching = switching === ws.id;
+                const count = notificationCounts.get(ws.id) || 0;
                 return (
                   <button
                     key={ws.id}
@@ -281,11 +392,18 @@ export const WorkspaceSwitcher: React.FC = () => {
                       <p className='text-sm font-medium text-foreground truncate'>{ws.name}</p>
                       <p className='text-xs text-muted-foreground truncate'>{ws.orgName}</p>
                     </div>
-                    {isSwitching ? (
-                      <Loader2 size={14} className='animate-spin text-muted-foreground shrink-0' />
-                    ) : isActive ? (
-                      <Check size={14} className='text-green-500 shrink-0' />
-                    ) : null}
+                    <div className='flex items-center gap-1.5 shrink-0'>
+                      {count > 0 && (
+                        <span className='min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
+                          {count > 99 ? '99+' : count}
+                        </span>
+                      )}
+                      {isSwitching ? (
+                        <Loader2 size={14} className='animate-spin text-muted-foreground' />
+                      ) : isActive ? (
+                        <Check size={14} className='text-green-500' />
+                      ) : null}
+                    </div>
                   </button>
                 );
               })
@@ -332,6 +450,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                   workspaces.map(ws => {
                     const isActive = ws.id === workspaceId;
                     const isSwitching = switching === ws.id;
+                    const count = notificationCounts.get(ws.id) || 0;
                     return (
                       <button
                         key={ws.id}
@@ -351,14 +470,18 @@ export const WorkspaceSwitcher: React.FC = () => {
                           <p className='text-xs font-medium text-foreground truncate'>{ws.name}</p>
                           <p className='text-xs text-muted-foreground truncate'>{ws.orgName}</p>
                         </div>
-                        {isSwitching ? (
-                          <Loader2
-                            size={12}
-                            className='animate-spin text-muted-foreground shrink-0'
-                          />
-                        ) : isActive ? (
-                          <Check size={12} className='text-green-500 shrink-0' />
-                        ) : null}
+                        <div className='flex items-center gap-1 shrink-0'>
+                          {count > 0 && (
+                            <span className='min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
+                              {count > 99 ? '99+' : count}
+                            </span>
+                          )}
+                          {isSwitching ? (
+                            <Loader2 size={12} className='animate-spin text-muted-foreground' />
+                          ) : isActive ? (
+                            <Check size={12} className='text-green-500' />
+                          ) : null}
+                        </div>
                       </button>
                     );
                   })

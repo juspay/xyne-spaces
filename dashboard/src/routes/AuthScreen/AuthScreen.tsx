@@ -136,6 +136,7 @@ const AuthScreen = (): ReactElement => {
   }
 
   if (isCreatingOrg && !userExistsButRemoved) {
+    sessionStorage.setItem('no_access_from_auth', '1');
     return <Navigate to='/no-access' replace={true} />;
   }
 

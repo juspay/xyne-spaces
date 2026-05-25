@@ -1054,6 +1054,53 @@ export class UserService {
   }
 
   /**
+   * Grant default resource access for invited ADMIN and MEMBER users.
+   * Mirrors the first-time login behavior (DEFAULT_USER_RESOURCES).
+   * Admins additionally get USER-MANAGEMENT access.
+   */
+  async grantDefaultResources(userId: string, email: string, role: string): Promise<void> {
+    const baseResources = [
+      { resourceName: 'TICKETS', accessType: AccessType.WRITE },
+      { resourceName: 'WORKFLOWS', accessType: AccessType.WRITE },
+      { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
+      { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
+    ];
+
+    const defaultResources = role === 'ADMIN'
+      ? [...baseResources, { resourceName: 'USER-MANAGEMENT', accessType: AccessType.ADMIN }]
+      : baseResources;
+
+    try {
+      for (const defaultResource of defaultResources) {
+        try {
+          const resource = await repositories.resources.findByName(defaultResource.resourceName);
+          if (resource) {
+            await repositories.resourceAccess.grantAccess(
+              {
+                userId,
+                resourceId: resource.id,
+                accessType: defaultResource.accessType,
+              },
+              userId,
+            );
+            logger.debug(
+              `[grantDefaultResources] Granted ${defaultResource.accessType} access to ${defaultResource.resourceName} for ${email}`
+            );
+          }
+        } catch (resourceError) {
+          logger.error(
+            `[grantDefaultResources] Failed to grant ${defaultResource.accessType} access to ${defaultResource.resourceName} for ${email}:`,
+            resourceError
+          );
+        }
+      }
+      logger.info(`[grantDefaultResources] Default resources granted to invited ${role.toLowerCase()} ${email}`);
+    } catch (err) {
+      logger.error(`[grantDefaultResources] Outer error for ${email}:`, err);
+    }
+  }
+
+  /**
    * Clean up - close Prisma connection
    */
   async disconnect(): Promise<void> {

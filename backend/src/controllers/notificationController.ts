@@ -338,6 +338,23 @@ export class NotificationController {
     }
   }
 
+  async getWorkspaceNotificationCounts(req: Request, res: Response): Promise<void> {
+    try {
+      const memberId = req.user?.memberId;
+      if (!memberId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const counts = await notificationService.getWorkspaceNotificationCounts(memberId);
+
+      res.json({ counts });
+    } catch (error) {
+      logger.error('Failed to get workspace notification counts:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
   async sendTestNotification(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user?.id;

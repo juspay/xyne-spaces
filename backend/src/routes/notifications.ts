@@ -20,6 +20,7 @@ router.post('/mobile/unregister', notificationController.unregisterMobilePushTok
 router.get('/', notificationController.getNotifications);
 router.get('/queue-stats', notificationController.getQueueStats);
 router.get('/unread-count', notificationController.getUnreadCount);
+router.get('/workspace-counts', notificationController.getWorkspaceNotificationCounts);
 router.post('/test', notificationController.sendTestNotification);
 router.post('/test-voip', notificationController.sendTestVoipPush);
 router.post('/test-apns', notificationController.sendTestApnsPush);

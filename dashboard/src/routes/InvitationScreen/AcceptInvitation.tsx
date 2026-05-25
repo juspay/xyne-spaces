@@ -296,13 +296,6 @@ export const AcceptInvitation = (): ReactElement => {
         <p className='text-muted-foreground mb-6'>
           You&apos;ve been invited to join{' '}
           <strong className='text-foreground'>{invitation.workspaceName || 'a workspace'}</strong>
-          {invitation.organizationName && (
-            <>
-              {' '}
-              at <strong className='text-foreground'>{invitation.organizationName}</strong>
-            </>
-          )}
-          .
         </p>
 
         <div className='bg-muted rounded-lg p-4 mb-6 text-left'>

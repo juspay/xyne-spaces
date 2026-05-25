@@ -1426,6 +1426,60 @@ class NotificationService {
     return repositories.notifications.countByUserId(userId, 'UNREAD');
   }
 
+  async getWorkspaceNotificationCounts(memberId: string): Promise<
+    Array<{
+      workspaceId: string;
+      userId: string;
+      count: number;
+    }>
+  > {
+    // Step 1: Get all active users for this member across workspaces
+    const users = await prisma.user.findMany({
+      where: {
+        orgMemberId: memberId,
+        leftAt: null,
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+      },
+    });
+
+    if (users.length === 0) {
+      return [];
+    }
+
+    const userIds = users.map(u => u.id);
+
+    // Step 2: Count unread+delivered notifications per user
+    const notificationCounts = await prisma.notification.groupBy({
+      by: ['userId'],
+      where: {
+        userId: { in: userIds },
+        status: { in: ['UNREAD', 'DELIVERED'] },
+        readAt: null,
+        dismissedAt: null,
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    // Build a map: userId -> count
+    const countMap = new Map<string, number>();
+    for (const nc of notificationCounts) {
+      countMap.set(nc.userId, nc._count.id);
+    }
+
+    // Step 3: Merge users with their counts
+    return users.map(u => ({
+      workspaceId: u.workspaceId,
+      userId: u.id,
+      count: countMap.get(u.id) ?? 0,
+    }));
+  }
+
   async getUserPreferences(userId: string): Promise<UserPreferences> {
     const preferences = await repositories.notificationPreferences.findByUserId(userId);
 
