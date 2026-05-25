@@ -1031,7 +1031,7 @@ const parseNode = (
     return (
       <mark
         key={`${keyPrefix}-highlight-${idx}`}
-        className='bg-yellow-200 text-inherit font-inherit px-0 rounded-sm'
+        className='search-result-highlight text-inherit font-inherit'
       >
         {children}
       </mark>
