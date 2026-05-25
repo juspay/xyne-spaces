@@ -166,6 +166,11 @@ import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMig
 import AIScreen from './AIScreen/AIScreen';
 import { ExternalLobbyPage } from './ExternalLobby/ExternalLobbyPage';
 import UserGuideScreen from './UserGuideScreen';
+import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
+import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
+import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
+import AutomationRunDetailScreen from './AutomationsScreen/AutomationRunDetailScreen';
+import AutomationApprovalsScreen from './AutomationsScreen/AutomationApprovalsScreen';
 
 /** Auth-aware call route: authenticated users join via CallPage, others see external lobby */
 function CallRouteHandler(): ReactElement | null {
@@ -1070,6 +1075,54 @@ export const router = createBrowserRouter([
               {
                 path: 'scheduled-messages',
                 element: <ScheduledMessageScreen />,
+              },
+              {
+                path: 'automations',
+                element: (
+                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
+                    <AutomationsListScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'automations/approvals',
+                element: (
+                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
+                    <AutomationApprovalsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'automations/new',
+                element: (
+                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
+                    <AutomationBuilderScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'automations/:id',
+                element: (
+                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
+                    <AutomationBuilderScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'automations/:id/runs',
+                element: (
+                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
+                    <AutomationRunsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'automations/:id/runs/:runId',
+                element: (
+                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
+                    <AutomationRunDetailScreen />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: 'apps',

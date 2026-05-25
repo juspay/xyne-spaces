@@ -46,6 +46,7 @@ import {
   CircleHelp,
   Building2,
   AlertCircle,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -91,6 +92,7 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/browser', label: 'Browser', icon: Globe },
   { path: '/forms', label: 'Forms', icon: Clipboard },
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarClock },
+  { path: '/automations', label: 'Automations', icon: Zap },
   { path: '/apps', label: 'Apps', icon: AppWindow },
   { path: '/inspector', label: 'Inspector', icon: SearchCode },
   { path: '/guide', label: 'User Guide', icon: CircleHelp },
@@ -265,6 +267,15 @@ const AppSidebar = (): ReactElement => {
             p =>
               p.resourceName === resourceName &&
               (p.accessType === 'ADMIN' || p.accessType === 'WRITE'),
+          );
+        } else if (resourceName === 'AUTOMATIONS') {
+          // Tiered: READ surfaces the list (read-only), WRITE adds proposals/
+          // activation, ADMIN adds approve/reject/disable. Any tier shows the
+          // sidebar entry — per-action gates live in the screens.
+          hasAccess = permissions.some(
+            p =>
+              p.resourceName === resourceName &&
+              (p.accessType === 'ADMIN' || p.accessType === 'WRITE' || p.accessType === 'READ'),
           );
         } else {
           hasAccess = permissions.some(

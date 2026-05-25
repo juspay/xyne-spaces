@@ -5,7 +5,15 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
+import {
+  emitTicketUpdated,
+  TicketUpdatedFieldSchema,
+  type TicketChanges,
+  type TicketUpdatedField,
+} from '@/automations/triggers/ticket-updated.trigger';
 import { logger } from '@/utils/logger';
+
+const TICKET_UPDATED_FIELDS: ReadonlyArray<TicketUpdatedField> = TicketUpdatedFieldSchema.options;
 
 interface TicketActivity {
   activityType: string;
@@ -62,6 +70,24 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           error: error instanceof Error ? error.message : String(error),
         });
       });
+    }
+
+    const changes: TicketChanges = {};
+    for (const field of TICKET_UPDATED_FIELDS) {
+      const next = args[field];
+      const previous = (prev as unknown as Record<string, unknown>)[field];
+      if (next !== undefined && next !== previous) {
+        changes[field] = {
+          previousValue: (previous as string | number | null | undefined) ?? null,
+          newValue: (next as string | number | null | undefined) ?? null,
+        };
+      }
+    }
+    if (Object.keys(changes).length > 0) {
+      const fullTicket = await db.ticket.findUnique({ where: { id: ticketId } });
+      if (fullTicket) {
+        await emitTicketUpdated({ ticket: fullTicket, changes, performedById: actorId });
+      }
     }
 
     // Send notification to the newly assigned user

@@ -725,6 +725,7 @@ export class TestAuthSeeder {
       workflow = await db.workflow.create({
         data: {
           workflowName,
+          workspaceId,
           metadata: workspaceId,
           status: 'SUCCESS',
         },

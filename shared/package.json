@@ -66,6 +66,11 @@
       "types": "./dist/utils/index.d.ts",
       "import": "./dist/utils/index.js",
       "default": "./dist/utils/index.js"
+    },
+    "./automations/variable-ref": {
+      "types": "./dist/automations/variable-ref.d.ts",
+      "import": "./dist/automations/variable-ref.js",
+      "default": "./dist/automations/variable-ref.js"
     }
   },
   "files": [

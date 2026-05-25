@@ -113,6 +113,8 @@ import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
+import { automationRoutes, initializeAutomations } from '@/automations';
+import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -430,6 +432,11 @@ export class App {
     };
 
     this.app.post('/api/internal/postAsUser', validateS2SKey, new ChatController().postMessage);
+    this.app.post(
+      '/api/internal/automations/claw-callback/:executionId/:stepName',
+      validateS2SKey,
+      handleClawCallback,
+    );
 
 
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
@@ -498,6 +505,9 @@ export class App {
 
     // Scheduled messages routes (auth required)
     this.app.use('/api/scheduled-messages', authMiddleware.authenticate, scheduledMessageRoutes);
+
+    // Automations routes (auth required, no ACL — matches /api/calls)
+    this.app.use('/api/automations', authMiddleware.authenticate, automationRoutes);
 
     // Activity logging routes (auth required)
     this.app.use('/api/activity', authMiddleware.authenticate, activityLogRoutes);
@@ -690,6 +700,9 @@ export class App {
       logger.info('Initializing team intelligence queue...');
       await teamIntelligenceQueue.initialize();
     }
+
+    logger.info('Initializing automations module (registries + queue producers)...');
+    await initializeAutomations();
 
     // Initialize WebSocket server
     logger.info('Initializing WebSocket server...');

@@ -3,6 +3,7 @@ import { Tooltip } from '../Tooltip';
 import {
   Bold,
   Italic,
+  Underline as UnderlineIcon,
   Code,
   FileCode,
   Image,
@@ -20,11 +21,13 @@ import Button from '../Button';
 export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   editor,
   showImageUpload = false,
+  rightSlot,
 }) => {
   const [isActive, setIsActive] = useState({
     bold: false,
     italic: false,
     strike: false,
+    underline: false,
     code: false,
     codeBlock: false,
     link: false,
@@ -35,13 +38,13 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   const [linkUrl, setLinkUrl] = useState('');
   const [linkText, setLinkText] = useState('');
   const [hasSelection, setHasSelection] = useState(false);
+  const linkSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
   const [imageTab, setImageTab] = useState<'url' | 'upload'>('upload');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imagePopoverRef = useRef<HTMLDivElement>(null);
-  const linkSelectionRef = useRef<{ from: number; to: number } | null>(null);
 
   useEffect(() => {
     if (!editor) return;
@@ -51,6 +54,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         bold: editor.isActive('bold'),
         italic: editor.isActive('italic'),
         strike: editor.isActive('strike'),
+        underline: editor.isActive('underline'),
         code: editor.isActive('code'),
         codeBlock: editor.isActive('codeBlock'),
         link: editor.isActive('link'),
@@ -90,6 +94,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   const handleStrikethrough = useCallback(() => {
     editor?.chain().focus().toggleStrike().run();
+  }, [editor]);
+
+  const handleUnderline = useCallback(() => {
+    editor?.chain().focus().toggleUnderline().run();
   }, [editor]);
 
   const handleCode = useCallback(() => {
@@ -134,6 +142,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   const handleLink = useCallback(() => {
     if (!editor) return;
 
+    if (editor.isActive('link')) {
+      editor.chain().focus().extendMarkRange('link').run();
+    }
+
     const { from, to } = editor.state.selection;
     let selectionRange = { from, to };
     let selectedText = editor.state.doc.textBetween(from, to);
@@ -158,7 +170,6 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   const applyLink = useCallback(() => {
     if (!editor || !linkUrl.trim()) return;
 
-    // if no protocol is specified
     let finalUrl = linkUrl.trim();
     if (!/^https?:\/\//i.test(finalUrl)) {
       finalUrl = `https://${finalUrl}`;
@@ -277,6 +288,18 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               aria-pressed={isActive.strike}
             >
               <Strikethrough className='h-4 w-4' />
+            </button>
+          </Tooltip>
+
+          <Tooltip content='Underline (⌘U)'>
+            <button
+              type='button'
+              onClick={handleUnderline}
+              className={buttonClass(isActive.underline)}
+              aria-label='Underline'
+              aria-pressed={isActive.underline}
+            >
+              <UnderlineIcon className='h-4 w-4' />
             </button>
           </Tooltip>
 
@@ -503,6 +526,13 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <ListOrdered className='h-4 w-4' />
             </button>
           </Tooltip>
+
+          {rightSlot && (
+            <>
+              <div className='mx-1 h-4 w-px bg-border' />
+              {rightSlot}
+            </>
+          )}
         </div>
       </div>
     </>

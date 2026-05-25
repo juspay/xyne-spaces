@@ -20,18 +20,13 @@ export function Checkbox({
 
   return (
     <label className='group inline-flex items-center gap-2 cursor-pointer select-none w-fit'>
-      {/* Hidden native checkbox for accessibility */}
-      <input
-        ref={inputRef}
-        type='checkbox'
-        checked={checked}
-        onChange={e => onChange(e.target.checked)}
-        className='sr-only'
-      />
-
       {/* Custom checkbox box — both "checked" and "indeterminate" share the
           filled-primary look (Gmail/Outlook convention); the glyph inside
-          (check vs dash) is what distinguishes "all" from "some". */}
+          (check vs dash) is what distinguishes "all" from "some". The
+          native input is overlaid (opacity-0) on top of this span so that
+          focus stays anchored on the visible glyph — using `sr-only` here
+          would absolute-position the input off-flow and trigger a
+          focus-scroll jump that scrolls the page to the top on click. */}
       <span
         className={`
           relative flex items-center justify-center
@@ -40,6 +35,13 @@ export function Checkbox({
           ${checked || indeterminate ? 'bg-primary border-primary ' : 'bg-card border-border '}
         `}
       >
+        <input
+          ref={inputRef}
+          type='checkbox'
+          checked={checked}
+          onChange={e => onChange(e.target.checked)}
+          className='absolute inset-0 w-full h-full opacity-0 cursor-pointer m-0 p-0'
+        />
         {indeterminate ? (
           <svg
             viewBox='0 0 10 2'

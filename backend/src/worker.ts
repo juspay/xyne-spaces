@@ -182,6 +182,25 @@ class WorkerService {
         await etaDeadlineWorker.start();
       }
 
+      if (appConfig.enableAutomationWorker) {
+        logger.info('Initializing automations module...');
+        const { initializeAutomations } = await import('@/automations');
+        await initializeAutomations();
+        const { automationWorker } = await import('@/automations/queue/automation.worker');
+        logger.info('Starting automation run worker...');
+        await automationWorker.start();
+        const { automationScheduleWorker } = await import(
+          '@/automations/queue/automation-schedule.worker'
+        );
+        logger.info('Starting automation schedule worker...');
+        await automationScheduleWorker.start();
+        const { automationResumeWorker } = await import(
+          '@/automations/queue/automation-resume.worker'
+        );
+        logger.info('Starting automation resume worker...');
+        await automationResumeWorker.start();
+      }
+
       if (appConfig.enableEmailFetchWorker) {
         logger.info('Initializing notification service for email refetch worker...');
         await notificationService.initialize();

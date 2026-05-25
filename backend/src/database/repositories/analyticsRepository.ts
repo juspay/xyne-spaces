@@ -732,6 +732,7 @@ export class AnalyticsRepository {
       by: ['workflowType', 'status'],
       where: {
         createdAt: dateCondition,
+        NOT: { workflowType: 'Automations' },
       },
       _count: {
         id: true

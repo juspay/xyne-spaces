@@ -86,8 +86,12 @@ export async function collectSideEffectJobs(
         assignedTo: entity.assignedTo,
         stageName: entity.stageName,
         statusV2: entity.statusV2,
+        priority: entity.priority,
+        title: entity.title,
+        description: entity.description,
         eta: entity.eta,
         boardId: entity.boardId,
+        userGroupId: entity.userGroupId,
         createdBy: entity.createdBy,
         channelId: entity.channelId,
       };

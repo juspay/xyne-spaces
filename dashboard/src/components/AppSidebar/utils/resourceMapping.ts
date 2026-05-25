@@ -18,4 +18,5 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/workspace-management': 'WORKSPACE',
   '/organisations': 'ORGANIZATIONS',
   '/inspector': 'INSPECTOR',
+  '/automations': 'AUTOMATIONS',
 };

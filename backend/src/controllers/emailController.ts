@@ -347,6 +347,18 @@ export class EmailController {
       // Uses newEmail.createdAt so the timestamp matches the persisted email record.
       await emailService.recordFirstResponse(conversationId, newEmail.createdAt);
 
+      void (async (): Promise<void> => {
+        try {
+          const { emitEmailSent } = await import('@/automations/triggers/email-sent.trigger');
+          await emitEmailSent(newEmail.id);
+        } catch (err) {
+          logger.warn('[EmailController] emitEmailSent failed for reply', {
+            emailId: newEmail.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      })();
+
       // 7. Create ExternalMessage tracking record for deduplication.
       // Prevents the provider sync from re-creating an Email row for the
       // outbound message we just sent.

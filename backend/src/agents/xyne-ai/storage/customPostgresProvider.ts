@@ -99,51 +99,67 @@ export interface XyneAIMemoryProvider {
 }
 
 export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider> {
-  // Cache workflow IDs by name to avoid repeated DB lookups
   const workflowIdCache = new Map<string, string>();
+  const userWorkspaceCache = new Map<string, string>();
 
-  const getOrCreateWorkflow = async (workflowName: string): Promise<string> => {
-    const cached = workflowIdCache.get(workflowName);
+  const resolveWorkspaceId = async (userId: string): Promise<string> => {
+    const cached = userWorkspaceCache.get(userId);
+    if (cached) return cached;
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { workspaceId: true },
+    });
+    if (!user) {
+      throw new Error(`[XyneAIMemoryProvider] user ${userId} not found — cannot resolve workspace`);
+    }
+    userWorkspaceCache.set(userId, user.workspaceId);
+    return user.workspaceId;
+  };
+
+  const getOrCreateWorkflow = async (
+    workflowName: string,
+    workspaceId: string,
+  ): Promise<string> => {
+    const cacheKey = `${workflowName}::${workspaceId}`;
+    const cached = workflowIdCache.get(cacheKey);
     if (cached) return cached;
 
     const existing = await db.workflow.findFirst({
-      where: { workflowName },
+      where: { workflowName, workspaceId },
       select: { id: true },
     });
 
     if (existing) {
-      workflowIdCache.set(workflowName, existing.id);
+      workflowIdCache.set(cacheKey, existing.id);
       return existing.id;
     }
 
     const workflow = await db.workflow.create({
       data: {
         workflowName,
+        workspaceId,
         status: 'NEW',
       },
     });
 
     const id = workflow.id as string;
-    workflowIdCache.set(workflowName, id);
-    logger.info(`[XyneAIMemoryProvider] Created workflow '${workflowName}': ${id}`);
+    workflowIdCache.set(cacheKey, id);
+    logger.info(
+      `[XyneAIMemoryProvider] Created workflow '${workflowName}' for workspace ${workspaceId}: ${id}`,
+    );
     return id;
   };
 
-  /** Get or create the workflow for the given agent name. */
-  const getOrCreateAskAIWorkflow = (agentName?: string): Promise<string> =>
-    getOrCreateWorkflow(getWorkflowNameForAgent(agentName));
+  const getOrCreateAskAIWorkflow = async (
+    userId: string,
+    agentName?: string,
+  ): Promise<string> => {
+    const workspaceId = await resolveWorkspaceId(userId);
+    return getOrCreateWorkflow(getWorkflowNameForAgent(agentName), workspaceId);
+  };
 
   const initialize = async (): Promise<void> => {
-    try {
-      // Ensure workflow rows exist for every registered agent
-      await Promise.all(
-        [...AGENT_WORKFLOW_MAP.values()].map(name => getOrCreateWorkflow(name)),
-      );
-      logger.info('[XyneAIMemoryProvider] Initialized');
-    } catch (error) {
-      logger.error('[XyneAIMemoryProvider] Failed to initialize:', error);
-      throw error;
-    }
+    logger.info('[XyneAIMemoryProvider] Initialized');
   };
 
   const createSession = async (
@@ -153,7 +169,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     agentName?: string,
   ): Promise<SessionData> => {
     try {
-      const workflowId = await getOrCreateAskAIWorkflow(agentName);
+      const workflowId = await getOrCreateAskAIWorkflow(userId, agentName);
       const uuid = sessionId || randomUUID();
 
       const execution = await db.workflowExecution.create({
@@ -261,7 +277,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
 
   const getSessionsByUser = async (userId: string, conversationId?: string): Promise<SessionData[]> => {
     try {
-      const workflowId = await getOrCreateAskAIWorkflow();
+      const workflowId = await getOrCreateAskAIWorkflow(userId);
 
       const userMappings = await db.workflowExecutionUsers.findMany({
         where: { userId },
@@ -315,7 +331,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
 
   const getUserSessions = async (userId: string): Promise<SessionListItem[]> => {
     try {
-      const workflowId = await getOrCreateAskAIWorkflow();
+      const workflowId = await getOrCreateAskAIWorkflow(userId);
 
       // Find all session IDs for this user
       const userMappings = await db.workflowExecutionUsers.findMany({

@@ -1,0 +1,94 @@
+import type { AutomationContext } from '../types/context';
+import { tokenize, isPureRef, extractRefPath } from '../util/variable-ref';
+
+const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+function resolvePath(context: AutomationContext, path: string): unknown {
+  const segments = path.split('.');
+  if (segments.length === 0) return undefined;
+  if (segments.some(s => FORBIDDEN_KEYS.has(s))) return undefined;
+
+  const head = segments[0];
+  if (head === undefined) return undefined;
+  let current: unknown;
+  let rest: string[];
+  if (head === 'trigger' || head === 'automation') {
+    current = (context as unknown as Record<string, unknown>)[head];
+    rest = segments.slice(1);
+  } else {
+    current = context.steps[head];
+    rest = segments.slice(1);
+  }
+
+  for (const segment of rest) {
+    if (current === null || current === undefined) return undefined;
+    if (typeof current !== 'object') return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+export class VariableResolver {
+  resolve(value: unknown, context: AutomationContext): unknown {
+    if (typeof value === 'string') {
+      return this.resolveString(value, context);
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.resolve(item, context));
+    }
+
+    if (value !== null && typeof value === 'object') {
+      const resolved: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        resolved[k] = this.resolve(v, context);
+      }
+      return resolved;
+    }
+
+    return value;
+  }
+
+  resolveString(value: string, context: AutomationContext): unknown {
+    if (!value.includes('{{')) {
+      return value;
+    }
+
+    if (isPureRef(value)) {
+      const path = extractRefPath(value);
+      if (path === null) return value;
+      return resolvePath(context, path);
+    }
+
+    const tokens = tokenize(value);
+    let result = '';
+    for (const token of tokens) {
+      if (token.kind === 'literal') {
+        result += token.text;
+      } else {
+        const resolved = resolvePath(context, token.path);
+        result += stringifyForTemplate(resolved);
+      }
+    }
+    return result;
+  }
+}
+
+function stringifyForTemplate(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'object' && !(value instanceof Date)) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  if (typeof value === 'string') {
+    const encoded = JSON.stringify(value);
+    return encoded.slice(1, -1);
+  }
+  return String(value);
+}
+
+export const variableResolver = new VariableResolver();

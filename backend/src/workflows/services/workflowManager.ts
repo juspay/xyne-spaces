@@ -32,9 +32,15 @@ export class WorkflowManager {
     status: WorkflowExecutionStatus
   }> {
     try {
+      const ticket = await repositories.tickets.getTicketById(request.ticketId)
+      if (!ticket) {
+        throw new Error(`Ticket ${request.ticketId} not found`)
+      }
+
       // 1. Create Workflow record
       const workflow = await repositories.workflows.create({
         ticketId: request.ticketId,
+        workspaceId: ticket.workspaceId,
         workflowType: request.workflowType,
         status: WorkflowExecutionStatus.NEW,
         context: request.context ? JSON.stringify(request.context) : null,

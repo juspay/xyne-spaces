@@ -651,15 +651,32 @@ model TicketStageEta {
   @@schema("public")
 }
 
+enum WorkflowEventType {
+  NO_OP
+  TICKET_CREATED
+  TICKET_UPDATED
+  TICKET_COMMENTED
+  EMAIL_RECEIVED
+  EMAIL_SENT
+
+  @@schema("public")
+}
+
 model Workflow {
   id               String    @id @default(cuid())
   ticketId         String?   // Foreign key
+  workspaceId      String
   context          String? // Initial context for workflow (readonly input) - only for top-level workflows
   status           String    @default("NEW") // NEW/PENDING/SCHEDULED/SUCCESS/FAILURE/PAUSED/INTERACTIVE
   workflowName     String?
   metadata         String?
   configuration    String?
-  workflowType     String? // Only for top-level workflows - child executions store this in WorkflowExecution
+  workflowType     String?           // "Automations" for automation rows; null/other for legacy workflows
+  /// Trigger discriminator for automations. `NO_OP` for everything else so the
+  /// event router skips it. Indexed (eventType, status) for cheap "active
+  /// workflows for event X" lookups.
+  eventType        WorkflowEventType @default(NO_OP)
+  automationSeriesId String?
   scheduledAt      DateTime? // Do the deployment only after 12 AM
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -669,9 +686,13 @@ model Workflow {
   ticket             Ticket?             @relation(fields: [ticketId], references: [id])
 
   @@index([ticketId])
-
   @@index([ticketId, createdAt, id])
   @@index([createdAt(sort: Desc), id])
+  @@index([eventType, status])
+  @@index([workflowType, createdAt(sort: Desc), id])
+  @@index([automationSeriesId])
+  @@index([workspaceId, eventType, status])
+  @@index([workspaceId, workflowType, createdAt(sort: Desc)])
   @@map("workflows")
   @@schema("public")
 }
@@ -704,6 +725,7 @@ model WorkflowExecution {
   pullRequests            PullRequests[]
 
   @@index([workflowId])
+  @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
   @@map("workflow_executions")
   @@schema("public")
@@ -714,6 +736,7 @@ model WorkflowExecutionState {
   workflowExecutionId String  @unique
   context             String? // For child executions - initial context (JSON)
   output              String? // Execution-specific output (typed result)
+  currentStepIndex    Int     @default(0)
 
   @@index([workflowExecutionId])
   @@map("workflow_execution_states")
@@ -777,6 +800,7 @@ model WorkflowStep {
 
   @@index([stepSubType])
   @@index([workflowExecutionId])
+  @@unique([workflowExecutionId, stepName])
   @@map("workflow_steps")
   @@schema("workflow")
 }

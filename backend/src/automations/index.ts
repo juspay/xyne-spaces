@@ -1,0 +1,75 @@
+import { logger } from '@/utils/logger';
+import { triggerRegistry } from './triggers/trigger-registry';
+import { stepRegistry } from './steps/step-registry';
+
+import { ticketCreatedTrigger } from './triggers/ticket-created.trigger';
+import { ticketUpdatedTrigger } from './triggers/ticket-updated.trigger';
+import { emailReceivedTrigger } from './triggers/email-received.trigger';
+import { emailSentTrigger } from './triggers/email-sent.trigger';
+import { ticketCommentedTrigger } from './triggers/ticket-commented.trigger';
+
+import { conditionalStep } from './steps/conditional.step';
+
+import { sendMessageStep } from './steps/send-message.step';
+import { notifyUserStep } from './steps/notify-user.step';
+import { createTicketStep } from './steps/create-ticket.step';
+import { createSubTicketStep } from './steps/create-sub-ticket.step';
+import { updateTicketStep } from './steps/update-ticket.step';
+import { assignTicketStep } from './steps/assign-ticket.step';
+import { closeTicketStep } from './steps/close-ticket.step';
+import { changeStageStep } from './steps/change-stage.step';
+import { archiveTicketStep } from './steps/archive-ticket.step';
+import { sendEmailReplyStep } from './steps/send-email-reply.step';
+import { notifyGroupStep } from './steps/notify-group.step';
+import { updateTagsStep } from './steps/update-tags.step';
+import { assignTicketToGroupStep } from './steps/assign-ticket-to-group.step';
+import { triggerWebhookStep } from './steps/trigger-webhook.step';
+import { runAgentStep } from './steps/run-agent.step';
+
+import { automationQueue } from './queue/automation.queue';
+import { automationResumeQueue } from './queue/automation-resume.queue';
+
+let initialised = false;
+
+export async function initializeAutomations(): Promise<void> {
+  if (initialised) return;
+  initialised = true;
+
+  triggerRegistry.register(ticketCreatedTrigger);
+  triggerRegistry.register(ticketUpdatedTrigger);
+  triggerRegistry.register(emailReceivedTrigger);
+  triggerRegistry.register(emailSentTrigger);
+  triggerRegistry.register(ticketCommentedTrigger);
+
+  stepRegistry.register(conditionalStep);
+
+  stepRegistry.register(sendMessageStep);
+  stepRegistry.register(notifyUserStep);
+  stepRegistry.register(createTicketStep);
+  stepRegistry.register(createSubTicketStep);
+  stepRegistry.register(updateTicketStep);
+  stepRegistry.register(assignTicketStep);
+  stepRegistry.register(closeTicketStep);
+  stepRegistry.register(changeStageStep);
+  stepRegistry.register(archiveTicketStep);
+  stepRegistry.register(sendEmailReplyStep);
+  stepRegistry.register(notifyGroupStep);
+  stepRegistry.register(updateTagsStep);
+  stepRegistry.register(assignTicketToGroupStep);
+  stepRegistry.register(triggerWebhookStep);
+  stepRegistry.register(runAgentStep);
+
+  await automationQueue.initialize();
+  await automationResumeQueue.initialize();
+
+  logger.info(
+    `[automations] Initialised — triggers=${triggerRegistry.list().length}, steps=${stepRegistry.list().length}`,
+  );
+}
+
+export { automationQueue } from './queue/automation.queue';
+export { triggerRegistry } from './triggers/trigger-registry';
+export { stepRegistry } from './steps/step-registry';
+export { eventRouter } from './engine/event-router';
+export { automationService } from './services/automation.service';
+export { default as automationRoutes } from './routes/automation.routes';

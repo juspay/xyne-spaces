@@ -37,7 +37,12 @@ const ESSENTIAL_RESOURCES = [
   { name: 'WORKSPACE', description: 'Workspace management access' },
   { name: 'ORGANIZATIONS', description: 'Organization management access' },
   { name: 'INSPECTOR', description: 'Inspector panel access (/inspector)' },
-  { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'}
+  { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'},
+  {
+    name: 'AUTOMATIONS',
+    description:
+      'Automation approval and on/off control (/api/automations/*). ADMIN access lets a user approve/reject proposals and toggle live automations on/off.',
+  },
 ];
 
 // Default user groups with their permissions
@@ -72,6 +77,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'CANVASES', accessType: AccessType.WRITE },
       { resourceName: 'WORKSPACE', accessType: AccessType.WRITE },
       { resourceName: 'ORGANIZATIONS', accessType: AccessType.READ },
+      { resourceName: 'AUTOMATIONS', accessType: AccessType.WRITE },
     ]
   },
   {
@@ -93,6 +99,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'CHANNELS', accessType: AccessType.READ },
       { resourceName: 'CANVASES', accessType: AccessType.READ },
       { resourceName: 'WORKSPACE', accessType: AccessType.READ },
+      { resourceName: 'AUTOMATIONS', accessType: AccessType.READ },
     ]
   }
 ];
