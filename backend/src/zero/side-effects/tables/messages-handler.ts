@@ -136,7 +136,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const [channel, sender, channelParticipantsRaw] = await Promise.all([
       db.channel.findUnique({
         where: { id: channelId },
-        select: { name: true, scopeType: true, projectId: true }
+        select: { name: true, scopeType: true, projectId: true, project: { select: { name: true } } }
       }),
       db.user.findUnique({
         where: { id: senderId },
@@ -285,6 +285,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         channelId,
         channelName: channel?.name ?? channelId,
+        ...(channel?.projectId ? { projectId: channel.projectId } : {}),
+        ...(channel?.project?.name ? { projectName: channel.project.name } : {}),
         ...(attachments.length > 0 && {
           attachments: attachments.map(att => ({
             attachmentId: att.id,
@@ -314,6 +316,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         channelId,
         channelName: channel?.name ?? channelId,
+        ...(channel?.projectId ? { projectId: channel.projectId } : {}),
+        ...(channel?.project?.name ? { projectName: channel.project.name } : {}),
         mentionedUserIds: nonAppMentionedUserIds,
       }, observerAppUserIds);
     }

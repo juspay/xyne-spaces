@@ -58,6 +58,8 @@ export interface AppMentionEventPayload {
     senderName?: string;
     channelId: string;
     channelName?: string;
+    projectId?: string;
+    projectName?: string;
     attachments?: AppEventAttachment[];
     metadata?: Record<string, unknown>;
 }
@@ -75,6 +77,8 @@ export interface DMEventPayload {
     senderName?: string;
     channelId: string;
     channelName?: string;
+    projectId?: string;
+    projectName?: string;
     attachments?: AppEventAttachment[];
     metadata?: Record<string, unknown>;
 }
@@ -93,6 +97,8 @@ export interface UserMentionedEventPayload {
     senderName?: string;
     channelId: string;
     channelName?: string;
+    projectId?: string;
+    projectName?: string;
     mentionedUserIds: string[];
     metadata?: Record<string, unknown>;
 }
