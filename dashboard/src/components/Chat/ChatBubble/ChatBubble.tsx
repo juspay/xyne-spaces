@@ -19,6 +19,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   MessageType,
   BookmarkEntityType,
+  ChannelType,
   ChannelScopeType,
   parseForwardedMessageXml,
   parsePreviewMd,
@@ -694,27 +695,35 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   };
 
   const handleMarkAsUnread = (): void => {
-    // Prevent parent component from marking as read on unmount
-    setSkipMarkAsRead(true);
-    // Prevent scroll position from resetting when lastViewedAt changes
-    // setSkipScrollReset(true);
-
     try {
-      void zero.mutate(
-        mutators.channel.markChannelUnreadFrom({
-          channelId,
-          messageId: message.messageId,
-          conversationId: message.conversationId,
-          timestamp: Date.now(),
-        }),
-      );
+      if (context === 'thread') {
+        // Prevent thread panel from marking as read on unmount
+        setSkipMarkAsRead(true);
+        void zero.mutate(
+          mutators.conversation.markThreadUnreadFrom({
+            conversationId: message.conversationId,
+            messageId: message.messageId,
+            participantId: crypto.randomUUID(),
+            timestamp: Date.now(),
+          }),
+        );
+      } else {
+        // Prevent parent component from marking as read on unmount
+        setSkipMarkAsRead(true);
+        void zero.mutate(
+          mutators.channel.markChannelUnreadFrom({
+            channelId,
+            messageId: message.messageId,
+            conversationId: message.conversationId,
+            timestamp: Date.now(),
+          }),
+        );
+      }
       toast.success('Marked as unread');
     } catch (error) {
       console.error('Failed to mark as unread:', error);
       toast.error('Failed to mark as unread. Please try again.');
-      // Reset the skip flags since the operation failed
       setSkipMarkAsRead(false);
-      // setSkipScrollReset(false);
     }
   };
 
@@ -857,7 +866,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   // Check if mark as unread should be shown
   const shouldShowMarkAsUnread =
-    context === 'channel' && !isSystemMessage && !isMessageDeleted && !isTicketCreationMessage;
+    !isSystemMessage &&
+    !isMessageDeleted &&
+    !isTicketCreationMessage &&
+    channel?.type !== ChannelType.EMAIL &&
+    channel?.type !== ChannelType.SUPPORT &&
+    (context === 'channel' || context === 'thread');
 
   const shouldEnableMobileThreadOpen =
     isMobile &&

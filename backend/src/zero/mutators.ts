@@ -2480,6 +2480,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             message.hasAttachment = draftAttachments.length > 0;
           }
 
+          // Update sender's lastReadAt BEFORE inserting the message so Zero's reactive
+          // store has the updated value in the same cycle as (or before) the message
+          // appears — preventing the "New Messages" banner from flashing on the sender's
+          // own message.
+          const existingParticipantForLastRead = await tx.run(zql.conversation_participants
+            .where('conversationId', conversationId)
+            .where('userId', authData.sub)
+            .one());
+
+          if (existingParticipantForLastRead) {
+            await tx.mutate.conversation_participants.update({
+              id: existingParticipantForLastRead.id,
+              lastReadAt: timestamp,
+            });
+          }
+
           await tx.mutate.messages.insert(message);
           logger.info(`💬 [MUTATOR-CREATE-REPLY] Reply message ${message.messageId} created in conversation ${conversationId}, type: ${type}`);
 
@@ -2578,7 +2594,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Auto-reopen DMs for all participants when a new message is sent
           await reopenClosedDmParticipants(tx, channel.id, channel.scopeType, timestamp);
 
-          // Add or upgrade sender as AUTHOR participant in conversation
+          // Add or upgrade sender as AUTHOR participant in conversation.
+          // lastReadAt is already updated before messages.insert above; here we only
+          // handle participationType promotion and new participant insertion.
           const existingParticipant = await tx.run(zql.conversation_participants
             .where('conversationId', conversationId)
             .where('userId', authData.sub)
@@ -2592,8 +2610,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 participationType: ConversationParticipation.AUTHOR,
               });
             }
+            // lastReadAt already updated before messages.insert — no duplicate write needed
           } else {
-            // Add as new AUTHOR participant
+            // Add as new AUTHOR participant (lastReadAt set here since the early block
+            // only updates existing participants)
             await tx.mutate.conversation_participants.insert({
               id: uuidv4(),
               conversationId,
@@ -2602,6 +2622,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               isSubscribed: true,
               joinedAt: timestamp,
             lastReplyAt: timestamp,
+              lastReadAt: timestamp,
               channelId: conversation.channelId,
             });
           }
@@ -4351,6 +4372,108 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 isRead: true,
               })
             ));
+          }
+        },
+      ),
+    },
+    conversation: {
+      markThreadUnreadFrom: defineMutator(
+        z.object({
+          conversationId: z.string(),
+          messageId: z.string(),
+          participantId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { conversationId, messageId, participantId, timestamp } }) => {
+          // Fetch the conversation
+          const conversation = await tx.run(
+            zql.conversations.where('conversationId', conversationId).one(),
+          );
+          if (!conversation) {
+            logger.warn('[markThreadUnreadFrom] Conversation not found', { conversationId });
+            return;
+          }
+
+          // Resolve the target message
+          let message = await tx.run(zql.messages.where('messageId', messageId).one());
+          if (!message) {
+            logger.warn('[markThreadUnreadFrom] Message not found', { messageId });
+            return;
+          }
+
+          // If root message selected in thread, start from the first reply instead
+          if (messageId === conversation.initialMessageId) {
+            const firstReplies = await tx.run(
+              zql.messages
+                .where('conversationId', conversationId)
+                .where('messageId', '!=', conversation.initialMessageId)
+                .orderBy('createdAt', 'asc')
+                .limit(1),
+            );
+            if (!firstReplies[0]) return; // no replies yet, nothing to mark
+            message = firstReplies[0];
+          }
+
+          const newLastReadAt = message.createdAt - 1;
+
+          // Upsert conversation_participants.lastReadAt
+          const existingParticipant = await tx.run(
+            zql.conversation_participants
+              .where('conversationId', conversationId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+
+          if (!existingParticipant) {
+            await tx.mutate.conversation_participants.insert({
+              id: participantId,
+              conversationId,
+              userId: authData.sub,
+              joinedAt: timestamp,
+              channelId: conversation.channelId,
+              lastReadAt: newLastReadAt,
+              lastReplyAt: conversation.lastActivityAt,
+              isSubscribed: true,
+              participationType: null,
+            });
+          } else {
+            await tx.mutate.conversation_participants.update({
+              id: existingParticipant.id,
+              lastReadAt: newLastReadAt,
+            });
+          }
+
+          // Fetch all messages in the thread at/after the selected message,
+          // then find activities pointing to those messages (mirrors markThreadActivitiesAsReadV2).
+          // Using messageId IN avoids the replied_v2 createdAt staleness issue.
+          const messagesAtOrAfter = await tx.run(
+            zql.messages
+              .where('conversationId', conversationId)
+              .where('createdAt', '>=', message.createdAt),
+          );
+          const messageIds = messagesAtOrAfter.map(m => m.messageId);
+
+          const threadActivities = messageIds.length > 0
+            ? await tx.run(
+                zql.activities
+                  .where('userId', authData.sub)
+                  .where('messageId', 'IN', messageIds),
+              )
+            : [];
+
+          logger.info('[markThreadUnreadFrom] Thread activities to mark unread', {
+            conversationId,
+            messageId,
+            count: threadActivities.length,
+          });
+
+          // Mark activities as unread sequentially
+          const activitiesToMarkUnread = threadActivities.filter(a => a.isRead);
+          for (const activity of activitiesToMarkUnread) {
+            await tx.mutate.activities.update({
+              id: activity.id,
+              isRead: false,
+            });
           }
         },
       ),
