@@ -38,8 +38,10 @@ export class GoogleFlow extends BaseFlow {
 
       const messageData = await googleService.getMessageById(messageId);
       if (!messageData) {
-        logger.error(`${TAG} Failed to fetch message data`);
-        return { authenticated: false };
+        // Message vanished between Gmail's Pub/Sub publish and our fetch (404).
+        // Skip-ack so Pub/Sub drops it instead of retrying for 7 days.
+        logger.warn(`${TAG} skipping vanished message ${messageId}`);
+        return { __skipIngestion: true, __skipReason: `message-not-found:${messageId}` };
       }
 
       const parsedEmail = googleService.parseEmailData(messageData);
@@ -69,8 +71,10 @@ export class GoogleFlow extends BaseFlow {
       const pubsubData = this.decodePubSub(payload);
       if (!pubsubData?.emailAddress) return undefined;
 
-      const username = pubsubData.emailAddress.split('@')[0].replace(/\./g, '-');
-      return `google-${username}`;
+      // Must use the same normalizer as GoogleService.getSourceName so the
+      // resolved name always matches the ExternalSource.name stored at setup.
+      // Otherwise emails with '+' or other chars route to a nonexistent row.
+      return GoogleService.getSourceName(pubsubData.emailAddress);
     } catch (error) {
       logger.error(`${TAG} Error determining source name`, error);
       return undefined;
