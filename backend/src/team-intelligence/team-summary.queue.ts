@@ -87,6 +87,7 @@ class TeamIntelligenceTeamSummaryQueue {
     logger.info('[TEAM-INTEL-TEAM-QUEUE] Enqueued team summary job', {
       batchId: data.batchId,
       teamSummaryId: data.teamSummaryId,
+      teamId: data.teamId,
       teamName: data.teamName,
     });
 

@@ -25,6 +25,7 @@ export interface CreateTeamIntelligenceUserData {
   source: string;
   userEmail: string;
   userName: string;
+  teamId: string | null;
   teamName: string | null;
   pullRequests: Prisma.InputJsonValue;
   soloCommits: Prisma.InputJsonValue;
@@ -50,6 +51,7 @@ export interface CreateTeamIntelligenceTeamSummaryData {
   batchId: string;
   reportDate: Date;
   source: string;
+  teamId?: string | null;
   teamName: string;
   idempotencyKey: string;
   totalUsers: number;
@@ -219,12 +221,14 @@ class TeamIntelligenceRepository {
 
   async findUsersByBatchAndTeam(
     batchId: string,
+    teamId: string | null,
     teamName: string,
     statuses?: TeamIntelligenceUserIngestionStatus[]
   ): Promise<TeamIntelligenceUserIngestion[]> {
     return await this.prisma.teamIntelligenceUserIngestion.findMany({
       where: {
         batchId,
+        teamId,
         teamName,
         ...(statuses ? { processingStatus: { in: statuses } } : {}),
       },
@@ -253,14 +257,14 @@ class TeamIntelligenceRepository {
 
   async findTeamSummaryByBatchAndTeam(
     batchId: string,
+    teamId: string | null,
     teamName: string
   ): Promise<TeamIntelligenceTeamSummary | null> {
-    return await this.prisma.teamIntelligenceTeamSummary.findUnique({
+    return await this.prisma.teamIntelligenceTeamSummary.findFirst({
       where: {
-        batchId_teamName: {
-          batchId,
-          teamName,
-        },
+        batchId,
+        teamId,
+        teamName,
       },
     });
   }
@@ -464,14 +468,15 @@ class TeamIntelligenceRepository {
     });
   }
 
-  async getTeamProgress(batchId: string, teamName: string): Promise<TeamIntelligenceTeamProgress> {
+  async getTeamProgress(batchId: string, teamId: string | null, teamName: string): Promise<TeamIntelligenceTeamProgress> {
     const [totalUsers, completedUsers, failedUsers] = await this.prisma.$transaction([
       this.prisma.teamIntelligenceUserIngestion.count({
-        where: { batchId, teamName },
+        where: { batchId, teamId, teamName },
       }),
       this.prisma.teamIntelligenceUserIngestion.count({
         where: {
           batchId,
+          teamId,
           teamName,
           processingStatus: TeamIntelligenceUserIngestionStatus.COMPLETED,
         },
@@ -479,6 +484,7 @@ class TeamIntelligenceRepository {
       this.prisma.teamIntelligenceUserIngestion.count({
         where: {
           batchId,
+          teamId,
           teamName,
           processingStatus: TeamIntelligenceUserIngestionStatus.FAILED,
         },

@@ -122,6 +122,7 @@ function canonicalizeUserForHash(user: TeamIntelligenceUserInput): Record<string
   return {
     userEmail: normalizeEmail(user.userEmail),
     userName: user.userName.trim(),
+    teamId: user.teamId?.trim() || null,
     teamName: user.teamName?.trim() || null,
     source: (user.source ?? 'mettle').trim(),
     pullRequests,
@@ -247,6 +248,7 @@ class TeamIntelligenceService {
       source: user.source,
       userEmail: user.userEmail,
       userName: user.userName,
+      teamId: user.teamId,
       teamName: user.teamName,
       pullRequests: user.pullRequests as unknown as Prisma.InputJsonValue,
       soloCommits: user.soloCommits as unknown as Prisma.InputJsonValue,
@@ -275,6 +277,7 @@ class TeamIntelligenceService {
     return {
       userEmail: normalizeEmail(user.userEmail),
       userName: user.userName.trim(),
+      teamId: user.teamId?.trim() || null,
       teamName: user.teamName?.trim() || null,
       source: resolvedSource,
       pullRequests,
@@ -307,6 +310,7 @@ class TeamIntelligenceService {
           reportDate: batchWithUsers.batch.reportDate.toISOString().slice(0, 10),
           userEmail: user.userEmail,
           userName: user.userName,
+          teamId: user.teamId,
           teamName: user.teamName,
           source,
         });

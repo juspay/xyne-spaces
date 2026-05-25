@@ -157,6 +157,7 @@ class TeamIntelligenceWorker {
         reportDate: user.reportDate.toISOString().slice(0, 10),
         userEmail: user.userEmail,
         userName: user.userName,
+        teamId: user.teamId,
         teamName: user.teamName,
         source: user.source,
       });
@@ -236,6 +237,7 @@ class TeamIntelligenceWorker {
         batchId: teamSummary.batchId,
         teamSummaryId: teamSummary.id,
         reportDate: teamSummary.reportDate.toISOString().slice(0, 10),
+        teamId: teamSummary.teamId,
         teamName: teamSummary.teamName,
         source: teamSummary.source,
       });
@@ -401,6 +403,7 @@ class TeamIntelligenceWorker {
       await this.triggerTeamSummaryIfReady({
         batchId,
         reportDate: userIngestion.reportDate,
+        teamId: userIngestion.teamId,
         teamName: userIngestion.teamName,
         source: userIngestion.source,
       });
@@ -426,6 +429,7 @@ class TeamIntelligenceWorker {
     await this.triggerTeamSummaryIfReady({
       batchId: data.batchId,
       reportDate: new Date(`${data.reportDate}T00:00:00.000Z`),
+      teamId: data.teamId,
       teamName: data.teamName,
       source: data.source,
     });
@@ -456,6 +460,7 @@ class TeamIntelligenceWorker {
 
       const completedUsers = await teamIntelligenceRepository.findUsersByBatchAndTeam(
         batchId,
+        teamSummary.teamId,
         teamSummary.teamName,
         [TeamIntelligenceUserIngestionStatus.COMPLETED]
       );
@@ -472,6 +477,7 @@ class TeamIntelligenceWorker {
           userId: user.id,
           userEmail: user.userEmail,
           userName: user.userName,
+          teamId: user.teamId,
           teamName: user.teamName ?? teamSummary.teamName,
           source: user.source,
           pullRequests: user.pullRequests as unknown as [],
@@ -604,25 +610,28 @@ class TeamIntelligenceWorker {
   private async triggerTeamSummaryIfReady(input: {
     batchId: string;
     reportDate: Date;
+    teamId: string | null;
     teamName: string | null;
     source: string;
   }): Promise<void> {
     const teamName = input.teamName?.trim() || 'No Team';
-    const progress = await teamIntelligenceRepository.getTeamProgress(input.batchId, teamName);
+    const teamId = input.teamId?.trim() || null;
+    const progress = await teamIntelligenceRepository.getTeamProgress(input.batchId, teamId, teamName);
     const terminalUsers = progress.completedUsers + progress.failedUsers;
 
     if (progress.totalUsers === 0 || terminalUsers !== progress.totalUsers) {
       return;
     }
 
-    let teamSummary = await teamIntelligenceRepository.findTeamSummaryByBatchAndTeam(input.batchId, teamName);
+    let teamSummary = await teamIntelligenceRepository.findTeamSummaryByBatchAndTeam(input.batchId, teamId, teamName);
     if (!teamSummary) {
       teamSummary = await teamIntelligenceRepository.createTeamSummary({
         batchId: input.batchId,
         reportDate: input.reportDate,
         source: input.source,
+        teamId,
         teamName,
-        idempotencyKey: `team-intelligence-team:${input.batchId}:${teamName}:${input.reportDate.toISOString().slice(0, 10)}`,
+        idempotencyKey: `team-intelligence-team:${input.batchId}:${teamId ?? 'null'}:${teamName}:${input.reportDate.toISOString().slice(0, 10)}`,
         totalUsers: progress.totalUsers,
         completedUsers: progress.completedUsers,
         failedUsers: progress.failedUsers,
@@ -653,6 +662,7 @@ class TeamIntelligenceWorker {
       batchId: input.batchId,
       teamSummaryId: teamSummary.id,
       reportDate: input.reportDate.toISOString().slice(0, 10),
+      teamId,
       teamName,
       source: input.source,
     });

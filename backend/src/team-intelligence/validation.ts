@@ -44,6 +44,7 @@ const TeamIntelligenceAiUsageSchema = z.object({
 const TeamIntelligenceUserSchema = z.object({
   userEmail: z.string().email(),
   userName: z.string().min(1),
+  teamId: z.string().optional(),
   teamName: z.string().optional(),
   source: z.string().optional(),
   pullRequests: z.array(TeamIntelligencePullRequestSchema).default([]),
