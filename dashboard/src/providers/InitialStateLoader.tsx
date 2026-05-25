@@ -380,7 +380,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     ttl: '10m',
   });
   const [visibleChannels, visibleChannelsDetails] = useCachedQuery(
-    queries.userVisibleChannelsV2(),
+    queries.userVisibleChannelsV3(),
     {
       ttl: '10m',
     },
