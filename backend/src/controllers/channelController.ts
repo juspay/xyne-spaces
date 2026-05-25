@@ -252,7 +252,8 @@ export class ChannelController {
           senderId,
           senderInfo.name,
           cleanContent,
-          workspaceId
+          workspaceId,
+          channelParticipants.length === 2 ? ChannelScopeType.DM : ChannelScopeType.GROUP_DM
         );
 
         // Update unread counts for recipients (skip for self-DMs)
@@ -600,7 +601,8 @@ export class ChannelController {
           senderId,
           senderInfo.name,
           cleanContent,
-          workspaceId
+          workspaceId,
+          channelParticipants.length === 2 ? ChannelScopeType.DM : ChannelScopeType.GROUP_DM
         );
 
         // Update unread counts for recipients (skip for self-DMs)

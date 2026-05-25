@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { notificationService } from '@/services/notificationService';
+import { unreadService } from '@/services/unreadService';
 import { apnsService } from '@/services/apnsService';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
@@ -217,8 +218,17 @@ export class NotificationController {
       }
 
       const notificationId = req.params.id;
+      const { channelId, conversationId } = req.body;
 
       await notificationService.markAsRead(notificationId, userId);
+
+      if (typeof channelId === 'string' && channelId.length > 0) {
+        await unreadService.markChannelAsViewed(channelId, userId);
+      }
+
+      if (typeof conversationId === 'string' && conversationId.length > 0) {
+        await unreadService.markThreadAsViewed(conversationId, userId);
+      }
 
       res.json({ success: true });
     } catch (error) {

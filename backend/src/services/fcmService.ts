@@ -5,6 +5,7 @@ import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { redisService } from './redisService';
+import { sendLocalIosPush } from './localIosPush';
 import { Prisma, SessionStatus } from '@prisma/client';
 
 type CachedAccessToken = {
@@ -542,6 +543,12 @@ class FcmPushService {
   }
 
   private async dispatchToFcm(token: string, payload: FcmNotificationPayload, platform?: string, appVersion?: string): Promise<void> {
+    const isSilent = payload.type === 'THREAD_READ' || payload.type === 'CHANNEL_READ';
+    if (config.env === 'development' && platform === 'ios') {
+      await sendLocalIosPush(payload, this.buildDataPayload(payload, isSilent));
+      return;
+    }
+
     const useNew = platform && shouldUseNewFcmCredentials(platform, appVersion);
     const manager = useNew ? this.accessTokenManagerNew : this.accessTokenManager;
     const pid = useNew ? this.projectIdNew : this.projectId;
@@ -558,11 +565,11 @@ class FcmPushService {
       }
       : undefined;
 
-    const apns = this.buildApnsPayload(payload);
+    const apns = this.buildApnsPayload(payload, isSilent);
     const requestBody = {
       message: {
         token,
-        data: this.buildDataPayload(payload),
+        data: this.buildDataPayload(payload, isSilent),
         android: {
           priority: 'high',
           ttl: '86400s',
@@ -604,14 +611,16 @@ class FcmPushService {
     }
   }
 
-  private buildDataPayload(payload: FcmNotificationPayload): Record<string, string> {
+  private buildDataPayload(payload: FcmNotificationPayload, isSilent: boolean): Record<string, string> {
     const data: Record<string, string> = {
       type: payload.type,
-      msg_title: payload.title,
-      msg_body: payload.message,
       category: payload.type,
     };
 
+    if(!isSilent) {
+      data.msg_title = payload.title;
+      data.msg_body = payload.message;
+    }
     if (payload.notificationId) data.notificationId = payload.notificationId;
     if (payload.actionUrl) data.actionUrl = payload.actionUrl;
     if (payload.actionUrl) data.deeplink = payload.actionUrl;
@@ -623,7 +632,7 @@ class FcmPushService {
     return data;
   }
 
-  private buildApnsPayload(payload: FcmNotificationPayload): {
+  private buildApnsPayload(payload: FcmNotificationPayload, isSilent: boolean): {
     headers: Record<string, string>;
     payload: { aps: Record<string, unknown> };
   } {
@@ -632,7 +641,7 @@ class FcmPushService {
         'apns-priority': '10',
       },
       payload: {
-        aps: {
+        aps: isSilent ? { 'content-available': 1 } : {
           alert: {
             title: payload.title,
             body: payload.message,

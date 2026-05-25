@@ -81,6 +81,12 @@ export const NotificationHandler: React.FC = () => {
   const handleNotification = useCallback(
     (data: NotificationData): void => {
       try {
+        // Skip silent data-only notifications meant for mobile tray clearing
+        const type = data.notification?.type?.toLowerCase();
+        if (type === 'channel_read' || type === 'thread_read') {
+          return;
+        }
+
         // For canvas notifications, construct actionUrl from data if not provided
         const canvasRedirectUrl =
           !data.notification.actionUrl && data.notification.data?.canvasId

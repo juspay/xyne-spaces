@@ -1,9 +1,59 @@
 import { DatabaseClient } from '@/database/client';
 import {logger} from '@/utils/logger';
+import { notificationService } from './notificationService';
+import { NotificationType } from '@prisma/client';
 
 const prisma = DatabaseClient.getInstance();
 
 export class UnreadService {
+  async markThreadAsViewed(
+    conversationId: string,
+    userId: string
+  ): Promise<void> {
+    try {
+      const viewedAt = new Date();
+
+      const conversation = await prisma.conversation.findUnique({
+        where: { conversationId },
+        select: { channelId: true, initialMessageId: true }
+      });
+
+      if (!conversation) {
+        logger.warn(`Cannot mark thread as viewed: conversation ${conversationId} not found`);
+        return;
+      }
+
+      await prisma.conversationParticipant.update({
+        where: {
+          conversationId_userId: { conversationId, userId }
+        },
+        data: {
+          lastReadAt: viewedAt,
+        }
+      });
+      await prisma.activity.updateMany({
+        where: {
+          userId,
+          conversationId,
+          isRead: false,
+        }, data: {
+          isRead: true,
+          updatedAt: new Date().toISOString(),
+        }
+      });
+
+      await notificationService.createNotification(userId, {
+        title: 'Silent notification',
+        message: 'silent notification',
+        type: NotificationType.THREAD_READ,
+        metadata: { conversationId }
+      }, { sendDesktop: true, sendMobile: true, isSilent: true });
+    } catch (error) {
+      logger.error('Error marking thread as viewed:', error);
+      throw error;
+    }
+  }
+
   async getUnreadCountForChannel(channelId: string, userId: string): Promise<number> {
 
     try {
@@ -38,7 +88,7 @@ export class UnreadService {
   async markChannelAsViewed(
     channelId: string,
     userId: string,
-    conversationId?: string // ✅ Now optional
+    conversationId?: string 
   ): Promise<void> {
     try {
       const viewedAt = new Date();
@@ -51,6 +101,16 @@ export class UnreadService {
         take: 25,
         select: { createdAt: true },
       });
+      await prisma.activity.updateMany({
+        where: {
+          userId,
+          channelId,
+          isRead: false,
+        }, data: {
+          isRead: true,
+          updatedAt: new Date().toISOString(),
+        }
+      });
       const conversationSeenCutoffAt =
         seenConversations[seenConversations.length - 1]?.createdAt ?? viewedAt;
 
@@ -59,10 +119,12 @@ export class UnreadService {
         conversationSeenCutoffAt: Date;
         lastViewedConversationId?: string;
         updatedAt: Date;
+        unreadCount: number;
       } = {
         lastViewedAt: viewedAt,
         conversationSeenCutoffAt,
         updatedAt: viewedAt,
+        unreadCount: 0,
       };
 
       if (conversationId) {
@@ -75,6 +137,14 @@ export class UnreadService {
         },
         data: updateData
       });
+      await notificationService.createNotification(userId, {
+        title: 'Silent notification', 
+        message: 'silent notification',
+        type: NotificationType.CHANNEL_READ,
+        metadata: {
+          channelId: channelId,
+        }
+      }, { sendDesktop: true, sendMobile: true, isSilent: true });
     } catch (error) {
       logger.error('Error marking channel as viewed:', error);
       throw error;

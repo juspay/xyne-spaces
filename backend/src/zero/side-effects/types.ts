@@ -55,6 +55,19 @@ export interface EmailReadPreviousValue {
   lastReadEmailId: string;
 }
 
+export interface ChannelUserStatusPreviousValue {
+  lastViewedAt: number | null;
+  unreadCount: number;
+  channelId: string;
+  userId: string;
+}
+
+export interface ConversationParticipantPreviousValue {
+  lastReadAt: number | null;
+  conversationId: string;
+  userId: string;
+}
+
 export type PreviousValue =
   | ConversationPreviousValue
   | TicketPreviousValue
@@ -64,7 +77,9 @@ export type PreviousValue =
   | TicketTagPreviousValue
   | DelayedMessagePreviousValue
   | ChannelPreviousValue
-  | EmailReadPreviousValue;
+  | EmailReadPreviousValue
+  | ChannelUserStatusPreviousValue
+  | ConversationParticipantPreviousValue;
 
 export interface SideEffectJobConfig {
   entityType: TableName;
@@ -95,6 +110,8 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   delayed_messages: ['insert', 'update', 'delete'],
   channels: ['update'],
   email_reads: ['insert', 'update'],
+  channel_user_status: ['update'],
+  conversation_participants: ['update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {
