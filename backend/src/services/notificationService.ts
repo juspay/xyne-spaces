@@ -10,7 +10,7 @@ import {
   createTag,
 } from '@/bots/json-ui';
 import type { FlowJson } from '@/bots/json-ui/types';
-import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
+import { ChannelScopeType, NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { notificationService as realTimeNotificationService } from '@/notification-service';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
@@ -719,7 +719,7 @@ class NotificationService {
   async createNotification(
     userId: string,
     data: NotificationData,
-    { sendDesktop, sendMobile }: { sendDesktop: boolean; sendMobile: boolean } = { sendDesktop: true, sendMobile: true }
+    { sendDesktop, sendMobile, isSilent }: { sendDesktop: boolean; sendMobile: boolean, isSilent?: boolean } = { sendDesktop: true, sendMobile: true, isSilent: false }
   ): Promise<{ deliveredViaApp: boolean }> {
     let deliveredViaApp = false;
 
@@ -744,32 +744,38 @@ class NotificationService {
 
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
-            const isDirectMessageType = typeof data.type === 'string' && data.type.toUpperCase() === 'DIRECT_MESSAGE';
-            const mobileTitle = isDirectMessageType ? (data.metadata?.senderName ?? data.title) : data.title;
 
             for (const session of sessions) {
               const deliveryMethod = session.platform === 'ios'
                 ? NotificationDeliveryMethod.IOS
                 : NotificationDeliveryMethod.ANDROID;
 
-              const sessionNotification = await this.createSessionNotification(
-                userId,
-                data,
-                deliveryMethod
-              );
-
-              const mobilePayload = {
-                type: data.type,
-                title: mobileTitle,
-                message: data.message,
-                notificationId: sessionNotification.id,
-                actionUrl: data.actionUrl,
-                relatedEntityType: data.relatedEntityType,
-                relatedEntityId: data.relatedEntityId,
-                metadata: data.metadata,
-              };
-
-              await realTimeNotificationService.queueMobilePush(userId, session, mobilePayload);
+              if(!isSilent){
+                const sessionNotification = await this.createSessionNotification(
+                  userId,
+                  data,
+                  deliveryMethod
+                );
+                const mobilePayload = {
+                  type: data.type,
+                  title: data.title,
+                  message: data.message,
+                  notificationId: sessionNotification.id,
+                  actionUrl: data.actionUrl,
+                  relatedEntityType: data.relatedEntityType,
+                  relatedEntityId: data.relatedEntityId,
+                  metadata: data.metadata,
+                };
+                await realTimeNotificationService.queueMobilePush(userId, session, mobilePayload);
+              } else {
+                await realTimeNotificationService.queueMobilePush(userId, session, {
+                  type: data.type,
+                  title: data.title,
+                  message: data.message,
+                  relatedEntityId: data.relatedEntityId,
+                  metadata: data.metadata,
+                });
+              }
             }
             logger.info(`[NOTIFICATION-SERVICE] MOBILE QUEUED: ${sessions.length} sessions for user ${userId}`);
 
@@ -832,6 +838,7 @@ class NotificationService {
     senderName: string,
     cleanContent: string,
     workspaceId: string,
+    senderPicture: string = '',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
@@ -859,8 +866,8 @@ class NotificationService {
     });
 
     const notificationData = {
-      title: `New message in ${channelName}`,
-      message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
+      title: `New message in #${channelName}`,
+      message: `${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
       type: NotificationType.CHANNEL_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
@@ -871,6 +878,7 @@ class NotificationService {
         messageId,
         senderId,
         senderName,
+        senderPicture,
         channelTitle: channelName,
         messageType: 'channel_message',
       },
@@ -930,11 +938,12 @@ class NotificationService {
     workspaceId: string,
     mentionType?: string,
     isDMChannel: boolean = false,
-    isThreadMessage: boolean = false
+    isThreadMessage: boolean = false,
+    senderPicture: string = '',
   ): Promise<{ deliveredUserIds: string[] }> {
     const title = mentionType
-      ? `${mentionType} in ${channelName}`
-      : `You were mentioned in ${channelName}`;
+      ? `${mentionType} in #${channelName}`
+      : `You were mentioned in #${channelName}`;
 
     const recipientIds = userIds.filter(id => id !== senderId);
 
@@ -966,7 +975,7 @@ class NotificationService {
       : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
     const notificationData = {
       title,
-      message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
+      message: `${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
       type: NotificationType.MENTION,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
@@ -977,6 +986,7 @@ class NotificationService {
         messageId,
         senderId,
         senderName,
+        senderPicture,
         channelTitle: channelName,
         mentionType,
       },
@@ -1124,7 +1134,8 @@ class NotificationService {
     senderName: string,
     cleanContent: string,
     workspaceId: string,
-    isDMChannel: boolean = false
+    isDMChannel: boolean = false,
+    senderPicture: string = '',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
@@ -1147,8 +1158,8 @@ class NotificationService {
     });
 
     const notificationData = {
-      title: `New reply in ${channelName}`,
-      message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
+      title: isDMChannel ? `New reply in #${channelName}` : `New reply from #${channelName}`,
+      message: `${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
       type: NotificationType.THREAD_REPLY,
       relatedEntityType: 'message' as const,
       relatedEntityId: replyMessageId,
@@ -1159,6 +1170,7 @@ class NotificationService {
         messageId: replyMessageId,
         senderId,
         senderName,
+        senderPicture,
         channelTitle: channelName,
         messageType: 'thread_reply',
       },
@@ -1206,7 +1218,10 @@ class NotificationService {
     senderName: string,
     cleanContent: string,
     workspaceId: string,
-    isDMChannel: boolean = true
+    scopeType: ChannelScopeType,
+    isDMChannel: boolean = true,
+    senderPicture: string = '',
+    channelName?: string,
   ): Promise<{ deliveredUserIds: string[] }> {
     if (recipientIds.length === 0) return { deliveredUserIds: [] };
 
@@ -1226,7 +1241,7 @@ class NotificationService {
     });
 
     const notificationData = {
-      title: `New Message from ${senderName}`,
+      title: channelName ? `${channelName}` : `New Message from ${senderName}`,
       message: cleanContent.substring(0, 100) + (cleanContent.length > 100 ? '...' : ''),
       type: NotificationType.DIRECT_MESSAGE,
       relatedEntityType: 'message' as const,
@@ -1235,9 +1250,11 @@ class NotificationService {
       metadata: {
         senderId,
         senderName,
+        senderPicture,
         channelId,
         conversationId,
         messageId,
+        scopeType
       },
     };
 
@@ -1313,8 +1330,6 @@ class NotificationService {
       }
 
       const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
-      const isDirectMessageType = typeof data.type === 'string' && data.type.toUpperCase() === 'DIRECT_MESSAGE';
-      const mobileTitle = isDirectMessageType ? (data.metadata?.senderName ?? data.title) : data.title;
 
       await Promise.allSettled(
         sessions.map(async (session) => {
@@ -1332,7 +1347,7 @@ class NotificationService {
 
           const mobilePayload = {
             type: data.type,
-            title: mobileTitle,
+            title: data.title,
             message: data.message,
             notificationId: sessionNotification.id, // Use the specific session notification ID
             actionUrl: data.actionUrl,

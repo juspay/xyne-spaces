@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, UserType } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, UserType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
@@ -74,6 +74,16 @@ function getPlainTextNotificationContent(content: string): string {
   return extractPlainTextFromHtml(content).replace(/\s+/g, ' ').trim();
 }
 
+function formatDmChannelName(names: string[], maxVisible: number = 2): string {
+  const visible = names.slice(0, maxVisible);
+  const remainder = names.length - visible.length;
+  if (remainder === 0) {
+    return visible.join(', ');
+  }
+  const suffix = remainder === 1 ? 'and 1 other' : `and ${remainder} others`;
+  return `${visible.join(', ')} ${suffix}`;
+}
+
 export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
@@ -140,7 +150,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }),
       db.user.findUnique({
         where: { id: senderId },
-        select: { name: true, userType: true }
+        select: { name: true, userType: true, picture: true }
       }),
       db.channelParticipant.findMany({
         where: { channelId },
@@ -231,11 +241,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }
     }
 
-    if (isDMChannel) {
-      const dmChannelName = channelParticipants
-        .filter(p => channel?.scopeType === 'DM' ? p.userId !== senderId : true)
-        .map(p => p.user.name || 'Unknown')
-        .join(', ');
+    if (isDMChannel && channel) {
+      const memberNames = channelParticipants
+        .filter(p => channel.scopeType === 'DM' ? p.userId !== senderId : true)
+        .map(p => p.user.name || 'Unknown');
+      const dmChannelName = formatDmChannelName(memberNames);
 
       await this.handleDMChannelMessage(
         messageId,
@@ -245,13 +255,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         appUserIds,
         dmChannelName || 'Direct Message',
         senderName,
+        sender?.picture ?? '',
         cleanContent,
         content,
         conversation.initialMessageId,
         channelParticipants,
         mentionType,
         message.createdAt,
-        channel?.scopeType,
+        channel.scopeType,
         message.hasAttachment
       );
       return;
@@ -373,6 +384,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             senderName,
             cleanContent,
             this.ctx.workspaceId,
+            sender?.picture ?? '',
           );
         } catch (error) {
           logger.error('[SIDE-EFFECT] Spaces channel message notifications failed', { error });
@@ -411,7 +423,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           this.ctx.workspaceId,
           mentionType,
           isDMChannel,
-          !!isReply
+          !!isReply,
+          sender?.picture ?? '',
         );
 
         slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
@@ -457,7 +470,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelName,
         senderName,
         cleanContent,
-        channelParticipants
+        channelParticipants,
+        sender?.picture ?? '',
       );
     }
 
@@ -935,7 +949,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     channelName: string,
     senderName: string,
     cleanContent: string,
-    channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>
+    channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>,
+    senderPicture: string = '',
   ): Promise<void> {
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
     const participants = await db.conversationParticipant.findMany({
@@ -988,7 +1003,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderUserId,
         senderName,
         cleanContent,
-        this.ctx.workspaceId
+        this.ctx.workspaceId,
+        false,
+        senderPicture,
       );
 
       slackRecipientEmails = getSlackRecipientEmails(replyEmails, deliveredUserIds, userEmailMap);
@@ -1014,13 +1031,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     appUserIds: string[],
     channelName: string,
     senderName: string,
+    senderPicture: string,
     cleanContent: string,
     htmlContent: string,
     initialMessageId: string | null,
     channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>,
     mentionType: '@channel' | '@here' | undefined,
     createdAt: Date,
-    scopeType: string | undefined,
+    scopeType: ChannelScopeType,
     hasAttachment: boolean
   ): Promise<void> {
     const isLargeGroupDm = channelParticipants.length > LARGE_GROUP_DM_THRESHOLD;
@@ -1065,7 +1083,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelName,
         senderName,
         cleanContent,
-        channelParticipants
+        channelParticipants,
+        senderPicture,
       );
     } else {
       if (!mentionType && !isLargeGroupDm) {
@@ -1095,7 +1114,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           senderId,
           senderName,
           cleanContent,
-          this.ctx.workspaceId
+          this.ctx.workspaceId,
+          scopeType,
+          true,
+          senderPicture,
+          channelName,
         );
 
         slackRecipientEmails = getSlackRecipientEmails(recipientEmails, deliveredUserIds, userEmailMap);

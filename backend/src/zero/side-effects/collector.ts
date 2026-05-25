@@ -114,6 +114,29 @@ export async function collectSideEffectJobs(
     }
   }
 
+  if (operation === 'update' && table === 'channel_user_status') {
+    const entity = await tx.run(zql.channel_user_status.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        lastViewedAt: entity.lastViewedAt,
+        unreadCount: entity.unreadCount,
+        channelId: entity.channelId,
+        userId: entity.userId,
+      };
+    }
+  }
+
+  if (operation === 'update' && table === 'conversation_participants') {
+    const entity = await tx.run(zql.conversation_participants.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        lastReadAt: entity.lastReadAt,
+        conversationId: entity.conversationId,
+        userId: entity.userId,
+      };
+    }
+  }
+
   accumulator.push({
     entityType: table,
     entityId,
