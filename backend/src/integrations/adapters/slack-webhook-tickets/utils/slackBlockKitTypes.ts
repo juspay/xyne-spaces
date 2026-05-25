@@ -154,8 +154,8 @@ export interface SlackAttachment {
   title?: string;
   title_link?: string;
   fields?: Array<{
-    title: string;
-    value: string;
+    title?: string;
+    value?: string;
   }>;
   image_url?: string;
   thumb_url?: string;

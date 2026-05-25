@@ -277,9 +277,13 @@ export class SlackBlockKitParser {
   /**
    * Parse attachment fields (legacy format)
    */
-  private parseAttachmentFields(fields: Array<{ title: string; value: string; short?: boolean }>): string {
+  private parseAttachmentFields(fields: Array<{ title?: string; value?: string; short?: boolean }>): string {
     return fields
-      .map((field) => `<div><strong>${escapeForSlack(field.title)}</strong></div><div>${this.formatMrkdwn(field.value)}</div>`)
+      .map((field) => {
+        const titleHtml = field.title ? `<div><strong>${escapeForSlack(field.title)}</strong></div>` : '';
+        const valueHtml = field.value ? `<div>${this.formatMrkdwn(field.value)}</div>` : '';
+        return titleHtml + valueHtml;
+      })
       .join('');
   }
 

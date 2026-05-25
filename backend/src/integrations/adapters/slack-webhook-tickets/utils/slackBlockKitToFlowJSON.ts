@@ -96,7 +96,7 @@ function collectAllSlackUserIds(input: BlockKitInput): string[] {
     for (const att of input.attachments) {
       if (att.pretext) fromText(att.pretext);
       if (att.text) fromText(att.text);
-      if (att.fields) att.fields.forEach(f => fromText(f.value));
+      if (att.fields) att.fields.forEach(f => f.value != null && fromText(f.value));
       if (att.blocks) fromBlocks(att.blocks);
     }
   }
@@ -552,7 +552,7 @@ export function slackAttachmentToFlowComponent(
         type: 'column',
         children: [
           { id: crypto.randomUUID(), type: 'text', props: { content: field.title, bold: true } },
-          mrkdwnToFlowComponent(field.value, slackToXyneMap),
+          mrkdwnToFlowComponent(field.value ?? '', slackToXyneMap),
         ],
       }),
     );
