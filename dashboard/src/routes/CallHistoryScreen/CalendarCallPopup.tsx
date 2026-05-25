@@ -194,6 +194,7 @@ const CalendarCallPopup = ({
   };
 
   const handleRsvpClick = (status: RsvpChoice): void => {
+    if ((status as MeetingStatus) === currentMeetingStatus) return;
     if (isRecurring) {
       setSeriesPrompt(status);
     } else {
