@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { browserPanelActor } from '../machines/browserPanelMachine';
 import { xyneAIActor } from '../machines/xyneAIMachine';
 import { isXyneOrigin } from './browserPanelPartition';
+import { toStandalonePath } from './electronApp';
 
 /**
  * Channel data interface for navigation
@@ -489,10 +490,20 @@ export const openSearchResult = async (
     return;
   }
 
-  const target = computeSearchResultPath(result, channelData);
-  if (!target || target.kind === 'async-user') {
+  let target = computeSearchResultPath(result, channelData);
+  if (!target) {
     await navigateToSearchResult(result, navigate, channelData);
     return;
+  }
+  if (target.kind === 'async-user') {
+    // DM doesn't exist yet — create it so we have a channel ID to open.
+    try {
+      const dmResponse = await channelService.createDm({ participantIds: [target.userId] });
+      target = { kind: 'internal', path: `/chat/dir/${dmResponse.id}` };
+    } catch {
+      await navigateToSearchResult(result, navigate, channelData);
+      return;
+    }
   }
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -538,15 +549,22 @@ export const openSearchResult = async (
       }
     }
 
-    // Chromeless rendering inside the panel is handled by the SPA itself
-    // via `useIsInPanelWebview` (see AppRoot.tsx, ChatScreen.tsx) — not by
-    // routing through `/newWindow/*`. So we send the regular URL here.
-    xyneAIActor.send({ type: 'CLOSE' });
-    const panelState = browserPanelActor.getSnapshot().context.browserPanelState;
-    if (panelState === 'open') {
-      browserPanelActor.send({ type: 'OPEN_URLS', urls: [panelUrl] });
+    if (isXyneOrigin(panelUrl)) {
+      // Open internal routes in a new standalone Electron window.
+      // Use target.path (no workspace prefix) so it matches /newWindow/chat/dir/:id routes.
+      const basePath = target.kind === 'external' ? target.url : target.path;
+      const standalonePath = toStandalonePath(basePath);
+      const newWin = window.open(standalonePath, '_blank');
+      newWin?.focus();
     } else {
-      browserPanelActor.send({ type: 'OPEN', urls: [panelUrl] });
+      // External URLs go to the browser panel.
+      xyneAIActor.send({ type: 'CLOSE' });
+      const panelState = browserPanelActor.getSnapshot().context.browserPanelState;
+      if (panelState === 'open') {
+        browserPanelActor.send({ type: 'OPEN_URLS', urls: [panelUrl] });
+      } else {
+        browserPanelActor.send({ type: 'OPEN', urls: [panelUrl] });
+      }
     }
     return;
   }

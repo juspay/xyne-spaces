@@ -40,7 +40,7 @@ export const shortcuts = {
     allowInInputs: true,
   },
   'global.goBack': {
-    keys: 'mod+[',
+    keys: ['mod+[', 'mod+left'],
     scope: 'global',
     description: 'Go back in navigation history',
     category: 'Navigation',
@@ -49,7 +49,7 @@ export const shortcuts = {
     useKey: true,
   },
   'global.goForward': {
-    keys: 'mod+]',
+    keys: ['mod+]', 'mod+right'],
     scope: 'global',
     description: 'Go forward in navigation history',
     category: 'Navigation',
