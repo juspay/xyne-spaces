@@ -53,12 +53,11 @@ type InlinePart =
 //  7     → inline code
 //  8     → underline
 //  9,10  → labeled link
-//  11    → bare link
-//  12    → emoji shortcode
-
+//  11    → bare slack link (<url>)
+//  12    → plain bare URL (https?://...)
+//  13    → emoji shortcode
 const INLINE_RE =
-  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|(?:^|(?<=[\s({[]))\*([^*\n]+)\*(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))_([^_\n]+)_(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))~([^~\n]+)~(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))`([^`\n]+)`(?=[\s)}\].,;:!?/-]|$)|<u>([^<]+)<\/u>|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>|:([a-zA-Z0-9_+-]{1,50}):/g;
-
+  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|(?:^|(?<=[\s({[]))\*([^*\n]+)\*(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))_([^_\n]+)_(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))~([^~\n]+)~(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))`([^`\n]+)`(?=[\s)}\].,;:!?/-]|$)|<u>([^<]+)<\/u>|<(https?:[^|>]+)\|([^>]+)>|<(https?:[^>\s]+)>|(https?:\/\/[^\s<>,"]+)|:([a-zA-Z0-9_+-]{1,50}):/g;
 function parseInlineContent(content: string): InlinePart[] {
   const parts: InlinePart[] = [];
   let lastIndex = 0;
@@ -93,7 +92,9 @@ function parseInlineContent(content: string): InlinePart[] {
     } else if (match[11] !== undefined) {
       parts.push({ type: 'link', href: match[11], label: match[11] });
     } else if (match[12] !== undefined) {
-      parts.push({ type: 'emoji', name: match[12] });
+      parts.push({ type: 'link', href: match[12], label: match[12] });
+    } else if (match[13] !== undefined) {
+      parts.push({ type: 'emoji', name: match[13] });
     }
 
     lastIndex = INLINE_RE.lastIndex;
@@ -258,7 +259,7 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
       <pre
         className={cn(
           sizeClasses[props.size ?? 'base'],
-          'my-1 overflow-x-auto rounded bg-muted px-3 py-2 font-mono leading-relaxed text-foreground whitespace-pre-wrap',
+          'my-1 overflow-x-auto rounded bg-muted px-3 py-2 font-mono leading-relaxed text-foreground whitespace-pre-wrap [font-variant-ligatures:none]',
         )}
         style={node.style}
       >
@@ -304,13 +305,17 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
           />
         );
       case 'bold':
-        return <strong key={key}>{part.value}</strong>;
+        return (
+          <strong key={key}>
+            {parseInlineContent(part.value).map((p, i) => renderPart(p, i))}
+          </strong>
+        );
       case 'italic':
-        return <em key={key}>{part.value}</em>;
+        return <em key={key}>{parseInlineContent(part.value).map((p, i) => renderPart(p, i))}</em>;
       case 'strike':
-        return <s key={key}>{part.value}</s>;
+        return <s key={key}>{parseInlineContent(part.value).map((p, i) => renderPart(p, i))}</s>;
       case 'underline':
-        return <u key={key}>{part.value}</u>;
+        return <u key={key}>{parseInlineContent(part.value).map((p, i) => renderPart(p, i))}</u>;
       case 'code':
         return (
           <code
@@ -392,7 +397,7 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
           return (
             <pre
               key={segIdx}
-              className='bg-muted text-foreground rounded p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap'
+              className='bg-muted text-foreground rounded p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap [font-variant-ligatures:none]'
             >
               <code>{seg.code}</code>
             </pre>

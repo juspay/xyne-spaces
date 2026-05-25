@@ -48,6 +48,20 @@ export async function extractMentionsFromContent(content: string): Promise<Extra
   const mentions: ExtractedMention[] = [];
   const processedUserIds = new Set<string>(); // Prevent duplicates
 
+  // Method 0: Extract mrkdwn token format <userid:ID> used in FlowJSON text components.
+  // Slack user mentions in BlockKit are normalised to <userid:xyneDbId> by the
+  // FlowJSON converter.  We need to handle this before the TipTap span scan.
+  const mrkdwnUserTokenRegex = /<userid:([\w-]+)>/g;
+  let mrkdwnMatch: RegExpExecArray | null;
+  while ((mrkdwnMatch = mrkdwnUserTokenRegex.exec(content)) !== null) {
+    const userId = mrkdwnMatch[1];
+    if (!processedUserIds.has(userId)) {
+      processedUserIds.add(userId);
+      // userId is already the Xyne DB id — we don't have email/picture here
+      mentions.push({ userId, username: userId });
+    }
+  }
+
   // Method 1: Extract from HTML span elements with data attributes (TipTap format)
   // First, find all span tags with the mention class
   const spanTagRegex = /<span[^>]*class="[^"]*chat-input-mention[^"]*"[^>]*>@[^<]+<\/span>/gi;
@@ -331,6 +345,14 @@ export async function extractAllUsersForNotification(
   if (channelId) {
     const specialMentions = extractSpecialMentions(content);
 
+    logger.info('🏷️ [SPECIAL-MENTION-DEBUG] extractSpecialMentions result', {
+      hasChannel: specialMentions.hasChannel,
+      hasHere: specialMentions.hasHere,
+      contentSnippet: content.slice(0, 200),
+      hasAtChannel: content.includes('@channel'),
+      hasBroadcastToken: content.includes('<broadcast:channel>'),
+    });
+
     if (specialMentions.hasChannel) {
       logger.info(`🏷️ [SPECIAL-MENTION] Expanding @channel for channel ${channelId}`);
       const channelUsers = await getChannelParticipantsForMention(channelId);
@@ -479,14 +501,20 @@ export function extractSpecialMentions(content: string): SpecialMentions {
   const plainChannelRegex = /@channel\b/i;
   const plainHereRegex = /@here\b/i;
 
-  if (!result.hasChannel && plainChannelRegex.test(content)) {
+  // Also match the mrkdwn broadcast token format used in FlowJSON text components:
+  // Slack's <!channel>/<!here> are normalised to <broadcast:channel>/<broadcast:here>
+  // by the BlockKit→FlowJSON converter, so we need to detect that form too.
+  const broadcastChannelRegex = /<broadcast:channel>/i;
+  const broadcastHereRegex = /<broadcast:here>/i;
+
+  if (!result.hasChannel && (plainChannelRegex.test(content) || broadcastChannelRegex.test(content))) {
     result.hasChannel = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @channel mention (plain text)');
+    logger.info('✅ [SPECIAL-MENTION] Found @channel mention (plain text or broadcast token)');
   }
 
-  if (!result.hasHere && plainHereRegex.test(content)) {
+  if (!result.hasHere && (plainHereRegex.test(content) || broadcastHereRegex.test(content))) {
     result.hasHere = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @here mention (plain text)');
+    logger.info('✅ [SPECIAL-MENTION] Found @here mention (plain text or broadcast token)');
   }
 
   return result;

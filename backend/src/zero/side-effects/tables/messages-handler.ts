@@ -39,6 +39,85 @@ const LARGE_GROUP_DM_THRESHOLD = 8;
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
 
+/**
+ * Extract plaintext content strings from a FlowJSON payload for notification
+ * preview and mention scanning.
+ *
+ * FlowJSON is stored as `<div data-flow-json="...escaped JSON...">Flow JSON</div>`.
+ * The visible text node ("Flow JSON") is meaningless — we need to walk the
+ * component tree and collect every text `content` prop, then join them.
+ */
+function extractTextFromFlowJson(content: string): string {
+  const attrMatch = content.match(/data-flow-json="([^"]+)"/);
+  if (!attrMatch) return '';
+  try {
+    const json = attrMatch[1]
+      .replace(/&quot;/g, '"')
+      .replace(/&#10;/g, '\n')
+      .replace(/&#13;/g, '\r');
+    const flow = JSON.parse(json) as { components?: unknown[] };
+
+    const texts: string[] = [];
+
+    function walk(components: unknown[]): void {
+      for (const comp of components) {
+        if (!comp || typeof comp !== 'object') continue;
+        const c = comp as Record<string, unknown>;
+        if (c['props'] && typeof c['props'] === 'object') {
+          const p = c['props'] as Record<string, unknown>;
+          if (typeof p['content'] === 'string' && p['content'].trim()) {
+            texts.push(p['content'].trim());
+          }
+        }
+        if (Array.isArray(c['children'])) {
+          walk(c['children'] as unknown[]);
+        }
+      }
+    }
+
+    if (Array.isArray(flow.components)) {
+      walk(flow.components);
+    }
+    return texts.join(' ').replace(/\s+/g, ' ').trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Like extractTextFromFlowJson but strips mrkdwn tokens for display in
+ * notification previews (user mentions removed, broadcast → @channel, etc.).
+ */
+function extractCleanTextFromFlowJson(content: string): string {
+  const raw = extractTextFromFlowJson(content);
+  if (!raw) return '';
+  return raw
+    .replace(/<userid:[^>]+>/g, '')
+    .replace(/<channelid:[^>]+>/g, '#channel')
+    .replace(/<broadcast:channel>/gi, '@channel ')
+    .replace(/<broadcast:here>/gi, '@here ')
+    .replace(/<broadcast:([^>]+)>/gi, '@$1')
+    .replace(/<([^|>]+)\|([^>]+)>/g, '$2')
+    .replace(/<(https?:[^>]+)>/g, '$1')
+    .replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * For flow JSON messages, returns the extracted plaintext from the FlowJSON
+ * component tree (suitable for mention scanning and notification preview).
+ * Returns null for non-flow-json content.
+ */
+function getFlowJsonContentForNotification(content: string): string | null {
+  if (!content.includes('data-flow-json')) return null;
+  return extractCleanTextFromFlowJson(content) || null;
+}
+
+/** Returns raw FlowJSON text with tokens intact (for mention scanning). */
+function getFlowJsonRawTextForMentions(content: string): string | null {
+  if (!content.includes('data-flow-json')) return null;
+  return extractTextFromFlowJson(content) || null;
+}
+
 function getNotificationPreviewContent(content: string, msgType: string, hasAttachment: boolean): string {
   let cleanContent = '';
 
@@ -60,7 +139,10 @@ function getNotificationPreviewContent(content: string, msgType: string, hasAtta
   }
 
   if (!cleanContent) {
-    cleanContent = getPlainTextNotificationContent(content);
+    // For flow JSON messages, extract text from the component tree instead of
+    // parsing HTML (which only sees the literal "Flow JSON" text node).
+    const flowText = getFlowJsonContentForNotification(content);
+    cleanContent = flowText ?? getPlainTextNotificationContent(content);
   }
 
   if (!cleanContent && hasAttachment) {
@@ -178,7 +260,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const senderName = sender?.name || 'Someone';
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
     const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
-    const specialMentions = extractSpecialMentions(content);
+
+    // For FlowJSON messages, special mentions and user mentions live inside the
+    // JSON component tree.  extractSpecialMentions and extractMentionsFromContent
+    // both understand <broadcast:channel/here> and <userid:ID> tokens, so we
+    // pass the raw (uncleaned) flow text for mention scanning.
+    const flowRawText = getFlowJsonRawTextForMentions(content);
+    const contentForMentions = flowRawText ?? content;
+    const specialMentions = extractSpecialMentions(contentForMentions);
     const mentionType = specialMentions.hasChannel ? '@channel' : specialMentions.hasHere ? '@here' : undefined;
 
     if (channel?.projectId && !isDMChannel) {
@@ -269,7 +358,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     }
 
     const workspaceId = await channelRepository.getWorkspaceId(channelId);
-    const mentionedUsers = await extractAllUsersForNotification(content, workspaceId, channelId);
+    // contentForMentions is already computed above (flow text for FlowJSON, raw HTML otherwise)
+    const mentionedUsers = await extractAllUsersForNotification(contentForMentions, workspaceId, channelId);
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
     const validMentionedUsers = mentionedUsers
       .filter(u => u.mentionSource === 'direct' || u.mentionSource === 'group')
