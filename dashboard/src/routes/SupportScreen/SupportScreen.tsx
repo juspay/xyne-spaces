@@ -1858,6 +1858,7 @@ const SupportScreen = (): ReactElement => {
                       </DndContext>
                     ) : (
                       <TicketListView
+                        isMember={isSelectedChannelJoined}
                         filter={{
                           channelId: selectedChannelId,
                           ...ticketFilter,
@@ -1886,7 +1887,7 @@ const SupportScreen = (): ReactElement => {
         {ticketId && (
           <Panel defaultSize={100} minSize={100} order={3}>
             <div className='h-full overflow-hidden'>
-              <SupportTicketDetail ticketFilter={ticketFilter} />
+              <SupportTicketDetail ticketFilter={ticketFilter} isMember={isSelectedChannelJoined} />
             </div>
           </Panel>
         )}
@@ -2078,9 +2079,13 @@ type SupportTicketDetailProps = {
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
   };
+  isMember: boolean;
 };
 
-const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactElement => {
+const SupportTicketDetail = ({
+  ticketFilter,
+  isMember,
+}: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
     channelId: channelIdParam,
@@ -2140,8 +2145,6 @@ const SupportTicketDetail = ({ ticketFilter }: SupportTicketDetailProps): ReactE
   // channelId for ACL + query gating — comes from the URL path. Both ticket
   // fetches below require it; without it we don't run the queries at all.
   const routeChannelId = channelIdParam ?? '';
-  const channelUserStatus = useGetChannelUserStatus(routeChannelId);
-  const isMember = !!channelUserStatus;
   // `mail` is set by navigateToMail (mail search-result click) and carries
   // either Postgres email.id or Gmail externalMessageId. We scroll to the
   // matching EmailThreadItem after emails load.

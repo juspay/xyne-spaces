@@ -12,7 +12,6 @@ import { Skeleton } from '../../ui/Skeleton';
 import { TicketListRow } from './TicketListRow';
 import { queries } from '../../../zero/queries';
 import { useShortcut } from '../../../shortcuts';
-import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
@@ -36,6 +35,7 @@ interface TicketListViewProps {
     stageName?: string[] | undefined;
   };
   onTicketClick: (ticket: SupportTicketRow) => void;
+  isMember: boolean;
   activeTicketId?: string | null | undefined;
   showExtraFields?: boolean;
   skeletonRowCount?: number;
@@ -62,6 +62,7 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
   function TicketListView(
     {
       filter,
+      isMember,
       onTicketClick,
       activeTicketId,
       showExtraFields = false,
@@ -78,10 +79,6 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
     const zero = useZero();
 
     const { channelId, assignedTo, priority, stageName } = filter;
-    // Feeds TicketsACL fast-path (scalar EXISTS on channel_participants) instead
-    // of the per-row OR(PUBLIC, EXISTS) fallback.
-    const channelUserStatus = useGetChannelUserStatus(channelId);
-    const isMember = !!channelUserStatus;
 
     const [firstPage, firstPageDetails] = useCachedQuery(
       queries.supportTicketsPageV3({
