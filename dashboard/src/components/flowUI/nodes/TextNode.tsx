@@ -55,8 +55,9 @@ type InlinePart =
 //  9,10  → labeled link
 //  11    → bare link
 //  12    → emoji shortcode
+
 const INLINE_RE =
-  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~|`([^`\n]+)`|<u>([^<]*)<\/u>|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>|:([a-zA-Z0-9_+-]{1,50}):/g;
+  /<(userid|channelid|groupid|broadcast):([.\w-]+)(?::([^>]+))?>|(?:^|(?<=[\s({[]))\*([^*\n]+)\*(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))_([^_\n]+)_(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))~([^~\n]+)~(?=[\s)}\].,;:!?/-]|$)|(?:^|(?<=[\s({[]))`([^`\n]+)`(?=[\s)}\].,;:!?/-]|$)|<u>([^<]+)<\/u>|<(https?:[^|>\s]+)\|([^>]+)>|<(https?:[^>\s]+)>|:([a-zA-Z0-9_+-]{1,50}):/g;
 
 function parseInlineContent(content: string): InlinePart[] {
   const parts: InlinePart[] = [];

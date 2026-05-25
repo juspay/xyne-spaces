@@ -445,6 +445,220 @@ await run('chat.postMessage (follow-up on thread file)', async () => {
   return `ts=${res.ts} (follow-up on thread file ${threadFileUploadTs})`;
 });
 
+// 24. chat.postMessage — Slack formatting inside a thread
+await run('chat.postMessage (thread formatting)', async () => {
+  assert(!!postedTs, 'need ts from postMessage');
+  const res = await client.chat.postMessage({
+    channel: CHANNEL_ID,
+    thread_ts: postedTs,
+    text: [
+      '[test] thread formatting reply',
+      '*bold text*',
+      '_italic text_',
+      '~strikethrough text~',
+      '`inline code`',
+      '```',
+      'const adapter = "slack-compatible";',
+      'console.log(adapter);',
+      '```',
+      '<https://example.com/thread-link|labeled link>',
+      '- bullet one',
+      '- bullet two',
+      '1. ordered one',
+      '2. ordered two',
+      '> quoted line',
+    ].join('\n'),
+    mrkdwn: true,
+  });
+  assert(res.ok === true, 'ok');
+  assert(typeof res.ts === 'string' && res.ts.length > 0, 'ts non-empty');
+  return `ts=${res.ts} (formatting in thread ${postedTs})`;
+});
+
+// 25. chat.postMessage — blocks inside a thread
+await run('chat.postMessage (thread blocks)', async () => {
+  assert(!!postedTs, 'need ts from postMessage');
+  const res = await client.chat.postMessage({
+    channel: CHANNEL_ID,
+    thread_ts: postedTs,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: '*Bold block* in thread — _italic_ ~strike~ `code`' } },
+    ],
+    text: '[test] thread blocks fallback',
+  });
+  assert(res.ok === true, 'ok');
+  assert(typeof res.ts === 'string' && res.ts.length > 0, 'ts non-empty');
+  return `ts=${res.ts} (blocks in thread ${postedTs})`;
+});
+
+// 26. chat.postMessage — mentions inside a thread
+if (TARGET_USER_ID) {
+  await run('chat.postMessage (thread mentions)', async () => {
+    assert(!!postedTs, 'need ts from postMessage');
+    const res = await client.chat.postMessage({
+      channel: CHANNEL_ID,
+      thread_ts: postedTs,
+      text: `[test] thread mention — user=<@${TARGET_USER_ID}> channel=<#${CHANNEL_ID}|adapter-test> broadcast=<!channel> here=<!here>`,
+      mrkdwn: true,
+    });
+    assert(res.ok === true, 'ok');
+    assert(typeof res.ts === 'string' && res.ts.length > 0, 'ts non-empty');
+    return `ts=${res.ts} (mentions in thread ${postedTs})`;
+  });
+} else {
+  results.push({ name: 'chat.postMessage (thread mentions)', pass: true, detail: 'SKIPPED (no TARGET_USER_ID)', duration: 0 });
+}
+
+// ── filetype tests (Xyne-only — verifies filetype field in file object response) ──
+// Tests both v1 (files.upload multipart) and v2 (3-step getUploadURLExternal flow),
+// at channel level and in threads, for xlsx/pdf/png/csv/docx.
+//
+// pdf and png require real magic bytes — fileValidationService checks file headers:
+//   pdf: must start with '%PDF'
+//   png: must start with [0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A]
+//
+// Equivalent curl for v2 (xlsx example):
+//   STEP1=$(curl -s -X POST "$BASE_URL/files.getUploadURLExternal" \
+//     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+//     -d '{"filename":"report.xlsx","length":4}')
+//   FILE_ID=$(echo $STEP1 | jq -r '.file_id')
+//   UPLOAD_URL=$(echo $STEP1 | jq -r '.upload_url')
+//   curl -s -X POST "$UPLOAD_URL" \
+//     -H "Authorization: Bearer $TOKEN" \
+//     -H "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" \
+//     --data-binary 'test'
+//   curl -s -X POST "$BASE_URL/files.completeUploadExternal" \
+//     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+//     -d "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"report.xlsx\"}],\"channel_id\":\"$CHANNEL_ID\"}"
+//
+// Equivalent curl for v1 (xlsx example):
+//   curl -s -X POST "$BASE_URL/files.upload" \
+//     -H "Authorization: Bearer $TOKEN" \
+//     -F "channels=$CHANNEL_ID" -F "filename=report.xlsx" \
+//     -F "file=@/path/to/report.xlsx"
+//
+// For thread: add thread_ts to completeUploadExternal body (v2) or -F "thread_ts=$TS" (v1).
+// For pdf: --data-binary $'%PDF-1.4\n% test'  |  For png: use a real png file.
+
+// pdf and png need real magic bytes — fileValidationService validates file headers
+const PDF_MAGIC = Buffer.from('%PDF-1.4\n% test\n');
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D]);
+
+interface FiletypeCase {
+  filename: string;
+  content: Buffer | string;
+  contentType: string;
+  expectedFiletype: string;
+}
+
+const filetypeCases: FiletypeCase[] = [
+  { filename: 'report.xlsx',  content: '[test] report.xlsx',  contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',       expectedFiletype: 'xlsx' },
+  { filename: 'document.pdf', content: PDF_MAGIC,             contentType: 'application/pdf',                                                         expectedFiletype: 'pdf'  },
+  { filename: 'image.png',    content: PNG_MAGIC,             contentType: 'image/png',                                                               expectedFiletype: 'png'  },
+  { filename: 'data.csv',     content: '[test] data.csv',     contentType: 'text/csv',                                                                expectedFiletype: 'csv'  },
+  { filename: 'letter.docx',  content: '[test] letter.docx',  contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  expectedFiletype: 'docx' },
+];
+
+// v2: 3-step upload (getUploadURLExternal → binary fetch → completeUploadExternal)
+async function uploadV2(
+  { filename, content, contentType }: FiletypeCase,
+  opts: { thread_ts?: string } = {},
+): Promise<any> {
+  const buf = Buffer.isBuffer(content) ? content : Buffer.from(content);
+
+  const urlRes = await client.files.getUploadURLExternal({ filename, length: buf.length }) as any;
+  assert(urlRes.ok === true, `getUploadURLExternal ok (${filename})`);
+  const { upload_url, file_id } = urlRes;
+
+  const uploadRes = await fetch(upload_url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': contentType },
+    body: new Uint8Array(buf),
+  });
+  assert(uploadRes.ok, `binary upload ok (${filename})`);
+
+  const completeRes = await client.files.completeUploadExternal({
+    files: [{ id: file_id, title: filename }],
+    channel_id: CHANNEL_ID,
+    ...(opts.thread_ts ? { thread_ts: opts.thread_ts } : {}),
+  } as any) as any;
+  assert(completeRes.ok === true, `completeUploadExternal ok (${filename})`);
+
+  return completeRes.files?.[0];
+}
+
+// v1: single multipart upload (files.upload)
+async function uploadV1(
+  { filename, content }: FiletypeCase,
+  opts: { thread_ts?: string } = {},
+): Promise<any> {
+  const buf = Buffer.isBuffer(content) ? content : Buffer.from(content);
+
+  const res = await (client.files as any).upload({
+    channels: CHANNEL_ID,
+    file: buf,
+    filename,
+    title: filename,
+    initial_comment: `[test] v1 ${filename}`,
+    ...(opts.thread_ts ? { thread_ts: opts.thread_ts } : {}),
+  }) as any;
+  assert(res.ok === true, `files.upload ok (${filename})`);
+
+  return res.file;
+}
+
+function assertFiletypeFields(file: any, expectedFiletype: string, filename: string) {
+  assert(typeof file === 'object' && file !== null, `file object present (${filename})`);
+  assert(file.filetype === expectedFiletype, `filetype="${file.filetype}", expected "${expectedFiletype}" (${filename})`);
+  assert(typeof file.mimetype === 'string' && file.mimetype.length > 0, `mimetype present (${filename})`);
+}
+
+if (isXyne) {
+  // ── v2 channel uploads ───────────────────────────────────────────────
+  for (const fc of filetypeCases) {
+    await run(`files.filetype v2 channel (${fc.expectedFiletype})`, async () => {
+      const file = await uploadV2(fc);
+      assertFiletypeFields(file, fc.expectedFiletype, fc.filename);
+      return `filetype=${file.filetype} mimetype=${file.mimetype}`;
+    });
+  }
+
+  // ── v2 thread uploads ────────────────────────────────────────────────
+  for (const fc of filetypeCases) {
+    await run(`files.filetype v2 thread (${fc.expectedFiletype})`, async () => {
+      assert(!!postedTs, 'need ts from chat.postMessage');
+      const file = await uploadV2(fc, { thread_ts: postedTs });
+      assertFiletypeFields(file, fc.expectedFiletype, fc.filename);
+      return `filetype=${file.filetype} mimetype=${file.mimetype} thread=${postedTs}`;
+    });
+  }
+
+  // ── v1 channel uploads ───────────────────────────────────────────────
+  for (const fc of filetypeCases) {
+    await run(`files.filetype v1 channel (${fc.expectedFiletype})`, async () => {
+      const file = await uploadV1(fc);
+      assertFiletypeFields(file, fc.expectedFiletype, fc.filename);
+      return `filetype=${file.filetype} mimetype=${file.mimetype}`;
+    });
+  }
+
+  // ── v1 thread uploads ────────────────────────────────────────────────
+  for (const fc of filetypeCases) {
+    await run(`files.filetype v1 thread (${fc.expectedFiletype})`, async () => {
+      assert(!!postedTs, 'need ts from chat.postMessage');
+      const file = await uploadV1(fc, { thread_ts: postedTs });
+      assertFiletypeFields(file, fc.expectedFiletype, fc.filename);
+      return `filetype=${file.filetype} mimetype=${file.mimetype} thread=${postedTs}`;
+    });
+  }
+} else {
+  for (const group of ['v2 channel', 'v2 thread', 'v1 channel', 'v1 thread']) {
+    for (const { expectedFiletype } of filetypeCases) {
+      results.push({ name: `files.filetype ${group} (${expectedFiletype})`, pass: true, detail: 'SKIPPED (Xyne-specific filetype check)', duration: 0 });
+    }
+  }
+}
+
 // ── Error cases ─────────────────────────────────────────────────────
 
 await run('error: invalid channel', async () => {

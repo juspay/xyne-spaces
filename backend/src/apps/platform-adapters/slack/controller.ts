@@ -1,4 +1,6 @@
+import path from "node:path";
 import type { Readable } from "node:stream";
+import mime from "mime";
 import { MessageType } from "@xyne/shared";
 import type { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
@@ -50,7 +52,7 @@ import {
 	transformOpenResponse,
 	transformRepliesResponse,
 } from "./response-transformers/conversations";
-import { transformFilesUploadResponse } from "./response-transformers/files";
+import { deriveFiletype, transformFilesUploadResponse } from "./response-transformers/files";
 import { transformUsergroupsListResponse } from "./response-transformers/usergroups";
 import { transformUsersInfoResponse } from "./response-transformers/users";
 import type { SlackAuthTestResponse, SlackFileObject } from "./types";
@@ -646,6 +648,21 @@ export class SlackController {
 		const reqFiles = (Array.isArray(req.files) ? {} : req.files) || {};
 		const uploadedFiles = [...(reqFiles.file || []), ...(reqFiles.files || [])];
 
+		if (parsed.data.filename) {
+			for (const f of uploadedFiles) {
+				if (!path.extname(f.originalname)) {
+					f.originalname = parsed.data.filename;
+				}
+			}
+		}
+
+		for (const f of uploadedFiles) {
+			if (f.mimetype === "application/octet-stream") {
+				const inferred = mime.getType(f.originalname);
+				if (inferred) f.mimetype = inferred;
+			}
+		}
+
 		if (uploadedFiles.length === 0 && parsed.data.content) {
 			uploadedFiles.push({
 				fieldname: "file",
@@ -861,10 +878,12 @@ export class SlackController {
 
 			const responseFiles: SlackFileObject[] = files.map((f, i) => {
 				const uploaded = uploadedResults[i];
+				const name = uploaded.originalName;
 				return {
 					id: f.id,
-					name: uploaded.originalName,
-					title: f.title ?? uploaded.originalName,
+					name,
+					title: f.title ?? name,
+					filetype: deriveFiletype(name, uploaded.mimeType),
 					size: uploaded.fileSize,
 					mimetype: uploaded.mimeType,
 					url_private: uploaded.fileUrl,
