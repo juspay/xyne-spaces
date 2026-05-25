@@ -2000,7 +2000,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     <TicketTable
                       tickets={group.allTickets}
                       ticketTags={tagsByTicketId}
-                      projectId={effectiveProjectId || ''}
+                      availableTags={availableTags || []}
                       visibleColumns={visibleColumns}
                       isComfortView={isComfortView}
                     />
