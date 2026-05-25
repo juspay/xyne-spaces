@@ -1,3 +1,54 @@
+## [1.147.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.146.1...v1.147.0) (2026-05-25)
+
+
+### Features
+
+* Add support for multiple DEFAULT_ADMIN_USERS ([1044b9e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1044b9e20ae18bc8a88b243648d10a368f34dee0)), closes [#6604](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6604)
+* add vespaQueue initialization in worker ([505dfcd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/505dfcdf5edb2855995694b470575042f2af2fc8)), closes [#6578](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6578)
+* added cutoff mode support in Activity to ChatList navigation ([b3e9a3a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b3e9a3a4a8a9c815bc4d60563828f6321d406351)), closes [#6327](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6327)
+* added share trigger for mentions in canvas ([decffea](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/decffea39852a9495103aba3c2ef556a31a9077e)), closes [#5722](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5722)
+* Build Team Intelligence Pipeline with LLM-Backed Summaries and Deterministic Fallbacks ([300a20e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/300a20e91f2673f3aef2dd490f150e35756fcb10)), closes [#6554](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6554)
+* contrast for dark mode and unread toggle behaviour added ([3a07e42](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3a07e42b9779d4523943146fa138c81a4c4690da)), closes [#6593](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6593)
+* dedup check in code rather than fully rely on unique index in db ([256f40f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/256f40f7d9468f577672626cb7fbe867089fc49e)), closes [#6495](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6495)
+* desk scoped search ([1e4cbce](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1e4cbce347eb2b962bff45ba64054d777aae52fd)), closes [#6667](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6667)
+* fallback hydrated query main ([7df3f56](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7df3f56bf1fb46827e467c15a4bb0705cb6dd36a)), closes [#6573](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6573)
+* Store channel update in call and recurringCallSeries Table ([2bce986](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2bce986267104083be9c69c4784490dc68aeb5d0)), closes [#6490](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6490)
+* Update ticket API xyneClaww ([ae4fed2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ae4fed2440e1160e787434466b64b6a518c8c8ef)), closes [#6542](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6542)
+* user groups and group dms can be added as call participants ([9139175](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/91391756fae18d3b79ffd31c05165f06b83a2441)), closes [#6459](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6459)
+* xyne desk perf ([36e0076](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/36e007660799568fdde0b878c8fba9760629c339)), closes [#6660](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6660)
+
+
+### Bug Fixes
+
+* : The toggle arrows in xyne-desk will follow the filters applied ([afef1dd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/afef1ddf592dc9f75c3242b65b62a559ec2c5faf)), closes [#6385](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6385)
+* Add strikethrough formatting to dashboard chat composer ([8f34d38](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8f34d381351338312b8035b3b5414e75a64ee838)), closes [#6339](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6339)
+* Add syntax highlighting support for all additional languages ([fccedba](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fccedbac5b3f9e6da5c4fc12f11eaff7d9852655)), closes [#6631](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6631)
+* Add text-foreground to LinksTab inputs for midnight theme visibility ([3fe66cc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3fe66ccd2a9feb5ad65907ded4466d7d99dc5edb)), closes [#6471](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6471)
+* Add ticket type filter ([3e994ff](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3e994ffcaee383a942bfb50946fec3360440b854)), closes [#6650](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6650)
+* added version check in desks ([bd8532d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bd8532ded12dadf5c1a31609cbc6a6e0f39ce8ff)), closes [#6551](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6551)
+* create canvas API ([9bd82b6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9bd82b62c18804dbd5c934a5252a4d96119d80b6)), closes [#6620](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6620)
+* electron duplicate tab browser and shortcut fix ([027a552](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/027a552f01e11cff75d560202e91291facf15e6f)), closes [#6453](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6453)
+* exclude call summaries and other AI canvas ([4871da9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4871da9fbb19ea6a03f406afdcb8373421ab5a53)), closes [#6532](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6532)
+* fix ([e008541](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e00854111d9715fce761cf058a4e9e48f9dbb1de)), closes [#6413](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6413)
+* fixed tickets query ([8ed2ffa](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8ed2ffac706f23667112f8e448448498aaeb0040))
+* fixes live preview of copied ticket link ([5fbc181](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5fbc1815318df1c6f07d6903e16caae8f732ad37))
+* main fix ([c2a559b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c2a559bc7e67eeef9c875f25eba5c2ad216f8b11)), closes [#6636](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6636)
+* mark channel viewed main ([0c0a53a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0c0a53a4699a53077182ee0a4e4cfda7aec3f0ff)), closes [#6567](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6567)
+* message change ([288364c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/288364c37d8a32cc0cccbbb37e884073264de756)), closes [#6623](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6623)
+* muted channel highlight in sidebar ([1ef8502](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1ef8502bcc28d7f1432e92f37591e4deeccdcd27)), closes [#6601](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6601)
+* open in new window for electron in search navigation results ([345e57c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/345e57cfc8b1b9129636861f7e83dc6dda37503a)), closes [#6178](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6178)
+* Populate lastReplyAt when creating conversation participant on first reply ([0a938a8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0a938a82d24a79e210fa7ed062f13a00e9dafb3c)), closes [#6558](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6558)
+* query fixes ([a4376fe](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a4376fec9150a2bc2c8354224561b015d7fec7ac)), closes [#5635](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5635)
+* rate limit mutations by batch size instead of per-request ([adc4ff6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/adc4ff686c0d44266dfb3940049681f6d9855364)), closes [#6571](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6571)
+* Redesign ticket view UI ([483310b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/483310bdb565462ca25575b68c4932d1fb3a6493)), closes [#6475](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6475)
+* remove Status Category field from ticket details screen ([7df51ee](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7df51ee76855ab12048ca7012a974d5e8e484b36)), closes [#6341](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6341)
+* revert lazy-load tags in CreateTicketModal instead of fetching all project tickets ([5b1a000](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5b1a000472e83a6d7663ecd2ca8c863a19248b00)), closes [#6569](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6569)
+* tag [@firstname](https://ssh.bitbucket.juspay.net/firstname).lastname mentions in chat composer via Enter ([cc4e32b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cc4e32b1fb6ba91590949e9b19e9628a195503ea)), closes [#6647](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6647)
+* text overflow in markdown messages ([ec085f3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ec085f3ccf022387570255f8a2a040a642b523c5)), closes [#6523](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6523)
+* Use lighter text color for unread channels in dark mode ([3bb547c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3bb547cd0ce7b7ecfeea3d899055ea6040dd72cf)), closes [#6565](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6565)
+* user resolution ([36ce935](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/36ce935847fddeca3d7b2c618f1a517b62de42e5)), closes [#6624](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6624)
+* xyne apps screen permission fix ([a006fa8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a006fa823bcdd2b7e9d5bf1a3b581c35bd735ab4)), closes [#6481](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6481)
+
 ## [1.146.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.146.0...v1.146.1) (2026-05-21)
 
 
