@@ -1,5 +1,5 @@
-import { ReactElement } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { ReactElement, useEffect } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Building2, Mail, ArrowLeft } from 'lucide-react';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { useAuth } from '../../hooks/useAuth';
@@ -16,7 +16,17 @@ import { useAuth } from '../../hooks/useAuth';
 const NoOrganizationAccessScreen = (): ReactElement => {
   const [searchParams] = useSearchParams();
   const { logout } = useAuth();
+  const navigate = useNavigate();
   const message = searchParams.get('message') || 'You are not part of any organisation.';
+
+  useEffect(() => {
+    const isValidNavigation = sessionStorage.getItem('no_access_from_auth');
+    if (isValidNavigation) {
+      sessionStorage.removeItem('no_access_from_auth');
+    } else {
+      void navigate('/auth', { replace: true });
+    }
+  }, [navigate]);
 
   const handleGoBack = (): void => {
     logout();

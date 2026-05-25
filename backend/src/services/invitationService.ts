@@ -354,6 +354,10 @@ export class InvitationService {
     if (invitation.role === 'OWNER') {
       await this.userService.grantWorkspaceOwnerResources(newWorkspaceUser.id, newWorkspaceUser.email);
       logger.info(`[InvitationService] Owner resource access granted to ${userData.email}`);
+    } else {
+      // Grant default resource access for ADMIN and MEMBER invitees
+      await this.userService.grantDefaultResources(newWorkspaceUser.id, newWorkspaceUser.email, invitation.role);
+      logger.info(`[InvitationService] Default resource access granted to invited ${invitation.role.toLowerCase()} ${userData.email}`);
     }
 
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
