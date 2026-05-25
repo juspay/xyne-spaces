@@ -7,7 +7,7 @@
 import * as Popover from '@radix-ui/react-popover';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import { Clock } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { cn } from '../../../utils/classNames';
 import Input from '../Input';
 
@@ -86,6 +86,18 @@ export const TimePicker: React.FC<TimePickerProps> = ({
       onChange?.(timeString);
     }
   };
+
+  useEffect(() => {
+    if (value) {
+      const parts = value.split(':');
+      const h = parts[0]?.split(' ')[0] ?? '';
+      const m = parts[1]?.split(' ')[0] ?? '';
+      const p = value.split(' ')[1] || 'AM';
+      setHour(h);
+      setMinute(m);
+      setPeriod(p);
+    }
+  }, [value]);
 
   const displayTime =
     hour && minute ? `${hour.padStart(2, '0')}:${minute.padStart(2, '0')} ${period}` : placeholder;
