@@ -58,8 +58,10 @@ export async function authenticate(
       logger.warn(
         `Sync request received for unknown source: ${resolvedSourceName} (route: ${sourceName})`
       );
-      res.status(404).json({
-        error: 'Source not found',
+      res.status(200).json({
+        success: true,
+        skipped: true,
+        reason: 'unknown_source',
         sourceName: resolvedSourceName,
       });
       return;
@@ -69,8 +71,10 @@ export async function authenticate(
       logger.warn(
         `Skipping ingest for disconnected source: ${resolvedSourceName} (isActive=false)`,
       );
-      res.status(403).json({
-        error: 'Source is inactive',
+      res.status(200).json({
+        success: true,
+        skipped: true,
+        reason: 'inactive_source',
         sourceName: resolvedSourceName,
       });
       return;

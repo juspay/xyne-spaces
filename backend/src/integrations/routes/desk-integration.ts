@@ -26,6 +26,7 @@ import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { microsoftDeskService } from '@/services/microsoftDeskService';
+import { GoogleService } from '@/services/googleService';
 import { ExternalSourcePlatform } from '../core/types';
 import { extractEmailAddress } from '@/utils/email';
 // Reuse the OAuth primitives from the route files that own them — keeps
@@ -102,6 +103,22 @@ router.post(
       if (!source) {
         res.status(404).json({ error: 'No active integration found for this channel' });
         return;
+      }
+
+      // Best-effort: stop Gmail publishing this mailbox's events to the topic.
+      // Must run BEFORE the OAuth revoke below, since stop() needs a valid
+      // OAuth token. A failure here just means the watch will time out
+      // naturally within 7 days — disconnect continues either way.
+      if (source.sourceType === ExternalSourcePlatform.GOOGLE && source.credentials) {
+        try {
+          const svc = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
+          await svc.stopGmailWatch();
+        } catch (err) {
+          logger.warn(`${TAG} Best-effort Gmail watch stop failed`, {
+            sourceId: source.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // Best-effort token revocation at the provider. Don't let a revoke

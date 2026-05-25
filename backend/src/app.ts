@@ -137,6 +137,7 @@ import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
+import { gmailWatchRenewalQueue } from '@/queues/gmailWatchRenewalQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
@@ -725,6 +726,9 @@ export class App {
     logger.info('Initializing Google Calendar sync queue...');
     await googleCalendarSyncQueue.initialize();
 
+    logger.info('Initializing Gmail watch renewal queue...');
+    await gmailWatchRenewalQueue.initialize();
+
     // Initialize Superposition client early to fail fast if misconfigured
     logger.info('Initializing Superposition client...');
     try {
@@ -807,6 +811,9 @@ export class App {
       // Close calendar sync queues
       await microsoftCalendarSyncQueue.close();
       await googleCalendarSyncQueue.close();
+
+      // Close Gmail watch renewal queue
+      await gmailWatchRenewalQueue.close();
 
       // Close presence cleanup queue
       await presenceCleanupQueue.close();

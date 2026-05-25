@@ -3,6 +3,7 @@ import { AuthResult } from '../../core/types';
 import { logger } from '@/utils/logger';
 import { OAuth2Client } from 'google-auth-library';
 import { GoogleCredentials } from './types';
+import { SHARED_GOOGLE_WEBHOOK_PATH } from '@/services/googleService';
 
 const TAG = '[GoogleAuthenticator]';
 const FAIL: AuthResult = { authenticated: false };
@@ -38,7 +39,7 @@ export class GoogleAuthenticator extends BaseAuthenticator {
       }
 
       // 2. Verify OIDC JWT from Authorization header
-      const jwtError = await this.verifyJWT(headers, sourceName);
+      const jwtError = await this.verifyJWT(headers);
       if (jwtError) return this.fail(jwtError, { sourceName });
 
       // 3. Verify email matches credentials
@@ -58,7 +59,6 @@ export class GoogleAuthenticator extends BaseAuthenticator {
 
   private async verifyJWT(
     headers: Record<string, string | string[]>,
-    sourceName: string
   ): Promise<string | null> {
     const authHeader = headers['authorization'];
     if (!authHeader) return 'Missing Authorization header';
@@ -67,7 +67,11 @@ export class GoogleAuthenticator extends BaseAuthenticator {
     const bearer = token.replace(/^Bearer\s+/i, '').trim();
     if (!bearer) return 'Empty Bearer token';
 
-    const expectedAudience = `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/external-source-sync/${sourceName}/ingest`;
+    // Audience is the fixed shared webhook path — every Google Pub/Sub message
+    // now arrives at the same URL, regardless of which source it's for. The
+    // sourceName arg is the body-resolved DB name (e.g. "google-nikunj-gupta")
+    // and must NOT be interpolated here, or the audience will mismatch the JWT.
+    const expectedAudience = `${process.env.BACKEND_URL || 'http://localhost:3000'}${SHARED_GOOGLE_WEBHOOK_PATH}`;
 
     try {
       const ticket = await this.oauth2Client.verifyIdToken({ idToken: bearer, audience: expectedAudience });

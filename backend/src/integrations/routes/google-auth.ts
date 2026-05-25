@@ -10,6 +10,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ExternalSourcePlatform } from '../core/types';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { config as appConfig } from '@/config/env';
@@ -523,6 +524,34 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     const stack = error?.stack || '';
     logger.error(`${TAG} Error in OAuth callback: ${message}`, { stack });
     redirectError(res, frontendUrl, message, platform, stateWorkspaceId, channelHint);
+  }
+});
+
+/**
+ * POST /api/integrations/google/admin/migrate-to-shared-sub
+ * One-shot migration: create shared subscription if missing, then delete every
+ * legacy per-source `gmail-google-<src>-push`. Idempotent. Use `?dryRun=true`
+ * (or `{ "dryRun": true }` in body) to preview before destroying anything.
+ *
+ * Auth: requires a logged-in user. Wrap with an admin role check if your
+ * platform has one — this is a destructive operation.
+ */
+router.post('/admin/migrate-to-shared-sub', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const dryRun = req.query.dryRun === 'true' || (req.body && req.body.dryRun === true);
+    const report = await GoogleService.migrateToSharedSubscription({ dryRun });
+    logger.info(`${TAG} migration finished`, {
+      dryRun: report.dryRun,
+      shared: report.sharedSubscriptionName,
+      created: report.sharedSubscriptionCreated,
+      deletedCount: report.oldSubscriptionsDeleted.length,
+      skippedCount: report.oldSubscriptionsSkipped.length,
+      requestedBy: req.user?.id,
+    });
+    res.json({ success: true, ...report });
+  } catch (error: any) {
+    logger.error(`${TAG} migration failed`, error);
+    res.status(500).json({ success: false, error: error?.message ?? 'Unknown error' });
   }
 });
 

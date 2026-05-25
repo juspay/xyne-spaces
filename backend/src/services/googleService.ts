@@ -27,6 +27,11 @@ const SOURCE_NAME_PREFIX = 'google-';
 const DEFAULT_PUBSUB_TOPIC = 'gmail-notifications';
 const PUBSUB_ACK_DEADLINE_SECONDS = 600;
 const DEFAULT_BACKEND_URL = 'http://localhost:3000';
+// One shared Pub/Sub subscription per env handles every Google source — body's
+// emailAddress routes to the right ExternalSource at request time. Env suffix
+// keeps dev/staging/prod from overwriting each other's pushConfig.
+const SHARED_SUBSCRIPTION_BASE = 'gmail-google-shared';
+export const SHARED_GOOGLE_WEBHOOK_PATH = '/api/external-source-sync/google/ingest';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -148,6 +153,15 @@ export class GoogleService {
       });
       return response.data as GmailMessageData;
     } catch (error) {
+      // 404 = message was deleted/expired between Gmail publishing the event
+      // and us fetching it. Surface as null so caller can skip-ack instead of
+      // throwing (which would make Pub/Sub retry the dead message for 7 days).
+      const status = (error as { status?: number; code?: number })?.status
+        ?? (error as { status?: number; code?: number })?.code;
+      if (status === 404) {
+        logger.warn(`${TAG} Message ${messageId} not found (likely deleted) — skipping`);
+        return null;
+      }
       logger.error(`${TAG} Failed to fetch message ${messageId}`, error);
       throw new Error(`Failed to fetch Gmail message: ${getErrorMessage(error)}`);
     }
@@ -332,6 +346,30 @@ export class GoogleService {
     return this.setupGmailWatch();
   }
 
+  /**
+   * Stop Gmail publishing this mailbox's events to the Pub/Sub topic.
+   * Used during desk disconnect so push notifications halt immediately
+   * instead of waiting up to 7 days for the watch to naturally expire.
+   * Idempotent: a 404 from Gmail (no active watch) is treated as success.
+   */
+  async stopGmailWatch(): Promise<void> {
+    try {
+      await this.gmail.users.stop({ userId: 'me' });
+      logger.info(`${TAG} Gmail watch stopped`);
+    } catch (error) {
+      const status = (error as { status?: number; code?: number })?.status
+        ?? (error as { status?: number; code?: number })?.code;
+      // 404 = no active watch (already stopped, expired, or never set up).
+      // Desired end state is "no watch publishing", which is already true.
+      if (status === 404) {
+        logger.info(`${TAG} No active Gmail watch to stop (already inactive)`);
+        return;
+      }
+      logger.error(`${TAG} Failed to stop Gmail watch`, error);
+      throw new Error(`Failed to stop Gmail watch: ${getErrorMessage(error)}`);
+    }
+  }
+
   // ─── Email Parsing ───────────────────────────────────────────────────────
 
   parseEmailData(messageData: GmailMessageData): ParsedEmailData {
@@ -464,8 +502,8 @@ export class GoogleService {
     const encryptedCredentials = encrypt(JSON.stringify(credentials));
 
     const watchResult = await new GoogleService(credentials).setupGmailWatch();
-    const webhookUrl = GoogleService.generateWebhookUrl(sourceName);
-    const subscriptionName = await GoogleService.setupPubSubSubscription(sourceName, webhookUrl);
+    const webhookUrl = GoogleService.generateWebhookUrl();
+    const subscriptionName = await GoogleService.setupPubSubSubscription();
 
     return { sourceName, webhookUrl, subscriptionName, watchResult, encryptedCredentials };
   }
@@ -480,8 +518,8 @@ export class GoogleService {
 
     const watchResult = await new GoogleService(credentials).setupGmailWatch();
 
-    const webhookUrl = GoogleService.generateWebhookUrl(sourceName);
-    const subscriptionName = await GoogleService.setupPubSubSubscription(sourceName, webhookUrl);
+    const webhookUrl = GoogleService.generateWebhookUrl();
+    const subscriptionName = await GoogleService.setupPubSubSubscription();
 
     const repo = new ExternalSourceRepository();
     const existing = await repo.findByName(sourceName);
@@ -526,7 +564,14 @@ export class GoogleService {
     };
   }
 
-  static async setupPubSubSubscription(sourceName: string, webhookUrl: string): Promise<string> {
+  /**
+   * Ensure the single shared Pub/Sub subscription exists for this env.
+   * Idempotent: creates on first call, refreshes pushConfig only when the
+   * webhookUrl/audience has drifted (e.g. BACKEND_URL changed across deploys),
+   * no-ops otherwise. Source-level routing happens at request time via the
+   * payload's emailAddress in GoogleFlow.getSourceNameFromDB.
+   */
+  static async setupPubSubSubscription(): Promise<string> {
     const credentials = GoogleService.loadPubSubServiceAccount();
     const pubsub = new PubSub({
       projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
@@ -534,7 +579,8 @@ export class GoogleService {
     });
 
     const topicName = process.env.GOOGLE_PUBSUB_TOPIC || DEFAULT_PUBSUB_TOPIC;
-    const subscriptionName = `gmail-${sourceName}-push`;
+    const subscriptionName = GoogleService.getSharedSubscriptionName();
+    const webhookUrl = GoogleService.generateWebhookUrl();
 
     const topic = pubsub.topic(topicName);
     const subscription = topic.subscription(subscriptionName);
@@ -549,22 +595,140 @@ export class GoogleService {
     };
 
     if (exists) {
-      await subscription.modifyPushConfig(pushConfig);
-      logger.info(`${TAG} Pub/Sub subscription updated`, { subscriptionName });
+      const [meta] = await subscription.getMetadata();
+      const currentEndpoint = meta.pushConfig?.pushEndpoint;
+      if (currentEndpoint === webhookUrl) {
+        logger.info(`${TAG} Shared Pub/Sub subscription already current`, { subscriptionName });
+      } else {
+        await subscription.modifyPushConfig(pushConfig);
+        logger.warn(`${TAG} Shared Pub/Sub subscription pushConfig drifted — refreshed`, {
+          subscriptionName,
+          previousEndpoint: currentEndpoint,
+          newEndpoint: webhookUrl,
+        });
+      }
     } else {
       await topic.createSubscription(subscriptionName, {
         pushConfig,
         ackDeadlineSeconds: PUBSUB_ACK_DEADLINE_SECONDS,
       });
-      logger.info(`${TAG} Pub/Sub subscription created`, { subscriptionName });
+      logger.info(`${TAG} Shared Pub/Sub subscription created`, { subscriptionName, webhookUrl });
     }
 
     return subscriptionName;
   }
 
-  static generateWebhookUrl(sourceName: string): string {
+  static generateWebhookUrl(): string {
     const baseUrl = process.env.BACKEND_URL || DEFAULT_BACKEND_URL;
-    return `${baseUrl}/api/external-source-sync/${sourceName}/ingest`;
+    return `${baseUrl}${SHARED_GOOGLE_WEBHOOK_PATH}`;
+  }
+
+  static getSharedSubscriptionName(): string {
+    // Env classification from BACKEND_URL — keeps detection in sync with how
+    // urlUtils.ts already distinguishes deployments, and avoids needing a new
+    // dedicated env var:
+    //   spaces.sandbox.xyne.juspay.net → sandbox
+    //   localhost / ngrok / trycloudflare / 127.0.0.1 → dev
+    //   anything else (prod domain) → prod
+    const backendUrl = (process.env.BACKEND_URL || '').toLowerCase();
+    let suffix: string;
+    if (backendUrl.includes('sandbox')) {
+      suffix = 'sandbox';
+    } else if (
+      backendUrl.includes('localhost')
+      || backendUrl.includes('127.0.0.1')
+      || backendUrl.includes('ngrok')
+      || backendUrl.includes('trycloudflare')
+    ) {
+      suffix = 'dev';
+    } else {
+      suffix = 'prod';
+    }
+    return `${SHARED_SUBSCRIPTION_BASE}-${suffix}-push`;
+  }
+
+  /**
+   * One-shot migration: ensure the env's shared subscription exists, then
+   * delete every legacy per-source `gmail-google-<src>-push` subscription on
+   * the Gmail topic. Safe to run repeatedly — idempotent on both halves.
+   * `dryRun=true` lists what would change without touching anything.
+   */
+  static async migrateToSharedSubscription(opts: { dryRun?: boolean } = {}): Promise<{
+    dryRun: boolean;
+    sharedSubscriptionName: string;
+    sharedSubscriptionCreated: boolean;
+    oldSubscriptionsDeleted: string[];
+    oldSubscriptionsSkipped: Array<{ name: string; reason: string }>;
+  }> {
+    const dryRun = !!opts.dryRun;
+    const sharedName = GoogleService.getSharedSubscriptionName();
+
+    const credentials = GoogleService.loadPubSubServiceAccount();
+    const pubsub = new PubSub({
+      projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+      credentials,
+    });
+    const topicName = process.env.GOOGLE_PUBSUB_TOPIC || DEFAULT_PUBSUB_TOPIC;
+    const topic = pubsub.topic(topicName);
+
+    // 1. Make sure the shared sub exists FIRST so events have a destination
+    // throughout the cleanup window (no event-loss gap).
+    let sharedSubscriptionCreated = false;
+    const sharedSub = topic.subscription(sharedName);
+    const [sharedExists] = await sharedSub.exists();
+    if (!sharedExists) {
+      if (!dryRun) {
+        await GoogleService.setupPubSubSubscription();
+        sharedSubscriptionCreated = true;
+      } else {
+        sharedSubscriptionCreated = true; // would-create
+      }
+    }
+
+    // 2. Find every legacy per-source subscription attached to this topic.
+    // `topic.getSubscriptions()` returns Subscription objects scoped to this
+    // topic only — won't accidentally touch unrelated subs in the project.
+    const [allOnTopic] = await topic.getSubscriptions();
+    const legacy = allOnTopic.filter(s => {
+      const shortName = s.name.split('/').pop() || '';
+      // Match gmail-google-<anything>-push but exclude shared subs of any env.
+      return /^gmail-google-.+-push$/.test(shortName)
+        && !shortName.startsWith(`${SHARED_SUBSCRIPTION_BASE}-`);
+    });
+
+    logger.info(`${TAG} migration: ${legacy.length} legacy subscriptions found on topic ${topicName}`, {
+      sharedName,
+      sharedSubscriptionCreated,
+      dryRun,
+    });
+
+    // 3. Delete each (or simulate deletion in dryRun).
+    const deleted: string[] = [];
+    const skipped: Array<{ name: string; reason: string }> = [];
+    for (const sub of legacy) {
+      const shortName = sub.name.split('/').pop() || sub.name;
+      if (dryRun) {
+        deleted.push(shortName);
+        continue;
+      }
+      try {
+        await sub.delete();
+        deleted.push(shortName);
+        logger.info(`${TAG} migration: deleted legacy subscription ${shortName}`);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        skipped.push({ name: shortName, reason });
+        logger.warn(`${TAG} migration: skipped ${shortName}: ${reason}`);
+      }
+    }
+
+    return {
+      dryRun,
+      sharedSubscriptionName: sharedName,
+      sharedSubscriptionCreated,
+      oldSubscriptionsDeleted: deleted,
+      oldSubscriptionsSkipped: skipped,
+    };
   }
 
   static getSourceName(emailAddress: string): string {
