@@ -13,9 +13,8 @@ import {
 } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
-import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
-import { useUserGroups } from '../../../hooks/useUserGroup';
+import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
 import { Calendar, Check, User } from 'lucide-react';
 import Tooltip from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
@@ -32,7 +31,6 @@ import { BulkActionToolbar } from './BulkActionToolbar';
 import { StatusOptions } from './TicketTableHelper';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useNavigate } from 'react-router-dom';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
@@ -42,8 +40,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 interface TicketTableProps {
   tickets: Ticket[];
   ticketTags?: Map<string, TicketTag[]>;
+  availableTags?: string[];
   onRowClick?: (ticket: Ticket) => void;
-  projectId?: string;
   visibleColumns?: Set<string>;
   isComfortView?: boolean;
 }
@@ -146,8 +144,8 @@ const IndexCellRenderer = (params: ICellRendererParams<Ticket>) => {
 export const TicketTable: React.FC<TicketTableProps> = ({
   tickets,
   ticketTags,
+  availableTags = [],
   onRowClick,
-  projectId,
   isComfortView = false,
   visibleColumns = new Set(['assignee', 'dueDate', 'status', 'priority', 'stage', 'tags']),
 }) => {
@@ -161,23 +159,6 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const [selectedCount, setSelectedCount] = useState(0);
 
   const userGroups = useUserGroups();
-  const [projectTickets] = useCachedQuery(
-    queries.ticketsByProject({ projectId: projectId ?? '' }),
-    {
-      enabled: !!projectId,
-    },
-  );
-
-  const availableTags = useMemo(() => {
-    if (!projectTickets) return [];
-    const tagSet = new Set<string>();
-    projectTickets.forEach(t => {
-      if ('tags' in t && Array.isArray(t.tags)) {
-        (t.tags as TicketTag[]).forEach(tag => tag?.name && tagSet.add(tag.name));
-      }
-    });
-    return Array.from(tagSet).sort();
-  }, [projectTickets]);
 
   const theme = themeQuartz.withParams({
     headerBackgroundColor: 'hsl(var(--card))',
@@ -679,12 +660,7 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
   const assigneeType = ticket?.assignedTo?.startsWith('group:') ? 'group' : 'user';
   const assigneeId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
   const assignedUser = useUser(assigneeId && assigneeType === 'user' ? assigneeId : '');
-  const [assignedGroup] = useCachedQuery(
-    queries.getUserGroupById({ userGroupId: assigneeId || '' }),
-    {
-      enabled: !!assigneeId && assigneeType === 'group',
-    },
-  );
+  const assignedGroup = useUserGroupById(assigneeId && assigneeType === 'group' ? assigneeId : '');
 
   if (!ticket) return null;
 

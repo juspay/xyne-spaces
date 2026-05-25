@@ -392,10 +392,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
-  // Query all assignments for this ticket
-  const [ticketAssignments] = useCachedQuery(
-    queries.ticketAssignmentsByTicketId({ ticketId: ticketId }),
-  );
+  // ticketDetailsById already loads assignments, so reuse them instead of subscribing twice.
+  const ticketAssignments = useMemo(() => ticket?.assignments ?? [], [ticket?.assignments]);
 
   // Filter PR reviewers and QA from assignments
   const prReviewerIds =
