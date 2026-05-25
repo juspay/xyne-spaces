@@ -1933,6 +1933,27 @@ export const mutators = defineMutators({
           metadata: undefined,
         };
 
+        // Update sender's lastReadAt BEFORE inserting the message so Zero's reactive
+        // store has the updated value in the same cycle as (or before) the message
+        // appears — preventing the "New Messages" banner from flashing on the sender's
+        // own message. Also upgrade MENTIONED → AUTHOR in the same update.
+        const existingParticipant = await tx.run(
+          zql.conversation_participants
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+
+        if (existingParticipant) {
+          await tx.mutate.conversation_participants.update({
+            id: existingParticipant.id,
+            lastReadAt: timestamp,
+            ...(existingParticipant.participationType === ConversationParticipation.MENTIONED && {
+              participationType: ConversationParticipation.AUTHOR,
+            }),
+          });
+        }
+
         await tx.mutate.messages.insert(message);
 
         if (type === MessageType.USER || type === MessageType.FORWARDED) {
@@ -3107,6 +3128,96 @@ export const mutators = defineMutators({
         );
       }
     }),
+  },
+  conversation: {
+    markThreadUnreadFrom: defineMutator(
+      z.object({
+        conversationId: z.string(),
+        messageId: z.string(),
+        participantId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { conversationId, messageId, participantId, timestamp } }) => {
+        // Fetch the conversation
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', conversationId).one(),
+        );
+        if (!conversation) return;
+
+        // Resolve the target message
+        let message = await resolveMessage(tx, messageId);
+        if (!message) return;
+
+        // If root message selected in thread, start from the first reply instead
+        if (messageId === conversation.initialMessageId) {
+          const firstReplies = await tx.run(
+            zql.messages
+              .where('conversationId', conversationId)
+              .where('messageId', '!=', conversation.initialMessageId)
+              .orderBy('createdAt', 'asc')
+              .limit(1),
+          );
+          if (!firstReplies[0]) return; // no replies yet, nothing to mark
+          message = firstReplies[0];
+        }
+
+        const newLastReadAt = message.createdAt - 1;
+
+        // Upsert conversation_participants.lastReadAt
+        const existingParticipant = await tx.run(
+          zql.conversation_participants
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+
+        if (!existingParticipant) {
+          await tx.mutate.conversation_participants.insert({
+            id: participantId,
+            conversationId,
+            userId: ctx.userID,
+            joinedAt: timestamp,
+            channelId: conversation.channelId,
+            lastReadAt: newLastReadAt,
+            lastReplyAt: conversation.lastActivityAt,
+            isSubscribed: true,
+            participationType: null,
+          });
+        } else {
+          await tx.mutate.conversation_participants.update({
+            id: existingParticipant.id,
+            lastReadAt: newLastReadAt,
+          });
+        }
+
+        // Fetch all messages in the thread at/after the selected message,
+        // then find activities pointing to those messages (mirrors markThreadActivitiesAsReadV2).
+        // Using messageId IN avoids the replied_v2 createdAt staleness issue.
+        const messagesAtOrAfter = await tx.run(
+          zql.messages
+            .where('conversationId', conversationId)
+            .where('createdAt', '>=', message.createdAt),
+        );
+        const messageIds = messagesAtOrAfter.map(m => m.messageId);
+
+        const threadActivities = messageIds.length > 0
+          ? await tx.run(
+              zql.activities
+                .where('userId', ctx.userID)
+                .where('messageId', 'IN', messageIds),
+            )
+          : [];
+
+        // Mark activities as unread sequentially
+        const activitiesToMarkUnread = threadActivities.filter(a => a.isRead);
+        for (const activity of activitiesToMarkUnread) {
+          await tx.mutate.activities.update({
+            id: activity.id,
+            isRead: false,
+          });
+        }
+      },
+    ),
   },
   ticket: {
     update: defineMutator(

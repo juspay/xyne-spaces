@@ -60,6 +60,7 @@ import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
+import { setThreadLastRead } from '../../../machines/stateMachine';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -594,6 +595,8 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               conversationId,
               isReply: true,
             });
+            // Sender has implicitly read up to their own message
+            setThreadLastRead(conversationId, messageCreatedAt);
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,

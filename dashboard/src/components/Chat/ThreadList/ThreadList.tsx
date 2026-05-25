@@ -230,7 +230,7 @@ const ThreadList = ({
       return -1;
     }
     return visibleMessages.findIndex(
-      (m, i) => i > 0 && new Date(m.createdAt).getTime() > lastReadAt && m.senderId !== user?.id,
+      (m, i) => i > 0 && new Date(m.createdAt).getTime() > lastReadAt,
     );
   }, [visibleMessages, conversationParticipant?.lastReadAt, user?.id]);
 
