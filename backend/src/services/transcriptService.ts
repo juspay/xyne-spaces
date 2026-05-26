@@ -1533,12 +1533,18 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
       const startTime = Date.now();
+
+      // Skip title generation for HEADLESS recordings - users set title manually via recordings UI
+      const skipTitleGeneration = call.callType === CallType.HEADLESS;
+      if (skipTitleGeneration) {
+        logger.info(`[${callId}] title_generation_skipped | reason=headless_recording`);
+      }
       const [summary, title, ticketSuggestions] = await Promise.all([
         this.generateCallSummary(formattedTranscript, callId).catch((err) => {
           logger.error(`[${callId}] generate_summary_threw | error=${err instanceof Error ? err.message : JSON.stringify(err)}`, err);
           return null;
         }),
-        this.generateCallTitle(titleInput).catch((err) => {
+        skipTitleGeneration ? Promise.resolve(null) : this.generateCallTitle(titleInput).catch((err) => {
           logger.error(`[${callId}] generate_title_threw | error=${err instanceof Error ? err.message : JSON.stringify(err)}`, err);
           return null;
         }),
@@ -1555,6 +1561,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       if (summary) {
         // Save summary and title to call record.
+        // Skip title update for HEADLESS recordings to preserve user-provided title.
         // Only set title from AI if the call doesn't already have one (scheduled calls have a pre-set title).
         await repositories.calls.update(call.id, {
           aiSummary: summary,
@@ -1563,7 +1570,7 @@ Output ONLY the processed transcript, nothing else.`;
         logger.info(`[${callId}] call_record_updated | fields_updated=aiSummary`);
 
         // Update the call system message with the title (if generated)
-        if (title) {
+        if (title && !skipTitleGeneration) {
           try {
             // Use Prisma transaction for atomic message update
             await db.$transaction(async (tx) => {
