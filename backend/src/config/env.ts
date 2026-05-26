@@ -81,6 +81,15 @@ const envSchema = Joi.object({
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
   SLACK_MIGRATION_FINAL_MESSAGE: Joi.string().allow('').default(''), // Custom message appended to the final migration notification
   SLACK_MIGRATION_LOG_CHANNEL_ID: Joi.string().allow('').default(''), // Slack channel ID for migration progress/error logs (defaults to #slack-migration-update)
+  // Google Sheets — Nightly Slack Migration
+  // Uses GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (config.email). Only needs a refresh token with Sheets scope.
+  // One-time setup: https://developers.google.com/oauthplayground → scope: https://www.googleapis.com/auth/spreadsheets
+  MIGRATION_SHEETS_REFRESH_TOKEN: Joi.string().allow('').default(''), // OAuth2 refresh token with spreadsheets scope
+  MIGRATION_SHEET_ID: Joi.string().allow('').default(''), // Google Spreadsheet ID
+  ENABLE_SLACK_MIGRATION_WORKER: Joi.boolean().default(false), // Toggle nightly migration cron on/off
+  SLACK_MIGRATION_CONCURRENCY: Joi.number().integer().min(1).default(2), // Max channels processed in parallel
+  SLACK_MIGRATION_SYNC_CRON: Joi.string().default(''), // Nightly sync cron (default: 12 AM IST = 18:30 UTC)
+  SLACK_MIGRATION_CLEANUP_CRON: Joi.string().default(''), // Cleanup cron (default: 7 AM IST = 01:30 UTC)
   SLACK_MIGRATION_NOTIFICATIONS_ENABLED: Joi.boolean().default(true), // Enable/disable Slack postMessage notifications during migration
   // Zoho Integration
   ZOHO_AUTO_WORKFLOW_ENABLED: Joi.boolean().default(true),
@@ -395,6 +404,13 @@ export const config = {
     ? Buffer.from(envVars.SLACK_MIGRATION_FINAL_MESSAGE, 'base64').toString('utf-8')
     : '',
   slackMigrationLogChannelId: envVars.SLACK_MIGRATION_LOG_CHANNEL_ID,
+  autoSyncSlackChannel: {
+    enabled: envVars.ENABLE_SLACK_MIGRATION_WORKER,
+    sheetId: envVars.MIGRATION_SHEET_ID,
+    concurrency: envVars.SLACK_MIGRATION_CONCURRENCY as number,
+    syncCron: envVars.SLACK_MIGRATION_SYNC_CRON as string,
+    cleanupCron: envVars.SLACK_MIGRATION_CLEANUP_CRON as string,
+  },
   slackMigrationNotificationsEnabled: envVars.SLACK_MIGRATION_NOTIFICATIONS_ENABLED,
   zoho: {
     autoWorkflowEnabled: envVars.ZOHO_AUTO_WORKFLOW_ENABLED,

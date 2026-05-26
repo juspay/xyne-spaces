@@ -59,12 +59,17 @@ async function pushVespaJobForChannel(channelId: string, userId: string, workspa
 
 export interface MigrationInput {
   syncDate?: string | null;
+  /** Optional explicit end date (YYYY-MM-DD). If omitted, defaults to today end-of-day.
+   *  For daily nightly runs, set this to yesterday to avoid ingesting today's messages twice. */
+  syncEndDate?: string | null;
   syncOptions?: string[];
   userId?: string;
   channelId?: string;
   xyneSpaceChannelId?: string;
   /** Optional user token (xoxp-...) to use instead of the bot token. Required for DMs. */
   userToken?: string;
+  /** Whether to post the final @channel announcement to the source Slack channel. Defaults to true. */
+  postChannelAnnouncement?: boolean;
 }
 
 export interface MigrationResult {
@@ -560,7 +565,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     }
 
     // Create time batches
-    const batches = createTimeBatches(input.syncDate!);
+    const batches = createTimeBatches(input.syncDate!, input.syncEndDate);
 
     if (ENABLE_NOTIFICATIONS && messageTs) {
       await postMessage({
@@ -632,7 +637,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     }
 
     // Final @channel announcement always goes to the source channel
-    if (ENABLE_NOTIFICATIONS) {
+    if (ENABLE_NOTIFICATIONS && input.postChannelAnnouncement !== false) {
       let xyneSpaceWorkspaceId: string | undefined;
       if (input.xyneSpaceChannelId) {
         const channelRepo2 = new ChannelRepository();
