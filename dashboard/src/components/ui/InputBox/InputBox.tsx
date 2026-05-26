@@ -781,29 +781,54 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             event.preventDefault();
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlContent, 'text/html');
-            const firstTable = doc.querySelector('table');
-            if (firstTable) {
-              const hasHeader =
-                !!firstTable.querySelector('thead') || !!firstTable.querySelector('th');
-              const rows = Array.from(firstTable.querySelectorAll('tr'))
+            const topLevel = Array.from(doc.body.childNodes);
+            if (topLevel.length === 0) return false;
+
+            const extractTable = (
+              table: HTMLTableElement,
+            ): { rows: string[][]; hasHeader: boolean } => {
+              const hasHeader = !!table.querySelector('thead') || !!table.querySelector('th');
+              const rows = Array.from(table.querySelectorAll('tr'))
                 .map(tr =>
                   Array.from(tr.querySelectorAll('td, th')).map(
                     cell => cell.textContent?.trim() ?? '',
                   ),
                 )
                 .filter(row => row.length > 0);
-
-              if (rows.length === 0 || rows[0]?.length === 0) return false;
-
-              if (rows.reduce((sum, row) => sum + row.length, 0) > 500) {
-                toast.error('Table content is too large', {
-                  description: 'Please paste a smaller table or copy the data as text.',
-                });
-                return true;
+              return { rows, hasHeader };
+            };
+            let inserted = false;
+            for (const node of topLevel) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent ?? '';
+                if (text.trim()) {
+                  editor?.commands.insertContent(text);
+                  inserted = true;
+                }
+                continue;
               }
-              insertTableAtCursor(rows, hasHeader);
-              return true;
+              if (node.nodeType !== Node.ELEMENT_NODE) continue;
+              const el = node as HTMLElement;
+
+              if (el.tagName.toLowerCase() === 'table') {
+                const { rows, hasHeader } = extractTable(el as HTMLTableElement);
+                if (rows.length === 0 || rows[0]?.length === 0) continue;
+                if (rows.reduce((sum, row) => sum + row.length, 0) > 500) {
+                  toast.error('Table content is too large', {
+                    description: 'Please paste a smaller table or copy the data as text.',
+                  });
+                  return true;
+                }
+                insertTableAtCursor(rows, hasHeader);
+                inserted = true;
+                continue;
+              }
+
+              editor?.commands.insertContent(el.outerHTML);
+              inserted = true;
             }
+
+            return inserted;
           }
 
           const pastedText = clipboard?.getData('text');
