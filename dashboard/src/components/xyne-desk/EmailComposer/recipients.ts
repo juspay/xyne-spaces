@@ -198,6 +198,8 @@ export const makeRecipientKeyDownHandler = (
       const newEmails = splitAndValidateEmails(deps.inputValue, deps.emails);
       if (newEmails.length > 0) {
         deps.setEmails([...deps.emails, ...newEmails]);
+      }
+      if (newEmails.length > 0 || deps.inputValue.includes('@')) {
         deps.setInputValue('');
       }
     } else if (e.key === 'Backspace' && !deps.inputValue && deps.emails.length > 0) {
