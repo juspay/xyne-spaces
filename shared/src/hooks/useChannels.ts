@@ -197,24 +197,15 @@ export const useMigratedChannels = (): Channel[] => {
 };
 
 export const useEmailChannels = (): VisibleChannel[] => {
-  const channels = useAllVisibleChannels();
+  const [emailChannelStatuses] = useQuery(queries.userVisibleEmailChannels());
   const allPublicChannels = useAllChannels();
   return useMemo(() => {
-    // Merge visible channels (participant-scoped) with allPublicChannels
-    // (public channels the user may not yet be a participant of) and dedupe
-    // by id. Visible wins on conflict so we keep the richer channelStats
-    // payload when the same channel appears in both lists; public-only rows
-    // are widened to VisibleChannel (channelStats will simply be absent).
     const byId = new Map<string, VisibleChannel>();
-    for (const channel of channels) {
-      if (channel.type === ChannelType.EMAIL) {
-        byId.set(channel.id, channel);
-      }
+    for (const status of emailChannelStatuses ?? []) {
+      const ch = status.channel;
+      if (ch) byId.set(ch.id, ch as unknown as VisibleChannel);
     }
     for (const channel of allPublicChannels) {
-      // Visible list already includes the user's private channels; here we
-      // only want to surface additional PUBLIC email channels the user hasn't
-      // joined yet. Skip PRIVATE ones so we don't leak ones the user isn't in.
       if (channel.visibility === ChannelVisibility.PRIVATE) continue;
       if (channel.type === ChannelType.EMAIL && !byId.has(channel.id)) {
         byId.set(channel.id, channel as unknown as VisibleChannel);
@@ -223,7 +214,7 @@ export const useEmailChannels = (): VisibleChannel[] => {
     return Array.from(byId.values()).sort((a, b) =>
       (a.name || '').localeCompare(b.name || ''),
     );
-  }, [channels, allPublicChannels]);
+  }, [allPublicChannels, emailChannelStatuses]);
 };
 
 export const useChannelsByProjectId = (projectId: string | undefined): Channel[] => {

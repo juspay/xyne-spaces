@@ -919,6 +919,15 @@ export const queries = defineQueries({
         ch.where('type', '!=', ChannelType.EMAIL).related('channelStats'),
       );
   }),
+  userVisibleEmailChannels: defineQuery(({ ctx }) => {
+    return zql.channel_user_status
+      .where('userId', ctx.userID)
+      .where('isClosed', false)
+      .where('isDeleted', false)
+      .related('channel', ch =>
+        ch.where('type', '=', ChannelType.EMAIL).related('channelStats'),
+      );
+  }),
 
   projectsByIds: defineQuery(
     z.object({ projectIds: z.array(z.string()) }),
