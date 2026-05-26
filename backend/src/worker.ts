@@ -195,11 +195,6 @@ class WorkerService {
         );
         logger.info('Starting automation schedule worker...');
         await automationScheduleWorker.start();
-        const { automationResumeWorker } = await import(
-          '@/automations/queue/automation-resume.worker'
-        );
-        logger.info('Starting automation resume worker...');
-        await automationResumeWorker.start();
       }
 
       if (appConfig.enableEmailFetchWorker) {

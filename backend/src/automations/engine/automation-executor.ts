@@ -1,3 +1,4 @@
+import type { z } from 'zod';
 import { PrismaClient, type Workflow } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import {
@@ -34,6 +35,7 @@ interface PreparedRun {
   chain: readonly string[];
   startIndex: number;
   label: 'STARTED' | 'RESUMED';
+  resumeAtIndex?: number;
 }
 
 const EXTERNAL_WAIT_STATUS = 'EXTERNAL_WAIT';
@@ -132,7 +134,14 @@ export class AutomationExecutor {
     logger.info(
       `[automations] run ${prep.label} runId=${executionId} automation=${workflow.id} startIndex=${prep.startIndex} steps=${config.steps.length}`,
     );
-    return this.runSteps(executionId, prep.ctx, prep.chain, config.steps, prep.startIndex);
+    return this.runSteps(
+      executionId,
+      prep.ctx,
+      prep.chain,
+      config.steps,
+      prep.startIndex,
+      prep.resumeAtIndex,
+    );
   }
 
   private async prepareRun(
@@ -190,7 +199,11 @@ export class AutomationExecutor {
         if (!stepConfig) continue;
         const parsedRow = safeParseJson(row.data);
         if (parsedRow !== undefined && parsedRow !== null && typeof parsedRow === 'object') {
-          const fromRow = parsedRow as { type?: StepType; input?: Record<string, unknown>; output?: unknown };
+          const fromRow = parsedRow as {
+            type?: StepType;
+            input?: Record<string, unknown>;
+            output?: unknown;
+          };
           initialCtx.steps[stepConfig.id] = {
             type: fromRow.type ?? stepConfig.type,
             ...(fromRow.input !== undefined ? { input: fromRow.input } : {}),
@@ -198,11 +211,13 @@ export class AutomationExecutor {
           };
         }
       }
+      const pausedIndex = pauseState.currentStepIndex;
       return {
         ctx: initialCtx,
         chain,
-        startIndex: pauseState.currentStepIndex + 1,
+        startIndex: pausedIndex,
         label: 'RESUMED',
+        resumeAtIndex: pausedIndex,
       };
     }
 
@@ -249,6 +264,31 @@ export class AutomationExecutor {
     return { ctx: freshContext, chain, startIndex: 0, label: 'STARTED' };
   }
 
+  private async invokeResume(
+    actionImpl: BaseActionStep<z.ZodSchema, Record<string, unknown>>,
+    runId: string,
+    stepName: string,
+    resolvedInput: Record<string, unknown>,
+    context: AutomationContext,
+  ): Promise<Record<string, unknown>> {
+    const row = await this.prisma.workflowStep.findUnique({
+      where: { workflowExecutionId_stepName: { workflowExecutionId: runId, stepName } },
+      select: { data: true },
+    });
+    const rowData: Record<string, unknown> =
+      row?.data && typeof row.data === 'string'
+        ? (safeParseJson(row.data) as Record<string, unknown> | undefined) ?? {}
+        : {};
+
+    if (typeof actionImpl.onResume === 'function') {
+      return actionImpl.onResume(rowData, resolvedInput, context);
+    }
+    const fallback = rowData['output'];
+    return (fallback && typeof fallback === 'object' && !Array.isArray(fallback)
+      ? (fallback as Record<string, unknown>)
+      : {});
+  }
+
   private async hydrateTriggerData(
     triggerImpl: { hydratePayload?(p: Record<string, unknown>): Promise<Record<string, unknown>> } | null,
     triggerData: Record<string, unknown>,
@@ -291,12 +331,13 @@ export class AutomationExecutor {
     chain: readonly string[],
     steps: AutomationStepConfig[],
     startIndex: number,
+    resumeAtIndex?: number,
   ): Promise<unknown> {
     const automationId = context.automation.id;
     try {
       const walkResult = await automationContextStorage.run<Promise<WalkResult>>(
         { runId, automationId, chain },
-        () => this.walkSteps(steps, context, runId, startIndex),
+        () => this.walkSteps(steps, context, runId, startIndex, resumeAtIndex),
       );
 
       if (walkResult.kind === 'paused') {
@@ -339,21 +380,25 @@ export class AutomationExecutor {
     context: AutomationContext,
     runId: string,
     startIndex: number = 0,
+    resumeAtIndex?: number,
   ): Promise<WalkResult> {
     for (let i = startIndex; i < steps.length; i++) {
       const step = steps[i] as AutomationStepConfig;
       const stepName = `step_${i}`;
+      const isResuming = resumeAtIndex === i;
 
-      await this.upsertStepRow(runId, stepName, step, 'RUNNING', null);
+      if (!isResuming) {
+        await this.upsertStepRow(runId, stepName, step, 'RUNNING', null);
+      }
 
       try {
-        await this.executeStep(step, context);
+        await this.executeStep(step, context, { runId, stepName, isResuming });
 
         const stepCtxEntry = context.steps[step.id];
         await this.markStepCompleted(runId, stepName, stepCtxEntry);
       } catch (err) {
         if (PauseStep.is(err)) {
-          await this.markStepWaiting(runId, stepName, context.steps[step.id]);
+          await this.markStepWaiting(runId, stepName, context.steps[step.id], err.statePatch);
           await persistAutomationPauseState(runId, {
             context: JSON.stringify(context),
             currentStepIndex: i,
@@ -378,7 +423,11 @@ export class AutomationExecutor {
   ): Promise<void> {
     for (const step of steps) {
       try {
-        await this.executeStep(step, context);
+        await this.executeStep(step, context, {
+          runId: '',
+          stepName: '',
+          isResuming: false,
+        });
       } catch (err) {
         if (PauseStep.is(err)) {
           throw new Error(
@@ -438,14 +487,17 @@ export class AutomationExecutor {
     runId: string,
     stepName: string,
     ctxEntry: { input?: unknown; output: unknown } | undefined,
+    statePatch?: Record<string, unknown>,
   ): Promise<void> {
+    const base = ctxEntry ?? { output: null };
+    const merged = statePatch ? { ...base, ...statePatch } : base;
     await this.prisma.workflowStep.update({
       where: {
         workflowExecutionId_stepName: { workflowExecutionId: runId, stepName },
       },
       data: {
         status: 'EXTERNAL_WAIT',
-        data: JSON.stringify(ctxEntry ?? { output: null }),
+        data: JSON.stringify(merged),
       },
     });
   }
@@ -470,6 +522,7 @@ export class AutomationExecutor {
   private async executeStep(
     step: AutomationStepConfig,
     context: AutomationContext,
+    callCtx: { runId: string; stepName: string; isResuming: boolean },
   ): Promise<void> {
     const stepImpl = this.stepRegistry.get(step.type);
 
@@ -516,9 +569,13 @@ export class AutomationExecutor {
 
     const actionImpl = stepImpl as BaseActionStep<typeof stepImpl.configSchema, Record<string, unknown>>;
     const t0 = Date.now();
-    logger.info(`[automations] step START id=${step.id} type=${step.type}`);
+    logger.info(
+      `[automations] step ${callCtx.isResuming ? 'RESUME' : 'START'} id=${step.id} type=${step.type}`,
+    );
     try {
-      const output = await actionImpl.execute(resolvedInput, context);
+      const output = callCtx.isResuming
+        ? await this.invokeResume(actionImpl, callCtx.runId, callCtx.stepName, resolvedInput, context)
+        : await actionImpl.execute(resolvedInput, context);
       context.steps[step.id] = { type: step.type, input: persistedInput, output };
       logger.info(
         `[automations] step OK    id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0}`,

@@ -27,7 +27,6 @@ import { triggerWebhookStep } from './steps/trigger-webhook.step';
 import { runAgentStep } from './steps/run-agent.step';
 
 import { automationQueue } from './queue/automation.queue';
-import { automationResumeQueue } from './queue/automation-resume.queue';
 
 let initialised = false;
 
@@ -60,7 +59,6 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(runAgentStep);
 
   await automationQueue.initialize();
-  await automationResumeQueue.initialize();
 
   logger.info(
     `[automations] Initialised — triggers=${triggerRegistry.list().length}, steps=${stepRegistry.list().length}`,

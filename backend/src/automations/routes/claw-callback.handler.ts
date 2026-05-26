@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { automationResumeQueue } from '../queue/automation-resume.queue';
+import { automationQueue } from '../queue/automation.queue';
 
 export async function handleClawCallback(
   req: Request<{ executionId: string; stepName: string }>,
@@ -38,7 +38,7 @@ export async function handleClawCallback(
       },
     });
 
-    await automationResumeQueue.enqueueResume({ executionId, externalRef: stepName });
+    await automationQueue.enqueueRun({ executionId });
 
     logger.info(
       `[automations] claw-callback stored payload + enqueued resume execution=${executionId} step=${stepName}`,
