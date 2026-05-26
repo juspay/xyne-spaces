@@ -83,9 +83,14 @@ const IFRAME_STYLES = `
     word-wrap: break-word;
     overflow-wrap: anywhere;
   }
+  html { overflow-x: auto; }
   body { padding: 4px 2px; }
   img { max-width: 100%; height: auto; }
-  table { max-width: 100%; }
+  td, th { overflow-wrap: normal; word-wrap: normal; }
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.35); }
+  ::-webkit-scrollbar-track { background: transparent; }
   a { color: #1a73e8; }
   blockquote {
     border-left: 3px solid #dadce0;
@@ -246,7 +251,11 @@ export const EmailBodyRenderer = ({
     const measure = (): void => {
       const body = iframe.contentDocument?.body;
       if (!body) return;
-      const next = body.scrollHeight;
+      let next = body.scrollHeight;
+      // When body content is wider than the viewport, html shows our 8px
+      // horizontal scrollbar. Without compensating here, body overflows the
+      // shortened viewport by 8px and a phantom vertical scrollbar appears.
+      if (body.scrollWidth > body.clientWidth) next += 8;
       if (next > 0) setHeight(next);
     };
 
@@ -289,6 +298,16 @@ export const EmailBodyRenderer = ({
               return;
             }
             target = target.parentElement;
+          }
+
+          const docEl = contentDoc.documentElement;
+          const hasHScroll = !!docEl && docEl.scrollWidth > docEl.clientWidth;
+          if (hasHScroll && Math.abs(e.deltaX) > 0) {
+            if (e.deltaY !== 0) {
+              const container = findScrollContainer(iframe);
+              container.scrollBy({ top: e.deltaY, left: 0 });
+            }
+            return;
           }
 
           const container = findScrollContainer(iframe);

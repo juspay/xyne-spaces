@@ -19,15 +19,14 @@ interface UseComposerResizeReturn {
   composerHeight: number;
   setComposerHeight: (next: number | ((current: number) => number)) => void;
   isResizing: boolean;
-  startResize: (clientY: number) => void;
-  handleTouchStart: (event: React.TouchEvent<HTMLDivElement>) => void;
+  handlePointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+  resizeTargetRef: React.RefObject<HTMLDivElement | null>;
 }
 
 /**
  * Owns the composer's drag-to-resize behavior — height state, ref-tracked
- * starting positions, mouse + touch listeners, and the `user-select: none`
- * cursor lock during the drag. The composer body just calls
- * `startResize(e.clientY)` from its grab handle and reads `composerHeight`.
+ * starting positions, and a pointer-captured drag lifecycle so quick drags
+ * can't outrun listener setup or get lost over the thread's iframes.
  */
 export const useComposerResize = ({
   enabled,
@@ -41,69 +40,124 @@ export const useComposerResize = ({
   const [isResizing, setIsResizing] = useState<boolean>(false);
   const startYRef = useRef<number>(0);
   const startHeightRef = useRef<number>(initialHeight);
+  const pendingHeightRef = useRef<number>(initialHeight);
+  const resizeTargetRef = useRef<HTMLDivElement | null>(null);
+  const finishResizeRef = useRef<((commit?: boolean) => void) | null>(null);
 
   const setComposerHeight: UseComposerResizeReturn['setComposerHeight'] = next => {
-    setComposerHeightState(prev => (typeof next === 'function' ? next(prev) : next));
-  };
-
-  const startResize = (clientY: number): void => {
-    if (!enabled) return;
-    startYRef.current = clientY;
-    startHeightRef.current = composerHeight;
-    setIsResizing(true);
-  };
-
-  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>): void => {
-    const touch = event.touches[0];
-    if (!touch) return;
-    event.preventDefault();
-    startResize(touch.clientY);
+    setComposerHeightState(prev => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      pendingHeightRef.current = value;
+      return value;
+    });
   };
 
   useEffect(() => {
-    if (!isResizing) return undefined;
-    const minHeight = useTallMinHeight ? tallMinHeight : defaultMinHeight;
-
-    const onPointerMove = (clientY: number): void => {
-      const deltaY = startYRef.current - clientY;
-      const next = Math.min(maxHeight, Math.max(minHeight, startHeightRef.current + deltaY));
-      setComposerHeightState(next);
-    };
-
-    const onMouseMove = (e: MouseEvent): void => onPointerMove(e.clientY);
-    const onTouchMove = (e: TouchEvent): void => {
-      const touch = e.touches[0];
-      if (!touch) return;
-      e.preventDefault();
-      onPointerMove(touch.clientY);
-    };
-    const stop = (): void => setIsResizing(false);
-
-    const prevUserSelect = document.body.style.userSelect;
-    const prevCursor = document.body.style.cursor;
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'row-resize';
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', stop);
-    document.addEventListener('touchmove', onTouchMove, { passive: false });
-    document.addEventListener('touchend', stop);
-
     return () => {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', stop);
-      document.removeEventListener('touchmove', onTouchMove);
-      document.removeEventListener('touchend', stop);
-      document.body.style.userSelect = prevUserSelect;
-      document.body.style.cursor = prevCursor;
+      finishResizeRef.current?.(false);
     };
-  }, [isResizing, useTallMinHeight, defaultMinHeight, tallMinHeight, maxHeight]);
+  }, []);
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!enabled || !event.isPrimary) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+    finishResizeRef.current?.(true);
+    event.preventDefault();
+
+    startYRef.current = event.clientY;
+    startHeightRef.current = pendingHeightRef.current;
+    setIsResizing(true);
+
+    const minHeight = useTallMinHeight ? tallMinHeight : defaultMinHeight;
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    const target = resizeTargetRef.current;
+    const prevUserSelect = document.body.style.userSelect;
+    const prevWillChange = target?.style.willChange ?? '';
+    const prevContain = target?.style.contain ?? '';
+    let rafId: number | null = null;
+    let finished = false;
+
+    if (target) {
+      target.style.willChange = 'height';
+      target.style.contain = 'layout paint';
+    }
+    document.body.style.userSelect = 'none';
+
+    const flush = (): void => {
+      rafId = null;
+      if (target) target.style.height = `${pendingHeightRef.current}px`;
+    };
+
+    const finish = (commit = true): void => {
+      if (finished) return;
+      finished = true;
+      finishResizeRef.current = null;
+
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+
+      handle.removeEventListener('pointermove', onPointerMove);
+      handle.removeEventListener('pointerup', onPointerUp);
+      handle.removeEventListener('pointercancel', onPointerCancel);
+      handle.removeEventListener('lostpointercapture', onLostPointerCapture);
+      window.removeEventListener('blur', onWindowBlur);
+
+      if (handle.isConnected && handle.hasPointerCapture(pointerId)) {
+        handle.releasePointerCapture(pointerId);
+      }
+
+      document.body.style.userSelect = prevUserSelect;
+      if (target) {
+        target.style.willChange = prevWillChange;
+        target.style.contain = prevContain;
+      }
+
+      if (commit) setComposerHeightState(pendingHeightRef.current);
+      setIsResizing(false);
+    };
+
+    const onPointerMove = (e: PointerEvent): void => {
+      if (e.pointerId !== pointerId) return;
+      if (e.pointerType === 'mouse' && e.buttons === 0) {
+        finish(true);
+        return;
+      }
+
+      const deltaY = startYRef.current - e.clientY;
+      pendingHeightRef.current = Math.min(
+        maxHeight,
+        Math.max(minHeight, startHeightRef.current + deltaY),
+      );
+      if (rafId === null) rafId = requestAnimationFrame(flush);
+    };
+
+    const onPointerUp = (e: PointerEvent): void => {
+      if (e.pointerId === pointerId) finish(true);
+    };
+    const onPointerCancel = (e: PointerEvent): void => {
+      if (e.pointerId === pointerId) finish(true);
+    };
+    const onLostPointerCapture = (): void => finish(true);
+    const onWindowBlur = (): void => finish(true);
+
+    finishResizeRef.current = finish;
+    handle.setPointerCapture(pointerId);
+    handle.addEventListener('pointermove', onPointerMove, { passive: true });
+    handle.addEventListener('pointerup', onPointerUp, { passive: true });
+    handle.addEventListener('pointercancel', onPointerCancel, { passive: true });
+    handle.addEventListener('lostpointercapture', onLostPointerCapture);
+    window.addEventListener('blur', onWindowBlur);
+  };
 
   return {
     composerHeight,
     setComposerHeight,
     isResizing,
-    startResize,
-    handleTouchStart,
+    handlePointerDown,
+    resizeTargetRef,
   };
 };
