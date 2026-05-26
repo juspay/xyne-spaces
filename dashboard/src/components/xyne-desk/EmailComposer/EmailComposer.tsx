@@ -561,8 +561,8 @@ export const EmailComposer = ({
   const {
     composerHeight,
     setComposerHeight,
-    startResize: startComposerResize,
-    handleTouchStart: handleComposerResizeTouchStart,
+    handlePointerDown: handleComposerResizePointerDown,
+    resizeTargetRef,
   } = useComposerResize({
     enabled: isExpanded && !isSending,
     useTallMinHeight: aiDraft.isDraftActive || isInlineAIPanelOpen,
@@ -1553,6 +1553,7 @@ export const EmailComposer = ({
       ref={composerRef}
     >
       <div
+        ref={resizeTargetRef}
         className={cn(
           'relative flex flex-col overflow-hidden',
           features.showCardWrap ? 'border border-border rounded-xl' : 'flex-1 min-h-0',
@@ -1571,11 +1572,7 @@ export const EmailComposer = ({
         {isExpanded && features.showResizeGrip && (
           <div
             className='h-4 flex-shrink-0 flex items-center justify-center cursor-row-resize touch-none'
-            onMouseDown={e => {
-              e.preventDefault();
-              startComposerResize(e.clientY);
-            }}
-            onTouchStart={handleComposerResizeTouchStart}
+            onPointerDown={handleComposerResizePointerDown}
             onKeyDown={() => {}}
             role='button'
             tabIndex={0}

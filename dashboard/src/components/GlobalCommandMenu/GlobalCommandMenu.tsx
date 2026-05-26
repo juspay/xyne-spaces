@@ -81,6 +81,12 @@ const GlobalCommandMenu = ({
 
   const handleOpenChange = useCallback(
     (newOpen: boolean) => {
+      if (newOpen && internalContextualTab === undefined && externalInitialTab === undefined) {
+        const pathParts = location.pathname.split('/').filter(Boolean);
+        if (pathParts.includes('support')) {
+          setInternalContextualTab(TabType.DESK);
+        }
+      }
       onOpenChange(newOpen);
       if (!newOpen) {
         setInternalInitialMention(null);
@@ -89,7 +95,7 @@ const GlobalCommandMenu = ({
         setInternalEnabledTabs(undefined);
       }
     },
-    [onOpenChange],
+    [onOpenChange, internalContextualTab, externalInitialTab, location.pathname],
   );
 
   const handleFindInChannel = useCallback(() => {
