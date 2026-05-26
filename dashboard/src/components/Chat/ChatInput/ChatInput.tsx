@@ -537,6 +537,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         // Restores draft content back to both the state machine and the editor
         const restoreDraft = () => {
           saveDraft(lookupId, processedHtml, '');
+          inputBoxRef.current?.clearContent();
           inputBoxRef.current?.insertContent(processedHtml);
           toast.error('Failed to send message', {
             description: 'Message restored as draft. Please try again.',
