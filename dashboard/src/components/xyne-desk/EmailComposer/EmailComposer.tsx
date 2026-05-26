@@ -1386,14 +1386,17 @@ export const EmailComposer = ({
   );
 
   const handleSuggestionSelect = (field: RecipientField, email: string): void => {
+    const lower = email.toLowerCase();
+    const isDup = (list: ReadonlyArray<string>): boolean =>
+      list.some(e => e.toLowerCase() === lower);
     if (field === 'to') {
-      if (!toEmails.includes(email)) setToEmails([...toEmails, email]);
+      if (!isDup(toEmails)) setToEmails([...toEmails, email]);
       setToInputValue('');
     } else if (field === 'cc') {
-      if (!ccEmails.includes(email)) setCcEmails([...ccEmails, email]);
+      if (!isDup(ccEmails)) setCcEmails([...ccEmails, email]);
       setCcInputValue('');
     } else {
-      if (!bccEmails.includes(email)) setBccEmails([...bccEmails, email]);
+      if (!isDup(bccEmails)) setBccEmails([...bccEmails, email]);
       setBccInputValue('');
     }
     setSuggestionIndex(0);
