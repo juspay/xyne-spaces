@@ -20,7 +20,20 @@ interface VideoViewerProps extends BaseViewerProps {
 }
 
 const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
-  ({ source, attachmentId, width, height, onExpand, menuContent, initialTime = 0 }, ref) => {
+  (
+    {
+      source,
+      attachmentId,
+      width,
+      height,
+      onExpand,
+      menuContent,
+      initialTime = 0,
+      disableGestures,
+      onInteractionStateChange,
+    },
+    ref,
+  ) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [volume, setVolume] = useState(1);
@@ -64,17 +77,19 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       return '';
     }, [attachmentId, source]);
 
-    // Mobile zoom hook for pinch-to-zoom
+    // Mobile zoom hook for pinch-to-zoom and pan
     const {
       scale: mobileZoomScale,
       transformOrigin,
+      panX,
       resetZoom,
     } = useMobileZoom({
-      enabled: Boolean(isMobile && isImmersiveMode),
+      enabled: Boolean(isMobile && (isImmersiveMode || disableGestures)),
       containerRef,
       targetRef: videoRef,
       minScale: 1,
       maxScale: 5,
+      onInteractionStateChange,
     });
 
     // Reset zoom when source/attachmentId changes
@@ -425,7 +440,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           )}
           style={{
             willChange: 'transform',
-            transform: isMobile ? `scale(${mobileZoomScale})` : 'translate3d(0, 0, 0)',
+            transform: isMobile
+              ? `translateX(${panX}px) scale(${mobileZoomScale})`
+              : 'translate3d(0, 0, 0)',
             transformOrigin: isMobile ? transformOrigin : undefined,
             transition: isMobile ? 'transform 0.05s ease-out' : undefined,
             objectFit: 'contain',

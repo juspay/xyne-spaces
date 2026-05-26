@@ -8,6 +8,12 @@ import VideoViewer from './VideoViewer';
 import CodeViewer from './CodeViewer';
 import HtmlViewer from './HtmlViewer';
 
+export interface ZoomState {
+  scale: number;
+  isAtLeftEdge: boolean;
+  isAtRightEdge: boolean;
+}
+
 export interface BaseViewerProps {
   source: File | null;
   fileName?: string;
@@ -18,6 +24,7 @@ export interface BaseViewerProps {
   initialPage?: number;
   onExpand?: () => void;
   disableGestures?: boolean;
+  onInteractionStateChange?: ((state: ZoomState) => void) | undefined;
 }
 
 export interface FileTypeConfig<P = BaseViewerProps> {

@@ -10,7 +10,12 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
 import { useScope, useShortcutById } from '../../shortcuts';
 
-const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestures }) => {
+const ImageViewer: React.FC<BaseViewerProps> = ({
+  source,
+  fileName,
+  disableGestures,
+  onInteractionStateChange,
+}) => {
   const [imageUrl, setImageUrl] = useState<string>('');
   const [rotation, setRotation] = useState(0);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -26,6 +31,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
   const {
     scale: gestureScale,
     transformOrigin,
+    panX,
     resetZoom,
   } = useMobileZoom({
     enabled: Boolean(disableGestures),
@@ -33,6 +39,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
     targetRef: imageRef,
     minScale: 1,
     maxScale: 5,
+    onInteractionStateChange,
   });
 
   useScope('viewer', imageLoaded && !imageError);
@@ -213,7 +220,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
               onError={handleImageError}
               className='select-none max-h-full max-w-full h-auto w-auto object-contain origin-center'
               style={{
-                transform: `rotate(${rotation}deg) scale(${gestureScale})`,
+                transform: `rotate(${rotation}deg) translateX(${panX}px) scale(${gestureScale})`,
                 transformOrigin,
                 // A short transition to smooth out the discrete setState calls without adding perceptible lag.
                 transition: 'transform 0.05s ease-out',
@@ -256,7 +263,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
           limitToBounds={true}
           centerOnInit={true}
           centerZoomedOut={true}
-          panning={{ disabled: true }}
+          panning={{ disabled: false }}
           wheel={{
             step: 0.5,
             smoothStep: 0.01,
