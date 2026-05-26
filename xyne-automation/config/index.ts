@@ -135,7 +135,7 @@ function getParallel(env: Environment): number {
     case 'local-test':
       return 3;
     case 'test':
-      return 3; // Jenkins has 4 CPUs, use 3 parallel runners
+      return 1; // Jenkins runs serially — single Gauge worker
     default:
       return 1;
   }

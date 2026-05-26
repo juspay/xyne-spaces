@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run the cucumber automation suite (xyne-automation-old) locally against the
 # same docker-compose stack Jenkins uses. Mirrors what Jenkins runs when
-# USE_GAUGE=false (the default). Pull the cucumber HTML report out of the
-# container at the end so you can open it on the host.
+# USE_CUCUMBER=true (gauge is now the default in CI). Pull the cucumber HTML
+# report out of the container at the end so you can open it on the host.
 #
 # Usage:
 #   scripts/run-cucumber-local.sh [profile]
