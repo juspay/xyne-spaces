@@ -44,6 +44,7 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
   const [categoryField, setCategoryField] = useState('Query Type');
   const [subCategoryField, setSubCategoryField] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   // Preview state
   const [previewSubject, setPreviewSubject] = useState('');
@@ -177,7 +178,69 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
 
           {/* Classification prompt */}
           <div className='space-y-2'>
-            <div className='text-sm font-medium'>Classification Prompt</div>
+            <div className='flex items-center justify-between'>
+              <div className='text-sm font-medium'>Classification Prompt</div>
+              <button
+                onClick={() => setShowGuide(v => !v)}
+                className='flex items-center gap-1 text-xs text-[#6276be] hover:text-[#4f62a8] transition-colors'
+                data-track-category='ClassificationSettings'
+                data-track-name='TogglePromptGuide'
+              >
+                <svg width='13' height='13' viewBox='0 0 16 16' fill='none'>
+                  <circle cx='8' cy='8' r='7' stroke='currentColor' strokeWidth='1.5' />
+                  <path
+                    d='M8 7v5M8 5v1'
+                    stroke='currentColor'
+                    strokeWidth='1.5'
+                    strokeLinecap='round'
+                  />
+                </svg>
+                {showGuide ? 'Hide Guide' : 'Prompt Guide'}
+              </button>
+            </div>
+            {showGuide && (
+              <div className='rounded-md border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground space-y-1.5'>
+                <p className='font-semibold text-foreground'>
+                  How to write your classification prompt:
+                </p>
+                <ul className='space-y-1 list-disc list-inside'>
+                  <li>
+                    Return <span className='font-mono text-foreground'>JSON</span> — not a raw
+                    string. The system parses JSON to extract the category.
+                  </li>
+                  <li>
+                    The JSON key must <strong className='text-foreground'>exactly match</strong> the
+                    Category field name (e.g.{' '}
+                    <span className='font-mono text-foreground'>&quot;Query Type&quot;</span>) —
+                    casing and spaces included.
+                  </li>
+                  <li>
+                    Return <strong className='text-foreground'>exactly one category</strong> — never
+                    combine or list multiple values. The system does a strict key lookup; combined
+                    values like{' '}
+                    <span className='font-mono text-foreground'>&quot;Mandate, Refund&quot;</span>{' '}
+                    will not match and will fall back to{' '}
+                    <span className='font-mono text-foreground'>Other</span>.
+                  </li>
+                  <li>If you have a Sub-Category field, include it in the same JSON object.</li>
+                  <li>
+                    Category values must match your configured options exactly (e.g.{' '}
+                    <span className='font-mono text-foreground'>Mandate</span>,{' '}
+                    <span className='font-mono text-foreground'>Refund</span>).
+                  </li>
+                  <li>Do not wrap output in markdown code fences or add any explanation.</li>
+                </ul>
+                <div className='mt-2 rounded bg-background border border-border px-3 py-2 font-mono text-foreground'>
+                  {`// Example output your prompt should return`}
+                  <br />
+                  {`{"Query Type": "Refund"}`}
+                  <br />
+                  {`// With sub-category`}
+                  <br />
+                  {`{"Query Type": "Refund", "Sub Type": "Partial Refund"}`}
+                </div>
+              </div>
+            )}
             <textarea
               className='w-full rounded border border-border bg-background px-3 py-2 text-sm font-mono min-h-[180px] resize-y'
               value={prompt}

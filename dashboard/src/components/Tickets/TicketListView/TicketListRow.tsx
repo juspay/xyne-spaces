@@ -184,6 +184,14 @@ export const TicketListRow = ({
         >
           {ticket.title}
         </span>
+        {ticket.aiCategory && (
+          <span
+            className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap flex-shrink-0'
+            title={`AI Category: ${ticket.aiCategory}`}
+          >
+            {ticket.aiCategory}
+          </span>
+        )}
         <div className='w-[28px] flex-shrink-0'>
           {emailCount > 0 && (
             <span
