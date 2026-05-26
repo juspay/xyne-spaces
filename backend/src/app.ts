@@ -49,6 +49,7 @@ import { externalSourceSyncRoutes } from '@/integrations';
 import googleAuthRoutes from '@/integrations/routes/google-auth';
 import deskIntegrationRoutes from '@/integrations/routes/desk-integration';
 import migrationRoutes from '@/migration';
+import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
 import publicUserRoutes from '@/routes/publicUserRoutes';
 import userRoutes from '@/routes/users';
@@ -804,6 +805,12 @@ export class App {
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
     await delayedMessageQueue.initialize();
 
+    // Nightly automated Slack migration cron (runs only on migration pod)
+    if (config.autoSyncSlackChannel.enabled) {
+      logger.info('[APP] Starting Slack migration nightly worker...');
+      await slackMigrationWorker.start();
+    }
+
     this.httpServer.listen(config.port, config.host, () => {
       logger.info(`Server is running on ${config.host}:${config.port} in ${config.env} mode`);
       logger.info('WebSocket server ready for connections');
@@ -857,6 +864,9 @@ export class App {
 
       await DatabaseClient.disconnect();
       await redisService.disconnect();
+
+      // Stop Slack migration nightly worker if running
+      await slackMigrationWorker.stop();
 
       // Close HTTP server
       this.httpServer.close(() => {
