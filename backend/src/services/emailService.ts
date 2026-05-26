@@ -158,6 +158,7 @@ export interface IngestEmailThreadResult {
   duplicates: number;
   isNew: boolean;
   blocked?: boolean;
+  wasVespaMerge?: boolean;
 }
 
 interface ThreadTxResult {
@@ -167,6 +168,7 @@ interface ThreadTxResult {
   inserted: number;
   duplicates: number;
   isNew: boolean;
+  wasVespaMerge?: boolean;
 }
 
 const SUBJECT_PREFIX_REGEX = /^(\s*(re|fwd|fw)\s*:\s*)+/i;
@@ -1814,21 +1816,14 @@ export class EmailService {
           }
         }
 
-        if (emailInsert.count > 0) {
-          if (vespaMatchConversationId && previousLatestEmailId && ticketId) {
-            const caughtUpUsers = await tx.emailRead.findMany({
-              where: { ticketId, lastReadEmailId: previousLatestEmailId },
-              select: { userId: true },
-            });
-            if (caughtUpUsers.length > 0) {
-              await tx.channelUserStatus.updateMany({
-                where: { channelId, userId: { in: caughtUpUsers.map(r => r.userId) }, isDeleted: false },
-                data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
-              });
-            }
-          } else {
+        if (emailInsert.count > 0 && vespaMatchConversationId && previousLatestEmailId && ticketId) {
+          const caughtUpUsers = await tx.emailRead.findMany({
+            where: { ticketId, lastReadEmailId: previousLatestEmailId },
+            select: { userId: true },
+          });
+          if (caughtUpUsers.length > 0) {
             await tx.channelUserStatus.updateMany({
-              where: { channelId, isDeleted: false },
+              where: { channelId, userId: { in: caughtUpUsers.map(r => r.userId) }, isDeleted: false },
               data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
             });
           }
@@ -1841,6 +1836,7 @@ export class EmailService {
           inserted: emailInsert.count,
           duplicates: emails.length - emailInsert.count,
           isNew,
+          wasVespaMerge: !!(vespaMatchConversationId && previousLatestEmailId && ticketId),
         };
       });
     } catch (error) {
@@ -1927,11 +1923,6 @@ export class EmailService {
       }
     }
 
-    try {
-      await this.channelRepository.updateLastActivity(channelId);
-    } catch (error) {
-      logger.warn('[EmailService] updateLastActivity failed', error);
-    }
 
     return {
       conversationId: txResult.conversationId,
@@ -1940,6 +1931,7 @@ export class EmailService {
       inserted: txResult.inserted,
       duplicates: txResult.duplicates,
       isNew: txResult.isNew,
+      wasVespaMerge: txResult.wasVespaMerge,
     };
   }
 }

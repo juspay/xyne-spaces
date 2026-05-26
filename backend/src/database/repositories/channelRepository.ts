@@ -229,6 +229,14 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
   }
 
+  async incrementUnreadForAllMembers(channelId: string, increment: number): Promise<void> {
+    if (increment <= 0) return;
+    await this.db.channelUserStatus.updateMany({
+      where: { channelId, isDeleted: false },
+      data: { unreadCount: { increment }, updatedAt: new Date() },
+    });
+  }
+
   async getChannelsByScope(scopeType: ChannelScopeType): Promise<Channel[]> {
     return await this.findMany({ scopeType });
   }

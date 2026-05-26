@@ -17,12 +17,14 @@ import { emailService } from '@/services/emailService';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
+import { ChannelRepository } from '@/database/repositories/channelRepository';
 
 const TAG = '[MicrosoftRefetch]';
 const RANGE_MAX_MESSAGES = 2000;
 const transformer = new MicrosoftTransformer();
 const preferenceRepo = new EmailChannelPreferenceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
+const channelRepo = new ChannelRepository();
 
 const GRAPH_MESSAGE_FIELDS = [
   'id', 'subject', 'body', 'bodyPreview', 'from',
@@ -102,6 +104,7 @@ export class MicrosoftRefetch extends BaseRefetch {
     let processed = 0;
     let newTickets = 0;
     let skipped = 0;
+    let threadsNeedingUnreadBump = 0;
     const errors: string[] = [];
 
     const ingestThread = async (
@@ -170,6 +173,9 @@ export class MicrosoftRefetch extends BaseRefetch {
         processed += result.inserted;
         skipped += result.duplicates;
         if (result.isNew) newTickets += 1;
+        if (result.inserted > 0 && !result.wasVespaMerge) {
+          threadsNeedingUnreadBump += 1;
+        }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
         logger.warn(`${TAG} thread ${threadId} ingest failed`, { error: errMsg });
@@ -187,6 +193,23 @@ export class MicrosoftRefetch extends BaseRefetch {
       }
     }
 
+    if (threadsNeedingUnreadBump > 0) {
+      try {
+        await channelRepo.incrementUnreadForAllMembers(
+          source.channelId!,
+          threadsNeedingUnreadBump,
+        );
+      } catch (error) {
+        logger.warn(`${TAG} incrementUnreadForAllMembers (end-of-refetch) failed`, { error });
+      }
+    }
+    if (processed > 0) {
+      try {
+        await channelRepo.updateLastActivity(source.channelId!);
+      } catch (error) {
+        logger.warn(`${TAG} updateLastActivity (end-of-refetch) failed`, { error });
+      }
+    }
 
     logger.info(`${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`);
     return { processed, newTickets, skipped, errors };
