@@ -9,6 +9,7 @@ import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { CallType } from '@xyne/shared';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
+import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 
@@ -40,6 +41,7 @@ interface NotificationData {
       messageType?: string;
       canvasId?: string;
       blockId?: string;
+      conversation?: Conversation;
     };
     createdAt: Date;
   };
@@ -85,6 +87,17 @@ export const NotificationHandler: React.FC = () => {
         const type = data.notification?.type?.toLowerCase();
         if (type === 'channel_read' || type === 'thread_read') {
           return;
+        }
+        // Cache conversation data from notification payload (if available)
+        // This pre-populates the cache so navigating to the channel is instant
+        const conversationPayload = data.notification.data?.conversation;
+        const channelId = data.notification.data?.channelId;
+        if (conversationPayload && channelId) {
+          queryCacheActor.send({
+            type: 'MERGE_CONVERSATION',
+            channelId,
+            conversation: conversationPayload,
+          });
         }
 
         // For canvas notifications, construct actionUrl from data if not provided

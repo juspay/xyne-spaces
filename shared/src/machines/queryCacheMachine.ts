@@ -69,6 +69,7 @@ export type QueryCacheEvent =
       };
     }
   | { type: 'SET_CONVERSATIONS'; channelId: string; conversations: Conversation[] }
+  | { type: 'MERGE_CONVERSATION'; channelId: string; conversation: Conversation }
   | { type: 'MERGE_CALL_HISTORY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
   | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState }
   | { type: 'MERGE_RECORDINGS_PAGE'; page: RecordingEntry[]; hasMore: boolean }
@@ -133,6 +134,19 @@ export const queryCacheMachine = setup({
           };
         }
         return context.channelConversations;
+      },
+    }),
+    mergeConversation: assign({
+      channelConversations: ({ context, event }) => {
+        if (event.type !== 'MERGE_CONVERSATION') return context.channelConversations;
+        const { channelId, conversation } = event;
+        const existing = context.channelConversations[channelId] ?? [];
+        // Replace if exists, otherwise prepend (newest first)
+        const idx = existing.findIndex(c => c.conversationId === conversation.conversationId);
+        const updated = idx >= 0
+          ? existing.map((c, i) => (i === idx ? conversation : c))
+          : [conversation, ...existing];
+        return { ...context.channelConversations, [channelId]: updated };
       },
     }),
     hydrateConversations: assign(({ event, context }) => {
@@ -217,6 +231,9 @@ export const queryCacheMachine = setup({
     },
     SET_CONVERSATIONS: {
       actions: 'setConversations',
+    },
+    MERGE_CONVERSATION: {
+      actions: 'mergeConversation',
     },
     MERGE_CALL_HISTORY_PAGE: {
       actions: 'mergeCallHistoryPage',

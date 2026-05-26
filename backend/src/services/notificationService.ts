@@ -16,8 +16,92 @@ import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
 import * as notificationFilterService from './notificationFilterService';
+import { serializeInitialMessageMd, type InitialMessageSummary } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
+
+/**
+ * Fetches conversation data for embedding in notification payloads.
+ * Builds initial_message_md inline since MessageMetadataService hasn't run yet.
+ * This allows the client to cache the conversation on notification receipt,
+ * eliminating the loader when navigating to the channel.
+ */
+async function fetchConversationForNotification(conversationId: string) {
+  try {
+    const conversation = await prisma.conversation.findUnique({
+      where: { conversationId },
+    });
+    if (!conversation) return undefined;
+
+    // Build initial_message_md from the message since MessageMetadataService
+    // hasn't run yet at notification time
+    let initialMessageMd: string | null = null;
+    if (conversation.initialMessageId) {
+      const message = await prisma.message.findUnique({
+        where: { messageId: conversation.initialMessageId },
+      });
+      if (message) {
+        const summary: InitialMessageSummary = {
+          messageId: message.messageId,
+          conversationId: message.conversationId,
+          senderId: message.senderId,
+          content: message.content,
+          msgType: message.msgType as InitialMessageSummary['msgType'],
+          hasAttachment: message.hasAttachment,
+          edited: message.edited,
+          isDeleted: message.isDeleted,
+          showInChannel: message.showInChannel,
+          visibleTo: message.visibleTo,
+          createdAt: message.createdAt.getTime(),
+          metadata: message.metadata ? JSON.stringify(message.metadata) : null,
+          nudgeCount: message.nudgeCount,
+          isSent: message.isSent,
+          reactions_md: message.reactions_md,
+          link_preview_md: message.link_preview_md,
+          childConversationId: message.childConversationId,
+        };
+        initialMessageMd = serializeInitialMessageMd(summary);
+      }
+    }
+
+    // Fetch attachments via initialMessageId → message_attachments.entityId
+    // (matches Zero schema relationship: conversations.initialMessageId → message_attachments.entityId)
+    const attachments = conversation.initialMessageId
+      ? await prisma.messageAttachment.findMany({
+          where: { entityId: conversation.initialMessageId },
+        })
+      : [];
+
+    return {
+      conversationId: conversation.conversationId,
+      channelId: conversation.channelId,
+      createdBy: conversation.createdBy,
+      initialMessageId: conversation.initialMessageId,
+      parentMessageId: conversation.parentMessageId,
+      lastActivityAt: conversation.lastActivityAt.getTime(),
+      replyCount: conversation.replyCount,
+      pinned: conversation.pinned,
+      ticketId: conversation.ticketId,
+      callId: conversation.callId,
+      createdAt: conversation.createdAt.getTime(),
+      initial_message_md: initialMessageMd,
+      initialMessageAttachments: attachments.map(a => ({
+        id: a.id,
+        entityId: a.entityId,
+        entityType: a.entityType,
+        originalFilename: a.originalFilename,
+        url: a.url,
+        size: a.size,
+        mimetype: a.mimetype,
+        createdAt: a.createdAt.getTime(),
+      })),
+      initialMessageNudgeCounts: [],
+    };
+  } catch (error) {
+    logger.warn('[NOTIFICATION] Failed to fetch conversation for notification payload', { conversationId, error });
+    return undefined;
+  }
+}
 
 interface BrowserSubscription {
   endpoint: string;
@@ -865,6 +949,8 @@ class NotificationService {
       channelId,
     });
 
+    const conversationData = await fetchConversationForNotification(conversationId);
+
     const notificationData = {
       title: `New message in #${channelName}`,
       message: `${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
@@ -881,6 +967,7 @@ class NotificationService {
         senderPicture,
         channelTitle: channelName,
         messageType: 'channel_message',
+        conversation: conversationData,
       },
     };
 
@@ -973,6 +1060,9 @@ class NotificationService {
     const mentionActionUrl = isThreadMessage
       ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
       : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+
+    const conversationData = await fetchConversationForNotification(conversationId);
+
     const notificationData = {
       title,
       message: `${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
@@ -989,6 +1079,7 @@ class NotificationService {
         senderPicture,
         channelTitle: channelName,
         mentionType,
+        conversation: conversationData,
       },
     };
 
@@ -1157,6 +1248,8 @@ class NotificationService {
       channelId,
     });
 
+    const conversationData = await fetchConversationForNotification(conversationId);
+
     const notificationData = {
       title: isDMChannel ? `New reply in #${channelName}` : `New reply from #${channelName}`,
       message: `${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
@@ -1173,6 +1266,7 @@ class NotificationService {
         senderPicture,
         channelTitle: channelName,
         messageType: 'thread_reply',
+        conversation: conversationData,
       },
     };
 
@@ -1240,6 +1334,8 @@ class NotificationService {
       channelId,
     });
 
+    const conversationData = await fetchConversationForNotification(conversationId);
+
     const notificationData = {
       title: channelName ? `${channelName}` : `New Message from ${senderName}`,
       message: cleanContent.substring(0, 100) + (cleanContent.length > 100 ? '...' : ''),
@@ -1254,7 +1350,8 @@ class NotificationService {
         channelId,
         conversationId,
         messageId,
-        scopeType
+        scopeType,
+        conversation: conversationData,
       },
     };
 
