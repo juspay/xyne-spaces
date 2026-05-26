@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Sparkles, Wand2 } from 'lucide-react';
+import { Sparkles, Wand2, X } from 'lucide-react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json, jsonLanguage } from '@codemirror/lang-json';
 import {
@@ -13,7 +13,7 @@ import { Combobox } from '../../../ui/Combobox/Combobox';
 import { AutomationRichTextField } from '../SchemaForm/AutomationRichTextField';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
-import { fetchClawAgents } from '../../../../api/automationsApi';
+import { fetchClawAgents, type ClawAgent } from '../../../../api/automationsApi';
 const FIELD_TYPES = ['string', 'number', 'boolean', 'object', 'array'] as const;
 type FieldType = (typeof FIELD_TYPES)[number];
 
@@ -96,23 +96,30 @@ export function RunAgentStepForm({
     }));
   }, [agents, agentSearch]);
 
-  const selectedAgentItem = useMemo(() => {
+  const selectedAgent = useMemo<ClawAgent | null>(() => {
     if (!cfg.agentSlug) return null;
-    const a = (agents ?? []).find(x => x.slug === cfg.agentSlug);
-    if (!a) {
-      return {
-        value: cfg.agentSlug,
-        label: cfg.agentSlug,
-        description: 'no longer available',
-      };
-    }
+    const found = (agents ?? []).find(x => x.slug === cfg.agentSlug);
+    if (found) return found;
     return {
-      value: a.slug,
-      label: a.name,
-      description: a.slug,
-      leftSlot: <Sparkles className='size-3.5' style={{ color: a.color }} />,
+      id: cfg.agentSlug,
+      slug: cfg.agentSlug,
+      name: cfg.agentSlug,
+      description: 'no longer available',
+      enabled: false,
+      isDefault: false,
+      color: '#94a3b8',
     };
   }, [agents, cfg.agentSlug]);
+
+  const selectedAgentItem = useMemo(() => {
+    if (!selectedAgent) return null;
+    return {
+      value: selectedAgent.slug,
+      label: selectedAgent.name,
+      description: selectedAgent.slug,
+      leftSlot: <Sparkles className='size-3.5' style={{ color: selectedAgent.color }} />,
+    };
+  }, [selectedAgent]);
 
   const setField = <K extends keyof RunAgentConfigShape>(
     key: K,
@@ -141,6 +148,26 @@ export function RunAgentStepForm({
               className='underline hover:no-underline'
             >
               Retry
+            </button>
+          </div>
+        ) : selectedAgent ? (
+          <div className='inline-flex max-w-full items-center gap-2 self-start rounded-full border border-border bg-accent/40 py-1 pl-2 pr-1 text-sm'>
+            <div className='flex size-5 items-center justify-center rounded-full bg-background shadow-sm'>
+              <Sparkles className='size-3' style={{ color: selectedAgent.color }} />
+            </div>
+            <span className='truncate font-medium text-foreground'>{selectedAgent.name}</span>
+            <span className='hidden truncate text-xs text-muted-foreground sm:inline'>
+              {selectedAgent.slug}
+            </span>
+            <button
+              type='button'
+              aria-label='Change agent'
+              data-track-category='automation-builder'
+              data-track-name='run-agent-step-clear-agent'
+              onClick={() => setField('agentSlug', '')}
+              className='ml-1 flex size-5 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground'
+            >
+              <X className='size-3' />
             </button>
           </div>
         ) : (

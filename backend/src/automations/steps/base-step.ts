@@ -44,6 +44,12 @@ export abstract class BaseActionStep<
   readonly mayEmit?: readonly string[];
 
   abstract execute(config: z.infer<TConfig>, context: AutomationContext): Promise<TOutput>;
+
+  onResume?(
+    rowData: Record<string, unknown>,
+    config: z.infer<TConfig>,
+    context: AutomationContext,
+  ): Promise<TOutput>;
 }
 
 export abstract class BaseControlFlowStep<

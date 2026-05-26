@@ -55,10 +55,19 @@ class AutomationWorker {
       );
       return;
     }
-    if (execution.status !== AutomationRunStatus.PENDING) {
+    const acceptableStatuses: readonly string[] = [
+      AutomationRunStatus.PENDING,
+      'EXTERNAL_WAIT',
+    ];
+    if (!acceptableStatuses.includes(execution.status)) {
       logger.warn(
-        `[AUTOMATION-WORKER] execution=${executionId} status=${execution.status}, expected PENDING — skipping`,
+        `[AUTOMATION-WORKER] execution=${executionId} status=${execution.status} — no handler, skipping`,
       );
+      return;
+    }
+
+    if (execution.status === 'EXTERNAL_WAIT') {
+      await this.executor.runExecution(executionId);
       return;
     }
 
