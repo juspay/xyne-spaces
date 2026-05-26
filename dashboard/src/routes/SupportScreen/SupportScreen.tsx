@@ -2045,6 +2045,7 @@ const TicketMetaRow = ({
         priority?: string | null;
         stageName?: string | null;
         assignedTo?: string | null;
+        aiCategory?: string | null;
       }
     | undefined
     | null;
@@ -2069,6 +2070,14 @@ const TicketMetaRow = ({
         boardId={boardId}
       />
       <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} label={assigneeName} />
+      {ticket.aiCategory && (
+        <span
+          className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap'
+          title={`AI Category: ${ticket.aiCategory}`}
+        >
+          {ticket.aiCategory}
+        </span>
+      )}
     </div>
   );
 };

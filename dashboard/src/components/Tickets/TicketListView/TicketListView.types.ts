@@ -11,6 +11,7 @@ export interface TicketListItem {
   lastEmailAt?: number | null;
   priority?: TicketPriority | string | null;
   assignedTo?: string | null;
+  aiCategory?: string | null;
   metadata?: unknown;
   emailCount?: number | null;
   emailDrafts?: readonly { userId: string | null }[] | null;

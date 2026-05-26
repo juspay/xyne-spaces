@@ -62,7 +62,7 @@ import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
-import { EmailClassificationService } from './emailClassificationService';
+import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { xyneAIStream } from '@/agents/xyne-ai';
 import { AUTODRAFT_SESSION_TAG } from '@/controllers/xyneAIController';
 import { AgentsConfig } from '@/agents/config';
@@ -70,7 +70,6 @@ import { buildDraftEmailSystemPrompt } from '@/agents/xyne-ai/prompts/draft';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
 
-const emailClassificationService = new EmailClassificationService();
 
 interface UserInfo {
   id: string;
@@ -827,56 +826,16 @@ export class EmailService {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
-    // Run AI classification in background — only for incoming emails on XyneDesk
-    // Falls back to channel's default assignee group if no mapping matches
-    void emailClassificationService
-      .classify(channelId, emailSubject, emailBody)
-      .then(async (classificationData) => {
-        if (!classificationData) return;
-        const { result, config } = classificationData;
-        const resolvedGroupId = await emailClassificationService.resolveUserGroup(result, config);
-        const effectiveGroupId = resolvedGroupId ?? groupId ?? null;
-        await emailClassificationService.storeOnTicket(ticket.id, result, effectiveGroupId);
-        if (resolvedGroupId) {
-          // Classification found a specific group — always use it over the default
-          await this.prisma.ticket.update({
-            where: { id: ticket.id },
-            data: { userGroupId: resolvedGroupId },
-          });
-          logger.info(`[Classification] Auto-assigned ticket ${ticket.id} to group ${resolvedGroupId}`);
-        } else if (groupId && !ticket.userGroupId) {
-          // No mapping matched — fall back to channel default only if nothing was set
-          await this.prisma.ticket.update({
-            where: { id: ticket.id },
-            data: { userGroupId: groupId },
-          });
-          logger.info(`[Classification] Fell back to default group ${groupId} for ticket ${ticket.id}`);
-        }
-
-        // Apply priority classification if available and meets threshold
-        if (result.priority) {
-          const threshold = config.priorityClassificationThreshold ?? 0.5;
-          if (result.priority.confidence >= threshold) {
-            await this.prisma.ticket.update({
-              where: { id: ticket.id },
-              data: {
-                priority: result.priority.priority,
-                aiPriority: result.priority.priority,
-              },
-            });
-            logger.info(
-              `[PriorityClassification] Auto-set priority to ${result.priority.priority} for ticket ${ticket.id} (confidence: ${(result.priority.confidence * 100).toFixed(1)}%)`
-            );
-          } else {
-            logger.info(
-              `[PriorityClassification] Priority ${result.priority.priority} not applied (confidence: ${(result.priority.confidence * 100).toFixed(1)}% < threshold: ${(threshold * 100).toFixed(1)}%)`
-            );
-          }
-        }
-      })
-      .catch((err) => {
-        logger.error(`[Classification] Background classification failed for ticket ${ticket.id}`, err);
-      });
+    // Enqueue AI classification as a Redis worker job
+    await emailClassificationQueue.getQueue().add('classify', {
+      ticketId: ticket.id,
+      channelId,
+      subject: emailSubject,
+      body: emailBody,
+      groupId: groupId ?? null,
+    }).catch((err: unknown) => {
+      logger.error(`[Classification] Failed to enqueue classification job for ticket ${ticket.id}`, err);
+    });
 
     // Fire-and-forget: enrich the ticket description via the AI agent. Never
     // blocks ingestion; ticket keeps the raw email body if this fails or times out.
@@ -1935,6 +1894,17 @@ export class EmailService {
           `[EmailService] Vespa job push failed for ticket ${txResult.ticketId}:`,
           error,
         );
+      });
+
+      // Enqueue AI classification as a Redis worker job
+      await emailClassificationQueue.getQueue().add('classify', {
+        ticketId: txResult.ticketId,
+        channelId,
+        subject: firstEmail.subject ?? '',
+        body: firstEmail.body ?? '',
+        groupId: groupId ?? null,
+      }).catch((err: unknown) => {
+        logger.error(`[Classification] Failed to enqueue classification job for ticket ${txResult.ticketId}`, err);
       });
     }
 

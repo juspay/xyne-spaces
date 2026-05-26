@@ -150,6 +150,7 @@ import { initializeXyneAI } from '@/agents/xyne-ai';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
+import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -661,6 +662,10 @@ export class App {
           logger.info('Initializing team intelligence queue...');
           await teamIntelligenceQueue.initialize();
         })(),
+        (async () => {
+          logger.info('Initializing email classification queue...');
+          await emailClassificationQueue.initialize();
+        })(),
       ]);
 
       logger.info('[TEST MODE] All queues initialized');
@@ -700,6 +705,9 @@ export class App {
 
       logger.info('Initializing team intelligence queue...');
       await teamIntelligenceQueue.initialize();
+
+      logger.info('Initializing email classification queue...');
+      await emailClassificationQueue.initialize();
     }
 
     logger.info('Initializing automations module (registries + queue producers)...');
@@ -852,6 +860,9 @@ export class App {
 
       // Close scheduled message queue
       await scheduledMessageQueue.close();
+
+      // Close email classification queue
+      await emailClassificationQueue.close();
 
       // Shutdown notification service
       await notificationService.shutdown();
