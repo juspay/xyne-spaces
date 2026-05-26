@@ -24,7 +24,11 @@ const PageWrapper = memo(
 );
 PageWrapper.displayName = 'PageWrapper';
 
-export const PdfViewer: React.FC<BaseViewerProps> = ({ source, initialPage }) => {
+export const PdfViewer: React.FC<BaseViewerProps> = ({
+  source,
+  initialPage,
+  onInteractionStateChange,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfContentRef = useRef<HTMLDivElement>(null);
   const [currentVisiblePage, setCurrentVisiblePage] = useState<number>(initialPage ?? 1);
@@ -35,11 +39,11 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source, initialPage }) =>
 
   const { numPages, scale: pdfScale, heightMap, error } = state.context;
 
-  // Mobile zoom hook for pinch-to-zoom in carousel mode
-  // Disable zoom when disableGestures is true (standalone mode) to allow normal scrolling
+  // Mobile zoom hook for pinch-to-zoom and pan
   const {
     scale: mobileZoomScale,
     transformOrigin,
+    panX,
     resetZoom,
     isPinching,
   } = useMobileZoom({
@@ -48,6 +52,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source, initialPage }) =>
     targetRef: pdfContentRef,
     minScale: 1,
     maxScale: 3,
+    onInteractionStateChange,
   });
 
   // Use pdfScale directly for Page rendering - CSS transform handles visual zoom
@@ -335,7 +340,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source, initialPage }) =>
             style={{
               height: rowVirtualizer.getTotalSize(),
               position: 'relative',
-              transform: isMobile ? `scale(${mobileZoomScale})` : undefined,
+              transform: isMobile ? `translateX(${panX}px) scale(${mobileZoomScale})` : undefined,
               transformOrigin,
               transition: isMobile ? 'transform 0.05s ease-out' : undefined,
             }}

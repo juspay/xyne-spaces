@@ -21,6 +21,7 @@ import {
   AttachmentViewerState,
 } from '../../machines/attachmentViewerMachine';
 import { MessageType } from '@xyne/shared';
+import { ZoomState } from './utils';
 
 export interface FileItem {
   fileName: string;
@@ -105,13 +106,14 @@ const SlideContent: React.FC<{
   isActive: boolean;
   disableGestures?: boolean;
   initialTime?: number | undefined;
-}> = ({ file, isActive, disableGestures, initialTime }) => {
+  onInteractionStateChange?: (state: ZoomState) => void;
+}> = ({ file, isActive, disableGestures, initialTime, onInteractionStateChange }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fileType = detectFileType(file.mimeType, file.fileName);
   const isVideo = fileType?.displayName === 'Video';
-  const shouldDisableGestures = disableGestures && fileType?.displayName === 'Image';
+  const isCarouselMode = Boolean(disableGestures);
 
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const prevActiveRef = useRef(isActive);
@@ -167,6 +169,8 @@ const SlideContent: React.FC<{
             fileName={file.fileName}
             attachmentId={file.attachmentId}
             {...(initialTime !== undefined && { initialTime })}
+            {...(isCarouselMode && { disableGestures: true })}
+            {...(isCarouselMode && onInteractionStateChange && { onInteractionStateChange })}
           />
         </div>
       );
@@ -202,7 +206,8 @@ const SlideContent: React.FC<{
         key={viewerResetKey}
         source={fileData}
         fileName={file.fileName}
-        {...(shouldDisableGestures && { disableGestures: true })}
+        {...(isCarouselMode && { disableGestures: true })}
+        {...(isCarouselMode && onInteractionStateChange && { onInteractionStateChange })}
       />
     </div>
   );
@@ -594,6 +599,11 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
                 file={file}
                 isActive={index === currentFileIndex}
                 {...(disableCarouselGestures && { disableGestures: true })}
+                {...(index === currentFileIndex && {
+                  onInteractionStateChange: (state: ZoomState) => {
+                    activeSlideZoomStateRef.current = state;
+                  },
+                })}
               />
             ) : (
               <SlidePlaceholder file={file} />
@@ -607,6 +617,13 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   const isImage = fileType?.displayName === 'Image';
 
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
+
+  // Track zoom state for conditional carousel swipe
+  const activeSlideZoomStateRef = useRef<ZoomState>({
+    scale: 1,
+    isAtLeftEdge: true,
+    isAtRightEdge: true,
+  });
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -819,6 +836,12 @@ export const AttachmentGalleryModal: React.FC = () => {
   const processedThreadIdRef = useRef<string | null>(null);
   const initialPathRef = useRef<string | null>(null);
   const prevIsOpenRef = useRef(false);
+  // Track zoom state for conditional carousel swipe in AttachmentGalleryModal
+  const activeSlideZoomStateRef = useRef<ZoomState>({
+    scale: 1,
+    isAtLeftEdge: true,
+    isAtRightEdge: true,
+  });
   // True once Zero has delivered complete thread data and UPDATE has been sent to the machine.
   // Used to hold renderContent() in a loading state until the full carousel is ready.
   const [threadDataLoaded, setThreadDataLoaded] = useState(false);
@@ -1227,6 +1250,19 @@ export const AttachmentGalleryModal: React.FC = () => {
     if (scrollDelta > 4) return;
     if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
 
+    // Check zoom state for conditional navigation
+    const zoomState = activeSlideZoomStateRef.current;
+    if (zoomState.scale > 1) {
+      // User is zoomed in - only navigate if swiping from edge toward opposite direction
+      if (dx < 0) {
+        // Swiping left (want next slide) - only allow if at right edge
+        if (!zoomState.isAtRightEdge) return;
+      } else {
+        // Swiping right (want previous slide) - only allow if at left edge
+        if (!zoomState.isAtLeftEdge) return;
+      }
+    }
+
     if (dx < 0) {
       handleNext();
     } else {
@@ -1262,6 +1298,11 @@ export const AttachmentGalleryModal: React.FC = () => {
                 {...(disableCarouselGestures && { disableGestures: true })}
                 // Pass initialTime to active video
                 initialTime={initialTime}
+                {...(index === currentFileIndex && {
+                  onInteractionStateChange: (state: ZoomState) => {
+                    activeSlideZoomStateRef.current = state;
+                  },
+                })}
               />
             ) : (
               <SlidePlaceholder file={file} />
