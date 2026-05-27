@@ -248,6 +248,7 @@ export class AuthV2Controller {
       logger.info(`[${requestId}] Detected platform: ${platform}`);
 
       const isNy = req.query.isNy === 'true';
+      const connectCalendar = req.query.connectCalendar === 'true';
 
       const codeVerifier = pkceServiceV2.generateCodeVerifier();
       const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
@@ -270,7 +271,7 @@ export class AuthV2Controller {
       // Get invitationId from query (for invitation flow)
       const invitationId = req.query.invitationId as string | undefined;
       
-      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo, undefined, isNy, invitationId);
+      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo, undefined, isNy, invitationId, connectCalendar);
 
       await pkceServiceV2.storeVerifier(state, codeVerifier);
 
@@ -280,7 +281,12 @@ export class AuthV2Controller {
 
       const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
         access_type: 'offline',
-        scope: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/calendar.readonly'],
+        scope: [
+          'openid',
+          'email',
+          'profile',
+          ...(connectCalendar ? ['https://www.googleapis.com/auth/calendar.readonly'] : []),
+        ],
         prompt: 'consent',
         redirect_uri: redirectUri,
         state,
@@ -521,6 +527,12 @@ export class AuthV2Controller {
 
         logger.info(`[${requestId}] Auto-login complete - redirecting to dashboard with cookies`);
         logger.info(`[${requestId}] Cookies set: xyne_last_workspace=${workspaceId}, user_session_id=${sessionId}, xyne_ws_${workspaceId}_token=<JWT>`);
+
+        // If this was a "connect calendar" re-auth, redirect straight to the calls page
+        if (stateData.connectCalendar) {
+          res.redirect(`${this.getFrontendUrl(req)}/${workspaceId}/calls?tab=upcoming&syncCalendar=true`);
+          return;
+        }
 
         // Include user data and autoLoginWorkspace in redirect
         // Frontend will call loginWorkspace which will find the session from cookies

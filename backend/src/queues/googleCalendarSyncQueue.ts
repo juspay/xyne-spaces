@@ -238,14 +238,15 @@ class GoogleCalendarSyncQueue {
       }
     }
 
-    await queue.add(
-      'sync-all',
-      {},
-      {
-        repeat: { cron: GOOGLE_CALENDAR_SYNC_CRON },
-        jobId: 'google-calendar-scan-repeatable',
-      },
-    );
+    // TODO: cron disabled — re-enable in dedicated PR
+    // await queue.add(
+    //   'sync-all',
+    //   {},
+    //   {
+    //     repeat: { cron: GOOGLE_CALENDAR_SYNC_CRON },
+    //     jobId: 'google-calendar-scan-repeatable',
+    //   },
+    // );
 
     this.workerInitialized = true;
     logger.info(

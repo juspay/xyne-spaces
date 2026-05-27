@@ -98,11 +98,16 @@ const CallHistoryScreen = (): ReactElement => {
     isMobile ? 'day' : 'month',
   );
   const [calendarProvider, setCalendarProvider] = useState<'GOOGLE' | 'MICROSOFT' | null>(null);
+  const [pendingAutoSync, setPendingAutoSync] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{
     text: string;
     ok: boolean;
     reauth?: boolean;
+  } | null>(null);
+  const [reauthCountdown, setReauthCountdown] = useState<{
+    count: number;
+    loginUrl: string;
   } | null>(null);
   const [currentMonthStart, setCurrentMonthStart] = useState(() => {
     const d = new Date();
@@ -195,9 +200,17 @@ const CallHistoryScreen = (): ReactElement => {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch the current user's calendar provider once on mount
+  // Fetch the current user's calendar provider once on mount.
+  // If syncCalendar=true is in the URL (returning from connect-calendar OAuth),
+  // strip the param and set pendingAutoSync so we fire sync once the provider is known.
   useEffect(() => {
     if (!user?.id) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get('syncCalendar') === 'true') {
+      params.delete('syncCalendar');
+      void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+      setPendingAutoSync(true);
+    }
     axios
       .get<{ success: boolean; provider: 'GOOGLE' | 'MICROSOFT' | null }>(
         `${API_BASE_URL}/calendar/sync/provider`,
@@ -209,9 +222,31 @@ const CallHistoryScreen = (): ReactElement => {
       .catch(() => {
         // non-critical — button just won't show
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  const handleCalendarSync = async () => {
+  // Tick the reauth countdown down every second, then redirect
+  useEffect(() => {
+    if (!reauthCountdown) return;
+    if (reauthCountdown.count === 0) {
+      window.location.href = reauthCountdown.loginUrl;
+      return;
+    }
+    const timer = setTimeout(() => {
+      setReauthCountdown(prev => (prev ? { ...prev, count: prev.count - 1 } : null));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [reauthCountdown]);
+
+  // Fire the auto-sync once calendarProvider is loaded after OAuth redirect
+  useEffect(() => {
+    if (!pendingAutoSync || !calendarProvider) return;
+    setPendingAutoSync(false);
+    void handleCalendarSync(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSync, calendarProvider]);
+
+  const handleCalendarSync = async (isRetry = false) => {
     if (!calendarProvider || isSyncing) return;
     setIsSyncing(true);
     setSyncMessage(null);
@@ -219,24 +254,21 @@ const CallHistoryScreen = (): ReactElement => {
       const provider = calendarProvider === 'GOOGLE' ? 'google' : 'microsoft';
       await axios.post(`${API_BASE_URL}/calendar/sync/${provider}`, {}, { withCredentials: true });
       setSyncMessage({ text: 'Synced!', ok: true });
-    } catch (err) {
-      if (axios.isAxiosError(err)) {
-        const data = err.response?.data as { error?: string; needsReauth?: boolean } | undefined;
-        if (data?.needsReauth) {
-          setSyncMessage({
-            text: 'Re-authorization required — please sign out and sign back in',
-            ok: false,
-            reauth: true,
-          });
-        } else {
-          setSyncMessage({ text: 'Unable to sync', ok: false });
-        }
-      } else {
-        setSyncMessage({ text: 'Unable to sync', ok: false });
-      }
-    } finally {
       setIsSyncing(false);
-      setTimeout(() => setSyncMessage(null), syncMessage?.reauth ? 8000 : 3000);
+      setTimeout(() => setSyncMessage(null), 3000);
+    } catch {
+      setIsSyncing(false);
+      if (!isRetry) {
+        const loginUrl =
+          calendarProvider === 'MICROSOFT'
+            ? `${API_BASE_URL}/v2/auth/microsoft/login?connectCalendar=true`
+            : `${API_BASE_URL}/v2/auth/login?connectCalendar=true`;
+        setSyncMessage({ text: '', ok: false, reauth: true });
+        setReauthCountdown({ count: 5, loginUrl });
+        return;
+      }
+      setSyncMessage({ text: 'Unable to sync', ok: false });
+      setTimeout(() => setSyncMessage(null), 3000);
     }
   };
 
@@ -695,7 +727,12 @@ const CallHistoryScreen = (): ReactElement => {
                     <MicrosoftIcon size={14} />
                   )}
                   <span>
-                    {syncMessage ? (
+                    {reauthCountdown ? (
+                      <>
+                        <span className='md:hidden'>{`Redirecting in ${reauthCountdown.count}s…`}</span>
+                        <span className='hidden md:inline'>{`Need calendar access, redirecting to login in ${reauthCountdown.count}s…`}</span>
+                      </>
+                    ) : syncMessage ? (
                       syncMessage.text
                     ) : isSyncing ? (
                       'Syncing…'

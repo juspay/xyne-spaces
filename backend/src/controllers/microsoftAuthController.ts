@@ -127,6 +127,8 @@ export class MicrosoftAuthController {
         // Get invitationId from query (for invitation flow)
         const invitationId = req.query.invitationId as string | undefined;
 
+        const connectCalendar = req.query.connectCalendar === 'true';
+
         const state = await oauthStateServiceV2.generateState(
           platform,
           codeChallenge,
@@ -134,6 +136,7 @@ export class MicrosoftAuthController {
           'microsoft',
           undefined,
           invitationId,
+          connectCalendar,
         );
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
@@ -144,7 +147,10 @@ export class MicrosoftAuthController {
 
         const authorizationUri = this.oauthClient.authorizeURL({
           redirect_uri: redirectUri,
-          scope: ['openid', 'email', 'profile', 'User.Read', 'Calendars.Read', 'offline_access'],
+          scope: [
+            'openid', 'email', 'profile', 'User.Read', 'offline_access',
+            ...(connectCalendar ? ['Calendars.Read'] : []),
+          ],
           state,
           code_challenge: codeChallenge,
           code_challenge_method: 'S256',
@@ -420,6 +426,13 @@ export class MicrosoftAuthController {
 
         // Redirect to frontend with success
         const frontendUrl = this.getFrontendUrl(req);
+
+        // If this was a "connect calendar" re-auth, redirect straight to the calls page
+        if (peekedState?.connectCalendar && user.workspaceId) {
+          res.redirect(`${frontendUrl}/${user.workspaceId}/calls?tab=upcoming&syncCalendar=true`);
+          return;
+        }
+
         const params = new URLSearchParams({
           success: 'true',
           email: microsoftUserData.email,
