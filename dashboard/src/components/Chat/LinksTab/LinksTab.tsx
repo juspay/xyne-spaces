@@ -4,7 +4,6 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useZero } from '../../../hooks/useZero';
-import { useSelector } from '@xstate/react';
 import type { Link } from '@xyne/shared';
 import { LinkVisibility } from '@xyne/shared';
 import Dialog from '../../ui/Dialog';
@@ -14,6 +13,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { isElectronApp } from '../../../utils/electronApp';
+import { openLink, getLinkOpenExternalDefault } from '../../../utils/openLink';
 
 interface LinksTabProps {
   channelId: string;
@@ -27,10 +27,6 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [linkToDelete, setLinkToDelete] = useState<Link | null>(null);
   const [linkToEdit, setLinkToEdit] = useState<Link | null>(null);
-  const browserPanelState = useSelector(
-    browserPanelActor,
-    state => state.context.browserPanelState,
-  );
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
@@ -126,18 +122,17 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
     setLinkToDelete(null);
   };
 
-  const handleOpenLink = (url: string) => {
-    if (isElectronApp()) {
-      xyneAIActor.send({ type: 'CLOSE' });
+  const handleOpenLink = (
+    url: string,
+    event?: React.MouseEvent | React.KeyboardEvent | null,
+  ): void => {
+    const modifier = !!(event?.metaKey || event?.ctrlKey);
+    const wantExternal = getLinkOpenExternalDefault() !== modifier;
 
-      if (browserPanelState === 'open') {
-        browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
-      } else {
-        browserPanelActor.send({ type: 'OPEN', urls: [url] });
-      }
-    } else {
-      window.open(url, '_blank');
+    if (isElectronApp() && !wantExternal) {
+      xyneAIActor.send({ type: 'CLOSE' });
     }
+    openLink(url, event ?? null);
   };
 
   const renderLinkCard = (link: Link) => {
@@ -149,11 +144,11 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
         key={link.id}
         role='button'
         tabIndex={0}
-        onClick={() => handleOpenLink(link.url)}
+        onClick={e => handleOpenLink(link.url, e)}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            handleOpenLink(link.url);
+            handleOpenLink(link.url, e);
           }
         }}
         className='group flex items-start gap-3 p-3 rounded-lg border border-border hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer'
