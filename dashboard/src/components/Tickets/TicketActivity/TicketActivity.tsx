@@ -7,6 +7,7 @@ import {
   SquareKanban,
   Tag,
   Archive,
+  GitMerge,
 } from 'lucide-react';
 import {
   ActivityType,
@@ -307,6 +308,52 @@ const getActivityDescription = (
         details: '',
       };
 
+    case ActivityType.MERGED: {
+      const srcId = (activity.value as Record<string, unknown> | null)?.['sourceTicketId'] as
+        | string
+        | undefined;
+      const srcXyneId = (activity.value as Record<string, unknown> | null)?.[
+        'sourceTicketXyneId'
+      ] as string | undefined;
+      if (srcId) {
+        return {
+          description: 'merged',
+          details: (
+            <>
+              <span className='font-semibold'>{srcXyneId || srcId}</span> into this ticket
+            </>
+          ),
+        };
+      }
+      return {
+        description: 'merged this ticket into',
+        details: <span className='font-semibold'>{referenceTitle}</span>,
+      };
+    }
+
+    case ActivityType.UNMERGED: {
+      const srcId = (activity.value as Record<string, unknown> | null)?.['sourceTicketId'] as
+        | string
+        | undefined;
+      const srcXyneId = (activity.value as Record<string, unknown> | null)?.[
+        'sourceTicketXyneId'
+      ] as string | undefined;
+      if (srcId) {
+        return {
+          description: 'unmerged',
+          details: (
+            <>
+              <span className='font-semibold'>{srcXyneId || srcId}</span> from this ticket
+            </>
+          ),
+        };
+      }
+      return {
+        description: 'unmerged this ticket from',
+        details: <span className='font-semibold'>{referenceTitle}</span>,
+      };
+    }
+
     case ActivityType.TAGS: {
       const action = value?.action;
       const labelName = value?.newValue || value?.oldValue || '';
@@ -385,6 +432,10 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
       return <SquareKanban size={12} className='text-purple-600' />;
     case ActivityType.IS_ARCHIVED:
       return <Archive size={12} className='text-amber-600' />;
+    case ActivityType.MERGED:
+      return <GitMerge size={12} className='text-blue-600' />;
+    case ActivityType.UNMERGED:
+      return <GitMerge size={12} className='text-green-600' />;
     case ActivityType.PR_REVIEWER:
     case ActivityType.QA:
     case ActivityType.ASSIGNED_TO:

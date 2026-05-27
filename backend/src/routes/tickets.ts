@@ -30,4 +30,7 @@ router.post('/:ticketId/attachments/from-conversation', ticketController.addAtta
 
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
 
+router.post('/:ticketId/merge', ticketController.mergeTicket);
+router.post('/:ticketId/unmerge', ticketController.unmergeTicket);
+
 export default router;

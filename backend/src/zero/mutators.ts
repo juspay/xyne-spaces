@@ -298,6 +298,8 @@ const formatTicketReferenceRelationLabel = (relationType: TicketReferenceRelatio
       return 'Duplicate';
     case TicketReferenceRelation.DUPLICATE_POSSIBLE:
       return 'Possible duplicate';
+    case TicketReferenceRelation.MERGED_INTO:
+      return 'Merged into';
     case TicketReferenceRelation.LINKED:
     default:
       return 'Linked';

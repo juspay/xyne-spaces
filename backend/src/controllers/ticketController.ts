@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, ChannelType } from '@prisma/client';
+import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, ChannelType, ActivityType, TicketReferenceRelation } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -1494,4 +1494,117 @@ export class TicketController {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
+  mergeTicket = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId } = req.params;
+      const { targetTicketId } = req.body;
+      const userId = req.user?.id ?? '';
+
+      if (!targetTicketId) { res.status(400).json({ error: 'targetTicketId is required' }); return; }
+      if (ticketId === targetTicketId) { res.status(400).json({ error: 'Cannot merge a ticket into itself' }); return; }
+
+      const [source, target] = await Promise.all([
+        prisma.ticket.findUnique({ where: { id: ticketId } }),
+        prisma.ticket.findUnique({ where: { id: targetTicketId } }),
+      ]);
+      if (!source) { res.status(404).json({ error: 'Source ticket not found' }); return; }
+      if (!target) { res.status(404).json({ error: 'Target ticket not found' }); return; }
+      if (source.workspaceId !== target.workspaceId) { res.status(403).json({ error: 'Cannot merge tickets across workspaces' }); return; }
+      if (source.isArchived || target.isArchived) { res.status(400).json({ error: 'Cannot merge archived tickets' }); return; }
+
+      const existingMapping = await prisma.ticketReferenceMapping.findFirst({
+        where: { sourceTicketId: ticketId, relationType: TicketReferenceRelation.MERGED_INTO },
+      });
+      if (existingMapping) {
+        res.status(400).json({ error: 'Ticket is already merged into another ticket' });
+        return;
+      }
+
+      const mapping = await prisma.$transaction(async (tx) => {
+        const created = await tx.ticketReferenceMapping.create({
+          data: { sourceTicketId: ticketId, targetTicketId, relationType: TicketReferenceRelation.MERGED_INTO, createdBy: userId },
+        });
+        await tx.ticket.update({ where: { id: ticketId }, data: { isArchived: true, updatedBy: userId } });
+
+        await tx.ticketActivity.create({
+          data: { ticketId, updatedBy: userId, activityType: ActivityType.MERGED, value: { targetTicketId: target.id, targetTicketXyneId: target.xyneId, targetTicketTitle: target.title } },
+        });
+        await tx.ticketActivity.create({
+          data: { ticketId: targetTicketId, updatedBy: userId, activityType: ActivityType.MERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: source.xyneId, sourceTicketTitle: source.title } },
+        });
+
+        return created;
+      });
+
+      // Create Zero-side notification activities (fire-and-forget)
+      TicketsSideEffectHandler.handleTicketMerged({
+        sourceTicketId: ticketId,
+        targetTicketId: target.id,
+        sourceXyneId: source.xyneId,
+        targetXyneId: target.xyneId,
+        sourceTitle: source.title,
+        targetTitle: target.title,
+        actorId: userId,
+        channelId: source.channelId,
+      }).catch((err) => {
+        logger.error('[TicketController] Failed to create merge notification activities:', err);
+      });
+
+      logger.info('[TicketController] Ticket merged', { sourceTicketId: ticketId, targetTicketId, mappingId: mapping.id });
+      res.json({ success: true, mappingId: mapping.id, targetTicket: { id: target.id, title: target.title, xyneId: target.xyneId } });
+    } catch (err) {
+      logger.error('[TicketController] mergeTicket error:', err);
+      res.status(500).json({ error: 'Failed to merge ticket' });
+    }
+  };
+
+  unmergeTicket = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId } = req.params;
+      const userId = req.user?.id ?? '';
+
+      const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+      if (!ticket) { res.status(404).json({ error: 'Ticket not found' }); return; }
+      if (!ticket.isArchived) { res.status(400).json({ error: 'Ticket is not archived' }); return; }
+
+      const mapping = await prisma.ticketReferenceMapping.findFirst({
+        where: { sourceTicketId: ticketId, relationType: TicketReferenceRelation.MERGED_INTO },
+        include: { targetTicket: true },
+      });
+      if (!mapping) { res.status(400).json({ error: 'Ticket is not merged into another ticket' }); return; }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.ticketReferenceMapping.delete({ where: { id: mapping.id } });
+        await tx.ticket.update({ where: { id: ticketId }, data: { isArchived: false, updatedBy: userId } });
+
+        await tx.ticketActivity.create({
+          data: { ticketId, updatedBy: userId, activityType: ActivityType.UNMERGED, value: { targetTicketId: mapping.targetTicketId, targetTicketXyneId: mapping.targetTicket.xyneId, targetTicketTitle: mapping.targetTicket.title } },
+        });
+        await tx.ticketActivity.create({
+          data: { ticketId: mapping.targetTicketId, updatedBy: userId, activityType: ActivityType.UNMERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: ticket.xyneId, sourceTicketTitle: ticket.title } },
+        });
+      });
+
+      // Create Zero-side notification activities (fire-and-forget)
+      TicketsSideEffectHandler.handleTicketUnmerged({
+        sourceTicketId: ticketId,
+        targetTicketId: mapping.targetTicketId,
+        sourceXyneId: ticket.xyneId,
+        targetXyneId: mapping.targetTicket.xyneId,
+        sourceTitle: ticket.title,
+        targetTitle: mapping.targetTicket.title,
+        actorId: userId,
+        channelId: ticket.channelId,
+      }).catch((err) => {
+        logger.error('[TicketController] Failed to create unmerge notification activities:', err);
+      });
+
+      logger.info('[TicketController] Ticket unmerged', { ticketId, previousTargetId: mapping.targetTicketId });
+      res.json({ success: true, restoredTicket: { id: ticket.id, title: ticket.title, xyneId: ticket.xyneId, isArchived: false } });
+    } catch (err) {
+      logger.error('[TicketController] unmergeTicket error:', err);
+      res.status(500).json({ error: 'Failed to unmerge ticket' });
+    }
+  };
+
 }
