@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { HoverCard } from '../HoverCard/HoverCard';
 
 export interface GenericMentionData {
@@ -20,6 +20,16 @@ export const GenericMentionHoverPopover: React.FC<GenericMentionHoverPopoverProp
   children,
   onClick,
 }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Close hover card on scroll
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleScroll = (): void => setIsOpen(false);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [isOpen]);
+
   const trigger = onClick ? (
     <span
       role='button'
@@ -46,6 +56,8 @@ export const GenericMentionHoverPopover: React.FC<GenericMentionHoverPopoverProp
       align='start'
       openDelay={400}
       closeDelay={200}
+      open={isOpen}
+      onOpenChange={setIsOpen}
       className='min-w-[300px] bg-transparent p-0 border-0 shadow-none'
     >
       <div className='bg-popover rounded-lg shadow-lg min-w-[300px] border border-border'>

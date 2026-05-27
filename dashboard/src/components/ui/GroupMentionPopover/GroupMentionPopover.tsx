@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Users, ExternalLink } from 'lucide-react';
 import { HoverCard } from '../HoverCard/HoverCard';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
@@ -17,6 +17,14 @@ export const GroupHoverWrapper: React.FC<GroupHoverWrapperProps> = ({ groupId, c
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
   const [open, setOpen] = useState(false);
+
+  // Close hover card on scroll
+  useEffect(() => {
+    if (!open) return;
+    const handleScroll = (): void => setOpen(false);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [open]);
 
   const userGroup = useUserGroupById(groupId);
 

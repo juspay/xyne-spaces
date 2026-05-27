@@ -33,7 +33,16 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
   const shouldTriggerCallRef = useRef(false);
 
   // Don't show hover card when user has typed (until they move cursor)
-  const [isHoverOpen, setIsHoverOpen] = React.useState(false);
+  const [isHoverOpen, setIsHoverOpen] = useState(false);
+
+  // Close hover card on scroll
+  useEffect(() => {
+    if (!isHoverOpen) return;
+    const handleScroll = (): void => setIsHoverOpen(false);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [isHoverOpen]);
+
   // Check if user has a valid status
   const hasValidStatus =
     user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
