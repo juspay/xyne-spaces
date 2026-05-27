@@ -83,6 +83,7 @@ import { StageFormModal } from '../StageFormModal/StageFormModal';
 import Tooltip from '../../ui/Tooltip';
 import WorkflowTriggerModal from '../../Workflow/WorkflowTriggerModal';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
+import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 import ApprovalNudgeBanner from './ApprovalNudgeBanner';
 import { isReleaseTicket } from '@xyne/shared';
 import { generateReleaseNotes } from '../../../services/ticketBoardService';
@@ -355,6 +356,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [pendingBoardChange, setPendingBoardChange] = useState<string | null>(null);
   const [isGeneratingReleaseNotes, setIsGeneratingReleaseNotes] = useState(false);
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
+  const [pendingTitleValue, setPendingTitleValue] = useState<string | null>(null);
+  const [showTitleChangeConfirmDialog, setShowTitleChangeConfirmDialog] = useState(false);
   const prevStatusV2Ref = useRef<TicketStatusV2 | null>(null);
   const hasAutoTriggeredReleaseNotesRef = useRef(false);
   const [boardDropdownOpen, setBoardDropdownOpen] = useState(false);
@@ -485,6 +488,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
   const channel = useChannel(channelId || '');
+
+  // Detect if ticket belongs to an email/desk channel — title changes also update email subject
+  // ticket.channelId is the direct field; ticket.conversation.channelId is the linked conversation's channel
+  const emailChannelPreference = useEmailChannelPreference(
+    ticket?.channelId || ticket?.conversation?.channelId || null,
+  );
+  const isEmailDeskTicket = !!emailChannelPreference;
 
   // Query all tickets in the project to extract available tags
   const [projectTickets] = useCachedQuery(
@@ -983,6 +993,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const handleSaveTitle = (): void => {
     if (titleValue.trim() && titleValue !== ticket.title) {
+      if (isEmailDeskTicket) {
+        const newTitle = titleValue.trim();
+        setPendingTitleValue(newTitle);
+        setEditingTitle(true);
+        setTimeout(() => setShowTitleChangeConfirmDialog(true), 0);
+        return;
+      }
       void zero.mutate(
         mutators.ticket.update({
           id: ticket.id,
@@ -3310,6 +3327,53 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
               >
                 Archive Ticket
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Title Change Confirmation Dialog (email desk tickets only) */}
+      {pendingTitleValue !== null && (
+        <Dialog
+          open={showTitleChangeConfirmDialog}
+          onOpenChange={open => {
+            if (!open) setTitleValue(ticket.title);
+            setShowTitleChangeConfirmDialog(open);
+          }}
+          title='Confirm Title Change'
+        >
+          <div className='p-6'>
+            <p className='text-sm text-muted-foreground mb-6'>
+              Changing the ticket title will also update the email subject. Do you want to continue?
+            </p>
+            <div className='flex justify-end gap-3'>
+              <Button
+                variant='secondary'
+                onClick={() => {
+                  setTitleValue(ticket.title);
+                  setShowTitleChangeConfirmDialog(false);
+                }}
+                data-track-category='Support'
+                data-track-name='CancelTitleChange'
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  void zero.mutate(
+                    mutators.ticket.update({
+                      id: ticket.id,
+                      title: pendingTitleValue,
+                      updatedAt: Date.now(),
+                    }),
+                  );
+                  setShowTitleChangeConfirmDialog(false);
+                }}
+                data-track-category='Support'
+                data-track-name='ConfirmTitleChange'
+              >
+                Confirm
               </Button>
             </div>
           </div>

@@ -36,6 +36,7 @@ const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash-experimental';
 const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
+const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
 
 // Nudge agents defaults
@@ -76,6 +77,7 @@ const CAC_KEYS = {
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   summariserModel: 'summariser_model_name',
+  attachmentSummariserModel: 'attachment_summariser_model_name',
   nudgeCreateTicketModel: 'nudge_create_ticket_model_name',
   nudgeRelatedTicketModel: 'nudge_related_ticket_model_name',
   nudgeRelatedMessageModel: 'nudge_related_message_model_name',
@@ -113,6 +115,7 @@ export class AgentsConfig {
   public readonly ticketBoardModelName: string;
   public readonly releaseNotesGeneratorModelName: string;
   public readonly summariserModelName: string;
+  public readonly attachmentSummariserModelName: string;
 
   // Nudge agents config
   public readonly nudgeCreateTicketModelName: string;
@@ -144,6 +147,7 @@ export class AgentsConfig {
     ticketBoardModelName: string,
     releaseNotesGeneratorModelName: string,
     summariserModelName: string,
+    attachmentSummariserModelName: string,
     nudgeCreateTicketModelName: string,
     nudgeRelatedTicketModelName: string,
     nudgeRelatedMessageModelName: string,
@@ -166,6 +170,7 @@ export class AgentsConfig {
     this.ticketBoardModelName = ticketBoardModelName;
     this.releaseNotesGeneratorModelName = releaseNotesGeneratorModelName;
     this.summariserModelName = summariserModelName;
+    this.attachmentSummariserModelName = attachmentSummariserModelName;
     this.nudgeCreateTicketModelName = nudgeCreateTicketModelName;
     this.nudgeRelatedTicketModelName = nudgeRelatedTicketModelName;
     this.nudgeRelatedMessageModelName = nudgeRelatedMessageModelName;
@@ -224,6 +229,7 @@ export class AgentsConfig {
       const ticketBoardModelName = getValue<string>(CAC_KEYS.ticketBoardModel, DEFAULT_TICKET_BOARD_MODEL);
       const releaseNotesGeneratorModelName = getValue<string>(CAC_KEYS.releaseNotesGeneratorModel, DEFAULT_RELEASE_NOTES_GENERATOR_MODEL);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
+      const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
       // Extract nudge agents values
       const nudgeCreateTicketModelName = getValue<string>(CAC_KEYS.nudgeCreateTicketModel, DEFAULT_NUDGE_CREATE_TICKET_MODEL);
@@ -303,6 +309,12 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.summariserModel);
       }
 
+      if (CAC_KEYS.attachmentSummariserModel in allConfigs) {
+        fromCAC.push(CAC_KEYS.attachmentSummariserModel);
+      } else {
+        usingDefaults.push(CAC_KEYS.attachmentSummariserModel);
+      }
+
       if (CAC_KEYS.nudgeCreateTicketModel in allConfigs) {
         fromCAC.push(CAC_KEYS.nudgeCreateTicketModel);
       } else {
@@ -375,7 +387,7 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.xyneAiHistoryCompactionTarget);
       }
 
-      const totalKeys = 21;
+      const totalKeys = 22;
       if (usingDefaults.length === totalKeys) {
         logger.debug('[Agents Config] All configs using DEFAULTS (not configured in CAC)', {
           xyneAiTracingEnabled: `${xyneAiTracingEnabled} (default)`,
@@ -444,6 +456,7 @@ export class AgentsConfig {
         ticketBoardModelName,
         releaseNotesGeneratorModelName,
         summariserModelName,
+        attachmentSummariserModelName,
         nudgeCreateTicketModelName,
         nudgeRelatedTicketModelName,
         nudgeRelatedMessageModelName,
@@ -470,6 +483,7 @@ export class AgentsConfig {
         DEFAULT_TICKET_BOARD_MODEL,
         DEFAULT_RELEASE_NOTES_GENERATOR_MODEL,
         DEFAULT_SUMMARISER_MODEL,
+        DEFAULT_ATTACHMENT_SUMMARISER_MODEL,
         DEFAULT_NUDGE_CREATE_TICKET_MODEL,
         DEFAULT_NUDGE_RELATED_TICKET_MODEL,
         DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
@@ -497,6 +511,7 @@ export class AgentsConfig {
       DEFAULT_TICKET_BOARD_MODEL,
       DEFAULT_RELEASE_NOTES_GENERATOR_MODEL,
       DEFAULT_SUMMARISER_MODEL,
+      DEFAULT_ATTACHMENT_SUMMARISER_MODEL,
       DEFAULT_NUDGE_CREATE_TICKET_MODEL,
       DEFAULT_NUDGE_RELATED_TICKET_MODEL,
       DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,

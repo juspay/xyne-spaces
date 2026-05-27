@@ -1886,14 +1886,16 @@ keypoints: newline-separated bullet points starting with •. Focus on:
 - Decisions made
 - Pending items or next steps
 - Who is responsible for what
+- Key findings or data from any attached files (PDF reports, documents, screenshots)
 
 Rules:
-- Do not invent information not present in the emails.
+- Do not invent information not present in the emails or attachments.
+- IMPORTANT: If documents, PDF reports, or images are attached, read them carefully and include relevant details from those files in the summary and key points. Do not ignore attachments.
 - Ignore email signatures, legal disclaimers, and quoted reply chains.
 - If the thread is a support ticket, identify: the customer issue, agent responses, and resolution status.
 - Keep each bullet point concise but informative.
 - Do NOT include email numbers, citation references, or index numbers like [1], [2] etc. in the key points. Write plain natural language only.
-- You donot have to create bullet points for every email — only include key actions, decisions, or updates that advance the thread. `;
+- You do not have to create bullet points for every email — only include key actions, decisions, or updates that advance the thread.`;
 
 export const FALLBACK_PROMPTS: Record<string, string> = {
   'xyne-ai': XYNE_AI_SYSTEM_FALLBACK,
