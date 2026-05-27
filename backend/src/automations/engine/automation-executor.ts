@@ -14,7 +14,7 @@ import type { StepType } from '../types/step-types';
 import { ControlFlowStepType } from '../types/known-types';
 import type { StepRegistry } from '../steps/step-registry';
 import { BaseActionStep, BaseControlFlowStep, StepKind } from '../steps/base-step';
-import { VariableResolver } from './variable-resolver';
+import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver';
 import { automationContextStorage } from './automation-context-storage';
 import { PauseStep } from './pause-step';
 import {
@@ -549,7 +549,10 @@ export class AutomationExecutor {
       return;
     }
 
-    const resolvedConfig = this.resolver.resolve(step.config, context) as Record<string, unknown>;
+    const resolvedConfig = stripNullForOptionalKeys(
+      this.resolver.resolve(step.config, context) as Record<string, unknown>,
+      stepImpl.configSchema,
+    );
 
     const safeResult = stepImpl.configSchema.safeParse(resolvedConfig);
     if (!safeResult.success) {

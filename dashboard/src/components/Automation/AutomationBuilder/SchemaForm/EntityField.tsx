@@ -1,11 +1,20 @@
 import { useMemo, useState } from 'react';
-import { UserType } from '@xyne/shared';
-import { Bot, Hash, Folder, Layers, ListOrdered, User as UserIcon, Users } from 'lucide-react';
+import { ChannelType, UserType } from '@xyne/shared';
+import {
+  Bot,
+  Hash,
+  Folder,
+  Layers,
+  ListOrdered,
+  Mail,
+  User as UserIcon,
+  Users,
+} from 'lucide-react';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { useActiveUserSearch, useSelf, useUser, useUsers } from '../../../../hooks/useUsers';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
-import { useAllVisibleChannels, useChannel } from '../../../../hooks/useChannels';
+import { useAllChannels, useChannel } from '../../../../hooks/useChannels';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../../ui/EntitySelector/EntityMultiSelector';
@@ -226,9 +235,17 @@ function UserGroupField({ value, onChange, placeholder }: FieldProps): React.Rea
   );
 }
 
+function channelIcon(type: string | null | undefined): React.ReactElement {
+  return type === ChannelType.EMAIL ? (
+    <Mail className='size-4 text-muted-foreground' />
+  ) : (
+    <Hash className='size-4 text-muted-foreground' />
+  );
+}
+
 function ChannelField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
   const [search, setSearch] = useState('');
-  const channels = useAllVisibleChannels();
+  const channels = useAllChannels();
   const selectedChannel = useChannel(value ?? '');
 
   const baseOptions: SelectorOption[] = useMemo(() => {
@@ -240,7 +257,7 @@ function ChannelField({ value, onChange, placeholder }: FieldProps): React.React
       .map(c => ({
         value: c.id,
         label: c.name || '(unnamed channel)',
-        icon: <Hash className='size-4 text-muted-foreground' />,
+        icon: channelIcon(c.type),
       }));
   }, [channels, search]);
 
@@ -251,7 +268,7 @@ function ChannelField({ value, onChange, placeholder }: FieldProps): React.React
       {
         value: selectedChannel.id,
         label: selectedChannel.name || '(unnamed channel)',
-        icon: <Hash className='size-4 text-muted-foreground' />,
+        icon: channelIcon(selectedChannel.type),
       },
       ...baseOptions,
     ];
@@ -589,7 +606,7 @@ function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): Rea
 
 function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
   const [search, setSearch] = useState('');
-  const channels = useAllVisibleChannels();
+  const channels = useAllChannels();
   const options: SelectorOption[] = useMemo(() => {
     if (!channels) return [];
     const lower = search.trim().toLowerCase();
@@ -599,7 +616,7 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
       .map(c => ({
         value: c.id,
         label: c.name || '(unnamed channel)',
-        icon: <Hash className='size-4 text-muted-foreground' />,
+        icon: channelIcon(c.type),
       }));
   }, [channels, search]);
   return (
