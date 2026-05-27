@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { AutomationContext } from '../types/context';
 import { tokenize, isPureRef, extractRefPath } from '../util/variable-ref';
 
@@ -92,3 +93,21 @@ function stringifyForTemplate(value: unknown): string {
 }
 
 export const variableResolver = new VariableResolver();
+
+export function stripNullForOptionalKeys(
+  resolved: Record<string, unknown>,
+  schema: z.ZodTypeAny,
+): Record<string, unknown> {
+  if (!(schema instanceof z.ZodObject)) return resolved;
+  const shape = schema.shape as Record<string, z.ZodTypeAny>;
+  const result: Record<string, unknown> = { ...resolved };
+  for (const key of Object.keys(result)) {
+    if (result[key] !== null) continue;
+    const field = shape[key];
+    if (!field) continue;
+    if (!field.safeParse(null).success && field.safeParse(undefined).success) {
+      delete result[key];
+    }
+  }
+  return result;
+}
