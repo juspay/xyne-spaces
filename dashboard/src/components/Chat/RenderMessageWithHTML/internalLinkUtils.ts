@@ -55,6 +55,9 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     };
 
     const segments = url.pathname.split('/').filter(Boolean);
+    if (segments[0] !== 'chat' && segments[1] === 'chat') {
+      segments.shift();
+    }
     if (segments[0] !== 'chat') {
       return fallbackUnknownLink;
     }
