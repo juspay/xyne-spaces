@@ -1,6 +1,6 @@
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGetChannelUserStatus, useVisibleChannel } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
 import { activitySkipMarkAsReadChannelRef } from '../../Activity/activitySkipMarkAsRead';
@@ -285,6 +285,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   // (from initialTopMostItemIndex) has settled. Prevents fetchOlderMessages from being
   // triggered by atTopStateChange during the initial mount/scroll race.
   const initialPositionSetRef = useRef(false);
+  const lastAutoScrollKeyRef = useRef<string | undefined>(undefined);
 
   /** Tracks the new-message boundary: its array index and whether user has seen it. */
   type NewConversationBoundary = { index: number; seenConvId: string | null };
@@ -352,6 +353,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
+  const lastConversationAutoScrollKey = useMemo(() => {
+    const lastConversation = conversations[conversations.length - 1];
+    if (!lastConversation) return '';
+    return `${lastConversation.conversationId}:${lastConversation.initial_message_md ?? ''}`;
+  }, [conversations]);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const isFetchingRef = useRef(false);
@@ -742,6 +748,26 @@ const ChatListV3: React.FC<ChatListProps> = ({
       fetchOlderMessages(linkedItemCreatedAt);
     }
   }, [linkedConversationId, activityNavigationNonce, isInitialLoadComplete, combinedMessages]);
+
+  useEffect(() => {
+    if (!isInitialLoadComplete) return;
+    const lastConversation = conversations[conversations.length - 1];
+    if (!lastConversation) return;
+
+    if (lastAutoScrollKeyRef.current === undefined) {
+      lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
+      return;
+    }
+
+    if (lastConversationAutoScrollKey === lastAutoScrollKeyRef.current) return;
+    lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
+
+    if (isNearBottomRef.current && latestConversationsListRef.current.length === 0) {
+      window.setTimeout(() => {
+        virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' });
+      }, 80);
+    }
+  }, [channelId, conversations, isInitialLoadComplete, lastConversationAutoScrollKey, user?.id]);
 
   useEffect(() => {
     if (shouldUseCutoffQuery) return;
