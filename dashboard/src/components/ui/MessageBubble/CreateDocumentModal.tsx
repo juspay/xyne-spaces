@@ -74,7 +74,9 @@ export const CreateDocumentModal: React.FC<CreateDocumentModalProps> = ({
     <Dialog open={isOpen} onOpenChange={handleOpenChange} title={title} description={description}>
       <div className='p-6'>
         <div className='mb-6'>
-          <h2 className='text-lg font-semibold leading-none tracking-tight'>{title}</h2>
+          <h2 className='text-lg font-semibold leading-none tracking-tight text-foreground'>
+            {title}
+          </h2>
           <p className='text-sm text-muted-foreground mt-2'>{description}</p>
         </div>
 
