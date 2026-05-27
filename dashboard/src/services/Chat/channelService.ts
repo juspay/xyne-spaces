@@ -26,7 +26,11 @@ export interface CreateChannelRequest {
   participants?: string[];
   type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT';
   assigneeUserGroupId?: string;
+  deskType?: 'EMAIL' | 'DL';
+  dlEmail?: string;
 }
+
+export type EmailDeskOpts = { deskType: 'EMAIL' } | { deskType: 'DL'; dlEmail: string };
 
 export interface CreateChannelResponse {
   success: boolean;
@@ -103,6 +107,7 @@ export class ChannelService {
   async createChannel(
     formData: CreateChannelFormData,
     channelType: 'DEFAULT' | 'EMAIL' | 'SUPPORT' = 'DEFAULT',
+    emailDeskOpts?: EmailDeskOpts,
   ): Promise<CreateChannelResponse> {
     const requestData: CreateChannelRequest = {
       name: formData.name,
@@ -112,6 +117,11 @@ export class ChannelService {
       projectId: formData.projectId,
       type: channelType,
       ...(formData.assigneeUserGroupId && { assigneeUserGroupId: formData.assigneeUserGroupId }),
+      ...(channelType === 'EMAIL' &&
+        emailDeskOpts && {
+          deskType: emailDeskOpts.deskType,
+          ...(emailDeskOpts.deskType === 'DL' && { dlEmail: emailDeskOpts.dlEmail }),
+        }),
     };
 
     const response = await apiInstance.post<CreateChannelResponse>('/channels', requestData);

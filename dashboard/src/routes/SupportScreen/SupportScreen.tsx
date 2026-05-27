@@ -142,7 +142,11 @@ import { useSelector } from '@xstate/react';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
-import { channelService, CreateChannelFormData } from '../../services/Chat/channelService';
+import {
+  channelService,
+  CreateChannelFormData,
+  EmailDeskOpts,
+} from '../../services/Chat/channelService';
 import { summarizeEmailThread } from '../../services/summarizeService';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
@@ -1104,9 +1108,18 @@ const SupportScreen = (): ReactElement => {
 
   // Mutation for creating email channel
   const createChannelMutation = useMutation({
-    mutationFn: async (data: CreateChannelFormData & { channelType?: 'EMAIL' | undefined }) => {
-      const { channelType, ...formData } = data;
-      const response = await channelService.createChannel(formData, channelType || 'EMAIL');
+    mutationFn: async (
+      data: CreateChannelFormData & {
+        channelType?: 'EMAIL' | undefined;
+        emailDeskOpts?: EmailDeskOpts;
+      },
+    ) => {
+      const { channelType, emailDeskOpts, ...formData } = data;
+      const response = await channelService.createChannel(
+        formData,
+        channelType || 'EMAIL',
+        emailDeskOpts ?? { deskType: 'EMAIL' },
+      );
       return response;
     },
     onSuccess: () => {
@@ -1125,10 +1138,25 @@ const SupportScreen = (): ReactElement => {
       connector?: 'google' | 'microsoft' | null;
       channelType?: 'EMAIL' | undefined;
       assigneeUserGroupId?: string;
+      deskType?: 'EMAIL' | 'DL';
+      dlEmail?: string;
     },
   ) => {
-    const { connector, ...rest } = data;
+    const { connector, deskType, dlEmail, ...rest } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
+
+    if (deskType === 'DL') {
+      if (!dlEmail) {
+        toast.error('Please select a distribution list');
+        return;
+      }
+      createChannelMutation.mutate({
+        ...rest,
+        channelType: 'EMAIL',
+        emailDeskOpts: { deskType: 'DL', dlEmail },
+      });
+      return;
+    }
 
     if (connector === 'microsoft') {
       const params = new URLSearchParams({

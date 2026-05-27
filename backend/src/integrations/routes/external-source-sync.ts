@@ -15,6 +15,8 @@ import { authMiddleware } from '@/middleware/auth';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
+import { db } from '@/database/client';
+import { DeskType } from '@prisma/client';
 
 const router = Router();
 
@@ -135,10 +137,27 @@ router.post(
       if (endMs - startMs > MAX_REFETCH_RANGE_MS) {
         return res.status(400).json({ success: false, error: 'Range exceeds 365 days' });
       }
-      const options: { startDate: string; endDate: string } = { startDate, endDate };
+      let source = await new ExternalSourceRepository().findByChannelId(channelId);
+      let targetChannelId: string | undefined;
+      let dlEmail: string | undefined;
 
-      const source = await new ExternalSourceRepository().findByChannelId(channelId);
       if (!source || !source.isActive) {
+        const pref = await db.emailChannelPreference.findUnique({
+          where: { channelId },
+          select: { deskType: true, dlEmail: true, workspaceId: true },
+        });
+        if (pref?.deskType === DeskType.DL && pref.workspaceId && pref.dlEmail) {
+          source = await db.externalSource.findUnique({ where: { workspaceId: pref.workspaceId } });
+          if (source?.isActive) {
+            targetChannelId = channelId;
+            dlEmail = pref.dlEmail;
+          } else {
+            source = null;
+          }
+        }
+      }
+
+      if (!source) {
         return res.status(404).json({ success: false, error: 'No active external source for this channel' });
       }
 
@@ -152,6 +171,13 @@ router.post(
         return res.status(401).json({ success: false, error: 'Unauthenticated' });
       }
 
+      const options = {
+        startDate,
+        endDate,
+        ...(targetChannelId && { targetChannelId }),
+        ...(dlEmail && { dlEmail }),
+      };
+
       if (appConfig.enableEmailFetchWorker) {
         if (!emailFetchQueue.isReady) {
           await emailFetchQueue.initialize();
@@ -161,9 +187,12 @@ router.post(
           channelId,
           requesterUserId,
           workspaceId: req.user!.workspaceId,
-          ...(options ?? {}),
+          startDate,
+          endDate,
+          ...(targetChannelId && { targetChannelId }),
+          ...(dlEmail && { dlEmail }),
         });
-        logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId });
+        logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId, targetChannelId, dlEmail });
         return res.status(202).json({ success: true, queued: true, jobId: String(job.id) });
       }
 

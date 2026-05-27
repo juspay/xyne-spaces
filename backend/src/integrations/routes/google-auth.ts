@@ -14,7 +14,7 @@ import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { config as appConfig } from '@/config/env';
-import { EmailMergeMode } from '@prisma/client';
+import { EmailMergeMode, WorkspaceRole, DeskType } from '@prisma/client';
 
 function resolveFrontendUrl(req?: Request): string {
   if (req) {
@@ -49,7 +49,7 @@ type PendingChannelData = {
 export type OAuthStateValue = {
   channelId?: string;
   channelData?: PendingChannelData;
-  mode?: 'reconnect';
+  mode?: 'reconnect' | 'workspace';
   expectedEmail?: string;
   workspaceId?: string;
   platform?: 'electron' | 'web';
@@ -208,6 +208,63 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       res,
       getFrontendUrl(req),
       'google_connect_failed',
+      platform,
+      req.user!.workspaceId,
+    );
+  }
+});
+
+// GET /api/integrations/google/connect/workspace
+// Workspace-level OAuth: connects xyne.desk@<orgDomain> as the shared mailbox that
+// DL desks ride on. No channel/preference is created — only an ExternalSource scoped
+// to the workspace (channelId: null, workspaceId set). Only one shared mailbox per
+// workspace is permitted (enforced by ExternalSource.workspaceId @unique).
+router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+  const platform: 'electron' | 'web' =
+    req.query.platform === 'electron' ? 'electron' : 'web';
+  try {
+    const workspaceId = req.user!.workspaceId;
+
+    // Gate on workspace OWNER / ADMIN. req.user.role is the WorkspaceRole written
+    // by authV2Middleware (fetched fresh from the User row).
+    const role = req.user!.role as WorkspaceRole;
+    if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
+      res.status(403).json({ error: 'Workspace admin/owner role required to set up the desk email' });
+      return;
+    }
+
+    const existing = await db.externalSource.findUnique({ where: { workspaceId } });
+    if (existing?.isActive) {
+      res.status(409).json({
+        error: 'Workspace already has a shared desk email configured',
+        existingDisplayName: existing.displayName,
+      });
+      return;
+    }
+
+    const state = Math.random().toString(36).substring(7);
+    await setOAuthState(state, {
+      mode: 'workspace',
+      workspaceId,
+      platform,
+      timestamp: Date.now(),
+    });
+
+    const authUrl = createOAuth2Client().generateAuthUrl({
+      access_type: 'offline',
+      scope: GMAIL_SCOPES,
+      prompt: 'consent',
+      state,
+    });
+
+    logger.info(`${TAG} Redirecting to Google OAuth for workspace shared mailbox`, { workspaceId });
+    res.redirect(authUrl);
+  } catch (error: any) {
+    logger.error(`${TAG} Error initiating workspace Google connect:`, error);
+    redirectError(
+      res,
+      getFrontendUrl(req),
+      'workspace_google_connect_failed',
       platform,
       req.user!.workspaceId,
     );
@@ -386,6 +443,87 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Workspace-level shared mailbox flow: no channel/preference, just one
+    // ExternalSource row scoped to the workspace + Gmail watch + Pub/Sub.
+    if (stateData.mode === 'workspace' && stateData.workspaceId) {
+      const workspaceId = stateData.workspaceId;
+
+      // Pre-checks before any network calls — avoids orphaning a Gmail watch /
+      // Pub/Sub subscription if a write would fail anyway.
+      const existingForWorkspace = await db.externalSource.findUnique({ where: { workspaceId } });
+      if (existingForWorkspace?.isActive) {
+        redirectError(res, frontendUrl, 'workspace_mailbox_already_exists', stateData.platform, workspaceId);
+        return;
+      }
+      // `existingSource` (by sourceName) was loaded above as part of the cross-channel
+      // dedup. Only reject if this Gmail is active on a *different* workspace.
+      if (existingSource?.isActive && existingSource.workspaceId !== workspaceId) {
+        redirectError(res, frontendUrl, 'gmail_already_connected', stateData.platform, workspaceId);
+        return;
+      }
+
+      const network = await GoogleService.prepareExternalSourceNetwork({
+        emailAddress,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+      });
+
+      if (existingForWorkspace) {
+        // Reactivate existing source (was soft-disconnected)
+        await db.externalSource.update({
+          where: { id: existingForWorkspace.id },
+          data: {
+            name: network.sourceName,
+            sourceType: ExternalSourcePlatform.GOOGLE,
+            displayName: emailAddress,
+            credentials: network.encryptedCredentials,
+            isActive: true,
+          },
+        });
+      } else {
+        try {
+          await db.externalSource.create({
+            data: {
+              name: network.sourceName,
+              sourceType: ExternalSourcePlatform.GOOGLE,
+              displayName: emailAddress,
+              channelId: null,
+              workspaceId,
+              credentials: network.encryptedCredentials,
+              isActive: true,
+            },
+          });
+        } catch (e: any) {
+          // Race-condition safety net for the pre-checks above.
+          if (e?.code === 'P2002') {
+            redirectError(res, frontendUrl, 'workspace_mailbox_already_exists', stateData.platform, workspaceId);
+            return;
+          }
+          throw e;
+        }
+      }
+
+      logger.info(`${TAG} Workspace shared mailbox setup complete`, {
+        workspaceId,
+        sourceName: network.sourceName,
+        emailAddress,
+      });
+
+      const params = new URLSearchParams({
+        workspaceMailboxConnected: 'true',
+        provider: 'google',
+        email: emailAddress,
+      });
+      res.redirect(
+        buildPostOAuthRedirect(
+          frontendUrl,
+          `/${workspaceId}/workspace-management?${params.toString()}`,
+          stateData.platform,
+        ),
+      );
+      return;
+    }
+
     // Resolve or create the channel. Reuses the `sourceName` computed above.
     logger.info(`${TAG} Creating channel / resolving board`);
     if (stateData.channelData) {
@@ -454,6 +592,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             ownerUserId: cd.userId,
             ...(cd.assigneeUserGroupId && { assigneeUserGroupId: cd.assigneeUserGroupId }),
             emailMergeMode: appConfig.emailMergeModeDefault as EmailMergeMode,
+            deskType: DeskType.EMAIL,
           },
         });
 

@@ -30,18 +30,24 @@ export class GoogleRefetch extends BaseRefetch {
         '[GoogleRefetch] startDate and endDate are required — manual refetch is range-only',
       );
     }
-    if (!source.channelId) {
-      throw new Error(`[GoogleRefetch] source ${source.name} has no channel binding`);
+    
+    const ingestChannelId = options.targetChannelId ?? source.channelId;
+    if (!ingestChannelId) {
+      throw new Error(`[GoogleRefetch] source ${source.name} has no channel to ingest into`);
     }
 
     const google = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
-    const preference = await preferenceRepo.findByChannelId(source.channelId);
+    const preference = await preferenceRepo.findByChannelId(ingestChannelId);
     const userId = preference?.ownerUserId ?? source.displayName;
+    const extraQuery = options.dlEmail
+      ? `(to:${options.dlEmail} OR cc:${options.dlEmail} OR from:${options.dlEmail})`
+      : undefined;
 
     // Step 1: list messages in the window
     const messages = await google.listMessagesByDateRange({
       startDate: options.startDate,
       endDate: options.endDate,
+      ...(extraQuery && { extraQuery }),
     });
     logger.info(`${TAG} range listing returned ${messages.length} messages`, {
       startDate: options.startDate,
@@ -126,7 +132,7 @@ export class GoogleRefetch extends BaseRefetch {
         if (validParsed.length === 0) return;
 
         const result = await emailService.ingestEmailThread({
-          channelId: source.channelId!,
+          channelId: ingestChannelId,
           externalThreadId: threadId,
           externalSourceId: source.id,
           userId,

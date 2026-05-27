@@ -39,7 +39,7 @@ class EmailFetchWorker {
   }
 
   private async processJob(job: Bull.Job<EmailFetchJobData>): Promise<void> {
-    const { sourceId, channelId, startDate, endDate } = job.data;
+    const { sourceId, channelId, startDate, endDate, targetChannelId, dlEmail } = job.data;
     logger.info(
       `[EMAIL-FETCH-WORKER] Processing job ${job.id} — source ${sourceId} (channel ${channelId})`,
     );
@@ -61,7 +61,14 @@ class EmailFetchWorker {
     }
 
     const options =
-      startDate && endDate ? { startDate, endDate } : undefined;
+      startDate && endDate
+        ? {
+            startDate,
+            endDate,
+            ...(targetChannelId && { targetChannelId }),
+            ...(dlEmail && { dlEmail }),
+          }
+        : undefined;
     const result = await adapter.refetch(source, options);
 
     logger.info(

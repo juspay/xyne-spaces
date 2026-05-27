@@ -48,6 +48,7 @@ import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel'
 import { externalSourceSyncRoutes } from '@/integrations';
 import googleAuthRoutes from '@/integrations/routes/google-auth';
 import deskIntegrationRoutes from '@/integrations/routes/desk-integration';
+import workspaceDeskRoutes from '@/integrations/routes/workspace-desk';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
@@ -237,6 +238,7 @@ export class App {
     // Desk integration management (disconnect / reconnect-init) — auth-gated
     // per-route via the desk-owner check inside each handler.
     this.app.use('/api/integrations/desk', deskIntegrationRoutes);
+    this.app.use('/api/integrations/workspace-desk', workspaceDeskRoutes);
 
     // Migration routes (body parsing handled in route file)
     this.app.use('/api/migration', migrationRoutes);

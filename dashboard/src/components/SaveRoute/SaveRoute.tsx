@@ -1,5 +1,5 @@
 import { ReactElement, ReactNode, useEffect, useMemo, useRef } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useParams } from 'react-router-dom';
 import { readSavedRoute, setSavedRoute } from '../../hooks/useSavedRoute';
 
 interface SaveRouteProps {
@@ -32,6 +32,8 @@ export const SaveRoute = ({
   children,
 }: SaveRouteProps): ReactElement => {
   const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const scopedKeyword = workspaceId ? `${keyword}:${workspaceId}` : keyword;
 
   const stripKey = useMemo(
     () => (stripSearchParams ? stripSearchParams.join('|') : ''),
@@ -40,7 +42,7 @@ export const SaveRoute = ({
   const stripRef = useRef(stripSearchParams);
   stripRef.current = stripSearchParams;
 
-  const initialSavedRef = useRef<string | undefined>(readSavedRoute(keyword));
+  const initialSavedRef = useRef<string | undefined>(readSavedRoute(scopedKeyword));
   const redirectAttemptedRef = useRef(false);
 
   let redirectTo: string | null = null;
@@ -64,10 +66,10 @@ export const SaveRoute = ({
 
   useEffect(() => {
     setSavedRoute(
-      keyword,
+      scopedKeyword,
       buildPersistablePath(location.pathname, location.search, stripRef.current),
     );
-  }, [keyword, location.pathname, location.search, stripKey]);
+  }, [scopedKeyword, location.pathname, location.search, stripKey]);
 
   if (redirectTo) {
     return <Navigate to={redirectTo} replace />;
