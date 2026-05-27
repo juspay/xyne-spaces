@@ -88,6 +88,7 @@ export interface CreateConversationWithEmailParams {
   emailFrom: string;
   emailCc?: string[];
   emailBcc?: string[];
+  emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
   ticketMetadata?: Record<string, unknown>;
@@ -104,6 +105,7 @@ export interface AddEmailToConversationParams {
   emailFrom: string;
   emailCc?: string[];
   emailBcc?: string[];
+  emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
   emailType?: EmailType;
@@ -142,6 +144,7 @@ export interface IngestEmailThreadParams {
     to: string[];
     cc?: string[];
     bcc?: string[];
+    replyTo?: string[];
     receivedAt: Date;
     type?: EmailType;
     uploadedFiles?: UploadedFileResult[];
@@ -609,6 +612,7 @@ export class EmailService {
       emailFrom,
       emailCc = [],
       emailBcc = [],
+      emailReplyTo = [],
       externalThreadId,
       externalMessageId,
       ticketMetadata,
@@ -765,6 +769,7 @@ export class EmailService {
           from: emailFrom,
           cc: emailCc || [],
           bcc: emailBcc || [],
+          replyTo: emailReplyTo || [],
           conversationId: conv.conversationId,
           channelId,
           externalThreadId,
@@ -1052,6 +1057,7 @@ export class EmailService {
         emailFrom,
         emailCc = [],
         emailBcc = [],
+        emailReplyTo = [],
         externalThreadId,
         externalMessageId,
         emailType = EmailType.DEFAULT,
@@ -1082,6 +1088,7 @@ export class EmailService {
         from: emailFrom,
         cc: emailCc,
         bcc: emailBcc,
+        replyTo: emailReplyTo,
         conversationId: conversationId,
         channelId: conversation.channelId,
         externalThreadId: externalThreadId,
@@ -1431,8 +1438,8 @@ export class EmailService {
     const to = params.to?.length
       ? params.to
       : params.type === 'REPLY'
-        ? [initialEmail.from]
-        : [...new Set([initialEmail.from, ...initialEmail.to])];
+        ? [initialEmail.replyTo?.[0] ?? initialEmail.from]
+        : [...new Set([initialEmail.replyTo?.[0] ?? initialEmail.from, ...initialEmail.to])];
     const cc = params.cc ?? (params.type === 'REPLY_ALL' && !params.to ? (initialEmail.cc || []) : []);
     const bcc = params.bcc ?? [];
 
@@ -1631,6 +1638,7 @@ export class EmailService {
       from: e.from,
       cc: e.cc ?? [],
       bcc: e.bcc ?? [],
+      replyTo: e.replyTo ?? [],
       channelId,
       externalThreadId,
       externalMessageId: e.externalMessageId,

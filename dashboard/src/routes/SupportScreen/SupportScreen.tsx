@@ -3520,6 +3520,7 @@ const EmailThreadItem = ({
   const toList = email.to || [];
   const ccList = email.cc || [];
   const bccList = email.bcc || [];
+  const replyToList = email.replyTo || [];
 
   const [isDemerging, setIsDemerging] = useState(false);
 
@@ -3625,6 +3626,7 @@ const EmailThreadItem = ({
           to={toList}
           cc={ccList}
           bcc={bccList}
+          replyTo={replyToList}
           createdAt={email.createdAt}
           isCollapsed={isCollapsed}
           previewText={preview}

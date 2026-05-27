@@ -915,9 +915,9 @@ export const EmailComposer = ({
             }
           };
 
-          // Sender first (only matters in case (b) — case (a) is filtered out
-          // because the sender is us).
-          if (source.from) addUnique(nextTo, [source.from]);
+          // Sender first (prefer Reply-To over From for list-relayed emails).
+          if (source.replyTo?.length) addUnique(nextTo, [source.replyTo[0]!]);
+          else if (source.from) addUnique(nextTo, [source.from]);
           // All original To recipients of the latest message.
           addUnique(nextTo, source.to || []);
           // Carry over CCs unchanged (minus self, minus dup).
@@ -931,6 +931,8 @@ export const EmailComposer = ({
           const senderIsSelf = !!targetEmail.from && isSelf(targetEmail.from);
           if (senderIsSelf) {
             nextTo = (targetEmail.to || []).filter(addr => !isSelf(addr));
+          } else if (targetEmail.replyTo?.length) {
+            nextTo = [targetEmail.replyTo[0]!];
           } else if (targetEmail.from) {
             nextTo = [targetEmail.from];
           }

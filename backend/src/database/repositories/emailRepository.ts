@@ -13,6 +13,7 @@ export class EmailRepository {
     from: string;
     cc?: string[];
     bcc?: string[];
+    replyTo?: string[];
     conversationId: string;
     channelId: string;
     externalThreadId: string;
@@ -34,6 +35,7 @@ export class EmailRepository {
         from: data.from,
         cc: data.cc || [],
         bcc: data.bcc || [],
+        replyTo: data.replyTo || [],
         conversationId: data.conversationId,
         channelId: data.channelId,
         externalThreadId: data.externalThreadId,
