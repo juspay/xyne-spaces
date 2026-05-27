@@ -17,6 +17,7 @@ import { logger } from '../../../utils/logger.js';
  * Note: JAF only supports these specific types. Other files (like PDFs) use makeFileAttachment.
  */
 const SUPPORTED_DOCUMENT_TYPES = [
+  'application/pdf',                                                            // .pdf
   'text/plain',                                                               // .txt
   'text/csv',                                                                  // .csv
   'application/json',                                                          // .json

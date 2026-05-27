@@ -10,6 +10,10 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
+import { AttachmentEntityType } from '@prisma/client';
+import { convertToBase64 } from '@/utils/attachmentBase64';
+import { convertToJAFAttachment } from '@/agents/xyne-ai/utils/attachmentConverter';
+import type { Attachment } from '@juspay-jaf/jaf';
 
 const EMAIL_SUMMARY_CACHE_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
 const EMAIL_SUMMARY_CACHE_PREFIX = 'email-summary';
@@ -196,34 +200,88 @@ export class SummarizeController {
         }
       }
 
-      // Convert emails to ThreadMessage format
-      const threadMessages = emails.map((email) => {
+      // Fetch all attachments for emails in this conversation
+      const emailIds = emails.map((e) => e.id);
+      const emailAttachments = await db.messageAttachment.findMany({
+        where: {
+          entityType: AttachmentEntityType.EMAIL,
+          entityId: { in: emailIds },
+          isDeleted: false,
+        },
+      });
+
+      const attachmentsByEmailId = new Map<string, typeof emailAttachments>();
+      for (const att of emailAttachments) {
+        const list = attachmentsByEmailId.get(att.entityId) ?? [];
+        list.push(att);
+        attachmentsByEmailId.set(att.entityId, list);
+      }
+
+      // Convert emails to ThreadMessage format; each email returns its own JAF attachments so
+      // there is no shared mutable state across concurrent promises.
+      const emailResults = await Promise.all(emails.map(async (email) => {
         const fromAddress = Array.isArray(email.from) ? email.from[0] : email.from;
         const toAddresses = Array.isArray(email.to) ? email.to.join(', ') : email.to;
         const ccAddresses = email.cc && email.cc.length > 0 ? `\nCC: ${email.cc.join(', ')}` : '';
 
         const emailHeader = `Subject: ${email.subject || '(no subject)'}\nTo: ${toAddresses}${ccAddresses}`;
         const plainBody = email.body ? extractPlainTextFromHtml(email.body) : '';
-        const content = `${emailHeader}\n\n${plainBody}`;
+
+        const attachments = attachmentsByEmailId.get(email.id) ?? [];
+        const jafAttachments: Attachment[] = [];
+        let attachmentText = '';
+
+        if (attachments.length > 0) {
+          const attLines = await Promise.all(attachments.map(async (a) => {
+            const sizeStr = a.size >= 1024 * 1024
+              ? `${(a.size / (1024 * 1024)).toFixed(1)} MB`
+              : `${(a.size / 1024).toFixed(1)} KB`;
+
+            try {
+              const base64Result = await convertToBase64(a);
+              if (base64Result?.base64Content) {
+                jafAttachments.push(convertToJAFAttachment({
+                  data: base64Result.base64Content,
+                  mime_type: base64Result.mimetype,
+                  filename: base64Result.originalFilename,
+                }));
+                logger.info(`[summarizeEmailThread] Attachment ready for LLM: ${a.originalFilename} (${a.mimetype})`);
+              } else {
+                logger.warn(`[summarizeEmailThread] Could not fetch attachment: ${a.originalFilename} (url=${a.url}, provider=${a.storageProvider})`);
+              }
+            } catch (err) {
+              logger.warn(`[summarizeEmailThread] Failed to process attachment ${a.originalFilename}:`, err);
+            }
+
+            return `  - ${a.originalFilename} (${a.mimetype}, ${sizeStr})`;
+          }));
+          attachmentText = `\n\n[Attachments:\n${attLines.join('\n')}]`;
+        }
 
         return {
-          id: email.id,
-          content,
-          authorName: fromAddress || 'Unknown Sender',
-          createdAt: email.createdAt,
-          hasAttachment: false,
+          message: {
+            id: email.id,
+            content: `${emailHeader}\n\n${plainBody}${attachmentText}`,
+            authorName: fromAddress || 'Unknown Sender',
+            createdAt: email.createdAt,
+            hasAttachment: attachments.length > 0,
+          },
+          jafAttachments,
         };
-      });
+      }));
 
-      logger.info(`Found ${threadMessages.length} emails in conversation: ${conversationId}`);
+      const threadMessages = emailResults.map((r) => r.message);
+      const allJAFAttachments = emailResults.flatMap((r) => r.jafAttachments);
 
-      const input: ThreadSummaryInput = { messages: threadMessages };
+      logger.info(`Found ${threadMessages.length} emails in conversation: ${conversationId}, ${allJAFAttachments.length} attachment(s) sent to LLM`);
+
+      const input: ThreadSummaryInput = { messages: threadMessages, jafAttachments: allJAFAttachments };
       const context: SummarizerContext = {
         userId,
         conversationId,
         channelId: conversation.channelId,
         summarizationType: 'emailThread',
-        modelName: agentsConfig.summariserModelName,
+        modelName: allJAFAttachments.length > 0 ? agentsConfig.attachmentSummariserModelName : agentsConfig.summariserModelName,
       };
 
       const messageIdMappingObj: { [index: number]: string } = {};

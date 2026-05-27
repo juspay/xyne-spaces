@@ -19,6 +19,7 @@ import {
   type RunConfig,
   type Message,
   type TraceEvent,
+  type Attachment,
 } from '@juspay-jaf/jaf';
 
 // Import config for environment variables
@@ -69,6 +70,7 @@ export interface ThreadSummaryInput {
   readonly messageIdMapping?: Map<number, string>;  // 1-based index to messageId mapping for citations (legacy)
   readonly conversationIdMapping?: Map<number, string>;  // 1-based index to conversationId mapping (for channel summary, legacy)
   readonly entityMapping?: Map<number, EnhancedEntityMetadata>;  // NEW: Enhanced entity mapping for multi-entity support
+  readonly jafAttachments?: readonly Attachment[];  // File attachments sent directly to the LLM (same approach as Ask AI)
 }
 
 /**
@@ -394,15 +396,16 @@ export async function* summarizeStream(
   };
 
   // Create initial state - uses unified Summarizer agent
+  const userMessage: Message = {
+    role: 'user',
+    content: formattedMessages,
+    ...(input.jafAttachments && input.jafAttachments.length > 0 && { attachments: input.jafAttachments }),
+  };
+
   const initialState: RunState<SummarizerContext> = {
     runId: generateRunId(),
     traceId: generateTraceId(),
-    messages: [
-      {
-        role: 'user',
-        content: formattedMessages,
-      },
-    ],
+    messages: [userMessage],
     currentAgentName: 'Summarizer',
     context,
     turnCount: 0,
@@ -725,7 +728,9 @@ Provide a detailed summary including context and nuances.`;
 - Current status of the issue or request
 - Any pending items or next steps
 - Who is responsible for what
+- Key findings or data from any attached files (PDF reports, diagnostic documents, screenshots)
 
+IMPORTANT: If documents or images are attached after the email thread, read them carefully and include relevant details from those files in your summary. Do not ignore attachments.
 Ignore email signatures, disclaimers, and quoted reply chains.`;
   } else {
     contextLabel = 'THREAD MESSAGES';
