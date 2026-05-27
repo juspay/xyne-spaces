@@ -40,14 +40,8 @@ router.post('/google', async (req, res) => {
     return res.json({ success: true, message: 'Google Calendar synced successfully' });
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
-    // unauthorized_client means the stored refresh token was issued without calendar scope
-    // or the credentials no longer match — the user must re-login.
-    const isReauthNeeded = raw.includes('unauthorized_client') || raw.includes('invalid_grant');
-    const message = isReauthNeeded
-      ? 'Google Calendar access requires re-authorization. Please sign out and sign back in with Google to grant Calendar access.'
-      : raw;
     logger.error(`[CALENDAR_SYNC] Manual Google sync failed for user ${userId}: ${raw}`);
-    return res.status(isReauthNeeded ? 403 : 500).json({ success: false, error: message, needsReauth: isReauthNeeded });
+    return res.status(500).json({ success: false, error: raw });
   }
 });
 

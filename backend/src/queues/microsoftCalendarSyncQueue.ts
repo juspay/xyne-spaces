@@ -259,14 +259,15 @@ class MicrosoftCalendarSyncQueue {
       }
     }
 
-    await queue.add(
-      'sync-all',
-      {},
-      {
-        repeat: { cron: MICROSOFT_CALENDAR_SYNC_CRON },
-        jobId: 'microsoft-calendar-scan-repeatable',
-      },
-    );
+    // TODO: cron disabled — re-enable in dedicated PR
+    // await queue.add(
+    //   'sync-all',
+    //   {},
+    //   {
+    //     repeat: { cron: MICROSOFT_CALENDAR_SYNC_CRON },
+    //     jobId: 'microsoft-calendar-scan-repeatable',
+    //   },
+    // );
 
     this.workerInitialized = true;
     logger.info(

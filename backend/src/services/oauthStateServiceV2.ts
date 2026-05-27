@@ -12,6 +12,7 @@ interface OAuthState {
   redirectTo?: string;
   isNy?: boolean;
   invitationId?: string;
+  connectCalendar?: boolean;
 }
 
 class OAuthStateService {
@@ -27,6 +28,7 @@ class OAuthStateService {
     provider: OAuthProvider = 'google',
     isNy?: boolean,
     invitationId?: string,
+    connectCalendar?: boolean,
   ): Promise<string> {
     const { redisService } = await import('./redisService');
     const client = redisService.getClient();
@@ -42,6 +44,7 @@ class OAuthStateService {
       ...(redirectTo !== undefined ? { redirectTo } : {}),
       ...(isNy ? { isNy } : {}),
       ...(invitationId ? { invitationId } : {}),
+      ...(connectCalendar ? { connectCalendar } : {}),
     };
 
     await client.setex(
