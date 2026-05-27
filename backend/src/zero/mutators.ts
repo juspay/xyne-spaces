@@ -4376,6 +4376,165 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         },
       ),
+      markAsUnread: defineMutator(
+        z.object({ activityId: z.string(), timestamp: z.number() }),
+        async ({ tx, ctx, args: { activityId, timestamp } }) => {
+          // 1. FETCH & VALIDATE ACTIVITY
+          const activity = await tx.run(zql.activities.where('id', activityId).one());
+
+          if (!activity) {
+            throw new Error('Activity not found');
+          }
+
+          if (activity.userId !== ctx.userID) {
+            throw new Error('Not authorized to mark this activity as unread');
+          }
+
+          if (['reacted', 'removed'].includes(activity.actorAction)) {
+            throw new Error('Cannot mark reactions as unread');
+          }
+          if (!activity.isRead) {
+            return;
+          }
+          // TYPE A: REPLIES - Update lastReadAt
+          if (['replied', 'replied_v2'].includes(activity.actorAction)) {
+            if (!activity.messageId) {
+              throw new Error('Reply activity missing messageId');
+            }
+
+            const message = await tx.run(zql.messages.where('messageId', activity.messageId).one());
+            if (!message) {
+              throw new Error('Message not found');
+            }
+
+            const newLastReadAt = message.createdAt - 1;
+
+            const existingParticipant = await tx.run(
+              zql.conversation_participants
+                .where('conversationId', message.conversationId)
+                .where('userId', ctx.userID)
+                .one(),
+            );
+
+            if (existingParticipant) {
+              await tx.mutate.conversation_participants.update({
+                id: existingParticipant.id,
+                lastReadAt: newLastReadAt,
+              });
+            }
+
+            await tx.mutate.activities.update({
+              id: activityId,
+              isRead: false,
+            });
+
+            return;
+          }
+
+          // TYPE B: DMs - Update lastViewedAt
+          if (activity.actorAction === 'direct_message') {
+            if (!activity.messageId) {
+              throw new Error('DM activity missing messageId');
+            }
+
+            if (!activity.channelId) {
+              throw new Error('DM activity missing channelId');
+            }
+
+            const message = await tx.run(zql.messages.where('messageId', activity.messageId).one());
+            if (!message) {
+              throw new Error('Message not found');
+            }
+
+            const conversation = await tx.run(
+              zql.conversations.where('conversationId', message.conversationId).one(),
+            );
+
+            if (!conversation) {
+              throw new Error('Conversation not found');
+            }
+
+            const newLastViewedAt = conversation.createdAt - 1;
+
+            const unreadConversations = await tx.run(
+              zql.conversations
+                .where('channelId', activity.channelId)
+                .where('createdAt', '>', newLastViewedAt)
+                .where('createdBy', '!=', ctx.userID),
+            );
+
+            const channelStatus = await tx.run(
+              zql.channel_user_status
+                .where('channelId', activity.channelId)
+                .where('userId', ctx.userID)
+                .where('isDeleted', false)
+                .one(),
+            );
+
+            if (!channelStatus) {
+              throw new Error('Channel status not found');
+            }
+
+            await tx.mutate.channel_user_status.update({
+              id: channelStatus.id,
+              lastViewedAt: newLastViewedAt,
+              unreadCount: unreadConversations.length,
+              conversationSeenCutoffAt: await getConversationSeenCutoffAt(
+                tx,
+                activity.channelId,
+                newLastViewedAt,
+              ),
+              updatedAt: timestamp,
+            });
+
+            await tx.mutate.activities.update({
+              id: activityId,
+              isRead: false,
+            });
+
+            return;
+          }
+
+          // TYPE C: SIMPLE (Mentions, Calls, Tickets, Others)
+
+          await tx.mutate.activities.update({
+            id: activityId,
+            isRead: false,
+          });
+
+          if (activity.channelId) {
+            // Skip channel unread count for thread reply activities
+            let isThreadReply = false
+            if (activity.conversationId && activity.messageId) {
+              const conversation = await tx.run(
+                zql.conversations.where('conversationId', activity.conversationId).one(),
+              )
+              isThreadReply = !!(
+                conversation?.initialMessageId &&
+                conversation.initialMessageId !== activity.messageId
+              )
+            }
+
+            if (!isThreadReply) {
+              const channelStatus = await tx.run(
+                zql.channel_user_status
+                  .where('channelId', activity.channelId)
+                  .where('userId', ctx.userID)
+                  .where('isDeleted', false)
+                  .one(),
+              );
+
+              if (channelStatus) {
+                await tx.mutate.channel_user_status.update({
+                  id: channelStatus.id,
+                  unreadCount: (channelStatus.unreadCount || 0) + 1,
+                  updatedAt: timestamp,
+                });
+              }
+            }
+          }
+        },
+      ),
     },
     conversation: {
       markThreadUnreadFrom: defineMutator(

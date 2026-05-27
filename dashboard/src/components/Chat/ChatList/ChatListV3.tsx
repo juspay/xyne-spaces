@@ -3,6 +3,7 @@ import { Conversation } from '../../../machines/stateMachine';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useGetChannelUserStatus, useVisibleChannel } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
+import { activitySkipMarkAsReadChannelRef } from '../../Activity/activitySkipMarkAsRead';
 import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
@@ -819,8 +820,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
 
     return () => {
       // Mark as viewed
-      if (skipMarkAsReadRef?.current) {
+      if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) {
         skipMarkAsReadRef.current = false;
+        activitySkipMarkAsReadChannelRef.current = false;
         return;
       }
 

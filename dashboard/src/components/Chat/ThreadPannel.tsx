@@ -1,5 +1,6 @@
 import { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import useMeasure from '../../hooks/useMeasure';
+import { activitySkipMarkAsReadThreadRef } from '../Activity/activitySkipMarkAsRead';
 import {
   useParams,
   useNavigate,
@@ -406,8 +407,9 @@ export const ThreadMessages = ({
 
   useEffect(() => {
     return () => {
-      if (skipMarkAsReadThreadRef?.current) {
+      if (skipMarkAsReadThreadRef?.current || activitySkipMarkAsReadThreadRef.current) {
         skipMarkAsReadThreadRef.current = false;
+        activitySkipMarkAsReadThreadRef.current = false;
         return;
       }
       if (derivedConversationId) {
