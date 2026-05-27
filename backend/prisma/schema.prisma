@@ -86,6 +86,7 @@ enum TicketReferenceRelation {
   LINKED
   DUPLICATE_CONFIRMED
   DUPLICATE_POSSIBLE
+  MERGED_INTO
   @@schema("public")
 }
 
@@ -166,6 +167,8 @@ enum ActivityType {
   STAGE_CHANGE_APPROVED
   STAGE_CHANGE_REJECTED
   IS_ARCHIVED
+  MERGED
+  UNMERGED
   @@schema("public")
 }
 

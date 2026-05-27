@@ -30,6 +30,7 @@ import {
   Inbox,
   CheckCheck,
   Search,
+  GitMerge,
 } from 'lucide-react';
 import { ChannelVisibility, EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
@@ -136,6 +137,7 @@ import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
 import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
 import Dialog from '../../components/ui/Dialog';
+import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
 import { useMutation } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
@@ -962,11 +964,51 @@ const SupportScreen = (): ReactElement => {
     setSelectedTickets(new Map());
   }, [selectedTickets, markBulkAsRead]);
 
+  const handleMergeSelectedTickets = useCallback(
+    async (parentTicketId: string): Promise<void> => {
+      if (selectedTickets.size < 2) return;
+      try {
+        const ticketIds = Array.from(selectedTickets.keys());
+        await Promise.all(
+          ticketIds
+            .filter(id => id !== parentTicketId)
+            .map(id =>
+              apiInstance.post(`/tickets/${id}/merge`, { targetTicketId: parentTicketId }),
+            ),
+        );
+        toast.success('Tickets merged');
+        clearTicketSelection();
+        setShowMergeDialog(false);
+      } catch (error: unknown) {
+        const err = error as {
+          response?: { data?: { error?: string; message?: string } };
+          message?: string;
+        };
+        toast.error('Merge failed', {
+          description:
+            err.response?.data?.error ||
+            err.response?.data?.message ||
+            err.message ||
+            'Unknown error',
+        });
+      }
+    },
+    [selectedTickets, clearTicketSelection],
+  );
+
   // Get full selected channel for member count and other stats
   const selectedChannelFull = useVisibleChannel(selectedChannelId ?? '');
 
   // Filters are now applied server-side via the supportTicketsFilteredV2 query
   const displayedTickets = supportTickets;
+
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+
+  const mergeDialogTickets = useMemo(() => {
+    if (!displayedTickets) return [];
+    const selected = displayedTickets.filter(t => selectedTickets.has(t.id));
+    return [...selected].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  }, [selectedTickets, displayedTickets]);
 
   const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
 
@@ -1752,6 +1794,23 @@ const SupportScreen = (): ReactElement => {
                       <CheckCheck size={14} />
                       Mark as read
                     </Button>
+                    {selectedTicketIds.size >= 2 && (
+                      <Button
+                        type='button'
+                        size='sm'
+                        variant='outline'
+                        onClick={() => setShowMergeDialog(true)}
+                        data-track-category='Support'
+                        data-track-name='MergeTickets'
+                        data-track-metadata={JSON.stringify({
+                          channelId: refetchChannelId,
+                          count: selectedTicketIds.size,
+                        })}
+                      >
+                        <GitMerge size={14} />
+                        Merge
+                      </Button>
+                    )}
                     <Button
                       type='button'
                       size='sm'
@@ -2027,6 +2086,13 @@ const SupportScreen = (): ReactElement => {
           </div>
         </Dialog>
       )}
+
+      <MergeTicketsDialog
+        open={showMergeDialog}
+        onOpenChange={setShowMergeDialog}
+        tickets={mergeDialogTickets}
+        onMerge={handleMergeSelectedTickets}
+      />
 
       {/* Multi-compose scrollable strip — fixed at the bottom, spans full width.
           Windows are laid out right-to-left (flex-row-reverse) so the newest

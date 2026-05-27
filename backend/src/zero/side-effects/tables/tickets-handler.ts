@@ -217,4 +217,124 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
       throw error;
     }
   }
+
+  /**
+   * Create Zero-side notification activities when a ticket is merged into another.
+   * Called from ticketController.mergeTicket after the Prisma transaction commits.
+   * This is a static method - does not use side effect context.
+   */
+  static async handleTicketMerged(params: {
+    sourceTicketId: string;
+    targetTicketId: string;
+    sourceXyneId: string;
+    targetXyneId: string;
+    sourceTitle: string;
+    targetTitle: string;
+    actorId: string;
+    channelId: string | null;
+  }): Promise<void> {
+    const {
+      sourceTicketId,
+      targetTicketId,
+      sourceXyneId,
+      targetXyneId,
+      sourceTitle,
+      targetTitle,
+      actorId,
+      channelId,
+    } = params;
+
+    try {
+      // Create both activities in parallel (same pattern as createEtaBreachActivities)
+      await Promise.all([
+        activityService.createActivity({
+          userId: actorId,
+          actorAction: 'ticket_merged',
+          actionSource: 'ticket',
+          actionSourceId: sourceTicketId,
+          ticketId: sourceTicketId,
+          channelId: channelId || undefined,
+          actorId,
+          classification: ActivityClassification.ACTIONABLE,
+        }),
+        activityService.createActivity({
+          userId: actorId,
+          actorAction: 'ticket_merged_target',
+          actionSource: 'ticket',
+          actionSourceId: targetTicketId,
+          ticketId: targetTicketId,
+          channelId: channelId || undefined,
+          actorId,
+          classification: ActivityClassification.ACTIONABLE,
+        }),
+      ]);
+
+      logger.info(
+        `[TicketsSideEffectHandler] Created merge activities: ${sourceXyneId} (${sourceTitle}) → ${targetXyneId} (${targetTitle})`
+      );
+    } catch (error) {
+      logger.error(`[TicketsSideEffectHandler] Failed to create merge activities:`, error);
+      // Don't throw — merge succeeded in DB; notification failure is non-critical
+    }
+  }
+
+  /**
+   * Create Zero-side notification activities when a ticket is unmerged.
+   * Called from ticketController.unmergeTicket after the Prisma transaction commits.
+   * This is a static method - does not use side effect context.
+   */
+  static async handleTicketUnmerged(params: {
+    sourceTicketId: string;
+    targetTicketId: string;
+    sourceXyneId: string;
+    targetXyneId: string;
+    sourceTitle: string;
+    targetTitle: string;
+    actorId: string;
+    channelId: string | null;
+  }): Promise<void> {
+    const {
+      sourceTicketId,
+      targetTicketId,
+      sourceXyneId,
+      targetXyneId,
+      sourceTitle,
+      targetTitle,
+      actorId,
+      channelId,
+    } = params;
+
+    try {
+      // Create both activities in parallel (same pattern as createEtaBreachActivities)
+      await Promise.all([
+        activityService.createActivity({
+          userId: actorId,
+          actorAction: 'ticket_unmerged',
+          actionSource: 'ticket',
+          actionSourceId: sourceTicketId,
+          ticketId: sourceTicketId,
+          channelId: channelId || undefined,
+          actorId,
+          classification: ActivityClassification.ACTIONABLE,
+        }),
+        activityService.createActivity({
+          userId: actorId,
+          actorAction: 'ticket_unmerged_target',
+          actionSource: 'ticket',
+          actionSourceId: targetTicketId,
+          ticketId: targetTicketId,
+          channelId: channelId || undefined,
+          actorId,
+          classification: ActivityClassification.ACTIONABLE,
+        }),
+      ]);
+
+      logger.info(
+        `[TicketsSideEffectHandler] Created unmerge activities: ${sourceXyneId} (${sourceTitle}) restored from ${targetXyneId} (${targetTitle})`
+      );
+    } catch (error) {
+      logger.error(`[TicketsSideEffectHandler] Failed to create unmerge activities:`, error);
+      // Don't throw — unmerge succeeded in DB; notification failure is non-critical
+    }
+  }
 }

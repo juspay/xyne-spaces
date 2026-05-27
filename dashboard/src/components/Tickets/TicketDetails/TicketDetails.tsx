@@ -61,6 +61,7 @@ import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar
 import { Selector } from './Selector';
 import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
 import { mutators } from '../../../zero/mutators';
+import { apiInstance } from '../../../services/clients/apiClient';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
@@ -991,6 +992,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     return refTicket?.title || refTicket?.xyneId || refTicket?.id || 'Unknown ticket';
   };
 
+  const handleUnmerge = async (sourceTicketId: string): Promise<void> => {
+    try {
+      await apiInstance.post(`/tickets/${sourceTicketId}/unmerge`);
+      toast.success('Ticket unmerged successfully');
+    } catch {
+      toast.error('Failed to unmerge ticket');
+    }
+  };
+
   const handleSaveTitle = (): void => {
     if (titleValue.trim() && titleValue !== ticket.title) {
       if (isEmailDeskTicket) {
@@ -1480,6 +1490,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       | TicketReferenceWithTicket['sourceTicket'],
     label: string,
     allowEdit: boolean,
+    onUnmerge?: () => void,
   ): React.ReactElement => {
     const link = buildTicketLink(relatedTicket);
     const boardStages = relatedTicket?.boardId
@@ -1531,9 +1542,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 {relatedTicket?.xyneId || relatedTicket?.id || '—'}
               </span>
               {link ? (
-                <Link className='text-sm font-normal text-foreground truncate' to={link}>
-                  {getReferenceTitle(relatedTicket)}
-                </Link>
+                onNavigateToTicket ? (
+                  <button
+                    type='button'
+                    onClick={() => onNavigateToTicket(relatedTicket!.id!)}
+                    className='text-sm font-normal text-foreground truncate hover:underline text-left'
+                    data-track-category='Tickets'
+                    data-track-name='NavigateToRelatedTicket'
+                  >
+                    {getReferenceTitle(relatedTicket)}
+                  </button>
+                ) : (
+                  <Link className='text-sm font-normal text-foreground truncate' to={link}>
+                    {getReferenceTitle(relatedTicket)}
+                  </Link>
+                )
               ) : (
                 <span className='text-sm font-normal text-foreground truncate'>
                   {getReferenceTitle(relatedTicket)}
@@ -1554,6 +1577,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
             )}
           </div>
+          {onUnmerge && (
+            <button
+              type='button'
+              onClick={onUnmerge}
+              className='text-sm text-primary hover:text-primary/80 font-medium whitespace-nowrap'
+              data-track-category='Tickets'
+              data-track-name='UnmergeTicket'
+            >
+              Unmerge
+            </button>
+          )}
           {allowEdit && (
             <button
               type='button'
@@ -3122,7 +3156,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       reference,
                       reference.targetTicket,
                       formatReferenceLabel(reference.relationType),
-                      true,
+                      reference.relationType !== TicketReferenceRelation.MERGED_INTO,
                     ),
                   )}
                   {referencesIn.map(reference =>
@@ -3131,6 +3165,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       reference.sourceTicket,
                       formatIncomingReferenceLabel(reference.relationType),
                       false,
+                      reference.relationType === TicketReferenceRelation.MERGED_INTO
+                        ? () => {
+                            void handleUnmerge(reference.sourceTicket?.id || '');
+                          }
+                        : undefined,
                     ),
                   )}
                 </>
