@@ -33,6 +33,7 @@ interface ThreadEmail {
   to?: ReadonlyArray<string> | null;
   cc?: ReadonlyArray<string> | null;
   bcc?: ReadonlyArray<string> | null;
+  replyTo?: ReadonlyArray<string> | null;
 }
 
 /**
@@ -86,6 +87,7 @@ export const buildContactPool = (
     e.to?.forEach(addRaw);
     e.cc?.forEach(addRaw);
     e.bcc?.forEach(addRaw);
+    e.replyTo?.forEach(addRaw);
   }
   return Array.from(map.values());
 };

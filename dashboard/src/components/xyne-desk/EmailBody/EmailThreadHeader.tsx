@@ -16,6 +16,7 @@ interface EmailThreadHeaderProps {
   to: readonly string[];
   cc: readonly string[];
   bcc?: readonly string[];
+  replyTo?: readonly string[];
   createdAt: number | null | undefined;
   isCollapsed: boolean;
   previewText?: string;
@@ -71,6 +72,7 @@ export const EmailThreadHeader = ({
   to,
   cc,
   bcc,
+  replyTo,
   createdAt,
   isCollapsed,
   previewText,
@@ -96,6 +98,7 @@ export const EmailThreadHeader = ({
       <DetailRow label='to' values={to} />
       {cc && cc.length > 0 && <DetailRow label='cc' values={cc} />}
       {bcc && bcc.length > 0 && <DetailRow label='bcc' values={bcc} />}
+      {replyTo && replyTo.length > 0 && <DetailRow label='reply-to' values={replyTo} />}
       <DetailRow label='date' values={[date.full]} />
     </div>
   );

@@ -1777,6 +1777,7 @@ export const emailTable = table('emails')
     from: string(),
     cc: json<string[]>().optional(),
     bcc: json<string[]>().optional(),
+    replyTo: json<string[]>().optional(),
     conversationId: string(),
     channelId: string(),
     externalThreadId: string(),

@@ -2039,6 +2039,7 @@ model Email {
   from String
   cc String[] @default([])
   bcc String[] @default([])
+  replyTo String[] @default([])
   conversationId String
   channelId String
   externalThreadId String

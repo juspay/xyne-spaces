@@ -139,6 +139,7 @@ export class GoogleRefetch extends BaseRefetch {
             to: d.emailData!.to ?? [],
             cc: d.emailData!.cc ?? [],
             bcc: d.emailData!.bcc ?? [],
+            replyTo: d.emailData!.replyTo ?? [],
             receivedAt: d.metadata.timestamp,
             uploadedFiles,
           })),

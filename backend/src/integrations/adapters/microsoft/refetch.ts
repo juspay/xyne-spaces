@@ -165,6 +165,7 @@ export class MicrosoftRefetch extends BaseRefetch {
             to: d.emailData!.to ?? [],
             cc: d.emailData!.cc ?? [],
             bcc: d.emailData!.bcc ?? [],
+            replyTo: d.emailData!.replyTo ?? [],
             receivedAt: d.metadata.timestamp,
             uploadedFiles,
           })),
