@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Play, Pause } from 'lucide-react';
+import { Play, Pause, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 
@@ -8,7 +8,7 @@ type AudioPlayState = 'idle' | 'loading' | 'playing' | 'paused';
 function formatSecs(s: number): string {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, '0')}`;
+  return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
 }
 
 interface AudioPlayerProps {
@@ -118,28 +118,47 @@ export function AudioPlayer({
     }
   };
 
-  const isReady = state === 'playing' || state === 'paused';
+  const canSeek = state === 'playing' || state === 'paused';
   const totalLabel = duration > 0 ? formatSecs(duration) : '--:--';
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  if (isReady) {
-    return (
-      <div
-        className={cn('inline-flex items-center gap-1.5', className)}
-        style={{ color: 'var(--call-action-button-color)' }}
+  return (
+    <div className={cn('flex items-center gap-2 w-full', className)}>
+      {/* Play / Pause / Loading button */}
+      <button
+        type='button'
+        onClick={e => void handleToggle(e)}
+        disabled={state === 'loading'}
+        data-track-category={trackCategory}
+        data-track-name={state === 'playing' ? 'pause_recording' : 'play_recording'}
+        className='shrink-0 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
       >
-        <button
-          type='button'
-          onClick={e => void handleToggle(e)}
-          data-track-category={trackCategory}
-          data-track-name={state === 'playing' ? 'pause_recording' : 'play_recording'}
-          className='flex-shrink-0'
-        >
-          {state === 'playing' ? (
-            <Pause className='w-4 h-4' />
-          ) : (
-            <Play className='w-4 h-4 translate-x-[0.5px]' />
-          )}
-        </button>
+        {state === 'loading' ? (
+          <Loader2 className='w-4 h-4 animate-spin' />
+        ) : state === 'playing' ? (
+          <Pause className='w-4 h-4' />
+        ) : (
+          <Play className='w-4 h-4 translate-x-[0.5px]' />
+        )}
+      </button>
+
+      {/* Current time */}
+      <span className='font-foreground text-xs text-muted-foreground shrink-0 tabular-nums w-11'>
+        {formatSecs(currentTime)}
+      </span>
+
+      {/* Progress track */}
+      <div className='flex-1 relative flex items-center h-4'>
+        {/* Visual track */}
+        <div className='absolute inset-y-0 left-0 right-0 flex items-center pointer-events-none'>
+          <div className='w-full h-1 rounded-full bg-muted overflow-hidden'>
+            <div
+              className='h-full bg-muted-foreground/70 rounded-full'
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+        {/* Invisible range input on top for interaction */}
         <input
           type='range'
           min={0}
@@ -147,30 +166,18 @@ export function AudioPlayer({
           step={0.1}
           value={currentTime}
           onChange={handleSeek}
+          disabled={!canSeek}
           onClick={stopPropagation ? e => e.stopPropagation() : undefined}
           data-track-category={trackCategory}
           data-track-name='seek_recording'
-          className='w-24 h-1 accent-current cursor-pointer'
+          className='absolute inset-0 w-full opacity-0 cursor-pointer disabled:cursor-default'
         />
-        <span className='font-mono text-sm'>
-          {formatSecs(currentTime)}&thinsp;/&thinsp;{totalLabel}
-        </span>
       </div>
-    );
-  }
 
-  return (
-    <div className={className}>
-      <button
-        type='button'
-        onClick={e => void handleToggle(e)}
-        disabled={state === 'loading'}
-        data-track-category={trackCategory}
-        data-track-name='play_recording'
-        className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
-      >
-        <Play className='w-4 h-4 flex-shrink-0 translate-x-[0.5px]' />
-      </button>
+      {/* Total duration */}
+      <span className='font-foreground text-xs text-muted-foreground shrink-0 tabular-nums w-11 text-right'>
+        {totalLabel}
+      </span>
     </div>
   );
 }

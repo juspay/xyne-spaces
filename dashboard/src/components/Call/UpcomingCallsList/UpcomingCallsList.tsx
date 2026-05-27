@@ -5,20 +5,47 @@ import {
   type Call,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import Button from '../../ui/Button';
+import { GroupedList } from './GroupedList';
 
 interface UpcomingCallsListProps {
   calls: Call[];
   onJoinCall: (call: Call) => void;
-  max?: number;
-  className?: string;
+  onCallClick?: ((call: Call) => void) | undefined;
+  onEditCall?: ((call: Call) => void) | undefined;
+  onCancelCall?: ((call: Call) => void) | undefined;
+  currentUserId?: string | undefined;
+  grouped?: boolean | undefined;
+  max?: number | undefined;
+  className?: string | undefined;
+  selectedDay?: Date | undefined;
 }
 
 export function UpcomingCallsList({
   calls,
   onJoinCall,
+  onCallClick,
+  onEditCall,
+  onCancelCall,
+  currentUserId,
+  grouped = false,
   max = 20,
   className,
+  selectedDay,
 }: UpcomingCallsListProps): React.JSX.Element {
+  if (grouped) {
+    return (
+      <GroupedList
+        calls={calls.slice(0, max)}
+        onJoinCall={onJoinCall}
+        onCallClick={onCallClick}
+        onEditCall={onEditCall}
+        onCancelCall={onCancelCall}
+        currentUserId={currentUserId}
+        selectedDay={selectedDay}
+      />
+    );
+  }
+
   const visible = calls.slice(0, max);
 
   return (
@@ -41,7 +68,6 @@ export function UpcomingCallsList({
               joinable ? 'border-status-success' : 'border-primary/25 hover:border-primary/50',
             )}
           >
-            {/* Content */}
             <div className='flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1 sm:py-2'>
               <div className='flex flex-1 flex-col gap-1 min-w-0'>
                 <p className='truncate text-[14px] font-medium leading-[1.2] text-foreground'>
@@ -54,7 +80,6 @@ export function UpcomingCallsList({
               </div>
             </div>
 
-            {/* Join Call button — always visible for joinable calls, hover-only otherwise */}
             <Button
               variant='outline'
               size='sm'
