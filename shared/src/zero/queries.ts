@@ -1454,15 +1454,8 @@ export const queries = defineQueries({
     },
   ),
 
-  // Get unread thread activities excluding @channel or @here mentions
-  userUnreadThreadActivities: defineQuery(() => {
-    return zql.activities
-      .where('isRead', false)
-      .where('actionSource', 'message')
-      .whereExists('message', m =>
-        m.whereExists('conversation', c => c.where('replyCount', '>', 0)),
-      );
-  }),
+  // Deprecated: userUnreadThreadActivities removed — thread count now derived
+  // from userUnreadActivities using isThreadActivity field
 
   channelCanvasFolders: defineQuery(
     z.object({

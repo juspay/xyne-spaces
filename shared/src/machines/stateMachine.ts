@@ -59,6 +59,7 @@ export type Conversation = QueryResultType<typeof queries.channelConversationsPa
 
 export type DraftMessageDB = QueryResultType<typeof queries.userDrafts>[number];
 export type DelayedMessageDB = QueryResultType<typeof queries.userDelayedMessages>[number];
+export type UnreadActivity = QueryResultType<typeof queries.userUnreadActivities>[number];
 
 // Metrics data for a single period
 export interface PeriodMetrics {
@@ -197,6 +198,8 @@ interface StateMachineContext {
   overlayDepth: number;
   /** Per-conversation thread read/scroll tracking */
   threadTracking: ThreadTrackingMap;
+  /** Unread activities from zero query, used to derive unread counts */
+  unreadActivities: UnreadActivity[];
 }
 
 type StateMachineEvent =
@@ -234,7 +237,8 @@ type StateMachineEvent =
   | { type: 'ARCHIVE_CHANNEL'; channelId: string }
   | { type: 'UNARCHIVE_CHANNEL'; channelId: string }
   | { type: 'SET_THREAD_LAST_READ'; conversationId: string; lastReadAt: number }
-  | { type: 'SET_THREAD_SCROLL'; conversationId: string; scrollTop: number };
+  | { type: 'SET_THREAD_SCROLL'; conversationId: string; scrollTop: number }
+  | { type: 'SET_UNREAD_ACTIVITIES'; unreadActivities: UnreadActivity[] };
 
 export const stateMachine = setup({
   types: {
@@ -608,6 +612,14 @@ export const stateMachine = setup({
         return next;
       },
     }),
+    setUnreadActivities: assign({
+      unreadActivities: ({ event }) => {
+        if (event.type === 'SET_UNREAD_ACTIVITIES') {
+          return event.unreadActivities;
+        }
+        return [];
+      },
+    }),
   },
 }).createMachine({
   id: 'stateMachine',
@@ -663,6 +675,7 @@ export const stateMachine = setup({
     onlineUsers: [],
     overlayDepth: 0,
     threadTracking: hydrateThreadTracking(),
+    unreadActivities: [],
   },
   initial: 'idle',
   states: {
@@ -757,6 +770,9 @@ export const stateMachine = setup({
         },
         SET_THREAD_SCROLL: {
           actions: 'setThreadScroll',
+        },
+        SET_UNREAD_ACTIVITIES: {
+          actions: 'setUnreadActivities',
         },
       },
     },

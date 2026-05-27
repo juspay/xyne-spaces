@@ -435,6 +435,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     ];
 
     if (validMentionedUsers.length > 0) {
+      const isThreadActivity = conversation.initialMessageId !== messageId;
       const activities = validMentionedUsers.map(user => ({
         id: uuidv4(),
         userId: user.userId,
@@ -445,6 +446,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         actionSourceId: messageId,
         messageId: messageId,
         channelId,
+        isThreadActivity,
         classification: ActivityClassification.PENDING,
       }));
 
@@ -538,7 +540,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       messageId,
       senderId,
       mentionType,
-      finalMentionedUserIds
+      finalMentionedUserIds,
+      conversation.initialMessageId !== messageId
     );
 
     // Handle bot mentions in channels - trigger bot execution when @mentioned
@@ -1136,7 +1139,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   ): Promise<void> {
     const isLargeGroupDm = channelParticipants.length > LARGE_GROUP_DM_THRESHOLD;
     if (mentionType) {
-      await this.handleSpecialMentionActivities(channelId, messageId, senderId, mentionType, []);
+      await this.handleSpecialMentionActivities(channelId, messageId, senderId, mentionType, [], initialMessageId !== messageId);
     }
 
     if (scopeType === 'DM' && !appUserIds.includes(senderId)) {
@@ -1181,7 +1184,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       );
     } else {
       if (!mentionType && !isLargeGroupDm) {
-        await createDirectMessageActivities(messageId, senderId, channelId);
+        await createDirectMessageActivities(messageId, senderId, channelId, initialMessageId !== messageId);
       }
 
       const recipientIds = channelParticipants
@@ -1269,7 +1272,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     messageId: string,
     senderId: string,
     mentionType: '@channel' | '@here' | undefined,
-    mentionedUserIds: string[] = []
+    mentionedUserIds: string[] = [],
+    isThreadActivity: boolean = false
   ): Promise<void> {
     if (!mentionType) {
       return;
@@ -1294,6 +1298,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         actionSourceId: messageId,
         messageId: messageId,
         channelId,
+        isThreadActivity,
         classification: ActivityClassification.PENDING,
         classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE,
       }));

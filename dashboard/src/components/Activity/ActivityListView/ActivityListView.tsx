@@ -47,6 +47,8 @@ import Button from '../../ui/Button';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { logger, Event } from '../../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
+import { useSelector } from '@xstate/react';
+import { stateMachineActor } from '../../../machines/stateMachine';
 
 type ActivityTab =
   | 'all'
@@ -547,8 +549,8 @@ const ActivityListView = (): ReactElement => {
 
     void zero.mutate(mutators.activities.markAsReadByFilter({ ...filters, timestamp: Date.now() }));
   };
-  // Fetch all unread activities for counting
-  const [unreadActivities] = useCachedQuery(queries.userUnreadActivities());
+  // Read unread activities from state machine (populated by DeferredLoader)
+  const unreadActivities = useSelector(stateMachineActor, state => state.context.unreadActivities);
 
   const activityCounts = useMemo(() => {
     const counts: Record<ActivityTab, number> = {
