@@ -1,6 +1,10 @@
 import React, { createContext, ReactElement, ReactNode, useContext } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
+import {
+  activitySkipMarkAsReadThreadRef,
+  activitySkipMarkAsReadChannelRef,
+} from './activitySkipMarkAsRead';
 import { Activity, ChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 
@@ -19,6 +23,8 @@ import { UserHoverWrapper } from '../ui/UserMentionPopover/UserMentionPopover';
 import { cn } from '../../utils/classNames';
 import { Button } from '../ui/Button';
 import { GenericMentionHoverPopover } from '../ui/GenericMentionPopover/GenericMentionPopover';
+import { CircleDot } from 'lucide-react';
+import { Tooltip } from '../ui/Tooltip';
 
 interface ActivityItemCardProps {
   activity: Activity;
@@ -127,6 +133,39 @@ export const ActivityItemCard = ({
     }
   };
 
+  const doMarkAsUnread = () => {
+    // Check if this is a reaction activity (excluded)
+    if (['reacted', 'removed'].includes(activity.actorAction)) {
+      return;
+    }
+
+    void zero.mutate(
+      mutators.activities.markAsUnread({
+        activityId: activity.id,
+        timestamp: Date.now(),
+      }),
+    );
+
+    if (isActive) {
+      activitySkipMarkAsReadThreadRef.current = true;
+      activitySkipMarkAsReadChannelRef.current = true;
+    }
+  };
+
+  const handleMarkAsUnread = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation(); // Prevent triggering the card's onClick
+    e.preventDefault();
+    doMarkAsUnread();
+  };
+
+  const handleMarkAsUnreadKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.stopPropagation();
+      e.preventDefault();
+      doMarkAsUnread();
+    }
+  };
+
   const getTimestampDisplay = (date: number | Date) => {
     const dateObj = typeof date === 'number' ? new Date(date) : date;
     if (isToday(dateObj)) {
@@ -232,6 +271,31 @@ export const ActivityItemCard = ({
               ))}
           </div>
 
+          <div className='flex items-center gap-1 flex-shrink-0 ml-auto sm:ml-2'>
+            {activity.isRead &&
+              !['reacted', 'removed'].includes(activity.actorAction) &&
+              channel?.type !== ChannelType.EMAIL &&
+              channel?.type !== ChannelType.SUPPORT && (
+                <Tooltip content='Mark as unread' delayDuration={0} side='top'>
+                  <div
+                    role='button'
+                    tabIndex={0}
+                    onClick={handleMarkAsUnread}
+                    onKeyDown={handleMarkAsUnreadKeyDown}
+                    className='opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-accent/50 cursor-pointer'
+                    aria-label='Mark as unread'
+                    data-track-category='ACTIVITY'
+                    data-track-name='MARK_AS_UNREAD'
+                    data-track-metadata={JSON.stringify({
+                      activityId: activity.id,
+                      actorAction: activity.actorAction,
+                    })}
+                  >
+                    <CircleDot className='w-3.5 h-3.5 text-muted-foreground hover:text-foreground' />
+                  </div>
+                </Tooltip>
+              )}
+          </div>
           <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
             {showUnreadDot && !activity.isRead && (
               <span className='h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0' />

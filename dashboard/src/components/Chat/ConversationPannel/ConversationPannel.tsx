@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useRef, useMemo, useCallback } from 'react';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
+import { activitySkipMarkAsReadChannelRef } from '../../Activity/activitySkipMarkAsRead';
 import {
   useChannel,
   useGetChannelUserStatus,
@@ -235,8 +236,9 @@ const ConversationPannel = ({
     return () => {
       clearTimeout(viewedTimer);
 
-      if (skipMarkAsReadRef?.current) {
+      if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) {
         skipMarkAsReadRef.current = false;
+        activitySkipMarkAsReadChannelRef.current = false;
         return;
       }
 
