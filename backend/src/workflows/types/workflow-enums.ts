@@ -490,6 +490,14 @@ export interface SpecsVerificationWorkFlowContext extends BaseWorkflowContext {
   maxIterations: number
 }
 
+export interface IssueWorkflowContext extends BaseWorkflowContext {
+  description: string
+  raiseQuestions?: boolean
+  solution?: string
+  clarificationAnswers?: string
+  debugAndFixDirectly?: boolean
+}
+
 // Union type for all workflow contexts
 export type WorkflowContext = any
 
@@ -557,6 +565,10 @@ export function isConnectorMigrationContext(context: WorkflowContext): context i
 
 export function isCoderWorkflowContext(context: WorkflowContext): context is CoderWorkflowContext {
   return 'userPrompt' in context && 'product' in context
+}
+
+export function isIssueWorkflowContext(context: WorkflowContext): context is IssueWorkflowContext {
+  return 'description' in context
 }
 
 // Helper functions
