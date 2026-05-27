@@ -120,6 +120,7 @@ export async function createSpecialMentionActivities(
   options?: {
     classification?: ActivityClassification;
     enqueue?: boolean;
+    isThreadActivity?: boolean;
   }
 ): Promise<void> {
   logger.info('[ActivityUtils] Creating special mention activities', {
@@ -140,6 +141,7 @@ export async function createSpecialMentionActivities(
     actionSourceId: messageId,
     messageId: messageId,
     channelId,
+    isThreadActivity: options?.isThreadActivity,
     classification: options?.classification ?? ActivityClassification.PENDING,
   }));
 
@@ -155,7 +157,8 @@ export async function createSpecialMentionActivities(
 export async function createDirectMessageActivities(
   messageId: string,
   senderUserId: string,
-  channelId: string
+  channelId: string,
+  isThreadActivity?: boolean
 ): Promise<void> {
   logger.info('[ActivityUtils] Creating direct message activities', {
     messageId,
@@ -183,6 +186,7 @@ export async function createDirectMessageActivities(
     actionSourceId: messageId,
     messageId: messageId,
     channelId,
+    isThreadActivity,
     classification: ActivityClassification.PENDING,
   }));
 

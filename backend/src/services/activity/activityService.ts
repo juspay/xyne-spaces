@@ -21,6 +21,7 @@ export interface CreateActivityParams {
   canvasId?: string;
   blockId?: string;
   conversationSeenCutoffAt?: Date | null;
+  isThreadActivity?: boolean;
   actorId: string;
   classification?: ActivityClassification;
   classificationConfidence?: number | null;
@@ -259,6 +260,7 @@ export class ActivityService {
         ...(activity.classificationConfidence !== undefined
           ? { classificationConfidence: activity.classificationConfidence }
           : {}),
+        ...(activity.isThreadActivity !== undefined ? { isThreadActivity: activity.isThreadActivity } : {}),
         isRead: activity.actionSource === 'reaction',
       },
     });
@@ -319,6 +321,7 @@ export class ActivityService {
         ...(a.classificationConfidence !== undefined
           ? { classificationConfidence: a.classificationConfidence }
           : {}),
+        ...(a.isThreadActivity !== undefined ? { isThreadActivity: a.isThreadActivity } : {}),
         isRead: a.actionSource === 'reaction',
       })),
     });
@@ -543,6 +546,7 @@ export class ActivityService {
         channelId: channelId,
         actorId: actorId,
         isRead: false,
+        isThreadActivity: true,
         classification: ActivityClassification.FYI,
         ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
       },

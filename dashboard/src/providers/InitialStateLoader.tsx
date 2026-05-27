@@ -18,6 +18,7 @@ import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
 import { initializeMetrics, cleanupMetrics } from '../services/metricsService';
 import { ZeroConnectionFailureModal } from '../components/ZeroConnectionStatus/ZeroConnectionFailureModal';
+import { DeferredLoader } from '../components/DeferredLoader';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { v4 as uuidv4 } from 'uuid';
@@ -503,6 +504,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     return (
       <SharedAuthProvider value={context}>
         {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
+        <DeferredLoader />
         {children}
       </SharedAuthProvider>
     );

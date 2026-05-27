@@ -1522,6 +1522,7 @@ export const activityTable = table('activities')
     classificationConfidence: number().optional(),
     classificationJobType: enumeration<ActivityClassificationJobType>().optional(),
     isRead: boolean(),
+    isThreadActivity: boolean().optional(),
     createdAt: number(),
     updatedAt: number().optional(),  // For batched reaction activity updates
   })

@@ -83,6 +83,7 @@ import cacConfigRoutes from '@/routes/cacConfig';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
+import activityThreadBackfillRoutes from '@/routes/activityThreadBackfill';
 import externalSourceDisplayNameBackfillRoutes from '@/routes/externalSourceDisplayNameBackfill';
 import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
 import channelRecapBackfillRoutes from '@/routes/channelRecapBackfill';
@@ -313,6 +314,8 @@ export class App {
     if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
       this.app.use('/api/admin/activities-backfill', activitiesBackfillRoutes);
     }
+    // Activity isThreadActivity backfill
+    this.app.use('/migrate/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
     // ExternalSource displayName cleanup ("Microsoft (email)" → "email").
     this.app.use(
       '/api/admin/external-source-displayname-backfill',

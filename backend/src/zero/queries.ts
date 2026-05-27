@@ -1369,7 +1369,8 @@ export const queries = defineQueries({
     }
   ),
 
-  // Get unread thread activities excluding @channel or @here mentions
+  // @deprecated Kept for backward compatibility with older clients.
+  // New clients use isThreadActivity field from userUnreadActivities instead.
   userUnreadThreadActivities: defineQuery(() => {
     return zql.activities
       .where('isRead', false)
