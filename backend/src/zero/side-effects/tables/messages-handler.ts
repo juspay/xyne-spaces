@@ -945,9 +945,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       nestedLinkPreview = msgMeta?.['linkPreview'] as Record<string, unknown> | undefined;
     }
 
-    const ticket = await db.ticket.findFirst({
-      where: { conversationId: targetMessage.conversationId },
-    });
+    // Skip ticket attach for message-level links so a copied reply doesn't render as the ticket card.
+    const ticket = info.type === 'message'
+      ? null
+      : await db.ticket.findFirst({
+          where: { conversationId: targetMessage.conversationId },
+        });
 
     const attachments = messageAttachments.map((att) => ({
       id: att.id,
