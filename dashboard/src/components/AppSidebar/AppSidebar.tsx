@@ -171,6 +171,7 @@ const mobileNavigationItems = [
 const AppSidebar = (): ReactElement => {
   const location = useLocation();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
   const { aiLandingDefault } = useAILandingDefault();
   const currentUser = useSelf();
@@ -364,7 +365,7 @@ const AppSidebar = (): ReactElement => {
               >
                 <Tooltip content='Xyne AI' side='right' delayDuration={0}>
                   <Link
-                    to='/ai'
+                    to={prefixWs('/ai')}
                     onClick={() => handleNavigationClick('Xyne AI')}
                     data-testid='nav-xyne-ai'
                     data-track-category='App_Sidebar'
@@ -401,7 +402,7 @@ const AppSidebar = (): ReactElement => {
                 >
                   <Tooltip content={item.label} side='right' delayDuration={0}>
                     <Link
-                      to={item.path}
+                      to={prefixWs(item.path)}
                       onClick={() => handleNavigationClick(item.label)}
                       aria-label={showPendingDmDot ? 'DMs unread' : item.label}
                       data-testid={testId}
@@ -562,6 +563,8 @@ const MobileNavbar = ({
   const analyticsPermission = useCanViewAnalytics();
   const { isMobile } = usePlatform();
   const { isKeyboardOpen } = useKeyboard();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
 
   // All hooks MUST be called before any early returns (React Rules of Hooks)
@@ -635,7 +638,7 @@ const MobileNavbar = ({
 
               return (
                 <Link
-                  to={item.path}
+                  to={prefixWs(item.path)}
                   key={item.path}
                   onClick={() => onNavigationClick(item.label)}
                   data-track-category='Mobile_Sidebar'
@@ -758,7 +761,7 @@ const MobileNavbar = ({
 
                     return (
                       <Link
-                        to={item.path}
+                        to={prefixWs(item.path)}
                         key={item.path}
                         className={`flex items-center gap-3 px-4 py-3 transition-colors ${
                           isActive ? 'bg-accent' : 'hover:bg-accent'

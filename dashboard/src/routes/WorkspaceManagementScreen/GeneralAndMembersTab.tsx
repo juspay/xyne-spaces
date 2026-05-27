@@ -19,6 +19,7 @@ import Dialog from '../../components/ui/Dialog';
 import type { User as UserType } from '../../machines/stateMachine';
 import { WorkspaceRole } from '@xyne/shared';
 import { usePlatform } from '../../hooks/usePlatform';
+import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
 
 const Card = ({
   children,
@@ -274,6 +275,18 @@ export const GeneralAndMembersTab = ({
             </div>
           </div>
         </Card>
+      </div>
+
+      {/* Desk Email Section */}
+      <div className='space-y-4'>
+        <div>
+          <h2 className='text-lg font-semibold text-foreground'>Desk Email</h2>
+          <p className='text-sm text-muted-foreground'>
+            Shared mailbox used by DL-type desks. Connect once at the workspace level; individual
+            desks bind to specific DLs the mailbox is a member of.
+          </p>
+        </div>
+        <WorkspaceDeskEmailCard />
       </div>
 
       {/* Members Section */}

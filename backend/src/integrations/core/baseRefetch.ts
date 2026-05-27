@@ -10,6 +10,8 @@ export interface RefetchResult {
 export interface RefetchOptions {
   startDate?: string;
   endDate?: string;
+  targetChannelId?: string;
+  dlEmail?: string;
 }
 
 /**

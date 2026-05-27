@@ -22,6 +22,8 @@ import {
 } from '@/services/externalAttachmentService';
 import { EmailRepository } from '@/database/repositories';
 import { findDuplicateEmailConversation } from '../../utils/vespaDuplicateDetector';
+import { collectDlCandidates } from '@/services/dlResolver';
+import { db } from '@/database/client';
 
 export class ExternalSourceCore {
   private externalSourceRepo: ExternalSourceRepository;
@@ -96,6 +98,14 @@ export class ExternalSourceCore {
     const source = await this.externalSourceRepo.findByName(sourceName);
     if (!source) {
       throw new SourceNotFoundError(sourceName);
+    }
+
+    if (source.workspaceId && !source.channelId) {
+      const resolvedChannelId = await this.resolveDlChannel(source, normalizedData);
+      if (!resolvedChannelId) {
+        return { success: true, conversationId: '', entityId: '', action: 'skipped' };
+      }
+      (source as { channelId: string | null }).channelId = resolvedChannelId;
     }
 
     if (!source.channelId) {
@@ -245,6 +255,41 @@ export class ExternalSourceCore {
       action: 'created',
       isNew,
     };
+  }
+
+  private async resolveDlChannel(
+    source: ExternalSource,
+    normalizedData: NormalizedData,
+  ): Promise<string | null> {
+    const workspaceId = source.workspaceId!;
+    const addrs = collectDlCandidates(normalizedData.emailData ?? {});
+    if (addrs.length === 0) {
+      logger.info(`[DL_ROUTE] Dropping inbound: no from/to/cc addresses`, {
+        sourceName: source.name,
+        workspaceId,
+      });
+      return null;
+    }
+
+    const match = await db.emailChannelPreference.findFirst({
+      where: { workspaceId, dlEmail: { in: addrs, mode: 'insensitive' } },
+      select: { channelId: true, dlEmail: true },
+    });
+    if (!match) {
+      logger.info(`[DL_ROUTE] Dropping inbound: no desk for from/to/cc`, {
+        sourceName: source.name,
+        workspaceId,
+        addrs,
+      });
+      return null;
+    }
+
+    logger.info(`[DL_ROUTE] Matched DL to desk via from/to/cc`, {
+      sourceName: source.name,
+      dlEmail: match.dlEmail,
+      channelId: match.channelId,
+    });
+    return match.channelId;
   }
 
   /**

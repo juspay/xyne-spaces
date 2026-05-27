@@ -9,6 +9,8 @@ export interface EmailFetchJobData {
   workspaceId: string;
   startDate?: string;
   endDate?: string;
+  targetChannelId?: string;
+  dlEmail?: string;
 }
 
 class EmailFetchQueue {

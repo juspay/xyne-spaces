@@ -1,7 +1,9 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement, useEffect, useState } from 'react';
 import { Settings, Mail, ChevronLeft } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
 import { GeneralAndMembersTab } from './GeneralAndMembersTab';
 import { InvitationsTab } from './InvitationsTab';
@@ -11,6 +13,28 @@ export const WorkspaceManagementScreen = (): ReactElement => {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [activeTab, setActiveTab] = useState('general');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const connected = searchParams.get('workspaceMailboxConnected');
+    const errorMsg = searchParams.get('emailError');
+    if (connected === 'true') {
+      const email = searchParams.get('email');
+      toast.success(email ? `Connected ${email}` : 'Shared mailbox connected');
+      void queryClient.invalidateQueries({ queryKey: ['workspace-shared-mailbox-status'] });
+    } else if (errorMsg) {
+      toast.error(errorMsg);
+    }
+    if (connected || errorMsg) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('workspaceMailboxConnected');
+      next.delete('emailError');
+      next.delete('email');
+      next.delete('provider');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams, queryClient]);
 
   const handleBack = (): void => {
     void navigate(workspaceId ? `/${workspaceId}/chat/dir` : '/');

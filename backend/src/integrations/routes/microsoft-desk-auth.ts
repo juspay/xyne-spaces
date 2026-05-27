@@ -8,12 +8,14 @@ import { authV2Middleware } from '../../middleware/authV2Middleware';
 import {
   microsoftDeskService,
   isReconnectChannelData,
+  isWorkspaceChannelData,
   MICROSOFT_OAUTH_SCOPES,
 } from '../../services/microsoftDeskService';
 import { encrypt } from '../../services/encryptionService';
 import { db } from '../../database/client';
 import { logger } from '../../utils/logger';
 import { config as appConfig } from '../../config/env';
+import { WorkspaceRole } from '@prisma/client';
 
 const router = Router();
 
@@ -133,6 +135,63 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
   } catch (error) {
     logger.error(`[${requestId}] Error initiating Microsoft email connect:`, error);
     redirectError(res, getFrontendUrl(), 'microsoft_connect_failed', platform, workspaceId);
+  }
+});
+
+/**
+ * GET /api/integrations/microsoft/connect/workspace
+ * Workspace-level OAuth: connects xyne.desk@<orgDomain> as the shared mailbox
+ * that DL desks ride on. Admin/owner only. Creates no channel.
+ */
+router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+  const requestId = `MS_DESK_WS_CONNECT_${Date.now()}`;
+  const platform: 'electron' | 'web' =
+    req.query.platform === 'electron' ? 'electron' : 'web';
+  const workspaceId = req.user!.workspaceId;
+
+  try {
+    const role = req.user!.role as WorkspaceRole;
+    if (role !== WorkspaceRole.OWNER && role !== WorkspaceRole.ADMIN) {
+      res.status(403).json({ error: 'Workspace admin/owner role required to set up the desk email' });
+      return;
+    }
+
+    const oauthClient = microsoftDeskService.getOAuthClient();
+    if (!oauthClient) {
+      redirectError(res, getFrontendUrl(), 'microsoft_not_configured', platform, workspaceId);
+      return;
+    }
+
+    const existing = await db.externalSource.findUnique({ where: { workspaceId } });
+    if (existing?.isActive) {
+      res.status(409).json({
+        error: 'Workspace already has a shared desk email configured',
+        existingDisplayName: existing.displayName,
+      });
+      return;
+    }
+
+    const state = microsoftDeskService.generateState();
+    await microsoftDeskService.storePendingChannel(state, {
+      mode: 'workspace',
+      userId: req.user!.id,
+      workspaceId,
+      platform,
+    });
+
+    const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;
+    const authorizationUri = oauthClient.authorizeURL({
+      redirect_uri: redirectUri,
+      scope: MICROSOFT_OAUTH_SCOPES,
+      state,
+      prompt: 'consent',
+    } as Record<string, string | string[]>);
+
+    logger.info(`[${requestId}] Redirecting to Microsoft OAuth for workspace shared mailbox`, { workspaceId });
+    res.redirect(authorizationUri);
+  } catch (error) {
+    logger.error(`[${requestId}] Error initiating Microsoft workspace connect:`, error);
+    redirectError(res, getFrontendUrl(), 'microsoft_workspace_connect_failed', platform, workspaceId);
   }
 });
 
@@ -275,6 +334,51 @@ router.get('/callback', async (req: Request, res: Response) => {
         buildPostOAuthRedirect(
           frontendUrl,
           buildSupportPath(channelData.workspaceId, channelData.channelId, params),
+          platform,
+        ),
+      );
+      return;
+    }
+
+    if (isWorkspaceChannelData(channelData)) {
+      try {
+        await microsoftDeskService.createWorkspaceSource(
+          channelData,
+          {
+            accessToken,
+            refreshToken: (token.refresh_token as string) ?? undefined,
+            email,
+            expiresAt: token.expires_at ? new Date(token.expires_at as string).toISOString() : undefined,
+          },
+          getPublicUrl(req),
+        );
+      } catch (err) {
+        const errCode = (err as Error & { code?: string })?.code;
+        if (errCode === 'WORKSPACE_MAILBOX_EXISTS') {
+          redirectError(res, frontendUrl, 'workspace_mailbox_already_exists', platform, channelData.workspaceId);
+          return;
+        }
+        if (errCode === 'GMAIL_ALREADY_CONNECTED') {
+          redirectError(res, frontendUrl, 'microsoft_account_already_connected', platform, channelData.workspaceId);
+          return;
+        }
+        throw err;
+      }
+
+      logger.info(`[${requestId}] Microsoft workspace shared mailbox connected`, {
+        workspaceId: channelData.workspaceId,
+        email,
+      });
+
+      const workspaceParams = new URLSearchParams({
+        workspaceMailboxConnected: 'true',
+        provider: 'microsoft',
+        email,
+      });
+      res.redirect(
+        buildPostOAuthRedirect(
+          frontendUrl,
+          `/${channelData.workspaceId}/workspace-management?${workspaceParams.toString()}`,
           platform,
         ),
       );

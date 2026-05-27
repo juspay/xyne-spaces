@@ -19,6 +19,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { DeskType } from '@prisma/client';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -233,13 +234,17 @@ export class GoogleService {
     startDate: string;
     endDate: string;
     maxMessages?: number;
+    extraQuery?: string;
   }): Promise<Array<{ id: string; threadId: string }>> {
-    const { startDate, endDate, maxMessages = 2000 } = params;
+    const { startDate, endDate, maxMessages = 2000, extraQuery } = params;
     const afterUnix = Math.floor(Date.parse(startDate) / 1000);
     const beforeUnix = Math.floor(Date.parse(endDate) / 1000);
     if (Number.isNaN(afterUnix) || Number.isNaN(beforeUnix)) {
       throw new Error('Invalid startDate or endDate');
     }
+
+    const baseQuery = `after:${afterUnix} before:${beforeUnix}`;
+    const q = extraQuery ? `${baseQuery} ${extraQuery}` : baseQuery;
 
     const messages: Array<{ id: string; threadId: string }> = [];
     let pageToken: string | undefined;
@@ -248,7 +253,7 @@ export class GoogleService {
       do {
         const response = await this.gmail.users.messages.list({
           userId: 'me',
-          q: `after:${afterUnix} before:${beforeUnix}`,
+          q,
           maxResults: Math.min(500, maxMessages - messages.length),
           ...(pageToken && { pageToken }),
         });
@@ -546,6 +551,7 @@ export class GoogleService {
     const preferenceRepo = new EmailChannelPreferenceRepository();
     await preferenceRepo.upsert({
       channelId,
+      deskType: DeskType.EMAIL,
       ownerUserId: channel?.createdBy,
       boardId: boardId ?? undefined, // Save boardId to EmailChannelPreference (new location)
     });

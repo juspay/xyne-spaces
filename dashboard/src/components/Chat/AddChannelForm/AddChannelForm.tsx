@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
-import { Hash, Lock } from 'lucide-react';
+import { Hash, Lock, AlertCircle } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
 import {
@@ -21,15 +21,23 @@ import { cn } from '../../../utils/classNames';
 import { useOAuthProviders } from '../../../hooks/useOAuthProviders';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/workspaceDeskApi';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
 type ConnectorType = 'google' | 'microsoft' | null;
+type DeskType = 'EMAIL' | 'DL';
+type Visibility = 'public' | 'private';
 
 interface AddChannelFormProps {
   mode?: ChannelFormMode;
   onSubmit: (
-    data: ChannelFormData & { connector?: ConnectorType; channelType?: 'EMAIL' | undefined },
+    data: ChannelFormData & {
+      connector?: ConnectorType;
+      channelType?: 'EMAIL' | undefined;
+      deskType?: DeskType;
+      dlEmail?: string;
+    },
   ) => void;
   onCancel: () => void;
   loading?: boolean;
@@ -51,8 +59,31 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
   const [selectedConnector, setSelectedConnector] = useState<ConnectorType>(null);
+  const [deskType, setDeskType] = useState<DeskType>('EMAIL');
+  const [dlEmailInput, setDlEmailInput] = useState<string>('');
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
+
+  const { data: workspaceMailbox } = useQuery({
+    queryKey: ['workspace-shared-mailbox-status'],
+    queryFn: getWorkspaceSharedMailboxStatus,
+    enabled: requireConnector,
+  });
+
+  const workspaceDomain = workspaceMailbox?.displayName?.split('@')[1]?.toLowerCase() ?? '';
+  const isValidDlEmail = (value: string): boolean => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return false;
+    if (workspaceDomain && value.split('@')[1]?.toLowerCase() !== workspaceDomain) return false;
+    return true;
+  };
+  const dlEmailError = ((): string | null => {
+    if (!dlEmailInput) return null;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dlEmailInput)) return 'Enter a valid email address';
+    if (workspaceDomain && dlEmailInput.split('@')[1]?.toLowerCase() !== workspaceDomain) {
+      return `DL must be on @${workspaceDomain} (the workspace mailbox domain)`;
+    }
+    return null;
+  })();
 
   // Fetch all projects for selection
   const [projects] = useCachedQuery(queries.getAllProjects());
@@ -95,19 +126,22 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     defaultValues: {
       name: '',
       description: '',
-      visibility: 'public' as 'public' | 'private',
+      visibility: 'private' as Visibility,
       topicTags: [] as string[],
       projectId: '',
       assigneeUserGroupId: '',
     } as CreateChannelFormData & { assigneeUserGroupId?: string },
     onSubmit: ({ value }) => {
-      // Prevent submission if channel name is duplicate
       if (duplicateCheck?.isDuplicate) {
         return;
       }
-      // Prevent submission if connector is required but not selected
-      if (requireConnector && !selectedConnector) {
-        return;
+      if (requireConnector) {
+        if (deskType === 'EMAIL' && !selectedConnector) return;
+        if (
+          deskType === 'DL' &&
+          (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))
+        )
+          return;
       }
       if (mode === 'promote') {
         const promoteData: PromoteGroupDmRequest = {
@@ -120,19 +154,27 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           promoteData.description = value.description;
         }
         onSubmit?.(promoteData);
-      } else {
-        // When requireConnector is true, pass connector as channel type
-        const channelType = requireConnector && selectedConnector ? 'EMAIL' : undefined;
-        if (channelType) {
+      } else if (requireConnector) {
+        if (deskType === 'DL') {
           onSubmit?.({
             ...value,
-            connector: selectedConnector,
-            channelType,
+            connector: null,
+            channelType: 'EMAIL',
+            deskType: 'DL',
+            dlEmail: dlEmailInput,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else {
-          onSubmit?.({ ...value, connector: selectedConnector });
+          onSubmit?.({
+            ...value,
+            connector: selectedConnector,
+            channelType: 'EMAIL',
+            deskType: 'EMAIL',
+            assigneeUserGroupId: value.assigneeUserGroupId,
+          });
         }
+      } else {
+        onSubmit?.({ ...value, connector: selectedConnector });
       }
     },
   });
@@ -146,7 +188,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     nameValue.length < 2 ||
     nameValue.length > 80 ||
     !projectIdValue ||
-    (requireConnector && !selectedConnector) ||
+    (requireConnector && deskType === 'EMAIL' && !selectedConnector) ||
+    (requireConnector &&
+      deskType === 'DL' &&
+      (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
     duplicateCheck?.isDuplicate === true;
 
   // Auto-select first project if none selected
@@ -228,8 +273,103 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
-      {/* Connector Selection (for email channels) */}
+      {/* Desk Type Toggle (for email channels) */}
       {requireConnector && (
+        <div className='space-y-2'>
+          <div className='flex gap-3'>
+            <button
+              type='button'
+              onClick={() => {
+                setDeskType('EMAIL');
+                setDlEmailInput('');
+              }}
+              className={cn(
+                'flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all text-left',
+                deskType === 'EMAIL'
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border text-foreground hover:border-muted-foreground/50',
+              )}
+              data-track-category='ADD_CHANNEL_FORM'
+              data-track-name='SELECT_DESK_TYPE_EMAIL'
+            >
+              <div>Personal mailbox</div>
+              <div className='text-xs font-normal text-muted-foreground mt-0.5'>
+                Connect a dedicated inbox via OAuth
+              </div>
+            </button>
+            <button
+              type='button'
+              onClick={() => setDeskType('DL')}
+              className={cn(
+                'flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all text-left',
+                deskType === 'DL'
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border text-foreground hover:border-muted-foreground/50',
+              )}
+              data-track-category='ADD_CHANNEL_FORM'
+              data-track-name='SELECT_DESK_TYPE_DL'
+            >
+              <div>Distribution list</div>
+              <div className='text-xs font-normal text-muted-foreground mt-0.5'>
+                Route a DL through the shared mailbox
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* DL Selection (when deskType === 'DL') */}
+      {requireConnector && deskType === 'DL' && (
+        <div className='space-y-2'>
+          {!workspaceMailbox?.configured ? (
+            <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
+              <AlertCircle
+                size={16}
+                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+              />
+              <div className='text-sm text-foreground'>
+                <div className='font-medium'>Workspace shared mailbox not configured</div>
+                <div className='text-xs text-muted-foreground mt-1'>
+                  An admin needs to set up the shared mailbox in{' '}
+                  <span className='font-medium'>Workspace Management</span> before DL desks can be
+                  created.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <label htmlFor='dl-email' className='text-sm font-medium text-foreground'>
+                Distribution List <span className='text-muted-foreground'>*</span>
+              </label>
+              <Input
+                id='dl-email'
+                type='email'
+                value={dlEmailInput}
+                onChange={e => setDlEmailInput(e.target.value.trim().toLowerCase())}
+                placeholder={`e.g. support@${workspaceDomain || 'yourcompany.com'}`}
+                className='text-foreground'
+                aria-invalid={!!dlEmailError}
+              />
+              {dlEmailError && <p className='text-sm text-destructive'>{dlEmailError}</p>}
+              <div className='flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 mt-1'>
+                <div className='text-xs text-foreground'>
+                  <div className='text-muted-foreground mt-1'>
+                    Add{' '}
+                    <span className='font-mono text-foreground'>
+                      {workspaceMailbox.displayName}
+                    </span>{' '}
+                    as a member of this distribution list. Without it, mail sent to the DL
+                    won&apos;t reach this desk.
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Connector Selection (for personal mailbox desks) */}
+      {requireConnector && deskType === 'EMAIL' && (
         <div className='space-y-2'>
           <div className='text-sm font-medium text-foreground'>
             Email Provider <span className='text-muted-foreground'>*</span>

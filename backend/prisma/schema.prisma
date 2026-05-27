@@ -95,6 +95,12 @@ enum EmailMergeMode {
   @@schema("public")
 }
 
+enum DeskType {
+  EMAIL
+  DL 
+  @@schema("public")
+}
+
 enum UserResponsibility {
   MANAGER
   TEAM_LEAD
@@ -2120,10 +2126,13 @@ model EmailChannelPreference {
   priorityClassificationPrompt String?  // Custom system prompt for the priority classification LLM
   priorityClassificationThreshold Float @default(0.5) // Minimum confidence threshold (0.0 - 1.0) to auto-apply priority
   autoDraftMode          AutoDraftMode @default(OFF)
-
+  deskType               DeskType @default(EMAIL)
+  dlEmail                String?
+  workspaceId            String?
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
+  @@unique([workspaceId, dlEmail])
   @@map("email_channel_preferences")
   @@schema("public")
 }
@@ -2369,6 +2378,7 @@ model ExternalSource {
   sourceType      String                    // "zoho", "slack", "jira", etc. - flexible string
   displayName     String                    // "Zoho (Euler Team)"
   channelId       String?                   // Target channel for messages (legacy/optional)
+  workspaceId     String?  @unique
   boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
   ownerUserId     String?                   // @deprecated - Use EmailChannelPreference table instead. Owner for user-scoped integrations like Gmail search
   credentials     String                    // Encrypted credentials (IV:ciphertext format)

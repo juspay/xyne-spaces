@@ -11,11 +11,14 @@ import { decrypt, encrypt } from './encryptionService';
 import { redisService } from './redisService';
 import { db } from '../database/client';
 import { config } from '../config/env';
-import { EmailMergeMode } from '@prisma/client';
+import { EmailMergeMode, DeskType } from '@prisma/client';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
 
-export type PendingChannelData = PendingChannelCreate | PendingChannelReconnect;
+export type PendingChannelData =
+  | PendingChannelCreate
+  | PendingChannelReconnect
+  | PendingChannelWorkspace;
 
 export interface PendingChannelCreate {
   mode?: 'create';
@@ -38,10 +41,24 @@ export interface PendingChannelReconnect {
   platform?: 'electron' | 'web';
 }
 
+export interface PendingChannelWorkspace {
+  mode: 'workspace';
+  userId: string;
+  workspaceId: string;
+  expectedEmail?: string;
+  platform?: 'electron' | 'web';
+}
+
 export function isReconnectChannelData(
   data: PendingChannelData,
 ): data is PendingChannelReconnect {
   return data.mode === 'reconnect';
+}
+
+export function isWorkspaceChannelData(
+  data: PendingChannelData,
+): data is PendingChannelWorkspace {
+  return data.mode === 'workspace';
 }
 
 interface MicrosoftCredentials {
@@ -313,6 +330,7 @@ export class MicrosoftDeskService {
           ...(channelData.assigneeUserGroupId && { assigneeUserGroupId: channelData.assigneeUserGroupId }),
           ...(board?.id && { boardId: board.id }), // Save boardId to EmailChannelPreference (new location)
           emailMergeMode: config.emailMergeModeDefault as EmailMergeMode,
+          deskType: DeskType.EMAIL,
         },
       });
 
@@ -325,6 +343,74 @@ export class MicrosoftDeskService {
     });
 
     return { channelId };
+  }
+
+  /**
+   * Workspace-shared mailbox flow. Creates a single ExternalSource scoped to
+   * the workspace (channelId: null, workspaceId set) plus Graph webhook. No
+   * channel or EmailChannelPreference — DL desks ride on this source.
+   */
+  async createWorkspaceSource(
+    channelData: PendingChannelWorkspace,
+    credentials: { accessToken: string; refreshToken?: string; email: string; expiresAt?: string },
+    publicUrl: string,
+  ): Promise<{ sourceName: string }> {
+    const safeEmail = credentials.email.replace('@', '--');
+    const sourceName = `microsoft-${safeEmail}`;
+    const encryptedCredentials = encrypt(JSON.stringify(credentials));
+    const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
+
+    const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
+    const existingForWorkspace = await db.externalSource.findUnique({
+      where: { workspaceId: channelData.workspaceId },
+    });
+
+    // Only reject if an active source with this name exists on a different workspace.
+    if (existingByName?.isActive && existingByName.workspaceId !== channelData.workspaceId) {
+      const err = new Error(
+        `Microsoft account ${credentials.email} is already connected`,
+      ) as Error & { code?: string };
+      err.code = 'GMAIL_ALREADY_CONNECTED';
+      throw err;
+    }
+
+    // Only reject if an active source already exists for this workspace.
+    if (existingForWorkspace?.isActive) {
+      const err = new Error(
+        'Workspace already has a shared desk email configured',
+      ) as Error & { code?: string };
+      err.code = 'WORKSPACE_MAILBOX_EXISTS';
+      throw err;
+    }
+
+    if (existingForWorkspace) {
+      // Reactivate existing source (was soft-disconnected)
+      await db.externalSource.update({
+        where: { id: existingForWorkspace.id },
+        data: {
+          name: sourceName,
+          displayName: credentials.email,
+          credentials: encryptedCredentials,
+          isActive: true,
+        },
+      });
+    } else {
+      await db.externalSource.create({
+        data: {
+          name: sourceName,
+          sourceType: 'microsoft',
+          displayName: credentials.email,
+          channelId: null,
+          workspaceId: channelData.workspaceId,
+          credentials: encryptedCredentials,
+          isActive: true,
+        },
+      });
+    }
+
+    await this.registerGraphWebhook(credentials.accessToken, webhookUrl);
+
+    return { sourceName };
   }
 
   // ─── Email Send/Reply ───

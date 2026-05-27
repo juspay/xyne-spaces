@@ -7,7 +7,7 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma } from '@prisma/client';
+import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType } from '@prisma/client';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
@@ -664,7 +664,9 @@ export class ChannelController {
         projectId,
         participants,
         type: channelType,
-        assigneeUserGroupId
+        assigneeUserGroupId,
+        deskType,
+        dlEmail,
       }: {
         scopeType: ChannelScopeType;
         scopeId?: string;
@@ -675,6 +677,8 @@ export class ChannelController {
         participants?: string[];
         type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT';
         assigneeUserGroupId?: string;
+        deskType?: DeskType;
+        dlEmail?: string;
       } = req.body;
 
       const userId = req.user!.id;
@@ -718,6 +722,56 @@ export class ChannelController {
             validValues: validVisibilities
           });
           return;
+        }
+      }
+
+      // EMAIL channels — deskType is required, and DL desks need extra validation.
+      if (channelType === 'EMAIL') {
+        if (!deskType || (deskType !== DeskType.EMAIL && deskType !== DeskType.DL)) {
+          res.status(400).json({ error: 'deskType (EMAIL or DL) is required for EMAIL channels' });
+          return;
+        }
+        if (deskType === DeskType.DL) {
+          if (!dlEmail) {
+            res.status(400).json({ error: 'dlEmail is required when deskType is DL' });
+            return;
+          }
+          const workspaceId = req.user!.workspaceId!;
+          const sharedSource = await db.externalSource.findUnique({
+            where: { workspaceId },
+            select: { displayName: true, isActive: true },
+          });
+          if (!sharedSource) {
+            res.status(409).json({ error: 'Workspace has no shared desk email configured' });
+            return;
+          }
+          if (!sharedSource.isActive) {
+            res.status(409).json({ error: 'Shared mailbox is disconnected' });
+            return;
+          }
+          const sharedDomain = sharedSource.displayName.split('@')[1]?.toLowerCase();
+          const dlDomain = dlEmail.split('@')[1]?.toLowerCase();
+          if (!sharedDomain || !dlDomain || sharedDomain !== dlDomain) {
+            logger.warn('DL domain mismatch on desk create', {
+              workspaceId,
+              sharedMailbox: sharedSource.displayName,
+              sharedDomain,
+              dlEmail,
+              dlDomain,
+            });
+            res.status(400).json({
+              error: `DL "${dlEmail}" (@${dlDomain}) must be on the same domain as the workspace shared mailbox "${sharedSource.displayName}" (@${sharedDomain}). You may be looking at the wrong workspace — try switching workspaces and retry.`,
+            });
+            return;
+          }
+          const alreadyClaimed = await db.emailChannelPreference.findUnique({
+            where: { workspaceId_dlEmail: { workspaceId, dlEmail } },
+            select: { channelId: true },
+          });
+          if (alreadyClaimed) {
+            res.status(409).json({ error: 'A desk already exists for this DL' });
+            return;
+          }
         }
       }
 
@@ -831,13 +885,49 @@ export class ChannelController {
 
       // Save EmailChannelPreference for EMAIL channels
       if (channelType === 'EMAIL') {
+        const isDl = deskType === DeskType.DL;
+        let resolvedBoardId: string | undefined;
+        if (isDl) {
+          const firstBoard = await db.board.findFirst({
+            where: { projectId: channel.projectId },
+            orderBy: { createdAt: 'asc' },
+            select: { id: true },
+          });
+          resolvedBoardId = firstBoard?.id;
+          if (!resolvedBoardId) {
+            logger.error('Cannot create DL desk: project has no boards', { projectId: channel.projectId });
+            await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
+            res.status(409).json({ error: 'Project has no boards configured — cannot create DL desk' });
+            return;
+          }
+        }
         try {
           await this.emailChannelPreferenceRepository.create({
             channelId: channel.id,
             ownerUserId: userId,
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
+            deskType: deskType!,
+            ...(resolvedBoardId && { boardId: resolvedBoardId }),
+            ...(isDl && {
+              dlEmail: dlEmail!,
+              workspaceId: req.user!.workspaceId!,
+              sendAsEmail: dlEmail!,
+            }),
           });
         } catch (error) {
+          if (isDl) {
+            logger.error('Failed to create DL EmailChannelPreference, rolling back channel', error);
+            await db.channel.delete({ where: { id: channel.id } }).catch(err => {
+              logger.error(`Channel rollback failed for ${channel.id}`, err);
+            });
+            const code = (error as { code?: string })?.code;
+            if (code === 'P2002') {
+              res.status(409).json({ error: 'A desk already exists for this DL' });
+            } else {
+              res.status(500).json({ error: 'Failed to create DL desk' });
+            }
+            return;
+          }
           logger.error('Failed to create EmailChannelPreference:', error);
           // Don't fail the entire channel creation if preference fails
         }

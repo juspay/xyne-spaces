@@ -18,6 +18,7 @@ import { EmailChannelPreferenceRepository } from '@/database/repositories/emailC
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { emailMatchesDl } from '@/services/dlResolver';
 
 const TAG = '[MicrosoftRefetch]';
 const RANGE_MAX_MESSAGES = 2000;
@@ -29,16 +30,28 @@ const channelRepo = new ChannelRepository();
 const GRAPH_MESSAGE_FIELDS = [
   'id', 'subject', 'body', 'bodyPreview', 'from',
   'toRecipients', 'ccRecipients', 'bccRecipients', 'replyTo',
-  'conversationId', 'internetMessageId', 'receivedDateTime',
-  'hasAttachments', 'parentFolderId',
+  'conversationId', 'internetMessageId',
+  'receivedDateTime', 'hasAttachments', 'parentFolderId',
 ].join(',');
 
+type GraphRecipient = { emailAddress?: { address?: string } };
 type GraphMessageStub = {
   id: string;
   receivedDateTime: string;
   conversationId?: string;
   internetMessageId?: string;
+  from?: GraphRecipient;
+  toRecipients?: GraphRecipient[];
+  ccRecipients?: GraphRecipient[];
 };
+
+function stubToDlInput(stub: GraphMessageStub): { from?: string; to?: string[]; cc?: string[] } {
+  return {
+    from: stub.from?.emailAddress?.address,
+    to: (stub.toRecipients ?? []).map(r => r.emailAddress?.address ?? '').filter(Boolean),
+    cc: (stub.ccRecipients ?? []).map(r => r.emailAddress?.address ?? '').filter(Boolean),
+  };
+}
 
 export class MicrosoftRefetch extends BaseRefetch {
   async refetch(source: ExternalSource, options?: RefetchOptions): Promise<RefetchResult> {
@@ -47,19 +60,27 @@ export class MicrosoftRefetch extends BaseRefetch {
         '[MicrosoftRefetch] startDate and endDate are required — manual refetch is range-only',
       );
     }
-    if (!source.channelId) {
-      throw new Error(`[MicrosoftRefetch] source ${source.name} has no channel binding`);
+
+    const ingestChannelId = options.targetChannelId ?? source.channelId;
+    if (!ingestChannelId) {
+      throw new Error(`[MicrosoftRefetch] source ${source.name} has no channel to ingest into`);
     }
 
     const accessToken = await MicrosoftDeskService.getValidAccessToken(source.credentials, source.id);
-    const preference = await preferenceRepo.findByChannelId(source.channelId);
+    const preference = await preferenceRepo.findByChannelId(ingestChannelId);
     const userId = preference?.ownerUserId ?? source.displayName;
+
+    // For DL desks: routing key is `dlEmail` appearing in From / To / Cc.
+    // Microsoft classic DGs don't emit List-ID, so we anchor on visible
+    // sender/recipient headers only. Messages with no match are silently dropped.
+    const targetDl = options.dlEmail?.toLowerCase() ?? null;
 
     // Step 1: list message ids in the window.
     const value = await this.listMessagesInRange(
       accessToken,
       options.startDate,
       options.endDate,
+      targetDl,
     );
     logger.info(`${TAG} range listing returned ${value.length} messages`, {
       startDate: options.startDate,
@@ -152,7 +173,7 @@ export class MicrosoftRefetch extends BaseRefetch {
         if (validParsed.length === 0) return;
 
         const result = await emailService.ingestEmailThread({
-          channelId: source.channelId!,
+          channelId: ingestChannelId,
           externalThreadId: threadId,
           externalSourceId: source.id,
           userId,
@@ -220,16 +241,24 @@ export class MicrosoftRefetch extends BaseRefetch {
     accessToken: string,
     startDate: string,
     endDate: string,
+    targetDl: string | null,
   ): Promise<GraphMessageStub[]> {
-    const filter = `receivedDateTime ge ${startDate} and receivedDateTime le ${endDate}`;
+    const selectFields = targetDl
+      ? 'id,receivedDateTime,conversationId,internetMessageId,from,toRecipients,ccRecipients'
+      : 'id,receivedDateTime,conversationId,internetMessageId';
+
     const initialUrl = new URL(`${config.microsoftGraph.baseUrl}/me/messages`);
-    initialUrl.searchParams.set('$filter', filter);
+    initialUrl.searchParams.set(
+      '$filter',
+      `receivedDateTime ge ${startDate} and receivedDateTime le ${endDate}`,
+    );
     initialUrl.searchParams.set('$orderby', 'receivedDateTime asc');
-    initialUrl.searchParams.set('$select', 'id,receivedDateTime,conversationId,internetMessageId');
+    initialUrl.searchParams.set('$select', selectFields);
     initialUrl.searchParams.set('$top', '100');
 
     const collected: GraphMessageStub[] = [];
     let nextLink: string | undefined = initialUrl.toString();
+    let droppedNoMatch = 0;
 
     while (nextLink && collected.length < RANGE_MAX_MESSAGES) {
       const response = await fetch(nextLink, {
@@ -244,12 +273,23 @@ export class MicrosoftRefetch extends BaseRefetch {
         '@odata.nextLink'?: string;
       };
       for (const m of json.value ?? []) {
+        if (targetDl && !emailMatchesDl(stubToDlInput(m), targetDl)) {
+          droppedNoMatch += 1;
+          continue;
+        }
         collected.push(m);
         if (collected.length >= RANGE_MAX_MESSAGES) break;
       }
       nextLink = json['@odata.nextLink'];
     }
 
+    if (targetDl) {
+      logger.info(`${TAG} DL recipient/from filter`, {
+        targetDl,
+        matched: collected.length,
+        dropped: droppedNoMatch,
+      });
+    }
     return collected;
   }
 }
