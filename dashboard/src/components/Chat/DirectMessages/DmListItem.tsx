@@ -165,7 +165,7 @@ export const DmListItem = ({
             <p
               className={cn(
                 'shrink-0 text-[14px] tracking-[-0.28px] text-muted-foreground',
-                unreadCount > 0 && 'text-sidebar-badge-accent',
+                unreadCount > 0 && !isSelected && 'text-sidebar-badge-accent',
               )}
             >
               {formatTime(lastMessage?.createdAt)}
@@ -213,7 +213,7 @@ export const DmListItem = ({
             >
               {renderMessagePreview()}
             </div>
-            {unreadCount > 0 ? (
+            {unreadCount > 0 && !isSelected ? (
               <div className='font-["Geist_Mono"] text-[14px] font-semibold leading-[1.2] text-sidebar-badge-accent-foreground shrink-0 bg-sidebar-badge-accent flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
                 {unreadCount}
               </div>
@@ -278,7 +278,7 @@ export const DmListItem = ({
               <span
                 className={cn(
                   "shrink-0 font-['Inter'] font-normal text-[12px] text-muted-foreground tracking-[-0.24px] leading-[1.2]",
-                  unreadCount > 0 && 'text-sidebar-badge-accent',
+                  unreadCount > 0 && !isSelected && 'text-sidebar-badge-accent',
                 )}
               >
                 {formatTime(lastMessage.createdAt)}
@@ -309,7 +309,7 @@ export const DmListItem = ({
               data-track-name='PREVIEW_LINK_CONTAINER'
               className={cn(
                 "font-['Inter'] font-normal text-[14px] text-muted-foreground tracking-[-0.28px] leading-[1.35] truncate flex-1",
-                unreadCount > 0 && 'text-foreground font-medium',
+                unreadCount > 0 && !isSelected && 'text-foreground font-medium',
                 // Make RenderMessageWithHTML output inline and preserve link styles
                 '[&_.message-html-root]:inline',
                 '[&_.message-html-root_*]:inline',
@@ -330,7 +330,7 @@ export const DmListItem = ({
             >
               {renderMessagePreview()}
             </p>
-            {unreadCount > 0 && (
+            {unreadCount > 0 && !isSelected && (
               <div className='shrink-0 bg-sidebar-badge-accent flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
                 <span className="font-['Geist_Mono'] text-[14px] font-semibold leading-[1.2] text-sidebar-badge-accent-foreground">
                   {unreadCount > 9 ? '9+' : unreadCount}
