@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { getLastActiveWorkspaceId } from '../../machines/authMachine';
 
 /**
  * CanvasRedirectPage handles generic redirect URLs (/redirected?canvasId=...&blockId=...)
@@ -23,6 +24,12 @@ export default function CanvasRedirectPage(): null {
     const type = searchParams.get('type');
     const canvasId = searchParams.get('canvasId');
     const blockId = searchParams.get('blockId');
+    const email = localStorage.getItem('user_email');
+    const workspaceId = email ? getLastActiveWorkspaceId(email) : null;
+
+    const toWorkspaceRoute = (path: string): string => {
+      return workspaceId ? `/${workspaceId}${path}` : '/auth';
+    };
 
     // Helper to preserve other query parameters
     const getOtherParams = (excludeKeys: string[]): string => {
@@ -42,8 +49,10 @@ export default function CanvasRedirectPage(): null {
         if (canvasId) {
           const otherParams = getOtherParams(['type', 'canvasId', 'blockId']);
           targetRoute = blockId
-            ? `/chat/canvas/${canvasId}?blockId=${encodeURIComponent(blockId)}${otherParams ? `&${otherParams}` : ''}`
-            : `/chat/canvas/${canvasId}${otherParams ? `?${otherParams}` : ''}`;
+            ? toWorkspaceRoute(
+                `/chat/canvas/${canvasId}?blockId=${encodeURIComponent(blockId)}${otherParams ? `&${otherParams}` : ''}`,
+              )
+            : toWorkspaceRoute(`/chat/canvas/${canvasId}${otherParams ? `?${otherParams}` : ''}`);
         }
         break;
       default:
@@ -55,7 +64,7 @@ export default function CanvasRedirectPage(): null {
       void navigate(targetRoute, { replace: true });
     } else {
       // Invalid redirect link - redirect to chat
-      void navigate('/chat', { replace: true });
+      void navigate(toWorkspaceRoute('/chat/dir'), { replace: true });
     }
   }, [searchParams, navigate]);
 

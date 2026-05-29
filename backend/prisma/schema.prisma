@@ -2587,6 +2587,7 @@ enum NotificationType {
   CALL_UPDATED
   EMAIL_FETCH_COMPLETED
   EMAIL_FETCH_FAILED
+  CANVAS_SHARED
   @@schema("public")
 }
 

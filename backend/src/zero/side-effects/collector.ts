@@ -78,6 +78,19 @@ export async function collectSideEffectJobs(
     }
   }
 
+  if (operation === 'delete' && table === 'canvas_participants') {
+    const participant = await tx.run(zql.canvas_participants.where('id', entityId).one());
+    if (participant) {
+      previousValue = {
+        canvasId: participant.canvasId,
+        userId: participant.userId,
+        userGroupId: participant.userGroupId,
+        channelId: participant.channelId,
+        role: participant.role,
+      };
+    }
+  }
+
   // Capture previous ticket state for update operations
   if (operation === 'update' && table === 'tickets') {
     const entity = await tx.run(zql.tickets.where('id', entityId).one());

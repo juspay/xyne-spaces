@@ -14,6 +14,7 @@ import { TicketUpdateActivity } from './TicketUpdateActivity';
 import { WorkflowQuestionActivity } from './WorkflowQuestionActivity';
 import { ScheduledCallActivity } from './ScheduledCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
+import { CanvasSharedActivity } from './CanvasSharedActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -174,6 +175,11 @@ export const ActivityItem = ({
     case 'email_fetch_completed':
     case 'email_fetch_failed':
       return <EmailFetchActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'canvas_shared':
+    case 'canvas_role_changed':
+    case 'canvas_access_revoked':
+      return <CanvasSharedActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

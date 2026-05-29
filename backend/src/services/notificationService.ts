@@ -1215,6 +1215,88 @@ class NotificationService {
     return { deliveredUserIds };
   }
 
+  async createCanvasSharedNotifications(
+    recipientUserIds: string[],
+    canvasId: string,
+    canvasTitle: string,
+    actorId: string,
+    actorName: string,
+    role: string,
+    actorAction: 'canvas_shared' | 'canvas_role_changed' | 'canvas_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    logger.info(`[NOTIFICATION-SERVICE] createCanvasSharedNotifications called`, {
+      recipientUserIds,
+      canvasId,
+      canvasTitle,
+      actorId,
+      actorName,
+      role,
+      actorAction,
+    });
+
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+
+    if (recipientIds.length === 0) {
+      logger.info(`[NOTIFICATION-SERVICE] No recipients after filtering, skipping canvas shared notification creation`);
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'canvas' });
+
+    const title = actorAction === 'canvas_shared'
+      ? `${actorName} shared a canvas with you`
+      : actorAction === 'canvas_access_revoked'
+        ? `Your access to a canvas was revoked`
+        : `${actorName} changed your role on ${canvasTitle}`;
+    const message = actorAction === 'canvas_shared'
+      ? `${actorName} shared "${canvasTitle}" with you as ${role}`
+      : actorAction === 'canvas_access_revoked'
+        ? `Your access to "${canvasTitle}" was revoked by ${actorName}`
+        : `${actorName} changed your role to ${role} on "${canvasTitle}"`;
+
+    logger.info(`[NOTIFICATION-SERVICE] Creating ${recipientIds.length} canvas shared notifications`, {
+      title,
+      message,
+      recipientIds,
+    });
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: 'CANVAS_SHARED' as NotificationType,
+          relatedEntityType: 'canvas',
+          relatedEntityId: canvasId,
+          metadata: {
+            canvasId,
+            actorId,
+            actorName,
+            role,
+            actorAction,
+          },
+        });
+        return userId;
+      })
+    );
+
+    const deliveredUserIds = results
+      .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+      .map(r => r.value);
+
+    const successCount = results.filter(r => r.status === 'fulfilled').length;
+    const failureCount = results.filter(r => r.status === 'rejected').length;
+
+    logger.info(`[NOTIFICATION-SERVICE] Canvas shared notification creation completed`, {
+      total: recipientIds.length,
+      success: successCount,
+      failures: failureCount,
+      deliveredUserIds,
+    });
+
+    return { deliveredUserIds };
+  }
+
   async createThreadReplyNotifications(
     userIds: string[],
     replyMessageId: string,
