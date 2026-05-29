@@ -82,6 +82,22 @@ class CanvasAuthService {
           })
         : null;
 
+      const userChannelIds = (
+        await db.channelParticipant.findMany({
+          where: { userId },
+          select: { channelId: true },
+        })
+      ).map(p => p.channelId);
+      const channelParticipant = userChannelIds.length
+        ? await db.canvasParticipant.findFirst({
+            where: {
+              canvasId: canvas.id,
+              channelId: { in: userChannelIds },
+            },
+            select: { role: true },
+          })
+        : null;
+
       const hasEditAccessLink = canvas.editAccessId === canvasIdOrAccessId;
       const hasViewAccessLink = canvas.viewAccessId === canvasIdOrAccessId;
 
@@ -110,7 +126,20 @@ class CanvasAuthService {
         }
       }
 
-      const effectiveRole = participant?.role ?? groupParticipant?.role;
+      const roleRank = (r: CanvasRole | undefined): number =>
+        r === CanvasRole.OWNER ? 3 : r === CanvasRole.EDITOR ? 2 : r === CanvasRole.VIEWER ? 1 : 0;
+
+      const stronger = (
+        a: { role: CanvasRole } | null,
+        b: { role: CanvasRole } | null,
+      ): { role: CanvasRole } | null => {
+        if (!a) return b;
+        if (!b) return a;
+        return roleRank(a.role) >= roleRank(b.role) ? a : b;
+      };
+
+      const entityRole = stronger(groupParticipant, channelParticipant);
+      const effectiveRole = participant?.role ?? entityRole?.role;
       const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
       const hasEditorRole = effectiveRole === CanvasRole.EDITOR;
       const hasViewerRole = effectiveRole === CanvasRole.VIEWER;

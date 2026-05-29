@@ -10,9 +10,8 @@ Feature: Channel Canvas Sharing with Users
     When I open the Xyne-Space at "canvas-created-by-user1-in-channel-1"
     And I wait for "[data-testid='canvas-editor']" to appear
     And I click on "[data-testid='canvas-share-button']"
-    Then I should see "Make visible to channel" in the element "[data-testid='canvas-share-modal']"
-    And I should see "Anyone with this link can view" in the element "[data-testid='canvas-share-modal']"
-    And I should see "People with access" in the element "[data-testid='canvas-share-modal']"
+    Then I should see "Make canvas public" in the element "[data-testid='canvas-share-modal']"
+    And I should see "Users with access" in the element "[data-testid='canvas-share-modal']"
     And I should see "Owner" in the element "[data-testid='canvas-share-modal']"
     And I should see the element "[data-testid='user-search-input']"
 

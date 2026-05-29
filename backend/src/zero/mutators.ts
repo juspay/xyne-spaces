@@ -6740,6 +6740,71 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
+      addChannelParticipant: defineMutator(
+        z.object({
+          canvasId: z.string(),
+          channelId: z.string(),
+          role: z.nativeEnum(CanvasRole),
+          participantId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { canvasId, channelId, role, participantId, timestamp } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error("Canvas doesn't exist");
+          }
+
+          const requestingUserParticipant = await tx.run(
+            zql.canvas_participants.where('canvasId', canvasId).where('userId', authData.sub).one(),
+          );
+
+          const isOwner =
+            canvas.createdBy === authData.sub ||
+            (requestingUserParticipant && requestingUserParticipant.role === CanvasRole.OWNER);
+          const isEditor =
+            requestingUserParticipant && requestingUserParticipant.role === CanvasRole.EDITOR;
+
+          if (!isOwner && !isEditor) {
+            throw new Error('Only canvas owners or editors can add channel participants');
+          }
+          if (role === CanvasRole.OWNER && requestingUserParticipant?.role === CanvasRole.EDITOR) {
+            throw new Error('Editors cannot grant owner role');
+          }
+
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+
+          const actorChannelMembership = await tx.run(
+            zql.channel_participants.where('channelId', channelId).where('userId', authData.sub).one(),
+          );
+          if (!actorChannelMembership) {
+            throw new Error('You must be a member of this channel to add it as a canvas participant');
+          }
+
+          const existingChannelParticipant = await tx.run(
+            zql.canvas_participants
+              .where('canvasId', canvasId)
+              .where('channelId', channelId)
+              .one(),
+          );
+          if (existingChannelParticipant) {
+            return;
+          }
+
+          await tx.mutate.canvas_participants.insert({
+            id: participantId,
+            canvasId,
+            userId: null,
+            userGroupId: null,
+            channelId,
+            role,
+            joinedAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
       removeParticipant: defineMutator(
         z.object({
           canvasId: z.string(),
@@ -6823,6 +6888,52 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
           if (!targetParticipant) {
             throw new Error('Group is not a participant');
+          }
+          if (isEditor && targetParticipant.role === CanvasRole.OWNER) {
+            throw new Error('Editors cannot remove owners');
+          }
+
+          await tx.mutate.canvas_participants.delete({ id: targetParticipant.id });
+        },
+      ),
+      removeChannelParticipant: defineMutator(
+        z.object({
+          canvasId: z.string(),
+          channelId: z.string(),
+        }),
+        async ({ tx, args: { canvasId, channelId } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error("Canvas doesn't exist");
+          }
+
+          const requestingUserParticipant = await tx.run(
+            zql.canvas_participants.where('canvasId', canvasId).where('userId', authData.sub).one(),
+          );
+          const isOwner =
+            canvas.createdBy === authData.sub ||
+            (requestingUserParticipant && requestingUserParticipant.role === CanvasRole.OWNER);
+          const isEditor =
+            requestingUserParticipant && requestingUserParticipant.role === CanvasRole.EDITOR;
+          if (!isOwner && !isEditor) {
+            throw new Error('Only canvas owners or editors can remove channel participants');
+          }
+
+          const actorChannelMembership = await tx.run(
+            zql.channel_participants.where('channelId', channelId).where('userId', authData.sub).one(),
+          );
+          if (!actorChannelMembership) {
+            throw new Error('You must be a member of this channel to remove it as a canvas participant');
+          }
+
+          const targetParticipant = await tx.run(
+            zql.canvas_participants
+              .where('canvasId', canvasId)
+              .where('channelId', channelId)
+              .one(),
+          );
+          if (!targetParticipant) {
+            throw new Error('Channel is not a participant');
           }
           if (isEditor && targetParticipant.role === CanvasRole.OWNER) {
             throw new Error('Editors cannot remove owners');
@@ -6929,6 +7040,64 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
           if (!targetParticipant) {
             throw new Error('Group is not a participant');
+          }
+          if (
+            requestingUserParticipant?.role === CanvasRole.EDITOR &&
+            targetParticipant.role === CanvasRole.OWNER
+          ) {
+            throw new Error('Editors cannot change owner roles');
+          }
+
+          await tx.mutate.canvas_participants.update({
+            id: targetParticipant.id,
+            role,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      updateChannelParticipantRole: defineMutator(
+        z.object({
+          canvasId: z.string(),
+          channelId: z.string(),
+          role: z.nativeEnum(CanvasRole),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { canvasId, channelId, role, timestamp } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error("Canvas doesn't exist");
+          }
+
+          const requestingUserParticipant = await tx.run(
+            zql.canvas_participants.where('canvasId', canvasId).where('userId', authData.sub).one(),
+          );
+          const isOwner =
+            canvas.createdBy === authData.sub ||
+            (requestingUserParticipant && requestingUserParticipant.role === CanvasRole.OWNER);
+          const isEditor =
+            requestingUserParticipant && requestingUserParticipant.role === CanvasRole.EDITOR;
+          if (!isOwner && !isEditor) {
+            throw new Error('Only canvas owners or editors can update channel participant roles');
+          }
+          if (requestingUserParticipant?.role === CanvasRole.EDITOR && role === CanvasRole.OWNER) {
+            throw new Error('Editors cannot grant owner role');
+          }
+
+          const actorChannelMembership = await tx.run(
+            zql.channel_participants.where('channelId', channelId).where('userId', authData.sub).one(),
+          );
+          if (!actorChannelMembership) {
+            throw new Error('You must be a member of this channel to change its role on this canvas');
+          }
+
+          const targetParticipant = await tx.run(
+            zql.canvas_participants
+              .where('canvasId', canvasId)
+              .where('channelId', channelId)
+              .one(),
+          );
+          if (!targetParticipant) {
+            throw new Error('Channel is not a participant');
           }
           if (
             requestingUserParticipant?.role === CanvasRole.EDITOR &&

@@ -10,7 +10,7 @@ Feature: DM Canvas Sharing with Users
     When I open the Xyne-Space at "canvas-created-in-dm"
     And I wait for "[data-testid='canvas-editor']" to appear
     And I click on "[data-testid='canvas-share-button']"
-    Then I should see "People with access" in the element "[data-testid='canvas-share-modal']"
+    Then I should see "Users with access" in the element "[data-testid='canvas-share-modal']"
     And I should see "Owner" in the element "[data-testid='canvas-share-modal']"
     And I should see the element "[data-testid='user-search-input']"
 

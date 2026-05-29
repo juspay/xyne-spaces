@@ -6,9 +6,8 @@
 * Ensuring user "user-1" is logged in
 * Creating channel canvas for user "user-1"
 * clicking on "[data-testid='canvas-share-button']"
-* verifying "Make visible to channel" is visible in "[data-testid='canvas-share-modal']"
-* verifying "Anyone with this link can view" is visible in "[data-testid='canvas-share-modal']"
-* verifying "People with access" is visible in "[data-testid='canvas-share-modal']"
+* verifying "Make canvas public" is visible in "[data-testid='canvas-share-modal']"
+* verifying "Users with access" is visible in "[data-testid='canvas-share-modal']"
 * verifying "Owner" is visible in "[data-testid='canvas-share-modal']"
 * verifying "[data-testid='user-search-input']" is visible
 
@@ -47,5 +46,5 @@
 * Ensuring user "user-1" is logged in
 * Creating channel canvas for user "user-1"
 * clicking on "[data-testid='canvas-share-button']"
-* clicking on "[data-testid='canvas-visibility-toggle']"
-* verifying "Make visible to channel" is visible in "[data-testid='canvas-share-modal']"
+* clicking on "[data-testid='canvas-visibility-public-button']"
+* verifying "Make canvas private" is visible in "[data-testid='canvas-share-modal']"

@@ -7,7 +7,7 @@
 * Ensuring user "user-1" is logged in
 * Creating DM canvas for user "user-1" with user "user-2"
 * clicking on "[data-testid='canvas-share-button']"
-* verifying "People with access" is visible in "[data-testid='canvas-share-modal']"
+* verifying "Users with access" is visible in "[data-testid='canvas-share-modal']"
 
 ## DM Owner adds user as Viewer
 * using browser

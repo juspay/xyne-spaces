@@ -17,10 +17,20 @@ export class CanvasParticipantsACL extends BaseQueryACL<Prisma.CanvasParticipant
       ? ({ userGroupId: { in: userGroupIds } } satisfies Prisma.CanvasParticipantWhereInput)
       : null;
 
+    const channelMemberships = await this.prisma.channelParticipant.findMany({
+      where: { userId: this.ctx.userId },
+      select: { channelId: true },
+    });
+    const channelIds = channelMemberships.map(c => c.channelId);
+    const channelParticipantWhere = channelIds.length
+      ? ({ channelId: { in: channelIds } } satisfies Prisma.CanvasParticipantWhereInput)
+      : null;
+
     return {
       OR: [
         { userId: this.ctx.userId },
         ...(groupParticipantWhere ? [groupParticipantWhere] : []),
+        ...(channelParticipantWhere ? [channelParticipantWhere] : []),
         {
           canvas: {
             OR: [
@@ -32,6 +42,15 @@ export class CanvasParticipantsACL extends BaseQueryACL<Prisma.CanvasParticipant
                     {
                       participants: {
                         some: groupParticipantWhere,
+                      },
+                    },
+                  ]
+                : []),
+              ...(channelParticipantWhere
+                ? [
+                    {
+                      participants: {
+                        some: channelParticipantWhere,
                       },
                     },
                   ]
