@@ -32,10 +32,17 @@ import { messageSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { replaceTicketSuggestionWithCreated } from '../utils/ticketSuggestionMarkdownGenerator';
-import { markPulseItemAsSent as rewritePulseItemAsSent, updatePulseMerchant as rewritePulseMerchant } from '../utils/markPulseItemAsSent';
+import {
+  markPulseItemAsSent as rewritePulseItemAsSent,
+  updatePulseMerchant as rewritePulseMerchant,
+} from '../utils/markPulseItemAsSent';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { ConversationV3Repository } from '../database/repositories/conversationV3Repository';
 import { serializeConversationV3Row } from '../serializers/conversationV3Serializer';
+import {
+  serializeConversationMessageRow,
+  type SerializedConversationMessageRow,
+} from '../serializers/conversationMessageSerializer';
 
 // Local type definitions
 interface UserInfo {
@@ -46,14 +53,16 @@ interface UserInfo {
 }
 
 // Zod schema for validating file metadata structure
-const fileMetadataSchema = z.array(z.object({
-  fileIndex: z.number(),
-  hasThumbnail: z.boolean(),
-  thumbnailIndex: z.number().optional(),
-  width: z.number().optional(), // Width in pixels (for images/videos)
-  height: z.number().optional(), // Height in pixels (for images/videos)
-  duration: z.number().optional(), // Duration in seconds (for videos)
-}));
+const fileMetadataSchema = z.array(
+  z.object({
+    fileIndex: z.number(),
+    hasThumbnail: z.boolean(),
+    thumbnailIndex: z.number().optional(),
+    width: z.number().optional(), // Width in pixels (for images/videos)
+    height: z.number().optional(), // Height in pixels (for images/videos)
+    duration: z.number().optional(), // Duration in seconds (for videos)
+  })
+);
 
 export class ConversationController {
   private conversationRepository: ConversationRepository;
@@ -78,6 +87,85 @@ export class ConversationController {
     this.conversationV3Repository = new ConversationV3Repository();
   }
 
+  /**
+   * Get a single message in a conversation with attachments and nudgeCounts.
+   * Mirrors one-row response shape from ZQL conversationMessage query.
+   * Used for mobile background prefetch of thread message data.
+   * GET /api/conversations/:conversationId/message/:messageId
+   */
+  getConversationMessage = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId, messageId } = req.params;
+      const userId = req.user!.id;
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID is required' });
+        return;
+      }
+      if (!messageId) {
+        res.status(400).json({ error: 'Message ID is required' });
+        return;
+      }
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      const channel = await this.channelRepository.findById(conversation.channelId);
+      if (channel?.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - not a channel participant',
+            code: 'NOT_CHANNEL_PARTICIPANT',
+          });
+          return;
+        }
+      }
+
+      const message = await this.messageRepository.findById(messageId);
+      if (!message || message.conversationId !== conversationId) {
+        res.status(404).json({ error: 'Message not found for this conversation' });
+        return;
+      }
+      if (message.visibleTo !== null && message.visibleTo !== userId) {
+        res.status(404).json({ error: 'Message not found for this conversation' });
+        return;
+      }
+
+      const [attachments, nudgeCounts] = await Promise.all([
+        message.hasAttachment
+          ? db.messageAttachment.findMany({
+              where: {
+                entityId: message.messageId,
+                entityType: AttachmentEntityType.CHAT,
+                isDeleted: false,
+              },
+              orderBy: { createdAt: 'asc' },
+            })
+          : Promise.resolve([]),
+        db.surfaceNudgeCount.findMany({
+          where: {
+            messageId: message.messageId,
+            OR: [{ userId }, { channelId: { not: null } }],
+          },
+        }),
+      ]);
+
+      const serialized: SerializedConversationMessageRow = serializeConversationMessageRow(
+        message,
+        attachments,
+        nudgeCounts
+      );
+
+      res.status(200).json(serialized);
+    } catch (error) {
+      logger.error('Error fetching conversation message:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 
   /**
    * Get a conversation by message ID with its initialMessageAttachments and initialMessageNudgeCounts.
@@ -144,26 +232,27 @@ export class ConversationController {
   }
 
   private async pushVespaJobForMessage(
-      messageID: string,
-      userId: string,
-      workspaceId?: string
-    ): Promise<void> {
-     
-      vespaQueue.addJob({
+    messageID: string,
+    userId: string,
+    workspaceId?: string
+  ): Promise<void> {
+    vespaQueue
+      .addJob({
         schema: messageSchema,
-        jobType: "feed",
+        jobType: 'feed',
         docId: messageID,
         userId: userId,
         ...(workspaceId ? { workspaceId } : {}),
-      }).catch(async (error) => {
+      })
+      .catch(async (error) => {
         logger.error('Error queuing Vespa job for channel:', error);
         try {
           const vespaLogs = db.vespaInsertionLogs;
           if (vespaLogs) {
             await vespaLogs.create({
               data: {
-                status: "FAILED",
-                type: "INSERT",
+                status: 'FAILED',
+                type: 'INSERT',
                 entityId: messageID,
                 entityType: messageSchema,
                 namespace: NAMESPACE,
@@ -178,20 +267,34 @@ export class ConversationController {
           logger.error('Failed to log Vespa insertion error to database:', dbError);
         }
       });
-    }
-  
+  }
+
   // POST /api/channels/{channelId}/conversations - Create new conversation (start thread) with optional file attachments
   createConversation = async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
-      const { content, msgType, visibleTo, fileMetadata: fileMetadataJson }: { content: string; msgType?: MessageType; visibleTo?: string | null; fileMetadata?: string } = req.body;
-      const reqFiles = (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } }).files || {};
+      const {
+        content,
+        msgType,
+        visibleTo,
+        fileMetadata: fileMetadataJson,
+      }: {
+        content: string;
+        msgType?: MessageType;
+        visibleTo?: string | null;
+        fileMetadata?: string;
+      } = req.body;
+      const reqFiles =
+        (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } })
+          .files || {};
       const files = reqFiles['files'] || [];
       const thumbnails = reqFiles['thumbnails'] || [];
       const userId = req.user!.id;
 
       // Parse file metadata if present
-      let fileMetadata: Array<{ fileIndex: number; hasThumbnail: boolean; thumbnailIndex?: number }> | undefined;
+      let fileMetadata:
+        | Array<{ fileIndex: number; hasThumbnail: boolean; thumbnailIndex?: number }>
+        | undefined;
       if (fileMetadataJson) {
         try {
           const parsedMetadata = JSON.parse(fileMetadataJson);
@@ -201,7 +304,10 @@ export class ConversationController {
           logger.error('Failed to parse or validate fileMetadata', { error });
           res.status(400).json({
             error: 'Invalid file metadata format',
-            details: error instanceof z.ZodError ? error.errors : 'File metadata must be a valid JSON array'
+            details:
+              error instanceof z.ZodError
+                ? error.errors
+                : 'File metadata must be a valid JSON array',
           });
           return;
         }
@@ -291,7 +397,6 @@ export class ConversationController {
         return;
       }
 
-
       // First create the message
       const messageData: CreateMessageInput = {
         conversationId: 'temp', // Will be updated after conversation creation
@@ -317,8 +422,10 @@ export class ConversationController {
 
       // Create attachment records if files were uploaded
       if (uploadedFiles.length > 0) {
-        logger.info(`fixingAttachment Creating ${uploadedFiles.length} attachment records for message ${message.messageId}`);
-        const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
+        logger.info(
+          `fixingAttachment Creating ${uploadedFiles.length} attachment records for message ${message.messageId}`
+        );
+        const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map((file) => ({
           entityId: message.messageId,
           entityType: AttachmentEntityType.CHAT,
           originalFilename: file.originalName,
@@ -346,10 +453,15 @@ export class ConversationController {
           : [];
 
       // Push Vespa job for message indexing
-      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(error => {
-        logger.error(`[ConversationController] Error pushing Vespa job for message ${message.messageId}:`, error);
-      });
-      
+      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(
+        (error) => {
+          logger.error(
+            `[ConversationController] Error pushing Vespa job for message ${message.messageId}:`,
+            error
+          );
+        }
+      );
+
       // Update conversation with real initial message ID
       await this.conversationRepository.update(conversation.conversationId, {
         initialMessageId: message.messageId,
@@ -395,7 +507,9 @@ export class ConversationController {
         channelId
       );
 
-      logger.info(`fixingAttachment complete: conversation ${conversation.conversationId} with ${attachments.length} attachments`);
+      logger.info(
+        `fixingAttachment complete: conversation ${conversation.conversationId} with ${attachments.length} attachments`
+      );
       // Also broadcast via Redis for horizontal scaling (using session method for now)
       logger.info(
         '📡 [REDIS-BROADCAST] Calling redisService.broadcastMessageToSession for channel:',
@@ -409,21 +523,31 @@ export class ConversationController {
 
       await unreadService.markChannelAsViewed(channelId, userId, conversation.conversationId);
 
-      const handler = new MessagesSideEffectHandler({ userID: userId, workspaceId: req.user!.workspaceId!, role: req.user!.role!, memberId: req.user!.memberId!, orgRole: req.user!.orgRole!});
-      handler.onInsert({
-        entityId: message.messageId,
-        entityType: 'messages',
-        operation: 'insert'
-      }).catch(err => logger.error('Side-effect handler error: createConversation', err));
-
-      userActivityTrackingService.trackMessageSent(userId, {
-        messageId: message.messageId,
-      }).catch(error => {
-        logger.error('[UserActivityTracking] Failed to track message sent activity:', {
-          messageId: message.messageId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+      const handler = new MessagesSideEffectHandler({
+        userID: userId,
+        workspaceId: req.user!.workspaceId!,
+        role: req.user!.role!,
+        memberId: req.user!.memberId!,
+        orgRole: req.user!.orgRole!,
       });
+      handler
+        .onInsert({
+          entityId: message.messageId,
+          entityType: 'messages',
+          operation: 'insert',
+        })
+        .catch((err) => logger.error('Side-effect handler error: createConversation', err));
+
+      userActivityTrackingService
+        .trackMessageSent(userId, {
+          messageId: message.messageId,
+        })
+        .catch((error) => {
+          logger.error('[UserActivityTracking] Failed to track message sent activity:', {
+            messageId: message.messageId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
 
       res.status(201).json({
         conversationId: conversation.conversationId,
@@ -499,8 +623,12 @@ export class ConversationController {
       const conversationsWithMessages = await Promise.all(
         conversations.map(async (conversation) => {
           try {
-            const initialMessage = await this.messageRepository.findById(conversation.initialMessageId);
-            const senderInfo = initialMessage ? await this.getUserInfo(initialMessage.senderId) : null;
+            const initialMessage = await this.messageRepository.findById(
+              conversation.initialMessageId
+            );
+            const senderInfo = initialMessage
+              ? await this.getUserInfo(initialMessage.senderId)
+              : null;
 
             // Get attachments for initial message
             const attachments =
@@ -511,11 +639,11 @@ export class ConversationController {
             // Get reactions for this message and map to frontend format
             const reactions = initialMessage
               ? (reactionsData[initialMessage.messageId] || []).map((r) => ({
-                emoji: r.emojiName,
-                count: r.count,
-                users: r.users,
-                reacted: r.userHasReacted,
-              }))
+                  emoji: r.emojiName,
+                  count: r.count,
+                  users: r.users,
+                  reacted: r.userHasReacted,
+                }))
               : [];
 
             return {
@@ -528,16 +656,16 @@ export class ConversationController {
               createdAt: conversation.createdAt,
               initialMessage: initialMessage
                 ? {
-                  messageId: initialMessage.messageId,
-                  content: initialMessage.content,
-                  msgType: initialMessage.msgType,
-                  hasAttachment: initialMessage.hasAttachment,
-                  edited: (initialMessage as Message & { edited?: boolean }).edited ?? false,
-                  attachments,
-                  createdAt: initialMessage.createdAt,
-                  sender: senderInfo,
-                  reactions,
-                }
+                    messageId: initialMessage.messageId,
+                    content: initialMessage.content,
+                    msgType: initialMessage.msgType,
+                    hasAttachment: initialMessage.hasAttachment,
+                    edited: (initialMessage as Message & { edited?: boolean }).edited ?? false,
+                    attachments,
+                    createdAt: initialMessage.createdAt,
+                    sender: senderInfo,
+                    reactions,
+                  }
                 : null,
             };
           } catch (error) {
@@ -617,7 +745,7 @@ export class ConversationController {
             msgType: message.msgType,
             hasAttachment: message.hasAttachment,
             edited: (message as Message & { edited?: boolean }).edited ?? false,
-            attachments: attachments.map(att => ({
+            attachments: attachments.map((att) => ({
               attachmentId: att.id,
               fileName: att.originalFilename,
               fileSize: att.size,
@@ -628,7 +756,7 @@ export class ConversationController {
               messageId: att.entityId,
               conversationId: att.conversationId,
               createdAt: att.createdAt,
-              metadata: att.metadata
+              metadata: att.metadata,
             })),
             createdAt: message.createdAt,
             sender: await this.getUserInfo(message.senderId),
@@ -657,15 +785,29 @@ export class ConversationController {
   replyToConversation = async (req: Request, res: Response): Promise<void> => {
     try {
       const { conversationId } = req.params;
-      const { content, msgType, visibleTo, fileMetadata: fileMetadataJson }: { content: string; msgType?: MessageType; visibleTo?: string | null; fileMetadata?: string } = req.body;
-      const reqFiles = (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } }).files || {};
+      const {
+        content,
+        msgType,
+        visibleTo,
+        fileMetadata: fileMetadataJson,
+      }: {
+        content: string;
+        msgType?: MessageType;
+        visibleTo?: string | null;
+        fileMetadata?: string;
+      } = req.body;
+      const reqFiles =
+        (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } })
+          .files || {};
       const files = reqFiles['files'] || [];
       const thumbnails = reqFiles['thumbnails'] || [];
       const userId = req.user!.id;
       const showInChannel = req.body.showInChannel === true || req.body.showInChannel === 'true';
 
       // Parse file metadata if present
-      let fileMetadata: Array<{ fileIndex: number; hasThumbnail: boolean; thumbnailIndex?: number }> | undefined;
+      let fileMetadata:
+        | Array<{ fileIndex: number; hasThumbnail: boolean; thumbnailIndex?: number }>
+        | undefined;
       if (fileMetadataJson) {
         try {
           const parsedMetadata = JSON.parse(fileMetadataJson);
@@ -675,7 +817,10 @@ export class ConversationController {
           logger.error('Failed to parse or validate fileMetadata', { error });
           res.status(400).json({
             error: 'Invalid file metadata format',
-            details: error instanceof z.ZodError ? error.errors : 'File metadata must be a valid JSON array'
+            details:
+              error instanceof z.ZodError
+                ? error.errors
+                : 'File metadata must be a valid JSON array',
           });
           return;
         }
@@ -752,7 +897,6 @@ export class ConversationController {
         return;
       }
 
-
       // Generate child conversation ID if showInChannel is true
       const childConversationId = showInChannel ? uuidv4() : undefined;
 
@@ -772,7 +916,7 @@ export class ConversationController {
 
       // Create attachment records if files were uploaded
       if (uploadedFiles.length > 0) {
-        const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
+        const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map((file) => ({
           entityId: message.messageId,
           entityType: AttachmentEntityType.CHAT,
           originalFilename: file.originalName,
@@ -800,10 +944,15 @@ export class ConversationController {
           : [];
 
       // Push Vespa job for message indexing
-      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(error => {
-        logger.error(`[ConversationController] Error pushing Vespa job for message ${message.messageId}:`, error);
-      });
-      
+      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(
+        (error) => {
+          logger.error(
+            `[ConversationController] Error pushing Vespa job for message ${message.messageId}:`,
+            error
+          );
+        }
+      );
+
       // Create child conversation if showInChannel is true (similar to mutator logic)
       if (showInChannel && childConversationId) {
         // Create a new conversation for this message in the channel
@@ -818,7 +967,9 @@ export class ConversationController {
         await messageMetadataService.syncInitialMessageMd(childConversationId);
         await messageMetadataService.syncParentMessageMd(childConversationId);
 
-        logger.info(`📤 [SEND-TO-CHANNEL] Created child conversation ${childConversationId} for message ${message.messageId}`);
+        logger.info(
+          `📤 [SEND-TO-CHANNEL] Created child conversation ${childConversationId} for message ${message.messageId}`
+        );
       }
 
       // Update conversation reply count and last activity
@@ -862,12 +1013,20 @@ export class ConversationController {
       // Also broadcast via Redis for horizontal scaling (using session method for now)
       await redisService.broadcastMessageToSession(conversationId, chatMessage);
 
-      const handler = new MessagesSideEffectHandler({ userID: userId, workspaceId: req.user!.workspaceId!, role: req.user!.role!, memberId: req.user!.memberId!, orgRole: req.user!.orgRole!});
-      handler.onInsert({
-        entityId: message.messageId,
-        entityType: 'messages',
-        operation: 'insert'
-      }).catch(err => logger.error('Side-effect handler error: replyToConversation', err));
+      const handler = new MessagesSideEffectHandler({
+        userID: userId,
+        workspaceId: req.user!.workspaceId!,
+        role: req.user!.role!,
+        memberId: req.user!.memberId!,
+        orgRole: req.user!.orgRole!,
+      });
+      handler
+        .onInsert({
+          entityId: message.messageId,
+          entityType: 'messages',
+          operation: 'insert',
+        })
+        .catch((err) => logger.error('Side-effect handler error: replyToConversation', err));
 
       const response: SendMessageResponse = {
         messageId: message.messageId,
@@ -876,7 +1035,7 @@ export class ConversationController {
         msgType: message.msgType,
         hasAttachment: message.hasAttachment,
         edited: (message as Message & { edited?: boolean }).edited ?? false,
-        attachments: attachments.map(att => ({
+        attachments: attachments.map((att) => ({
           attachmentId: att.id,
           fileName: att.originalFilename,
           fileSize: att.size,
@@ -887,7 +1046,7 @@ export class ConversationController {
           messageId: att.entityId,
           conversationId: att.conversationId,
           createdAt: att.createdAt,
-          metadata: att.metadata
+          metadata: att.metadata,
         })),
         createdAt: message.createdAt,
         sender: senderInfo,
@@ -987,10 +1146,10 @@ export class ConversationController {
         userId,
         pageNum && pageSize
           ? {
-            page: pageNum,
-            pageSize,
-            before: beforeDate,
-          }
+              page: pageNum,
+              pageSize,
+              before: beforeDate,
+            }
           : undefined
       );
 
@@ -1011,7 +1170,7 @@ export class ConversationController {
             msgType: message.msgType,
             hasAttachment: message.hasAttachment,
             edited: (message as Message & { edited?: boolean }).edited ?? false,
-            attachments: attachments.map(att => ({
+            attachments: attachments.map((att) => ({
               attachmentId: att.id,
               fileName: att.originalFilename,
               fileSize: att.size,
@@ -1022,7 +1181,7 @@ export class ConversationController {
               messageId: att.entityId,
               conversationId: att.conversationId,
               createdAt: att.createdAt,
-              metadata: att.metadata
+              metadata: att.metadata,
             })),
             createdAt: message.createdAt,
             sender: await this.getUserInfo(message.senderId),
@@ -1136,8 +1295,13 @@ export class ConversationController {
       let largeDescription: string | undefined;
       let simplifiedInput = parseResult.validatedInput;
 
-      if (parseResult.validatedInput.description && parseResult.validatedInput.description.length > 10000) {
-        logger.info(`🔍 [BOT-CMD] Large description detected (${parseResult.validatedInput.description.length} chars), extracting...`);
+      if (
+        parseResult.validatedInput.description &&
+        parseResult.validatedInput.description.length > 10000
+      ) {
+        logger.info(
+          `🔍 [BOT-CMD] Large description detected (${parseResult.validatedInput.description.length} chars), extracting...`
+        );
         largeDescription = parseResult.validatedInput.description;
         // Create simplified input without the large description for storage
         simplifiedInput = {
@@ -1360,10 +1524,15 @@ export class ConversationController {
       await redisService.broadcastMessageToSession(conversationId, chatMessage);
 
       // Push Vespa job for message indexing
-      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(error => {
-        logger.error(`[ConversationController] Error pushing Vespa job for message ${message.messageId}:`, error);
-      });
-      
+      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(
+        (error) => {
+          logger.error(
+            `[ConversationController] Error pushing Vespa job for message ${message.messageId}:`,
+            error
+          );
+        }
+      );
+
       res.status(200).json({
         messageId: updatedMessage.messageId,
         conversationId: updatedMessage.conversationId,
@@ -1390,8 +1559,8 @@ export class ConversationController {
       const userId = req.user!.id;
       // Validate required fields
       if (!suggestionId || !ticketId || !xyneId || !title || !ticketConversationId) {
-        res.status(400).json({ 
-          error: 'suggestionId, ticketId, xyneId, title, and ticketConversationId are required' 
+        res.status(400).json({
+          error: 'suggestionId, ticketId, xyneId, title, and ticketConversationId are required',
         });
         return;
       }
@@ -1496,7 +1665,11 @@ export class ConversationController {
       }
 
       // Rewrite frontmatter to mark this item as sent
-      const updatedContent = rewritePulseItemAsSent(message.content, itemId, new Date().toISOString());
+      const updatedContent = rewritePulseItemAsSent(
+        message.content,
+        itemId,
+        new Date().toISOString()
+      );
 
       const updatedMessage = await this.messageRepository.update(messageId, {
         content: updatedContent,
@@ -1520,8 +1693,12 @@ export class ConversationController {
   updatePulseMerchant = async (req: Request, res: Response): Promise<void> => {
     try {
       const { conversationId, messageId } = req.params;
-      const { merchantId: localMerchantId, orgId, orgName } = req.body as {
-        merchantId: string;  // local frontmatter id, e.g. "m1"
+      const {
+        merchantId: localMerchantId,
+        orgId,
+        orgName,
+      } = req.body as {
+        merchantId: string; // local frontmatter id, e.g. "m1"
         orgId: string;
         orgName: string;
       };
@@ -1556,14 +1733,15 @@ export class ConversationController {
       // Resolve merchantId and productId from the Pulse org API
       const { pulseService } = await import('@/services/pulseService');
       const orgList = await pulseService.fetchOrgList();
-      const matchedOrg = orgList.find(o => (o.id ?? o.orgId) === orgId);
+      const matchedOrg = orgList.find((o) => (o.id ?? o.orgId) === orgId);
 
       const pulseMerchantIds = matchedOrg?.merchantIdList ?? matchedOrg?.merchantIds ?? [];
       const pulseMerchantId = pulseMerchantIds.length > 0 ? pulseMerchantIds[0] : null;
 
       // Fetch product/lead data for this org
       const products = await pulseService.fetchOrgLeadData(orgId);
-      const productId = products.length > 0 ? (products[0].id ?? (products[0] as any).productId ?? null) : null;
+      const productId =
+        products.length > 0 ? (products[0].id ?? (products[0] as any).productId ?? null) : null;
 
       const updatedContent = rewritePulseMerchant(message.content, localMerchantId, {
         name: orgName,
@@ -1605,7 +1783,13 @@ export class ConversationController {
       const key = `agent_progress:conversation:${conversationId}`;
       const raw = await redisService.getAllHashFields(key);
       const data = Object.values(raw)
-        .map((v) => { try { return JSON.parse(v) as unknown; } catch { return null; } })
+        .map((v) => {
+          try {
+            return JSON.parse(v) as unknown;
+          } catch {
+            return null;
+          }
+        })
         .filter((v): v is Record<string, unknown> => v !== null);
       res.status(200).json({ success: true, data });
     } catch (error) {

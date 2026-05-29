@@ -8,6 +8,9 @@ const conversationController = new ConversationController();
 // Keep replyToConversation for file upload handling
 router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);
 
+// Get a single conversation message by conversationId + messageId (for mobile background prefetch)
+router.get('/:conversationId/message/:messageId', conversationController.getConversationMessage);
+
 // Get conversation by message ID (for mobile background prefetch, mirrors ZQL channelConversationsPaginatedV3)
 router.get('/by-message/:messageId', conversationController.getConversationByMessageId);
 
