@@ -16,6 +16,7 @@ import {
   Users,
   Ticket,
   MoreVertical,
+  Layout,
 } from 'lucide-react';
 import { ActivityItem } from '../ActivityItem';
 import { NofocusRefProvider } from '../ActivityItemCard';
@@ -56,6 +57,7 @@ type ActivityTab =
   | 'replies'
   | 'reactions'
   | 'tickets'
+  | 'canvas'
   | 'actionable'
   | 'fyi'
   | 'group_mentions';
@@ -124,6 +126,16 @@ const TABS: TabConfig[] = [
       activity.actorAction === 'eta_breach' ||
       activity.actorAction === 'stage_eta_breach' ||
       activity.ticketId !== null,
+  },
+  {
+    value: 'canvas',
+    label: 'Canvas',
+    Icon: Layout,
+    filter: activity =>
+      activity.actorAction === 'canvas_shared' ||
+      activity.actorAction === 'canvas_role_changed' ||
+      activity.actorAction === 'canvas_access_revoked' ||
+      (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
   },
   {
     value: 'group_mentions',
@@ -286,6 +298,8 @@ const ActivityListView = (): ReactElement => {
           'ticket_qa_assigned',
           'workflow_question',
         ];
+      case 'canvas':
+        return ['canvas_shared', 'canvas_role_changed', 'canvas_access_revoked', 'mentioned_user'];
       default:
         return []; // Empty array for 'all' - query will not filter by type
     }
@@ -545,6 +559,18 @@ const ActivityListView = (): ReactElement => {
       filters.classification = ActivityClassification.ACTIONABLE;
     } else if (activeTab === 'fyi') {
       filters.classification = ActivityClassification.FYI;
+    } else if (activeTab === 'canvas') {
+      const timestamp = Date.now();
+      void zero.mutate(
+        mutators.activities.markAsReadByFilter({ actorAction: 'canvas_shared', timestamp }),
+      );
+      void zero.mutate(
+        mutators.activities.markAsReadByFilter({ actorAction: 'canvas_role_changed', timestamp }),
+      );
+      void zero.mutate(
+        mutators.activities.markAsReadByFilter({ actorAction: 'canvas_access_revoked', timestamp }),
+      );
+      return;
     }
 
     void zero.mutate(mutators.activities.markAsReadByFilter({ ...filters, timestamp: Date.now() }));
@@ -559,6 +585,7 @@ const ActivityListView = (): ReactElement => {
       replies: 0,
       reactions: 0,
       tickets: 0,
+      canvas: 0,
       actionable: 0,
       fyi: 0,
       group_mentions: 0,
@@ -594,6 +621,15 @@ const ActivityListView = (): ReactElement => {
         activity.actorAction === 'removed'
       ) {
         counts.reactions++;
+      }
+
+      if (
+        activity.actorAction === 'canvas_shared' ||
+        activity.actorAction === 'canvas_role_changed' ||
+        activity.actorAction === 'canvas_access_revoked' ||
+        (activity.actorAction === 'mentioned_user' && activity.canvasId)
+      ) {
+        counts.canvas++;
       }
 
       const classification = activity.classification ?? ActivityClassification.PENDING;

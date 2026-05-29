@@ -1,5 +1,4 @@
 import type { TableName } from '../acl/core/types';
-
 export type SideEffectOperation = 'insert' | 'update' | 'delete' | 'upsert';
 
 export interface ConversationPreviousValue {
@@ -59,6 +58,14 @@ export interface EmailReadPreviousValue {
   lastReadEmailId: string;
 }
 
+export interface CanvasParticipantPreviousValue {
+  canvasId: string;
+  userId: string | null;
+  userGroupId?: string | null;
+  channelId?: string | null;
+  role: string;
+}
+
 export interface ChannelUserStatusPreviousValue {
   lastViewedAt: number | null;
   unreadCount: number;
@@ -82,6 +89,7 @@ export type PreviousValue =
   | DelayedMessagePreviousValue
   | ChannelPreviousValue
   | EmailReadPreviousValue
+  | CanvasParticipantPreviousValue
   | ChannelUserStatusPreviousValue
   | ConversationParticipantPreviousValue;
 
@@ -105,6 +113,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   ticket_tags: ['insert', 'delete'],
   call_participants: ["insert", "update"],
   channel_participants: ['insert'],
+  canvas_participants: ['insert', 'update', 'delete'],
   conversations: ['insert', 'delete'],
   calls: ['update'],
   tickets: ['update'],

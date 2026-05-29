@@ -10,6 +10,7 @@ import { TicketsSideEffectHandler } from './tables/tickets-handler';
 import { TicketAssignmentsSideEffectHandler } from './tables/ticket-assignments-handler';
 import { TicketStageEtaSideEffectHandler } from './tables/ticket-stage-eta-handler';
 import { CanvasSideEffectHandler } from './tables/canvas-handler';
+import { CanvasParticipantsSideEffectHandler } from './tables/canvas-participants-handler';
 import { ReactionsSideEffectHandler } from './tables/reactions-handler';
 import { DelayedMessagesSideEffectHandler } from './tables/delayed-messages-handler';
 import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
@@ -33,6 +34,8 @@ export class SideEffectHandlerFactory {
         return new CallParticipantsSideEffectHandler(ctx);
       case 'channel_participants':
         return new ChannelParticipantsSideEffectHandler(ctx);
+      case 'canvas_participants':
+        return new CanvasParticipantsSideEffectHandler(ctx);
       case 'calls':
         return new CallSideEffectHandler(ctx);
       case 'tickets':
