@@ -491,8 +491,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           );
         }
       }
+
+      // When "All Boards" is selected while in board view, navigate to the project view so
+      // the sidebar correctly shows only the project highlighted (not the old board).
+      if (viewMode === 'board' && projectIdParam && !nextFilters.boards?.length) {
+        void navigate(`/projects/${projectIdParam}`);
+      }
     },
-    [send, channelId, viewMode, filters.boards, zero, selectedViewId, activeViewKey],
+    [
+      send,
+      channelId,
+      viewMode,
+      filters.boards,
+      zero,
+      selectedViewId,
+      activeViewKey,
+      projectIdParam,
+      navigate,
+    ],
   );
 
   const handleSetGroupBy = useCallback(

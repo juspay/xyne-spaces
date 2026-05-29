@@ -366,7 +366,11 @@ export const ticketFiltersMachine = setup({
 
         const boardFromUrl = urlFilters.boards?.length ? urlFilters.boards : undefined;
         const boardFromDb = event.selectedBoardIdFromDb ? [event.selectedBoardIdFromDb] : undefined;
-        const boardFilter = boardFromUrl ?? boardFromDb;
+        // When the user navigates directly to a board via the URL path (/projects/:projectId/:boardId),
+        // the boardId is in the route params (not query params), so we use it as a fallback.
+        const boardFromPath =
+          event.viewMode === 'board' && event.boardId ? [event.boardId] : undefined;
+        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath;
 
         if (Object.keys(urlFilters).length > 0) {
           filters = { ...urlFilters };
