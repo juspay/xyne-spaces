@@ -43,6 +43,7 @@ import {
   TicketStageRequestStatus,
   BaseTicketType,
   RCAStatus,
+  LookupType,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -366,6 +367,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketDetailsById({ ticketId: ticketId }));
+  const [ticketTypeDropdownOpened, setTicketTypeDropdownOpened] = useState(false);
+  const [ticketTypeLookupResult, ticketTypeLookupDetails] = useCachedQuery(
+    queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
+    { enabled: ticketTypeDropdownOpened },
+  );
+  const ticketTypeOptions = useMemo(() => {
+    if (!ticketTypeLookupResult) return [];
+    return ticketTypeLookupResult.map(type => ({
+      id: type.value,
+      name: type.value,
+    }));
+  }, [ticketTypeLookupResult]);
+  const isTicketTypeLoading =
+    ticketTypeDropdownOpened && ticketTypeLookupDetails.type !== 'complete';
   const rcaRecord = ticket?.rcas?.[0];
 
   // RCA button labels based on status
@@ -1049,6 +1064,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       mutators.ticket.update({
         id: ticket.id,
         assignedTo: userId,
+        updatedAt: Date.now(),
+      }),
+    );
+  };
+
+  const handleTicketTypeChange = (type: string): void => {
+    void zero.mutate(
+      mutators.ticket.update({
+        id: ticket.id,
+        ticketType: type,
         updatedAt: Date.now(),
       }),
     );
@@ -2267,7 +2292,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             {ticket.ticketType && (
               <TicketKeyValuePair
                 ticketKey='Type'
-                value={<span className='flex items-center gap-2'>{ticket.ticketType}</span>}
+                value={
+                  <Selector
+                    items={ticketTypeOptions}
+                    selectedValue={ticket.ticketType}
+                    onValueChange={handleTicketTypeChange}
+                    placeholder='Set Type'
+                    noBorder={true}
+                    isLoading={isTicketTypeLoading}
+                    onOpenChange={open => {
+                      if (open && !ticketTypeDropdownOpened) {
+                        setTicketTypeDropdownOpened(true);
+                      }
+                    }}
+                  />
+                }
               />
             )}
 

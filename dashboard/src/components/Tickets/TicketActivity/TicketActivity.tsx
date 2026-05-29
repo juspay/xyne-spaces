@@ -164,6 +164,17 @@ const getActivityDescription = (
           };
     }
 
+    case ActivityType.TICKET_TYPE:
+      return {
+        description: 'changed ticket type',
+        details: (
+          <>
+            from <span className='font-semibold'>{value?.oldValue || 'none'}</span> to{' '}
+            <span className='font-semibold'>{value?.newValue || 'none'}</span>
+          </>
+        ),
+      };
+
     case ActivityType.PRIORITY:
       return {
         description: 'changed priority',

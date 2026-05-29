@@ -4636,6 +4636,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           priority: z.string().optional(),
           stageName: z.string().optional(),
           assignedTo: z.string().nullable().optional(),
+          ticketType: z.string().optional(),
           userGroupId: z.string().nullable().optional(),
           eta: z.number().optional(),
           boardId: z.string().optional(),
@@ -4698,7 +4699,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const updateData: any = { updatedAt: params.updatedAt, updatedBy: authData.sub };
           const activities: any[] = [];
-          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived', 'kanbanPosition'] as const;
+          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived', 'kanbanPosition', 'ticketType'] as const;
           const oldAssignedTo = ticket.assignedTo;
           const oldBoardId = ticket.boardId;
 
@@ -4882,6 +4883,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               if (field === 'eta') activityType = 'ETA';
               if (field === 'boardId') activityType = 'BOARD';
               if (field === 'isArchived') activityType = 'IS_ARCHIVED';
+              if (field === 'ticketType') activityType = 'TICKET_TYPE';
 
               activities.push({
                 activityType,
@@ -5248,6 +5250,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
             } else if (activity.activityType === 'IS_ARCHIVED') {
               activityMessage = `${userName} archived the ticket`;
+            } else if (activity.activityType === 'TICKET_TYPE') {
+              const oldType = activity.value.oldValue || 'none';
+              const newType = activity.value.newValue || 'none';
+              activityMessage = `${userName} changed ticket type from ${oldType} to ${newType}`;
             }
 
             if (activityMessage && ticket.conversationId) {
