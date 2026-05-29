@@ -878,8 +878,6 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                             description: messageContent,
                             channelId: channelId,
                             projectId: (channel.projectId as string | null) || '',
-                            createdBy: user.id,
-                            updatedBy: user.id,
                             ticketType: BaseTicketType.Support,
                             ...(conversationId && { sourceConversationId: conversationId }),
                           };

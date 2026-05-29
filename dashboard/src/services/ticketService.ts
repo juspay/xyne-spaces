@@ -6,8 +6,6 @@ export interface CreateTicketRequest {
   description: string;
   channelId: string;
   projectId: string;
-  createdBy: string;
-  updatedBy: string;
   ticketType: BaseTicketType;
   boardId?: string;
   sourceConversationId?: string;
