@@ -28,6 +28,13 @@ const ProjectSidebar = ({
   const currentAssignee = searchParams.get('assignee');
   const currentGroup = searchParams.get('group');
 
+  // When a board is selected via the top filter dropdown, the machine syncs it to the
+  // ?board= query param. This should take priority over the URL path param (activeBoardId)
+  // so that changing the board from the filter always reflects in the sidebar — including
+  // when in board view (/projects/:projectId/:boardId) where the path still holds the old board.
+  const boardFromFilter = searchParams.get('board');
+  const effectiveBoardId = boardFromFilter ?? activeBoardId ?? undefined;
+
   // Section expansion states
   const [isFavoritesExpanded, setIsFavoritesExpanded] = useState(true);
   const [isProjectsExpanded, setIsProjectsExpanded] = useState(true);
@@ -68,6 +75,20 @@ const ProjectSidebar = ({
     { id: '2', type: 'board' as const, name: 'Product Design' },
     { id: '3', type: 'board' as const, name: 'Xynespace-FE' },
   ];
+  // Auto-expand the active project so its boards are always visible in the sidebar.
+  // This handles both: navigating to /projects/:projectId/:boardId via the URL, and
+  // selecting a board from the top filter dropdown (which sets ?board= query param).
+  useEffect(() => {
+    if (activeProjectId) {
+      setExpandedProjects(prev => {
+        if (prev.has(activeProjectId)) return prev;
+        const next = new Set(prev);
+        next.add(activeProjectId);
+        return next;
+      });
+    }
+  }, [activeProjectId]);
+
   // Auto-expand projects when searching for boards
   useEffect(() => {
     if (projectsSearch.searchQuery.trim()) {
@@ -199,7 +220,7 @@ const ProjectSidebar = ({
                     project={project}
                     isExpanded={expandedProjects.has(project.id)}
                     isActive={activeProjectId === project.id}
-                    activeBoardId={activeBoardId}
+                    activeBoardId={effectiveBoardId}
                     searchQuery={projectsSearch.searchQuery}
                     onToggle={() => {
                       void navigate(`/projects/${project.id}`);
