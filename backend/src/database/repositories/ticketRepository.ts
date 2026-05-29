@@ -29,7 +29,7 @@ export class TicketRepository {
    * @param data - Ticket data
    * @param tx - Optional transaction client for atomic operations
    */
-  async createTicket(data: CreateTicketRequest & { xyneId: string }, tx?: PrismaTransaction) {
+  async createTicket(data: CreateTicketRequest & { xyneId: string; createdBy: string; updatedBy: string }, tx?: PrismaTransaction) {
     const db = tx || prisma; // Use transaction if provided, else default prisma
 
     // Validate required fields

@@ -1002,9 +1002,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           formDataPayload.append('ticketType', formData.ticketType);
         }
 
-        formDataPayload.append('createdBy', user.id);
-        formDataPayload.append('updatedBy', user.id);
-
         // Add draft attachment IDs if creating from conversation
         if (draftAttachmentIds.length > 0) {
           draftAttachmentIds.forEach(id => {
@@ -1066,8 +1063,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
           channelId: isFromSubTicket || isFromAI ? formData.channelId : channelId,
           ...(selectedChannelProjectId && { projectId: selectedChannelProjectId }),
-          createdBy: user.id,
-          updatedBy: user.id,
           ticketType: formData.ticketType,
           ...(draftAttachmentIds.length > 0 && { draftAttachmentIds }),
           ...(sourceConversation && { eta: formData.eta?.toISOString() }),

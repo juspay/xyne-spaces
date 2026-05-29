@@ -4,8 +4,6 @@ export interface CreateTicketRequest {
   // Required fields
   title: string;
   description: string;
-  createdBy: string;
-  updatedBy: string;
   projectId: string; // Project to which the ticket is linked
   workspaceId: string; // Workspace for ACL optimization (denormalized from project)
   userGroupId?: string; // User group to which the ticket belongs

@@ -317,8 +317,6 @@ export class TicketController {
       const {
         title,
         description,
-        createdBy,
-        updatedBy,
         assignedTo,
         projectId,
         userGroupId,
@@ -422,12 +420,25 @@ export class TicketController {
         return;
       }
 
-      // Use authenticated user's ID as createdBy and updatedBy if not provided
       const userId = req.user?.id;
       if (!userId || !req.user) {
         res.status(401).json({ error: 'User not authenticated' });
         return;
       }
+
+      if (req.body.createdBy && req.body.createdBy !== userId) {
+        res.status(400).json({ error: 'createdBy must match the authenticated user' });
+        return;
+      }
+      if (req.body.updatedBy && req.body.updatedBy !== userId) {
+        res.status(400).json({ error: 'updatedBy must match the authenticated user' });
+        return;
+      }
+      if (req.body.closedBy && req.body.closedBy !== userId) {
+        res.status(400).json({ error: 'closedBy must match the authenticated user' });
+        return;
+      }
+
       const queryContext = {
         userID: userId,
         workspaceId: req.user.workspaceId,
@@ -435,9 +446,6 @@ export class TicketController {
         orgRole: req.user.orgRole,
         memberId: req.user.memberId,
       };
-
-      const finalCreatedBy = createdBy || userId;
-      const finalUpdatedBy = updatedBy || userId;
 
       const initialMessageId = randomUUID();
 
@@ -523,8 +531,8 @@ export class TicketController {
           ticket = await this.ticketRepository.createTicket({
             title,
             description,
-            createdBy: finalCreatedBy,
-            updatedBy: finalUpdatedBy,
+            createdBy: userId,
+            updatedBy: userId,
             assignedTo: finalAssignedTo,
             conversationId,
             channelId: channelIdFromConversation,
@@ -573,13 +581,13 @@ export class TicketController {
             where: {
               conversationId_userId: {
                 conversationId,
-                userId: createdBy,
+                userId,
               },
             },
             create: {
               id: randomUUID(),
               conversationId,
-              userId: createdBy,
+              userId,
               participationType: 'MENTIONED',
               isSubscribed: true,
               joinedAt: new Date(),
@@ -635,7 +643,7 @@ export class TicketController {
         } else {
           const conversation = await this.conversationRepository.create({
             channelId: channelId!,
-            createdBy: finalCreatedBy,
+            createdBy: userId,
             initialMessageId,
           });
 
@@ -646,8 +654,8 @@ export class TicketController {
           ticket = await this.ticketRepository.createTicket({
             title,
             description,
-            createdBy: finalCreatedBy,
-            updatedBy: finalUpdatedBy,
+            createdBy: userId,
+            updatedBy: userId,
             assignedTo: finalAssignedTo,
             conversationId,
             channelId: channelId!,
@@ -669,7 +677,7 @@ export class TicketController {
 
           await this.messageRepository.createWithExecutionId({
             conversationId,
-            senderId: finalCreatedBy,
+            senderId: userId,
             content: `Ticket created in ${board?.name || 'Unknown Board'}: ${title}`,
             msgType: 'SYSTEM',
             metadata: { ticketId: ticket.id },
@@ -704,13 +712,13 @@ export class TicketController {
             where: {
               conversationId_userId: {
                 conversationId,
-                userId: finalCreatedBy,
+                userId: userId,
               },
             },
             create: {
               id: randomUUID(),
               conversationId,
-              userId: finalCreatedBy,
+              userId: userId,
               participationType: 'MENTIONED',
               isSubscribed: true,
               joinedAt: new Date(),
@@ -740,8 +748,8 @@ export class TicketController {
             thumbnailUrl: file.thumbnailUrl ?? undefined,
             width: file.width,
             height: file.height,
-            uploadedByUserId: finalCreatedBy,
-            createdBy: finalCreatedBy,
+            uploadedByUserId: userId,
+            createdBy: userId,
             storageProvider: config.fileStorage.provider,
             conversationId: conversationId,
             workspaceId: ticketChannelWorkspaceId,
@@ -754,7 +762,7 @@ export class TicketController {
           const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
           if (savedAttachments.length > 0) {
             const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-            this.pushVespaJobForAttachments(attachments, finalCreatedBy, ticketChannelWorkspaceId).catch((error: any) => {
+            this.pushVespaJobForAttachments(attachments, userId, ticketChannelWorkspaceId).catch((error: any) => {
               logger.error(`[TicketController] Error pushing Vespa job for ticket attachments ${ticket.id}:`, error);
             });
           }
@@ -766,7 +774,7 @@ export class TicketController {
           const convertedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
           if (convertedAttachments.length > 0) {
             const attachments = convertedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-            this.pushVespaJobForAttachments(attachments, finalCreatedBy, ticketChannelWorkspaceId).catch((error: any) => {
+            this.pushVespaJobForAttachments(attachments, userId, ticketChannelWorkspaceId).catch((error: any) => {
               logger.error(`[TicketController] Error pushing Vespa job for converted attachments in ticket ${ticket.id}:`, error);
             });
           }
@@ -1107,7 +1115,7 @@ export class TicketController {
           workspace,
           repoSlug,
           conversationId: ticket.conversationId,
-          userId: xyneReleaseBot?.id || finalCreatedBy,
+          userId: xyneReleaseBot?.id || userId,
           channelId: ticket.channelId || undefined,
           newCommitId,
           deployedCommitId,
