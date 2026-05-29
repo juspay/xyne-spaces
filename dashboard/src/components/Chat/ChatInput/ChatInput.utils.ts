@@ -96,7 +96,7 @@ export const processMessageForSending = (htmlContent: string, users?: MentionRes
 
   let processed = sanitized;
   processed = processed.replace(/\u200B(<span[^>]*data-mention[^>]*>.*?<\/span>)\u200B/g, '$1');
-  processed = processed.replace(/\u200B@[^\u200B<]+\u200B/g, '@$1');
+  processed = processed.replace(/\u200B(@[^\u200B<]+)\u200B/g, '$1');
 
   // Convert plain text mentions to proper mention spans if users are provided
   if (users && users.length > 0) {
@@ -110,4 +110,19 @@ export const processMessageForSending = (htmlContent: string, users?: MentionRes
   processed = convertTrailingEmoticonsInHtml(processed);
 
   return processed;
+};
+
+export const containsSpecialBroadcastMention = (content: string): boolean => {
+  if (!content) return false;
+
+  // Mention node form from editor
+  const specialMentionSpanRegex =
+    /<span[^>]*class="[^"]*chat-input-special-mention[^"]*"[^>]*data-mention-type="(channel|here)"[^>]*>/i;
+  if (specialMentionSpanRegex.test(content)) {
+    return true;
+  }
+
+  // Plain text form (including code blocks): show warning but let backend treat as plain text when disabled.
+  const textContent = new DOMParser().parseFromString(content, 'text/html').body.textContent ?? '';
+  return /@(?:channel|here)\b/i.test(textContent);
 };

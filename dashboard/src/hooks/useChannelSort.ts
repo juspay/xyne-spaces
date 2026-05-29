@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
 import { ChannelUserStatus, ChannelSortOrder } from '@xyne/shared';
+import { useSelector } from '@xstate/react';
 import { VisibleChannel } from '../machines/stateMachine';
+import { stateMachineActor } from '../machines/stateMachine';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
-import { queries } from '../zero/queries';
-import { useCachedQuery } from './useCachedQuery';
 import { groupChannelsByScope } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 
 interface UseChannelSortResult {
@@ -21,7 +21,7 @@ export const useChannelSort = (
   currentUserId: string,
 ): UseChannelSortResult => {
   const zero = useZero();
-  const [userPreference] = useCachedQuery(queries.getCurrentUserPreference({}));
+  const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
   const channelSortOrder = userPreference?.channelSortOrder ?? ChannelSortOrder.RECENCY;
 
   const setChannelSortOrder = (order: ChannelSortOrder): void => {

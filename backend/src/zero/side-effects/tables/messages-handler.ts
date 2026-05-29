@@ -225,7 +225,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const { senderId, content, conversationId } = message;
     const { channelId } = conversation;
 
-    const [channel, sender, channelParticipantsRaw] = await Promise.all([
+    const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
         where: { id: channelId },
         select: { name: true, scopeType: true, projectId: true, project: { select: { name: true } } }
@@ -237,7 +237,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       db.channelParticipant.findMany({
         where: { channelId },
         select: { userId: true }
-      })
+      }),
+      db.userPreference.findUnique({
+        where: { userId: senderId },
+        select: { allowThreadBroadcastMentions: true },
+      }),
     ]);
 
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
@@ -260,14 +264,18 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const senderName = sender?.name || 'Someone';
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
     const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
-
+    const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
+    const allowThreadBroadcastMentions = userPreference?.allowThreadBroadcastMentions ?? false;
     // For FlowJSON messages, special mentions and user mentions live inside the
     // JSON component tree.  extractSpecialMentions and extractMentionsFromContent
     // both understand <broadcast:channel/here> and <userid:ID> tokens, so we
     // pass the raw (uncleaned) flow text for mention scanning.
     const flowRawText = getFlowJsonRawTextForMentions(content);
     const contentForMentions = flowRawText ?? content;
-    const specialMentions = extractSpecialMentions(contentForMentions);
+    const specialMentions =
+      isReply && !allowThreadBroadcastMentions
+        ? { hasChannel: false, hasHere: false }
+        : extractSpecialMentions(contentForMentions);
     const mentionType = specialMentions.hasChannel ? '@channel' : specialMentions.hasHere ? '@here' : undefined;
 
     if (channel?.projectId && !isDMChannel) {
@@ -358,8 +366,13 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     }
 
     const workspaceId = await channelRepository.getWorkspaceId(channelId);
+    // In thread replies, disable @channel/@here expansion by not passing channelId.
     // contentForMentions is already computed above (flow text for FlowJSON, raw HTML otherwise)
-    const mentionedUsers = await extractAllUsersForNotification(contentForMentions, workspaceId, channelId);
+    const mentionedUsers = await extractAllUsersForNotification(
+      contentForMentions,
+      workspaceId,
+      isReply && !allowThreadBroadcastMentions ? undefined : channelId
+    );
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
     const validMentionedUsers = mentionedUsers
       .filter(u => u.mentionSource === 'direct' || u.mentionSource === 'group')
@@ -453,10 +466,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       await activityService.createActivities(activities);
     }
 
-    // Determine whether this message is a thread reply before sending notifications,
-    // so mentions inside a thread can use the 'thread_mention' context which passes
-    // for THREADS_ONLY users (in addition to ALL and MENTIONS_ONLY).
-    const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
+    // Uses isReply calculated earlier for thread context in notifications
     const mentionedUserIdSet = new Set(notificationUserIds);
 
     if (!isReply) {

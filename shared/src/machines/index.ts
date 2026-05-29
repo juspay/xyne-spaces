@@ -49,6 +49,7 @@ export type {
   Conversation,
   DraftMessageDB,
   DelayedMessageDB,
+  UserPreference,
   PeriodMetrics,
   MetricsState,
   UnreadCounts,

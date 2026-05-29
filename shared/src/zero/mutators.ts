@@ -6609,6 +6609,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             channelSortOrder,
             enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -6637,6 +6638,36 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage,
+            allowThreadBroadcastMentions: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    setAllowThreadBroadcastMentions: defineMutator(
+      z.object({
+        id: z.string(),
+        allowThreadBroadcastMentions: z.boolean(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, allowThreadBroadcastMentions, timestamp } }) => {
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            allowThreadBroadcastMentions,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions,
             createdAt: timestamp,
             updatedAt: timestamp,
           });

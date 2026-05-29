@@ -496,6 +496,9 @@ export function extractSpecialMentions(content: string): SpecialMentions {
     logger.info('✅ [SPECIAL-MENTION] Found @here mention (HTML span)');
   }
 
+  const contentWithoutCode = content
+    .replace(/<pre[^>]*>[\s\S]*?<\/pre>/gi, '')
+    .replace(/<code[^>]*>[\s\S]*?<\/code>/gi, '');
   // Fallback: Check for plain text @channel or @here (case-insensitive)
   // Match @channel or @here as whole words (not part of other words)
   const plainChannelRegex = /@channel\b/i;
@@ -507,12 +510,12 @@ export function extractSpecialMentions(content: string): SpecialMentions {
   const broadcastChannelRegex = /<broadcast:channel>/i;
   const broadcastHereRegex = /<broadcast:here>/i;
 
-  if (!result.hasChannel && (plainChannelRegex.test(content) || broadcastChannelRegex.test(content))) {
+  if (!result.hasChannel && (plainChannelRegex.test(contentWithoutCode) || broadcastChannelRegex.test(contentWithoutCode))) {
     result.hasChannel = true;
     logger.info('✅ [SPECIAL-MENTION] Found @channel mention (plain text or broadcast token)');
   }
 
-  if (!result.hasHere && (plainHereRegex.test(content) || broadcastHereRegex.test(content))) {
+  if (!result.hasHere && (plainHereRegex.test(contentWithoutCode) || broadcastHereRegex.test(contentWithoutCode))) {
     result.hasHere = true;
     logger.info('✅ [SPECIAL-MENTION] Found @here mention (plain text or broadcast token)');
   }

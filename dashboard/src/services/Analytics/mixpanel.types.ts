@@ -53,6 +53,9 @@ export const EVENTS = {
 
   // Unified Performance Event
   PERFORMANCE_METRIC: 'performance_metric',
+
+  // Settings/Preferences events
+  PREFERENCE_CHANGED: 'preference_changed',
 } as const;
 
 // Common property values (optional - you can use plain strings)
