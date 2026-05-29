@@ -57,6 +57,7 @@ interface CalendarDayViewProps {
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
   onDeleteClick?: (call: Call) => void;
+  onHideClick?: (call: Call, options?: { isSeries?: boolean }) => void;
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
   otherUsersCalls?: OtherUserCalls[];
   initialOpenCallId?: string | null;
@@ -80,6 +81,7 @@ interface DayViewCallCardProps {
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
   onDeleteClick?: (call: Call) => void;
+  onHideClick?: (call: Call, options?: { isSeries?: boolean }) => void;
   onResizePointerDown: (e: React.PointerEvent, call: Call) => void;
 }
 
@@ -99,6 +101,7 @@ function DayViewCallCard({
   onDownloadTranscript,
   onEditClick,
   onDeleteClick,
+  onHideClick,
   onResizePointerDown,
 }: DayViewCallCardProps): ReactElement {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -108,7 +111,8 @@ function DayViewCallCard({
 
   const isEnded = call.status === CallStatus.ENDED;
   const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
-  const isDeclined = meetingStatus === MeetingStatus.DECLINED;
+  const isDeclined =
+    meetingStatus === MeetingStatus.DECLINED || meetingStatus === MeetingStatus.HIDDEN;
   const isMaybe = meetingStatus === MeetingStatus.MAYBE;
 
   return (
@@ -247,6 +251,14 @@ function DayViewCallCard({
                   }
                 : undefined
             }
+            onHideClick={
+              onHideClick
+                ? options => {
+                    setOpenCallId(null);
+                    onHideClick(call, options);
+                  }
+                : undefined
+            }
           />
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
@@ -338,6 +350,7 @@ const CalendarDayView = ({
   onDownloadTranscript,
   onEditClick,
   onDeleteClick,
+  onHideClick,
   onCreateCallAtSlot,
   otherUsersCalls = [],
   initialOpenCallId,
@@ -625,6 +638,7 @@ const CalendarDayView = ({
                         onDownloadTranscript={onDownloadTranscript}
                         {...(onEditClick ? { onEditClick } : {})}
                         {...(onDeleteClick ? { onDeleteClick } : {})}
+                        {...(onHideClick ? { onHideClick } : {})}
                         onResizePointerDown={onResizePointerDown}
                       />
                     );
@@ -693,6 +707,7 @@ const CalendarDayView = ({
                           onDownloadTranscript={onDownloadTranscript}
                           {...(onEditClick ? { onEditClick } : {})}
                           {...(onDeleteClick ? { onDeleteClick } : {})}
+                          {...(onHideClick ? { onHideClick } : {})}
                           onResizePointerDown={onResizePointerDown}
                         />
                       );

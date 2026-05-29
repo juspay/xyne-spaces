@@ -34,6 +34,7 @@ interface CalendarCallPopupProps {
   onDownloadTranscript?: () => void;
   onEditClick?: (() => void) | undefined;
   onDeleteClick?: (() => void) | undefined;
+  onHideClick?: ((options?: { isSeries?: boolean }) => void) | undefined;
 }
 
 function formatPopupDate(startsAt: number | string): string {
@@ -73,7 +74,7 @@ function RsvpBadge({ status }: { status: MeetingStatus }): React.ReactElement | 
       </span>
     );
   }
-  if (status === MeetingStatus.DECLINED) {
+  if (status === MeetingStatus.DECLINED || status === MeetingStatus.HIDDEN) {
     return (
       <span className='absolute -bottom-0.5 -right-0.5 flex items-center justify-center size-3.5 rounded-full bg-red-500 border border-background'>
         <X className='size-2 text-white stroke-[3]' />
@@ -129,6 +130,7 @@ const CalendarCallPopup = ({
   onDownloadTranscript,
   onEditClick,
   onDeleteClick,
+  onHideClick,
 }: CalendarCallPopupProps): React.ReactElement => {
   const isEnded = call.status === CallStatus.ENDED;
   const isRecurring = !!call.recurringSeriesId;
@@ -137,6 +139,7 @@ const CalendarCallPopup = ({
   const isExternalCalendar = isGoogleCalendar || isMicrosoftCalendar;
 
   const [seriesPrompt, setSeriesPrompt] = useState<RsvpChoice | null>(null);
+  const [showHideSeriesPrompt, setShowHideSeriesPrompt] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [localRsvp, setLocalRsvp] = useState<MeetingStatus | null>(null);
   const [isGuestsExpanded, setIsGuestsExpanded] = useState(false);
@@ -199,6 +202,14 @@ const CalendarCallPopup = ({
       setSeriesPrompt(status);
     } else {
       void submitRsvp(status, false);
+    }
+  };
+
+  const handleHideClick = (): void => {
+    if (isRecurring) {
+      setShowHideSeriesPrompt(true);
+    } else {
+      onHideClick?.();
     }
   };
 
@@ -378,6 +389,47 @@ const CalendarCallPopup = ({
     );
   }
 
+  // ── Hide series scope confirmation ───────────────────────────────────────
+  if (showHideSeriesPrompt) {
+    return (
+      <div className='p-4'>
+        <div className='mb-4'>
+          <div className='size-12 rounded-2xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center'>
+            <Headphones className='size-6 text-blue-500 dark:text-blue-400' />
+          </div>
+        </div>
+        <h3 className='font-semibold text-foreground text-base mb-1'>Hide recurring event</h3>
+        <p className='text-sm text-muted-foreground mb-5'>
+          This call repeats. Hide just this occurrence or all future calls?
+        </p>
+        <div className='flex justify-end gap-2'>
+          <button
+            onClick={() => {
+              onHideClick?.();
+              setShowHideSeriesPrompt(false);
+            }}
+            data-track-category='Calls'
+            data-track-name='hide-this-call'
+            className='text-sm px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer text-foreground'
+          >
+            This Call
+          </button>
+          <button
+            onClick={() => {
+              onHideClick?.({ isSeries: true });
+              setShowHideSeriesPrompt(false);
+            }}
+            data-track-category='Calls'
+            data-track-name='hide-all-calls'
+            className='text-sm px-4 py-2 rounded-lg bg-action-primary text-action-primary-foreground hover:opacity-90 transition-opacity cursor-pointer'
+          >
+            All Calls
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── Main popup view ───────────────────────────────────────────────────────
   const participants = call.participants ?? [];
 
@@ -387,7 +439,8 @@ const CalendarCallPopup = ({
     rsvpCounts.set(status, (rsvpCounts.get(status) ?? 0) + 1);
   }
   const yesCount = rsvpCounts.get(MeetingStatus.ACCEPTED) ?? 0;
-  const noCount = rsvpCounts.get(MeetingStatus.DECLINED) ?? 0;
+  const noCount =
+    (rsvpCounts.get(MeetingStatus.DECLINED) ?? 0) + (rsvpCounts.get(MeetingStatus.HIDDEN) ?? 0);
   const waitingCount = participants.length - yesCount - noCount;
   const rsvpSummaryParts: string[] = [];
   if (yesCount > 0) rsvpSummaryParts.push(`${yesCount} yes`);
@@ -432,6 +485,21 @@ const CalendarCallPopup = ({
                 title='Delete call'
                 data-track-category='Calls'
                 data-track-name='popup-delete-call'
+                className='text-muted-foreground hover:text-destructive transition-colors p-0.5 cursor-pointer'
+              >
+                <Trash2 className='size-4' />
+              </button>
+            )}
+          {!isEnded &&
+            !isExternalCalendar &&
+            currentUserId !== organizerUserId &&
+            currentParticipant &&
+            onHideClick && (
+              <button
+                onClick={handleHideClick}
+                title='Hide call'
+                data-track-category='Calls'
+                data-track-name='popup-hide-call'
                 className='text-muted-foreground hover:text-destructive transition-colors p-0.5 cursor-pointer'
               >
                 <Trash2 className='size-4' />

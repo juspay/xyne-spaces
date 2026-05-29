@@ -5,7 +5,13 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { roomActor } from '../../machines/roomMachine';
-import { CallType, CallStatus, ChannelScopeType, InvitationResponse } from '@xyne/shared';
+import {
+  CallType,
+  CallStatus,
+  ChannelScopeType,
+  InvitationResponse,
+  MeetingStatus,
+} from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -68,6 +74,8 @@ interface UseCallHistoryReturn {
   deleteModalCall: ScheduledCall | null;
   handleDeleteConfirm: (cancelEntireSeries: boolean) => void;
   closeDeleteModal: () => void;
+  /** Hide a call (participant-only, irreversible) */
+  handleHideClick: (call: ScheduledCall, options?: { isSeries?: boolean }) => void;
   /** Open the edit-call modal for a specific call */
   handleEditClick: (call: Call) => void;
   editModalOpen: boolean;
@@ -162,6 +170,15 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
         return false;
       }
       if (!(call.endsAt && new Date(call.endsAt).getTime() > now)) {
+        return false;
+      }
+      // Exclude calls the current user has hidden
+      if (
+        userId &&
+        call.participants?.some(
+          p => p.userId === userId && p.meetingStatus === MeetingStatus.HIDDEN,
+        )
+      ) {
         return false;
       }
       // Only show calls where the user is an actual participant. This filters out
@@ -534,6 +551,16 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     setDeleteModalOpen(true);
   };
 
+  const handleHideClick = (call: ScheduledCall, options?: { isSeries?: boolean }): void => {
+    void callService
+      .hideCall(call.externalId, options)
+      .then(() => toast.success('Call hidden'))
+      .catch(error => {
+        logger.error(Logger.API_CALL_FAILED, { message: 'Failed to hide call', error });
+        toast.error('Failed to hide call');
+      });
+  };
+
   const closeDeleteModal = (): void => {
     setDeleteModalOpen(false);
     setDeleteModalCall(null);
@@ -736,6 +763,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     deleteModalCall,
     handleDeleteConfirm,
     closeDeleteModal,
+    handleHideClick,
     handleEditClick,
     editModalOpen,
     editModalCall,

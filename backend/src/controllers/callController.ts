@@ -19,7 +19,7 @@ import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import z from 'zod';
 import { TrackSource } from 'livekit-server-sdk';
-import { UpdateRsvpSchema } from '@/validators/callValidator';
+import { HideCallSchema, UpdateRsvpSchema } from '@/validators/callValidator';
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@/services/storage/pathUtils';
@@ -172,6 +172,89 @@ export class CallController {
 
       logger.error('Failed to update RSVP:', error);
       res.status(500).json({ success: false, error: 'Failed to update RSVP' });
+    }
+  };
+
+  hideCall = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const { isSeries } = HideCallSchema.parse(req.body);
+      const now = new Date();
+
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (call.status === CallStatus.CANCELLED) {
+        res.status(400).json({ success: false, error: 'Cannot hide a cancelled call' });
+        return;
+      }
+
+      if (call.callOrigin === CallOrigin.GOOGLE_CALENDAR || call.callOrigin === CallOrigin.MICROSOFT_CALENDAR) {
+        res.status(400).json({ success: false, error: 'Hiding external calendar events is not supported yet' });
+        return;
+      }
+
+      if (call.createdByUserId === userId) {
+        res.status(403).json({ success: false, error: 'Organizers cannot hide their own call — use cancel instead' });
+        return;
+      }
+
+      const participant = await repositories.calls.findParticipant(call.id, userId);
+      if (!participant) {
+        res.status(403).json({ success: false, error: 'You are not a participant of this call' });
+        return;
+      }
+
+      if (participant.meetingStatus === MeetingStatus.HIDDEN) {
+        res.status(400).json({ success: false, error: 'Call is already hidden' });
+        return;
+      }
+
+      const updatedCount = await db.$transaction(async tx => {
+        await repositories.calls.updateParticipantMeetingStatus(
+          participant.id,
+          MeetingStatus.HIDDEN,
+          now,
+          tx,
+        );
+
+        if (isSeries && call.recurringSeriesId) {
+          return repositories.calls.updateRecurringSeriesMeetingStatus({
+            recurringSeriesId: call.recurringSeriesId,
+            userId,
+            meetingStatus: MeetingStatus.HIDDEN,
+            respondedAt: now,
+            tx,
+          });
+        }
+
+        return 1;
+      });
+
+      res.json({
+        success: true,
+        message: 'Call hidden successfully',
+        seriesUpdated: Boolean(isSeries && call.recurringSeriesId),
+        instanceCount: updatedCount,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message || 'Invalid request body' });
+        return;
+      }
+
+      logger.error('Failed to hide call:', error);
+      res.status(500).json({ success: false, error: 'Failed to hide call' });
     }
   };
 
