@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 
@@ -17,6 +17,7 @@ interface SelectorProps {
   icon?: React.ReactElement;
   noBorder?: boolean;
   isItemDisabled?: (item: StatusItem) => boolean;
+  onOpenChange?: (isOpen: boolean) => void;
 }
 
 /**
@@ -31,6 +32,7 @@ export const Selector: React.FC<SelectorProps> = ({
   icon,
   noBorder,
   isItemDisabled,
+  onOpenChange,
 }) => {
   const options: SelectorOption[] = useMemo(() => {
     return items.map(item => ({
@@ -40,6 +42,13 @@ export const Selector: React.FC<SelectorProps> = ({
       disabled: isItemDisabled?.(item) ?? false,
     }));
   }, [items, icon, isItemDisabled]);
+
+  const [isOpen, setIsOpen] = useState(false);
+
+  const handleOpenChange = (open: boolean): void => {
+    setIsOpen(open);
+    onOpenChange?.(open);
+  };
 
   return (
     <EntitySelector
@@ -52,6 +61,8 @@ export const Selector: React.FC<SelectorProps> = ({
       isStatusSelector={true} // Triggers the border and divider styling
       width='auto'
       noBorder={noBorder || false}
+      isOpen={isOpen}
+      onOpenChange={handleOpenChange}
     />
   );
 };

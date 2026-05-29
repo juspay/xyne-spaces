@@ -3388,6 +3388,7 @@ export const mutators = defineMutators({
         priority: z.string().optional(),
         stageName: z.string().optional(),
         assignedTo: z.string().nullable().optional(),
+        ticketType: z.string().optional(),
         userGroupId: z.string().nullable().optional(),
         eta: z.number().optional(),
         boardId: z.string().optional(),
@@ -3407,6 +3408,7 @@ export const mutators = defineMutators({
           priority,
           stageName,
           assignedTo,
+          ticketType,
           userGroupId,
           eta,
           boardId,
@@ -3425,6 +3427,7 @@ export const mutators = defineMutators({
           priority?: TicketPriority;
           stageName?: string;
           assignedTo?: string | null;
+          ticketType?: string;
           userGroupId?: string;
           eta?: number;
           boardId?: string;
@@ -3446,6 +3449,9 @@ export const mutators = defineMutators({
         if (priority !== undefined) updateData.priority = priority as TicketPriority;
         if (stageName !== undefined) updateData.stageName = stageName;
         if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
+        if (ticketType !== undefined) {
+          updateData.ticketType = ticketType;
+        }
         if (userGroupId !== undefined && userGroupId !== null) {
           updateData.userGroupId = userGroupId;
         }
