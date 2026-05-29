@@ -399,6 +399,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     queries.userDelayedMessages(),
     { ttl: '10m' },
   );
+  const [userPreference, userPreferenceDetails] = useCachedQuery(
+    queries.getCurrentUserPreference({}),
+    { ttl: '10m' },
+  );
 
   const permissionsQuery = useTanStackQuery<PermissionsApiResponse>({
     queryKey: ['user-permissions', context.userID],
@@ -467,6 +471,13 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
       });
     }
 
+    if (isQueryCompleted(userPreferenceDetails)) {
+      stateMachineActor.send({
+        type: 'SET_USER_PREFERENCE',
+        userPreference,
+      });
+    }
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     users,
@@ -487,6 +498,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     userDraftsDetails.type,
     userDelayedMessages,
     userDelayedMessagesDetails.type,
+    userPreference,
+    userPreferenceDetails.type,
   ]);
 
   const areAllQueriesCompleted =

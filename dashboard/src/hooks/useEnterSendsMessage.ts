@@ -1,14 +1,14 @@
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
-import { queries } from '../zero/queries';
-import { useCachedQuery } from './useCachedQuery';
+import { useSelector } from '@xstate/react';
+import { stateMachineActor } from '../machines/stateMachine';
 
 export const useEnterSendsMessage = (): {
   enterSendsMessage: boolean;
   setEnterSendsMessage: (value: boolean) => void;
 } => {
   const zero = useZero();
-  const [userPreference] = useCachedQuery(queries.getCurrentUserPreference({}));
+  const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
 
   // Default true: Enter sends, Shift+Enter = new line
   const enterSendsMessage = userPreference?.enterSendsMessage ?? true;

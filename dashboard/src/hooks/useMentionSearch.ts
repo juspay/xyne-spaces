@@ -19,12 +19,20 @@ interface UseMentionSearchResult {
   clearResults: () => void;
 }
 
+interface UseMentionSearchOptions {
+  includeSpecialMentions?: boolean;
+}
+
 const getUserPicture = (name: string, picture: string | null): string => {
   if (picture) return picture;
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=0ea5e9&color=fff`;
 };
 
-export const useMentionSearch = (channelId?: string): UseMentionSearchResult => {
+export const useMentionSearch = (
+  channelId?: string,
+  options: UseMentionSearchOptions = {},
+): UseMentionSearchResult => {
+  const { includeSpecialMentions = true } = options;
   const context = useAuthContextValues();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -256,7 +264,7 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
     // Add special mentions (@channel and @here) only for non-DM channels
     const specialMentions: MentionResult[] = [];
 
-    if (shouldSearch && !isDMChannel && channelDataReady) {
+    if (includeSpecialMentions && shouldSearch && !isDMChannel && channelDataReady) {
       const allSpecialMentions = [
         {
           id: 'special-channel',
@@ -290,7 +298,15 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
 
     // Order: Special mentions (@channel, @here) -> Users -> User Groups
     return [...specialMentions, ...users, ...groups];
-  }, [users, groups, isDMChannel, shouldSearch, channelDataReady, searchQuery]);
+  }, [
+    users,
+    groups,
+    isDMChannel,
+    shouldSearch,
+    channelDataReady,
+    searchQuery,
+    includeSpecialMentions,
+  ]);
 
   const searchMentions = useCallback((query: string) => {
     setError(null);

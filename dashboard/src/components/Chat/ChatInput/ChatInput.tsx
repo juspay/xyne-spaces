@@ -27,7 +27,7 @@ import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import { AgentProgressIndicator } from './AgentProgressIndicator';
 import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import { websocketService } from '../../../services/clients/socketClient';
-import { processMessageForSending } from './ChatInput.utils';
+import { processMessageForSending, containsSpecialBroadcastMention } from './ChatInput.utils';
 import { saveDraft, useDraft } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
@@ -56,6 +56,7 @@ import { format } from 'date-fns';
 import { Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useUpcomingDelayedMessage } from '../../../hooks/useUserDelayedMessages';
+import { useThreadBroadcastMentions } from '../../../hooks/useThreadBroadcastMentions';
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
@@ -160,7 +161,14 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       return () => cancelAnimationFrame(rafId);
     }, [isMobile, isXyneAIOpen]);
 
-    const { results: mentionResults, allUsers, searchMentions } = useMentionSearch(channelId);
+    const { allowThreadBroadcastMentions } = useThreadBroadcastMentions();
+    const {
+      results: mentionResults,
+      allUsers,
+      searchMentions,
+    } = useMentionSearch(channelId, {
+      includeSpecialMentions: !conversation?.conversationId || allowThreadBroadcastMentions,
+    });
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
     const channelResults = useChannelSearch(channelSearchQuery, 10);
     const conversationId = conversation?.conversationId;
@@ -453,6 +461,16 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
         const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
         const hasFiles = files && files.length > 0;
+        const hasThreadBroadcastMention =
+          !!conversationId &&
+          !allowThreadBroadcastMentions &&
+          containsSpecialBroadcastMention(processedHtml);
+
+        if (hasThreadBroadcastMention) {
+          toast.warning('Not allowed in threads', {
+            description: '@channel and @here are disabled in thread replies.',
+          });
+        }
         const scopeType =
           channel?.scopeType && channel.scopeType !== ChannelScopeType.DEFAULT
             ? channel.scopeType
@@ -711,6 +729,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         allUsersForMentionResolution,
         onMessageChange,
         isOffline,
+        allowThreadBroadcastMentions,
       ],
     );
 
@@ -726,6 +745,15 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         }
         const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
         const hasFiles = files.length > 0;
+        const hasThreadBroadcastMention =
+          !!conversationId &&
+          !allowThreadBroadcastMentions &&
+          containsSpecialBroadcastMention(processedHtml);
+        if (hasThreadBroadcastMention) {
+          toast.warning('Not allowed in threads', {
+            description: '@channel and @here are disabled in thread replies.',
+          });
+        }
         if (!processedHtml.trim() && !hasFiles) {
           toast.error('Cannot schedule an empty message');
           return;
@@ -762,6 +790,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         allUsersForMentionResolution,
         lookupId,
         setRecentScheduledFor,
+        allowThreadBroadcastMentions,
       ],
     );
 

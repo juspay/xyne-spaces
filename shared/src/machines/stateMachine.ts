@@ -60,6 +60,7 @@ export type Conversation = QueryResultType<typeof queries.channelConversationsPa
 export type DraftMessageDB = QueryResultType<typeof queries.userDrafts>[number];
 export type DelayedMessageDB = QueryResultType<typeof queries.userDelayedMessages>[number];
 export type UnreadActivity = QueryResultType<typeof queries.userUnreadActivities>[number];
+export type UserPreference = QueryResultType<typeof queries.getCurrentUserPreference>;
 
 // Metrics data for a single period
 export interface PeriodMetrics {
@@ -187,6 +188,7 @@ interface StateMachineContext {
   drafts: DraftMessages; // Draft messages per channel/conversation
   draftMessages: DraftMessageDB[];
   delayedMessages: DelayedMessageDB[];
+  userPreference: UserPreference;
   allUserGroups: UserGroup[];
   userGroupMappings: UserGroupMapping[];
   metrics: MetricsState;
@@ -220,6 +222,7 @@ type StateMachineEvent =
   | { type: 'ADD_USER_GROUP_MAPPINGS'; userGroupMappings: UserGroupMapping[] }
   | { type: 'ADD_USER_DRAFTS'; draftMessages: DraftMessageDB[] }
   | { type: 'ADD_USER_DELAYED_MESSAGES'; delayedMessages: DelayedMessageDB[] }
+  | { type: 'SET_USER_PREFERENCE'; userPreference: UserPreference }
   | { type: 'SET_METRICS'; metrics: Omit<MetricsState, 'loading' | 'error'> }
   | { type: 'SET_METRICS_LOADING'; loading: boolean }
   | { type: 'SET_METRICS_ERROR'; error: string | null }
@@ -473,6 +476,14 @@ export const stateMachine = setup({
         return context.delayedMessages;
       },
     }),
+    setUserPreference: assign({
+      userPreference: ({ context, event }) => {
+        if (event.type === 'SET_USER_PREFERENCE') {
+          return event.userPreference;
+        }
+        return context.userPreference;
+      },
+    }),
     setMetrics: assign({
       metrics: ({ context, event }) => {
         if (event.type === 'SET_METRICS') {
@@ -668,6 +679,7 @@ export const stateMachine = setup({
     drafts: JSON.parse(safeGetItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
     draftMessages: [],
     delayedMessages: [],
+    userPreference: undefined,
     allUserGroups: [],
     userGroupMappings: [],
     metrics: initialMetricsState,
@@ -731,6 +743,9 @@ export const stateMachine = setup({
         },
         ADD_USER_DELAYED_MESSAGES: {
           actions: 'addUserDelayedMessages',
+        },
+        SET_USER_PREFERENCE: {
+          actions: 'setUserPreference',
         },
         SET_METRICS: {
           actions: 'setMetrics',

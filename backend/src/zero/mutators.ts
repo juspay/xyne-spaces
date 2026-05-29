@@ -10591,6 +10591,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               channelSortOrder,
               enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -10619,6 +10620,40 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               channelSortOrder: ChannelSortOrder.RECENCY,
               enterSendsMessage,
+              allowThreadBroadcastMentions: false,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      setAllowThreadBroadcastMentions: defineMutator(
+        z.object({
+          id: z.string(),
+          allowThreadBroadcastMentions: z.boolean(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, allowThreadBroadcastMentions, timestamp } }) => {
+          logger.info('[PREFERENCE] allowThreadBroadcastMentions changed', {
+            userId: authData.sub,
+            allowThreadBroadcastMentions,
+          });
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', authData.sub).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              allowThreadBroadcastMentions,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions,
               createdAt: timestamp,
               updatedAt: timestamp,
             });

@@ -246,6 +246,21 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         </Radio>
       </RadioGroup>
     </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>
+          Allow @channel/@here in thread replies
+        </p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          When enabled, your thread replies can notify many channel members
+        </p>
+      </div>
+      <Switch
+        id='allow-thread-broadcast-mentions'
+        checked={state.allowThreadBroadcastMentions}
+        onCheckedChange={state.setAllowThreadBroadcastMentions}
+      />
+    </div>
     {linkOpenPrefIsRelevant() && (
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>
