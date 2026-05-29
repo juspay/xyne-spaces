@@ -90,23 +90,27 @@ class ScheduledCallNotificationService {
           return;
         }
 
-        // Filter out participants who declined the RSVP (NO) or have already joined the call
-        const [declinedUserIds, joinedUserIds] = await Promise.all([
+        // Filter out participants who declined, hidden the call, or have already joined
+        const [declinedUserIds, hiddenUserIds, joinedUserIds] = await Promise.all([
           repositories.calls.getParticipantIdsByMeetingStatus(callId, MeetingStatus.DECLINED),
+          repositories.calls.getParticipantIdsByMeetingStatus(callId, MeetingStatus.HIDDEN),
           repositories.calls.getParticipantIdsByResponse(callId, InvitationResponse.ACCEPTED),
         ]);
-        const excludedUserIdsSet = new Set([...declinedUserIds, ...joinedUserIds]);
+        const excludedUserIdsSet = new Set([...declinedUserIds, ...hiddenUserIds, ...joinedUserIds]);
 
-        // Send reminders to everyone except those who said NO or are already in the call
+        // Send reminders to everyone except those who said NO, hidden the call, or are already in the call
         const participantsToRemind = participantIds.filter(id => !excludedUserIdsSet.has(id));
 
         if (participantsToRemind.length === 0) {
-          logger.info(`All participants for call ${callExternalId} have either declined or already joined, skipping reminders`);
+          logger.info(`All participants for call ${callExternalId} have either declined, hidden, or already joined, skipping reminders`);
           return;
         }
 
         if (declinedUserIds.length > 0) {
           logger.info(`Skipping reminder for ${declinedUserIds.length} participant(s) who declined RSVP for call ${callExternalId}`);
+        }
+        if (hiddenUserIds.length > 0) {
+          logger.info(`Skipping reminder for ${hiddenUserIds.length} participant(s) who hid call ${callExternalId}`);
         }
         if (joinedUserIds.length > 0) {
           logger.info(`Skipping reminder for ${joinedUserIds.length} participant(s) who already joined call ${callExternalId}`);

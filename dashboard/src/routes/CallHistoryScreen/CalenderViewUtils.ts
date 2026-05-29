@@ -325,7 +325,8 @@ export function getCallEventProps(call: Call, currentUserId?: string) {
   const height = Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins));
   const isEnded = call.status === CallStatus.ENDED;
   const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
-  const isDeclined = meetingStatus === MeetingStatus.DECLINED;
+  const isDeclined =
+    meetingStatus === MeetingStatus.DECLINED || meetingStatus === MeetingStatus.HIDDEN;
   const isMaybe = meetingStatus === MeetingStatus.MAYBE;
 
   return {

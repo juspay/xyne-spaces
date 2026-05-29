@@ -306,6 +306,7 @@ export enum MeetingStatus {
   ACCEPTED = 'ACCEPTED',
   DECLINED = 'DECLINED',
   MAYBE = 'MAYBE',
+  HIDDEN = 'HIDDEN',
 }
 
 // @ts-ignore TS1294

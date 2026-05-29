@@ -60,6 +60,9 @@ router.post('/:callId/decline', callController.declineCall);
 // RSVP endpoint for scheduled calls
 router.post('/:callId/rsvp', callController.updateMeetingStatus);
 
+// Hide call endpoint (participant-only, irreversible)
+router.post('/:callId/hide', callController.hideCall);
+
 // Get call participants (for native Participants screen)
 router.get('/:callId/participants', callController.getCallParticipants);
 

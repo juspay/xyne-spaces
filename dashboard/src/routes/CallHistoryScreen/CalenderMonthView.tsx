@@ -66,6 +66,7 @@ interface CalendarMonthViewProps {
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
   onDeleteClick?: (call: Call) => void;
+  onHideClick?: (call: Call, options?: { isSeries?: boolean }) => void;
   onCreateCall?: (date: Date) => void;
   otherUsersCalls?: OtherUserCalls[];
   initialOpenCallId?: string | null;
@@ -101,6 +102,7 @@ const CalendarMonthView = ({
   onDownloadTranscript,
   onEditClick,
   onDeleteClick,
+  onHideClick,
   onCreateCall,
   otherUsersCalls = [],
   initialOpenCallId,
@@ -357,6 +359,14 @@ const CalendarMonthView = ({
                                           }
                                         : undefined
                                     }
+                                    onHideClick={
+                                      onHideClick
+                                        ? options => {
+                                            setOpenCallId(null);
+                                            onHideClick(call, options);
+                                          }
+                                        : undefined
+                                    }
                                   />
                                 </PopoverPrimitive.Content>
                               </PopoverPrimitive.Portal>
@@ -535,6 +545,15 @@ const CalendarMonthView = ({
                                                       setOpenOverflowCallId(null);
                                                       setOpenOverflowDay(null);
                                                       onDeleteClick(call);
+                                                    }
+                                                  : undefined
+                                              }
+                                              onHideClick={
+                                                onHideClick
+                                                  ? options => {
+                                                      setOpenOverflowCallId(null);
+                                                      setOpenOverflowDay(null);
+                                                      onHideClick(call, options);
                                                     }
                                                   : undefined
                                               }

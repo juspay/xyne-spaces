@@ -120,6 +120,10 @@ export interface UpdateRsvpRequest {
   isSeries?: boolean;
 }
 
+export interface HideCallRequest {
+  isSeries?: boolean;
+}
+
 // ============================================================================
 // CUSTOM ERROR CLASS
 // ============================================================================
@@ -161,6 +165,24 @@ export class CallService {
   async updateMeetingStatus(callId: string, data: UpdateRsvpRequest): Promise<void> {
     try {
       await apiInstance.post(`/calls/${callId}/rsvp`, data);
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  async hideCall(callId: string, data?: HideCallRequest): Promise<void> {
+    try {
+      await apiInstance.post(`/calls/${callId}/hide`, data ?? {});
     } catch (error) {
       if (error instanceof AxiosError && error.response?.data) {
         const errorData = error.response.data as unknown;

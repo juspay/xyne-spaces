@@ -6,6 +6,10 @@ export const UpdateRsvpSchema = z.object({
   isSeries: z.boolean().optional(),
 });
 
+export const HideCallSchema = z.object({
+  isSeries: z.boolean().optional(),
+});
+
 export type UpdateRsvpInput = z.infer<typeof UpdateRsvpSchema>;
 
 /**

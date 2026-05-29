@@ -150,6 +150,7 @@ const CallHistoryScreen = (): ReactElement => {
     deleteModalCall,
     handleDeleteConfirm,
     closeDeleteModal,
+    handleHideClick,
     handleEditClick,
     handleDeleteClick,
     editModalOpen,
@@ -947,6 +948,7 @@ const CallHistoryScreen = (): ReactElement => {
                     onGotoMessage={call => handleGotoTranscript(call)}
                     onDownloadTranscript={call => handleDownloadTranscript(call)}
                     onEditClick={call => handleEditClick(call)}
+                    onHideClick={(call, options) => handleHideClick(call, options)}
                     onCreateCall={handleCreateCallOnDay}
                     otherUsersCalls={otherUsersCallsArray}
                     initialOpenCallId={callIdParam}
@@ -961,6 +963,7 @@ const CallHistoryScreen = (): ReactElement => {
                     onGotoMessage={call => handleGotoTranscript(call)}
                     onDownloadTranscript={call => handleDownloadTranscript(call)}
                     onEditClick={call => handleEditClick(call)}
+                    onHideClick={(call, options) => handleHideClick(call, options)}
                     onCreateCallAtSlot={handleCreateCallAtSlot}
                     otherUsersCalls={otherUsersCallsArray}
                     initialOpenCallId={callIdParam}
@@ -976,6 +979,7 @@ const CallHistoryScreen = (): ReactElement => {
                     onGotoMessage={call => handleGotoTranscript(call)}
                     onDownloadTranscript={call => handleDownloadTranscript(call)}
                     onEditClick={call => handleEditClick(call)}
+                    onHideClick={(call, options) => handleHideClick(call, options)}
                     onCreateCallAtSlot={handleCreateCallAtSlot}
                     otherUsersCalls={otherUsersCallsArray}
                     initialOpenCallId={callIdParam}

@@ -309,6 +309,7 @@ enum MeetingStatus {
   ACCEPTED
   DECLINED
   MAYBE
+  HIDDEN
   @@schema("public")
 }
 
