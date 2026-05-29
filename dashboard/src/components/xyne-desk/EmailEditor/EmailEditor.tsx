@@ -187,6 +187,7 @@ export const EmailEditor = ({
     onCreate: ({ editor }) => {
       cb.current.onEditorReady?.(editor);
     },
+    autofocus: 'end',
     content: value || '',
     editable: !disabled && !readOnly,
     onUpdate: ({ editor }) => {
@@ -196,8 +197,8 @@ export const EmailEditor = ({
     },
     onBlur: () => cb.current.onBlur?.(),
     editorProps: {
-      scrollThreshold: 80,
-      scrollMargin: 80,
+      scrollThreshold: 0,
+      scrollMargin: 16,
       attributes: {
         class:
           'tiptap email-composer-editor prose prose-sm dark:prose-invert max-w-none focus:outline-none px-4 py-3 min-h-full',

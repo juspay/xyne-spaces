@@ -31,6 +31,7 @@ import {
   CheckCheck,
   Search,
   GitMerge,
+  Mail,
 } from 'lucide-react';
 import { ChannelVisibility, EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
@@ -2318,10 +2319,25 @@ const SupportTicketDetail = ({
   const emails = useMemo(() => (ticket?.emails as Email[] | undefined) ?? [], [ticket?.emails]);
   const emailCollapseState = useEmailCollapseState(emails);
 
+  const initiator = useMemo(() => {
+    if (emails.length === 0) return null;
+    const first = [...emails].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))[0];
+    if (!first?.from) return null;
+    return parseFromField(first.from);
+  }, [emails]);
+
   // When arriving via a mail deep-link (`?mail=<id>`), un-collapse the target
   // email so it's visible, then scroll to it with a brief yellow flash.
+  const scrolledForTargetRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!targetMailId || emails.length === 0) return;
+    if (!targetMailId) {
+      scrolledForTargetRef.current = null;
+      return;
+    }
+    if (emails.length === 0) return;
+    if (scrolledForTargetRef.current === targetMailId) return;
+    if (!emails.some(e => e.id === targetMailId)) return;
+    scrolledForTargetRef.current = targetMailId;
     emailCollapseState.expandOne(targetMailId);
     const raf = requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -2897,8 +2913,22 @@ const SupportTicketDetail = ({
                 )}
               </div>
               <div className='flex items-center gap-2 flex-shrink-0'>
-                <div className='pl-9'>
+                <div className='pl-9 flex items-center gap-3 flex-wrap'>
                   <TicketMetaRow ticket={ticket} boardId={boardId} />
+                  {initiator && (
+                    <div
+                      className='inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground whitespace-nowrap h-[24px]'
+                      title={
+                        initiator.email
+                          ? `Initiated by ${initiator.name} <${initiator.email}>`
+                          : `Initiated by ${initiator.name}`
+                      }
+                      aria-label={`Initiated by ${initiator.name}`}
+                    >
+                      <Mail size={12} className='shrink-0 text-muted-foreground' />
+                      <span className='truncate max-w-[160px]'>{initiator.name}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -3478,12 +3508,24 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
   });
 
   const emailIdsKey = useMemo(() => sortedEmails.map(e => e.id).join('|'), [sortedEmails]);
+  const prevIdsRef = useRef<Set<string>>(new Set(sortedEmails.map(e => e.id)));
   useEffect(() => {
-    if (sortedEmails.length <= 1) {
-      setCollapsedIds(new Set());
-      return;
-    }
-    setCollapsedIds(new Set(sortedEmails.slice(0, -1).map(e => e.id)));
+    setCollapsedIds(prev => {
+      const currentIds = new Set(sortedEmails.map(e => e.id));
+      const previousIds = prevIdsRef.current;
+      const next = new Set(prev);
+      for (const id of Array.from(next)) {
+        if (!currentIds.has(id)) next.delete(id);
+      }
+      for (const email of sortedEmails) {
+        if (!previousIds.has(email.id) && email.id !== lastEmailId) {
+          next.add(email.id);
+        }
+      }
+      if (lastEmailId) next.delete(lastEmailId);
+      prevIdsRef.current = currentIds;
+      return next;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emailIdsKey]);
 
@@ -3694,10 +3736,14 @@ const EmailThreadItem = ({
     <div
       id={`mail-${email.id}`}
       data-external-message-id={email.externalMessageId || undefined}
-      className={cn('w-full scroll-mt-20 transition-colors', isCollapsed ? 'py-3' : 'py-6')}
+      className={cn(
+        'w-full scroll-mt-20 transition-colors',
+        '[content-visibility:auto] [contain-intrinsic-size:auto_240px]',
+        !isCollapsed && 'py-6',
+      )}
     >
       <div
-        className={cn(headerClickable && 'cursor-pointer')}
+        className={cn(headerClickable && 'cursor-pointer', isCollapsed && 'py-3')}
         data-track-category='Support'
         data-track-name={isCollapsed ? 'ExpandEmail' : 'CollapseEmail'}
         onClick={headerClickable ? onToggleCollapse : undefined}

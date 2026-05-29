@@ -61,6 +61,7 @@ import { EmailTagWithAvatar } from '../EmailTagWithAvatar/EmailTagWithAvatar';
 import { RecipientSuggestionsDropdown } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
 import { AIComposerPanel } from '../AIComposerPanel/AIComposerPanel';
 import { stripCitationMarks } from '../../ui/TipTapExtensions/CitationMark';
+import { Popover } from '../../ui/Popover/Popover';
 
 import {
   buildContactPool,
@@ -1104,7 +1105,7 @@ export const EmailComposer = ({
         : null;
       const bodyContent = hasContent ? stripCitationMarks(emailContent) : '';
       const composedBody = activeSig
-        ? `${bodyContent}${bodyContent ? '<br><br>' : ''}${activeSig.content}`
+        ? `${bodyContent}${bodyContent ? '<br>' : ''}${activeSig.content}`
         : bodyContent;
       const uniqueToken = `<span style="font-size:1px;color:transparent;display:inline-block;line-height:0;">${
         typeof crypto !== 'undefined' && crypto.randomUUID
@@ -1536,19 +1537,52 @@ export const EmailComposer = ({
           </div>
         </div>
       )}
-      {selectedSignatureId && (
-        <div className='px-4 pb-3'>
-          <div className='border-t border-border pt-2'>
-            <p className='text-xs text-muted-foreground mb-1'>--</p>
-            <div
-              className='text-sm text-muted-foreground prose prose-sm max-w-none'
-              dangerouslySetInnerHTML={{
-                __html: signatures?.find(s => s.id === selectedSignatureId)?.content ?? '',
-              }}
-            />
-          </div>
-        </div>
-      )}
+      {selectedSignatureId &&
+        (() => {
+          const activeSig = signatures?.find(s => s.id === selectedSignatureId);
+          if (!activeSig) return null;
+          const sigName = activeSig.name?.trim() || 'Default';
+          return (
+            <div className='px-4 pb-3'>
+              <Popover
+                trigger={
+                  <button
+                    type='button'
+                    className='inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 px-2 py-1 rounded-md border border-border/60 transition-colors max-w-full'
+                    aria-label={`Signature ${sigName}. Click to preview`}
+                  >
+                    <Signature size={12} className='shrink-0' />
+                    <span className='font-medium'>Signature</span>
+                    <span className='text-muted-foreground/60' aria-hidden='true'>
+                      ·
+                    </span>
+                    <span className='truncate max-w-[160px]'>{sigName}</span>
+                  </button>
+                }
+                side='top'
+                align='start'
+                sideOffset={6}
+                className='p-3 w-[min(420px,90vw)]'
+              >
+                <div className='space-y-2'>
+                  <div className='flex items-center justify-between gap-2'>
+                    <span className='text-xs font-medium text-foreground truncate'>{sigName}</span>
+                    <span className='text-[10px] uppercase tracking-wide text-muted-foreground shrink-0'>
+                      Preview
+                    </span>
+                  </div>
+                  <div className='border-t border-border pt-2 max-h-[280px] overflow-auto'>
+                    <p className='text-xs text-muted-foreground mb-1'>--</p>
+                    <div
+                      className='text-sm text-foreground/80 prose prose-sm dark:prose-invert max-w-none'
+                      dangerouslySetInnerHTML={{ __html: activeSig.content ?? '' }}
+                    />
+                  </div>
+                </div>
+              </Popover>
+            </div>
+          );
+        })()}
     </>
   );
 

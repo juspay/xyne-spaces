@@ -602,6 +602,21 @@
     font-weight: 600;
   }
 
+  .email-composer-editor table.chat-table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .email-composer-editor table.chat-table th,
+  .email-composer-editor table.chat-table td {
+    min-width: 80px;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+  }
+
   /* Link styles in chat input for classic and summer_breeze themes */
   .chat-input-field .ProseMirror a {
     color: var(--link-color);
