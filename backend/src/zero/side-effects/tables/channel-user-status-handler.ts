@@ -19,19 +19,10 @@ export class ChannelUserStatusSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
-    const hasViewChange =
-      args?.lastViewedAt !== undefined && prev.lastViewedAt !== args.lastViewedAt;
     const hasReadClear =
       args?.unreadCount === 0 && prev.unreadCount > 0;
 
-    if (!hasViewChange && !hasReadClear) {
-      return;
-    }
-
-    // Only send if there was actually unread content to clear
-    if (prev.unreadCount === 0) {
-      return;
-    }
+    if (!hasReadClear) return;
 
     try {
       await notificationService.createNotification(prev.userId, {

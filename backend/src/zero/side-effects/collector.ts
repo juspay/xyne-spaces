@@ -148,6 +148,7 @@ export async function collectSideEffectJobs(
     if (entity) {
       previousValue = {
         lastReadAt: entity.lastReadAt,
+        lastReplyAt: entity.lastReplyAt,
         conversationId: entity.conversationId,
         userId: entity.userId,
       };
