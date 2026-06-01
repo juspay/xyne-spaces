@@ -122,5 +122,6 @@ router.post('/:externalId/rejoin', resolveCallSession, callLobbyController.rejoi
 router.post('/:externalId/messages', resolveCallSession, requireCallParticipant, callLobbyController.sendMessage);
 router.get('/:externalId/messages', resolveCallSession, requireCallParticipant, callLobbyController.getMessages);
 router.get('/:externalId/participants', resolveCallSession, requireCallParticipant, callLobbyController.getParticipants);
+router.get('/:externalId/invite-url', resolveCallSession, callLobbyController.getInviteUrl);
 
 export default router;

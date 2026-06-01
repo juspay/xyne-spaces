@@ -1,0 +1,4 @@
+/* dashboard-external global styles
+ * Imports the dashboard's global.css which contains all theme CSS vars + tailwind directives
+ */
+@import '../../dashboard/src/global.css';

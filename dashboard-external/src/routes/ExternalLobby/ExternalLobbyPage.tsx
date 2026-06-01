@@ -13,8 +13,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { CallType } from '@xyne/shared';
-import { callLobbyService, type CallInfo } from '../../services/Call/callLobbyService';
-import { usePlatform } from '../../hooks/usePlatform';
+import { callLobbyService, type CallInfo } from '@/services/Call/callLobbyService';
+import { usePlatform } from '@/hooks/usePlatform';
 import { ExternalCallView } from './ExternalCallView';
 
 // ---------------------------------------------------------------------------

@@ -13,23 +13,10 @@ import { addHHMMDuration } from '@/utils/dateUtils';
 import { emailService } from '@/services/emailService';
 import { renderCallInvitationHtml, buildCallInvitationIcs } from '@xyne/shared';
 import { sanitizeEmailBodyHtml } from '@/utils/contentUtils';
-import { config } from '@/config/env';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { Prisma } from '@prisma/client';
 import rruleLib from 'rrule';
 
-// Precedence: x-original-host (ingress) → FRONTEND_URL → config fallback.
-function resolveFrontendUrl(req: Request): string {
-  const originalHost = req.headers['x-original-host'];
-  if (originalHost && typeof originalHost === 'string' && originalHost.trim()) {
-    const protocol =
-      (req.headers['x-forwarded-proto'] as string | undefined) || req.protocol || 'https';
-    return `${protocol}://${originalHost.trim()}`;
-  }
-  const envUrl = (process.env.FRONTEND_URL ?? '').trim();
-  if (envUrl) return envUrl;
-  if (config.slackFrontendUrl) return config.slackFrontendUrl;
-  throw new Error('Frontend URL is not configured');
-}
 const { RRule } = rruleLib;
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
@@ -52,7 +39,6 @@ async function sendCallInvitationReply(
       orgName?: string;
       timezone?: string;
     };
-    frontendUrl: string;
   },
   tx: Prisma.TransactionClient,
 ): Promise<void> {
@@ -62,7 +48,7 @@ async function sendCallInvitationReply(
     params.invitation.organizerName || organizer?.name || organizer?.email || 'A colleague';
   const organizerEmail = params.invitation.organizerEmail || organizer?.email || '';
   const timezone = params.invitation.timezone || 'UTC';
-  const joinUrl = `${params.frontendUrl}/call/${params.externalId}`;
+  const joinUrl = buildCallInviteUrl(params.externalId);
 
   const renderedBody = renderCallInvitationHtml({
     title,
@@ -384,7 +370,6 @@ export class ScheduleCallController {
               organizerUserId: userId,
               externalInvitees: externalInvitees!,
               invitation: invitation!,
-              frontendUrl: resolveFrontendUrl(req).replace(/\/+$/, ''),
             },
             tx,
           );

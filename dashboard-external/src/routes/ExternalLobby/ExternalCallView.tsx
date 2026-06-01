@@ -4,9 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import { ConnectionState } from 'livekit-client';
 import { RoomAudioRenderer } from '@livekit/components-react';
 import { CallType } from '@xyne/shared';
-import { roomActor } from '../../machines/roomMachine';
-import { FullCallView } from '../../components/Call/CallViews/FullCallView';
-import { callLobbyService } from '../../services/Call/callLobbyService';
+import { roomActor } from '@/machines/roomMachine';
+import { FullCallView } from '@/components/Call/CallViews/FullCallView';
+import { callLobbyService } from '@/services/Call/callLobbyService';
 
 interface ExternalCallViewProps {
   token: string;
@@ -35,6 +35,7 @@ export function ExternalCallView({
   callId: _callId,
   externalId,
   callType,
+  participantId,
   onDisconnected,
 }: ExternalCallViewProps) {
   const wasConnectedRef = useRef(false);
@@ -150,7 +151,7 @@ export function ExternalCallView({
         isAIAssistantEnabled={false}
         aiController={null}
         requestedAiController={false}
-        localParticipantId={localParticipant?.identity ?? null}
+        localParticipantId={participantId}
         callId={externalId}
         connectionState={connectionState ?? ConnectionState.Disconnected}
         machineState={machineState}

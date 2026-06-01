@@ -76,6 +76,7 @@ const envSchema = Joi.object({
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
   FRONTEND_URL: Joi.string().allow('').default(''),
+  EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default(''),
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
@@ -390,6 +391,7 @@ export const config = {
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,
   frontendUrl: envVars.FRONTEND_URL,
+  externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS
     ? envVars.SLACK_MIGRATION_APPROVALS.split(',')

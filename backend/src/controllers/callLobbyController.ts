@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { InvitationResponse } from '@prisma/client';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { repositories } from '@/database/repositories';
 import { livekitService } from '@/services/liveKitService';
 import { logger } from '@/utils/logger';
@@ -288,6 +289,22 @@ export const callLobbyController = {
       res.json({ participants });
     } catch (err) {
       logger.error(`[call-lobby] getParticipants failed | error=${err}`);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  /**
+   * GET /api/call-lobby/:externalId/invite-url
+   * Returns the full external call invite URL for this call.
+   * No session required — the URL is constructed from backend config.
+   */
+  getInviteUrl: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { externalId } = req.params;
+      const url = buildCallInviteUrl(externalId);
+      res.json({ url });
+    } catch (err) {
+      logger.error(`[call-lobby] getInviteUrl failed | error=${err}`);
       res.status(500).json({ error: 'Internal server error' });
     }
   },
