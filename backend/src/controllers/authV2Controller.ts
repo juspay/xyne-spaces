@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
-import { UserStatus } from '@prisma/client';
+import { AuthProvider, UserStatus } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
@@ -449,7 +449,7 @@ export class AuthV2Controller {
       const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('google_access_token', JSON.stringify({
         user: googleUserData,
-        provider: 'google',
+        provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token,
         accessToken: access_token,
       }), {
@@ -778,7 +778,7 @@ export class AuthV2Controller {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
         res.cookie('google_access_token', JSON.stringify({
           user: googleUserData,
-          provider: 'google',
+          provider: AuthProvider.GOOGLE,
           refreshToken: refresh_token,
           accessToken: access_token,
         }), {
@@ -857,7 +857,7 @@ export class AuthV2Controller {
       // Store pending auth data for later loginWorkspace/createOrg call (multi-workspace case)
       res.cookie('google_access_token', JSON.stringify({
         user: googleUserData,
-        provider: 'google',
+        provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token,
         accessToken: access_token,
       }), {
@@ -995,7 +995,7 @@ export class AuthV2Controller {
       // Store all Google auth data in one cookie (until workspace selection)
       const customToken = {
         user: googleUserData,
-        provider: 'google',
+        provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token || null,
         accessToken: access_token || null,
       };
@@ -1796,7 +1796,7 @@ export class AuthV2Controller {
             googleId: decoded.sub,
             picture: decoded.picture,
           },
-          provider: 'google',
+          provider: AuthProvider.GOOGLE,
           pendingRefreshToken: undefined,
           pendingAccessToken: undefined,
         };
