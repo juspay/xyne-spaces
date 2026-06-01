@@ -3,9 +3,32 @@ import { logger } from '@/utils/logger';
 import { emailClassificationQueue, type EmailClassificationJobData } from '@/queues/emailClassificationQueue';
 import { EmailClassificationService } from '@/services/emailClassificationService';
 import { DatabaseClient } from '@/database/client';
+import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
+import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import { syncUserWorkload } from '@/utils/workloadUtils';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { activityService } from '@/services/activity/activityService';
+import { ActivityClassification, ActivityType } from '@prisma/client';
+import type { BoardMetadata } from '@xyne/shared';
 
 const emailClassificationService = new EmailClassificationService();
 const prisma = DatabaseClient.getInstance();
+const SYSTEM_ACTOR = 'system';
+
+function shouldAssignTicketPerson(
+  boardId: string | null,
+  groupChanged: boolean,
+  ticketIsUnassigned: boolean,
+  effectiveGroupId: string | null,
+): boolean {
+  // ASSIGN RULE:
+  // 1. Group changed → assign to someone in the new group
+  // 2. Ticket is unassigned + classification yielded a group → assign
+  return boardId !== null && (
+    groupChanged ||
+    (ticketIsUnassigned && effectiveGroupId !== null)
+  );
+}
 
 class EmailClassificationWorker {
   private isInitialized = false;
@@ -36,43 +59,265 @@ class EmailClassificationWorker {
     const { ticketId, channelId, subject, body, groupId } = job.data;
     logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId}`);
 
-    const classificationData = await emailClassificationService.classify(channelId, subject, body);
-    if (!classificationData) return;
+    let classificationData: {
+      result: { category: string; subCategory: string | null; rawOutput: Record<string, unknown>; priority?: any };
+      config: any;
+    } | null = null;
 
-    const { result, config } = classificationData;
-    const resolvedGroupId = await emailClassificationService.resolveUserGroup(result, config);
-    const effectiveGroupId = resolvedGroupId ?? groupId ?? null;
+    try {
+      classificationData = await emailClassificationService.classify(channelId, subject, body);
+    } catch (error) {
+      logger.error(
+        `[EMAIL-CLASSIFICATION-WORKER] Classification failed for ticket ${ticketId}:`,
+        error instanceof Error ? error.message : error,
+      );
+      // Continue with fallback — classification failure shouldn't leave ticket unassigned
+    }
 
-    await emailClassificationService.storeOnTicket(ticketId, result, effectiveGroupId);
+    let resolvedGroupId: string | null = null;
+    let effectiveGroupId: string | null = groupId ?? null;
+
+    if (classificationData) {
+      const { result, config } = classificationData;
+      resolvedGroupId = await emailClassificationService.resolveUserGroup(result, config);
+      effectiveGroupId = resolvedGroupId ?? groupId ?? null;
+
+      // Only store if classification actually produced data
+      if (result && Object.keys(result.rawOutput ?? {}).length > 0) {
+        await emailClassificationService.storeOnTicket(ticketId, result, effectiveGroupId);
+      }
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        id: true,
+        userGroupId: true,
+        assignedTo: true,
+        boardId: true,
+        projectId: true,
+        channelId: true,
+        conversationId: true,
+        priority: true,
+      },
+    });
+    if (!ticket) {
+      logger.warn(`[EMAIL-CLASSIFICATION-WORKER] Ticket ${ticketId} not found, skipping assignment.`);
+      return;
+    }
+
+    const groupChanged = effectiveGroupId !== null && effectiveGroupId !== ticket.userGroupId;
+    const ticketIsUnassigned = !ticket.assignedTo;
 
     const priorityAboveThreshold =
-      result.priority &&
-      result.priority.confidence >= (config.priorityClassificationThreshold ?? 0.5);
+      classificationData?.result?.priority &&
+      classificationData.result.priority.confidence >= (classificationData.config.priorityClassificationThreshold ?? 0.5);
 
-    if (effectiveGroupId || priorityAboveThreshold) {
-      await prisma.ticket.update({
+    const shouldAssignPerson = shouldAssignTicketPerson(
+      ticket.boardId,
+      groupChanged,
+      ticketIsUnassigned,
+      effectiveGroupId,
+    );
+
+    const updatePayload: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
+
+    // Track meaningful updates separately from the automatic updatedAt bump
+    let hasMeaningfulUpdates = false;
+
+    if (groupChanged) {
+      updatePayload.userGroupId = effectiveGroupId;
+      hasMeaningfulUpdates = true;
+    }
+    if (priorityAboveThreshold) {
+      updatePayload.priority = classificationData!.result.priority!.priority;
+      updatePayload.aiPriority = classificationData!.result.priority!.priority;
+      hasMeaningfulUpdates = true;
+    }
+
+    let newAssignedTo: string | undefined;
+    let assignmentSucceeded = false;
+
+    if (shouldAssignPerson) {
+      try {
+        const boardRow = await prisma.board.findUnique({
+          where: { id: ticket.boardId! },
+          select: { metadata: true },
+        });
+        const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
+
+        if (boardMetadata?.fullRoleAssignment === true) {
+          const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+            ticketId,
+            userGroupId: effectiveGroupId!,
+            boardId: ticket.boardId!,
+            createdBy: SYSTEM_ACTOR,
+            projectId: ticket.projectId ?? undefined,
+          });
+          if (fullRoles.member) {
+            newAssignedTo = fullRoles.member;
+            assignmentSucceeded = true;
+            logger.info(
+              `[EMAIL-CLASSIFICATION-WORKER] Full-role assigned ticket ${ticketId}: member=${fullRoles.member}`,
+            );
+          }
+        } else {
+          const assignmentResult = await evaluateAssignmentRule(
+            effectiveGroupId!,
+            ticket.boardId!,
+            AssignmentType.TICKET_ASSIGNEE,
+            undefined,
+            ticket.projectId ?? undefined,
+          );
+          if (assignmentResult.assignedUserId) {
+            newAssignedTo = assignmentResult.assignedUserId;
+            assignmentSucceeded = true;
+            logger.info(
+              `[EMAIL-CLASSIFICATION-WORKER] Assigned ticket ${ticketId} to user ${newAssignedTo}`,
+            );
+          } else {
+            logger.warn(
+              `[EMAIL-CLASSIFICATION-WORKER] No eligible user for ticket ${ticketId}: ${assignmentResult.reason}`,
+            );
+          }
+        }
+
+        if (newAssignedTo) {
+          updatePayload.assignedTo = newAssignedTo;
+          hasMeaningfulUpdates = true;
+        }
+      } catch (error) {
+        logger.error(
+          `[EMAIL-CLASSIFICATION-WORKER] Assignment engine failed for ticket ${ticketId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+
+    if (hasMeaningfulUpdates) {
+      const updatedTicket = await prisma.ticket.update({
         where: { id: ticketId },
-        data: {
-          ...(effectiveGroupId && { userGroupId: effectiveGroupId }),
-          ...(priorityAboveThreshold && {
-            priority: result.priority!.priority,
-            aiPriority: result.priority!.priority,
-          }),
-        },
+        data: updatePayload,
       });
 
-      if (effectiveGroupId) {
-        logger.info(
-          resolvedGroupId
-            ? `[EMAIL-CLASSIFICATION-WORKER] Auto-assigned ticket ${ticketId} to group ${effectiveGroupId}`
-            : `[EMAIL-CLASSIFICATION-WORKER] Fell back to default group ${effectiveGroupId} for ticket ${ticketId}`,
+      try {
+        await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+      } catch (error) {
+        logger.warn(
+          `[EMAIL-CLASSIFICATION-WORKER] ticketMd sync failed for ticket ${ticketId}:`,
+          error,
         );
       }
-      if (priorityAboveThreshold) {
-        logger.info(
-          `[EMAIL-CLASSIFICATION-WORKER] Auto-set priority to ${result.priority!.priority} for ticket ${ticketId}`,
+
+      if (newAssignedTo && assignmentSucceeded) {
+        try {
+          await syncUserWorkload(
+            newAssignedTo,
+            effectiveGroupId!,
+            ticket.boardId!,
+            SYSTEM_ACTOR,
+          );
+          logger.info(
+            `[EMAIL-CLASSIFICATION-WORKER] Synced workload for user ${newAssignedTo}`,
+          );
+        } catch (error) {
+          logger.error(
+            `[EMAIL-CLASSIFICATION-WORKER] Workload sync failed for user ${newAssignedTo}:`,
+            error,
+          );
+        }
+      }
+    }
+
+    // Activity logging
+
+    if (newAssignedTo && assignmentSucceeded) {
+      const assignReason = resolvedGroupId
+        ? 'AI classification'
+        : 'Default channel group';
+
+      try {
+        // 1. Ticket activity row (appears in the ticket's activity log)
+        await prisma.ticketActivity.create({
+          data: {
+            ticketId,
+            updatedBy: SYSTEM_ACTOR,
+            activityType: ActivityType.ASSIGNED_TO,
+            value: {
+              field: 'assignedTo',
+              oldValue: ticket.assignedTo ?? null,
+              newValue: newAssignedTo,
+              reason: assignReason,
+              aiClassified: !!resolvedGroupId,
+            },
+          },
+        });
+        logger.info(`[EMAIL-CLASSIFICATION-WORKER] Created ticket activity for auto-assignment on ${ticketId}`);
+      } catch (error) {
+        logger.error(
+          `[EMAIL-CLASSIFICATION-WORKER] Failed to create ticket activity for ${ticketId}:`,
+          error,
         );
       }
+
+      try {
+        // 2. In-app notification activity (appears in the user's activity feed)
+        await activityService.createActivity({
+          userId: newAssignedTo,
+          actorAction: 'ticket_assigned',
+          actionSource: 'ticket',
+          actionSourceId: ticketId,
+          ticketId,
+          conversationId: ticket.conversationId ?? undefined,
+          channelId: ticket.channelId ?? undefined,
+          actorId: SYSTEM_ACTOR,
+          classification: ActivityClassification.ACTIONABLE,
+        });
+        logger.info(`[EMAIL-CLASSIFICATION-WORKER] Created in-app activity for user ${newAssignedTo} on ${ticketId}`);
+      } catch (error) {
+        logger.error(
+          `[EMAIL-CLASSIFICATION-WORKER] Failed to create in-app activity for ${ticketId}:`,
+          error,
+        );
+      }
+    }
+
+    if (priorityAboveThreshold) {
+      try {
+        await prisma.ticketActivity.create({
+          data: {
+            ticketId,
+            updatedBy: SYSTEM_ACTOR,
+            activityType: ActivityType.PRIORITY,
+            value: {
+              field: 'priority',
+              oldValue: ticket.priority ?? null,
+              newValue: classificationData!.result.priority!.priority,
+              reason: 'AI priority classification',
+            },
+          },
+        });
+        logger.info(`[EMAIL-CLASSIFICATION-WORKER] Created ticket activity for AI priority change on ${ticketId}`);
+      } catch (error) {
+        logger.error(
+          `[EMAIL-CLASSIFICATION-WORKER] Failed to create priority activity for ${ticketId}:`,
+          error,
+        );
+      }
+
+      logger.info(
+        `[EMAIL-CLASSIFICATION-WORKER] Set priority to ${classificationData!.result.priority!.priority} for ticket ${ticketId}`,
+      );
+    }
+
+    if (groupChanged) {
+      logger.info(
+        resolvedGroupId
+          ? `[EMAIL-CLASSIFICATION-WORKER] Mapped ticket ${ticketId} to AI-resolved group ${effectiveGroupId}`
+          : `[EMAIL-CLASSIFICATION-WORKER] Fell back to default group ${effectiveGroupId} for ticket ${ticketId}`,
+      );
     }
   }
 
