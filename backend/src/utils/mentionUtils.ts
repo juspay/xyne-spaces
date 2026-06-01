@@ -62,18 +62,19 @@ export async function extractMentionsFromContent(content: string): Promise<Extra
     }
   }
 
-  // Method 1: Extract from HTML span elements with data attributes (TipTap format)
-  // First, find all span tags with the mention class
-  const spanTagRegex = /<span[^>]*class="[^"]*chat-input-mention[^"]*"[^>]*>@[^<]+<\/span>/gi;
+  // Method 1: Extract from HTML span elements with data attributes
+  // Handles TipTap format (class="chat-input-mention") and
+  // BlockKit-parsed format (data-mention data-mention-type='user') with single or double quotes
+  const spanTagRegex = /<span\b[^>]*(?:class="[^"]*chat-input-mention[^"]*"|data-mention(?:\s|>))[^>]*>(?:@[^<]*)?<\/span>|<span\b[^>]*\bdata-user-id=["'][^"']+["'][^>]*>(?:@[^<]*)?<\/span>/gi;
   let spanMatch;
 
   while ((spanMatch = spanTagRegex.exec(content)) !== null) {
     const spanTag = spanMatch[0];
     
-    const userIdMatch = spanTag.match(/data-user-id="([^"]+)"/i);
-    const usernameMatch = spanTag.match(/data-username="([^"]+)"/i);
-    const userEmailMatch = spanTag.match(/data-user-email="([^"]*)"/i);
-    const userPictureMatch = spanTag.match(/data-user-picture="([^"]*)"/i);
+    const userIdMatch = spanTag.match(/data-user-id=["']([^"']+)["']/i);
+    const usernameMatch = spanTag.match(/data-username=["']([^"']+)["']/i);
+    const userEmailMatch = spanTag.match(/data-user-email=["']([^"']*)["']/i);
+    const userPictureMatch = spanTag.match(/data-user-picture=["']([^"']*)["']/i);
 
     if (!userIdMatch || !usernameMatch) {
       logger.warn(`⚠️ [MENTION-HTML] Skipping span tag missing required attributes: ${spanTag.substring(0, 100)}`);

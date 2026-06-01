@@ -62,7 +62,7 @@ async function replaceEmojisInContent(content: string): Promise<string> {
 export function extractMentionedUserIdsFromContent(content?: string | null): string[] {
   if (!content) return [];
 
-  const regex = /<span\b[^>]*\bdata-user-id="([^"]+)"[^>]*>/g;
+  const regex = /<span\b[^>]*\bdata-user-id=["']([^"']+)["'][^>]*>/g;
   const userIds: string[] = [];
 
   for (const match of content.matchAll(regex)) {
