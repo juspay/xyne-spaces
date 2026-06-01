@@ -77,11 +77,6 @@ export const LOGGER_BASE_URL = isElectronBundled
 export const MAX_RETRIES = 3;
 
 export const SHAREABLE_ORIGIN = window.location.origin;
-export const CALL_INVITE_BASE_URL = isProd
-  ? 'https://spaces.xyne.juspay.net'
-  : isSandBox
-    ? 'https://spaces.sandbox.xyne.juspay.net'
-    : 'http://localhost:5173';
 
 // Feature flag: show manual GENERATE SUMMARY action button (Generate PRD, Generate Summary, Chat with Transcript)
 // Auto-generation still runs regardless of this flag

@@ -1,0 +1,46 @@
+{
+  "name": "xyne-spaces-dashboard-external",
+  "license": "Apache-2.0",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "cd ../shared && npm install && npm run build",
+    "dev": "vite",
+    "build": "node --max-old-space-size=8192 node_modules/.bin/vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit --project tsconfig.app.json --pretty",
+    "lint": "eslint .",
+    "validate": "npm run lint",
+    "lint:deps": "depcruise src --config .dependency-cruiser.cjs --output-type err-long"
+  },
+  "dependencies": {
+    "@livekit/components-react": "^2.9.15",
+    "@livekit/components-styles": "^1.1.6",
+    "@rocicorp/zero": "0.26.1",
+    "@tanstack/react-query": "^5.90.9",
+    "@xstate/react": "^6.0.0",
+    "@xstate/store": "^3.16.0",
+    "livekit-client": "^2.15.14",
+    "lucide-react": "^0.544.0",
+    "mixpanel-browser": "^2.72.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-router-dom": "^7.9.6",
+    "sonner": "^1.7.1",
+    "xstate": "^5.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "autoprefixer": "^10.4.21",
+    "dependency-cruiser": "^17.4.2",
+    "eslint-plugin-import": "^2.32.0",
+    "tailwindcss": "^3.4.18",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.8.3",
+    "vite": "^7.1.5"
+  }
+}

@@ -137,4 +137,13 @@ export const callLobbyService = {
     );
     return response.data.participants;
   },
+
+  /**
+   * Get the external call invite URL from the backend.
+   * Returns the full URL (backend base URL + /call/:externalId).
+   */
+  async getInviteUrl(externalId: string): Promise<string> {
+    const response = await apiInstance.get<{ url: string }>(`${BASE}/${externalId}/invite-url`);
+    return response.data.url;
+  },
 };

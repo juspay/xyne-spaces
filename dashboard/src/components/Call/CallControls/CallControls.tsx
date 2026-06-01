@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { REACTION_EMOJIS } from '../hooks/useReactions';
 import {
   Users,
@@ -27,7 +28,7 @@ import { useDrawStore, sendDrawEvent } from '../../../hooks/useDrawStore';
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
-import { CALL_INVITE_BASE_URL } from '../../../config';
+import { callLobbyService } from '../../../services/Call/callLobbyService';
 
 interface CallControlsProps {
   isMicEnabled: boolean;
@@ -111,6 +112,13 @@ export function CallControls({
   const reactionPickerRef = useRef<HTMLDivElement>(null);
   const shareMenuRef = useRef<HTMLDivElement>(null);
   const { isMobile } = usePlatform();
+
+  const inviteUrlQuery = useQuery({
+    queryKey: ['call-invite-url', callId],
+    queryFn: () => callLobbyService.getInviteUrl(callId),
+    staleTime: Infinity,
+    enabled: !!callId,
+  });
 
   const micMenuRef = useRef<HTMLDivElement>(null);
   const cameraMenuRef = useRef<HTMLDivElement>(null);
@@ -221,7 +229,7 @@ export function CallControls({
   };
 
   const handleCopyInviteLink = (): void => {
-    const webUrl = `${CALL_INVITE_BASE_URL}/call/${callId}`;
+    const webUrl = inviteUrlQuery.data ?? '';
     void navigator.clipboard.writeText(webUrl).then(() => {
       setShowShareMenu(false);
       setShowCopied(true);

@@ -5,6 +5,7 @@ VERSION ?= $(shell git rev-parse --short=7 HEAD)
 BACKEND_IMAGE_NAME ?= xyne-spaces-backend
 RUNNER_IMAGE_NAME ?= xyne-spaces-runner
 DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard
+EXTERNAL_DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard-external
 SOURCE_COMMIT := $(shell git rev-parse HEAD)
 SOURCE_SHORT_COMMIT ?= $(shell git rev-parse --short=10 HEAD)
 
@@ -55,6 +56,21 @@ clean-dashboard:
 	docker rmi $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
+# External Dashboard targets (public call-join SPA — deployed without mTLS)
+build-external-dashboard:
+	$(info Building $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f dashboard-external/Dockerfile -t $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
+
+push-external-dashboard:
+	$(info Pushing to registry: $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f dashboard-external/Dockerfile -t $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
+	$(info Successfully pushed: $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-external-dashboard:
+	docker rmi $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
 lint-dashboard:
 	$(info Running dashboard quality checks)
 	cd dashboard && npm ci && npm run lint:errors-only && npm run type-check
@@ -83,11 +99,11 @@ run-pr-police:
 		sh -c 'cat > /tmp/gcp-creds.json && export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-creds.json && npm run yama review -- --workspace XYNE --repository xyne-spaces --branch $(BRANCH_NAME)'
 
 # Combined targets
-build-all: build-backend build-runner build-dashboard
+build-all: build-backend build-runner build-dashboard build-external-dashboard
 
-push-all: push-backend push-runner push-dashboard
+push-all: push-backend push-runner push-dashboard push-external-dashboard
 
-clean-all: clean-backend clean-runner clean-dashboard
+clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard
 
 test:
 	$(info Running tests for all components)
@@ -102,4 +118,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa

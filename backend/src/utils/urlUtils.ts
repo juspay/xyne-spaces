@@ -1,4 +1,6 @@
 // backend/src/utils/urlUtils.ts
+import { config } from '@/config/env';
+
 /**
  * URL detection utilities
  *
@@ -253,4 +255,13 @@ export function isValidUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Builds the external call invite URL for a given call.
+ * Uses EXTERNAL_CALL_INVITE_BASE_URL from config so the path (including any
+ * /external/ prefix) is driven entirely by the environment, not hardcoded.
+ */
+export function buildCallInviteUrl(externalId: string): string {
+  return `${config.externalCallInviteBaseUrl}/call/${externalId}`;
 }

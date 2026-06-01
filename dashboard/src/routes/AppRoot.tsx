@@ -165,7 +165,6 @@ import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
-import { ExternalLobbyPage } from './ExternalLobby/ExternalLobbyPage';
 import UserGuideScreen from './UserGuideScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
@@ -173,7 +172,7 @@ import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
 import AutomationRunDetailScreen from './AutomationsScreen/AutomationRunDetailScreen';
 import AutomationApprovalsScreen from './AutomationsScreen/AutomationApprovalsScreen';
 
-/** Auth-aware call route: authenticated users join via CallPage, others see external lobby */
+/** Auth-aware call route: authenticated users join via CallPage, others see external lobby  */
 function CallRouteHandler(): ReactElement | null {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return null;
@@ -184,7 +183,7 @@ function CallRouteHandler(): ReactElement | null {
       </ZeroProvider>
     );
   }
-  return <ExternalLobbyPage />;
+  return <Navigate to='/auth' replace />;
 }
 
 /** Auto-triggers AI onboarding after the existing 6-step onboarding completes, or resumes on refresh */

@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "resolvePackageJsonExports": true,
+
+    /* Path aliases — mirror dashboard so @/ imports from dashboard/src type-check correctly */
+    "paths": {
+      "@/*": ["../dashboard/src/*"],
+      "@xyne/shared/*": ["../shared/dist/*"],
+      "react-router-dom": ["./node_modules/react-router-dom/dist/index.d.ts"],
+      "react-router-dom-actual": ["./node_modules/react-router-dom/dist/index.d.ts"]
+    },
+
+    /* Linting — relaxed vs dashboard because we import dashboard files wholesale */
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "skipDefaultLibCheck": true,
+
+    /* Decorator support (required by some dashboard deps) */
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src"]
+}
