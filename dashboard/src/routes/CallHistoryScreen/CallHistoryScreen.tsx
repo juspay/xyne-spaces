@@ -711,7 +711,7 @@ const CallHistoryScreen = (): ReactElement => {
           )}
         >
           {/* Action cards */}
-          <div className='grid grid-cols-2 gap-3'>
+          <div data-testid='new-call-button' className='grid grid-cols-2 gap-3'>
             <button
               data-testid='start-instant-call-option'
               onClick={() => setIsInstantCallModalOpen(true)}
@@ -991,7 +991,7 @@ const CallHistoryScreen = (): ReactElement => {
 
           {/* RECENTS section — list mode only */}
           {viewMode === 'list' && (
-            <div className='flex flex-col gap-3 pb-20 md:pb-4'>
+            <div data-testid='call-history-list' className='flex flex-col gap-3 pb-20 md:pb-4'>
               <div className='flex items-center justify-between'>
                 <span className='text-xs font-semibold tracking-widest text-muted-foreground uppercase'>
                   Recents
