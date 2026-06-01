@@ -3,6 +3,7 @@ import { ValidatedActivityPayload } from '@/validators/activityValidator';
 import { ActivityLogEntry } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { UserSessionService } from '@/services/userSessionService';
+import { activityService } from '@/services/activity/activityService';
 
 export class ActivityController {
   private userSessionService: UserSessionService;
@@ -73,6 +74,23 @@ export class ActivityController {
         success: false,
         error: 'Internal server error',
       });
+    }
+  }
+
+  async getWorkspaceActivityCounts(req: Request, res: Response): Promise<void> {
+    try {
+      const memberId = req.user?.memberId;
+      if (!memberId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const counts = await activityService.getWorkspaceActivityCounts(memberId);
+
+      res.json({ counts });
+    } catch (error) {
+      logger.error('Failed to get workspace activity counts:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 }
