@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useCallback, type ReactElement, type ReactNode } from 'react';
 import {
   useEditor,
   EditorContent,
@@ -16,10 +16,19 @@ import Highlight from '@tiptap/extension-highlight';
 import Underline from '@tiptap/extension-underline';
 import FontFamily from '@tiptap/extension-font-family';
 import TextAlign from '@tiptap/extension-text-align';
+import { Quote } from 'lucide-react';
 import { EmailEditorToolbar } from './EmailEditorToolbar';
 import { TableExtensions } from '../../ui/TipTapExtensions';
 import { InlineImageNodeView } from './InlineImageNodeView';
 import { CitationMark, getCitationRefFromTarget } from '../../ui/TipTapExtensions/CitationMark';
+
+interface SelectionPopoverState {
+  text: string;
+  top: number;
+  left: number;
+}
+
+const normalizeSelectedText = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 // Extend TipTap's SetImageOptions to include our custom dataAttId attribute
 // which is registered via Image.extend() below.
@@ -91,6 +100,10 @@ interface EmailEditorProps {
   onCitationOrderChange?: (orderedRefs: string[]) => void;
   toolbarRightSlot?: React.ReactNode;
   extraExtensions?: Extensions;
+  /** Callback when user selects text and clicks "Refine selection" */
+  onSelectionRefine?: (selectedText: string) => void;
+  /** Whether to show the selection refine popover (default: false) */
+  showSelectionRefine?: boolean;
 }
 
 export const EmailEditor = ({
@@ -110,6 +123,8 @@ export const EmailEditor = ({
   onCitationOrderChange,
   toolbarRightSlot,
   extraExtensions,
+  onSelectionRefine,
+  showSelectionRefine = false,
 }: EmailEditorProps): ReactElement => {
   const cb = useRef({
     onChange,
@@ -119,6 +134,7 @@ export const EmailEditor = ({
     onBlur,
     onEditorReady,
     onCitationClick,
+    onSelectionRefine,
   });
   cb.current = {
     onChange,
@@ -128,8 +144,90 @@ export const EmailEditor = ({
     onBlur,
     onEditorReady,
     onCitationClick,
+    onSelectionRefine,
   };
   const lastEmittedRef = useRef('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const editorContentRef = useRef<HTMLDivElement>(null);
+  const [selectionPopover, setSelectionPopover] = useState<SelectionPopoverState | null>(null);
+
+  const clearSelectionPopover = useCallback((): void => {
+    setSelectionPopover(null);
+  }, []);
+
+  // Handle text selection for refine
+  useEffect(() => {
+    if (!showSelectionRefine) {
+      clearSelectionPopover();
+      return;
+    }
+
+    const handleSelectionChange = (): void => {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        clearSelectionPopover();
+        return;
+      }
+
+      const range = selection.getRangeAt(0);
+      const selected = normalizeSelectedText(selection.toString());
+      if (!selected) {
+        clearSelectionPopover();
+        return;
+      }
+
+      const containerElement = containerRef.current;
+      const editorElement = editorContentRef.current;
+      if (!containerElement || !editorElement) {
+        clearSelectionPopover();
+        return;
+      }
+
+      const commonAncestor = range.commonAncestorContainer;
+      const selectionInsideEditor = editorElement.contains(
+        commonAncestor.nodeType === Node.TEXT_NODE ? commonAncestor.parentNode : commonAncestor,
+      );
+
+      if (!selectionInsideEditor) {
+        clearSelectionPopover();
+        return;
+      }
+
+      const rect = range.getBoundingClientRect();
+      const containerRect = containerElement.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) {
+        clearSelectionPopover();
+        return;
+      }
+
+      setSelectionPopover({
+        text: selected,
+        top: Math.max(12, rect.top - containerRect.top - 44),
+        left: Math.min(
+          Math.max(12, rect.left - containerRect.left + rect.width / 2),
+          Math.max(12, containerRect.width - 12),
+        ),
+      });
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [showSelectionRefine, clearSelectionPopover]);
+
+  const handleRefineSelection = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!selectionPopover?.text) return;
+      cb.current.onSelectionRefine?.(selectionPopover.text);
+      clearSelectionPopover();
+      // Clear browser selection
+      window.getSelection()?.removeAllRanges();
+    },
+    [selectionPopover, clearSelectionPopover],
+  );
 
   const editor = useEditor({
     extensions: [
@@ -283,14 +381,33 @@ export const EmailEditor = ({
   }, [editor, disabled, readOnly]);
 
   return (
-    <div className={`flex flex-col min-h-0 ${className}`}>
+    <div ref={containerRef} className={`relative flex flex-col min-h-0 ${className}`}>
+      {/* Selection refine popover */}
+      {selectionPopover && showSelectionRefine && !disabled && !readOnly && (
+        <div
+          className='absolute z-20 -translate-x-1/2'
+          style={{ top: selectionPopover.top, left: selectionPopover.left }}
+        >
+          <button
+            type='button'
+            onMouseDown={e => e.preventDefault()}
+            onClick={handleRefineSelection}
+            className='inline-flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg backdrop-blur hover:bg-muted transition-colors'
+            data-track-category='YourDraft'
+            data-track-name='RefineSelection'
+          >
+            <Quote size={12} className='text-red-500 dark:text-red-400' />
+            <span>Refine selection</span>
+          </button>
+        </div>
+      )}
       <div className='flex-shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
         <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} />
       </div>
       {/* Padding lives on the ProseMirror element (via editorProps class)
           so clicks anywhere in the visible area land on the editor and
           focus it natively — no wrapper-level click handler needed. */}
-      <div className='flex-1 min-h-0 overflow-y-auto text-sm cursor-text'>
+      <div ref={editorContentRef} className='flex-1 min-h-0 overflow-y-auto text-sm cursor-text'>
         <div className='flex flex-col min-h-full'>
           <EditorContent editor={editor} className='flex-1' />
           {footerSlot}

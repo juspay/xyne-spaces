@@ -6,6 +6,7 @@ import {
 } from '../services/XyneAI/XyneAISessionsService';
 import type { Message, DraftSource } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { logger, Event } from '../utils/logger';
+import { rewriteEmailText } from '../services/emailQuickRewriteService';
 export interface DeskAIDraftHeaders {
   from?: string | null;
   to?: ReadonlyArray<string> | null;
@@ -28,13 +29,19 @@ export interface UseDeskAIDraftReturn {
   draftSources: DraftSource[];
   isStreaming: boolean;
   isDraftActive: boolean;
+  /** Text selected by user for partial refinement (from AI Draft or Your Draft) */
+  selectedTextForRefine: string;
   triggerDraft: () => void;
   askAIRefine: (instruction: string, sourceText: string) => void;
-  refineDraft: (instruction: string, options?: { selectedText?: string }) => void;
-  quickRewrite: (action: AIRefineQuickAction, sourceText: string) => void;
-  customRewrite: (instruction: string, sourceText: string) => void;
+  refineDraft: (instruction: string, options?: { selectedText?: string }) => Promise<void>;
+  quickRewrite: (action: AIRefineQuickAction, sourceText: string) => Promise<void>;
+  customRewrite: (instruction: string, sourceText: string) => Promise<void>;
   acceptDraft: () => string;
   rejectDraft: () => void;
+  /** Prepare refine from external source (e.g., "Your Draft") - sets draft content and selected text */
+  prepareRefineFromExternal: (sourceContent: string, selectedText: string) => void;
+  /** Clear the selected text for refine */
+  clearSelectedTextForRefine: () => void;
 }
 
 const latestBotContent = (messages: Message[]): string | null => {
@@ -112,6 +119,7 @@ export function useDeskAIDraft({
   const [isStreaming, setIsStreaming] = useState(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [selectedTextForRefine, setSelectedTextForRefine] = useState('');
   const sessionIdRef = useRef<string | null>(null);
   const ourStreamIdRef = useRef<string | null>(null);
 
@@ -337,7 +345,7 @@ export function useDeskAIDraft({
   );
 
   const refineDraft = useCallback(
-    (instruction: string, options?: { selectedText?: string }) => {
+    async (instruction: string, options?: { selectedText?: string }) => {
       const trimmedInstruction = instruction.trim();
       const trimmedSelectedText = options?.selectedText?.trim() ?? '';
       const parts = [basePrompt];
@@ -359,13 +367,34 @@ export function useDeskAIDraft({
             : `Refinement guidance from the user: "${trimmedInstruction}"`,
         );
       }
-      void submit(parts.join('\n\n'), trimmedInstruction || 'Refine draft');
+
+      const query = parts.join('\n\n');
+
+      setIsDraftActive(true);
+      setIsStreaming(true);
+      setDraftContent('');
+      setDraftSources([]);
+
+      try {
+        const result = await rewriteEmailText({ query });
+
+        setDraftContent(result.rewrittenText);
+        setIsStreaming(false);
+        writeStorage(result.rewrittenText);
+      } catch (error) {
+        logger.error(Event.DESK_AI_DRAFT_STREAM_FAILED, {
+          threadId,
+          conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        setIsStreaming(false);
+      }
     },
-    [submit, draftContent, basePrompt],
+    [draftContent, basePrompt, threadId, conversationId, writeStorage],
   );
 
   const quickRewrite = useCallback(
-    (action: AIRefineQuickAction, sourceText: string) => {
+    async (action: AIRefineQuickAction, sourceText: string) => {
       const trimmedSource = sourceText.trim();
       if (!trimmedSource) return;
 
@@ -401,20 +430,31 @@ export function useDeskAIDraft({
         `Text to rewrite:\n"""\n${trimmedSource}\n"""${headerBlock}${signoffRule}`,
       ].join('\n\n');
 
-      const displayLabel: Record<AIRefineQuickAction, string> = {
-        polish: 'Polish',
-        formalise: 'Formalise',
-        elaborate: 'Elaborate',
-        shorten: 'Shorten',
-      };
+      setIsDraftActive(true);
+      setIsStreaming(true);
+      setDraftContent('');
+      setDraftSources([]);
 
-      void submit(query, displayLabel[action], { disableTools: true });
+      try {
+        const result = await rewriteEmailText({ query });
+
+        setDraftContent(result.rewrittenText);
+        setIsStreaming(false);
+        writeStorage(result.rewrittenText);
+      } catch (error) {
+        logger.error(Event.DESK_AI_DRAFT_STREAM_FAILED, {
+          threadId,
+          conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        setIsStreaming(false);
+      }
     },
-    [submit, headers],
+    [headers, threadId, conversationId, writeStorage],
   );
 
   const customRewrite = useCallback(
-    (instruction: string, sourceText: string) => {
+    async (instruction: string, sourceText: string) => {
       const trimmedSource = sourceText.trim();
       const trimmedInstruction = instruction.trim();
       if (!trimmedSource || !trimmedInstruction) return;
@@ -440,9 +480,27 @@ export function useDeskAIDraft({
         `Text to rewrite:\n"""\n${trimmedSource}\n"""${headerBlock}${signoffRule}`,
       ].join('\n\n');
 
-      void submit(query, trimmedInstruction, { disableTools: true });
+      setIsDraftActive(true);
+      setIsStreaming(true);
+      setDraftContent('');
+      setDraftSources([]);
+
+      try {
+        const result = await rewriteEmailText({ query });
+
+        setDraftContent(result.rewrittenText);
+        setIsStreaming(false);
+        writeStorage(result.rewrittenText);
+      } catch (error) {
+        logger.error(Event.DESK_AI_DRAFT_STREAM_FAILED, {
+          threadId,
+          conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        setIsStreaming(false);
+      }
     },
-    [submit, headers],
+    [headers, threadId, conversationId, writeStorage],
   );
 
   const acceptDraft = useCallback(() => {
@@ -461,14 +519,30 @@ export function useDeskAIDraft({
     setDraftContent('');
     setDraftSources([]);
     setIsStreaming(false);
+    setSelectedTextForRefine('');
     clearStorage();
   }, [threadId, clearStorage]);
+
+  const prepareRefineFromExternal = useCallback(
+    (sourceContent: string, selectedText: string): void => {
+      setDraftContent(sourceContent);
+      setSelectedTextForRefine(selectedText);
+      setIsDraftActive(true);
+      setDraftSources([]);
+    },
+    [],
+  );
+
+  const clearSelectedTextForRefine = useCallback((): void => {
+    setSelectedTextForRefine('');
+  }, []);
 
   return {
     draftContent,
     draftSources,
     isStreaming,
     isDraftActive,
+    selectedTextForRefine,
     triggerDraft,
     askAIRefine,
     refineDraft,
@@ -476,5 +550,7 @@ export function useDeskAIDraft({
     customRewrite,
     acceptDraft,
     rejectDraft,
+    prepareRefineFromExternal,
+    clearSelectedTextForRefine,
   };
 }

@@ -11,6 +11,7 @@ import { Check, X, Sparkles, Loader2, Square, Quote } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import rehypeRaw from 'rehype-raw';
 import { RefineInput } from '../RefineInput/RefineInput';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
@@ -23,6 +24,10 @@ interface DraftCardProps {
   onAccept: () => void;
   onReject: () => void;
   onRefine: (instruction: string, options?: { selectedText?: string }) => void;
+  /** Selected text for refinement (can come from AI Draft selection or external "Your Draft" selection) */
+  selectedTextForRefine?: string;
+  /** Clear the selected text for refinement */
+  onClearSelectedText?: () => void;
 }
 
 interface SelectionPopoverState {
@@ -46,13 +51,25 @@ export const DraftCard = ({
   onAccept,
   onReject,
   onRefine,
+  selectedTextForRefine,
+  onClearSelectedText,
 }: DraftCardProps): ReactElement => {
   const contentRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const selectedRangeRef = useRef<Range | null>(null);
   const refineInputRef = useRef<HTMLInputElement>(null);
   const [selectionPopover, setSelectionPopover] = useState<SelectionPopoverState | null>(null);
-  const [selectedText, setSelectedText] = useState('');
+  const [localSelectedText, setLocalSelectedText] = useState('');
+
+  // Use external selectedTextForRefine if provided, otherwise use local state
+  const selectedText = selectedTextForRefine || localSelectedText;
+  const setSelectedText = (text: string): void => {
+    setLocalSelectedText(text);
+    // If there's an external clear function and we're clearing, call it too
+    if (!text && onClearSelectedText) {
+      onClearSelectedText();
+    }
+  };
 
   const clearPersistentHighlight = useCallback((): void => {
     if (typeof CSS !== 'undefined' && CSS.highlights) {
@@ -72,16 +89,26 @@ export const DraftCard = ({
   }, []);
 
   const clearSelectedText = useCallback((): void => {
-    setSelectedText('');
+    setLocalSelectedText('');
+    if (onClearSelectedText) onClearSelectedText();
     clearPersistentHighlight();
     clearSelectionPopover();
-  }, [clearPersistentHighlight, clearSelectionPopover]);
+  }, [clearPersistentHighlight, clearSelectionPopover, onClearSelectedText]);
 
   useEffect(() => {
     if (!draftContent || isStreaming) {
       clearSelectedText();
     }
   }, [draftContent, isStreaming, clearSelectedText]);
+
+  // Focus the refine input when external selectedTextForRefine is set
+  useEffect(() => {
+    if (selectedTextForRefine) {
+      setTimeout(() => {
+        refineInputRef.current?.focus();
+      }, 0);
+    }
+  }, [selectedTextForRefine]);
 
   useEffect(() => {
     const handleWindowSelectionChange = (): void => {
@@ -277,7 +304,9 @@ export const DraftCard = ({
         >
           {draftContent ? (
             <div className={aiMarkdownProseClassName}>
-              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{draftContent}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={[rehypeRaw]}>
+                {draftContent}
+              </Markdown>
               {isStreaming && (
                 <span className='inline-block w-0.5 h-4 bg-foreground animate-pulse ml-0.5 align-text-bottom' />
               )}

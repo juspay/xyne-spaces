@@ -2055,9 +2055,11 @@ export const EmailComposer = ({
                 onReject={() => {
                   aiDraft.rejectDraft();
                 }}
-                onRefine={(instruction: string, options?: { selectedText?: string }) =>
-                  aiDraft.refineDraft(instruction, options)
-                }
+                onRefine={(instruction: string, options?: { selectedText?: string }) => {
+                  void aiDraft.refineDraft(instruction, options);
+                }}
+                selectedTextForRefine={aiDraft.selectedTextForRefine}
+                onClearSelectedText={aiDraft.clearSelectedTextForRefine}
               />
             ) : null;
 
@@ -2068,11 +2070,11 @@ export const EmailComposer = ({
                   disabled={aiDraft.isStreaming}
                   onQuickRewrite={action => {
                     const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
-                    aiDraft.quickRewrite(action, source);
+                    void aiDraft.quickRewrite(action, source);
                   }}
                   onCustomRewrite={instruction => {
                     const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
-                    aiDraft.customRewrite(instruction, source);
+                    void aiDraft.customRewrite(instruction, source);
                   }}
                   onAskAISubmit={instruction => {
                     aiDraft.askAIRefine(instruction, stripHtml(emailContent));
@@ -2129,6 +2131,10 @@ export const EmailComposer = ({
                       disabled={isSending}
                       className='flex-1 min-h-0'
                       footerSlot={composerFooter}
+                      showSelectionRefine={features.showAI && !aiDraft.isStreaming && !isSending}
+                      onSelectionRefine={selectedText => {
+                        aiDraft.prepareRefineFromExternal(emailContent, selectedText);
+                      }}
                     />
                   </div>
                   <div className='flex-1 min-w-0 flex flex-col min-h-0'>{draftCard ?? aiPanel}</div>
