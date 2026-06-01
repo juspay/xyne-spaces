@@ -8,6 +8,11 @@ import type {
   TitleGeneratorInput,
   TitleGeneratorContext,
 } from '../services/agents/title-generator.js';
+import { rewriteEmailText } from '../agents/email-quick-rewrite/index.js';
+import type {
+  EmailQuickRewriteInput,
+  EmailQuickRewriteContext,
+} from '../agents/email-quick-rewrite/index.js';
 
 /**
  * Generate a title from a description
@@ -49,6 +54,49 @@ export async function generateTitleFromDescription(req: Request, res: Response):
   } catch (_) {
     res.status(500).json({
       error: 'Failed to generate title',
+      message: 'An unexpected error occurred. Please try again later.',
+    });
+  }
+}
+
+/**
+ * Rewrite email text based on the provided query/prompt
+ */
+export async function rewriteEmail(req: Request, res: Response): Promise<void> {
+  try {
+    const { query } = req.body;
+    const userId = req.user?.id;
+
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({
+        error: 'query is required and must be a string',
+      });
+      return;
+    }
+
+    if (query.trim().length === 0) {
+      res.status(400).json({
+        error: 'query cannot be empty',
+      });
+      return;
+    }
+
+    const input: EmailQuickRewriteInput = {
+      query: query.trim(),
+    };
+
+    const context: EmailQuickRewriteContext = {
+      userId,
+    };
+
+    const result = await rewriteEmailText(input, context);
+
+    res.json({
+      rewrittenText: result.rewrittenText,
+    });
+  } catch (_) {
+    res.status(500).json({
+      error: 'Failed to rewrite email',
       message: 'An unexpected error occurred. Please try again later.',
     });
   }

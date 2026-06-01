@@ -4,7 +4,7 @@
  */
 
 import express from 'express';
-import { generateTitleFromDescription } from '../controllers/aiController.js';
+import { generateTitleFromDescription, rewriteEmail } from '../controllers/aiController.js';
 
 const router = express.Router();
 
@@ -15,5 +15,11 @@ const router = express.Router();
  * Generate a title from a description
  */
 router.post('/generate-title', generateTitleFromDescription);
+
+/**
+ * POST /api/ai/rewrite-email
+ * Rewrite email text based on an action or custom instruction
+ */
+router.post('/rewrite-email', rewriteEmail);
 
 export default router;
