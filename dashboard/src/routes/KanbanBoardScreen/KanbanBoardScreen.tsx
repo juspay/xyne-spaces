@@ -55,7 +55,13 @@ import type {
   TicketAssignment,
   BoardMetadata,
 } from '@xyne/shared';
-import { TicketStatusV2, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import {
+  TicketStatusV2,
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  ChannelType,
+} from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
   getStageColor,
@@ -249,6 +255,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const channel = useChannel(channelId || '');
+  const isEmailChannel = channel?.type === ChannelType.EMAIL;
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
     new Set(['assignee', 'dueDate', 'status', 'priority', 'tags']),
   );
@@ -893,26 +900,27 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   //  3. All-boards channel/project view — derive from loaded tickets. Returns [] while
   //     tickets are still loading; Zero reactively re-fetches once they arrive.
   const visibleBoardIds = useMemo((): string[] => {
+    if (!isEmailChannel) return [];
     if (filteredSingleBoardId) return [filteredSingleBoardId];
     if (filters.boards && filters.boards.length > 0) return filters.boards;
     return Array.from(
       new Set((allProjectTickets ?? []).map(t => t.boardId).filter((id): id is string => !!id)),
     );
-  }, [filteredSingleBoardId, filters.boards, allProjectTickets]);
+  }, [isEmailChannel, filteredSingleBoardId, filters.boards, allProjectTickets]);
 
   // Fetch lightweight board metadata for all visible boards so we can determine
-  // which ones use priority-based SLA. In single-board view selectedBoardDetail
-  // already contains metadata, so boardsByIds is disabled to avoid a duplicate
+  // which ones use priority-based SLA. Only needed for EMAIL channels that
+  // support SLA policies. In single-board view selectedBoardDetail already
+  // contains metadata, so boardsByIds is disabled to avoid a duplicate
   // subscription. In multi-board view boardsByIds is the only source.
   const [visibleBoards] = useCachedQuery(queries.boardsByIds({ boardIds: visibleBoardIds }), {
-    enabled: visibleBoardIds.length > 1,
+    enabled: isEmailChannel && visibleBoardIds.length > 1,
   });
 
   // Narrow the visible board IDs to only those configured for priority-based SLA.
-  // Boards using stage-based SLA (the default) have no active entries in
-  // board_sla_policies, but we avoid the subscription entirely rather than
-  // letting it fire an empty query.
+  // Only applicable for EMAIL channels; non-EMAIL channels have no SLA policies.
   const prioritySlaBoardIds = useMemo((): string[] => {
+    if (!isEmailChannel) return [];
     if (filteredSingleBoardId) {
       // Single-board: metadata is already in selectedBoardDetail.
       const meta = selectedBoardDetail?.metadata as BoardMetadata | null | undefined;
@@ -922,7 +930,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return (visibleBoards ?? [])
       .filter(b => (b.metadata as BoardMetadata | null | undefined)?.slaPolicyType === 'priority')
       .map(b => b.id);
-  }, [filteredSingleBoardId, selectedBoardDetail, visibleBoards]);
+  }, [isEmailChannel, filteredSingleBoardId, selectedBoardDetail, visibleBoards]);
 
   // One subscription for all priority-SLA boards on screen. TicketCard looks up
   // the policy by boardId + priority, so no per-card fetches are needed.

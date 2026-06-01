@@ -114,7 +114,7 @@ export const Dialog = ({
             'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
             'w-full',
             'max-w-md',
-            'bg-popover rounded-lg shadow-lg',
+            'bg-popover text-popover-foreground rounded-lg shadow-lg',
             'focus:outline-none z-50',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
@@ -133,8 +133,7 @@ export const Dialog = ({
             </DialogPrimitive.Description>
           )}
 
-          {/* Content */}
-          <div className={cn('')}>{children}</div>
+          {children}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

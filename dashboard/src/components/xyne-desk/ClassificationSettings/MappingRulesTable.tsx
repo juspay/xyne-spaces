@@ -74,7 +74,7 @@ export const MappingRulesTable: React.FC<MappingRulesTableProps> = ({
   };
 
   return (
-    <div className='space-y-3'>
+    <div className='space-y-3 text-foreground'>
       <div className='text-sm font-medium text-foreground'>Assignment Rules</div>
 
       {/* Table */}
@@ -104,7 +104,7 @@ export const MappingRulesTable: React.FC<MappingRulesTableProps> = ({
                   <>
                     <td className='px-3 py-2'>
                       <input
-                        className='w-full rounded border border-border bg-background px-2 py-1 text-sm'
+                        className='w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground'
                         value={editForm.category ?? ''}
                         onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}
                         placeholder='e.g. Feature Request'
@@ -114,7 +114,7 @@ export const MappingRulesTable: React.FC<MappingRulesTableProps> = ({
                     </td>
                     <td className='px-3 py-2'>
                       <input
-                        className='w-full rounded border border-border bg-background px-2 py-1 text-sm'
+                        className='w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground'
                         value={editForm.subCategory ?? ''}
                         onChange={e => setEditForm(f => ({ ...f, subCategory: e.target.value }))}
                         placeholder='e.g. UPI, mWeb Intent (empty = catch-all)'
@@ -154,7 +154,7 @@ export const MappingRulesTable: React.FC<MappingRulesTableProps> = ({
                           setEditingId(null);
                           setEditForm({});
                         }}
-                        className='text-xs px-2 py-1 rounded border border-border hover:bg-muted'
+                        className='text-xs px-2 py-1 rounded border border-border hover:bg-muted text-foreground'
                         data-track-category='MappingRules'
                         data-track-name='CancelMappingEdit'
                       >
@@ -175,7 +175,7 @@ export const MappingRulesTable: React.FC<MappingRulesTableProps> = ({
                     <td className='px-3 py-2 flex gap-1'>
                       <button
                         onClick={() => startEdit(mapping)}
-                        className='text-xs px-2 py-1 rounded border border-border hover:bg-muted'
+                        className='text-xs px-2 py-1 rounded border border-border hover:bg-muted text-foreground'
                         data-track-category='MappingRules'
                         data-track-name='StartMappingEdit'
                       >
@@ -209,7 +209,7 @@ export const MappingRulesTable: React.FC<MappingRulesTableProps> = ({
               </label>
               <input
                 id='mapping-add-category'
-                className='w-full rounded border border-border bg-background px-2 py-1.5 text-sm'
+                className='w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground'
                 placeholder='e.g. Feature Request'
                 value={addForm.category}
                 onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))}
@@ -223,7 +223,7 @@ export const MappingRulesTable: React.FC<MappingRulesTableProps> = ({
               </label>
               <input
                 id='mapping-add-subcategory'
-                className='w-full rounded border border-border bg-background px-2 py-1.5 text-sm'
+                className='w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground'
                 placeholder='e.g. UPI, mWeb Intent, UPI QR'
                 value={addForm.subCategory ?? ''}
                 onChange={e => setAddForm(f => ({ ...f, subCategory: e.target.value }))}
@@ -267,7 +267,7 @@ export const MappingRulesTable: React.FC<MappingRulesTableProps> = ({
                 setShowAddForm(false);
                 setAddForm(EMPTY_FORM);
               }}
-              className='text-sm px-3 py-1.5 rounded border border-border hover:bg-muted'
+              className='text-sm px-3 py-1.5 rounded border border-border hover:bg-muted text-foreground'
               data-track-category='MappingRules'
               data-track-name='CancelAddMapping'
             >

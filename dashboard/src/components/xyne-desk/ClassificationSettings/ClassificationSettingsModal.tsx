@@ -125,7 +125,7 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
         </div>
 
         {/* Scrollable content */}
-        <div className='overflow-y-auto p-5 space-y-5'>
+        <div className='overflow-y-auto p-5 space-y-5 text-foreground'>
           {error && (
             <div className='text-sm text-destructive bg-destructive/10 px-3 py-2 rounded'>
               {error}
@@ -148,7 +148,7 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
                 </label>
                 <input
                   id='classification-category-field'
-                  className='w-full rounded border border-border bg-background px-2 py-1.5 text-sm'
+                  className='w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground'
                   value={categoryField}
                   onChange={e => handleChange(() => setCategoryField(e.target.value))}
                   placeholder='e.g. Query Type'
@@ -165,7 +165,7 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
                 </label>
                 <input
                   id='classification-subcategory-field'
-                  className='w-full rounded border border-border bg-background px-2 py-1.5 text-sm'
+                  className='w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground'
                   value={subCategoryField}
                   onChange={e => handleChange(() => setSubCategoryField(e.target.value))}
                   placeholder='e.g. Feature Request Type — leave blank if unused'
@@ -242,7 +242,7 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
               </div>
             )}
             <textarea
-              className='w-full rounded border border-border bg-background px-3 py-2 text-sm font-mono min-h-[180px] resize-y'
+              className='w-full rounded border border-border bg-background px-3 py-2 text-sm font-mono text-foreground min-h-[180px] resize-y'
               value={prompt}
               onChange={e => handleChange(() => setPrompt(e.target.value))}
               placeholder='Enter the AI classification prompt...'
@@ -266,7 +266,7 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
               </button>
               <button
                 onClick={handleCancel}
-                className='text-sm px-4 py-1.5 rounded border border-border hover:bg-muted transition-colors'
+                className='text-sm px-4 py-1.5 rounded border border-border hover:bg-muted text-foreground transition-colors'
                 data-track-category='ClassificationSettings'
                 data-track-name='CancelPromptChanges'
               >
@@ -292,7 +292,7 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
             {showPreview && (
               <div className='space-y-3 rounded-md border border-border p-3'>
                 <input
-                  className='w-full rounded border border-border bg-background px-3 py-1.5 text-sm'
+                  className='w-full rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground'
                   placeholder='Email subject'
                   value={previewSubject}
                   onChange={e => setPreviewSubject(e.target.value)}
@@ -300,7 +300,7 @@ export const ClassificationSettingsModal: React.FC<ClassificationSettingsModalPr
                   data-track-name='PreviewSubjectInput'
                 />
                 <textarea
-                  className='w-full rounded border border-border bg-background px-3 py-2 text-sm min-h-[80px] resize-y'
+                  className='w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground min-h-[80px] resize-y'
                   placeholder='Email body...'
                   value={previewBody}
                   onChange={e => setPreviewBody(e.target.value)}
