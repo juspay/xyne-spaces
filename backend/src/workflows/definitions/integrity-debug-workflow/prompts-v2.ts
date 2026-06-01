@@ -3,6 +3,17 @@
  * Based on dry-run feedback - more comprehensive and iterative approach
  */
 
+/**
+ * Append free-text "additional user info" (provided at runtime via the workflow
+ * input) to a hardcoded user prompt. If the value is empty/undefined/whitespace-only,
+ * the original prompt is returned unchanged - preserving today's behaviour.
+ */
+function appendAdditionalUserInfo(prompt: string, additionalUserInfo?: string): string {
+  if (!additionalUserInfo || !additionalUserInfo.trim()) return prompt;
+  return `${prompt}\n\n## Additional User Info:\n${additionalUserInfo.trim()}`;
+}
+
+
 // ============================================================================
 // STEP 1: REPOSITORY IDENTIFICATION
 // ============================================================================
@@ -174,7 +185,8 @@ export function buildStep4LogCollectionPrompt(
   orderIds: string[],
   merchantId: string,
   requiredFields: any,
-  flow: string
+  flow: string,
+  additionalUserInfo?: string
 ): string {
   // Handle empty or null requiredFields
   if (!requiredFields || Object.keys(requiredFields).length === 0) {
@@ -200,21 +212,55 @@ export function buildStep4LogCollectionPrompt(
   const webhookSyncInstruction = flow === 'WEBHOOK' ? `
 
 **CRITICAL - Webhook with Mandatory Sync:**
-Since the flow is WEBHOOK, check if ${gateway} gateway performs a mandatory sync after receiving webhook.
-If yes:
-1. Collect webhook logs (initial notification from gateway) - find the session_id from webhook logs
-2. ALSO collect sync logs from the SAME session_id (our verification call to gateway after webhook)
-3. Include both webhook_response and sync_response in the output
-4. Some gateways use sync response for integrity verification, not webhook data
 
-**IMPORTANT**: The sync log will be in the same session as the webhook. Use the session_id from webhook to find the corresponding sync log.
+**READ THIS FIRST — the log file contains many different log entry types**, NOT just webhooks. Fetching logs by order_id returns a mix of entries: REFUND_WORKFLOW_TRACKING_DATA, internal workflow events, txn lifecycle events, INCOMING_API webhooks, OUTGOING_API syncs, and others. **Each entry type has a DIFFERENT "message" structure** (e.g. tracking events have "message.description", workflow events have "message.code"/"message.flow_name", API logs have "message.req_body"/"message.res_body").
 
-To check for mandatory sync:
-- Search ${gateway} gateway code for sync calls after webhook processing
-- Look for patterns like "mandatorySync", "verifyWebhook", "statusCheck after webhook"
-- If found, collect both webhook and sync logs from the same session_id` : '';
+You MUST therefore **filter the entries by (api_tag pattern + category) FIRST**, then extract fields ONLY from the filtered entries. Do NOT attempt to extract "message.req_body" or any other field from arbitrary entries — non-API entries will not have those fields and you'll waste turns chasing them. After filtering, the structure is guaranteed (see field paths below). **If an entry doesn't match the filter, SKIP IT — don't try to inspect or normalize it.**
 
-  return `Collect logs for these transactions:
+Write a SINGLE Python script that parses the jsonl logs in two filtering passes and outputs the correlated failure-webhook + mandatory-sync pairs as JSON. Do NOT write two separate scripts; run python ONCE.
+
+PASS 1 — Find FAILURE webhooks (filter to incoming-API webhook entries only, then keep the failures):
+  An entry qualifies ONLY IF ALL of these are true (filter first; ignore everything else):
+    - "category" (top-level) equals "INCOMING_API"
+    - "api_tag" matches pattern "*_PAY_WEBHOOKS" (e.g. GW_MERCHANTID_GW_REFID_BASED_PAY_WEBHOOKS). Read it from NESTED "message.api_tag" OR from top-level "entity" (both carry the same value on these entries).
+    - "resp_code" is non 200 (i.e., 400, 500, or any non 2xx) — this picks out FAILURES (top-level; mirrored at "message.res_code")
+    - "udf_order_id" (top-level) equals one of the given order IDs
+    - "merchant_id" OR "merchant_idx_id" (top-level) equals the given merchant ID
+  DEDUPLICATE matched entries by (x-request-id, api_tag, timestamp).
+  For these filtered entries, the structure is GUARANTEED to have: top-level "x-request-id", "udf_order_id", "merchant_id", "resp_code"; and nested "message.api_tag", "message.req_body" (gateway's incoming payload), "message.res_body" (our error response), "message.error_info".
+  Collect each matched entry's top-level "x-request-id" into a set — call it FAILED_REQUEST_IDS. This is the correlation key that links incoming webhook to outgoing sync. **There is NO "session_id" field in these logs**; "x-request-id" is the canonical correlation id (e.g. "4cb5a654-5e48-4e3b-aa85-1ace01341990"). Mirrored at "euler-request-id" and "udf_txn_uuid" if you need cross-checks.
+
+PASS 2 — Find the mandatory SYNC outgoing call(s) with the SAME x-request-id (filter to outgoing-API sync entries only, correlated by x-request-id):
+  An entry qualifies ONLY IF ALL of these are true (again — filter first, do not inspect non-matching entries):
+    - "category" (top-level) equals "OUTGOING_API"
+    - "api_tag" matches pattern "*_SYNC" (e.g. GW_MANDATE_SYNC). Read it from nested "message.api_tag" OR top-level "entity".
+    - "x-request-id" (top-level) is in FAILED_REQUEST_IDS
+    - (Optional belt-and-braces) "x-parent-api-tag" (top-level on sync entries) equals the corresponding failure webhook's api_tag — outgoing sync logs carry this pointer back to the webhook that triggered them.
+  DEDUPLICATE by (x-request-id, api_tag, timestamp).
+  For these filtered entries, the structure is GUARANTEED to have: top-level "x-request-id", "resp_code", "x-parent-api-tag"; and nested "message.api_tag", "message.url" (gateway endpoint), "message.req_body" (what WE sent to gateway), "message.res_body" (gateway's response or timeout details).
+
+OUTPUT — print a JSON ARRAY to stdout. One element per failure webhook found, with the matched sync entry attached (or null if no sync exists for that x-request-id). Schema:
+[
+  {
+    "x_request_id": "<top-level x-request-id value>",
+    "failure_webhook": { ...full failure-webhook log entry... },
+    "mandatory_sync": { ...full matching sync log entry... } | null
+  },
+  ...
+]
+
+Then, for each pair in the output, classify the outcome by inspecting the mandatory_sync entry's status code (top-level "resp_code"; mirrored at "message.res_code"):
+- mandatory_sync.resp_code is 5XX → gateway-side failure (e.g. ResponseTimeout, gateway unreachable). Classify as GATEWAY issue.
+- mandatory_sync.resp_code is 4XX or 2XX → extract and analyze the request/response payloads at "mandatory_sync.message.req_body" and "mandatory_sync.message.res_body" for further analysis.
+- mandatory_sync is null → no sync call was triggered (or none exists) for that failure webhook. Fall back to analysing the FAILURE WEBHOOK itself to determine why it failed:
+    * Inspect "failure_webhook.message.req_body" - this is the payload the gateway sent us; check for missing/invalid fields, wrong types, unexpected values, or malformed structure.
+    * Inspect "failure_webhook.message.res_body" - this is OUR error response and typically contains the most useful diagnostic info: "error_code" (e.g. "invalid_request", "INVALID_INPUT"), "status", and "error_info.developer_message" / "error_info.user_message" / "error_info.code" explaining what we rejected and why.
+    * Also check top-level "failure_webhook.error_code" and "failure_webhook.error_info" for additional context (e.g. "WEBHOOK_VERIFICATION_FAILED").
+    * Use the combination of (req_body, res_body, error_info) to pinpoint the validation/parsing/signature/business-rule failure on our side.
+
+Include the FULL JSON array (with both webhook and sync entries for each pair) in your final response. Some gateways rely on the sync response for integrity verification rather than the webhook data, so both are needed downstream.`: '';
+
+  const base = `Collect Euler logs for these transactions:
 
 **Transaction Details:**
 - Order IDs: ${orderIds.join(', ')}
@@ -261,6 +307,7 @@ Some gateways encrypt their request/response payloads. **ONLY** if you encounter
 - **If logs are encrypted, use DECRYPTED_RESPONSE/DECRYPTED_REQUEST logs instead**
 
 Return structured JSON with the collected data: an array of log objects for orders where logs were found.`;
+  return appendAdditionalUserInfo(base, additionalUserInfo);
 }
 
 // ============================================================================
@@ -307,9 +354,43 @@ Order IDs with logs found: ${logsCount}
 ${amountFormatInfo}
 
 **NOTE - Gateway Logs:**
-The collected logs contain either plain JSON or decrypted gateway payloads.
-If the gateway uses encryption, the logs will already contain decrypted data (from DECRYPTED_RESPONSE/DECRYPTED_REQUEST logs).
-Use the provided log data for analysis - it's ready to use.
+The logs you need for analysis are ALREADY EMBEDDED in this prompt as the JSON block at the very top (above this section, before the "Gateway:" header). They were collected by the previous step (Log Collection / Step 4) and pre-correlated for you.
+
+**DO NOT use uploaded_files_list, uploaded_files_read, euler_logs_with_order_id, log-viewer tools, or any other log-fetching tool to search for additional logs.** Those tools will return 0 results for this order id because the logs have already been fetched and live in this prompt. Calling them is a waste of turns and will lead you to incorrectly conclude "no logs found."
+
+If the logs JSON at the top of this prompt is empty (e.g. \`[]\` or \`{"sessions": []}\`), that means upstream collection failed — return "needs_human_review" with "no logs available from Step 4" as the reason, rather than trying to refetch.
+
+The collected logs contain either plain JSON or decrypted gateway payloads. If the gateway uses encryption, the logs will already contain decrypted data (from DECRYPTED_RESPONSE/DECRYPTED_REQUEST entries). Use the provided log data for analysis - it's ready to use.
+
+---
+
+**RULES YOU MUST FOLLOW BEFORE ANY ANALYSIS — these are HARD constraints, not suggestions:**
+
+**Rule 1 — Consistency with Step 3 (Log Requirements Discovery):**
+The Step 3 output (passed as context above and/or available via prior workflow state) enumerates the integrity-check functions, skip conditions, and verified fields it found for ${gateway}. Your conclusions MUST be consistent with those findings. Specifically:
+- Do NOT claim that ${gateway} is "not supported in the integrity framework" if Step 3 identified ${gateway}-specific integrity functions. If you believe Step 3 was wrong, you must say so explicitly, cite the file:line you actually read that contradicts it, and quote the relevant code excerpt.
+- Treat Step 3's "skip_conditions" list as ground truth for which conditions are supposed to bypass integrity. If your analysis depends on a condition NOT in that list, explain why Step 3 missed it.
+
+**Rule 2 — Evidence requirement for every code-level claim:**
+Every statement of the form "X function exists/is missing", "Y case is not handled", "Z field is read from W", "the case statement is at line N" MUST be backed by evidence from THIS session:
+- The exact tool call you used (grep pattern, glob pattern, read of file:line range)
+- A quoted excerpt of the relevant lines (not paraphrased)
+- The file path
+
+A claim without this triple (tool + excerpt + path) will be treated as a hallucination and is grounds for the entire analysis being rejected. If you cannot find evidence for a claim, say "I could not verify X — needs human review" rather than asserting it.
+
+**Rule 3 — Anchor your investigation to the actual error message in the logs:**
+Start from the literal error string in the failure logs (e.g. "WEBHOOK_VERIFICATION_FAILED", "webhook validation failed", "INVALID_INPUT", or whatever appears in failure_webhook.message.res_body / failure_webhook.error_info / failure_webhook.error_code). Then:
+- Grep the codebase for that exact error string to find the function that emitted it.
+- Walk forward from that function to identify what condition triggered it.
+- Your final root cause MUST terminate at code that could plausibly emit the observed error. If your proposed root cause is at a function that doesn't produce that error string, you are looking at the wrong place.
+
+**Rule 4 — No code_changes_required without having read the target file:**
+Before listing any entry in "code_changes_required", you MUST have read the target file in THIS session and your output must quote the actual current content of the lines you propose to change. Do NOT propose line-number-specific edits ("at line ~115", "at line ~5220") to files you have not opened in this session. If you have not read the file, either read it now or move the suggestion to "additional_verifications_needed" instead.
+
+**If you cannot satisfy any of these rules for a finding, return that finding as "needs_human_review" with the reason, rather than fabricating a confident answer.**
+
+---
 
 **Analysis Task:**
 

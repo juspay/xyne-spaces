@@ -129,6 +129,27 @@ INTEGRITY_EXPONENTIAL_BACKOFF=false
 INTEGRITY_RETRY_ENABLED=false
 ```
 
+### Optional input: `additionalUserInfo` (Step 4 only)
+
+The workflow accepts an optional free-text field `additionalUserInfo` in its input payload (same level as `gateway`, `merchantId`, `orderIds`). When provided, it is appended to the **Step 4 (Log Collection)** user prompt under an `## Additional User Info:` header. If omitted (or empty / whitespace-only) the prompt is sent unchanged.
+
+Use it to pass gateway-specific log-collection hints, custom grep patterns, entity-name aliases, or any ad-hoc context the agent should consider when fetching logs.
+
+Example payload:
+
+```json
+{
+  "ticketId": "XYNE-1234",
+  "workflowType": "INTEGRITY_DEBUG_WORKFLOW",
+  "gateway": "YES_BIZ",
+  "merchantId": "ring",
+  "flow": "WEBHOOK",
+  "failureReason": "INTEGRITY_CHECK_FAILED",
+  "orderIds": ["JMND787123694837LGBW"],
+  "additionalUserInfo": "Entity name for incoming webhook logs is GW_MERCHANTID_GW_REFID_BASED_PAY_WEBHOOKS - grep case-insensitive 'pay_webhooks' to match."
+}
+```
+
 ## Output
 
 ```json
