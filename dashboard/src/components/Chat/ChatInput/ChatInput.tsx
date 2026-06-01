@@ -884,7 +884,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 richText: true,
                 commands: true,
                 mentions: true,
-                fileAttachments: true,
+                fileAttachments: !messageId,
                 emojiPicker: true,
               }}
               blockedExtensions={[...BLOCKED_EXTENSIONS]}
