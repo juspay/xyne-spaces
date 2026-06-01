@@ -65,6 +65,7 @@ const XyneAIRequestSchemaV2 = z.object({
   channelIds: z.array(z.string().min(1)).default([]),
   channel_ids: z.array(z.string().min(1)).default([]),
   conversationId: z.preprocess(emptyToUndefined, z.string().optional()),
+  conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvasViewAccessId: z.string().optional(),
   selectionContexts: z.array(SelectionContextSchema).optional(),
   createCanvasEnabled: z.boolean().optional().default(false),
@@ -92,8 +93,11 @@ const XyneAIRequestSchemaV2 = z.object({
   parentMessageId: z.string().optional(),
   isRegenerate: z.boolean().optional().default(false),
   canvasIds: z.array(z.string().min(1)).optional(),
+  canvas_ids: z.array(z.string().min(1)).optional(),
   ticketIds: z.array(z.string().min(1)).optional(),
+  ticket_ids: z.array(z.string().min(1)).optional(),
   callIds: z.array(z.string().min(1)).optional(),
+  call_ids: z.array(z.string().min(1)).optional(),
   attachedContext: AttachedContextSchema,
   attached_context: AttachedContextSchema,
   displayQuery: z.string().optional(),
@@ -136,6 +140,7 @@ export class XyneAIControllerV2 {
       channelIds,
       channel_ids,
       conversationId,
+      conversation_id,
       canvasViewAccessId,
       selectionContexts,
       createCanvasEnabled: createCanvasEnabledCC,
@@ -151,8 +156,11 @@ export class XyneAIControllerV2 {
       parentMessageId,
       isRegenerate,
       canvasIds,
+      canvas_ids,
       ticketIds,
+      ticket_ids,
       callIds,
+      call_ids,
       attachedContext,
       attached_context,
       displayQuery,
@@ -165,10 +173,18 @@ export class XyneAIControllerV2 {
     const effectiveSessionId = sessionId || session_id;
     const effectiveChannelIds = channelIds.length > 0 ? channelIds : channel_ids;
     const effectiveResearchContext = researchContext || research_context;
+    const effectiveConversationId = conversationId || conversation_id;
     const effectiveAttachedContext = attachedContext || attached_context;
     const createCanvasEnabled = createCanvasEnabledCC || createCanvasEnabledSC;
     const webSearchEnabled = webSearchEnabledCC || webSearchEnabledSC;
     const deepResearchEnabled = deepResearchEnabledCC || deepResearchEnabledSC;
+
+    // Snake-case fallback for IDs sent by Web Worker
+    const effectiveCanvasIds = canvasIds?.length ? canvasIds : canvas_ids;
+    const effectiveTicketIds = ticketIds?.length ? ticketIds : ticket_ids;
+    const effectiveCallIds = callIds?.length ? callIds : call_ids;
+
+    logger.info(`[XyneAIv2] Request context: ticketIds=${JSON.stringify(effectiveTicketIds)}, canvasIds=${JSON.stringify(effectiveCanvasIds)}, callIds=${JSON.stringify(effectiveCallIds)}, attachedContextCount=${effectiveAttachedContext?.length ?? 0}`);
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -200,17 +216,17 @@ export class XyneAIControllerV2 {
 
     try {
       // Authorization check - verify user has access to ALL specified channels
-      if (channelIds.length > 0) {
+      if (effectiveChannelIds.length > 0) {
         const userChannelAccess = await db.channelParticipant.findMany({
           where: {
             userId,
-            channelId: { in: channelIds },
+            channelId: { in: effectiveChannelIds },
           },
           select: { channelId: true },
         });
 
         const accessibleChannelIds = userChannelAccess.map(c => c.channelId);
-        const inaccessibleChannels = channelIds.filter((id: string) => !accessibleChannelIds.includes(id));
+        const inaccessibleChannels = effectiveChannelIds.filter((id: string) => !accessibleChannelIds.includes(id));
 
         if (inaccessibleChannels.length > 0) {
           logger.warn('[XyneAIv2] auth: forbidden channels', {
@@ -246,7 +262,7 @@ export class XyneAIControllerV2 {
       logger.info(`[XyneAIv2] User context prepared for agent (userId: ${userInfo.userId})`);
 
       // Track metrics: context channels count
-      getAskAIContextChannels().record(channelIds.length);
+      getAskAIContextChannels().record(effectiveChannelIds.length);
 
       const startTime = Date.now();
       let status = 'success';
@@ -266,7 +282,7 @@ export class XyneAIControllerV2 {
           query,
           sessionId: effectiveSessionId,
           channelIds: effectiveChannelIds,
-          conversationId,
+          conversationId: effectiveConversationId,
           canvasViewAccessId,
           selectionContexts,
           createCanvasEnabled,
@@ -277,9 +293,9 @@ export class XyneAIControllerV2 {
           messageAttachmentIds,
           parentMessageId,
           isRegenerate,
-          canvasIds,
-          ticketIds,
-          callIds,
+          canvasIds: effectiveCanvasIds,
+          ticketIds: effectiveTicketIds,
+          callIds: effectiveCallIds,
           attachedContext: effectiveAttachedContext,
           displayQuery,
           draftMode,
@@ -383,7 +399,11 @@ export class XyneAIControllerV2 {
       const xyneClawAuthUrl = `${config.xyneClaw.authUrl}/claw/api/v1/run/stream`;
 
       // IMPORTANT: conversationId management for claw session continuity.
-      const clawConversationId = request.sessionId || `chat-${randomUUID()}`;
+      // claw uses this ID to persist/retrieve conversation history in its DB.
+      // This is NOT the Spaces thread conversationId — that is passed separately
+      // via agentConfig.SPACES_CONVERSATION_ID so the agent can use thread-aware
+      // tools like fetch_thread_messages.
+      const clawConversationId = request.sessionId || randomUUID();
 
       logger.info(`[XyneAIv2] Calling xyne-claw-auth /run/stream endpoint at ${xyneClawAuthUrl}`, {
         sessionId: request.sessionId,
@@ -559,6 +579,7 @@ export class XyneAIControllerV2 {
             webSearchEnabled: String(request.webSearchEnabled),
             deepResearchEnabled: String(request.deepResearchEnabled),
             ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
+            ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
           },
           ...(((request.researchContext || request.createCanvasEnabled || request.webSearchEnabled || request.deepResearchEnabled) && {
             additionalInstructions: [

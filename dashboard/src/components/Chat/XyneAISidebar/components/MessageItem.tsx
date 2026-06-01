@@ -15,7 +15,11 @@ import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
-import { stripCitationMarks } from '../../../ui/TipTapExtensions/CitationMark';
+import {
+  stripCitationMarks,
+  extractInlineCitations,
+  type InlineCitation,
+} from '../../../ui/TipTapExtensions/CitationMark';
 import { genericInstance } from '../../../../services/clients/genericClient';
 import type { Components } from 'react-markdown';
 import {
@@ -49,132 +53,70 @@ import type {
 import { ReasoningBlock } from './ReasoningBlock';
 import { ToolInvocationList } from './ToolInvocationList';
 import { PendingActionBlock } from './PendingActionBlock';
-import type { ToolInvocation, ClawCitation } from '../utils/XyneAITypes';
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-// Aggregated Citations Component - displays all citations from tool invocations
-const AggregatedCitations = ({
-  toolInvocations,
-}: {
-  toolInvocations: ToolInvocation[] | undefined;
-}): ReactElement | null => {
-  if (!toolInvocations || toolInvocations.length === 0) return null;
+// Inline Citations Component - displays key points with inline citation pill badges
+const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactElement | null => {
+  if (citations.length === 0) return null;
 
-  // Collect all citations from all tool invocations
-  const allCitations: ClawCitation[] = [];
-  const seenKeys = new Set<string>();
-
-  const collectCitations = (inv: ToolInvocation) => {
-    if (inv.citations && inv.citations.length > 0) {
-      for (const citation of inv.citations) {
-        // Create a unique key for deduplication
-        const key =
-          citation.url ||
-          `${citation.kind}-${citation.channelId}-${citation.conversationId}-${citation.viewAccessId}-${citation.ticketId}`;
-
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          allCitations.push(citation);
-        }
-      }
-    }
-
-    // Check nested invocations (if any)
-    if (inv.parentToolCallId === undefined) {
-      // This is a parent invocation, find its children
-      const children = toolInvocations.filter(child => child.parentToolCallId === inv.toolCallId);
-      for (const child of children) {
-        collectCitations(child);
-      }
-    }
-  };
-
-  // Start with root invocations (those without parent)
-  const rootInvocations = toolInvocations.filter(inv => !inv.parentToolCallId);
-  for (const inv of rootInvocations) {
-    collectCitations(inv);
-  }
-
-  if (allCitations.length === 0) return null;
+  const hasPoints = citations.some(c => c.point);
 
   return (
-    <div className='space-y-2'>
+    <div className='space-y-3'>
       <h3 className='text-xs font-semibold text-muted-foreground uppercase tracking-wide'>
-        Citations ({allCitations.length})
+        {hasPoints ? 'Key Points' : 'Citations'}
       </h3>
-      <ul className='space-y-1.5'>
-        {allCitations.map((citation, idx) => {
-          const url = buildCitationUrl(citation);
-          const label = getCitationLabel(citation);
-
-          return (
-            <li key={idx} className='flex items-start gap-1.5'>
-              <Link2 size={10} className='mt-0.5 shrink-0 text-muted-foreground/50' />
-              {url ? (
+      <ol className='space-y-3'>
+        {citations.map((citation, idx) => (
+          <li key={idx} className='flex items-start gap-2'>
+            <span className='text-xs font-semibold text-muted-foreground mt-0.5 min-w-[1.2rem]'>
+              {idx + 1}.
+            </span>
+            <div className='text-sm text-foreground leading-relaxed'>
+              {citation.point ? (
+                <span>
+                  {citation.point}
+                  {citation.label ? (
+                    <span className='ml-1.5 inline-flex items-center align-middle'>
+                      {citation.url ? (
+                        <Link
+                          to={citation.url}
+                          className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
+                        >
+                          <Link2 size={10} />
+                          {citation.label}
+                        </Link>
+                      ) : (
+                        <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground'>
+                          <Link2 size={10} />
+                          {citation.label}
+                        </span>
+                      )}
+                    </span>
+                  ) : null}
+                </span>
+              ) : citation.url ? (
                 <Link
-                  to={url}
-                  className='break-all text-xs text-blue-500 hover:text-blue-600 hover:underline'
+                  to={citation.url}
+                  className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                 >
-                  {label}
+                  <Link2 size={10} />
+                  {citation.label}
                 </Link>
               ) : (
-                <span className='break-all text-xs text-muted-foreground'>{label}</span>
+                <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground'>
+                  <Link2 size={10} />
+                  {citation.label}
+                </span>
               )}
-            </li>
-          );
-        })}
-      </ul>
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 };
-
-// Build a URL for a citation based on its kind
-function buildCitationUrl(citation: ClawCitation): string | null {
-  if (citation.kind === 'external' && citation.url) {
-    return citation.url;
-  }
-
-  if (citation.kind === 'thread' && citation.channelId && citation.conversationId) {
-    // Use relative URL with hash fragment to open thread panel (matches v1 format)
-    return `/chat/dir/${citation.channelId}/${citation.conversationId}#origin=${citation.conversationId}`;
-  }
-
-  if (citation.kind === 'canvas' && citation.viewAccessId) {
-    // Use relative URL to preserve workspace prefix
-    return `/chat/canvas/${citation.viewAccessId}`;
-  }
-
-  if (
-    citation.kind === 'ticket' &&
-    citation.ticketId &&
-    citation.channelId &&
-    citation.conversationId
-  ) {
-    // Ticket URL format: /chat/dir/{channelId}/{conversationId}/{ticketId}?selectedTab=thread
-    return `/chat/dir/${citation.channelId}/${citation.conversationId}/${citation.ticketId}?selectedTab=thread`;
-  }
-
-  return null;
-}
-
-// Get a display label for a citation
-function getCitationLabel(citation: ClawCitation): string {
-  if (citation.label) return citation.label;
-
-  if (citation.kind === 'thread') {
-    if (citation.channelName) {
-      return `Thread in #${citation.channelName}`;
-    }
-    return 'Spaces thread';
-  }
-
-  if (citation.kind === 'canvas') return 'Canvas';
-  if (citation.kind === 'ticket') return `Ticket ${citation.ticketId || ''}`.trim();
-  if (citation.kind === 'external') return 'Source link';
-
-  return 'Reference';
-}
 
 // ─── Image Component with Download Button (Sidebar only) ─────────────────────
 
@@ -1472,8 +1414,12 @@ const MessageContent = ({
           ))}
         </div>
       )}
-      {/* v2: Aggregated Citations from all tool invocations - moved to end of message */}
-      <AggregatedCitations toolInvocations={message.toolInvocations} />
+      {/* v2: Inline Citations from <citation> block */}
+      {(() => {
+        const raw = message.content || message.streamingContent || '';
+        const inlineCitations = extractInlineCitations(raw);
+        return inlineCitations.length > 0 ? <InlineCitations citations={inlineCitations} /> : null;
+      })()}
     </div>
   );
 };

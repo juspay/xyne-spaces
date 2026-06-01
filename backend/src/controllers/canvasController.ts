@@ -15,8 +15,8 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { ActivityClassification } from '@prisma/client';
-import {initializeYSweetDoc} from '../utils/ysweetUtils.js';
-import { convertMarkdownToBlockNote, getCanvasUrl } from '../services/canvasService.js';
+import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
+import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasByViewAccessId } from '../services/canvasService.js';
 
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -398,6 +398,121 @@ export class CanvasController {
         error: 'Failed to send mention notifications',
         message: 'An unexpected error occurred.',
       });
+    }
+  };
+
+  readCanvas = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { viewAccessId } = req.params;
+      if (!viewAccessId) {
+        res.status(400).json({ error: 'viewAccessId is required' });
+        return;
+      }
+
+      const canvas = await getCanvasByViewAccessId(viewAccessId);
+      if (!canvas) {
+        res.status(404).json({ error: 'Canvas not found' });
+        return;
+      }
+
+      // Check read permission
+      try {
+        await canvasAuthService.requireEditAccess(canvas.id, userId);
+      } catch (error) {
+        logger.warn(`[CANVAS-READ] Permission denied for user ${userId} on canvas ${canvas.id}`);
+        res.status(403).json({ error: 'Permission denied' });
+        return;
+      }
+
+      // Read content from Y-Sweet
+      const { readFromYSweet } = await import('../utils/ysweetUtils.js');
+      // const { convertBlockNoteToMarkdown } = await import('../services/canvasService.js');
+      const blocks = await readFromYSweet(canvas.id);
+      const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
+
+      res.status(200).json({
+        id: canvas.id,
+        viewAccessId,
+        title: canvas.title,
+        markdown,
+        url: getCanvasUrl(viewAccessId),
+      });
+    } catch (error) {
+      logger.error('[CANVAS-READ] Error:', error);
+      res.status(500).json({ error: 'Failed to read canvas' });
+    }
+  };
+
+  updateCanvas = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { viewAccessId } = req.params;
+      const { markdown } = req.body;
+
+      if (!viewAccessId) {
+        res.status(400).json({ error: 'viewAccessId is required' });
+        return;
+      }
+
+      if (!markdown || typeof markdown !== 'string') {
+        res.status(400).json({ error: 'markdown content is required' });
+        return;
+      }
+
+      const canvas = await getCanvasByViewAccessId(viewAccessId);
+      if (!canvas) {
+        res.status(404).json({ error: 'Canvas not found' });
+        return;
+      }
+
+      // Check edit permission
+      try {
+        await canvasAuthService.requireEditAccess(canvas.id, userId);
+      } catch (error) {
+        logger.warn(`[CANVAS-UPDATE] Permission denied for user ${userId} on canvas ${canvas.id}`);
+        res.status(403).json({ error: 'Permission denied' });
+        return;
+      }
+
+      const blocks = await convertMarkdownToBlockNote(markdown);
+
+      // Sync content to Y-Sweet for collaborative editing
+      const ysweetSynced = await syncToYSweet(canvas.id, blocks);
+      if (!ysweetSynced) {
+        logger.warn(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
+      }
+
+      // Update DB timestamp
+      const prisma = DatabaseClient.getInstance();
+      await prisma.canvas.update({
+        where: { id: canvas.id },
+        data: {
+          lastEditedBy: userId,
+          lastEditedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      res.status(200).json({
+        id: canvas.id,
+        viewAccessId,
+        title: canvas.title,
+        url: getCanvasUrl(viewAccessId),
+      });
+    } catch (error) {
+      logger.error('[CANVAS-UPDATE] Error:', error);
+      res.status(500).json({ error: 'Failed to update canvas' });
     }
   };
 }
