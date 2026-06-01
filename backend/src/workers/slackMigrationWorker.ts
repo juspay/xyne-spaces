@@ -216,10 +216,12 @@ class SlackMigrationWorker {
   async start(): Promise<void> {
     if (this.isInitialized) return;
 
-    // Flush all stale Bull jobs from previous runs before registering new crons
+    // Flush stale jobs from the main processing queue only (not the cron queues —
+    // flushing cron queue keys would delete the repeat sorted sets and cause
+    // the next scheduled run to be miscalculated if the server restarts after the cron time).
     try {
       const redis = redisService.getClient();
-      const keys = await redis.keys('bull:slack-migration*');
+      const keys = await redis.keys('bull:slack-migration-nightly:*');
       if (keys.length > 0) {
         await redis.del(...keys);
         logger.info(`[SLACK-MIGRATION-WORKER] Flushed ${keys.length} stale Redis key(s) on startup`);
@@ -239,22 +241,27 @@ class SlackMigrationWorker {
     // Handles all rows: daily (yesterday window) + one-time (explicit date)
     this.snapshotQueue = new Bull('slack-migration-snapshot-cron', { redis: redisConfig });
     this.snapshotQueue.process(async () => { await snapshotAndEnqueue(); });
+    // Remove existing repeatable before re-registering so cron updates take effect on restart.
+    // IMPORTANT: do NOT set removeOnComplete inside add() for repeatable jobs — in Bull 4.x
+    // that causes the repeatable pattern itself to be deleted after the first fire (job fires once, never again).
+    try { await this.snapshotQueue.removeRepeatableByKey('slack-migration-snapshot-repeatable'); } catch (_) { /* no-op */ }
     await this.snapshotQueue.add(
       {},
       {
         repeat: { cron: config.autoSyncSlackChannel.syncCron, tz: 'UTC' }, // controlled via SLACK_MIGRATION_SYNC_CRON (default: 12 AM IST)
-        removeOnComplete: true,
+        jobId: 'slack-migration-snapshot-repeatable',
       },
     );
 
     // ── Cleanup cron: 7 AM IST = 01:30 UTC ───────────────────────────────────
     this.cleanupQueue = new Bull('slack-migration-cleanup-cron', { redis: redisConfig });
     this.cleanupQueue.process(async () => { await cleanupExpiredJobs(); });
+    try { await this.cleanupQueue.removeRepeatableByKey('slack-migration-cleanup-repeatable'); } catch (_) { /* no-op */ }
     await this.cleanupQueue.add(
       {},
       {
         repeat: { cron: config.autoSyncSlackChannel.cleanupCron, tz: 'UTC' }, // controlled via SLACK_MIGRATION_CLEANUP_CRON (default: 7 AM IST)
-        removeOnComplete: true,
+        jobId: 'slack-migration-cleanup-repeatable',
       },
     );
 
