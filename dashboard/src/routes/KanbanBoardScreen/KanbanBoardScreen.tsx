@@ -260,7 +260,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     new Set(['assignee', 'dueDate', 'status', 'priority', 'tags']),
   );
   const [isComfortView, setIsComfortView] = useState(false);
-  const [showOverdueOnly, setShowOverdueOnly] = useState(false);
   const [deleteViewConfirm, setDeleteViewConfirm] = useState<{
     configId: string;
     name: string;
@@ -339,6 +338,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   ];
 
   const handleColumnVisibilityChange = (columnKey: string, isVisible: boolean) => {
+    if (columnKey === 'stage') {
+      send({ type: 'SET_SUB_STATUS', showSubStatus: isVisible });
+      return;
+    }
     setVisibleColumns(prev => {
       const next = new Set(prev);
       if (isVisible) {
@@ -432,6 +435,30 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Extract filters and viewType from machine context
   const filters = state.context.filters;
   const channelViewType = state.context.viewType;
+  const showOverdueOnly = state.context.showOverdueOnly;
+  const showSubStatus = state.context.showSubStatus;
+
+  const setShowOverdueOnly = useCallback(
+    (next: boolean) => {
+      send({ type: 'SET_OVERDUE_ONLY', showOverdueOnly: next });
+    },
+    [send],
+  );
+
+  // Sync persisted sub-status preference into visibleColumns
+  useEffect(() => {
+    setVisibleColumns(prev => {
+      const hasStage = prev.has('stage');
+      if (showSubStatus === hasStage) return prev;
+      const next = new Set(prev);
+      if (showSubStatus) {
+        next.add('stage');
+      } else {
+        next.delete('stage');
+      }
+      return next;
+    });
+  }, [showSubStatus]);
 
   // Automatically show Board column when "All Boards" is selected
   useEffect(() => {
@@ -1627,7 +1654,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             {/* Stage Overdue Filter Toggle */}
             <Tooltip content={showOverdueOnly ? 'Show All Tickets' : 'Show Only Overdue Tickets'}>
               <button
-                onClick={() => setShowOverdueOnly(prev => !prev)}
+                onClick={() => setShowOverdueOnly(!showOverdueOnly)}
                 className={`px-3 py-2 transition-colors ${
                   showOverdueOnly
                     ? 'bg-red-100 text-red-700 border border-red-300'

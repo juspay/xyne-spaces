@@ -12,12 +12,16 @@ interface StorageData {
   filters: TicketFilters;
   viewType?: 'status' | 'stage' | 'board';
   groupBy?: string;
+  showOverdueOnly?: boolean;
+  showSubStatus?: boolean;
 }
 
 export interface TicketFiltersContext {
   filters: TicketFilters;
   viewType: 'status' | 'stage' | 'board';
   groupBy: string;
+  showOverdueOnly: boolean;
+  showSubStatus: boolean;
   channelId?: string;
   projectId?: string;
   boardId?: string;
@@ -25,8 +29,10 @@ export interface TicketFiltersContext {
   enabled: boolean;
   storageKey: string;
   urlFilters: TicketFilters;
-  urlViewType?: 'status' | 'stage' | 'board';
-  urlGroupBy?: string;
+  urlViewType?: 'status' | 'stage' | 'board' | undefined;
+  urlGroupBy?: string | undefined;
+  urlShowOverdueOnly?: boolean | undefined;
+  urlShowSubStatus?: boolean | undefined;
   currentSearchParams?: URLSearchParams;
   setSearchParams?: (
     params: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
@@ -50,6 +56,8 @@ export type TicketFiltersEvent =
   | { type: 'SET_FILTERS'; filters: TicketFilters }
   | { type: 'SET_VIEW_TYPE'; viewType: 'status' | 'stage' | 'board' }
   | { type: 'SET_GROUP_BY'; groupBy: string }
+  | { type: 'SET_OVERDUE_ONLY'; showOverdueOnly: boolean }
+  | { type: 'SET_SUB_STATUS'; showSubStatus: boolean }
   | { type: 'URL_CHANGED'; searchParams: URLSearchParams };
 
 /* -------------------------- UTILITY FUNCTIONS -------------------------- */
@@ -273,6 +281,12 @@ const loadFromStorage = (key: string): StorageData => {
       if (parsed.groupBy) {
         result.groupBy = parsed.groupBy;
       }
+      if (typeof parsed.showOverdueOnly === 'boolean') {
+        result.showOverdueOnly = parsed.showOverdueOnly;
+      }
+      if (typeof parsed.showSubStatus === 'boolean') {
+        result.showSubStatus = parsed.showSubStatus;
+      }
       return result;
     }
   } catch {
@@ -289,6 +303,8 @@ const saveToStorage = (
   filters: TicketFilters,
   viewType?: 'status' | 'stage' | 'board',
   groupBy?: string,
+  showOverdueOnly?: boolean,
+  showSubStatus?: boolean,
 ): void => {
   try {
     const data: StorageData = { filters };
@@ -297,6 +313,12 @@ const saveToStorage = (
     }
     if (groupBy && groupBy !== 'none') {
       data.groupBy = groupBy;
+    }
+    if (showOverdueOnly) {
+      data.showOverdueOnly = true;
+    }
+    if (showSubStatus) {
+      data.showSubStatus = true;
     }
     sessionStorage.setItem(key, JSON.stringify(data));
   } catch {
@@ -348,6 +370,10 @@ export const ticketFiltersMachine = setup({
       const urlFilters = readFiltersFromUrl(currentParams);
       const urlViewType = currentParams.get('viewType');
       const urlGroupBy = currentParams.get('groupBy');
+      const urlHasOverdue = currentParams.has('overdue');
+      const urlShowOverdueOnly = currentParams.get('overdue') === '1';
+      const urlHasSubStatus = currentParams.has('subStatus');
+      const urlShowSubStatus = currentParams.get('subStatus') === '1';
       // UPDATED: Pass projectId and boardId to getStorageKey
       const storageKey = getStorageKey(
         event.channelId,
@@ -360,6 +386,8 @@ export const ticketFiltersMachine = setup({
       let filters: TicketFilters = {};
       let viewType: 'status' | 'stage' | 'board' = 'stage';
       let groupBy = 'none';
+      let showOverdueOnly = false;
+      let showSubStatus = false;
 
       if (enabled) {
         const storageData = loadFromStorage(storageKey);
@@ -396,6 +424,11 @@ export const ticketFiltersMachine = setup({
         } else if (storageData.groupBy) {
           groupBy = storageData.groupBy;
         }
+
+        showOverdueOnly = urlHasOverdue
+          ? urlShowOverdueOnly
+          : (storageData.showOverdueOnly ?? false);
+        showSubStatus = urlHasSubStatus ? urlShowSubStatus : (storageData.showSubStatus ?? false);
       }
 
       const result: TicketFiltersContext = {
@@ -403,6 +436,8 @@ export const ticketFiltersMachine = setup({
         filters,
         viewType,
         groupBy,
+        showOverdueOnly,
+        showSubStatus,
         enabled,
         storageKey,
         urlFilters,
@@ -429,6 +464,8 @@ export const ticketFiltersMachine = setup({
       if (urlGroupBy) {
         result.urlGroupBy = urlGroupBy;
       }
+      result.urlShowOverdueOnly = urlHasOverdue ? urlShowOverdueOnly : undefined;
+      result.urlShowSubStatus = urlHasSubStatus ? urlShowSubStatus : undefined;
 
       return result;
     }),
@@ -439,6 +476,22 @@ export const ticketFiltersMachine = setup({
     updateFilters: assign(({ event, context }) => {
       if (event.type !== 'SET_FILTERS') return context;
       return { ...context, filters: event.filters };
+    }),
+
+    /**
+     * Update showOverdueOnly in context
+     */
+    updateOverdueOnly: assign(({ event, context }) => {
+      if (event.type !== 'SET_OVERDUE_ONLY') return context;
+      return { ...context, showOverdueOnly: event.showOverdueOnly };
+    }),
+
+    /**
+     * Update showSubStatus in context
+     */
+    updateSubStatus: assign(({ event, context }) => {
+      if (event.type !== 'SET_SUB_STATUS') return context;
+      return { ...context, showSubStatus: event.showSubStatus };
     }),
 
     /**
@@ -466,25 +519,24 @@ export const ticketFiltersMachine = setup({
       const urlFilters = readFiltersFromUrl(event.searchParams);
       const urlViewType = event.searchParams.get('viewType');
       const urlGroupBy = event.searchParams.get('groupBy');
+      const urlHasOverdue = event.searchParams.has('overdue');
+      const urlShowOverdueOnly = event.searchParams.get('overdue') === '1';
+      const urlHasSubStatus = event.searchParams.has('subStatus');
+      const urlShowSubStatus = event.searchParams.get('subStatus') === '1';
+      const prevHadOverdue = context.currentSearchParams?.has('overdue') ?? false;
+      const prevHadSubStatus = context.currentSearchParams?.has('subStatus') ?? false;
 
-      // Destructure to remove old urlViewType / urlGroupBy and prevent them from being stale
-      const { urlViewType: _oldVt, urlGroupBy: _oldGb, ...restOfContext } = context;
-
-      const result: TicketFiltersContext = {
-        ...restOfContext,
+      return {
         urlFilters,
         currentSearchParams: event.searchParams,
+        urlViewType:
+          urlViewType === 'status' || urlViewType === 'stage' || urlViewType === 'board'
+            ? urlViewType
+            : undefined,
+        urlGroupBy: urlGroupBy || undefined,
+        urlShowOverdueOnly: urlHasOverdue ? urlShowOverdueOnly : prevHadOverdue ? false : undefined,
+        urlShowSubStatus: urlHasSubStatus ? urlShowSubStatus : prevHadSubStatus ? false : undefined,
       };
-
-      // Only add urlViewType if it exists in the URL, otherwise it's undefined (cleared)
-      if (urlViewType === 'status' || urlViewType === 'stage' || urlViewType === 'board') {
-        result.urlViewType = urlViewType;
-      }
-      if (urlGroupBy) {
-        result.urlGroupBy = urlGroupBy;
-      }
-
-      return result;
     }),
 
     /**
@@ -496,7 +548,12 @@ export const ticketFiltersMachine = setup({
       const hasUrlFilters = Object.keys(context.urlFilters).length > 0;
       const hasUrlGroupBy = context.urlGroupBy !== undefined;
 
-      if (!hasUrlFilters && !hasUrlGroupBy) {
+      if (
+        !hasUrlFilters &&
+        !hasUrlGroupBy &&
+        context.urlShowOverdueOnly === undefined &&
+        context.urlShowSubStatus === undefined
+      ) {
         return context;
       }
 
@@ -505,6 +562,12 @@ export const ticketFiltersMachine = setup({
         filters: hasUrlFilters ? context.urlFilters : context.filters,
         viewType: context.urlViewType || context.viewType,
         groupBy: context.urlGroupBy ?? context.groupBy,
+        showOverdueOnly:
+          context.urlShowOverdueOnly !== undefined
+            ? context.urlShowOverdueOnly
+            : context.showOverdueOnly,
+        showSubStatus:
+          context.urlShowSubStatus !== undefined ? context.urlShowSubStatus : context.showSubStatus,
       };
     }),
 
@@ -514,7 +577,14 @@ export const ticketFiltersMachine = setup({
     saveToStorage: ({ context }) => {
       if (!context.enabled) return;
       const { boards: _, ...filtersWithoutBoards } = context.filters;
-      saveToStorage(context.storageKey, filtersWithoutBoards, context.viewType, context.groupBy);
+      saveToStorage(
+        context.storageKey,
+        filtersWithoutBoards,
+        context.viewType,
+        context.groupBy,
+        context.showOverdueOnly,
+        context.showSubStatus,
+      );
     },
 
     /**
@@ -536,6 +606,18 @@ export const ticketFiltersMachine = setup({
         params.set('groupBy', context.groupBy);
       } else {
         params.delete('groupBy');
+      }
+
+      if (context.showOverdueOnly) {
+        params.set('overdue', '1');
+      } else {
+        params.delete('overdue');
+      }
+
+      if (context.showSubStatus) {
+        params.set('subStatus', '1');
+      } else {
+        params.delete('subStatus');
       }
 
       // Update the URL
@@ -566,6 +648,8 @@ export const ticketFiltersMachine = setup({
     filters: {},
     viewType: 'stage',
     groupBy: 'none',
+    showOverdueOnly: false,
+    showSubStatus: false,
     enabled: true,
     storageKey: `${STORAGE_KEY_PREFIX}-default`,
     urlFilters: {},
@@ -602,6 +686,12 @@ export const ticketFiltersMachine = setup({
         },
         SET_GROUP_BY: {
           actions: ['updateGroupBy', 'syncStateToUrl', 'saveToStorage'],
+        },
+        SET_OVERDUE_ONLY: {
+          actions: ['updateOverdueOnly', 'syncStateToUrl', 'saveToStorage'],
+        },
+        SET_SUB_STATUS: {
+          actions: ['updateSubStatus', 'syncStateToUrl', 'saveToStorage'],
         },
         URL_CHANGED: {
           actions: ['syncFromUrl', 'applyUrlFilters', 'saveToStorage'],
