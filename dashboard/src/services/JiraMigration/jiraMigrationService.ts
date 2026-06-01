@@ -291,6 +291,26 @@ export interface JiraMigrationChangeTicketCreatedByResponse {
   } | null;
 }
 
+export interface JiraMigrationMoveJiraProjectBoardRequest {
+  jiraProjectKey: string;
+  channelId: string;
+  sourceBoardId: string;
+  targetBoardId: string;
+  dryRun?: boolean;
+  confirmText?: string;
+}
+
+export interface JiraMigrationMoveJiraProjectBoardResponse {
+  dryRun: boolean;
+  externalSourceId?: string;
+  jiraProjectKey: string;
+  channelId: string;
+  sourceBoardId: string;
+  targetBoardId: string;
+  movedTickets: number;
+  missingStages: string[];
+}
+
 export interface JiraMigrationPurgeProjectMigrationRequest {
   projectId: string;
   confirmText?: string;
@@ -475,6 +495,16 @@ class JiraMigrationService {
       success: true;
       data: JiraMigrationPurgeProjectMigrationResponse;
     }>(`${JIRA_MIGRATION_BASE_URL}/purge-project-migration`, payload);
+    return response.data.data;
+  }
+
+  async moveJiraProjectBoard(
+    payload: JiraMigrationMoveJiraProjectBoardRequest,
+  ): Promise<JiraMigrationMoveJiraProjectBoardResponse> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: JiraMigrationMoveJiraProjectBoardResponse;
+    }>(`${JIRA_MIGRATION_BASE_URL}/move-jira-project-board`, payload);
     return response.data.data;
   }
 }

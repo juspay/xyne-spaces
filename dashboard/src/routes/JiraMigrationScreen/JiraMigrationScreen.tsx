@@ -12,6 +12,7 @@ import {
   type JiraMigrationHistoryItem,
   type JiraMigrationJobProgress,
   type JiraMigrationPreviewResponse,
+  type JiraMigrationMoveJiraProjectBoardResponse,
   type JiraMigrationPurgeProjectMigrationResponse,
   type JiraMigrationResolveUsersResponse,
 } from '../../services/JiraMigration/jiraMigrationService';
@@ -53,7 +54,12 @@ type PreviewSection = 'overview' | 'fields' | 'issues';
 type TicketStatusV2Option = 'TODO' | 'STARTED' | 'COMPLETED' | 'PAUSED' | 'CANCELLED';
 type MigrationPhase = 'setup' | 'map-statuses' | 'migrate';
 type MigrationMode = 'all-to-one' | 'per-board';
-type JiraMigrationUseCase = 'issues' | 'channel-only' | 'ticket-created-by' | 'purge-project';
+type JiraMigrationUseCase =
+  | 'issues'
+  | 'channel-only'
+  | 'ticket-created-by'
+  | 'purge-project'
+  | 'move-jira-project-board';
 
 type PerBoardMapping = {
   jiraBoard: JiraBoard;
@@ -216,6 +222,17 @@ const JiraMigrationScreen = (): ReactElement => {
   const [isPurgeLoading, setIsPurgeLoading] = useState(false);
   const [purgeJobId, setPurgeJobId] = useState<string | null>(null);
   const [purgeJobProgress, setPurgeJobProgress] = useState<JiraMigrationJobProgress | null>(null);
+  const [moveJiraProjectKey, setMoveJiraProjectKey] = useState('');
+  const [moveXyneProjectId, setMoveXyneProjectId] = useState('');
+  const [moveJiraChannelId, setMoveJiraChannelId] = useState('');
+  const [moveSourceBoardId, setMoveSourceBoardId] = useState('');
+  const [moveTargetBoardId, setMoveTargetBoardId] = useState('');
+  const [moveDryRun, setMoveDryRun] = useState(true);
+  const [moveConfirmText, setMoveConfirmText] = useState('');
+  const [moveResult, setMoveResult] = useState<JiraMigrationMoveJiraProjectBoardResponse | null>(
+    null,
+  );
+  const [isMoveBoardLoading, setIsMoveBoardLoading] = useState(false);
   const [scanResolvedMappings, setScanResolvedMappings] = useState<
     JiraMigrationResolveUsersResponse['resolvedUserMappings']
   >([]);
@@ -251,6 +268,12 @@ const JiraMigrationScreen = (): ReactElement => {
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: selectedProjectId || 'placeholder' }),
     { enabled: !!selectedProjectId },
+  );
+
+  const moveChannels = useChannelsByProjectId(moveXyneProjectId || undefined);
+  const [moveBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: moveXyneProjectId || 'placeholder' }),
+    { enabled: !!moveXyneProjectId },
   );
 
   const selectedProject = useMemo(
@@ -425,6 +448,68 @@ const JiraMigrationScreen = (): ReactElement => {
       const message = error instanceof Error ? error.message : 'Failed to purge migration';
       toast.error('Purge failed', { description: message });
       setIsPurgeLoading(false);
+    }
+  };
+
+  const handleMoveJiraProjectBoard = async (): Promise<void> => {
+    const projectKey = moveJiraProjectKey.trim().toUpperCase();
+    if (!projectKey) {
+      toast.error('Enter Jira project key');
+      return;
+    }
+    if (!moveXyneProjectId.trim()) {
+      toast.error('Select Xyne project');
+      return;
+    }
+    if (!moveJiraChannelId.trim()) {
+      toast.error('Select channel');
+      return;
+    }
+    if (!moveSourceBoardId.trim()) {
+      toast.error('Select source board');
+      return;
+    }
+    if (!moveTargetBoardId.trim()) {
+      toast.error('Select target board');
+      return;
+    }
+    if (moveSourceBoardId.trim() === moveTargetBoardId.trim()) {
+      toast.error('Source and target board must be different');
+      return;
+    }
+    if (!moveDryRun) {
+      if (moveConfirmText.trim() !== `MOVE ${projectKey}`) {
+        toast.error(`Type 'MOVE ${projectKey}' to confirm`);
+        return;
+      }
+    }
+
+    setIsMoveBoardLoading(true);
+    try {
+      const payload = {
+        jiraProjectKey: projectKey,
+        channelId: moveJiraChannelId.trim(),
+        sourceBoardId: moveSourceBoardId.trim(),
+        targetBoardId: moveTargetBoardId.trim(),
+        dryRun: moveDryRun,
+        ...(!moveDryRun ? { confirmText: moveConfirmText.trim() } : {}),
+      };
+      const result = await jiraMigrationService.moveJiraProjectBoard(payload);
+      setMoveResult(result);
+      if (result.missingStages.length > 0) {
+        toast.error('Target board missing stages', {
+          description: result.missingStages.join(', '),
+        });
+      } else {
+        toast.success(moveDryRun ? 'Dry run complete' : 'Tickets moved', {
+          description: `${result.movedTickets} tickets`,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Move failed';
+      toast.error('Move failed', { description: message });
+    } finally {
+      setIsMoveBoardLoading(false);
     }
   };
 
@@ -1439,6 +1524,19 @@ const JiraMigrationScreen = (): ReactElement => {
                 >
                   Purge Migration
                 </button>
+                <button
+                  type='button'
+                  data-track-category='jira_migration'
+                  data-track-name='use_case_move_jira_project_board'
+                  onClick={() => setUseCase('move-jira-project-board')}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    useCase === 'move-jira-project-board'
+                      ? 'bg-foreground text-background'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Move Jira Project Tickets
+                </button>
               </div>
             </div>
             <div className='grid grid-cols-2 gap-3 text-left lg:min-w-[320px]'>
@@ -1930,6 +2028,214 @@ const JiraMigrationScreen = (): ReactElement => {
                     {purgeJobProgress.errorMessage && (
                       <p className='text-xs text-rose-600'>{purgeJobProgress.errorMessage}</p>
                     )}
+                  </div>
+                )}
+              </div>
+            </section>
+          ) : useCase === 'move-jira-project-board' ? (
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+              <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.04),transparent)] px-5 py-4'>
+                <div className='flex flex-col gap-1'>
+                  <h3 className='text-sm font-semibold text-foreground'>
+                    Move Jira Project Tickets
+                  </h3>
+                  <p className='text-xs text-muted-foreground'>
+                    Move only Jira-migrated tickets for one Jira project + channel from source board
+                    to target board. Missing stages will be created and the target board stage order
+                    will be aligned to the source board.
+                  </p>
+                </div>
+              </div>
+
+              <div className='p-5 space-y-4'>
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-5'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <label
+                      htmlFor='jira-move-project-key'
+                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                    >
+                      Jira Project Key
+                    </label>
+                    <Input
+                      id='jira-move-project-key'
+                      value={moveJiraProjectKey}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setMoveJiraProjectKey(e.target.value)
+                      }
+                      placeholder='ABC'
+                    />
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Xyne Project
+                    </p>
+                    <EntitySelector
+                      options={(projects || []).map(project => ({
+                        value: project.id,
+                        label: project.name,
+                        icon: <FolderKanban className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={moveXyneProjectId || null}
+                      onSelect={value => {
+                        setMoveXyneProjectId(value ?? '');
+                        setMoveJiraChannelId('');
+                        setMoveSourceBoardId('');
+                        setMoveTargetBoardId('');
+                        setMoveConfirmText('');
+                        setMoveResult(null);
+                      }}
+                      placeholder='Select project'
+                      searchPlaceholder='Search projects...'
+                      width='100%'
+                      testId='jira-move-project-xyne-project'
+                    />
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Channel
+                    </p>
+                    <EntitySelector
+                      options={moveChannels.map(channel => ({
+                        value: channel.id,
+                        label: channel.name,
+                        icon: <Hash className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={moveJiraChannelId || null}
+                      onSelect={value => setMoveJiraChannelId(value ?? '')}
+                      placeholder='Select channel'
+                      searchPlaceholder='Search channels...'
+                      width='100%'
+                      testId='jira-move-project-channel'
+                    />
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Source Board
+                    </p>
+                    <EntitySelector
+                      options={(moveBoards || []).map(board => ({
+                        value: board.id,
+                        label: board.name,
+                        icon: <LayoutTemplate className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={moveSourceBoardId || null}
+                      onSelect={value => setMoveSourceBoardId(value ?? '')}
+                      placeholder='Select board'
+                      searchPlaceholder='Search boards...'
+                      width='100%'
+                      testId='jira-move-project-source-board'
+                    />
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Target Board
+                    </p>
+                    <EntitySelector
+                      options={(moveBoards || []).map(board => ({
+                        value: board.id,
+                        label: board.name,
+                        icon: <LayoutTemplate className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={moveTargetBoardId || null}
+                      onSelect={value => setMoveTargetBoardId(value ?? '')}
+                      placeholder='Select board'
+                      searchPlaceholder='Search boards...'
+                      width='100%'
+                      testId='jira-move-project-target-board'
+                    />
+                  </div>
+                </div>
+
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                      Mode
+                    </p>
+                    <div className='flex items-center gap-2'>
+                      <button
+                        type='button'
+                        data-track-category='jira_migration'
+                        data-track-name='move_jira_project_board_set_dry_run'
+                        onClick={() => setMoveDryRun(true)}
+                        className={cn(
+                          'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
+                          moveDryRun
+                            ? 'bg-foreground text-background border-foreground'
+                            : 'border-border text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        Dry run
+                      </button>
+                      <button
+                        type='button'
+                        data-track-category='jira_migration'
+                        data-track-name='move_jira_project_board_set_move'
+                        onClick={() => setMoveDryRun(false)}
+                        className={cn(
+                          'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
+                          !moveDryRun
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'border-border text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        Move
+                      </button>
+                    </div>
+                    <p className='mt-2 text-xs text-muted-foreground'>Start with Dry run.</p>
+                  </div>
+
+                  {!moveDryRun && (
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm lg:col-span-2'>
+                      <label
+                        htmlFor='jira-move-project-confirm'
+                        className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                      >
+                        Confirm
+                      </label>
+                      <Input
+                        id='jira-move-project-confirm'
+                        value={moveConfirmText}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                          setMoveConfirmText(e.target.value)
+                        }
+                        placeholder={`MOVE ${moveJiraProjectKey.trim().toUpperCase() || 'ABC'}`}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className='flex justify-end'>
+                  <Button
+                    variant={moveDryRun ? 'outline' : 'default'}
+                    onClick={() => void handleMoveJiraProjectBoard()}
+                    disabled={isMoveBoardLoading}
+                  >
+                    {isMoveBoardLoading ? 'Running…' : moveDryRun ? 'Run Dry Run' : 'Move Tickets'}
+                  </Button>
+                </div>
+
+                {moveResult && (
+                  <div className='rounded-2xl border border-border/70 bg-card/60 p-4 text-sm'>
+                    <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>Tickets</div>
+                        <div className='font-semibold'>{moveResult.movedTickets}</div>
+                      </div>
+                      <div className='md:col-span-3'>
+                        <div className='text-[11px] uppercase text-muted-foreground'>
+                          Missing Stages
+                        </div>
+                        <div className='font-semibold'>
+                          {moveResult.missingStages.length > 0
+                            ? moveResult.missingStages.join(', ')
+                            : 'None'}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

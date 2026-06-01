@@ -248,6 +248,7 @@ const envSchema = Joi.object({
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
   JIRA_MIGRATION_BATCH_DELAY_MS: Joi.number().integer().min(0).max(600000).default(5000),
+  JIRA_MIGRATION_REPORT_CANVAS_CHANNEL_ID: Joi.string().allow('').default(''),
   // Confluence migration configuration
   CONFLUENCE_BASE_URL: Joi.string().allow('').default(''),
   CONFLUENCE_EMAIL: Joi.string().allow('').default(''),
@@ -585,6 +586,7 @@ export const config = {
   jiraMigration: {
     issuePageSize: envVars.JIRA_MIGRATION_ISSUE_PAGE_SIZE as number,
     batchDelayMs: envVars.JIRA_MIGRATION_BATCH_DELAY_MS as number,
+    reportCanvasChannelId: envVars.JIRA_MIGRATION_REPORT_CANVAS_CHANNEL_ID as string,
   },
   confluence: {
     baseUrl: envVars.CONFLUENCE_BASE_URL as string,

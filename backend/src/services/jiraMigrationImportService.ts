@@ -39,6 +39,9 @@ import {
   queueJiraImportMessageVespaJob,
   queueJiraImportTicketVespaJob,
 } from '@/services/jira/vespa';
+import {
+  syncConversationTicketMdFromPrismaTicket,
+} from '@/utils/ticketMd';
 
 type JiraFieldDefinition = {
   id: string;
@@ -570,7 +573,52 @@ export class JiraMigrationImportService {
     size: number;
     mimetype: string;
     url: string;
+    isDeleted?: boolean;
   }>();
+
+  private async setTicketTagsReplaceSet(ticketId: string, tags: string[], updatedBy: string): Promise<void> {
+    const desired = Array.from(new Set(tags.map(tag => tag.trim()).filter(tag => tag.length > 0)));
+
+    const existingRows = await db.ticketTag.findMany({
+      where: { ticketId },
+      select: { name: true },
+    });
+    const existing = existingRows.map(row => row.name);
+
+    const desiredSet = new Set(desired);
+    const existingSet = new Set(existing);
+
+    const toAdd = desired.filter(name => !existingSet.has(name));
+    const toRemove = existing.filter(name => !desiredSet.has(name));
+
+    if (toAdd.length > 0) {
+      await db.ticketTag.createMany({
+        data: toAdd.map(name => ({ ticketId, name })),
+        skipDuplicates: true,
+      });
+    }
+
+    if (toRemove.length > 0) {
+      await db.ticketTag.deleteMany({
+        where: { ticketId, name: { in: toRemove } },
+      });
+    }
+
+    if (toAdd.length > 0 || toRemove.length > 0) {
+      await db.ticketActivity.create({
+        data: {
+          ticketId,
+          updatedBy,
+          activityType: ActivityType.TAGS,
+          value: {
+            added: toAdd,
+            removed: toRemove,
+            source: 'jira-migration',
+          },
+        },
+      });
+    }
+  }
 
   private queueMessageVespaJobs(messages: Array<{ messageId: string; userId: string }>): void {
     for (const message of messages) {
@@ -774,7 +822,7 @@ export class JiraMigrationImportService {
 
     if (mappedAttachmentRowIds.length === 0) return;
 
-    const attachmentRowsById = new Map<string, { id: string; size: number; mimetype: string; url: string }>();
+    const attachmentRowsById = new Map<string, { id: string; size: number; mimetype: string; url: string; isDeleted: boolean }>();
     const attachmentRowIdChunks = chunkArray(mappedAttachmentRowIds, ATTACHMENT_ROW_PRELOAD_BATCH_SIZE);
 
     for (const attachmentRowIdChunk of attachmentRowIdChunks) {
@@ -787,6 +835,7 @@ export class JiraMigrationImportService {
           size: true,
           mimetype: true,
           url: true,
+          isDeleted: true,
         },
       });
 
@@ -1390,6 +1439,105 @@ export class JiraMigrationImportService {
     return this.existingAttachmentsByKey.get(cacheKey) || null;
   }
 
+  private parseJiraAttachmentIdFromExternalId(externalId: string): string | null {
+    const parts = (externalId || '').split(':');
+    const attachmentId = parts[parts.length - 1] || '';
+    return attachmentId.trim() ? attachmentId.trim() : null;
+  }
+
+  private async syncDeletedTicketAttachments(
+    externalSourceId: string,
+    issueId: string,
+    jiraAttachmentIds: Set<string>,
+  ): Promise<void> {
+    const prefix = `jira-ticket-attachment:${issueId}:`;
+    const existingMappings = await db.externalMessage.findMany({
+      where: {
+        externalSourceId,
+        entityType: ExternalEntityType.ATTACHMENT,
+        externalId: { startsWith: prefix },
+      },
+      select: {
+        externalId: true,
+        entityId: true,
+      },
+    });
+
+    const attachmentRowIdsToDelete: string[] = [];
+    const attachmentRowIdsToUndelete: string[] = [];
+
+    for (const mapping of existingMappings) {
+      const attachmentId = this.parseJiraAttachmentIdFromExternalId(mapping.externalId);
+      if (!attachmentId) continue;
+      if (!mapping.entityId) continue;
+
+      if (jiraAttachmentIds.has(attachmentId)) {
+        attachmentRowIdsToUndelete.push(mapping.entityId);
+      } else {
+        attachmentRowIdsToDelete.push(mapping.entityId);
+      }
+    }
+
+    if (attachmentRowIdsToUndelete.length > 0) {
+      await db.messageAttachment.updateMany({
+        where: { id: { in: attachmentRowIdsToUndelete }, isDeleted: true },
+        data: { isDeleted: false },
+      });
+    }
+
+    if (attachmentRowIdsToDelete.length > 0) {
+      await db.messageAttachment.updateMany({
+        where: { id: { in: attachmentRowIdsToDelete }, isDeleted: false },
+        data: { isDeleted: true },
+      });
+    }
+  }
+
+  private async syncDeletedCommentAttachments(
+    externalSourceId: string,
+    issueId: string,
+    desiredExternalIds: Set<string>,
+  ): Promise<void> {
+    const prefix = `jira-comment-attachment:${issueId}:`;
+    const existingMappings = await db.externalMessage.findMany({
+      where: {
+        externalSourceId,
+        entityType: ExternalEntityType.ATTACHMENT,
+        externalId: { startsWith: prefix },
+      },
+      select: {
+        externalId: true,
+        entityId: true,
+      },
+    });
+
+    const attachmentRowIdsToDelete: string[] = [];
+    const attachmentRowIdsToUndelete: string[] = [];
+
+    for (const mapping of existingMappings) {
+      if (!mapping.entityId) continue;
+      if (desiredExternalIds.has(mapping.externalId)) {
+        attachmentRowIdsToUndelete.push(mapping.entityId);
+      } else {
+        attachmentRowIdsToDelete.push(mapping.entityId);
+      }
+    }
+
+    if (attachmentRowIdsToUndelete.length > 0) {
+      await db.messageAttachment.updateMany({
+        where: { id: { in: attachmentRowIdsToUndelete }, isDeleted: true },
+        data: { isDeleted: false },
+      });
+    }
+
+    if (attachmentRowIdsToDelete.length > 0) {
+      await db.messageAttachment.updateMany({
+        where: { id: { in: attachmentRowIdsToDelete }, isDeleted: false },
+        data: { isDeleted: true },
+      });
+    }
+  }
+
   private async renderJiraMessageContent(
     body: unknown,
     unresolvedUsers: Map<string, UnresolvedJiraUser>,
@@ -1419,6 +1567,50 @@ export class JiraMigrationImportService {
     });
 
     return content.trim() || fallbackHtml;
+  }
+
+  private async syncConversationDerivedMd(conversationId: string, ticketId: string): Promise<void> {
+    const [ticket, conversation] = await Promise.all([
+      db.ticket.findUnique({ where: { id: ticketId } }),
+      db.conversation.findUnique({ where: { conversationId }, select: { initialMessageId: true } }),
+    ]);
+
+    if (!ticket || !conversation?.initialMessageId) return;
+
+    const initialMessage = await db.message.findUnique({
+      where: { messageId: conversation.initialMessageId },
+    });
+
+    await syncConversationTicketMdFromPrismaTicket(db as any, ticket);
+    if (initialMessage) {
+      const summaryData: InitialMessageSummary = {
+        messageId: initialMessage.messageId,
+        conversationId: initialMessage.conversationId,
+        senderId: initialMessage.senderId,
+        content: initialMessage.content,
+        msgType: initialMessage.msgType as InitialMessageSummary['msgType'],
+        hasAttachment: initialMessage.hasAttachment,
+        edited: initialMessage.edited,
+        isDeleted: initialMessage.isDeleted,
+        showInChannel: initialMessage.showInChannel,
+        visibleTo: initialMessage.visibleTo,
+        createdAt: initialMessage.createdAt.getTime(),
+        metadata: initialMessage.metadata ? JSON.stringify(initialMessage.metadata) : null,
+        nudgeCount: initialMessage.nudgeCount,
+        isSent: initialMessage.isSent,
+        reactions_md: initialMessage.reactions_md,
+        link_preview_md: initialMessage.link_preview_md,
+        childConversationId: initialMessage.childConversationId,
+      };
+
+      const md = serializeInitialMessageMd(summaryData);
+      if (md) {
+        await db.conversation.update({
+          where: { conversationId },
+          data: { initial_message_md: md },
+        });
+      }
+    }
   }
 
   private async importComments(
@@ -1461,17 +1653,62 @@ export class JiraMigrationImportService {
       createdAt: Date;
     }> = [];
 
-    for (const comment of comments) {
-      const cacheKey = this.buildCommentMessageCacheKey(conversationId, comment.id);
-      const existingMessageId = this.existingCommentMessagesByKey.get(cacheKey);
-      if (existingMessageId) {
-        skipped += 1;
-        commentMessageMap.set(comment.id, existingMessageId);
-        this.queueExternalMapping({
-          externalSourceId,
-          externalId: this.buildCommentExternalId(comment.id),
-          externalThreadId: this.buildIssueThreadExternalId(issue.id),
-          entityId: existingMessageId,
+	    for (const comment of comments) {
+	      const cacheKey = this.buildCommentMessageCacheKey(conversationId, comment.id);
+	      const existingMessageId = this.existingCommentMessagesByKey.get(cacheKey);
+	      if (existingMessageId) {
+	        skipped += 1;
+	        commentMessageMap.set(comment.id, existingMessageId);
+
+	        // Jira comments can be edited. If the comment exists, refresh content when it differs.
+	        try {
+	          const existingMessage = await db.message.findUnique({
+	            where: { messageId: existingMessageId },
+	            select: { messageId: true, content: true, senderId: true, edited: true },
+	          });
+
+	          if (existingMessage) {
+	            const nextSenderId = await this.userResolver.resolveUser(
+	              comment.author,
+	              fallbackUserId,
+	              unresolvedUsers,
+	              issue.key,
+	            );
+	            const nextContent = await this.renderJiraMessageContent(
+	              comment.body,
+	              unresolvedUsers,
+	              '<p>[Imported Jira comment]</p>',
+	              issue.key,
+	            );
+
+	            if (existingMessage.content !== nextContent || existingMessage.senderId !== nextSenderId) {
+	              await db.message.update({
+	                where: { messageId: existingMessageId },
+	                data: {
+	                  content: nextContent,
+	                  senderId: nextSenderId,
+	                  edited: true,
+	                },
+	              });
+
+	              this.queueMessageVespaJobs([
+	                { messageId: existingMessageId, userId: nextSenderId },
+	              ]);
+	            }
+	          }
+	        } catch (error) {
+	          logger.warn('[JiraMigration] Failed to sync edited Jira comment', {
+	            issueKey: issue.key,
+	            commentId: comment.id,
+	            error: error instanceof Error ? error.message : String(error),
+	          });
+	        }
+
+	        this.queueExternalMapping({
+	          externalSourceId,
+	          externalId: this.buildCommentExternalId(comment.id),
+	          externalThreadId: this.buildIssueThreadExternalId(issue.id),
+	          entityId: existingMessageId,
           direction: MessageDirection.INCOMING,
           entityType: ExternalEntityType.MESSAGE,
         });
@@ -1755,7 +1992,7 @@ export class JiraMigrationImportService {
       })),
     );
 
-    const plannedMatches: Array<{
+	    const plannedMatches: Array<{
       messageId: string;
       commentId: string;
       mediaRef: JiraCommentMediaRef;
@@ -1764,7 +2001,7 @@ export class JiraMigrationImportService {
     }> = [];
     const seenMatchKeys = new Set<string>();
 
-    for (const comment of comments) {
+	    for (const comment of comments) {
       const messageId = commentMessageMap.get(comment.id);
       if (!messageId) continue;
 
@@ -1787,13 +2024,22 @@ export class JiraMigrationImportService {
           score,
         });
       }
-    }
+	    }
 
-    await this.preloadMappedAttachmentsByExternalIds(
-      externalSourceId,
-      plannedMatches.map(plannedMatch => ({
-        externalId: this.buildCommentAttachmentExternalId(issue.id, plannedMatch.commentId, plannedMatch.attachment.id),
-        entityId: plannedMatch.messageId,
+	    // Soft-delete comment-attachment mappings that no longer match the current comment bodies.
+	    // This also undeletes if an attachment becomes embedded again.
+	    const desiredCommentAttachmentExternalIds = new Set(
+	      plannedMatches.map(match =>
+	        this.buildCommentAttachmentExternalId(issue.id, match.commentId, match.attachment.id),
+	      ),
+	    );
+	    await this.syncDeletedCommentAttachments(externalSourceId, issue.id, desiredCommentAttachmentExternalIds);
+
+	    await this.preloadMappedAttachmentsByExternalIds(
+	      externalSourceId,
+	      plannedMatches.map(plannedMatch => ({
+	        externalId: this.buildCommentAttachmentExternalId(issue.id, plannedMatch.commentId, plannedMatch.attachment.id),
+	        entityId: plannedMatch.messageId,
         attachmentId: plannedMatch.attachment.id,
       })),
     );
@@ -1824,13 +2070,13 @@ export class JiraMigrationImportService {
           plannedMatch.commentId,
           plannedMatch.attachment.id,
         );
-        const existing = await this.findExistingAttachment(plannedMatch.messageId, plannedMatch.attachment.id);
-        if (existing) {
-          this.queueExternalMapping({
-            externalSourceId,
-            externalId: commentAttachmentExternalId,
-            externalThreadId: this.buildIssueThreadExternalId(issue.id),
-            entityId: existing.id,
+	        const existing = await this.findExistingAttachment(plannedMatch.messageId, plannedMatch.attachment.id);
+	        if (existing && !existing.isDeleted) {
+	          this.queueExternalMapping({
+	            externalSourceId,
+	            externalId: commentAttachmentExternalId,
+	            externalThreadId: this.buildIssueThreadExternalId(issue.id),
+	            entityId: existing.id,
             direction: MessageDirection.INCOMING,
             entityType: ExternalEntityType.ATTACHMENT,
           });
@@ -1946,10 +2192,18 @@ export class JiraMigrationImportService {
     fallbackUserId: string,
     unresolvedUsers: Map<string, UnresolvedJiraUser>,
     workspaceId: string,
-  ): Promise<{ imported: number; skipped: number }> {
-    const attachments: JiraAttachment[] = Array.isArray(issue.fields.attachment)
-      ? issue.fields.attachment
-      : [];
+	  ): Promise<{ imported: number; skipped: number }> {
+	    const attachments: JiraAttachment[] = Array.isArray(issue.fields.attachment)
+	      ? issue.fields.attachment
+	      : [];
+
+	    // Soft-delete attachments that were previously imported but are no longer present on the Jira issue.
+	    // Also undelete if an attachment re-appears.
+	    await this.syncDeletedTicketAttachments(
+	      externalSourceId,
+	      issue.id,
+	      new Set(attachments.map(attachment => attachment.id)),
+	    );
 
     await this.preloadMappedAttachmentsByExternalIds(
       externalSourceId,
@@ -1980,24 +2234,24 @@ export class JiraMigrationImportService {
     }> = [];
     const attachmentsToImport: JiraAttachment[] = [];
 
-    for (const attachment of attachments) {
-      const attachmentExternalId = this.buildTicketAttachmentExternalId(issue.id, attachment.id);
-      const existing = await this.findExistingAttachment(ticketId, attachment.id);
-      if (existing) {
-        this.queueExternalMapping({
-          externalSourceId,
-          externalId: attachmentExternalId,
-          externalThreadId: this.buildIssueThreadExternalId(issue.id),
-          entityId: existing.id,
+	    for (const attachment of attachments) {
+	      const attachmentExternalId = this.buildTicketAttachmentExternalId(issue.id, attachment.id);
+	      const existing = await this.findExistingAttachment(ticketId, attachment.id);
+	      if (existing && !existing.isDeleted) {
+	        this.queueExternalMapping({
+	          externalSourceId,
+	          externalId: attachmentExternalId,
+	          externalThreadId: this.buildIssueThreadExternalId(issue.id),
+	          entityId: existing.id,
           direction: MessageDirection.INCOMING,
           entityType: ExternalEntityType.ATTACHMENT,
         });
-        skipped += 1;
-        continue;
-      }
+	        skipped += 1;
+	        continue;
+	      }
 
-      attachmentsToImport.push(attachment);
-    }
+	      attachmentsToImport.push(attachment);
+	    }
 
     const preparedAttachments = await mapWithConcurrency(
       attachmentsToImport,
@@ -2146,31 +2400,36 @@ export class JiraMigrationImportService {
     actorUserId: string,
     jiraProjectKey: string,
   ): Promise<number> {
-    const relationshipCandidates: Array<{
-      sourceTicketId: string;
-      targetTicketId: string;
-      relationType: TicketReferenceRelation;
-      activityValue: Record<string, any>;
-    }> = [];
+	    const relationshipCandidates: Array<{
+	      sourceTicketId: string;
+	      targetTicketId: string;
+	      relationType: TicketReferenceRelation;
+	      activityValue: Record<string, any>;
+	    }> = [];
+	    const relationshipTicketIds = new Set<string>();
+	    const migratedTicketIds = new Set<string>();
 
-    for (const issue of issues) {
-      const sourceTicket = await this.findExistingTicketByJiraId(externalSourceId, issue.id, issue.key);
-      if (!sourceTicket) continue;
+	    for (const issue of issues) {
+	      const sourceTicket = await this.findExistingTicketByJiraId(externalSourceId, issue.id, issue.key);
+	      if (!sourceTicket) continue;
+	      relationshipTicketIds.add(sourceTicket.id);
+	      migratedTicketIds.add(sourceTicket.id);
 
-      const issueLinks: JiraIssueLink[] = Array.isArray(issue.fields.issuelinks)
-        ? issue.fields.issuelinks
-        : [];
+	      const issueLinks: JiraIssueLink[] = Array.isArray(issue.fields.issuelinks)
+	        ? issue.fields.issuelinks
+	        : [];
 
-      for (const link of issueLinks) {
+	      for (const link of issueLinks) {
         const mappedLink = this.mapJiraIssueLinkRelation(link);
         if (!mappedLink.targetIssue) continue;
 
-        const targetTicket = await this.findExistingTicketByJiraId(
+	        const targetTicket = await this.findExistingTicketByJiraId(
           externalSourceId,
           mappedLink.targetIssue.id,
           mappedLink.targetIssue.key,
-        );
-        if (!targetTicket || targetTicket.id === sourceTicket.id) continue;
+	        );
+	        if (!targetTicket || targetTicket.id === sourceTicket.id) continue;
+	        relationshipTicketIds.add(targetTicket.id);
 
         const normalizedPair = normalizeTicketReferencePair(
           sourceTicket.id,
@@ -2178,11 +2437,11 @@ export class JiraMigrationImportService {
           mappedLink.relationType,
         );
 
-        relationshipCandidates.push({
-          sourceTicketId: normalizedPair.sourceTicketId,
-          targetTicketId: normalizedPair.targetTicketId,
-          relationType: mappedLink.relationType,
-          activityValue: {
+	        relationshipCandidates.push({
+	          sourceTicketId: normalizedPair.sourceTicketId,
+	          targetTicketId: normalizedPair.targetTicketId,
+	          relationType: mappedLink.relationType,
+	          activityValue: {
             action: 'imported_from_jira',
             relationType: mappedLink.relationType,
             targetTicketId: targetTicket.id,
@@ -2197,39 +2456,56 @@ export class JiraMigrationImportService {
             jiraTargetIssueId: mappedLink.targetIssue.id,
             jiraTargetIssueKey: mappedLink.targetIssue.key,
           },
-        });
-      }
-    }
+	        });
+	      }
+	    }
 
-    if (relationshipCandidates.length === 0) {
-      logger.info(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Relationship import completed`, {
-        linkedTickets: 0,
-        totalIssues: issues.length,
-      });
-      return 0;
-    }
+	    const sourceTicketIds = [...migratedTicketIds];
+	    if (sourceTicketIds.length === 0) {
+	      logger.info(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Relationship import completed`, {
+	        linkedTickets: 0,
+	        totalIssues: issues.length,
+	      });
+	      return 0;
+	    }
 
-    const sourceTicketIds = [...new Set(relationshipCandidates.map(candidate => candidate.sourceTicketId))];
-    const targetTicketIds = [...new Set(relationshipCandidates.map(candidate => candidate.targetTicketId))];
-    const relationTypes = [...new Set(relationshipCandidates.map(candidate => candidate.relationType))];
+	    // For unlink support we need to see *all* existing mappings for the migrated source tickets,
+	    // not just those still present in Jira.
+	    const TICKET_REFERENCE_LOOKUP_CHUNK_SIZE = 8000;
+	    const existingMappingsChunks = await Promise.all(
+	      chunkArray(sourceTicketIds, TICKET_REFERENCE_LOOKUP_CHUNK_SIZE).map(chunk =>
+	        db.ticketReferenceMapping.findMany({
+	          where: {
+	            OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }],
+	          },
+	          select: {
+	            sourceTicketId: true,
+	            targetTicketId: true,
+	            relationType: true,
+	          },
+	        }),
+	      ),
+	    );
+	    const existingMappings = Array.from(
+	      new Map(
+	        existingMappingsChunks
+	          .flat()
+	          .map(mapping => [
+	            `${mapping.sourceTicketId}:${mapping.targetTicketId}:${mapping.relationType}`,
+	            mapping,
+	          ]),
+	      ).values(),
+	    );
 
-    const existingMappings = await db.ticketReferenceMapping.findMany({
-      where: {
-        sourceTicketId: { in: sourceTicketIds },
-        targetTicketId: { in: targetTicketIds },
-        relationType: { in: relationTypes },
-      },
-      select: {
-        sourceTicketId: true,
-        targetTicketId: true,
-        relationType: true,
-      },
-    });
-
-    const existingMappingKeys = new Set(
-      existingMappings.map(mapping => `${mapping.sourceTicketId}:${mapping.targetTicketId}:${mapping.relationType}`),
-    );
+	    const existingMappingKeys = new Set(
+	      existingMappings.map(mapping => `${mapping.sourceTicketId}:${mapping.targetTicketId}:${mapping.relationType}`),
+	    );
     const seenMappingKeys = new Set<string>();
+    const desiredMappingKeys = new Set(
+      relationshipCandidates.map(
+        candidate => `${candidate.sourceTicketId}:${candidate.targetTicketId}:${candidate.relationType}`,
+      ),
+    );
     const mappingsToCreate: Array<{
       sourceTicketId: string;
       targetTicketId: string;
@@ -2264,18 +2540,70 @@ export class JiraMigrationImportService {
       });
     }
 
-    if (mappingsToCreate.length > 0) {
-      await db.ticketReferenceMapping.createMany({
-        data: mappingsToCreate,
-        skipDuplicates: true,
-      });
-    }
+	    if (mappingsToCreate.length > 0) {
+	      await db.ticketReferenceMapping.createMany({
+	        data: mappingsToCreate,
+	        skipDuplicates: true,
+	      });
+	    }
 
-    if (activitiesToCreate.length > 0) {
-      await db.ticketActivity.createMany({
-        data: activitiesToCreate as any,
-      });
-    }
+    // Remove stale reference mappings for Jira-migrated tickets when Jira links are removed.
+    // Only removes mappings where BOTH endpoints are Jira-imported tickets for this externalSourceId.
+	    const endpointTicketIds = new Set<string>(migratedTicketIds);
+	    for (const mapping of existingMappings) {
+	      endpointTicketIds.add(mapping.sourceTicketId);
+	      endpointTicketIds.add(mapping.targetTicketId);
+	    }
+
+	    const endpointTicketIdList = Array.from(endpointTicketIds);
+	    const externalMessageChunks = await Promise.all(
+	      chunkArray(endpointTicketIdList, TICKET_REFERENCE_LOOKUP_CHUNK_SIZE).map(chunk =>
+	        db.externalMessage.findMany({
+	          where: {
+	            externalSourceId,
+	            entityType: ExternalEntityType.TICKET,
+	            entityId: { in: chunk },
+	          },
+	          select: { entityId: true },
+	        }),
+	      ),
+	    );
+	    const jiraImportedTicketIds = new Set(
+	      externalMessageChunks
+	        .flat()
+	        .map(row => row.entityId)
+	        .filter((id): id is string => Boolean(id)),
+	    );
+
+    const staleMappingsToDelete = existingMappings.filter(mapping => {
+      if (!jiraImportedTicketIds.has(mapping.sourceTicketId)) return false;
+      if (!jiraImportedTicketIds.has(mapping.targetTicketId)) return false;
+      if (!migratedTicketIds.has(mapping.sourceTicketId) && !migratedTicketIds.has(mapping.targetTicketId)) return false;
+      const key = `${mapping.sourceTicketId}:${mapping.targetTicketId}:${mapping.relationType}`;
+      return !desiredMappingKeys.has(key);
+    });
+		    if (staleMappingsToDelete.length > 0) {
+		      // Chunk deletes to avoid "too many bind variables" assertion violations.
+		      const DELETE_CHUNK_SIZE = 5000;
+		      const deleteChunks = chunkArray(staleMappingsToDelete, DELETE_CHUNK_SIZE);
+		      for (const chunk of deleteChunks) {
+		        await db.ticketReferenceMapping.deleteMany({
+		          where: {
+		            OR: chunk.map(mapping => ({
+		              sourceTicketId: mapping.sourceTicketId,
+		              targetTicketId: mapping.targetTicketId,
+		              relationType: mapping.relationType,
+		            })),
+		          },
+		        });
+		      }
+		    }
+
+	    if (activitiesToCreate.length > 0) {
+	      await db.ticketActivity.createMany({
+	        data: activitiesToCreate as any,
+	      });
+	    }
 
     logger.info(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Relationship import completed`, {
       linkedTickets: mappingsToCreate.length,
@@ -2328,14 +2656,16 @@ export class JiraMigrationImportService {
       childTicket: CachedTicketRecord;
       parentTicket: CachedTicketRecord;
     }> = [];
+    const childTicketByIssueId = new Map<string, CachedTicketRecord>();
 
     for (const issue of issues) {
       const issueLogPrefix = buildJiraMigrationIssueLogPrefix(jiraProjectKey, issue);
       const parentIssueKey = resolveJiraParentIssueKey(issue, fieldDefinitions);
-      if (!parentIssueKey) continue;
-
       const childTicket = await this.findExistingTicketByJiraId(externalSourceId, issue.id, issue.key);
       if (!childTicket) continue;
+      childTicketByIssueId.set(issue.id, childTicket);
+
+      if (!parentIssueKey) continue;
 
       const parentTicket = this.getCachedTicketRecord(parentIssueKey, parentIssueKey);
       if (!parentTicket) {
@@ -2349,11 +2679,11 @@ export class JiraMigrationImportService {
       candidates.push({ issue, childTicket, parentTicket });
     }
 
-    if (candidates.length === 0) {
+    const childTickets = Array.from(childTicketByIssueId.values());
+    const childTicketIds = [...new Set(childTickets.map(ticket => ticket.id))];
+    if (childTicketIds.length === 0) {
       return 0;
     }
-
-    const childTicketIds = [...new Set(candidates.map(candidate => candidate.childTicket.id))];
     const existingSubTickets = childTicketIds.length > 0
       ? await db.subTicket.findMany({
           where: {
@@ -2365,18 +2695,14 @@ export class JiraMigrationImportService {
       existingSubTickets.map(subTicket => [subTicket.mappedTicketId, subTicket]),
     );
 
-    const existingParentTicketIds = [...new Set(candidates
-      .map(candidate => {
-        const existingSubTicket = existingSubTicketsByMappedTicketId.get(candidate.childTicket.id);
-        return existingSubTicket ? candidate.parentTicket.id : null;
-      })
-      .filter((ticketId): ticketId is string => Boolean(ticketId)))];
+    const existingParentTicketIds = [...new Set(
+      candidates.map(candidate => candidate.parentTicket.id).filter(Boolean),
+    )];
     const existingSubTicketIds = [...new Set(existingSubTickets.map(subTicket => subTicket.id))];
     const existingMappings =
       existingParentTicketIds.length > 0 && existingSubTicketIds.length > 0
         ? await db.ticketSubTicketMapping.findMany({
             where: {
-              ticketId: { in: existingParentTicketIds },
               subTicketId: { in: existingSubTicketIds },
             },
             select: {
@@ -2667,8 +2993,8 @@ export class JiraMigrationImportService {
       created: externalSourceCreated,
     } = await this.ensureExternalSource(jiraProjectKey, channel.id, board.id);
 
-    const fallbackUser = await this.userRepository.findByEmail(JIRA_MIGRATION_FALLBACK_EMAIL, workspaceId);
-    const fallbackUserId = fallbackUser?.id || actorUserId;
+	    const fallbackUser = await this.userRepository.findByEmail(JIRA_MIGRATION_FALLBACK_EMAIL, workspaceId);
+	    const fallbackUserId = fallbackUser?.id || actorUserId;
     if (!fallbackUser) {
       logger.warn(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Configured fallback user not found; using actor user`, {
         configuredFallbackEmail: JIRA_MIGRATION_FALLBACK_EMAIL,
@@ -2676,7 +3002,8 @@ export class JiraMigrationImportService {
       });
     }
 
-    await this.userResolver.warmUserResolutionLookup();
+	    await this.userResolver.warmUserResolutionLookup();
+	    const initialTicketMessageSenderId = fallbackUserId;
 
     let jiraStatusOrder: string[] | null = null;
     if (Array.isArray(input.jiraStatusSequence) && input.jiraStatusSequence.length > 0) {
@@ -2794,7 +3121,7 @@ export class JiraMigrationImportService {
       await this.preloadExistingTickets(externalSourceId, issuesChunk);
       stages = await this.ensureExactJiraStages(
         board.id,
-        actorUserId,
+        fallbackUserId,
         issuesChunk,
         stages,
         normalizedStatusV2Mappings,
@@ -2810,7 +3137,7 @@ export class JiraMigrationImportService {
       const incrementalFieldSetup = await this.ensureBoardCustomFieldsIncremental(
         board.id,
         board.name,
-        actorUserId,
+        fallbackUserId,
         workspaceId,
         fieldDefinitions,
         issuesChunk,
@@ -2909,32 +3236,32 @@ export class JiraMigrationImportService {
                 },
               });
 
-              await tx.message.create({
-                data: {
-                  messageId: initialMessageId,
-                  conversationId: generatedConversationId,
-                  senderId: resolvedReporterId,
-                  content: rootMessageContent,
-                  msgType: MessageType.USER,
-                  hasAttachment: false,
-                  edited: false,
-                  isDeleted: false,
-                  showInChannel: false,
-                  visibleTo: null,
-                  createdAt,
-                },
-              });
-
-              const initialMessageMd = serializeInitialMessageMd({
-                messageId: initialMessageId,
-                conversationId: generatedConversationId,
-                senderId: resolvedReporterId,
-                content: rootMessageContent,
-                msgType: MessageType.USER as InitialMessageSummary['msgType'],
-                hasAttachment: false,
-                edited: false,
-                isDeleted: false,
-                showInChannel: false,
+	              await tx.message.create({
+	                data: {
+	                  messageId: initialMessageId,
+	                  conversationId: generatedConversationId,
+	                  senderId: initialTicketMessageSenderId,
+	                  content: rootMessageContent,
+	                  msgType: MessageType.USER,
+	                  hasAttachment: false,
+	                  edited: false,
+	                  isDeleted: false,
+	                  showInChannel: false,
+	                  visibleTo: null,
+	                  createdAt,
+	                },
+	              });
+	
+	              const initialMessageMd = serializeInitialMessageMd({
+	                messageId: initialMessageId,
+	                conversationId: generatedConversationId,
+	                senderId: initialTicketMessageSenderId,
+	                content: rootMessageContent,
+	                msgType: MessageType.USER as InitialMessageSummary['msgType'],
+	                hasAttachment: false,
+	                edited: false,
+	                isDeleted: false,
+	                showInChannel: false,
                 visibleTo: null,
                 createdAt: createdAt.getTime(),
                 metadata: null,
@@ -2975,16 +3302,16 @@ export class JiraMigrationImportService {
                   ? new Date(dueDateRaw)
                   : undefined;
 
-              const createdTicket = await this.ticketRepository.createTicket(
-                {
-                  title: summary,
-                  description,
-                  createdBy: resolvedReporterId,
-                  updatedBy: actorUserId,
-                  assignedTo: assignee ? resolvedAssigneeId : undefined,
-                  conversationId: generatedConversationId,
-                  channelId: channel.id,
-                  projectId: project.id,
+	              const createdTicket = await this.ticketRepository.createTicket(
+	                {
+	                  title: summary,
+	                  description,
+	                  createdBy: resolvedReporterId,
+	                  updatedBy: fallbackUserId,
+	                  assignedTo: assignee ? resolvedAssigneeId : undefined,
+	                  conversationId: generatedConversationId,
+	                  channelId: channel.id,
+	                  projectId: project.id,
                   boardId: board.id,
                   statusV2: stageMatch.statusV2,
                   priority: mapPriority(issue.fields.priority?.name),
@@ -3102,17 +3429,209 @@ export class JiraMigrationImportService {
             importedTickets += 1;
             this.queueTicketVespaJob(ticket.id, resolvedReporterId);
 
-            if (initialMessageIdForTicket) {
-              this.queueMessageVespaJobs([
-                {
-                  messageId: initialMessageIdForTicket,
-                  userId: resolvedReporterId,
-                },
-              ]);
-            }
+	            if (initialMessageIdForTicket) {
+	              this.queueMessageVespaJobs([
+	                {
+	                  messageId: initialMessageIdForTicket,
+	                  userId: initialTicketMessageSenderId,
+	                },
+	              ]);
+	            }
 
           } else {
             skippedTickets += 1;
+
+            try {
+              const existingConversationId = conversationId || null;
+              const conversation = existingConversationId
+                ? await db.conversation.findUnique({
+                    where: { conversationId: existingConversationId },
+                    select: { initialMessageId: true, createdBy: true },
+                  })
+                : null;
+
+              const updates: Array<Promise<unknown>> = [];
+              let ticketTouched = false;
+              let initialMessageTouched = false;
+
+              if (ticketId) {
+                const currentTicket = await db.ticket.findUnique({
+                  where: { id: ticketId },
+                  select: {
+                    id: true,
+                    conversationId: true,
+                    createdBy: true,
+                    title: true,
+                    description: true,
+                    stageName: true,
+                    statusV2: true,
+                    priority: true,
+                    assignedTo: true,
+                    eta: true,
+                    ticketType: true,
+                    createdAt: true,
+                  },
+                });
+
+                if (currentTicket) {
+                  const desiredTicketType = mapJiraIssueTypeToTicketType(issue.fields.issuetype?.name);
+                  const dueDateRaw = issue.fields.duedate;
+                  const desiredEta =
+                    typeof dueDateRaw === 'string' && dueDateRaw.trim()
+                      ? new Date(dueDateRaw)
+                      : null;
+
+                  // Stage/status sync
+		                  if (currentTicket.stageName !== mappedStage.name) {
+		                    await this.ticketRepository.updateTicketStage(
+		                      ticketId,
+		                      mappedStage.name,
+		                      fallbackUserId,
+		                    );
+		                    ticketTouched = true;
+		                  }
+
+                  // Basic fields sync (diff before calling update to avoid unnecessary writes)
+                  const nextFields: {
+                    title?: string;
+                    description?: string;
+                    priority?: TicketPriority;
+                    eta?: Date | null;
+                    ticketType?: string | null;
+                  } = {};
+
+                  if (currentTicket.title !== summary) nextFields.title = summary;
+                  if ((currentTicket.description || '') !== description) nextFields.description = description;
+                  if (currentTicket.priority !== mapPriority(issue.fields.priority?.name)) {
+                    nextFields.priority = mapPriority(issue.fields.priority?.name);
+                  }
+                  if ((currentTicket.ticketType || null) !== (desiredTicketType || null)) {
+                    nextFields.ticketType = desiredTicketType || null;
+                  }
+
+                  const prevEtaMs = currentTicket.eta ? currentTicket.eta.getTime() : null;
+                  const nextEtaMs = desiredEta ? desiredEta.getTime() : null;
+                  if (prevEtaMs !== nextEtaMs) {
+                    nextFields.eta = desiredEta;
+                  }
+
+	                  if (Object.keys(nextFields).length > 0) {
+	                    await this.ticketRepository.updateTicketFields(ticketId, nextFields as any, fallbackUserId);
+	                    ticketTouched = true;
+	                  }
+
+                  // Assignee sync (allow unassign)
+	                  const desiredAssigneeId = assignee ? resolvedAssigneeId : null;
+	                  if ((currentTicket.assignedTo || null) !== (desiredAssigneeId || null)) {
+	                    await this.ticketRepository.updateTicketAssignee(ticketId, desiredAssigneeId, fallbackUserId);
+	                    ticketTouched = true;
+	                  }
+
+                  // createdBy correction (and keep conversation.createdBy aligned)
+	                  if (currentTicket.createdBy !== resolvedReporterId) {
+	                    updates.push(
+	                      db.ticket.update({
+	                        where: { id: ticketId },
+	                        data: { createdBy: resolvedReporterId, updatedBy: fallbackUserId },
+	                      }),
+	                    );
+	                    ticketTouched = true;
+	                  }
+
+	                  // Tags replace-set sync (labels + sprints)
+	                  const allTagNames: string[] = [];
+                  if (Array.isArray(issue.fields.labels)) {
+                    allTagNames.push(...(issue.fields.labels as string[]).filter(Boolean));
+                  }
+                  for (const sprintFieldId of sprintFieldIds) {
+                    const sprintValue = issue.fields[sprintFieldId];
+                    if (sprintValue == null) continue;
+                    const sprintNames = extractMeaningfulJiraCustomFieldValues(sprintValue);
+                    allTagNames.push(...sprintNames);
+	                  }
+		                  const desiredTags = [...new Set(allTagNames.filter(Boolean))];
+		                  await this.setTicketTagsReplaceSet(ticketId, desiredTags, fallbackUserId);
+		                }
+		              }
+
+              if (conversation && existingConversationId && conversation.createdBy !== resolvedReporterId) {
+                updates.push(
+                  db.conversation.update({
+                    where: { conversationId: existingConversationId },
+                    data: { createdBy: resolvedReporterId },
+                  }),
+                );
+              }
+
+	              if (conversation?.initialMessageId) {
+	                const currentInitialMessage = await db.message.findUnique({
+	                  where: { messageId: conversation.initialMessageId },
+	                  select: { messageId: true, senderId: true, content: true },
+	                });
+	
+	                if (
+	                  currentInitialMessage &&
+	                  (currentInitialMessage.senderId !== initialTicketMessageSenderId ||
+	                    currentInitialMessage.content !== rootMessageContent)
+	                ) {
+	                  updates.push(
+	                    db.message.update({
+	                      where: { messageId: conversation.initialMessageId },
+	                      data: {
+	                        senderId: initialTicketMessageSenderId,
+	                        content: rootMessageContent,
+	                      },
+	                    }),
+	                  );
+	                  initialMessageTouched = true;
+	                }
+	              }
+
+              if (updates.length > 0) {
+                await Promise.all(updates);
+              }
+
+              if ((ticketTouched || initialMessageTouched) && existingConversationId && ticketId) {
+                await this.syncConversationDerivedMd(existingConversationId, ticketId);
+              }
+
+              if (ticketId) {
+                const refreshed = await db.ticket.findUnique({
+                  where: { id: ticketId },
+                  select: {
+                    id: true,
+                    conversationId: true,
+                    xyneId: true,
+                    title: true,
+                    description: true,
+                    createdBy: true,
+                    assignedTo: true,
+                    workspaceId: true,
+                  },
+                });
+                if (refreshed) {
+                  this.cacheTicketRecord(
+                    {
+                      id: refreshed.id,
+                      conversationId: refreshed.conversationId,
+                      xyneId: refreshed.xyneId,
+                      title: refreshed.title,
+                      description: refreshed.description,
+                      createdBy: refreshed.createdBy,
+                      assignedTo: refreshed.assignedTo,
+                      workspaceId: refreshed.workspaceId,
+                    },
+                    issue.id,
+                    issue.key,
+                  );
+                }
+              }
+            } catch (error) {
+              logger.warn(`${issueLogPrefix} Failed to sync createdBy/root message derived metadata`, {
+                issueKey: issue.key,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
           }
 
           if (!ticketId || !conversationId) {
@@ -3484,14 +4003,14 @@ export class JiraMigrationImportService {
     const createdSubTickets = await this.createSubTicketMappings(
       externalSourceId,
       relationshipIssues,
-      actorUserId,
+      fallbackUserId,
       fieldDefinitions,
       jiraProjectKey,
     );
     const linkedTickets = await this.importRelationships(
       externalSourceId,
       relationshipIssues,
-      actorUserId,
+      fallbackUserId,
       jiraProjectKey,
     );
 

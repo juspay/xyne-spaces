@@ -14,6 +14,7 @@ router.post('/resolve-users', authMiddleware.authenticate, jiraMigrationAdminAut
 router.post('/execute', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.execute);
 router.post('/bulk-execute', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.bulkExecute);
 router.post('/move-channel-project', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveChannelProject);
+router.post('/move-jira-project-board', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveJiraProjectBoard);
 router.post('/change-ticket-created-by', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.changeTicketCreatedBy);
 router.post('/purge-project-migration', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.purgeProjectMigration);
 router.post('/user-map/lookup', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.userMapLookup);
