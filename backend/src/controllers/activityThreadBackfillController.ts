@@ -9,6 +9,7 @@ const LOG_EVERY_N_BATCHES = 50;
 type BackfillOptions = {
   batchSize: number;
   delayMs: number;
+  dryRun: boolean;
 };
 
 type BackfillSummary = {
@@ -25,10 +26,11 @@ export class ActivityThreadBackfillController {
   }
 
   private static buildOptions(body: unknown): BackfillOptions {
-    const payload = (body ?? {}) as Partial<{ batchSize: number; delayMs: number }>;
+    const payload = (body ?? {}) as Partial<{ batchSize: number; delayMs: number; dryRun: boolean }>;
     const batchSize = payload.batchSize && payload.batchSize > 0 ? payload.batchSize : 50;
     const delayMs = payload.delayMs && payload.delayMs > 0 ? payload.delayMs : 1000;
-    return { batchSize, delayMs };
+    const dryRun = payload.dryRun === true;
+    return { batchSize, delayMs, dryRun };
   }
 
   private static async runBackfill(options: BackfillOptions): Promise<void> {
@@ -70,6 +72,7 @@ export class ActivityThreadBackfillController {
 
       const messageToIsThread = new Map<string, boolean>();
       for (const msg of messages) {
+        if (!msg.conversation) continue;
         messageToIsThread.set(msg.messageId, msg.messageId !== msg.conversation.initialMessageId);
       }
 
@@ -97,17 +100,19 @@ export class ActivityThreadBackfillController {
       }
 
       try {
-        if (threadIds.length > 0) {
-          await db.activity.updateMany({
-            where: { id: { in: threadIds } },
-            data: { isThreadActivity: true },
-          });
-        }
-        if (channelIds.length > 0) {
-          await db.activity.updateMany({
-            where: { id: { in: channelIds } },
-            data: { isThreadActivity: false },
-          });
+        if (!options.dryRun) {
+          if (threadIds.length > 0) {
+            await db.activity.updateMany({
+              where: { id: { in: threadIds } },
+              data: { isThreadActivity: true },
+            });
+          }
+          if (channelIds.length > 0) {
+            await db.activity.updateMany({
+              where: { id: { in: channelIds } },
+              data: { isThreadActivity: false },
+            });
+          }
         }
         summary.updated += threadIds.length + channelIds.length;
       } catch (error) {
