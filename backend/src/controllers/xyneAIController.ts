@@ -136,6 +136,26 @@ export class XyneAIController {
       return;
     }
 
+    const mode = disable_tools && draft_mode ? 'draft-rewrite' : disable_tools ? 'rewrite' : draft_mode ? 'draft' : 'ask';
+    logger.info('[XyneAI] query start', {
+      flow: 'xyne-ai-v1',
+      mode,
+      userId,
+      sessionId: session_id,
+      conversationId: conversation_id,
+      channelCount: channel_ids.length,
+      hasAttachments: (attachments?.length ?? 0) > 0,
+      attachmentCount: attachments?.length ?? 0,
+      messageAttachmentCount: message_attachment_ids?.length ?? 0,
+      canvasCount: canvas_ids?.length ?? 0,
+      ticketCount: ticket_ids?.length ?? 0,
+      callCount: call_ids?.length ?? 0,
+      isRegenerate: is_regenerate,
+      webSearchEnabled: web_search_enabled,
+      deepResearchEnabled: deep_research_enabled,
+      queryLen: query?.length ?? 0,
+    });
+
     try {
       // Authorization check - verify user has access to ALL specified channels
       // Skip if channel_ids is empty - agent will ask user to specify channel
@@ -201,6 +221,13 @@ export class XyneAIController {
             hasDeskSignature = signatureCount > 0;
           }
         }
+        logger.info('[XyneAI] draft signature check', {
+          flow: 'xyne-ai-v1',
+          mode,
+          userId,
+          conversationId: conversation_id,
+          hasDeskSignature,
+        });
       }
 
       // Transform selection_contexts from snake_case to camelCase
@@ -243,16 +270,43 @@ export class XyneAIController {
       const startTime = Date.now();
       let status = 'success';
 
+      logger.info('[XyneAI] stream invoke', {
+        flow: 'xyne-ai-v1',
+        mode,
+        userId,
+        sessionId: session_id,
+        conversationId: conversation_id,
+        channelCount: channel_ids.length,
+        disableTools: disable_tools === true,
+      });
       try {
         await this.streamResponse(res, agentRequest);
       } catch (streamError) {
         status = 'error';
+        logger.error('[XyneAI] stream failed', {
+          flow: 'xyne-ai-v1',
+          mode,
+          userId,
+          sessionId: session_id,
+          conversationId: conversation_id,
+          durationMs: Date.now() - startTime,
+          error: streamError instanceof Error ? streamError.message : String(streamError),
+        });
         throw streamError;
       } finally {
         try {
           const duration = Date.now() - startTime;
           getAskAIQueryDuration().record(duration, { status });
           getAskAIQueriesTotal().add(1, { status });
+          logger.info('[XyneAI] query done', {
+            flow: 'xyne-ai-v1',
+            mode,
+            userId,
+            sessionId: session_id,
+            conversationId: conversation_id,
+            status,
+            durationMs: duration,
+          });
         } catch (metricsError) {
           logger.error('[XyneAI] Error recording metrics:', metricsError);
         }
@@ -868,11 +922,23 @@ export class XyneAIController {
 
     const streamGenerator = xyneAIStream({ ...request, onStreamEvent });
 
+    let sessionIdFromStream: string | undefined;
+    let terminalType: string | undefined;
+    let errorMsg: string | undefined;
+
     try {
       for await (const chunk of streamGenerator) {
+        const c = chunk as { type?: string; sessionId?: string; error?: string };
+        if (c.type === 'start' && typeof c.sessionId === 'string') {
+          sessionIdFromStream = c.sessionId;
+        }
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
         if (typeof (res as any).flush === 'function') (res as any).flush();
-        if (chunk.type === 'complete' || chunk.type === 'error') break;
+        if (c.type === 'complete' || c.type === 'error') {
+          terminalType = c.type;
+          if (c.type === 'error') errorMsg = c.error;
+          break;
+        }
       }
     } finally {
       clearInterval(pingInterval);
@@ -880,7 +946,13 @@ export class XyneAIController {
 
     res.write(`data: ${JSON.stringify({ type: 'end' })}\n\n`);
     res.end();
-    logger.info(`[XyneAI] Stream completed`);
+    logger.info('[XyneAI] stream done', {
+      flow: 'xyne-ai-v1',
+      sessionId: sessionIdFromStream,
+      conversationId: (request as { conversationId?: string }).conversationId,
+      terminalType: terminalType ?? 'closed',
+      ...(errorMsg && { errorMsg }),
+    });
   }
 
   private handleError(res: Response, error: unknown, operation: string): void {
