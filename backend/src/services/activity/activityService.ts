@@ -600,6 +600,54 @@ export class ActivityService {
       },
     });
   }
+
+  async getWorkspaceActivityCounts(memberId: string): Promise<
+    Array<{
+      workspaceId: string;
+      userId: string;
+      count: number;
+    }>
+  > {
+    const users = await this.prisma.user.findMany({
+      where: {
+        orgMemberId: memberId,
+        leftAt: null,
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+      },
+    });
+
+    if (users.length === 0) {
+      return [];
+    }
+
+    const userIds = users.map(u => u.id);
+
+    const activityCounts = await this.prisma.activity.groupBy({
+      by: ['userId'],
+      where: {
+        userId: { in: userIds },
+        isRead: false,
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    const countMap = new Map<string, number>();
+    for (const ac of activityCounts) {
+      countMap.set(ac.userId, ac._count.id);
+    }
+
+    return users.map(u => ({
+      workspaceId: u.workspaceId,
+      userId: u.id,
+      count: countMap.get(u.id) ?? 0,
+    }));
+  }
 }
 
 // Singleton instance

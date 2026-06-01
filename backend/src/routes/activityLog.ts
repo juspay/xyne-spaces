@@ -24,4 +24,10 @@ router.post(
   (req, res) => activityController.logActivity(req, res)
 );
 
+router.get(
+  '/workspace-counts',
+  authMiddleware.authenticate,
+  (req, res) => activityController.getWorkspaceActivityCounts(req, res)
+);
+
 export default router;
