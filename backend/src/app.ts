@@ -317,6 +317,7 @@ export class App {
     }
     // Activity isThreadActivity backfill
     this.app.use('/migrate/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
+    this.app.use('/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
     // ExternalSource displayName cleanup ("Microsoft (email)" → "email").
     this.app.use(
       '/api/admin/external-source-displayname-backfill',
