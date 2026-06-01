@@ -72,28 +72,9 @@ import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
-import {
-  DndContext,
-  DragOverlay,
-  closestCenter,
-  useSensor,
-  useSensors,
-  MouseSensor,
-  TouchSensor,
-  KeyboardSensor,
-} from '@dnd-kit/core';
-import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
-import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
-import { useDragAndDrop } from '../../hooks/useDragAndDrop';
-import {
-  getStageColor,
-  groupTicketsByStage,
-  createTagsByTicketIdMap,
-} from '../KanbanBoardScreen/KanbanBoardScreen.utils';
-import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
-import type { Ticket, BoardMetadata, TicketStageRequest } from '@xyne/shared';
-import type { Stage } from '../KanbanBoardScreen/KanbanBoardScreen.types';
-import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
+import { SupportKanbanBoard } from './SupportKanbanBoard';
+import { TicketPriority } from '@xyne/shared';
+import type { Ticket } from '@xyne/shared';
 import { getDraft } from '../../hooks/useDraft';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
@@ -128,7 +109,6 @@ interface BotMessageBrief {
   sources: DraftSource[];
 }
 import { InboxSettingsPanel } from '../../components/xyne-desk/InboxSettings/InboxSettingsPanel';
-import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import {
   useChannelConnectedEmail,
   clearChannelConnectedEmailCache,
@@ -157,13 +137,6 @@ import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadC
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV2>[number];
-
-const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: number }) => ({
-  id: stage.id,
-  name: stage.name,
-  color: getStageColor(stage.name.toLowerCase().replace(/\s+/g, '_')),
-  ...(stage.sequenceNumber !== undefined && { sequenceNumber: stage.sequenceNumber }),
-});
 
 const ChannelInfoModal = ({
   channelId,
@@ -503,7 +476,6 @@ const SupportScreen = (): ReactElement => {
   const supportBase = workspaceId ? `/${workspaceId}/support` : '/support';
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const zero = useZero();
   const { userID } = useAuthContextValues();
   const { isMobile } = usePlatform();
   const [showMyTicketsOnly, setShowMyTicketsOnly] = useState(false);
@@ -515,31 +487,11 @@ const SupportScreen = (): ReactElement => {
   useEffect(() => {
     setChannelBoardId(null);
   }, [selectedChannelId]);
-  const boardId = channelBoardId ?? undefined;
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('support-view-mode');
     return (saved as ViewMode) || 'list';
   });
-
-  const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: boardId || '' }), {
-    enabled: !!boardId && viewMode === 'kanban',
-  });
-
-  // Fetch board metadata to determine the active SLA mechanism.
-  // getBoardById is lightweight (board + project only, no stages) and is a
-  // separate subscription from stagesByBoard, which returns stages not board rows.
-  const [boardForSla] = useCachedQuery(queries.getBoardById({ boardId: boardId || '' }), {
-    enabled: !!boardId && viewMode === 'kanban',
-  });
-  const isBoardPrioritySla =
-    (boardForSla?.metadata as BoardMetadata | null | undefined)?.slaPolicyType === 'priority';
-
-  // Fetch SLA policies only when the board is configured for priority-based SLA.
-  // Boards using stage-based SLA (the default) have no active entries in
-  // board_sla_policies, so we skip the subscription entirely rather than letting
-  // it fire an empty query.
-  const kanbanSlaPolicies = useBoardsSlaPolicies(isBoardPrioritySla && boardId ? [boardId] : []);
 
   const setSelectedChannelId = useCallback(
     (next: string | null): void => {
@@ -854,19 +806,6 @@ const SupportScreen = (): ReactElement => {
   // Fetch EMAIL channels using hook (from state machine, already loaded)
   const emailChannels = useEmailChannels();
 
-  // Unified query: channel-scoped tickets. Only needed for Kanban view; list
-  // view uses paginated supportTicketsPage via TicketListView.
-  const kanbanChannelUserStatus = useGetChannelUserStatus(selectedChannelId ?? '');
-  const kanbanIsMember = !!kanbanChannelUserStatus;
-  const [supportTickets] = useCachedQuery(
-    queries.supportTicketsFilteredV2({
-      channelId: selectedChannelId ?? '',
-      isMember: kanbanIsMember,
-      ...ticketFilter,
-    }),
-    { enabled: !!selectedChannelId && viewMode === 'kanban' },
-  );
-
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
   const userChannelStatuses = useUserChannelStatuses();
@@ -1000,154 +939,14 @@ const SupportScreen = (): ReactElement => {
   // Get full selected channel for member count and other stats
   const selectedChannelFull = useVisibleChannel(selectedChannelId ?? '');
 
-  // Filters are now applied server-side via the supportTicketsFilteredV2 query
-  const displayedTickets = supportTickets;
+  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
 
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
   const mergeDialogTickets = useMemo(() => {
-    if (!displayedTickets) return [];
-    const selected = displayedTickets.filter(t => selectedTickets.has(t.id));
+    const selected = kanbanTickets.filter(t => selectedTickets.has(t.id));
     return [...selected].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-  }, [selectedTickets, displayedTickets]);
-
-  const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
-
-  // Stages fetched dynamically from the board configured in EmailChannelPreference.
-  // Empty if no board is configured — dropdown and kanban will show no stages.
-  const stageColumns = useMemo(() => stages?.map(toStageColumn) ?? [], [stages]);
-
-  // Full stage objects (with formId and approvers) used for drag-and-drop and form checks.
-  const stagesForDragDrop = useMemo<Stage[]>(() => {
-    if (!stages) return [];
-    return stages.map(stage => {
-      const formId =
-        stage.formContextMappings?.find(
-          (m: { contextType: string; entityType: string; formId: string }) =>
-            m.contextType === 'STAGE' && m.entityType === 'TICKET',
-        )?.formId ?? null;
-      return {
-        id: stage.id,
-        name: stage.name,
-        color: getStageColor(stage.name.toLowerCase().replace(/\s+/g, '_')),
-        ...(stage.sequenceNumber !== undefined ? { sequenceNumber: stage.sequenceNumber } : {}),
-        ...(stage.defaultTicketStatusV2 !== undefined
-          ? { defaultTicketStatusV2: stage.defaultTicketStatusV2 }
-          : {}),
-        ...(formId ? { formId } : {}),
-        ...(stage.approvers ? { approvers: stage.approvers } : {}),
-      } satisfies Stage;
-    });
-  }, [stages]);
-
-  // Map of stageId -> formId for quick lookup during drag-and-drop.
-  const stageFormMap = useMemo(() => {
-    const map = new Map<string, string>();
-    stagesForDragDrop.forEach(stage => {
-      if (stage.formId) {
-        map.set(stage.id, stage.formId);
-      }
-    });
-    return map;
-  }, [stagesForDragDrop]);
-
-  // Stage form modal state — shown when moving a ticket to a stage that has a form.
-  const [stageFormModal, setStageFormModal] = useState<{
-    ticket: Ticket;
-    targetStage: Stage;
-    sourceStageName: string;
-    formId: string;
-    hasApprovers: boolean;
-    existingRequest?: TicketStageRequest | null;
-  } | null>(null);
-
-  // Backward movement confirmation dialog state.
-  const [showBackwardConfirmDialog, setShowBackwardConfirmDialog] = useState(false);
-  const [backwardStageChange, setBackwardStageChange] = useState<{
-    stageName: string;
-    fromSequenceNumber: number;
-    newStatus?: TicketStatusV2;
-    ticketId: string;
-  } | null>(null);
-
-  useEffect(() => {
-    if (displayedTickets) {
-      setLocalTickets(displayedTickets as Ticket[]);
-    }
-  }, [displayedTickets]);
-
-  const ticketsByStage = useMemo(
-    () => groupTicketsByStage(localTickets, stageColumns),
-    [localTickets, stageColumns],
-  );
-
-  const tagsByTicketId = useMemo(() => createTagsByTicketIdMap([]), []);
-
-  // Handler for when a stage transition requires a form to be filled out.
-  const handleStageFormRequired = useCallback(
-    async (data: { ticket: Ticket; targetStage: Stage; formId: string; hasApprovers: boolean }) => {
-      const sourceStage = stagesForDragDrop.find(s => s.name === data.ticket.stageName);
-      const ticketRequests = await zero.run(
-        queries.getTicketStageRequests({ ticketId: data.ticket.id }),
-        { type: 'complete' },
-      );
-      const existingRequest = ticketRequests?.find(
-        (r: TicketStageRequest) => r.stageId === data.targetStage.id,
-      );
-      setStageFormModal({
-        ...data,
-        sourceStageName: sourceStage?.name || data.ticket.stageName || '',
-        existingRequest: existingRequest || null,
-      });
-    },
-    [stagesForDragDrop, zero],
-  );
-
-  // Handler for backward stage movement — shows a confirmation dialog.
-  const handleBackwardStageChange = useCallback(
-    (data: {
-      ticket: Ticket;
-      stageName: string;
-      fromSequenceNumber: number;
-      newStatus?: TicketStatusV2;
-    }) => {
-      setBackwardStageChange({
-        stageName: data.stageName,
-        fromSequenceNumber: data.fromSequenceNumber,
-        ...(data.newStatus !== undefined && { newStatus: data.newStatus }),
-        ticketId: data.ticket.id,
-      });
-      setShowBackwardConfirmDialog(true);
-    },
-    [],
-  );
-
-  const { activeTicket, handleDragStart, handleDragEnd } = useDragAndDrop({
-    localTickets,
-    setLocalTickets,
-    zero,
-    stages: stagesForDragDrop,
-    mode: 'stage',
-    canReorder: false,
-    onStageFormRequired: handleStageFormRequired,
-    onBackwardStageChange: handleBackwardStageChange,
-    stageFormMap,
-  });
-
-  const sensors = useSensors(
-    useSensor(MouseSensor, {
-      activationConstraint: {
-        distance: 10,
-      },
-    }),
-    useSensor(TouchSensor, {
-      activationConstraint: {
-        delay: 250,
-        tolerance: 5,
-      },
-    }),
-    useSensor(KeyboardSensor),
-  );
+  }, [selectedTickets, kanbanTickets]);
 
   // Mutation for creating email channel
   const createChannelMutation = useMutation({
@@ -1916,34 +1715,14 @@ const SupportScreen = (): ReactElement => {
                       </div>
                     )}
                     {viewMode === 'kanban' ? (
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragStart={handleDragStart}
-                        onDragEnd={event => void handleDragEnd(event)}
-                      >
-                        <KanbanColumns
-                          stages={stageColumns}
-                          ticketsByStage={ticketsByStage}
-                          tagsByTicketId={tagsByTicketId}
-                          onTicketClick={handleTicketClick}
-                          containerClassName='h-full'
-                          slaPolicies={kanbanSlaPolicies}
-                        />
-                        <DragOverlay>
-                          {activeTicket ? (
-                            <TicketCard
-                              ticket={activeTicket}
-                              isCompact={true}
-                              onClick={() => {}}
-                              data-track-category='Support'
-                              data-track-name='DragOverlayTicketClick'
-                              data-track-metadata={JSON.stringify({ ticketId: activeTicket?.id })}
-                              slaPolicies={kanbanSlaPolicies}
-                            />
-                          ) : null}
-                        </DragOverlay>
-                      </DndContext>
+                      <SupportKanbanBoard
+                        channelId={selectedChannelId}
+                        boardId={channelBoardId}
+                        onBoardIdResolved={setChannelBoardId}
+                        ticketFilter={ticketFilter}
+                        onTicketClick={handleTicketClick}
+                        onTicketsLoaded={setKanbanTickets}
+                      />
                     ) : (
                       <TicketListView
                         isMember={isSelectedChannelJoined}
@@ -2020,72 +1799,6 @@ const SupportScreen = (): ReactElement => {
             handleRefetch(range);
           }}
         />
-      )}
-
-      {/* Stage Form Modal — shown when a ticket is moved to a stage that has a form */}
-      {stageFormModal && (
-        <StageFormModal
-          isOpen={!!stageFormModal}
-          onClose={() => setStageFormModal(null)}
-          ticket={stageFormModal.ticket}
-          targetStage={stageFormModal.targetStage}
-          sourceStageName={stageFormModal.sourceStageName}
-          existingRequest={stageFormModal.existingRequest ?? null}
-          formId={stageFormModal.formId}
-          hasApprovers={stageFormModal.hasApprovers ?? false}
-          onSuccess={() => setStageFormModal(null)}
-        />
-      )}
-
-      {/* Backward stage movement confirmation dialog */}
-      {backwardStageChange && (
-        <Dialog
-          open={showBackwardConfirmDialog}
-          onOpenChange={setShowBackwardConfirmDialog}
-          title='Confirm Stage Change'
-        >
-          <div className='p-6'>
-            <p className='text-sm text-muted-foreground mb-6'>
-              Moving to a previous stage will clear all status change requests for status after this
-              one. These requests will need to be submitted again. Do you want to continue?
-            </p>
-            <div className='flex justify-end gap-3'>
-              <Button
-                variant='secondary'
-                onClick={() => setShowBackwardConfirmDialog(false)}
-                data-track-category='Support'
-                data-track-name='CancelBackwardStageChange'
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  if (backwardStageChange) {
-                    void zero.mutate(
-                      mutators.cleanupStageApprovals({
-                        ticketId: backwardStageChange.ticketId,
-                        fromSequenceNumber: backwardStageChange.fromSequenceNumber,
-                      }),
-                    );
-                    void zero.mutate(
-                      mutators.ticket.update({
-                        id: backwardStageChange.ticketId,
-                        stageName: backwardStageChange.stageName,
-                        updatedAt: Date.now(),
-                      }),
-                    );
-                  }
-                  setShowBackwardConfirmDialog(false);
-                  setBackwardStageChange(null);
-                }}
-                data-track-category='Support'
-                data-track-name='ConfirmBackwardStageChange'
-              >
-                Continue
-              </Button>
-            </div>
-          </div>
-        </Dialog>
       )}
 
       <MergeTicketsDialog

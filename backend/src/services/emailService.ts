@@ -433,29 +433,48 @@ export class EmailService {
     emailBody: string;
   }): Promise<void> {
     const { ticketId, conversationId, channelId, emailSubject, emailBody } = params;
+    const startTime = Date.now();
+
+    logger.info('[AutoDraft] start', {
+      mode: 'autodraft',
+      ticketId,
+      conversationId,
+      channelId,
+      subjectLen: emailSubject?.length ?? 0,
+      bodyLen: emailBody?.length ?? 0,
+    });
 
     const preference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
     if (preference?.autoDraftMode !== 'DRAFT') {
-      logger.info('[AutoDraft] Skipping — auto-draft is not enabled for this channel', {
+      logger.info('[AutoDraft] skip: auto-draft not enabled for channel', {
+        mode: 'autodraft',
         ticketId,
         channelId,
+        autoDraftMode: preference?.autoDraftMode ?? 'unset',
+        durationMs: Date.now() - startTime,
       });
       return;
     }
 
     const personaUserId = preference.ownerUserId;
     if (!personaUserId) {
-      logger.info('[AutoDraft] Skipping — no desk owner configured to personalize the draft', {
+      logger.info('[AutoDraft] skip: no desk owner configured', {
+        mode: 'autodraft',
         ticketId,
+        channelId,
+        durationMs: Date.now() - startTime,
       });
       return;
     }
 
     const persona = await this.userRepository.findById(personaUserId);
     if (!persona?.email) {
-      logger.warn('[AutoDraft] Skipping — desk owner has no email', {
+      logger.warn('[AutoDraft] skip: desk owner has no email', {
+        mode: 'autodraft',
         ticketId,
+        channelId,
         ownerUserId: personaUserId,
+        durationMs: Date.now() - startTime,
       });
       return;
     }
@@ -476,6 +495,15 @@ export class EmailService {
 
     let summary = '';
     let autodraftSessionId: string | undefined;
+    const streamStart = Date.now();
+    logger.info('[AutoDraft] stream invoke', {
+      mode: 'autodraft',
+      ticketId,
+      conversationId,
+      channelId,
+      hasDeskSignature,
+      queryLen: baseQuery.length,
+    });
     try {
       const stream = xyneAIStream({
         query: baseQuery,
@@ -500,9 +528,19 @@ export class EmailService {
           break;
         }
       }
-    } catch (error) {
-      logger.warn('[AutoDraft] Stream failed — no draft will be saved', {
+      logger.info('[AutoDraft] stream complete', {
+        mode: 'autodraft',
         ticketId,
+        sessionId: autodraftSessionId,
+        summaryLen: summary.length,
+        streamDurationMs: Date.now() - streamStart,
+      });
+    } catch (error) {
+      logger.warn('[AutoDraft] stream failed', {
+        mode: 'autodraft',
+        ticketId,
+        sessionId: autodraftSessionId,
+        streamDurationMs: Date.now() - streamStart,
         error: error instanceof Error ? error.message : String(error),
       });
       return;
@@ -510,7 +548,12 @@ export class EmailService {
 
 
     if (!summary.trim()) {
-      logger.warn('[AutoDraft] Empty summary returned — no draft will be saved', { ticketId });
+      logger.warn('[AutoDraft] skip persist: empty summary', {
+        mode: 'autodraft',
+        ticketId,
+        sessionId: autodraftSessionId,
+        durationMs: Date.now() - startTime,
+      });
       return;
     }
 
@@ -536,10 +579,20 @@ export class EmailService {
           },
         });
       }
-      logger.info('[AutoDraft] Shared AI seed draft persisted', { ticketId, conversationId });
-    } catch (error) {
-      logger.error('[AutoDraft] Failed to persist draft', {
+      logger.info('[AutoDraft] draft persisted', {
+        mode: 'autodraft',
         ticketId,
+        conversationId,
+        sessionId: autodraftSessionId,
+        htmlLen: html.length,
+      });
+    } catch (error) {
+      logger.error('[AutoDraft] persist failed', {
+        mode: 'autodraft',
+        ticketId,
+        conversationId,
+        sessionId: autodraftSessionId,
+        durationMs: Date.now() - startTime,
         error: error instanceof Error ? error.message : String(error),
       });
 
@@ -552,13 +605,28 @@ export class EmailService {
           where: { id: autodraftSessionId },
           data: { tag: AUTODRAFT_SESSION_TAG },
         });
+        logger.info('[AutoDraft] session tagged', {
+          mode: 'autodraft',
+          ticketId,
+          sessionId: autodraftSessionId,
+        });
       } catch (error) {
-        logger.warn('[AutoDraft] Failed to tag session row', {
-          autodraftSessionId,
+        logger.warn('[AutoDraft] session tagging failed', {
+          mode: 'autodraft',
+          ticketId,
+          sessionId: autodraftSessionId,
           error: error instanceof Error ? error.message : String(error),
         });
       }
     }
+    logger.info('[AutoDraft] done', {
+      mode: 'autodraft',
+      ticketId,
+      conversationId,
+      sessionId: autodraftSessionId,
+      durationMs: Date.now() - startTime,
+      summaryLen: summary.length,
+    });
   }
 
   /**

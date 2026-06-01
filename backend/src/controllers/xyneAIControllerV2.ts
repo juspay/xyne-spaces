@@ -176,11 +176,33 @@ export class XyneAIControllerV2 {
       return;
     }
 
+    const mode = draftMode ? 'draft' : 'ask';
+    logger.info('[XyneAIv2] query start', {
+      flow: 'xyne-ai-v2',
+      mode,
+      userId,
+      sessionId: effectiveSessionId,
+      conversationId,
+      channelCount: effectiveChannelIds.length,
+      hasAttachments: (attachments?.length ?? 0) > 0,
+      attachmentCount: attachments?.length ?? 0,
+      messageAttachmentCount: messageAttachmentIds?.length ?? 0,
+      canvasCount: canvasIds?.length ?? 0,
+      ticketCount: ticketIds?.length ?? 0,
+      callCount: callIds?.length ?? 0,
+      isRegenerate,
+      webSearchEnabled,
+      deepResearchEnabled,
+      provider,
+      agentSlug,
+      queryLen: query?.length ?? 0,
+    });
+
     try {
       // Authorization check - verify user has access to ALL specified channels
       if (channelIds.length > 0) {
         const userChannelAccess = await db.channelParticipant.findMany({
-          where: { 
+          where: {
             userId,
             channelId: { in: channelIds },
           },
@@ -191,6 +213,12 @@ export class XyneAIControllerV2 {
         const inaccessibleChannels = channelIds.filter((id: string) => !accessibleChannelIds.includes(id));
 
         if (inaccessibleChannels.length > 0) {
+          logger.warn('[XyneAIv2] auth: forbidden channels', {
+            flow: 'xyne-ai-v2',
+            mode,
+            userId,
+            inaccessibleChannels,
+          });
           res.status(403).json({ 
             error: 'Forbidden: You do not have access to some channels',
             inaccessibleChannels,
@@ -223,6 +251,16 @@ export class XyneAIControllerV2 {
       const startTime = Date.now();
       let status = 'success';
 
+      logger.info('[XyneAIv2] stream invoke', {
+        flow: 'xyne-ai-v2',
+        mode,
+        userId,
+        sessionId: effectiveSessionId,
+        conversationId,
+        channelCount: effectiveChannelIds.length,
+        provider,
+        agentSlug,
+      });
       try {
         await this.streamResponse(req, res, {
           query,
@@ -252,12 +290,30 @@ export class XyneAIControllerV2 {
         });
       } catch (streamError) {
         status = 'error';
+        logger.error('[XyneAIv2] stream failed', {
+          flow: 'xyne-ai-v2',
+          mode,
+          userId,
+          sessionId: effectiveSessionId,
+          conversationId,
+          durationMs: Date.now() - startTime,
+          error: streamError instanceof Error ? streamError.message : String(streamError),
+        });
         throw streamError;
       } finally {
         try {
           const duration = Date.now() - startTime;
           getAskAIQueryDuration().record(duration, { status });
           getAskAIQueriesTotal().add(1, { status });
+          logger.info('[XyneAIv2] query done', {
+            flow: 'xyne-ai-v2',
+            mode,
+            userId,
+            sessionId: effectiveSessionId,
+            conversationId,
+            status,
+            durationMs: duration,
+          });
         } catch (metricsError) {
           logger.error('[XyneAIv2] Error recording metrics:', metricsError);
         }
@@ -538,13 +594,26 @@ export class XyneAIControllerV2 {
       const decoder = new TextDecoder();
       let buffer = '';
       let eventCount = 0;
+      const streamStart = Date.now();
+      let firstEventAt: number | null = null;
+      let terminalType: string | undefined;
+      let lastErrorMsg: string | undefined;
 
       try {
         let currentEventType = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
-            logger.info(`[XyneAIv2] DEBUG: SSE stream ended, total events=${eventCount}`);
+            logger.info('[XyneAIv2] stream done', {
+              flow: 'xyne-ai-v2',
+              sessionId: clawConversationId,
+              conversationId: request.conversationId,
+              eventCount,
+              terminalType: terminalType ?? 'closed',
+              ttfbMs: firstEventAt ? firstEventAt - streamStart : null,
+              streamDurationMs: Date.now() - streamStart,
+              ...(lastErrorMsg && { errorMsg: lastErrorMsg }),
+            });
             break;
           }
 
@@ -571,6 +640,7 @@ export class XyneAIControllerV2 {
               try {
                 const parsed = JSON.parse(data);
                 eventCount++;
+                if (firstEventAt === null) firstEventAt = Date.now();
 
                 // Use SSE event type (from event: line) as the authoritative type
                 // The data JSON from claw-auth does NOT contain a "type" field
@@ -613,7 +683,8 @@ export class XyneAIControllerV2 {
                   })}\n\n`);
                   if (typeof (res as any).flush === 'function') (res as any).flush();
                 } else if (eventType === 'done') {
-                  res.write(`data: ${JSON.stringify({ 
+                  terminalType = 'complete';
+                  res.write(`data: ${JSON.stringify({
                     type: 'complete',
                     sessionId: clawConversationId,
                     content: parsed.content,
@@ -623,6 +694,8 @@ export class XyneAIControllerV2 {
                   })}\n\n`);
                   if (typeof (res as any).flush === 'function') (res as any).flush();
                 } else if (eventType === 'error') {
+                  terminalType = 'error';
+                  lastErrorMsg = parsed.error || 'Unknown error';
                   res.write(`data: ${JSON.stringify({ 
                     type: 'error', 
                     error: parsed.error || 'Unknown error' 
