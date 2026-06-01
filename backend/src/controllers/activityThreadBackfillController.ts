@@ -62,18 +62,25 @@ export class ActivityThreadBackfillController {
 
       const messageIds = [...new Set(activities.map(a => a.messageId).filter(Boolean))] as string[];
 
+      // Fetch messages and conversations separately to avoid Prisma throwing
+      // when a message's conversationId points to a deleted conversation.
       const messages = await db.message.findMany({
         where: { messageId: { in: messageIds } },
-        select: {
-          messageId: true,
-          conversation: { select: { initialMessageId: true } },
-        },
+        select: { messageId: true, conversationId: true },
       });
+
+      const conversationIds = [...new Set(messages.map(m => m.conversationId))];
+      const conversations = await db.conversation.findMany({
+        where: { conversationId: { in: conversationIds } },
+        select: { conversationId: true, initialMessageId: true },
+      });
+      const convMap = new Map(conversations.map(c => [c.conversationId, c.initialMessageId]));
 
       const messageToIsThread = new Map<string, boolean>();
       for (const msg of messages) {
-        if (!msg.conversation) continue;
-        messageToIsThread.set(msg.messageId, msg.messageId !== msg.conversation.initialMessageId);
+        const initialMessageId = convMap.get(msg.conversationId);
+        if (initialMessageId === undefined) continue;
+        messageToIsThread.set(msg.messageId, msg.messageId !== initialMessageId);
       }
 
       const threadIds: string[] = [];
