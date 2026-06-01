@@ -820,7 +820,14 @@ const ChatListV3: React.FC<ChatListProps> = ({
   }, [channelId, updatedConversations, isInitialLoadComplete, shouldUseCutoffQuery]);
 
   useEffect(() => {
-    if (latestConversationsDetails.type !== 'complete' || latestConversations.length === 0) return;
+    if (latestConversationsDetails.type !== 'complete') return;
+    if (latestConversations.length === 0) {
+      // All conversations were deleted (e.g. deleting the only message in a DM).
+      if (isInitialLoadComplete) {
+        setConversations(prev => (prev.length > 0 ? [] : prev));
+      }
+      return;
+    }
     const sortedLatest = [...latestConversations].sort((a, b) => a.createdAt - b.createdAt);
     const currentConversations = conversationsRef.current;
     const { merged, latestClear } = mergeWithLatest(
