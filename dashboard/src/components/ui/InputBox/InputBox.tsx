@@ -717,7 +717,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
-          if (files.length > 0) {
+          if (features.fileAttachments && files.length > 0) {
             logger.info(Event.ATTACHMENT_PASTE_DETECTED, {
               fileCount: files.length,
               fileTypes: Array.from(files).map(f => f.type || 'unknown'),
