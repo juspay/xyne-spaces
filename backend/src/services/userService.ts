@@ -434,14 +434,11 @@ export class UserService {
             name: oauthUserData.name,
             picture: oauthUserData.picture,
           });
-          // Update auth provider separately if needed
-          if (user.authProvider !== oauthUserData.provider) {
-            user = await this.prisma.user.update({
-              where: { id: user.id },
-              data: { authProvider: oauthUserData.provider },
-            });
-          }
         }
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { authProvider: oauthUserData.provider },
+        });
 
         return { user, isNewUser };
       }
@@ -460,7 +457,6 @@ export class UserService {
           name: oauthUserData.name,
           picture: oauthUserData.picture,
         });
-        // Update auth provider
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: { authProvider: oauthUserData.provider },
@@ -719,7 +715,13 @@ export class UserService {
         }
       });
 
+      const normalizedAuthProvider = (userData.authProvider?.toUpperCase() as AuthProvider) || AuthProvider.GOOGLE;
+
       if (workspaceUser) {
+        workspaceUser = await this.prisma.user.update({
+          where: { id: workspaceUser.id },
+          data: { authProvider: normalizedAuthProvider }
+        });
         return { user: workspaceUser, isNewUser: false };
       }
 
@@ -734,10 +736,12 @@ export class UserService {
       });
 
       if (workspaceUser) {
-        // Update the providerUserId to match the real provider ID
         workspaceUser = await this.prisma.user.update({
           where: { id: workspaceUser.id },
-          data: { providerUserId: userData.providerUserId }
+          data: {
+            providerUserId: userData.providerUserId,
+            authProvider: normalizedAuthProvider
+          }
         });
         return { user: workspaceUser, isNewUser: false };
       }
@@ -794,7 +798,7 @@ export class UserService {
           email: userData.email,
           name: userData.name,
           picture: userData.picture,
-          authProvider: (userData.authProvider || 'GOOGLE') as AuthProvider,
+          authProvider: normalizedAuthProvider,
           workspace: { connect: { id: userData.workspaceId } },
           role,
           orgMember: { connect: { memberId: orgMember.memberId } },
