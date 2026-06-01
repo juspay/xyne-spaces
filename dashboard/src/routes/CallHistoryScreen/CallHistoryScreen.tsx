@@ -1055,6 +1055,8 @@ const CallHistoryScreen = (): ReactElement => {
                       {...(scrollContainer ? { customScrollParent: scrollContainer } : {})}
                       data={displayRecentCalls}
                       initialItemCount={Math.min(displayRecentCalls.length, 20)}
+                      overscan={5}
+                      increaseViewportBy={100}
                       endReached={() => {
                         if (hasMoreCalls) loadMoreCalls();
                       }}

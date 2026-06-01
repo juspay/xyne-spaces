@@ -171,13 +171,7 @@ export const queryCacheMachine = setup({
         const calls = [...map.values()].sort(
           (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
         );
-        // Only allow hasMore to flip false→true on a fresh (empty cache) load
-        const hasMore = !event.hasMore
-          ? false
-          : context.callHistory.calls.length === 0
-            ? true
-            : context.callHistory.hasMore;
-        return { calls, hasMore };
+        return { calls, hasMore: event.hasMore };
       },
     }),
     hydrateCallHistory: assign({
