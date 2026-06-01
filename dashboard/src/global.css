@@ -417,6 +417,17 @@
     pointer-events: none;
   }
 
+  /* Email Composer Editor — hyperlink styling (all themes) */
+  .email-composer-editor.ProseMirror a {
+    color: var(--link-color);
+    text-decoration: underline;
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+  .email-composer-editor.ProseMirror a:hover {
+    color: var(--link-hover-color);
+  }
+
   /* Chat Input Field - Base editor styles */
   .chat-input-field {
     @apply leading-6 text-foreground;

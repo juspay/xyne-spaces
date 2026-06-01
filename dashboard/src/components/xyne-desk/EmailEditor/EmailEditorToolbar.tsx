@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { Editor } from '@tiptap/react';
 import {
   Bold,
@@ -130,6 +130,26 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({ editor, 
     blockquote: false,
     link: false,
   });
+
+  const [currentFontFamily, setCurrentFontFamily] = useState('');
+  const [currentFontSize, setCurrentFontSize] = useState('');
+
+  useEffect(() => {
+    if (!editor) return;
+
+    const updateAttributes = (): void => {
+      const attrs = editor.getAttributes('textStyle');
+      setCurrentFontFamily((attrs['fontFamily'] as string) || '');
+      setCurrentFontSize((attrs['fontSize'] as string) || '');
+    };
+
+    updateAttributes();
+    editor.on('transaction', updateAttributes);
+
+    return (): void => {
+      editor.off('transaction', updateAttributes);
+    };
+  }, [editor]);
 
   const [linkUrl, setLinkUrl] = useState('');
   const [linkText, setLinkText] = useState('');
@@ -307,14 +327,18 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({ editor, 
         <Popover.Trigger asChild>
           <button
             type='button'
-            className='flex items-center gap-1 px-1.5 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
+            className='flex items-center gap-1 px-1.5 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors w-[96px] shrink-0 overflow-hidden'
             title='Font Family'
             data-track-category='email-editor'
             data-track-name='open-font-family-dropdown'
           >
-            <Type className='h-3.5 w-3.5' />
-            <span className='hidden sm:inline'>Font</span>
-            <ChevronDown className='h-3 w-3' />
+            <Type className='h-3.5 w-3.5 shrink-0' />
+            <span className='flex-1 min-w-0 truncate'>
+              {currentFontFamily
+                ? (FONT_FAMILIES.find(f => f.value === currentFontFamily)?.label ?? 'Font')
+                : 'Font'}
+            </span>
+            <ChevronDown className='h-3 w-3 shrink-0' />
           </button>
         </Popover.Trigger>
         <Popover.Portal>
@@ -328,7 +352,11 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({ editor, 
                 key={font.label}
                 type='button'
                 onClick={() => handleFontFamily(font.value)}
-                className='w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent rounded transition-colors'
+                className={`w-full text-left px-3 py-1.5 text-sm rounded transition-colors ${
+                  currentFontFamily === font.value
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-foreground hover:bg-accent'
+                }`}
                 style={font.value ? { fontFamily: font.value } : undefined}
                 data-track-category='email-editor'
                 data-track-name='select-font-family'
@@ -346,13 +374,17 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({ editor, 
         <Popover.Trigger asChild>
           <button
             type='button'
-            className='flex items-center gap-1 px-1.5 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
+            className='flex items-center gap-1 px-1.5 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors w-[56px] shrink-0 overflow-hidden'
             title='Font Size'
             data-track-category='email-editor'
             data-track-name='open-font-size-dropdown'
           >
-            <span className='hidden sm:inline'>Size</span>
-            <ChevronDown className='h-3 w-3' />
+            <span className='flex-1 min-w-0 truncate'>
+              {currentFontSize
+                ? (FONT_SIZES.find(s => s.value === currentFontSize)?.label ?? 'Size')
+                : 'Size'}
+            </span>
+            <ChevronDown className='h-3 w-3 shrink-0' />
           </button>
         </Popover.Trigger>
         <Popover.Portal>
@@ -366,7 +398,11 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({ editor, 
                 key={size.value}
                 type='button'
                 onClick={() => handleFontSize(size.value)}
-                className='w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent rounded transition-colors'
+                className={`w-full text-left px-3 py-1.5 text-sm rounded transition-colors ${
+                  currentFontSize === size.value
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-foreground hover:bg-accent'
+                }`}
                 style={{ fontSize: size.value }}
                 data-track-category='email-editor'
                 data-track-name='select-font-size'

@@ -110,15 +110,15 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
   const getPriorityColor = (priority: string): string => {
     switch (priority) {
       case 'CRITICAL':
-        return 'text-red-600 bg-red-50 border-red-200';
+        return 'text-destructive bg-destructive/10 border-destructive/20';
       case 'HIGH':
-        return 'text-orange-600 bg-orange-50 border-orange-200';
+        return 'text-orange-500 bg-orange-500/10 border-orange-500/20';
       case 'MEDIUM':
-        return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+        return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
       case 'LOW':
-        return 'text-green-600 bg-green-50 border-green-200';
+        return 'text-green-500 bg-green-500/10 border-green-500/20';
       default:
-        return 'text-gray-600 bg-gray-50 border-gray-200';
+        return 'text-muted-foreground bg-muted/50 border-border';
     }
   };
 
@@ -164,7 +164,7 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
         </div>
 
         {/* Scrollable content */}
-        <div className='overflow-y-auto p-5 space-y-5'>
+        <div className='overflow-y-auto p-5 space-y-5 text-foreground'>
           {error && (
             <div className='text-sm text-destructive bg-destructive/10 px-3 py-2 rounded'>
               {error}
@@ -208,7 +208,7 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
             </div>
 
             {threshold > 0.7 && (
-              <div className='flex items-start gap-2 text-xs text-yellow-600 bg-yellow-50 p-2 rounded'>
+              <div className='flex items-start gap-2 text-xs text-yellow-500 bg-yellow-500/10 p-2 rounded'>
                 <AlertTriangle className='w-4 h-4 shrink-0 mt-0.5' />
                 <span>
                   High threshold means fewer tickets will have their priority auto-adjusted by AI.
@@ -216,7 +216,7 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
               </div>
             )}
             {threshold < 0.3 && (
-              <div className='flex items-start gap-2 text-xs text-orange-600 bg-orange-50 p-2 rounded'>
+              <div className='flex items-start gap-2 text-xs text-orange-500 bg-orange-500/10 p-2 rounded'>
                 <AlertTriangle className='w-4 h-4 shrink-0 mt-0.5' />
                 <span>Low threshold may result in AI adjusting priority even when uncertain.</span>
               </div>
@@ -233,7 +233,7 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
               Customize the AI prompt. Use {'{{subject}}'} and {'{{body}}'} as placeholders.
             </p>
             <textarea
-              className='w-full rounded border border-border bg-background px-3 py-2 text-sm font-mono min-h-[240px] resize-y'
+              className='w-full rounded border border-border bg-background px-3 py-2 text-sm font-mono text-foreground min-h-[240px] resize-y'
               value={prompt}
               onChange={e => handleChange(() => setPrompt(e.target.value))}
               placeholder='Enter the AI priority classification prompt...'
@@ -266,7 +266,7 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
               <button
                 onClick={handleCancel}
                 disabled={isSaving}
-                className='text-sm px-4 py-1.5 rounded border border-border hover:bg-secondary transition-colors'
+                className='text-sm px-4 py-1.5 rounded border border-border hover:bg-secondary text-foreground transition-colors'
                 data-track-category='PrioritySettings'
                 data-track-name='CancelChanges'
               >
@@ -292,7 +292,7 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
                 </label>
                 <input
                   id='preview-subject'
-                  className='w-full rounded border border-border bg-background px-3 py-2 text-sm'
+                  className='w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground'
                   value={previewSubject}
                   onChange={e => setPreviewSubject(e.target.value)}
                   placeholder='e.g. URGENT: Production outage affecting payments'
@@ -306,7 +306,7 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
                 </label>
                 <textarea
                   id='preview-body'
-                  className='w-full rounded border border-border bg-background px-3 py-2 text-sm min-h-[100px] resize-y'
+                  className='w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground min-h-[100px] resize-y'
                   value={previewBody}
                   onChange={e => setPreviewBody(e.target.value)}
                   placeholder='Enter email content to test priority detection...'
@@ -340,12 +340,12 @@ export const PrioritySettingsModal: React.FC<PrioritySettingsModalProps> = ({
                       Confidence: {(previewResult.confidence * 100).toFixed(1)}%
                     </span>
                     {previewResult.confidence >= threshold ? (
-                      <span className='inline-flex items-center gap-1 text-xs text-green-600'>
+                      <span className='inline-flex items-center gap-1 text-xs text-green-500'>
                         <CheckCircle className='w-3 h-3' />
                         Would auto-apply
                       </span>
                     ) : (
-                      <span className='inline-flex items-center gap-1 text-xs text-gray-600'>
+                      <span className='inline-flex items-center gap-1 text-xs text-muted-foreground'>
                         <Info className='w-3 h-3' />
                         Below threshold
                       </span>

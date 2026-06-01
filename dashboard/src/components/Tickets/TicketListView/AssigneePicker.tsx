@@ -111,7 +111,7 @@ export function AssigneePicker({ ticketId, assignedTo, label }: AssigneePickerPr
               placeholder='Search users...'
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
+              className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md text-xs text-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
               data-track-category='Tickets'
               data-track-name='SearchAssigneePicker'
             />
