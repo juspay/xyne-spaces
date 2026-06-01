@@ -1166,7 +1166,11 @@ function humanizeIssuePath(path: string): string {
   if (path === 'trigger.config' || path.startsWith('trigger.config.')) return 'Conditions';
   if (path === 'trigger.type' || path === 'trigger') return 'Trigger';
   const stepMatch = /^steps\[(\d+)\]/.exec(path);
-  if (stepMatch) return `Step ${Number(stepMatch[1]) + 1}`;
+  if (stepMatch) {
+    const label = `Step ${Number(stepMatch[1]) + 1}`;
+    const field = path.replace(/^steps\[\d+\]\.config\.?/, '').replace(/^steps\[\d+\]\.?/, '');
+    return field ? `${label} → ${field}` : label;
+  }
   return path;
 }
 

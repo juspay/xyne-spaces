@@ -23,7 +23,7 @@ const DEFAULT_MAX_RETRIES = 3;
 const RunAgentConfigSchema = z.object({
   agentSlug: variableRef(z.string().min(1).describe('Claw agent slug')),
   prompt: variableRef(z.string().min(1).describe('Prompt for the agent')),
-  outputSchema: OutputSchemaSchema.describe(
+  outputSchema: OutputSchemaSchema.default({}).describe(
     'Expected output shape: keys must be present in the agent response; extra fields are kept but not validated.',
   ),
   maxRetries: z
