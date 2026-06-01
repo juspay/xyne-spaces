@@ -222,7 +222,9 @@ export async function resolveSlackIds(
         ? isSlackNativeId(slackId)
           ? userRepo.findByMetadataField('slackId', slackId)
           : userRepo.findById(slackId)
-        : groupRepo.findByMetadataField('slackGroupId', slackId)
+        : isSlackNativeId(slackId)
+          ? groupRepo.findByMetadataField('slackGroupId', slackId)
+          : groupRepo.findById(slackId)
     )
   );
 
@@ -232,7 +234,7 @@ export async function resolveSlackIds(
     const result = dbResults[i];
     if (result.status === 'fulfilled' && result.value) {
       userMapper.set(slackId, { dbId: result.value.id });
-    } else if (type !== 'user' || isSlackNativeId(slackId)) {
+    } else if ((type === 'user' && isSlackNativeId(slackId)) || (type === 'group' && isSlackNativeId(slackId))) {
       slackIdsToFetch.push(slackId);
     } else {
       userMapper.set(slackId, {});
