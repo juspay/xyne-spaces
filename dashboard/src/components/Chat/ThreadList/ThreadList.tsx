@@ -13,7 +13,7 @@ import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.typ
 import { useEditContext } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
-import { ArrowDown, ChevronUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronUp } from 'lucide-react';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
 
@@ -118,6 +118,7 @@ const ThreadList = ({
   });
   const [isExpanded, setIsExpanded] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(false);
+  const [isNearTop, setIsNearTop] = useState(true);
   const [hasOverflow, setHasOverflow] = useState(false);
 
   const {
@@ -131,6 +132,8 @@ const ThreadList = ({
   });
 
   const showFab = enableJumpFab && hasOverflow && !isNearBottom && threadMessages.length > 0;
+  const showScrollToTopFab =
+    enableJumpFab && hasOverflow && !isNearTop && threadMessages.length > 0;
 
   const handleJumpToLatest = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -138,8 +141,18 @@ const ThreadList = ({
       container.scrollTop = container.scrollHeight - container.clientHeight;
       updateLastReadAt();
       setIsNearBottom(true);
+      setIsNearTop(false);
     }
   }, [updateLastReadAt]);
+
+  const handleScrollToTop = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.scrollTop = 0;
+      setIsNearTop(true);
+      setIsNearBottom(false);
+    }
+  }, []);
 
   // Check if the previous message is a system message
   const isPreviousMessageSystem = (
@@ -154,6 +167,7 @@ const ThreadList = ({
   useEffect(() => {
     hasAppliedInitialScrollRef.current = false;
     setIsNearBottom(false);
+    setIsNearTop(true);
     setHasOverflow(false);
   }, [conversationId, location.key, location.hash, activityNavigationNonce]);
 
@@ -304,6 +318,7 @@ const ThreadList = ({
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
       setIsNearBottom(distanceFromBottom < 150);
+      setIsNearTop(container.scrollTop < 150);
 
       if (onScrollPositionChange) {
         clearTimeout(timeoutId);
@@ -423,6 +438,17 @@ const ThreadList = ({
             <ArrowDown className='w-5 h-5 text-foreground' />
           </button>
         )}
+        {showScrollToTopFab && (
+          <button
+            onClick={handleScrollToTop}
+            className={`absolute ${showFab ? 'bottom-20' : 'bottom-6'} right-6 bg-background border border-border rounded-full p-3 shadow-lg hover:shadow-xl transition-all duration-200 hover:bg-accent z-50`}
+            aria-label='Scroll to top'
+            data-track-category='THREAD_PANEL'
+            data-track-name='THREAD_SCROLL_TO_TOP'
+          >
+            <ArrowUp className='w-5 h-5 text-foreground' />
+          </button>
+        )}
       </div>
     );
   }
@@ -536,6 +562,17 @@ const ThreadList = ({
           data-track-name='THREAD_SCROLL_TO_BOTTOM'
         >
           <ArrowDown className='w-5 h-5 text-foreground' />
+        </button>
+      )}
+      {showScrollToTopFab && (
+        <button
+          onClick={handleScrollToTop}
+          className={`absolute ${showFab ? 'bottom-20' : 'bottom-6'} right-6 bg-background border border-border rounded-full p-3 shadow-lg hover:shadow-xl transition-all duration-200 hover:bg-accent z-50`}
+          aria-label='Scroll to top'
+          data-track-category='THREAD_PANEL'
+          data-track-name='THREAD_SCROLL_TO_TOP'
+        >
+          <ArrowUp className='w-5 h-5 text-foreground' />
         </button>
       )}
     </div>
