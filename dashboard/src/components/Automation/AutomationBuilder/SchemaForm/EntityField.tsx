@@ -253,7 +253,6 @@ function ChannelField({ value, onChange, placeholder }: FieldProps): React.React
     const lower = search.trim().toLowerCase();
     return channels
       .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
-      .slice(0, 30)
       .map(c => ({
         value: c.id,
         label: c.name || '(unnamed channel)',
@@ -297,7 +296,6 @@ function BoardField({ value, onChange, placeholder }: FieldProps): React.ReactEl
     const lower = search.trim().toLowerCase();
     return boards
       .filter(b => (lower ? b.name.toLowerCase().includes(lower) : true))
-      .slice(0, 30)
       .map(b => ({
         value: b.id,
         label: b.name,
@@ -465,7 +463,6 @@ function ProjectField({ value, onChange, placeholder }: FieldProps): React.React
     const lower = search.trim().toLowerCase();
     return projects
       .filter(p => (lower ? p.name.toLowerCase().includes(lower) : true))
-      .slice(0, 30)
       .map(p => ({
         value: p.id,
         label: p.name,
@@ -612,7 +609,6 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
     const lower = search.trim().toLowerCase();
     return channels
       .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
-      .slice(0, 50)
       .map(c => ({
         value: c.id,
         label: c.name || '(unnamed channel)',
@@ -640,7 +636,6 @@ function MultiBoards({ value, onChange, placeholder }: MultiFieldProps): React.R
     const lower = search.trim().toLowerCase();
     return boards
       .filter(b => (lower ? b.name.toLowerCase().includes(lower) : true))
-      .slice(0, 50)
       .map(b => ({
         value: b.id,
         label: b.name,
@@ -668,7 +663,6 @@ function MultiProjects({ value, onChange, placeholder }: MultiFieldProps): React
     const lower = search.trim().toLowerCase();
     return projects
       .filter(p => (lower ? p.name.toLowerCase().includes(lower) : true))
-      .slice(0, 50)
       .map(p => ({
         value: p.id,
         label: p.name,

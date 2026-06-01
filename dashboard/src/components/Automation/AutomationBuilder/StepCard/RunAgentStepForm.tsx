@@ -133,24 +133,7 @@ export function RunAgentStepForm({
       {/* Agent picker — searchable combobox so a workspace with many agents
           stays usable. Type to filter by name / slug / description. */}
       <FieldRow label='Agent' error={issuesAt.get('agentSlug')} required>
-        {agentsLoading ? (
-          <div className='text-xs text-muted-foreground'>Loading agents…</div>
-        ) : agentsError ? (
-          <div className='flex items-center gap-2 text-xs text-red-600'>
-            <span>Couldn&apos;t reach claw — agents unavailable.</span>
-            <button
-              type='button'
-              data-track-category='automation-builder'
-              data-track-name='run-agent-step-agents-retry'
-              onClick={() => {
-                void refetch();
-              }}
-              className='underline hover:no-underline'
-            >
-              Retry
-            </button>
-          </div>
-        ) : selectedAgent ? (
+        {selectedAgent ? (
           <div className='inline-flex max-w-full items-center gap-2 self-start rounded-full border border-border bg-accent/40 py-1 pl-2 pr-1 text-sm'>
             <div className='flex size-5 items-center justify-center rounded-full bg-background shadow-sm'>
               <Sparkles className='size-3' style={{ color: selectedAgent.color }} />
@@ -168,6 +151,23 @@ export function RunAgentStepForm({
               className='ml-1 flex size-5 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground'
             >
               <X className='size-3' />
+            </button>
+          </div>
+        ) : agentsLoading ? (
+          <div className='text-xs text-muted-foreground'>Loading agents…</div>
+        ) : agentsError ? (
+          <div className='flex items-center gap-2 text-xs text-red-600'>
+            <span>Couldn&apos;t reach claw — agents unavailable.</span>
+            <button
+              type='button'
+              data-track-category='automation-builder'
+              data-track-name='run-agent-step-agents-retry'
+              onClick={() => {
+                void refetch();
+              }}
+              className='underline hover:no-underline'
+            >
+              Retry
             </button>
           </div>
         ) : (
