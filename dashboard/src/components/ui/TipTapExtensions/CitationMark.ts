@@ -177,8 +177,52 @@ export const CitationMark = Mark.create<CitationMarkOptions>({
   },
 });
 
+export interface InlineCitation {
+  point: string;
+  label: string;
+  url: string;
+}
+
+function sanitizeCitationUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? trimmed : '';
+  } catch {
+    return '';
+  }
+}
+
 export function stripCitationMarks(html: string): string {
-  return html.replace(/<cite\b[^>]*>([\s\S]*?)<\/cite>/gi, '$1');
+  return html
+    .replace(/<cite\b[^>]*>([\s\S]*?)<\/cite>/gi, '$1')
+    .replace(/\n?<citation\b[^>]*>([\s\S]*?)<\/citation>/gi, '');
+}
+
+export function extractInlineCitations(content: string): InlineCitation[] {
+  const match = /<citation\b[^>]*>([\s\S]*?)<\/citation>/i.exec(content);
+  if (!match || !match[1]) return [];
+
+  const citations: InlineCitation[] = [];
+  const lines = match[1].trim().split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const km = /^\d+\.\s+(.+?)\s+\|\|\|\s+\[([^\]]+)\]\(([^)]+)\)/.exec(trimmed);
+    if (km && km[1] && km[2]) {
+      citations.push({
+        point: km[1].trim(),
+        label: km[2].trim(),
+        url: sanitizeCitationUrl(km[3] || ''),
+      });
+      continue;
+    }
+    const lm = /^\d+\.\s*\[([^\]]+)\]\(([^)]+)\)/.exec(trimmed);
+    if (lm && lm[1] && lm[2]) {
+      citations.push({ point: '', label: lm[1].trim(), url: sanitizeCitationUrl(lm[2]) });
+    }
+  }
+  return citations;
 }
 
 export function stripOrphanCitations(

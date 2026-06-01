@@ -104,6 +104,7 @@ import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
 import ysweetRoutes from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
+import internalCanvasRoutes from '@/routes/internalCanvas';
 import pythonQueryRoutes from '@/routes/pythonQuery';
 import formsRoutes from '@/routes/forms';
 import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
@@ -445,6 +446,8 @@ export class App {
       handleClawCallback,
     );
 
+    // Internal canvas read/update (S2S-only, used by MCP tools)
+    this.app.use('/api/internal/canvas', internalCanvasRoutes);
 
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
