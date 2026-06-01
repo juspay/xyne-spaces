@@ -19,12 +19,16 @@ export class ConversationParticipantsSideEffectHandler extends BaseSideEffectHan
     }
 
     // Only react to lastReadAt changes
-    if (!args?.lastReadAt) {
+    if (args?.lastReadAt == null) {
       return;
     }
-    if (prev.lastReadAt === args.lastReadAt) {
-      return;
-    }
+
+    // If no unseen content existed before this update, skip
+    const hadUnseenContent =
+      prev.lastReplyAt != null &&
+      (prev.lastReadAt == null || prev.lastReadAt < prev.lastReplyAt);
+    if (!hadUnseenContent) return;
+
 
     try {
       await notificationService.createNotification(prev.userId, {

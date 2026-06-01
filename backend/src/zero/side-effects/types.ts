@@ -75,6 +75,7 @@ export interface ChannelUserStatusPreviousValue {
 
 export interface ConversationParticipantPreviousValue {
   lastReadAt: number | null;
+  lastReplyAt: number | null;
   conversationId: string;
   userId: string;
 }
