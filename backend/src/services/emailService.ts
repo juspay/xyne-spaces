@@ -922,51 +922,6 @@ export class EmailService {
       channelId,
     });
 
-    // Auto-assign ticket based on group and board
-    if (groupId && boardId) {
-      try {
-        const boardRow = await this.prisma.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
-        const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
-
-        if (boardMetadata?.fullRoleAssignment === true) {
-          const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
-            ticketId: ticket.id,
-            userGroupId: groupId,
-            boardId,
-            createdBy: userId,
-            projectId: ticket.projectId,
-          });
-          if (fullRoles.member) {
-            const updatedTicket = await this.prisma.ticket.update({
-              where: { id: ticket.id },
-              data: { assignedTo: fullRoles.member },
-            });
-            await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
-          }
-        } else {
-        const assignmentResult = await evaluateAssignmentRule(groupId, boardId, undefined, undefined, ticket.projectId);
-        if (assignmentResult.assignedUserId) {
-          const updatedTicket = await this.prisma.ticket.update({
-            where: { id: ticket.id },
-            data: { assignedTo: assignmentResult.assignedUserId }
-          });
-
-          await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
-
-          // Sync workload mapping for the assigned user
-          try {
-            await syncUserWorkload(assignmentResult.assignedUserId, groupId, boardId, userId);
-            logger.info(`[EmailService] Synced workload for user ${assignmentResult.assignedUserId}`);
-          } catch (workloadError) {
-            logger.error('[EmailService] Error syncing workload:', workloadError);
-            }
-          }
-        }
-      } catch (error) {
-        logger.error('[EmailService] Auto-assignment failed:', error);
-      }
-    }
-
     void this.triggerAutoDraft({
       ticketId: ticket.id,
       conversationId: conversation.conversationId,

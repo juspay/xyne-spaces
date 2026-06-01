@@ -40,7 +40,12 @@ interface TicketActivityProps {
  * All fields are optional for safe access across different activity types.
  */
 type ActivityValue = Partial<
-  BaseActivityValue & PRActivityValue & ReferenceTicketActivityValue & SubticketActivityValue
+  BaseActivityValue &
+    PRActivityValue &
+    ReferenceTicketActivityValue &
+    SubticketActivityValue & {
+      reason?: string;
+    }
 >;
 
 type SortOrder = 'newest' | 'oldest';
@@ -59,7 +64,7 @@ const getActivityDescription = (
   users: User[] | undefined,
   boards?: { id: string; name: string }[],
   userGroups?: UserGroup[],
-): { description: string; details: ReactNode } => {
+): { description: string; details: ReactNode; hideActorName?: boolean } => {
   const value = activity.value as ActivityValue | null;
   const referenceTitle =
     value?.targetTicketTitle || value?.targetTicketXyneId || value?.targetTicketId || 'ticket';
@@ -148,6 +153,21 @@ const getActivityDescription = (
       const newUser = users?.find(u => u.id === value?.newValue);
       const updatedByUser = users?.find(u => u.id === activity.updatedBy);
 
+      // Auto-assigned by the system (email classification worker)
+      const isAutoAssigned =
+        value?.reason === 'AI classification' || value?.reason === 'Default channel group';
+      if (isAutoAssigned) {
+        return {
+          description: 'Auto-assigned',
+          details: (
+            <>
+              to <span className='font-semibold'>{newUser?.name || 'Unassigned'}</span>
+            </>
+          ),
+          hideActorName: true,
+        };
+      }
+
       return updatedByUser === newUser
         ? {
             description: 'self-assigned the ticket',
@@ -175,16 +195,19 @@ const getActivityDescription = (
         ),
       };
 
-    case ActivityType.PRIORITY:
+    case ActivityType.PRIORITY: {
+      const isAiPriority = value?.reason === 'AI priority classification';
       return {
-        description: 'changed priority',
+        description: isAiPriority ? 'Auto-assigned priority' : 'changed priority',
         details: (
           <>
             from <span className='font-semibold'>{value?.oldValue || ''}</span> to{' '}
             <span className='font-semibold'>{value?.newValue || ''}</span>
           </>
         ),
+        hideActorName: isAiPriority,
       };
+    }
 
     case ActivityType.STAGE_ETA:
       return {
@@ -538,7 +561,12 @@ export const ActivityComponent = ({
   activities: TicketActivityType[];
 }) => {
   const activityUser = users?.find(u => u.id === activity.updatedBy);
-  const { description, details } = getActivityDescription(activity, users, boards, userGroups);
+  const { description, details, hideActorName } = getActivityDescription(
+    activity,
+    users,
+    boards,
+    userGroups,
+  );
   const isLast = index === activities.length - 1;
 
   return (
@@ -557,7 +585,9 @@ export const ActivityComponent = ({
       <div className='flex-1 min-w-0 mt-1 pb-6'>
         <div className='flex items-center justify-between gap-3'>
           <p className='text-sm text-muted-foreground'>
-            {activity.activityType !== ActivityType.PR && (activityUser?.name || 'Someone')}{' '}
+            {activity.activityType !== ActivityType.PR &&
+              !hideActorName &&
+              (activityUser?.name || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>
