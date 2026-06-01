@@ -93,8 +93,10 @@ export class TicketRepository {
     // Calculate total ETA by summing only stages with ETA (in hours)
     const totalEtaHours = stages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
 
-    // Calculate ETA deadline only if at least one stage has ETA
+    // Calculate ETA deadline only if at least one stage has ETA.
+    // If caller provides an explicit ETA (e.g. migration), prefer that.
     const etaDeadline = totalEtaHours > 0 ? calculateETADeadline(new Date(), totalEtaHours) : null;
+    const resolvedEta = data.eta ?? etaDeadline;
 
     // Upsert merchant if merchantId is provided
     if (data.merchantId) {
@@ -126,7 +128,7 @@ export class TicketRepository {
         stageName: selectedStage.name,
         statusV2: data.statusV2 || TicketStatusV2.TODO,
         priority: data.priority || TicketPriority.LOW,
-        ...(etaDeadline && { eta: etaDeadline }),
+        ...(resolvedEta && { eta: resolvedEta }),
         metadata: data.metadata as Prisma.InputJsonValue,
         closedAt: data.closedAt,
         closedBy: data.closedBy,
@@ -247,7 +249,7 @@ export class TicketRepository {
       destinationBranchName: string;
       prAuthor?: string;
       remainingOpenPRs?: number;
-    }
+    },
   ) {
 
     // Get current ticket to capture old stage name, boardId, and statusV2
@@ -697,7 +699,7 @@ export class TicketRepository {
     return mappings.map(m => m.subTicket);
   }
 
-  async updateTicketAssignee(ticketId: string, newAssigneeId: string, updatedBy: string): Promise<void> {
+  async updateTicketAssignee(ticketId: string, newAssigneeId: string | null, updatedBy: string): Promise<void> {
     const previous = await prisma.ticket.findUnique({
       where: { id: ticketId },
       select: { assignedTo: true },
@@ -771,6 +773,8 @@ export class TicketRepository {
       description?: string;
       priority?: TicketPriority;
       statusV2?: TicketStatusV2;
+      eta?: Date | null;
+      ticketType?: string | null;
       isArchived?: boolean;
       closedAt?: Date | null;
       closedBy?: string | null;
@@ -782,6 +786,8 @@ export class TicketRepository {
     if (fields.description !== undefined) data.description = fields.description;
     if (fields.priority !== undefined) data.priority = fields.priority;
     if (fields.statusV2 !== undefined) data.statusV2 = fields.statusV2;
+    if (fields.eta !== undefined) data.eta = fields.eta;
+    if (fields.ticketType !== undefined) data.ticketType = fields.ticketType;
     if (fields.isArchived !== undefined) data.isArchived = fields.isArchived;
     if (fields.closedAt !== undefined) data.closedAt = fields.closedAt;
     if (fields.closedBy !== undefined) data.closedBy = fields.closedBy;
@@ -794,18 +800,20 @@ export class TicketRepository {
       fields.statusV2 !== undefined ||
       fields.title !== undefined ||
       fields.description !== undefined ||
-      fields.priority !== undefined;
+      fields.priority !== undefined ||
+      fields.eta !== undefined;
 
     let prevSnapshot: {
       statusV2: TicketStatusV2 | null;
       title: string | null;
       description: string | null;
       priority: TicketPriority | null;
+      eta: Date | null;
     } | null = null;
     if (needsPrevRead) {
       const prev = await prisma.ticket.findUnique({
         where: { id: ticketId },
-        select: { statusV2: true, title: true, description: true, priority: true },
+        select: { statusV2: true, title: true, description: true, priority: true, eta: true },
       });
       prevSnapshot = prev
         ? {
@@ -813,6 +821,7 @@ export class TicketRepository {
             title: prev.title,
             description: prev.description,
             priority: prev.priority,
+            eta: prev.eta,
           }
         : null;
     }
@@ -844,6 +853,13 @@ export class TicketRepository {
       }
       if (fields.priority !== undefined && prevSnapshot.priority !== fields.priority) {
         changes.priority = { previousValue: prevSnapshot.priority, newValue: fields.priority };
+      }
+      if (fields.eta !== undefined) {
+        const prevEtaMs = prevSnapshot.eta ? prevSnapshot.eta.getTime() : null;
+        const nextEtaMs = fields.eta ? fields.eta.getTime() : null;
+        if (prevEtaMs !== nextEtaMs) {
+          changes.eta = { previousValue: prevEtaMs, newValue: nextEtaMs };
+        }
       }
       if (Object.keys(changes).length > 0) {
         void emitTicketUpdated({

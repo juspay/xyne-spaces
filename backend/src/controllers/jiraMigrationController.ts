@@ -14,6 +14,8 @@ import { config } from '@/config/env';
 import { getCachedJiraUserEmailMappings } from '@/services/jira/jiraUserMapCsv';
 import { getCanvasUrl } from '@/services/canvasService';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { generateKeyBetween } from 'fractional-indexing';
+import { calculateETADeadline } from '@/utils/etaCalculation';
 import {
   queueJiraPurgeAttachmentVespaDeleteJob,
   queueJiraPurgeMessageVespaDeleteJob,
@@ -35,6 +37,348 @@ const sleep = async (ms: number): Promise<void> => {
 };
 
 export class JiraMigrationController {
+  moveJiraProjectBoard = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const actorUserId = req.user?.id;
+      if (!actorUserId) {
+        res.status(401).json({ error: 'Authenticated user required for Jira migration operations' });
+        return;
+      }
+
+      const {
+        jiraProjectKey,
+        channelId,
+        sourceBoardId,
+        targetBoardId,
+        dryRun,
+        confirmText,
+      } = req.body as {
+        jiraProjectKey?: string;
+        channelId?: string;
+        sourceBoardId?: string;
+        targetBoardId?: string;
+        dryRun?: boolean;
+        confirmText?: string;
+      };
+
+      if (!jiraProjectKey || !channelId || !sourceBoardId || !targetBoardId) {
+        res.status(400).json({ error: 'jiraProjectKey, channelId, sourceBoardId, and targetBoardId are required' });
+        return;
+      }
+
+      const normalizedProjectKey = jiraProjectKey.trim().toUpperCase();
+      const resolvedDryRun = dryRun !== false;
+      const resolvedConfirmText = (confirmText || '').trim();
+      if (!resolvedDryRun && resolvedConfirmText !== `MOVE ${normalizedProjectKey}`) {
+        res.status(400).json({ error: `Type 'MOVE ${normalizedProjectKey}' to confirm` });
+        return;
+      }
+
+      if (sourceBoardId === targetBoardId) {
+        res.status(400).json({ error: 'sourceBoardId and targetBoardId must be different' });
+        return;
+      }
+
+      const externalSourceName = `jira-${normalizedProjectKey}-${channelId}`.toLowerCase();
+      const externalSource = await db.externalSource.findUnique({
+        where: { name: externalSourceName },
+        select: { id: true, sourceType: true, boardId: true, channelId: true, name: true },
+      });
+      if (!externalSource || externalSource.sourceType !== 'jira') {
+        res.status(404).json({ error: 'Jira external source not found for provided jiraProjectKey + channelId' });
+        return;
+      }
+
+      const externalSourceBoardMismatch =
+        Boolean(externalSource.boardId) && externalSource.boardId !== sourceBoardId;
+      if (externalSourceBoardMismatch) {
+        logger.warn('[JiraMigration] External source boardId does not match sourceBoardId; continuing with requested sourceBoardId', {
+          externalSourceId: externalSource.id,
+          externalSourceBoardId: externalSource.boardId,
+          sourceBoardId,
+          targetBoardId,
+          channelId,
+          jiraProjectKey: normalizedProjectKey,
+        });
+      }
+
+      const [sourceBoard, targetBoard, channel] = await Promise.all([
+        db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, name: true } }),
+        db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, projectId: true, name: true } }),
+        db.channel.findUnique({ where: { id: channelId }, select: { id: true, projectId: true, name: true } }),
+      ]);
+
+      if (!sourceBoard || !targetBoard || !channel) {
+        res.status(404).json({ error: 'sourceBoardId, targetBoardId, or channelId not found' });
+        return;
+      }
+      if (sourceBoard.projectId !== targetBoard.projectId || channel.projectId !== targetBoard.projectId) {
+        res.status(400).json({ error: 'Boards and channel must belong to same project' });
+        return;
+      }
+
+      const ticketMappings = await db.externalMessage.findMany({
+        where: {
+          externalSourceId: externalSource.id,
+          entityType: 'TICKET',
+          entityId: { not: null },
+        },
+        select: { entityId: true },
+      });
+      const mappedTicketIds = ticketMappings.map(m => m.entityId!).filter(Boolean);
+      if (mappedTicketIds.length === 0) {
+        res.json({ success: true, data: { movedTickets: 0, dryRun: resolvedDryRun, missingStages: [] } });
+        return;
+      }
+
+      const ticketsToMove = await db.ticket.findMany({
+        where: {
+          id: { in: mappedTicketIds },
+          boardId: sourceBoardId,
+        },
+        select: {
+          id: true,
+          stageName: true,
+          createdAt: true,
+        },
+      });
+
+      const targetStages = await db.stage.findMany({
+        where: { boardId: targetBoardId },
+        select: { id: true, name: true, eta: true, sequenceNumber: true },
+        orderBy: { sequenceNumber: 'asc' },
+      });
+      const targetStageByName = new Map(targetStages.map(s => [s.name, s]));
+      const missingStages = Array.from(
+        new Set(
+          ticketsToMove
+            .map(t => t.stageName)
+            .filter(stageName => !targetStageByName.has(stageName)),
+        ),
+      );
+
+      if (resolvedDryRun) {
+        res.json({
+          success: true,
+          data: {
+            dryRun: true,
+            externalSourceId: externalSource.id,
+            jiraProjectKey: normalizedProjectKey,
+            channelId,
+            sourceBoardId,
+            targetBoardId,
+            movedTickets: ticketsToMove.length,
+            missingStages,
+            ...(externalSourceBoardMismatch
+              ? {
+                  warnings: [
+                    `External source boardId (${externalSource.boardId}) does not match sourceBoardId (${sourceBoardId}). Moving only the subset currently on sourceBoardId.`,
+                  ],
+                }
+              : {}),
+          },
+        });
+        return;
+      }
+
+      if (missingStages.length > 0) {
+        const sourceStages = await db.stage.findMany({
+          where: { boardId: sourceBoardId, name: { in: missingStages } },
+          select: { name: true, eta: true, defaultTicketStatusV2: true, sequenceNumber: true },
+        });
+        const sourceStageByName = new Map(sourceStages.map(stage => [stage.name, stage]));
+        const stillMissing = missingStages.filter(name => !sourceStageByName.has(name));
+        if (stillMissing.length > 0) {
+          res.status(400).json({
+            error: 'Target board missing stages; source board also missing some stage definitions (cannot create)',
+            missingStages: stillMissing,
+          });
+          return;
+        }
+
+        const maxSequence = targetStages.reduce((max, stage) => Math.max(max, stage.sequenceNumber), 0);
+        let nextSequence = maxSequence + 1;
+        const created = await db.$transaction(
+          missingStages.map(stageName => {
+            const src = sourceStageByName.get(stageName)!;
+            return db.stage.create({
+              data: {
+                name: stageName,
+                eta: src.eta ?? null,
+                boardId: targetBoardId,
+                // temporary; will resequence to match source board ordering below
+                sequenceNumber: nextSequence++,
+                createdBy: actorUserId,
+                defaultTicketStatusV2: src.defaultTicketStatusV2,
+              },
+              select: { id: true, name: true, eta: true, sequenceNumber: true },
+            });
+          }),
+        );
+        for (const stage of created) {
+          targetStages.push(stage);
+          targetStageByName.set(stage.name, stage);
+        }
+      }
+
+      // Align target board stage ordering with source board stage ordering (by stage name).
+      // Stages not present on source board keep relative order at end.
+      const [sourceStagesAll, targetStagesAll] = await Promise.all([
+        db.stage.findMany({
+          where: { boardId: sourceBoardId },
+          select: { name: true, sequenceNumber: true },
+          orderBy: { sequenceNumber: 'asc' },
+        }),
+        db.stage.findMany({
+          where: { boardId: targetBoardId },
+          select: { id: true, name: true, sequenceNumber: true },
+          orderBy: { sequenceNumber: 'asc' },
+        }),
+      ]);
+      const targetByName = new Map(targetStagesAll.map(stage => [stage.name, stage] as const));
+      const seenTargetIds = new Set<string>();
+      const desiredStageOrder: Array<{ id: string; name: string }> = [];
+
+      for (const src of sourceStagesAll) {
+        const match = targetByName.get(src.name);
+        if (!match) continue;
+        if (seenTargetIds.has(match.id)) continue;
+        seenTargetIds.add(match.id);
+        desiredStageOrder.push({ id: match.id, name: match.name });
+      }
+
+      for (const stage of targetStagesAll) {
+        if (seenTargetIds.has(stage.id)) continue;
+        seenTargetIds.add(stage.id);
+        desiredStageOrder.push({ id: stage.id, name: stage.name });
+      }
+
+      const now = new Date();
+      await db.$transaction(
+        desiredStageOrder.map((stage, index) =>
+          db.stage.update({
+            where: { id: stage.id },
+            data: { sequenceNumber: index + 1, updatedBy: actorUserId, updatedAt: now },
+          }),
+        ),
+      );
+
+      const byStage = new Map<string, Array<{ id: string; createdAt: Date }>>();
+      for (const ticket of ticketsToMove) {
+        const list = byStage.get(ticket.stageName) || [];
+        list.push({ id: ticket.id, createdAt: ticket.createdAt });
+        byStage.set(ticket.stageName, list);
+      }
+
+      // Compute all kanbanPosition updates up front so we can apply them in batches without holding a long transaction.
+      const ticketUpdates: Array<{ ticketId: string; stageName: string; kanbanPosition: string }> =
+        [];
+      for (const [stageName, stageTickets] of byStage.entries()) {
+        stageTickets.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+        const firstTicketInStage = await db.ticket.findFirst({
+          where: {
+            boardId: targetBoardId,
+            stageName,
+            kanbanPosition: { not: null },
+          },
+          orderBy: { kanbanPosition: 'asc' },
+          select: { kanbanPosition: true },
+        });
+        const stageKeyEnd = firstTicketInStage?.kanbanPosition ?? null;
+
+        let prevKey: string | null = null;
+        for (const ticket of stageTickets) {
+          const nextKey = generateKeyBetween(prevKey, stageKeyEnd);
+          prevKey = nextKey;
+          ticketUpdates.push({ ticketId: ticket.id, stageName, kanbanPosition: nextKey });
+        }
+      }
+
+      const UPDATES_PER_SECOND = 30;
+      const updateBatches = chunkArray(ticketUpdates, UPDATES_PER_SECOND);
+      for (let batchIndex = 0; batchIndex < updateBatches.length; batchIndex += 1) {
+        const batch = updateBatches[batchIndex]!;
+        const batchTicketIds = batch.map(u => u.ticketId);
+
+        await db.$transaction(async tx => {
+          for (const update of batch) {
+            await tx.ticket.update({
+              where: { id: update.ticketId },
+              data: {
+                boardId: targetBoardId,
+                kanbanPosition: update.kanbanPosition,
+                updatedBy: actorUserId,
+                updatedAt: now,
+              },
+            });
+          }
+
+          // Reset stage ETA tracking for moved tickets in this batch (old stageIds belong to old board).
+          await tx.ticketStageEta.deleteMany({
+            where: { ticketId: { in: batchTicketIds } },
+          });
+
+          // Recreate current-stage ETA entries (best-effort) using target board stage ETA.
+          for (const update of batch) {
+            const stage = targetStageByName.get(update.stageName);
+            if (!stage || !stage.eta || stage.eta <= 0) continue;
+            const stageEtaDeadline = calculateETADeadline(now, stage.eta);
+            await tx.ticketStageEta.create({
+              data: {
+                ticketId: update.ticketId,
+                stageId: stage.id,
+                stageEnteredAt: now,
+                stageLeftAt: null,
+                stageEta: stageEtaDeadline,
+                updatedBy: actorUserId,
+              },
+            });
+          }
+        });
+
+        if (batchIndex < updateBatches.length - 1) {
+          await sleep(1000);
+        }
+      }
+
+      // Update externalSource.boardId only if we fully drained the requested source board
+      // (so we don't break future moves when tickets are split across boards).
+      const remainingOnSource = await db.ticket.count({
+        where: { id: { in: mappedTicketIds }, boardId: sourceBoardId },
+      });
+      if (remainingOnSource === 0 && (!externalSource.boardId || externalSource.boardId === sourceBoardId)) {
+        await db.externalSource.update({
+          where: { id: externalSource.id },
+          data: { boardId: targetBoardId },
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          dryRun: false,
+          externalSourceId: externalSource.id,
+          jiraProjectKey: normalizedProjectKey,
+          channelId,
+          sourceBoardId,
+          targetBoardId,
+          movedTickets: ticketUpdates.length,
+          missingStages: [],
+          ...(externalSourceBoardMismatch
+            ? {
+                warnings: [
+                  `External source boardId (${externalSource.boardId}) does not match sourceBoardId (${sourceBoardId}). Moved only the subset currently on sourceBoardId.`,
+                ],
+              }
+            : {}),
+        },
+      });
+    } catch (error) {
+      logger.error('Jira migration move-jira-project-board failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to move Jira project tickets' });
+    }
+  };
+
   moveChannelProject = async (req: Request, res: Response): Promise<void> => {
     try {
       const actorUserId = req.user?.id;
@@ -1139,29 +1483,26 @@ export class JiraMigrationController {
     result: import('@/services/jiraMigrationImportService').JiraMigrationExecuteResult,
   ) {
     const { completedIssues, partialIssues, failedIssues } = this.getMigrationReportSummary(result);
-    const topWarnings = result.warnings.slice(0, 8);
-    const unresolvedUserItems = result.unresolvedUsers.slice(0, 8).map(user => {
+    const topWarnings = result.warnings;
+    const unresolvedUserItems = result.unresolvedUsers.map(user => {
       const name = user.displayName || user.accountId || 'Unknown Jira user';
       const suggestedEmails = user.suggestedEmails.length > 0 ? user.suggestedEmails.join(', ') : null;
-      const issueKeys = user.issueKeys.length > 0 ? user.issueKeys.slice(0, 5).join(', ') : null;
-      const issueSuffix =
-        user.issueKeys.length > 5 ? ` (+${user.issueKeys.length - 5} more)` : '';
+      const issueKeys = user.issueKeys.length > 0 ? user.issueKeys.join(', ') : null;
 
       return [
         name,
         suggestedEmails,
-        issueKeys ? `Tickets: ${issueKeys}${issueSuffix}` : null,
+        issueKeys ? `Tickets: ${issueKeys}` : null,
       ]
         .filter(Boolean)
         .join(' · ');
     });
     const issueDetailItems = result.issueResults
       .filter(issue => issue.status !== 'completed')
-      .slice(0, 12)
       .map(issue => {
         const base = `${issue.issueKey} · ${issue.status.toUpperCase()}${issue.failedStep ? ` · ${issue.failedStep}` : ''} · ${issue.summary}`;
         return issue.errors.length > 0
-          ? `${base} · ${issue.errors.slice(0, 2).join(' | ')}`
+          ? `${base} · ${issue.errors.join(' | ')}`
           : base;
       });
 
@@ -1299,15 +1640,27 @@ export class JiraMigrationController {
     actorUserId: string,
     result: import('@/services/jiraMigrationImportService').JiraMigrationExecuteResult,
   ): Promise<void> {
+    const reportCanvasChannelId =
+      (config.jiraMigration as any).reportCanvasChannelId &&
+      String((config.jiraMigration as any).reportCanvasChannelId).trim()
+        ? String((config.jiraMigration as any).reportCanvasChannelId).trim()
+        : channelId;
+
+    // Post the summary message only to the report canvas channel.
+    channelId = reportCanvasChannelId;
     const conversationId = randomUUID();
     const messageId = randomUUID();
     const now = new Date();
     let canvasUrl: string | null = null;
     try {
-      canvasUrl = await this.createMigrationReportCanvas(channelId, actorUserId, result);
+      canvasUrl = await this.createMigrationReportCanvas(
+        reportCanvasChannelId,
+        actorUserId,
+        result,
+      );
     } catch (error) {
       logger.error('[JiraMigration] Canvas report failed; posting summary message without canvas link', error, {
-        channelId,
+        channelId: reportCanvasChannelId,
         actorUserId,
         jiraProjectKey: result.jiraProjectKey,
         externalSourceId: result.externalSourceId || null,
