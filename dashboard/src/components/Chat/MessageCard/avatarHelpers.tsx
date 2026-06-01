@@ -32,7 +32,11 @@ const useResolvedChannel = (conversation?: Conversation | null): Channel | null 
 const useOtherParticipantIds = (channel: Channel | null, currentUserId: string): string[] => {
   if (!channel) return [];
   if (!isOneToOneDMChannel(channel.scopeType) && !isGroupDMChannel(channel.scopeType)) return [];
-  return getDMParticipantIdsToFetch(channel, currentUserId);
+  const otherIds = getDMParticipantIdsToFetch(channel, currentUserId);
+  if (isOneToOneDMChannel(channel.scopeType) && otherIds.length === 0) {
+    return [currentUserId];
+  }
+  return otherIds;
 };
 
 const useUsersByIds = (ids: string[]): Array<NonNullable<ReturnType<typeof useUsers>[number]>> => {
