@@ -483,6 +483,7 @@ export interface IntegrityDebugContext extends BaseWorkflowContext {
     flow: 'WEBHOOK' | 'REDIRECTION' | 'SYNC'
   }>
   orderIds?: string[] // Array of all order IDs to analyze
+  additionalUserInfo?: string // Optional free-text passed by the caller; appended to Step 4 (Log Collection) user prompt
 }
 
 export interface SpecsVerificationWorkFlowContext extends BaseWorkflowContext {

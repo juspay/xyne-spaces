@@ -521,7 +521,8 @@ const fetchLogs = async (
   orderIds: string[],
   merchantId: string,
   flow: string,
-  logRequirements: any
+  logRequirements: any,
+  additionalUserInfo?: string
 ): Promise<any> => {
   logger.info(`[${ticketId}] STEP 3: Fetching logs for ${orderIds.length} orders`);
   logger.info(`${ticketId}_fetch_logs_3_input`, {
@@ -549,21 +550,33 @@ const fetchLogs = async (
     // Handle both field names: required_fields or required_fields_for_dry_run
     let requiredFields = logRequirements.required_fields || logRequirements.required_fields_for_dry_run;
 
-    // Flatten nested structure if present (e.g., database_fields, gateway_response_fields)
-    if (requiredFields && (requiredFields.database_fields || requiredFields.gateway_response_fields)) {
+    // Flatten nested structure only if it's the OLD shape:
+    //   { database_fields: { table: [...] }, gateway_response_fields: { table: [...] } }
+    // If the agent returned the newer FLAT-ARRAY shape (e.g. database_tables: [...],
+    // gateway_response_fields: [...]), pass it through unchanged so the array values
+    // flow into buildStep4LogCollectionPrompt and get rendered by its array branch.
+    // Guarding each branch prevents Object.assign({}, someArray) from silently
+    // converting an array into numeric-keyed string properties.
+    const isPlainObject = (v: any) =>
+      v != null && typeof v === 'object' && !Array.isArray(v);
+
+    const hasNestedShape =
+      requiredFields && (
+        isPlainObject(requiredFields.database_fields) ||
+        isPlainObject(requiredFields.gateway_response_fields)
+      );
+
+    if (hasNestedShape) {
       const flattenedFields: Record<string, any> = {};
 
-      // Merge database_fields
-      if (requiredFields.database_fields) {
+      if (isPlainObject(requiredFields.database_fields)) {
         Object.assign(flattenedFields, requiredFields.database_fields);
       }
 
-      // Merge gateway_response_fields
-      if (requiredFields.gateway_response_fields) {
+      if (isPlainObject(requiredFields.gateway_response_fields)) {
         Object.assign(flattenedFields, requiredFields.gateway_response_fields);
       }
 
-      // Merge verification_fields (as metadata)
       if (requiredFields.verification_fields) {
         flattenedFields.verification_metadata = requiredFields.verification_fields;
       }
@@ -573,15 +586,15 @@ const fetchLogs = async (
     }
 
     // Build log collection prompt (Step 3)
+    const workflowConfig = loadWorkflowConfig();
     const logCollectionPrompt = buildStep4LogCollectionPrompt(
       gateway,
       orderIds,
       merchantId,
       requiredFields,
-      flow
+      flow,
+      additionalUserInfo
     );
-
-    const workflowConfig = loadWorkflowConfig();
 
     // Execute with retry logic
     const retryResult = await executeWithRetry(
@@ -1072,6 +1085,11 @@ const IntegrityDebugInputSchema = z.object({
     gateway: z.string(),
     flow: z.enum(['WEBHOOK', 'SYNC', 'REDIRECTION']),
   })).optional().describe('Sessions array (created by contextMapper)'),
+
+  // Optional free-text added to the Step 4 (Log Collection) user prompt under an
+  // "## Additional User Info:" header. Useful for gateway-specific quirks, log
+  // format hints, or any ad-hoc context the caller wants to give the agent.
+  additionalUserInfo: z.string().optional().describe('Optional free-text appended to the Step 4 (Log Collection) user prompt'),
 }).passthrough(); // Allow additional fields without validation errors
 
 /**
@@ -1087,6 +1105,7 @@ const contextMapper = (payload: any): IntegrityDebugContext => {
       csvData: payload.csvData || '',
       sessions: payload.sessions,
       orderIds: payload.orderIds || [],
+      additionalUserInfo: payload.additionalUserInfo,
     };
   }
 
@@ -1104,6 +1123,7 @@ const contextMapper = (payload: any): IntegrityDebugContext => {
     csvData: '', // Not used anymore
     sessions,
     orderIds: payload.orderIds || [], // Store all order IDs
+    additionalUserInfo: payload.additionalUserInfo,
   };
 };
 
@@ -1203,7 +1223,8 @@ async function execute(
       orderIds,
       merchantId,
       flow,
-      logRequirements
+      logRequirements,
+      context.additionalUserInfo
     );
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
