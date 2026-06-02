@@ -115,4 +115,13 @@ export class ExternalSourceRepository {
       where: { channelId }
     });
   }
+
+  /**
+   * Find external source by workspace ID
+   */
+  async findByWorkspaceId(workspaceId: string) {
+    return await this.db.externalSource.findUnique({
+      where: { workspaceId }
+    });
+  }
 }

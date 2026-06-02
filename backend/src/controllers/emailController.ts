@@ -15,7 +15,7 @@ import { MessageAttachmentRepository } from '@/database/repositories/messageAtta
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { logger } from '@/utils/logger';
-import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma } from '@prisma/client';
+import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma, DeskType } from '@prisma/client';
 import { db } from '@/database/client';
 import { ZohoService } from '@/services/zohoService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
@@ -53,6 +53,20 @@ export class EmailController {
   private messageAttachmentRepo = new MessageAttachmentRepository();
   private emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
   private userRepo = new UserRepository();
+
+  private async resolveExternalSourceForChannel(channelId: string) {
+    const source = await this.externalSourceRepo.findByChannelId(channelId);
+    if (source) {
+      return source;
+    }
+    const preference = await this.emailChannelPreferenceRepo.findByChannelId(channelId);
+    if (preference?.deskType === DeskType.DL && preference.workspaceId) {
+      const wsSource = await this.externalSourceRepo.findByWorkspaceId(preference.workspaceId);
+      return wsSource;
+    }
+    logger.warn(`[EmailController] No external source found for channel`, { channelId });
+    return null;
+  }
 
   /**
    * POST /api/email/:conversationId/reply
@@ -128,7 +142,7 @@ export class EmailController {
         return res.status(404).json({ error: 'Channel not found' });
       }
 
-      const externalSource = await this.externalSourceRepo.findByChannelId(channel.id);
+      const externalSource = await this.resolveExternalSourceForChannel(channel.id);
       if (!externalSource) {
         return res.status(404).json({ error: 'External source not found' });
       }
@@ -519,7 +533,7 @@ export class EmailController {
         return res.status(403).json({ error: 'Not a member of this channel' });
       }
 
-      const externalSource = await this.externalSourceRepo.findByChannelId(channelId);
+      const externalSource = await this.resolveExternalSourceForChannel(channelId);
       if (!externalSource) {
         return res.json({ contacts: [] });
       }
@@ -597,7 +611,7 @@ export class EmailController {
         return res.status(400).json({ error: 'Channel must be of type EMAIL' });
       }
 
-      const externalSource = await this.externalSourceRepo.findByChannelId(channel.id);
+      const externalSource = await this.resolveExternalSourceForChannel(channel.id);
       if (!externalSource) {
         return res.status(404).json({ error: 'External source not found for channel' });
       }
