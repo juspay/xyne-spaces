@@ -294,7 +294,7 @@ export const queries = defineQueries({
         )
         .related('parentMessage')
         .related('participants')
-        .related('ticket', t => t.related('attachments'))
+        .related('ticket')
         .one();
     },
   ),
@@ -311,7 +311,7 @@ export const queries = defineQueries({
     ({ ctx, args: { conversationId } }) => {
       return zql.conversations
         .where('conversationId', conversationId)
-        .related('ticket', t => t.related('attachments'))
+        .related('ticket')
         .related('call')
         .related('participants', p =>
           p.where('userId', ctx.userID).one(),
@@ -2042,7 +2042,6 @@ export const queries = defineQueries({
       let query = zql.conversations
         .where('channelId', channelId)
         .related('initialMessageAttachments')
-        .related('ticket', t => t.related('attachments'))
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
             helpers.or(
@@ -2134,7 +2133,6 @@ export const queries = defineQueries({
       return zql.conversations
         .where('channelId', channelId)
         .related('initialMessageAttachments')
-        .related('ticket', t => t.related('attachments'))
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
             helpers.or(
