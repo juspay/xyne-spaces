@@ -4,7 +4,7 @@ import { Button } from '../../ui/Button/Button';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import type { ColumnDef } from '../../ui/Table/Table.types';
 import type { InstalledApps } from '@xyne/shared';
-import { Download, Pencil, Copy } from 'lucide-react';
+import { Download, Pencil, Copy, RefreshCw } from 'lucide-react';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -34,6 +34,7 @@ interface AppsTableProps {
   apps: AppRow[];
   currentUserId: string;
   onInstall: (appId: string) => void;
+  onReinstall: (appId: string) => void;
   onUpdateApp?: (
     appId: string,
     data: { name?: string; description?: string; webhookUrl?: string },
@@ -50,6 +51,7 @@ export const AppsTable = ({
   apps,
   currentUserId,
   onInstall,
+  onReinstall,
   onUpdateApp,
   onGetJwtToken,
   onGetSigningSecret,
@@ -313,6 +315,21 @@ export const AppsTable = ({
             >
               <Download size={14} />
               {isInstalling ? 'Installing...' : 'Install'}
+            </Button>
+          )}
+          {hasAdminAccess && isInstalled && (
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={isInstalling}
+              onClick={() => onReinstall(app.id)}
+              className='gap-1 h-8'
+              title='Regenerate JWT token (use after updating permissions)'
+              data-track-category='Apps'
+              data-track-name='ReinstallApp'
+            >
+              <RefreshCw size={14} />
+              {isInstalling ? 'Reinstalling...' : 'Reinstall'}
             </Button>
           )}
         </div>

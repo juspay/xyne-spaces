@@ -84,6 +84,7 @@ import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
 import activityThreadBackfillRoutes from '@/routes/activityThreadBackfill';
+import appPermissionsBackfillRoutes from '@/routes/appPermissionsBackfill';
 import externalSourceDisplayNameBackfillRoutes from '@/routes/externalSourceDisplayNameBackfill';
 import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
 import channelRecapBackfillRoutes from '@/routes/channelRecapBackfill';
@@ -318,6 +319,9 @@ export class App {
     // Activity isThreadActivity backfill
     this.app.use('/migrate/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
     this.app.use('/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
+    // App permissions backfill — grant all permissions to all installed apps
+    this.app.use('/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
+    this.app.use('/migrate/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
     // ExternalSource displayName cleanup ("Microsoft (email)" → "email").
     this.app.use(
       '/api/admin/external-source-displayname-backfill',

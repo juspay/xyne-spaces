@@ -92,6 +92,26 @@ export async function authenticateApp(
     req.body.userId = verifiedResult.data.userId;
     req.body.appId = verifiedResult.data.appId;
 
+    // Load permissions by status.
+    // approved + delete = currently effective (active).
+    // hasPendingChanges = true when any permission is 'new' or 'delete',
+    // meaning a reinstall is needed to fully apply the changes.
+    const { effectiveNames, hasPendingChanges } =
+      await repositories.appPermissions.getGrantedPermissionsWithMeta(installedApp.id);
+
+    if (hasPendingChanges) {
+      logger.warn(
+        `[APP-AUTH] Permission changes pending reinstall for installedApp ${installedApp.id}`,
+      );
+    }
+
+    (req as any).auth = {
+      permissions: effectiveNames,
+      installedAppId: installedApp.id,
+      permissionsStale: hasPendingChanges,
+      installedAppCreatedAt: installedApp.createdAt,
+    };
+
     // Fetch user to get workspaceId for downstream controllers that expect req.user
     const user = await repositories.users.findById(userId);
     if (!user) {

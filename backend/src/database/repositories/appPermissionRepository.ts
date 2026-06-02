@@ -1,0 +1,283 @@
+import { BaseRepository } from './base';
+import {
+  type Prisma,
+  type AvailableAppPermission,
+  AppPermissionStatus,
+  AppPermissionType,
+} from '@prisma/client';
+
+// ─── Prisma transaction client type ──────────────────────────────────────────
+import { PrismaClient } from '@prisma/client';
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+// ─── Typed row shapes from Prisma includes ────────────────────────────────────
+type AppPermissionWithPerm = Prisma.AppPermissionGetPayload<{
+  include: { permission: { select: { name: true; type: true } } };
+}>;
+
+type InstalledAppPermissionWithPerm = Prisma.InstalledAppPermissionGetPayload<{
+  include: { permission: { select: { name: true; type: true } } };
+}>;
+
+type InstalledAppPermissionBase = Prisma.InstalledAppPermissionGetPayload<{
+  select: { id: true; permissionId: true; status: true };
+}>;
+
+type AvailablePermissionIdNameType = Prisma.AvailableAppPermissionGetPayload<{
+  select: { id: true; name: true; type: true };
+}>;
+
+
+function toScope(name: string, type: AppPermissionType): string {
+  return `${name}:${type.toLowerCase()}`;
+}
+
+function parseScope(scope: string): { name: string; type: AppPermissionType } {
+  const colonIdx = scope.indexOf(':');
+  if (colonIdx === -1) {
+    throw new Error(`Invalid permission scope "${scope}" — expected "resource:action" e.g. "chat:write"`);
+  }
+  const name = scope.slice(0, colonIdx);
+  const typeRaw = scope.slice(colonIdx + 1).toUpperCase();
+  if (!(typeRaw in AppPermissionType)) {
+    throw new Error(
+      `Unknown action "${scope.slice(colonIdx + 1)}" in scope "${scope}". Valid: ${Object.values(AppPermissionType).map((v) => v.toLowerCase()).join(', ')}`,
+    );
+  }
+  return { name, type: typeRaw as AppPermissionType };
+}
+
+export class AppPermissionRepository extends BaseRepository<
+  AvailableAppPermission,
+  Prisma.AvailableAppPermissionUncheckedCreateInput,
+  Prisma.AvailableAppPermissionUpdateInput
+> {
+  constructor() {
+    super('availableAppPermission');
+  }
+
+
+  async create(data: Prisma.AvailableAppPermissionUncheckedCreateInput) {
+    return this.db.availableAppPermission.create({ data });
+  }
+
+  async findById(id: string) {
+    return this.db.availableAppPermission.findUnique({ where: { id } });
+  }
+
+  async findMany(options?: {
+    where?: Prisma.AvailableAppPermissionWhereInput;
+    skip?: number;
+    take?: number;
+    orderBy?: Prisma.AvailableAppPermissionOrderByWithRelationInput | Prisma.AvailableAppPermissionOrderByWithRelationInput[];
+  }) {
+    return this.db.availableAppPermission.findMany(options ?? {});
+  }
+
+  async update(id: string, data: Prisma.AvailableAppPermissionUpdateInput) {
+    return this.db.availableAppPermission.update({ where: { id }, data });
+  }
+
+  async delete(id: string) {
+    return this.db.availableAppPermission.delete({ where: { id } });
+  }
+
+  /** Look up a single registry entry by its scope string (e.g. "chat:write"). */
+  async findByScope(scope: string) {
+    const { name, type } = parseScope(scope);
+    return this.db.availableAppPermission.findUnique({ where: { name_type: { name, type } } });
+  }
+
+  /** All registry entries, sorted by name then type. */
+  async findAll() {
+    return this.db.availableAppPermission.findMany({
+      orderBy: [{ name: 'asc' }, { type: 'asc' }],
+    });
+  }
+
+
+  async upsertByScope(scope: string, description?: string) {
+    const { name, type } = parseScope(scope);
+    return this.db.availableAppPermission.upsert({
+      where: { name_type: { name, type } },
+      create: { name, type, description },
+      update: {},
+    });
+  }
+
+  async getAppPermissions(appId: string): Promise<string[]> {
+    const rows: AppPermissionWithPerm[] = await this.db.appPermission.findMany({
+      where: { appId },
+      include: { permission: { select: { name: true, type: true } } },
+    });
+    return rows.map((r) => toScope(r.permission.name, r.permission.type));
+  }
+
+  async setAppPermissions(appId: string, scopes: string[]): Promise<void> {
+    const parsed = scopes.map(parseScope);
+    await this.db.$transaction(async (tx: Tx) => {
+      await tx.appPermission.deleteMany({ where: { appId } });
+      if (parsed.length === 0) return;
+
+      const permissions: AvailablePermissionIdNameType[] = await tx.availableAppPermission.findMany({
+        where: { OR: parsed.map(({ name, type }) => ({ name, type })) },
+        select: { id: true, name: true, type: true },
+      });
+
+      const foundScopes = new Set(permissions.map((p) => toScope(p.name, p.type)));
+      const unknown = scopes.filter((s) => !foundScopes.has(s));
+      if (unknown.length > 0) throw new Error(`Unknown permissions: ${unknown.join(', ')}`);
+
+      await tx.appPermission.createMany({
+        data: permissions.map((p) => ({ appId, permissionId: p.id })),
+        skipDuplicates: true,
+      });
+    });
+  }
+
+
+  async getGrantedPermissionsWithMeta(
+    installedAppId: string,
+  ): Promise<{ effectiveNames: string[]; hasPendingChanges: boolean }> {
+    const rows: InstalledAppPermissionWithPerm[] = await this.db.installedAppPermission.findMany({
+      where: { installedAppId },
+      include: { permission: { select: { name: true, type: true } } },
+    });
+    if (rows.length === 0) return { effectiveNames: [], hasPendingChanges: false };
+
+    const effectiveNames = rows
+      .filter((r) => r.status === AppPermissionStatus.APPROVED || r.status === AppPermissionStatus.PENDINGDELETE)
+      .map((r) => toScope(r.permission.name, r.permission.type));
+
+    const hasPendingChanges = rows.some(
+      (r) => r.status === AppPermissionStatus.UNAPPROVED || r.status === AppPermissionStatus.PENDINGDELETE,
+    );
+
+    return { effectiveNames, hasPendingChanges };
+  }
+
+  /** True when any installed permission needs a reinstall to take effect. */
+  async hasPermissionsPendingReinstall(installedAppId: string): Promise<boolean> {
+    const count = await this.db.installedAppPermission.count({
+      where: {
+        installedAppId,
+        status: { in: [AppPermissionStatus.UNAPPROVED, AppPermissionStatus.PENDINGDELETE] },
+      },
+    });
+    return count > 0;
+  }
+
+  async getInstalledPermissions(installedAppId: string): Promise<string[]> {
+    const rows: InstalledAppPermissionWithPerm[] = await this.db.installedAppPermission.findMany({
+      where: { installedAppId },
+      include: { permission: { select: { name: true, type: true } } },
+    });
+    return rows
+      .filter((r) => r.status !== AppPermissionStatus.PENDINGDELETE)
+      .map((r) => toScope(r.permission.name, r.permission.type));
+  }
+
+  /** All installed permissions with their current status (for status-badge UI). */
+  async getInstalledPermissionsWithStatus(
+    installedAppId: string,
+  ): Promise<{ scope: string; status: AppPermissionStatus }[]> {
+    const rows: InstalledAppPermissionWithPerm[] = await this.db.installedAppPermission.findMany({
+      where: { installedAppId },
+      include: { permission: { select: { name: true, type: true } } },
+    });
+    return rows.map((r) => ({ scope: toScope(r.permission.name, r.permission.type), status: r.status }));
+  }
+
+
+  async setInstalledPermissions(installedAppId: string, scopes: string[]): Promise<void> {
+    const parsed = scopes.map(parseScope);
+    await this.db.$transaction(async (tx: Tx) => {
+      const permissions: AvailablePermissionIdNameType[] = await tx.availableAppPermission.findMany({
+        where: { OR: parsed.map(({ name, type }) => ({ name, type })) },
+        select: { id: true, name: true, type: true },
+      });
+
+      const foundScopes = new Set(permissions.map((p) => toScope(p.name, p.type)));
+      const unknown = scopes.filter((s) => !foundScopes.has(s));
+      if (unknown.length > 0) throw new Error(`Unknown permissions: ${unknown.join(', ')}`);
+
+      const wantedIds = new Set(permissions.map((p) => p.id));
+
+      const existing: InstalledAppPermissionBase[] = await tx.installedAppPermission.findMany({
+        where: { installedAppId },
+        select: { id: true, permissionId: true, status: true },
+      });
+      const existingMap = new Map<string, InstalledAppPermissionBase>(
+        existing.map((r) => [r.permissionId, r]),
+      );
+
+      for (const [permissionId, row] of existingMap) {
+        if (wantedIds.has(permissionId)) {
+          // Restore PENDINGDELETE → APPROVED (admin re-added it)
+          if (row.status === AppPermissionStatus.PENDINGDELETE) {
+            await tx.installedAppPermission.update({
+              where: { id: row.id },
+              data: { status: AppPermissionStatus.APPROVED },
+            });
+          }
+        } else {
+          if (row.status === AppPermissionStatus.UNAPPROVED) {
+            // Never activated — drop immediately
+            await tx.installedAppPermission.delete({ where: { id: row.id } });
+          } else if (row.status === AppPermissionStatus.APPROVED) {
+            // Still active, mark for removal on next reinstall
+            await tx.installedAppPermission.update({
+              where: { id: row.id },
+              data: { status: AppPermissionStatus.PENDINGDELETE },
+            });
+          }
+        }
+      }
+
+      // Insert brand-new entries
+      const toInsert = permissions.filter((p) => !existingMap.has(p.id));
+      if (toInsert.length > 0) {
+        await tx.installedAppPermission.createMany({
+          data: toInsert.map((p) => ({
+            installedAppId,
+            permissionId: p.id,
+            status: AppPermissionStatus.UNAPPROVED,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    });
+  }
+
+
+  async copyFromApp(appId: string, installedAppId: string): Promise<void> {
+    const grants = await this.db.appPermission.findMany({
+      where: { appId },
+      select: { permissionId: true },
+    });
+    if (grants.length === 0) return;
+
+    await this.db.installedAppPermission.createMany({
+      data: grants.map((g) => ({
+        installedAppId,
+        permissionId: g.permissionId,
+        status: AppPermissionStatus.APPROVED,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+
+  async applyReinstall(installedAppId: string): Promise<void> {
+    await this.db.$transaction(async (tx: Tx) => {
+      await tx.installedAppPermission.updateMany({
+        where: { installedAppId, status: AppPermissionStatus.UNAPPROVED },
+        data: { status: AppPermissionStatus.APPROVED },
+      });
+      await tx.installedAppPermission.deleteMany({
+        where: { installedAppId, status: AppPermissionStatus.PENDINGDELETE },
+      });
+    });
+  }
+}
+

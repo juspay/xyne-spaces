@@ -3684,9 +3684,10 @@ model Apps {
   updatedAt DateTime
 
   // Relations
-  createdByUser   User            @relation("AppsCreatedBy", fields: [createdBy], references: [id])
-  installations   InstalledApps[]
-  commands        AppCommand[]
+  createdByUser       User                  @relation("AppsCreatedBy", fields: [createdBy], references: [id])
+  installations       InstalledApps[]
+  commands            AppCommand[]
+  appPermissions AppPermission[]
 
   @@index([name])
   @@index([createdBy])
@@ -3704,9 +3705,10 @@ model InstalledApps {
   updatedAt DateTime
 
   // Relations
-  app             Apps         @relation(fields: [appId], references: [id])
-  user            User         @relation("InstalledAppsUser", fields: [userId], references: [id])
-  incomingWebhooks AppIncomingWebhook[]
+  app                     Apps                   @relation(fields: [appId], references: [id])
+  user                    User                   @relation("InstalledAppsUser", fields: [userId], references: [id])
+  incomingWebhooks        AppIncomingWebhook[]
+  installedAppPermissions InstalledAppPermission[]
 
   @@index([appId])
   @@index([userId])
@@ -3843,5 +3845,78 @@ model DelayedMessage {
   @@index([scheduledFor, status])
   @@index([channelId, status])
   @@map("delayed_messages")
+  @@schema("public")
+}
+
+// Action/access type for a permission scope (the part after the colon, e.g. chat:WRITE)
+enum AppPermissionType {
+  READ    // read-only access
+  WRITE   // create / update access
+
+  @@schema("public")
+}
+
+// Status of a permission on an installed app
+enum AppPermissionStatus {
+  UNAPPROVED    // Added after install, pending activation via reinstall
+  APPROVED      // Active — confirmed during install or reinstall
+  PENDINGDELETE // Marked for removal, still active until next reinstall
+
+  @@schema("public")
+}
+
+// App Permission System
+/// Registry of all available permissions.
+/// The full scope string used in requirePermission() is composed as "name:type" (e.g. "chat:WRITE").
+model AvailableAppPermission {
+  id          String            @id @default(cuid())
+  name        String            // resource prefix — e.g. "chat", "channels", "tickets"
+  type        AppPermissionType // action — READ, WRITE, HISTORY, DELETE, MANAGE
+  description String?
+  createdAt   DateTime          @default(now())
+
+  appPermissions          AppPermission[]
+  installedAppPermissions InstalledAppPermission[]
+
+  @@unique([name, type])        // "chat" + WRITE is one permission
+  @@index([name])
+  @@index([type])
+  @@map("available_app_permissions")
+  @@schema("public")
+}
+
+/// Permissions an app has requested (selected by the creator before install)
+model AppPermission {
+  id           String   @id @default(cuid())
+  appId        String
+  permissionId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  app        Apps                 @relation(fields: [appId], references: [id])
+  permission AvailableAppPermission @relation(fields: [permissionId], references: [id])
+
+  @@unique([appId, permissionId])
+  @@index([appId])
+  @@index([permissionId])
+  @@map("app_permission")
+  @@schema("public")
+}
+
+/// Permissions granted to a specific installation (copied from AppPermissionGrant at install time)
+model InstalledAppPermission {
+  id             String                @id @default(cuid())
+  installedAppId String
+  permissionId   String
+  status         AppPermissionStatus   @default(UNAPPROVED)
+  createdAt      DateTime              @default(now())
+
+  installedApp InstalledApps         @relation(fields: [installedAppId], references: [id])
+  permission   AvailableAppPermission @relation(fields: [permissionId], references: [id])
+
+  @@unique([installedAppId, permissionId])
+  @@index([installedAppId])
+  @@index([permissionId])
+  @@map("installed_app_permissions")
   @@schema("public")
 }

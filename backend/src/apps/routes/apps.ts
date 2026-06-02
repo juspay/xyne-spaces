@@ -17,6 +17,7 @@ import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
 import { FlowController } from '../controllers/flowController';
+import { PermissionController } from '../controllers/permissionController';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { PlatformAdapterRegistry } from '../platform-adapters/types';
 import { SlackAdapter } from '../platform-adapters/slack';
@@ -25,6 +26,7 @@ const router = Router();
 const appController = new AppController();
 const chatController = new ChatController();
 const flowController = new FlowController();
+const permissionController = new PermissionController();
 const platformRegistry = new PlatformAdapterRegistry();
 
 platformRegistry.register(new SlackAdapter());
@@ -84,6 +86,12 @@ router.post("/flow/action", authMiddleware.authenticate, flowController.executeA
 
 // Platform adapter routes
 platformRegistry.mountAll(router);
+
+// ─── Permission management (user auth) ─────────────────────────────────────
+// matched as an appId param.
+router.get('/permissions', authMiddleware.authenticate, permissionController.listAvailable);
+router.get('/permissions/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), permissionController.getGranted);
+router.post('/permissions/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.setPermissions);
 
 // Commands (user auth) — manage commands per app
 router.get('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getCommands);

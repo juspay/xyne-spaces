@@ -66,6 +66,13 @@ export interface UpsertCommandRequest {
   isForChat?: boolean;
 }
 
+export interface AppPermission {
+  id: string;
+  name: string;
+  type: string;
+  description: string | null;
+}
+
 export class AppsService {
   async createApp(data: CreateAppRequest): Promise<App> {
     const response = await apiInstance.post<App>('/apps/create', data);
@@ -175,6 +182,25 @@ export class AppsService {
       conversationId: conversationId ?? null,
       text: text ?? null,
     });
+  }
+
+  // ─── Permission management ──────────────────────────────────────────────────
+
+  /** List every permission in the registry (for the selection UI). */
+  async getAvailablePermissions(): Promise<AppPermission[]> {
+    const response = await apiInstance.get<{ permissions: AppPermission[] }>('/apps/permissions');
+    return response.data.permissions;
+  }
+
+  /** Get the permission names currently granted to an app. */
+  async getGrantedPermissions(appId: string): Promise<string[]> {
+    const response = await apiInstance.get<{ permissions: string[] }>(`/apps/permissions/${appId}`);
+    return response.data.permissions;
+  }
+
+  /** Replace the full set of permissions for an app. */
+  async setPermissions(appId: string, permissions: string[]): Promise<void> {
+    await apiInstance.post(`/apps/permissions/${appId}`, { permissions });
   }
 }
 

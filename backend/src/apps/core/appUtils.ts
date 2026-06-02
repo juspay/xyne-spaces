@@ -16,15 +16,23 @@ import { db } from '@/database/client';
  */
 export async function installApp(appId: string, workspaceId: string) {
   try {
-    // 1. Check if app is already installed
-    const existingInstallation = await repositories.installedApps.findMany({
+    // 1. Check if app is already installed — if so, regenerate JWT (reinstall)
+    const existingInstallation = await repositories.installedApps.findFirst({
       where: { appId: appId }
     });
-    
-    if (existingInstallation.length > 0) {
-      return {
-        message: 'App is already installed in workspace',
-      };
+
+    if (existingInstallation) {
+      const signingSecret = decrypt(existingInstallation.signingSecret);
+      const jwtToken = jwt.sign(
+        { appId, userId: existingInstallation.userId },
+        signingSecret,
+        { noTimestamp: true },
+      );
+      // Apply pending permission changes: new→approved, delete→removed
+      await repositories.appPermissions.applyReinstall(existingInstallation.id);
+      await repositories.installedApps.update(existingInstallation.id, { updatedAt: new Date() });
+      logger.info(`[INSTALL-APP] App ${appId} reinstalled — permissions applied`);
+      return { jwtToken };
     }
 
     // 2. Get the app to retrieve its name
@@ -95,7 +103,11 @@ export async function installApp(appId: string, workspaceId: string) {
     } );
 
     logger.info(`[INSTALL-APP] Created installed app entry: ${installedApp.id} for app ${appId}`);
-    
+
+    // 9. Copy pre-install permission grants (app_permission) → installed_app_permissions
+    await repositories.appPermissions.copyFromApp(appId, installedApp.id);
+    logger.info(`[INSTALL-APP] Copied permissions from app ${appId} to installedApp ${installedApp.id}`);
+
     return {
       jwtToken: jwtToken,
     };

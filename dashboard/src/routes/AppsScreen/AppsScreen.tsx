@@ -234,6 +234,7 @@ const AppsScreen = (): ReactElement => {
                 apps={apps}
                 currentUserId={user?.id ?? ''}
                 onInstall={handleInstallApp}
+                onReinstall={handleInstallApp}
                 onUpdateApp={handleUpdateApp}
                 onGetJwtToken={getJwtToken}
                 onGetSigningSecret={getSigningSecret}
