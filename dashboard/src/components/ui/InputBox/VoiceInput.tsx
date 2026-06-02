@@ -5,7 +5,7 @@
  *
  * Usage in InputBox (desktop):
  *   const voiceInputRef = useRef<VoiceInputHandle>(null);
- *   <VoiceInput ref={voiceInputRef} editor={editor} content={content}
+ *   <VoiceInput ref={voiceInputRef} editor={editor}
  *     mentionItems={mentionItems} voiceMentionItems={voiceMentionItems}
  *     disabled={disabled} isSending={isSending}
  *     onStateChange={({ isRecording, isTranscribing }) => {
@@ -39,8 +39,6 @@ export interface VoiceInputHandle {
 
 interface VoiceInputProps {
   editor: Editor | null;
-  /** Current editor text content — used to decide whether to prefix a space */
-  content: string;
   mentionItems?: MentionResult[];
   voiceMentionItems?: MentionResult[];
   disabled?: boolean;
@@ -55,7 +53,6 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
   (
     {
       editor,
-      content,
       mentionItems = [],
       voiceMentionItems = [],
       disabled = false,
@@ -217,7 +214,8 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
         );
         if (nonEmpty.length === 0) return;
 
-        const shouldPrefixSpace = content.length > 0 && !content.endsWith(' ');
+        const currentText = editor.getText();
+        const shouldPrefixSpace = currentText.length > 0 && !currentText.endsWith(' ');
         if (shouldPrefixSpace) {
           editor.chain().focus().insertContent(' ').run();
         } else {
@@ -264,7 +262,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
           }, 1400);
         }
       },
-      [editor, content, parseVoiceTranscript],
+      [editor, parseVoiceTranscript],
     );
 
     // ── STT hints (user display names for the STT provider) ────────────────

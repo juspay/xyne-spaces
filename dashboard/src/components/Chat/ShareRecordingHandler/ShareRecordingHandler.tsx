@@ -27,7 +27,10 @@ export const ShareRecordingHandler: React.FC = () => {
   const { isMobile } = usePlatform();
 
   // Query the message from Zero — same pattern as BookmarkItem.tsx
-  const [message] = useCachedQuery(queries.getMessageForActivityV2({ messageId: messageId ?? '' }));
+  const [message] = useCachedQuery(
+    queries.getMessageForActivityV2({ messageId: messageId ?? '' }),
+    { enabled: !!messageId },
+  );
 
   // Listen for SHARE_RECORDING bridge events
   useEffect(() => {

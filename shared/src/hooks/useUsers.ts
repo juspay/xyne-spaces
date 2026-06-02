@@ -4,7 +4,6 @@ import { stateMachineActor } from '../machines/stateMachine.js';
 import type { User } from '../machines/stateMachine.js';
 import { useSharedAuthContext } from './context.js';
 import { searchUsers as _searchUsers } from '../utils/search.js';
-import { shallowEqualUsers } from '../utils/comparators.js';
 import { UserStatus } from '../zero/schema.js';
 
 export { type User } from '../machines/stateMachine.js';
@@ -13,17 +12,29 @@ export function searchUsers(users: User[], query: string, limit = 10): User[] {
   return _searchUsers(users, query, limit);
 }
 
+// Shared users-by-id Map, rebuilt only when users array reference changes.
+let _usersMapRef: User[] | null = null;
+let _usersMap = new Map<string, User>();
+
+function getUsersMap(users: User[]): Map<string, User> {
+  if (_usersMapRef !== users) {
+    _usersMapRef = users;
+    _usersMap = new Map(users.map(u => [u.id, u]));
+  }
+  return _usersMap;
+}
+
 export const useUsers = (): User[] => {
-  const users = useSelector(stateMachineActor, state => state.context.users, shallowEqualUsers);
+  const users = useSelector(stateMachineActor, state => state.context.users);
   return useMemo(() => users, [users]);
 };
 
 export const useUser = (userId: string): User | undefined => {
-  const user = useSelector(stateMachineActor, state =>
-    state.context.users.find(u => u.id === userId),
+  // O(1) Map lookup inside selector. Re-renders only when this specific user
+  // object changes (=== check on the returned User object, not the entire array).
+  return useSelector(stateMachineActor, state =>
+    getUsersMap(state.context.users).get(userId),
   );
-
-  return user;
 };
 
 export const useSelf = (): User | undefined => {

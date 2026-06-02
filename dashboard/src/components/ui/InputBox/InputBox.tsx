@@ -244,6 +244,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isFocused, setIsFocused] = useState(false);
     const [isInCodeBlock, setIsInCodeBlock] = useState(false);
     const [content, setContent] = useState('');
+    const contentRef = useRef('');
+    const debouncedUpdateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSending, setIsSending] = useState(false);
     // Voice recording state — driven by VoiceInput component via onStateChange
     const [isVoiceRecording, setIsVoiceRecording] = useState(false);
@@ -548,7 +550,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       content: value || '',
       editable: !isSending,
       onCreate: ({ editor }) => {
-        setContent(editor.getText().trim());
+        const initialText = editor.getText().trim();
+        contentRef.current = initialText;
+        setContent(initialText.length > 0 ? 'has-content' : '');
         updateEmojiSizeClass(editor);
       },
       autofocus: autoFocus ? autoFocus : null,
@@ -562,15 +566,31 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         setIsInCodeBlock(editor.isActive('codeBlock'));
       },
       onUpdate: ({ editor }) => {
-        setContent(editor.getText().trim());
+        const textContent = editor.getText().trim();
+        contentRef.current = textContent;
+        setContent(prev => {
+          const next = textContent.length > 0 ? 'has-content' : '';
+          return prev === next ? prev : next;
+        });
         setIsInCodeBlock(editor.isActive('codeBlock'));
         handleTyping?.();
-        notifyTyping(); // Notify the typing state context
+        notifyTyping();
 
-        const htmlContent = sanitizeHtmlContent(editor.getHTML());
-        onContentChange?.(htmlContent, editor.getText());
+        // Quick emoji size reset: if text clearly has non-emoji chars, switch to
+        // small immediately so the user doesn't see large text while typing.
+        // The full getHTML()-based check runs in the debounce for pure-emoji detection.
+        if (/[a-zA-Z0-9]/.test(textContent)) {
+          setEmojiSizeClass('text-sm');
+        }
 
-        updateEmojiSizeClass(editor);
+        // Debounce heavy work: getHTML(), sanitize, draft save, emoji size.
+        // These don't need to run synchronously on every keystroke.
+        if (debouncedUpdateTimer.current) clearTimeout(debouncedUpdateTimer.current);
+        debouncedUpdateTimer.current = setTimeout(() => {
+          const htmlContent = sanitizeHtmlContent(editor.getHTML());
+          onContentChange?.(htmlContent, editor.getText());
+          updateEmojiSizeClass(editor);
+        }, 300);
       },
       editorProps: {
         attributes: {
@@ -936,6 +956,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const handleSend = useCallback(async () => {
       if (!editor || isSending || sendDisabled) return;
 
+      // Flush pending debounced content update before sending so that
+      // onContentChange consumers (e.g. ComposeDmPanel form state) receive
+      // the latest content before handleSubmit reads from the form.
+      if (debouncedUpdateTimer.current) {
+        clearTimeout(debouncedUpdateTimer.current);
+        debouncedUpdateTimer.current = null;
+        const htmlContent = sanitizeHtmlContent(editor.getHTML());
+        onContentChange?.(htmlContent, editor.getText());
+      }
+
       const plainText = editor.getText().trim();
       const htmlContent = editor.getHTML();
 
@@ -1203,7 +1233,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 ref={voiceInputRef}
                 headless
                 editor={editor}
-                content={content}
                 mentionItems={mentionItems}
                 voiceMentionItems={voiceMentionItems}
                 disabled={disabled}
@@ -1521,7 +1550,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   <VoiceInput
                     ref={voiceInputRef}
                     editor={editor}
-                    content={content}
                     mentionItems={mentionItems}
                     voiceMentionItems={voiceMentionItems}
                     disabled={disabled}
