@@ -25,7 +25,8 @@ export const ALLOWED_MODELS = new Set([
   'form',
   'activity',
   'userActivityEvent',
-  'email'
+  'email',
+  'messageAttachment'
 ])
 
 // Allowed operators for where conditions
