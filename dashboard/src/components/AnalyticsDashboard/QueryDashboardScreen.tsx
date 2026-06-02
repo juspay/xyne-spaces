@@ -181,10 +181,12 @@ export const QueryDashboardScreen: React.FC = () => {
   }, [editingQueryId, currentDashboard]);
 
   useEffect(() => {
+    let stale = false;
     const loadFields = async () => {
       try {
         const url = `/analytics-query/fields?entityType=${selectedEntityType}`;
         const response = await apiInstance.get<{ data: AvailableFields }>(url);
+        if (stale) return;
 
         if (response.data.data) {
           const systemFields = response.data.data.system.map(f => ({
@@ -210,13 +212,19 @@ export const QueryDashboardScreen: React.FC = () => {
           setFields([]);
         }
       } catch {
-        setFields([]);
+        if (!stale) {
+          setFields([]);
+        }
       }
     };
 
     if (showCreateModal) {
       void loadFields();
     }
+
+    return () => {
+      stale = true;
+    };
   }, [selectedEntityType, showCreateModal]);
 
   const resetForm = () => {

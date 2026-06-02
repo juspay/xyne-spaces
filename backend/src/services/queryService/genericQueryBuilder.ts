@@ -11,9 +11,9 @@ import {
   normalizeValueForOperator,
   isValidFormEntityType,
 } from './types';
-import { PrismaFieldType, getFieldMetadata, hasField } from './genericFieldRegistry';
+import { PrismaFieldType, getFieldMetadata, getModelFields, hasField } from './genericFieldRegistry';
 
-const MAX_QUERY_LIMIT = 5000;
+const MAX_QUERY_LIMIT = 10000;
 const QUERY_TIMEOUT = 30000;
 
 /**
@@ -71,16 +71,68 @@ export class GenericQueryBuilder {
    */
   private isDateField(fieldName: string, entityType: string): boolean {
     if (fieldName.startsWith('custom.')) return false;
-    
+
     // Only check metadata for supported entity types
     if (!isSupportedEntityType(entityType)) {
       return fieldName.endsWith('At') || fieldName === 'eta';
     }
-    
+
     // Convert entity type to Prisma model name
     const modelName = getPrismaModelName(entityType);
     const metadata = getFieldMetadata(modelName, fieldName);
     return metadata?.type === 'DateTime' || (metadata?.type === 'Int' && fieldName.endsWith('At'));
+  }
+
+  /**
+   * Check if filters contain any date field conditions
+   */
+  private hasDateFilters(filters: LogicalFilter | undefined, entityType: string): boolean {
+    if (!filters) return false;
+    return this.hasDateFiltersRecursive(filters, entityType);
+  }
+
+  /**
+   * Recursively check if LogicalFilter contains date field conditions
+   */
+  private hasDateFiltersRecursive(filter: LogicalFilter, entityType: string): boolean {
+    return filter.conditions.some(condition => {
+      if (isLogicalFilter(condition)) {
+        return this.hasDateFiltersRecursive(condition, entityType);
+      }
+      return this.isDateField(condition.field, entityType);
+    });
+  }
+
+  /**
+   * Find the best default date field for an entity.
+   * Prefers createdAt, then updatedAt, then any DateTime field.
+   */
+  private getDefaultDateField(modelName: string): string | undefined {
+    const fields = getModelFields(modelName);
+    if (!fields) return undefined;
+
+    const dateFields = Array.from(fields.values())
+      .filter(f => f.type === 'DateTime')
+      .map(f => f.name);
+
+    if (dateFields.includes('createdAt')) return 'createdAt';
+    if (dateFields.includes('updatedAt')) return 'updatedAt';
+    return dateFields[0];
+  }
+
+  /**
+   * Build a default date filter for the last 3 months
+   */
+  private getDefaultDateFilter(field: string): FieldCondition {
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    threeMonthsAgo.setUTCHours(0, 0, 0, 0);
+
+    return {
+      field,
+      operator: 'gte',
+      value: threeMonthsAgo.toISOString(),
+    };
   }
 
   /**
@@ -537,15 +589,11 @@ export class GenericQueryBuilder {
       where,
       select: { id: true },
     });
+
+    let entityIds = entities.map((e: any) => e.id);
     
-    const entityIds = entities.map((e: any) => e.id);
-    
-    // Enforce query limit for custom field aggregations
     if (entityIds.length > MAX_QUERY_LIMIT) {
-      throw new Error(
-        `Query too large: ${entityIds.length} entities exceed maximum limit of ${MAX_QUERY_LIMIT}. ` +
-        `Please add filters to reduce the dataset size.`
-      );
+      entityIds = entityIds.slice(0, MAX_QUERY_LIMIT);
     }
     
     if (entityIds.length === 0) {
@@ -711,7 +759,7 @@ export class GenericQueryBuilder {
       const systemGroupByFields = groupByFields.filter(f => !f.startsWith('custom.'));
       
       // Single query to get all entity data (fixes double-fetch)
-      const entityData = await model.findMany({
+      let entityData = await model.findMany({
         where,
         select: {
           id: true,
@@ -719,12 +767,8 @@ export class GenericQueryBuilder {
         },
       });
 
-      // Enforce query limit for GROUP BY aggregations with custom fields
       if (entityData.length > MAX_QUERY_LIMIT) {
-        throw new Error(
-          `Query too large: ${entityData.length} entities exceed maximum limit of ${MAX_QUERY_LIMIT}. ` +
-          `Please add filters to reduce the dataset size.`
-        );
+        entityData = entityData.slice(0, MAX_QUERY_LIMIT);
       }
 
       if (entityData.length === 0) {
@@ -963,7 +1007,29 @@ export class GenericQueryBuilder {
       where.projectId = query.projectId;
     }
 
-    if (!query.filters) {
+    let effectiveFilters = query.filters;
+    if (!effectiveFilters || !this.hasDateFilters(effectiveFilters, query.entityType)) {
+      if (isSupportedEntityType(query.entityType)) {
+        const modelName = getPrismaModelName(query.entityType);
+        const defaultDateField = this.getDefaultDateField(modelName);
+        if (defaultDateField) {
+          const dateCondition = this.getDefaultDateFilter(defaultDateField);
+          if (effectiveFilters) {
+            effectiveFilters = {
+              operator: 'AND',
+              conditions: [effectiveFilters, dateCondition],
+            };
+          } else {
+            effectiveFilters = {
+              operator: 'AND',
+              conditions: [dateCondition],
+            };
+          }
+        }
+      }
+    }
+
+    if (!effectiveFilters) {
       // No filters, just add entity ID filter if present
       if (entityIds.length > 0) {
         where.id = { in: entityIds };
@@ -971,7 +1037,7 @@ export class GenericQueryBuilder {
       return where;
     }
 
-    const logicalWhere = await this.buildLogicalWhere(query.filters, query.entityType);
+    const logicalWhere = await this.buildLogicalWhere(effectiveFilters, query.entityType);
 
     // If we have entity IDs from custom field filters, we need to AND them with the logicalWhere
     if (entityIds.length > 0) {
