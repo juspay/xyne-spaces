@@ -13,37 +13,10 @@ import type { QueryResultType } from '@rocicorp/zero';
 export { type VisibleChannel } from '../machines/stateMachine.js';
 export type VisibleProject = QueryResultType<typeof queries.projectsByIds>[number];
 
-const shallowEqualVisibleChannels = (a: VisibleChannel[], b: VisibleChannel[]): boolean => {
-  if (a.length !== b.length) return false;
-  return a.every((channel, index) => {
-    const otherChannel = b[index];
-    return (
-      otherChannel &&
-      channel.id === otherChannel.id &&
-      channel.name === otherChannel.name &&
-      channel.scopeType === otherChannel.scopeType &&
-      channel.visibility === otherChannel.visibility &&
-      channel.channelStats?.lastActivityAt === otherChannel.channelStats?.lastActivityAt &&
-      channel.channelStats?.participantCount === otherChannel.channelStats?.participantCount &&
-      channel.channelStats?.addUserPolicy === otherChannel.channelStats?.addUserPolicy &&
-      channel.description === otherChannel.description
-    );
-  });
-};
-
-const shallowEqualChannels = (a: Channel[], b: Channel[]): boolean => {
-  if (a.length !== b.length) return false;
-  return a.every((channel, index) => {
-    const otherChannel = b[index];
-    return (
-      otherChannel &&
-      channel.id === otherChannel.id &&
-      channel.name === otherChannel.name &&
-      channel.scopeType === otherChannel.scopeType &&
-      channel.visibility === otherChannel.visibility
-    );
-  });
-};
+// XState assign() preserves context field references when a field is not modified.
+// Default useSelector === comparison on the selector output is sufficient and O(1).
+// The O(n) shallowEqual comparators were removed — they were comparing 749 channels
+// and 431 visible channels on every state machine event, costing ~1s/10s of CPU.
 
 export function searchChannels(channels: Channel[], query: string, limit = 10): Channel[] {
   return _searchChannels(channels, query, limit);
@@ -53,12 +26,10 @@ export const useAllChannels = (): Channel[] => {
   const channels = useSelector(
     stateMachineActor,
     state => state.context.allChannels,
-    shallowEqualChannels,
   );
   const visibleChannels = useSelector(
     stateMachineActor,
     state => state.context.visibleChannels,
-    shallowEqualVisibleChannels,
   );
   return useMemo(() => {
     const combined = [...channels];
@@ -75,7 +46,6 @@ export const useAllVisibleChannels = (): VisibleChannel[] => {
   const channels = useSelector(
     stateMachineActor,
     state => state.context.visibleChannels,
-    shallowEqualVisibleChannels,
   );
   return useMemo(() => channels, [channels]);
 };
@@ -233,11 +203,22 @@ export const useUserChannelStatuses = (): ChannelUserStatus[] => {
   return useMemo(() => userChannelStatuses, [userChannelStatuses]);
 };
 
+// Shared Map for O(1) channel user status lookups.
+let _cusMapRef: ChannelUserStatus[] | null = null;
+let _cusMap = new Map<string, ChannelUserStatus>();
+
+function getChannelUserStatusMap(statuses: ChannelUserStatus[]): Map<string, ChannelUserStatus> {
+  if (_cusMapRef !== statuses) {
+    _cusMapRef = statuses;
+    _cusMap = new Map(statuses.map(s => [s.channelId, s]));
+  }
+  return _cusMap;
+}
+
 export const useGetChannelUserStatus = (channelId: string): ChannelUserStatus | undefined => {
-  const channelUserStatus = useSelector(stateMachineActor, state =>
-    state.context.userChannelStatuses.find(c => c.channelId === channelId),
+  return useSelector(stateMachineActor, state =>
+    getChannelUserStatusMap(state.context.userChannelStatuses).get(channelId),
   );
-  return channelUserStatus;
 };
 
 export const useGetChannelConversations = (channelId: string): Conversation[] => {

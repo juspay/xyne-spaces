@@ -1745,7 +1745,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <VoiceInput
                     ref={voiceInputRef}
                     editor={editor}
-                    content={inputValue}
                     disabled={isStreaming}
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />

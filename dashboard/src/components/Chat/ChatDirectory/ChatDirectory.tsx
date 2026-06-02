@@ -71,7 +71,10 @@ const ChatDirectory = ({
 }: ChatDirectoryProps): ReactElement | null => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { workspaceId } = useParams<{ workspaceId: string }>();
+  const { workspaceId, channelId: activeChannelId } = useParams<{
+    workspaceId: string;
+    channelId: string;
+  }>();
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
@@ -532,6 +535,7 @@ const ChatDirectory = ({
                     key={channel.id}
                     channel={channel}
                     unreadCount={unreadCounts[channel.id] ?? 0}
+                    isActive={activeChannelId === channel.id}
                   />
                 ))}
               </Accordion.Content>
@@ -665,6 +669,7 @@ const ChatDirectory = ({
                   key={channel.id}
                   channel={channel}
                   unreadCount={unreadCounts[channel.id] ?? 0}
+                  isActive={activeChannelId === channel.id}
                 />
               ))}
             </Accordion.Content>
@@ -726,6 +731,7 @@ const ChatDirectory = ({
                   key={channel.id}
                   channel={channel}
                   unreadCount={unreadCounts[channel.id] ?? 0}
+                  isActive={activeChannelId === channel.id}
                 />
               ))}
             </Accordion.Content>

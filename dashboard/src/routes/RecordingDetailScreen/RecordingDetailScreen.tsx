@@ -93,6 +93,7 @@ export default function RecordingDetailScreen(): ReactElement {
   // Query the message for sharing using Zero - same pattern as ShareRecordingHandler
   const [message] = useCachedQuery(
     queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
+    { enabled: !!recording?.messageId },
   );
 
   useEffect(() => {
