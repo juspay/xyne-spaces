@@ -3,16 +3,6 @@ import { queries } from '../../zero/queries';
 import { formatDuration } from '../../utils/dateUtils';
 import { CallOrigin, CallStatus, InvitationResponse, type User } from '@xyne/shared';
 
-export type RecentCallFilter = 'all' | 'incoming' | 'outgoing' | 'active' | 'missed';
-
-export const FILTER_LABELS: Record<RecentCallFilter, string> = {
-  all: 'All Calls',
-  incoming: 'Incoming Calls',
-  outgoing: 'Outgoing Calls',
-  active: 'Active Calls',
-  missed: 'Missed Calls',
-};
-
 export type Call = QueryResultType<typeof queries.userCallHistory>[number];
 
 export function isGoogleCalendarCall(
@@ -115,19 +105,6 @@ export function getCallTitleFromParticipants(
   });
 
   return firstNames.join(', ');
-}
-
-export function groupByDay(calls: Call[]): { date: Date; calls: Call[] }[] {
-  const map = new Map<string, { date: Date; calls: Call[] }>();
-  for (const call of calls) {
-    if (!call.startsAt) continue;
-    const d = new Date(call.startsAt);
-    d.setHours(0, 0, 0, 0);
-    const key = d.toISOString();
-    if (!map.has(key)) map.set(key, { date: d, calls: [] });
-    map.get(key)!.calls.push(call);
-  }
-  return Array.from(map.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
 }
 
 export function isScheduledCallJoinable(call: Call): boolean {
