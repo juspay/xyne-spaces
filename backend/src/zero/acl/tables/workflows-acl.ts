@@ -7,30 +7,23 @@ import { zql } from '../../queries';
 const AUTOMATION_WORKFLOW_TYPE = 'Automations';
 const AUTOMATIONS_RESOURCE_NAME = 'AUTOMATIONS';
 
-type Tier = 'READ' | 'WRITE' | 'ADMIN';
-
 /**
- * Status values whose write requires `ADMIN` on the AUTOMATIONS resource:
- * approve sets DISABLED, reject sets REJECTED, disable sets DISABLED,
- * archival sets ARCHIVED. Everything else (DRAFT, ACTIVE, PENDING_APPROVAL,
- * REVOKED, AUTO_REVOKED) requires only WRITE.
+ * Status transitions that require `ADMIN` on the AUTOMATIONS resource: approve
+ * sets DISABLED, reject sets REJECTED, disable sets DISABLED, archival sets
+ * ARCHIVED. Everything else — create, edit, delete, and non-admin status moves
+ * — is open to any user in the workspace. Admin is the ONLY scope checked here;
+ * read and write are not ACL-gated.
  */
 const ADMIN_ONLY_STATUSES = new Set<string>(['DISABLED', 'REJECTED', 'ARCHIVED']);
 
-function tierSatisfies(holder: AccessType, required: Tier): boolean {
-  if (holder === AccessType.ADMIN) return true;
-  if (holder === AccessType.WRITE) return required === 'WRITE' || required === 'READ';
-  if (holder === AccessType.READ) return required === 'READ';
-  return false;
-}
-
 export class WOrkflowsAcl extends BaseACL<'workflows'> {
   /**
-   * Check that the calling user holds at least `tier` on the AUTOMATIONS
-   * resource — directly or via a group mapping. Uses Zero's tx (no Prisma)
-   * so it shares the mutator's transactional context.
+   * Check that the calling user holds `ADMIN` on the AUTOMATIONS resource —
+   * directly or via a group mapping. This is the only access tier enforced on
+   * automations; read and write are open. Uses Zero's tx (no Prisma) so it
+   * shares the mutator's transactional context.
    */
-  private async requireAutomationsTier(tx: Transaction<Schema>, tier: Tier): Promise<void> {
+  private async requireAutomationsAdmin(tx: Transaction<Schema>): Promise<void> {
     const resource = await tx.run(zql.resources.where('name', AUTOMATIONS_RESOURCE_NAME).one());
     if (!resource) {
       throw new MutationACLError(
@@ -45,29 +38,23 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
         .where('userId', this.ctx.userID)
         .where('resourceId', resource.id),
     );
-    if (directGrants.some(g => tierSatisfies(g.accessType, tier))) return;
+    if (directGrants.some(g => g.accessType === AccessType.ADMIN)) return;
 
     // Group grants: find user's group memberships, then check group access on
     // this resource. Two-step because Zero zql doesn't compose joins yet.
     const memberships = await tx.run(
       zql.user_group_mappings.where('userId', this.ctx.userID),
     );
-    if (memberships.length === 0) {
-      throw new MutationACLError(
-        `${tier} access on the AUTOMATIONS resource is required`,
-        'workflows',
-      );
-    }
     const groupIds = new Set(memberships.map(m => m.userGroupId));
     const groupGrants = await tx.run(
       zql.resource_access.where('resourceId', resource.id),
     );
     const allowed = groupGrants.some(
-      g => g.groupId != null && groupIds.has(g.groupId) && tierSatisfies(g.accessType, tier),
+      g => g.groupId != null && groupIds.has(g.groupId) && g.accessType === AccessType.ADMIN,
     );
     if (!allowed) {
       throw new MutationACLError(
-        `${tier} access on the AUTOMATIONS resource is required`,
+        'Admin access on the AUTOMATIONS resource is required',
         'workflows',
       );
     }
@@ -87,8 +74,6 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     }
 
     if (args.workflowType === AUTOMATION_WORKFLOW_TYPE) {
-      // Creating an automation proposal is a WRITE-tier action.
-      await this.requireAutomationsTier(tx, 'WRITE');
       return;
     }
 
@@ -148,10 +133,11 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     // Status transitions to DISABLED / REJECTED / ARCHIVED are admin-only
     // (approve / reject / disable / archive). Every other update — name,
     // config, metadata, or non-admin status transitions (DRAFT, ACTIVE,
-    // PENDING_APPROVAL, REVOKED, AUTO_REVOKED) — requires WRITE.
+    // PENDING_APPROVAL, REVOKED, AUTO_REVOKED) — is open to any workspace user.
     const nextStatus = (args as { status?: string }).status;
-    const tier: Tier = nextStatus && ADMIN_ONLY_STATUSES.has(nextStatus) ? 'ADMIN' : 'WRITE';
-    await this.requireAutomationsTier(tx, tier);
+    if (nextStatus && ADMIN_ONLY_STATUSES.has(nextStatus)) {
+      await this.requireAutomationsAdmin(tx);
+    }
   }
 
   async canDelete(
@@ -171,7 +157,12 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     if (existing.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Automation delete failed: not in this workspace', 'workflows');
     }
-    await this.requireAutomationsTier(tx, 'WRITE');
+    if (existing.status !== 'DRAFT') {
+      throw new MutationACLError(
+        'Automation delete failed: only draft automations can be deleted',
+        'workflows',
+      );
+    }
   }
 
   async canUpsert(

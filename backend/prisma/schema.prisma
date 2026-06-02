@@ -669,6 +669,8 @@ enum WorkflowEventType {
   TICKET_COMMENTED
   EMAIL_RECEIVED
   EMAIL_SENT
+  WEBHOOK
+  MESSAGE_RECEIVED
 
   @@schema("public")
 }
@@ -751,6 +753,30 @@ model WorkflowExecutionState {
 
   @@index([workflowExecutionId])
   @@map("workflow_execution_states")
+  @@schema("workflow")
+}
+
+/// Discriminates what an encrypted WorkflowMapping secret belongs to. Add new
+/// values here as more entities need encrypted secrets stored centrally.
+enum WorkflowMappingEntityType {
+  AUTOMATION_WEBHOOK
+
+  @@schema("workflow")
+}
+
+/// Stores encrypted secrets for workflow-adjacent entities (e.g. external-event
+/// webhook triggers). entitySecret is AES-256-CBC encrypted with ENCRYPTION_KEY.
+/// For automation webhook triggers: entityType=AUTOMATION_WEBHOOK,
+/// entityId=automationSeriesId (stable across versions of the same automation).
+model WorkflowMapping {
+  id           String                    @id @default(cuid())
+  entityType   WorkflowMappingEntityType
+  entityId     String
+  entitySecret String
+
+  @@unique([entityType, entityId])
+  @@index([entityType])
+  @@map("workflow_mappings")
   @@schema("workflow")
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Trash2, Variable, X } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { Button } from '../../../ui/Button/Button';
 import Input from '../../../ui/Input/Input';
@@ -13,16 +13,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../ui/Select/Select';
-import { Popover } from '../../../ui/Popover/Popover';
 import { MultiSelect } from '../../../ui/MultiSelect/MultiSelect';
 import type { JsonSchema, ValidationIssue } from '../../Automation.types';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
-import { VariablePicker } from '../VariablePicker/VariablePicker';
-import {
-  findSoleMatchingVariable,
-  formatReferenceLabel,
-} from '../VariablePicker/VariablePicker.utils';
+import { findSoleMatchingVariable } from '../VariablePicker/VariablePicker.utils';
 import type { SchemaFormProps } from './SchemaForm.types';
+import { ReferenceChip, UseVariableButton } from './VariableFieldParts';
 import { EntityField, MultiEntityField } from './EntityField';
 import { AutomationRichTextField } from './AutomationRichTextField';
 import { ChipArrayField } from './ChipArrayField';
@@ -662,99 +658,6 @@ function RawInput({
   );
 }
 
-function ReferenceChip({
-  value,
-  sources,
-  onClear,
-}: {
-  value: string;
-  sources: VariablePickerSource[];
-  onClear: () => void;
-}): React.ReactElement {
-  const label = formatReferenceLabel(value, sources);
-  return (
-    <div className='inline-flex items-center gap-2 self-start rounded-md border border-border bg-accent/30 px-2 py-1 text-xs text-foreground'>
-      <Variable className='size-3 text-muted-foreground' />
-      <span className='font-medium'>{label}</span>
-      <button
-        type='button'
-        onClick={onClear}
-        data-track-category='automation-builder'
-        data-track-name='schema-form-detach-variable'
-        className='ml-1 rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60'
-        aria-label='Detach variable'
-      >
-        <X className='size-3' />
-      </button>
-    </div>
-  );
-}
-
-function UseVariableButton({
-  sources,
-  onPick,
-  targetEntityKind,
-  targetLeafType,
-}: {
-  sources: VariablePickerSource[];
-  onPick: (reference: string) => void;
-  targetEntityKind?: string | null;
-  targetLeafType?: string | null;
-}): React.ReactElement {
-  const [open, setOpen] = useState(false);
-
-  const soleMatch = useMemo(
-    () => findSoleMatchingVariable(sources, targetEntityKind ?? null),
-    [sources, targetEntityKind],
-  );
-
-  const triggerButton = (
-    <button
-      type='button'
-      aria-label='Use variable'
-      data-track-category='automation-builder'
-      data-track-name='use-variable-open'
-      onClick={
-        soleMatch
-          ? (e): void => {
-              e.preventDefault();
-              e.stopPropagation();
-              onPick(soleMatch.reference);
-            }
-          : undefined
-      }
-      className={cn(
-        'mt-1 flex h-8 w-8 items-center justify-center rounded-md border border-border',
-        'text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors',
-      )}
-    >
-      <Variable className='size-4' />
-    </button>
-  );
-
-  if (soleMatch) return triggerButton;
-
-  return (
-    <Popover
-      open={open}
-      onOpenChange={setOpen}
-      align='end'
-      side='bottom'
-      sideOffset={4}
-      className='rounded-xl p-0 overflow-hidden'
-      trigger={triggerButton}
-    >
-      <VariablePicker
-        sources={sources}
-        onSelect={entry => onPick(entry.reference)}
-        onClose={() => setOpen(false)}
-        targetEntityKind={targetEntityKind ?? null}
-        targetLeafType={targetLeafType ?? null}
-      />
-    </Popover>
-  );
-}
-
 interface ArrayFieldProps {
   schema: JsonSchema;
   value: unknown[];
@@ -1015,5 +918,6 @@ function entityKindLabel(kind: EntityKind): string {
   if (kind === EntityKind.BOARD) return 'board';
   if (kind === EntityKind.STAGE) return 'stage';
   if (kind === EntityKind.SENDER) return 'sender';
+  if (kind === EntityKind.CONVERSATION) return 'conversation';
   return 'project';
 }

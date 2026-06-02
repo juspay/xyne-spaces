@@ -6,6 +6,8 @@ import {
   TICKET_UPDATED_EVENT,
   type TicketChanges,
 } from '../triggers/ticket-updated.trigger';
+import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
+import type { MessageType } from '@prisma/client';
 
 export interface TicketCreatedEventPayload {
   ticketId: string;
@@ -29,11 +31,20 @@ export interface EmailEventPayload {
   emailId: string;
 }
 
+export interface MessageReceivedEventPayload {
+  messageId: string;
+  conversationId: string;
+  channelId: string;
+  authorId: string;
+  msgType: MessageType;
+}
+
 export type AutomationEvent =
   | { type: typeof EMAIL_RECEIVED_EVENT; payload: EmailEventPayload }
   | { type: typeof EMAIL_SENT_EVENT; payload: EmailEventPayload }
   | { type: typeof TICKET_COMMENTED_EVENT; payload: TicketCommentedEventPayload }
   | { type: typeof TICKET_CREATED_EVENT; payload: TicketCreatedEventPayload }
-  | { type: typeof TICKET_UPDATED_EVENT; payload: TicketUpdatedEventPayload };
+  | { type: typeof TICKET_UPDATED_EVENT; payload: TicketUpdatedEventPayload }
+  | { type: typeof MESSAGE_RECEIVED_EVENT; payload: MessageReceivedEventPayload };
 
 export type AutomationEventType = AutomationEvent['type'];

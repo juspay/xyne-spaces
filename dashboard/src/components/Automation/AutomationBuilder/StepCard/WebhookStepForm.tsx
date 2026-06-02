@@ -1,14 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import {
-  ChevronDown,
-  ChevronRight,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Plus,
-  Trash2,
-  Variable,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, Plus, Trash2 } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import Input from '../../../ui/Input/Input';
 import Textarea from '../../../ui/Textarea/Textarea';
@@ -20,10 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../ui/Select/Select';
-import { Popover } from '../../../ui/Popover/Popover';
-import { VariablePicker } from '../VariablePicker/VariablePicker';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
+import { UseVariableButton } from '../SchemaForm/VariableFieldParts';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 type HttpMethod = (typeof HTTP_METHODS)[number];
@@ -677,49 +667,5 @@ function HeadersEditor({
         Add header
       </Button>
     </div>
-  );
-}
-
-function UseVariableButton({
-  sources,
-  onPick,
-}: {
-  sources: VariablePickerSource[];
-  onPick: (reference: string) => void;
-}): React.ReactElement {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover
-      open={open}
-      onOpenChange={setOpen}
-      align='end'
-      side='bottom'
-      sideOffset={4}
-      className='rounded-xl p-0 overflow-hidden'
-      trigger={
-        <button
-          type='button'
-          aria-label='Use variable'
-          aria-haspopup='dialog'
-          aria-expanded={open}
-          className={cn(
-            'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-border',
-            'text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
-          )}
-        >
-          <Variable className='size-4' aria-hidden='true' />
-        </button>
-      }
-    >
-      <VariablePicker
-        sources={sources}
-        onSelect={entry => {
-          onPick(entry.reference);
-          setOpen(false);
-        }}
-        onClose={() => setOpen(false)}
-      />
-    </Popover>
   );
 }

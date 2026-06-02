@@ -15,14 +15,6 @@ function hasAccess(
   });
 }
 
-export function useCanReadAutomations(): boolean {
-  return hasAccess(usePermissions(), 'READ');
-}
-
-export function useCanWriteAutomations(): boolean {
-  return hasAccess(usePermissions(), 'WRITE');
-}
-
 export function useIsAutomationsAdmin(): boolean {
   return hasAccess(usePermissions(), 'ADMIN');
 }

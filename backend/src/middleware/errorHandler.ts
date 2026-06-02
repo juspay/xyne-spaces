@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '@/utils/logger';
+import { redactSensitiveUrl } from '@/utils/redact';
 import { ApiResponse } from '@/types/express';
 
 export class AppError extends Error {
@@ -41,7 +42,7 @@ export const errorHandler = (
     stack: appError.stack,
     originalError: err instanceof AppError ? undefined : err.message,
     originalStack: err instanceof AppError ? undefined : err.stack,
-    url: req.url,
+    url: redactSensitiveUrl(req.url),
     method: req.method,
     ip: req.ip,
     userAgent: req.get('User-Agent'),
@@ -59,7 +60,7 @@ export const errorHandler = (
 export const notFoundHandler = (req: Request, res: Response): void => {
   const response: ApiResponse = {
     success: false,
-    error: `Route ${req.originalUrl} not found`,
+    error: `Route ${redactSensitiveUrl(req.originalUrl)} not found`,
     timestamp: new Date().toISOString(),
   };
 

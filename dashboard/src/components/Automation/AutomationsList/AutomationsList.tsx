@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
+  Archive,
   Check,
   History,
   Loader2,
@@ -26,7 +27,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useSelf, useUser } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
-import { useCanWriteAutomations, useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
+import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import type { Automation } from '../Automation.types';
@@ -67,7 +68,6 @@ export function AutomationsList({
   const navigate = useNavigate();
   const isAutomationsAdmin = useIsAutomationsAdmin();
   const { workspaceId } = useAuthContextValues();
-  const canWriteAutomations = useCanWriteAutomations();
   const isArchivedTab = category === 'archived';
 
   const triggerCatalogQuery = useQuery({
@@ -134,13 +134,23 @@ export function AutomationsList({
       toast.error(err instanceof Error ? err.message : 'Disable failed');
     },
   });
+  const archiveMutation = useMutation({
+    mutationFn: (id: string): Promise<void> => {
+      zero.mutate(mutators.automations.archive({ id, timestamp: Date.now() }));
+      toast.success('Automation archived');
+      return Promise.resolve();
+    },
+    onError: err => {
+      toast.error(err instanceof Error ? err.message : 'Archive failed');
+    },
+  });
 
   const handleEdit = (item: Automation): void => {
-    if (item.status === AutomationStatusValues.ACTIVE) {
-      void navigate(`/automations/new?fork=${item.id}`);
+    if (item.status === AutomationStatusValues.DRAFT) {
+      onOpen(item);
       return;
     }
-    onOpen(item);
+    void navigate(`/automations/new?fork=${item.id}`);
   };
   const liveItems = useMemo(() => {
     const meId = me?.id ?? null;
@@ -203,12 +213,10 @@ export function AutomationsList({
               Approvals
             </Button>
           </Link>
-          {canWriteAutomations ? (
-            <Button onClick={onCreate} className='font-semibold'>
-              <Plus className='size-4' />
-              New automation
-            </Button>
-          ) : null}
+          <Button onClick={onCreate} className='font-semibold'>
+            <Plus className='size-4' />
+            New automation
+          </Button>
         </div>
         <CategoryTabs category={category} counts={counts} onChange={setCategory} />
       </div>
@@ -230,14 +238,18 @@ export function AutomationsList({
                   key={item.id}
                   automation={item}
                   summary={summarizeAutomation(item, triggerCatalog, stepCatalog)}
-                  canWrite={canWriteAutomations}
                   onOpen={() => onOpen(item)}
                   onEdit={() => handleEdit(item)}
                   onShowRuns={onShowRuns ? () => onShowRuns(item) : undefined}
                   onDelete={() => setPendingDelete(item)}
+                  onArchive={
+                    isAutomationsAdmin && isLiveStatus(item.status)
+                      ? () => archiveMutation.mutate(item.id)
+                      : undefined
+                  }
                   onToggleActive={
                     isLiveStatus(item.status) &&
-                    ((item.status === AutomationStatusValues.DISABLED && canWriteAutomations) ||
+                    (item.status === AutomationStatusValues.DISABLED ||
                       (item.status === AutomationStatusValues.ACTIVE && isAutomationsAdmin))
                       ? next =>
                           next ? activateMutation.mutate(item.id) : disableMutation.mutate(item.id)
@@ -388,11 +400,11 @@ function EmptyState({
 interface AutomationRowProps {
   automation: Automation;
   summary: string;
-  canWrite: boolean;
   onOpen: () => void;
   onEdit: () => void;
   onShowRuns?: (() => void) | undefined;
   onDelete: () => void;
+  onArchive?: (() => void) | undefined;
   onToggleActive?: ((next: boolean) => void) | undefined;
   toggleLoading: boolean;
 }
@@ -400,11 +412,11 @@ interface AutomationRowProps {
 function AutomationRow({
   automation,
   summary,
-  canWrite,
   onOpen,
   onEdit,
   onShowRuns,
   onDelete,
+  onArchive,
   onToggleActive,
   toggleLoading,
 }: AutomationRowProps): React.ReactElement {
@@ -532,18 +544,19 @@ function AutomationRow({
                 </button>
               }
             >
-              {canWrite &&
-                (automation.status === AutomationStatusValues.ACTIVE ||
-                  automation.status === AutomationStatusValues.DRAFT) && (
-                  <RowMenuButton
-                    label='Edit'
-                    icon={<Pencil className='size-4' />}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onEdit();
-                    }}
-                  />
-                )}
+              {/* Editable from any status except one that's actively under
+                  review — matches the builder's canEdit. Non-draft rows fork a
+                  new proposal. */}
+              {automation.status !== AutomationStatusValues.PENDING_APPROVAL && (
+                <RowMenuButton
+                  label='Edit'
+                  icon={<Pencil className='size-4' />}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onEdit();
+                  }}
+                />
+              )}
               {onShowRuns && (
                 <RowMenuButton
                   label='Run history'
@@ -554,10 +567,21 @@ function AutomationRow({
                   }}
                 />
               )}
-              {/* Delete is permitted only for DRAFT proposals and only for
-                  users with WRITE access — anything past DRAFT (PENDING, LIVE,
-                  ARCHIVED, terminal) is kept as audit history. */}
-              {canWrite && automation.status === AutomationStatusValues.DRAFT ? (
+              {/* Admin-only: permanently retire a live automation. */}
+              {onArchive && (
+                <RowMenuButton
+                  label='Archive'
+                  icon={<Archive className='size-4' />}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onArchive();
+                  }}
+                />
+              )}
+              {/* Delete is permitted only for DRAFT proposals — anything past
+                  DRAFT (PENDING, LIVE, ARCHIVED, terminal) is kept as audit
+                  history. */}
+              {automation.status === AutomationStatusValues.DRAFT ? (
                 <>
                   <div role='separator' className='my-1 h-px bg-border' />
                   <RowMenuButton

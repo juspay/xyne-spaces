@@ -254,14 +254,9 @@ class ApprovalService {
     const { automationService } = await import('./automation.service');
     if (nextStatus === AutomationStatus.ACTIVE) {
       const { automation } = await automationService.activate(liveId);
-      let archivedCount = 0;
-      if (row.automationSeriesId) {
-        const archived = await repositories.workflows.archivePriorLiveInLineage(
-          row.automationSeriesId,
-          liveId,
-        );
-        archivedCount = archived.length;
-      }
+      const rootId = row.automationSeriesId ?? row.id;
+      const archived = await repositories.workflows.archivePriorLiveInLineage(rootId, liveId);
+      const archivedCount = archived.length;
       logger.info(
         `[approval] toggleLive ACTIVE id=${liveId} actorUserId=${actorUserId} archivedPrior=${archivedCount}`,
       );

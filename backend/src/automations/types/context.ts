@@ -14,6 +14,10 @@ import {
 } from '../triggers/ticket-commented.trigger';
 import { TICKET_CREATED_EVENT } from '../triggers/ticket-created.trigger';
 import { TICKET_UPDATED_EVENT } from '../triggers/ticket-updated.trigger';
+import {
+  MESSAGE_RECEIVED_EVENT,
+  MessageReceivedOutputSchema,
+} from '../triggers/message-received.trigger';
 import type { TicketContext } from '../triggers/ticket-context';
 import type { TicketChanges } from '../triggers/ticket-updated.trigger';
 
@@ -38,6 +42,10 @@ export type TriggerContext =
     })
   | (z.infer<typeof EmailSentOutputSchema> & {
       type: typeof EMAIL_SENT_EVENT;
+      data: Record<string, unknown>;
+    })
+  | (z.infer<typeof MessageReceivedOutputSchema> & {
+      type: typeof MESSAGE_RECEIVED_EVENT;
       data: Record<string, unknown>;
     });
 

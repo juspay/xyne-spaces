@@ -39,6 +39,7 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 import { replaceCustomEmojiShortcodesWithImg } from '@/utils/customEmojiUtils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { emitTicketCommented } from '@/automations/triggers/ticket-commented.trigger';
+import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
 
 interface UserInfo {
   id: string;
@@ -476,6 +477,17 @@ export class ConversationService {
 
     // Also broadcast via Redis for horizontal scaling (using session method for now)
     // await redisService.broadcastMessageToSession(channelId, conversationMessage);
+
+    // Fan out the automation `MESSAGE_RECEIVED` event for the first message in a
+    // new channel conversation. Which message kinds fire is a user-configured
+    // trigger condition; loops are prevented by the run chain. Fire-and-forget.
+    void emitMessageReceived({
+      messageId: message.messageId,
+      conversationId: conversation.conversationId,
+      channelId,
+      msgType: message.msgType,
+      userId,
+    });
 
     return {
       conversation,

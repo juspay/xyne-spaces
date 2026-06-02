@@ -16,6 +16,9 @@ import type { JsonSchema } from '../../Automation.types';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import { WebhookStepForm } from './WebhookStepForm';
 import { RunAgentStepForm } from './RunAgentStepForm';
+import { SendMessageStepForm } from './SendMessageStepForm';
+import { CreateEmailDraftStepForm } from './CreateEmailDraftStepForm';
+import { ReplyOnMessageStepForm } from './ReplyOnMessageStepForm';
 import type { StepCardProps } from './StepCard.types';
 
 export function StepCard({
@@ -189,6 +192,30 @@ export function StepCard({
                   pathPrefix={pathPrefix}
                   variableSources={variableSources}
                   readOnly={readOnly}
+                />
+              ) : step.type === 'SEND_MESSAGE' ? (
+                <SendMessageStepForm
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
+              ) : step.type === 'CREATE_EMAIL_DRAFT' ? (
+                <CreateEmailDraftStepForm
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
+              ) : step.type === 'REPLY_ON_MESSAGE' ? (
+                <ReplyOnMessageStepForm
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
                 />
               ) : (
                 <SchemaForm

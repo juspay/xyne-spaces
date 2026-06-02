@@ -6,6 +6,7 @@ import type { ValidationResult } from '../types/validation';
 import { ConfigValidator } from '../engine/config-validator';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
+import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   parseAutomationConfig,
@@ -77,9 +78,11 @@ class AutomationService {
       `[AUTOMATION-SERVICE] activate id=${id} trigger=${config.trigger.type} steps=${config.steps.length}`,
     );
 
+    const headersEncrypted = encryptWebhookStepHeaders(config.steps);
     const updated = await repositories.workflows.update(id, {
       status: AutomationStatus.ACTIVE,
       eventType: triggerTypeToEventType(config.trigger.type),
+      ...(headersEncrypted ? { context: JSON.stringify(config) } : {}),
       updatedAt: new Date(),
     });
 

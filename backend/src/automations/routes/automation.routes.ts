@@ -5,8 +5,14 @@ import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
 import { ConditionOperator } from '../types/operators';
 import { automationService } from '../services/automation.service';
+import {
+  issueWebhookSecret,
+  webhookSecretExists,
+} from '../services/webhook-secret.service';
+import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
 import type { AutomationConfig } from '../types/automation-config';
 import { clawClient } from '../services/claw-client';
+import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import {
@@ -74,6 +80,7 @@ router.get('/schema/triggers/:type', (req: Request, res: Response) => {
       icon: impl.icon,
       configSchema: impl.decorateConfigSchema(rawConfig),
       outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output' }),
+      ...(impl.type === WEBHOOK_EVENT ? { webhookUrl: webhookEndpoint() } : {}),
     },
     timestamp: new Date().toISOString(),
   });
@@ -223,5 +230,60 @@ function safeParseJson(s: string): unknown {
     return s;
   }
 }
+
+function webhookEndpoint(): string {
+  return `${config.backendUrl.replace(/\/$/, '')}/api/automation-webhooks`;
+}
+
+async function resolveWebhookAutomation(
+  automationId: string,
+): Promise<{ seriesId: string } | { error: { status: number; message: string } }> {
+  const workflow = await db.workflow.findUnique({ where: { id: automationId } });
+  if (!workflow || workflow.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    return { error: { status: 404, message: 'Automation not found' } };
+  }
+  return { seriesId: workflow.automationSeriesId ?? workflow.id };
+}
+
+// Read-only: the token is shown only once at creation, so this returns just
+// whether a secret has been issued (never the token itself).
+router.get(
+  '/:automationId/webhook',
+  async (req: Request<{ automationId: string }>, res: Response) => {
+    const resolved = await resolveWebhookAutomation(req.params.automationId);
+    if ('error' in resolved) {
+      res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
+      return;
+    }
+    res.json({
+      success: true,
+      data: {
+        url: `${webhookEndpoint()}/${resolved.seriesId}`,
+        issued: await webhookSecretExists(resolved.seriesId),
+      },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
+router.post(
+  '/:automationId/webhook',
+  async (req: Request<{ automationId: string }>, res: Response) => {
+    const resolved = await resolveWebhookAutomation(req.params.automationId);
+    if ('error' in resolved) {
+      res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
+      return;
+    }
+    const secret = await issueWebhookSecret(resolved.seriesId);
+    res.json({
+      success: true,
+      data: {
+        url: secret ? `${webhookEndpoint()}/${resolved.seriesId}/${secret}` : null,
+        alreadyIssued: secret === null,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
 
 export default router;

@@ -10,6 +10,8 @@ export abstract class BaseTrigger<TConfig extends z.ZodSchema> {
   abstract readonly outputSchema: z.ZodSchema;
   abstract readonly category: TriggerCategory;
   readonly icon?: string;
+  readonly requiresScopeFilter?: boolean;
+  readonly scopeFilterFields?: readonly string[];
 
   validate(config: unknown): z.infer<TConfig> {
     return this.configSchema.parse(config);

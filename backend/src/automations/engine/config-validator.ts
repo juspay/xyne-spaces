@@ -146,14 +146,22 @@ export class ConfigValidator {
           }
         }
         if (
-          triggerHasFilterFields(triggerImpl.configSchema) &&
-          !hasAnyFilter(config.trigger.config)
+          triggerImpl.requiresScopeFilter !== false &&
+          triggerHasFilterFields(triggerImpl.configSchema)
         ) {
-          issues.push({
-            path: 'trigger.config',
-            code: ValidationIssueCode.SHAPE,
-            message: 'Add at least one filter so the automation does not fire on every event.',
-          });
+          const scopeFields = triggerImpl.scopeFilterFields;
+          const scoped = scopeFields
+            ? hasAnyFilterIn(config.trigger.config, scopeFields)
+            : hasAnyFilter(config.trigger.config);
+          if (!scoped) {
+            issues.push({
+              path: 'trigger.config',
+              code: ValidationIssueCode.SHAPE,
+              message: scopeFields
+                ? `Scope this automation by at least one of: ${scopeFields.join(', ')} — so it does not fire on every event.`
+                : 'Add at least one filter so the automation does not fire on every event.',
+            });
+          }
         }
         outputSchemas.set('trigger', triggerImpl.outputSchema);
       }
@@ -358,6 +366,23 @@ function triggerHasFilterFields(schema: z.ZodTypeAny): boolean {
     return Object.keys((schema as z.ZodObject<z.ZodRawShape>).shape).length > 0;
   }
   return true;
+}
+
+function isMeaningfulFilterValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'boolean') return false;
+  if (typeof value === 'string') return value.length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'number') return true;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return false;
+}
+
+/** True if at least one of the named scope fields holds a meaningful value. */
+function hasAnyFilterIn(config: unknown, fields: readonly string[]): boolean {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return false;
+  const record = config as Record<string, unknown>;
+  return fields.some(field => isMeaningfulFilterValue(record[field]));
 }
 
 function hasAnyFilter(config: unknown): boolean {

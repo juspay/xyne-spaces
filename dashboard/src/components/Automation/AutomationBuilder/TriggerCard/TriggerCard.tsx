@@ -14,6 +14,7 @@ import { cn } from '../../../../utils/classNames';
 import { Popover } from '../../../ui/Popover/Popover';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import { EmailReceivedFilterForm } from './EmailReceivedFilterForm';
+import { WebhookTriggerForm } from './WebhookTriggerForm';
 import type { TriggerCardProps } from './TriggerCard.types';
 import type { TriggerCatalogItem } from '../../Automation.types';
 
@@ -114,6 +115,13 @@ export function TriggerCard({
         ) : trigger.type === 'EMAIL_RECEIVED' ? (
           <EmailReceivedFilterForm
             schema={schema.configSchema}
+            value={trigger.config}
+            onChange={onConfigChange}
+            issues={issues ?? null}
+            pathPrefix='trigger.config.'
+          />
+        ) : trigger.type === 'WEBHOOK' ? (
+          <WebhookTriggerForm
             value={trigger.config}
             onChange={onConfigChange}
             issues={issues ?? null}

@@ -11543,6 +11543,32 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
+
+      // Admin-only: permanently retire a live automation. ARCHIVED is gated to
+      // admins by the workflows ACL, and the event-router only matches ACTIVE
+      // rows, so archiving immediately stops it from firing.
+      archive: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          logger.info(`[Mutator] automations.archive START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            logger.warn(`[Mutator] automations.archive REJECT id=${id} reason=not-found`);
+            throw new Error(`Automation "${id}" not found`);
+          }
+          if (existing.status !== 'ACTIVE' && existing.status !== 'DISABLED') {
+            throw new Error(
+              `Automation "${id}" is ${existing.status}; only LIVE rows can be archived.`,
+            );
+          }
+          await tx.mutate.workflows.update({
+            id,
+            status: 'ARCHIVED',
+            updatedAt: timestamp,
+          });
+          logger.info(`[Mutator] automations.archive OPTIMISTIC id=${id} status=ARCHIVED`);
+        },
+      ),
     },
   });
 }

@@ -5,18 +5,10 @@ import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { PauseStep } from '../engine/pause-step';
 import { automationContextStorage } from '../engine/automation-context-storage';
+import { OutputSchemaSchema, assertMatchesSchema } from '../engine/declared-schema';
 import { clawClient } from '../services/claw-client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-
-const OutputFieldTypeSchema = z.enum(['string', 'number', 'boolean', 'object', 'array']);
-export type OutputFieldType = z.infer<typeof OutputFieldTypeSchema>;
-
-const OutputSchemaNodeSchema: z.ZodType<unknown> = z.lazy(() =>
-  z.union([OutputFieldTypeSchema, z.record(z.string().min(1), OutputSchemaNodeSchema)]),
-);
-const OutputSchemaSchema = z.record(z.string().min(1), OutputSchemaNodeSchema);
-export type RunAgentOutputSchema = z.infer<typeof OutputSchemaSchema>;
 
 const DEFAULT_MAX_RETRIES = 3;
 
@@ -252,25 +244,3 @@ function stripJsonFence(text: string): string {
   return fence?.[1]?.trim() ?? text;
 }
 
-function assertMatchesSchema(
-  actual: Record<string, unknown>,
-  declared: Record<string, unknown>,
-  path = '',
-): void {
-  for (const [key, expected] of Object.entries(declared)) {
-    const here = path ? `${path}.${key}` : key;
-    if (!(key in actual)) throw new Error(`required key "${here}" missing`);
-    const v = actual[key];
-    const actualType = Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v;
-    if (typeof expected === 'string') {
-      if (actualType !== expected) {
-        throw new Error(`key "${here}" expected ${expected}, got ${actualType}`);
-      }
-    } else if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
-      if (actualType !== 'object') {
-        throw new Error(`key "${here}" expected object, got ${actualType}`);
-      }
-      assertMatchesSchema(v as Record<string, unknown>, expected as Record<string, unknown>, here);
-    }
-  }
-}
