@@ -1,4 +1,5 @@
 import React, { ReactElement } from 'react';
+import { formatDistanceToNow } from 'date-fns';
 import { TicketStatusIcon } from '../../../assets/icons';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
@@ -8,9 +9,27 @@ import { MessageWithOptionalNudgeCounts } from '../../ui/MessageBubble/MessageBu
 
 interface TicketActivityMessageProps {
   message: MessageWithOptionalNudgeCounts;
+  isPrevActivity?: boolean;
+  isNextActivity?: boolean;
 }
 
-export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ message }) => {
+const formatTimestamp = (timestamp: number | string | Date): string => {
+  try {
+    const date =
+      typeof timestamp === 'number' || typeof timestamp === 'string'
+        ? new Date(timestamp)
+        : timestamp;
+    return formatDistanceToNow(date, { addSuffix: true });
+  } catch {
+    return '';
+  }
+};
+
+export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({
+  message,
+  isPrevActivity = false,
+  isNextActivity = false,
+}) => {
   const metadata = message?.metadata as Record<string, unknown> | null;
   const getIcon = (): ReactElement => {
     switch (metadata?.['activityType']) {
@@ -35,11 +54,25 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ me
   };
 
   return (
-    <div className='flex justify-start min-[500px]:px-4 px-2 my-3' data-testid='ticket-activity'>
-      <div className='flex items-center gap-2 text-sm text-muted-foreground px-10 py-0.5'>
-        {getIcon()}
-        <div>
-          <RenderMessageWithHTML message={message.content} />
+    <div
+      className={`flex justify-start ${isPrevActivity ? '' : 'mt-2'}`}
+      data-testid='ticket-activity'
+    >
+      <div className='flex items-start gap-2 px-4 w-full text-sm text-muted-foreground'>
+        {/* Icon + connecting line, aligned within the avatar column */}
+        <div className='w-8 flex-shrink-0 flex flex-col items-center self-stretch mt-0.5'>
+          {getIcon()}
+          {isNextActivity && <span className='w-0 flex-1 my-1 border-[0.8px] border-border' />}
+        </div>
+
+        {/* Content with inline timestamp */}
+        <div className='flex-1 min-w-0 -mt-1 pb-3 flex items-baseline flex-wrap gap-x-2'>
+          <div className='[&_.jp-message-html]:text-muted-foreground [&_.jp-message-html]:text-[13px]'>
+            <RenderMessageWithHTML message={message.content} isSystemMessage />
+          </div>
+          <span className='text-xs text-muted-foreground whitespace-nowrap flex-shrink-0'>
+            {formatTimestamp(message.createdAt)}
+          </span>
         </div>
       </div>
     </div>

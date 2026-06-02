@@ -383,6 +383,23 @@ const ThreadList = ({
                 previousMessage?.msgType === MessageType.SYSTEM &&
                 prevMsgMetadataasRecord?.['isTicketActivity'] === true;
 
+              const isActivityItem = (
+                neighbor: ThreadListItemWithSeparator | undefined,
+              ): boolean => {
+                if (!neighbor || neighbor.type !== 'message') return false;
+                const neighborMetadata = neighbor.data.metadata as Record<string, unknown> | null;
+                return (
+                  neighbor.data.msgType === MessageType.SYSTEM &&
+                  neighborMetadata?.['isTicketActivity'] === true
+                );
+              };
+              const isPrevRenderedItemAnActivity = isActivityItem(
+                messagesWithSeparators[index - 1],
+              );
+              const isNextRenderedItemAnActivity = isActivityItem(
+                messagesWithSeparators[index + 1],
+              );
+
               const showAvatar =
                 messageIndex < 2 ||
                 !threadMessage ||
@@ -409,6 +426,8 @@ const ThreadList = ({
                       channelScopeType={channelScopeType}
                       allThreadAttachments={allThreadAttachments}
                       workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
+                      isPrevActivity={isPrevRenderedItemAnActivity}
+                      isNextActivity={isNextRenderedItemAnActivity}
                       {...(disableAskAI !== undefined && { disableAskAI })}
                       {...(conversation && { conversation })}
                     />
