@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, loggerContext, LogContext } from '@/utils/logger';
+import { redactSensitiveUrl } from '@/utils/redact';
 import { CustomRequest } from '@/types/express';
 
 
@@ -24,7 +25,7 @@ export const requestLogger = (req: CustomRequest, res: Response, next: NextFunct
     logger.info('Request start', {
       type: 'REQUEST_START',
       method: req.method,
-      url: req.url,
+      url: redactSensitiveUrl(req.url),
       ip: req.ip,
       userAgent: req.get('User-Agent'),
     });
@@ -34,7 +35,7 @@ export const requestLogger = (req: CustomRequest, res: Response, next: NextFunct
       logger.info('Request end', {
         type: 'REQUEST_END',
         method: req.method,
-        url: req.url,
+        url: redactSensitiveUrl(req.url),
         statusCode: res.statusCode,
         duration: `${duration}ms`,
         contentLength: res.get('Content-Length') || 0,

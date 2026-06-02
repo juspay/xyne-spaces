@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
+import { decryptHeaderValue, isSensitiveHeader } from '../engine/webhook-step-encryption';
 import { logger } from '@/utils/logger';
 
 const HttpMethod = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -29,6 +30,12 @@ const TriggerWebhookConfigSchema = z.object({
     .record(z.string())
     .optional()
     .describe('Custom request headers as key → value pairs. Values support placeholders.'),
+  secretHeaders: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Header names whose values are secrets — stored encrypted and redacted in the UI. Common auth headers are sensitive by default.',
+    ),
   encoding: z.enum(['JSON', 'FORM', 'RAW']).default('JSON').describe('Request body encoding.'),
   body: variableRef(z.string())
     .optional()
@@ -145,7 +152,10 @@ export class TriggerWebhookStep extends BaseActionStep<
     headers: Record<string, string> | undefined,
     encoding: 'JSON' | 'FORM' | 'RAW',
   ): Record<string, string> {
-    const out: Record<string, string> = { ...(headers ?? {}) };
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers ?? {})) {
+      out[k] = decryptHeaderValue(v);
+    }
     const hasContentType = Object.keys(out).some(k => k.toLowerCase() === 'content-type');
     if (!hasContentType) {
       if (encoding === 'JSON') out['Content-Type'] = 'application/json';
@@ -176,9 +186,10 @@ export class TriggerWebhookStep extends BaseActionStep<
     if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
       return input;
     }
+    const marked = input['secretHeaders'] as string[] | undefined;
     const redacted: Record<string, string> = {};
-    for (const k of Object.keys(headers as Record<string, unknown>)) {
-      redacted[k] = '[REDACTED]';
+    for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+      redacted[k] = isSensitiveHeader(k, marked) ? '[REDACTED]' : String(v);
     }
     return { ...input, headers: redacted };
   }

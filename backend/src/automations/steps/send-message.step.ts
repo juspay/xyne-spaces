@@ -4,24 +4,8 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { conversationService } from '@/services/conversationService';
-import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { MessageType } from '@prisma/client';
-
-const AUTOMATIONS_BOT_ID = 'automations';
-const cachedBotUserIdByWorkspace = new Map<string, string>();
-
-async function getAutomationsBotUserId(workspaceId: string): Promise<string> {
-  const cached = cachedBotUserIdByWorkspace.get(workspaceId);
-  if (cached) return cached;
-  const bot = await unifiedBotUserService.getBotByBotId(AUTOMATIONS_BOT_ID, workspaceId);
-  if (!bot) {
-    throw new Error(
-      `[automations] System bot "${AUTOMATIONS_BOT_ID}" not found in workspace ${workspaceId}. Make sure '@/bots/implementations/automations-bot/automations-bot.js' is imported in the bot registry.`,
-    );
-  }
-  cachedBotUserIdByWorkspace.set(workspaceId, bot.id);
-  return bot.id;
-}
+import { getAutomationsBotUserId } from './automations-bot';
 
 const SendMessageConfigSchema = z.object({
   channelId: variableRef(z.string().min(1)),

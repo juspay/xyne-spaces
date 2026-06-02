@@ -37,6 +37,7 @@ interface VariableAwareInputProps {
   ariaInvalid?: boolean;
   style?: CSSProperties;
   rightSlot?: ReactNode;
+  targetEntityKind?: string | null;
 }
 
 export function VariableAwareInput({
@@ -52,6 +53,7 @@ export function VariableAwareInput({
   ariaInvalid,
   style,
   rightSlot,
+  targetEntityKind,
 }: VariableAwareInputProps): React.ReactElement {
   const [varOpen, setVarOpen] = useState(false);
   const labelFor = useMemo(() => buildVariableLabelResolver(variableSources), [variableSources]);
@@ -128,6 +130,7 @@ export function VariableAwareInput({
             onOpenChange={setVarOpen}
             editor={editor}
             variableSources={variableSources}
+            targetEntityKind={targetEntityKind ?? null}
           />
         )}
       </div>
@@ -140,11 +143,13 @@ function VariableInsertButton({
   onOpenChange,
   editor,
   variableSources,
+  targetEntityKind,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
   editor: Editor | null;
   variableSources: VariablePickerSource[];
+  targetEntityKind?: string | null;
 }): React.ReactElement {
   return (
     <Popover
@@ -167,6 +172,7 @@ function VariableInsertButton({
     >
       <VariablePicker
         sources={variableSources}
+        targetEntityKind={targetEntityKind ?? null}
         onSelect={entry => {
           const ref = entry.reference.replace(/^\{\{|\}\}$/g, '');
           if (editor) {

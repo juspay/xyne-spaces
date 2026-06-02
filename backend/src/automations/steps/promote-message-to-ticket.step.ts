@@ -9,10 +9,10 @@ import { TicketPriority, TicketStatusV2 } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 
-const CreateTicketConfigSchema = z.object({
+const PromoteMessageToTicketConfigSchema = z.object({
+  conversationId: variableRef(z.string().min(1)),
   title: variableRef(z.string().min(1)),
   description: variableRef(z.string()).optional(),
-  channelId: variableRef(z.string().min(1)),
   projectId: variableRef(z.string().min(1)),
   boardId: variableRef(z.string().min(1)),
   assigneeId: variableRef(z.string()).optional(),
@@ -22,13 +22,13 @@ const CreateTicketConfigSchema = z.object({
   createdById: variableRef(z.string()).optional(),
 });
 
-const CreateTicketOutputSchema = z.object({
+const PromoteMessageToTicketOutputSchema = z.object({
   ticketId: z.string(),
   xyneId: z.string(),
   boardId: z.string(),
 });
 
-interface CreateTicketOutput extends Record<string, unknown> {
+interface PromoteMessageToTicketOutput extends Record<string, unknown> {
   ticketId: string;
   xyneId: string;
   boardId: string;
@@ -36,33 +36,37 @@ interface CreateTicketOutput extends Record<string, unknown> {
 
 const ticketController = new TicketController();
 
-export class CreateTicketStep extends BaseActionStep<typeof CreateTicketConfigSchema, CreateTicketOutput> {
-  readonly type = 'CREATE_TICKET';
-  readonly configSchema = CreateTicketConfigSchema;
-  readonly outputSchema = CreateTicketOutputSchema;
-  readonly name = 'Create a ticket';
+export class PromoteMessageToTicketStep extends BaseActionStep<
+  typeof PromoteMessageToTicketConfigSchema,
+  PromoteMessageToTicketOutput
+> {
+  readonly type = 'PROMOTE_MESSAGE_TO_TICKET';
+  readonly configSchema = PromoteMessageToTicketConfigSchema;
+  readonly outputSchema = PromoteMessageToTicketOutputSchema;
+  readonly name = 'Promote a message to a ticket';
   readonly description =
-    'Creates a ticket on the chosen board. Uses the same flow as the dashboard so the ticket card appears in the channel and the board view.';
+    'Creates a ticket from an existing conversation (the message and its thread). The channel is taken from the conversation.';
   readonly category = StepCategory.TICKET;
   readonly icon = 'TicketPlus';
   readonly mayEmit = ['TICKET_CREATED'] as const;
 
   async execute(
-    config: z.infer<typeof CreateTicketConfigSchema>,
+    config: z.infer<typeof PromoteMessageToTicketConfigSchema>,
     context: AutomationContext,
-  ): Promise<CreateTicketOutput> {
+  ): Promise<PromoteMessageToTicketOutput> {
     const createdBy =
       (config.createdById as string | undefined) ?? context.automation.createdById;
     const rawTitle = config.title as string;
     const title = extractPlainTextFromHtml(rawTitle).trim() || rawTitle;
     const description = (config.description as string | undefined) ?? title;
 
+    // The channel is derived from the source conversation by the controller.
     const reqBody: Record<string, unknown> = {
       title,
       description,
       createdBy,
       updatedBy: createdBy,
-      channelId: config.channelId as string,
+      sourceConversationId: config.conversationId as string,
       projectId: config.projectId as string,
       boardId: config.boardId as string,
     };
@@ -96,8 +100,8 @@ export class CreateTicketStep extends BaseActionStep<typeof CreateTicketConfigSc
     if (capturedStatus >= 400 || !capturedBody) {
       const message =
         (capturedBody as { error?: string } | undefined)?.error ??
-        `Ticket creation failed (status=${capturedStatus})`;
-      throw new Error(`[CREATE_TICKET] ${message}`);
+        `Promote to ticket failed (status=${capturedStatus})`;
+      throw new Error(`[PROMOTE_MESSAGE_TO_TICKET] ${message}`);
     }
 
     const ticket = capturedBody as {
@@ -108,7 +112,7 @@ export class CreateTicketStep extends BaseActionStep<typeof CreateTicketConfigSc
     };
 
     logger.info(
-      `[automations] CREATE_TICKET → ticket ${ticket.id} (xyneId=${ticket.xyneId}) created in channel=${reqBody.channelId}, board=${reqBody.boardId}, project=${reqBody.projectId}, conversation=${ticket.conversationId}`,
+      `[automations] PROMOTE_MESSAGE_TO_TICKET → ticket ${ticket.id} (xyneId=${ticket.xyneId}) from conversation=${reqBody.sourceConversationId}, board=${reqBody.boardId}, project=${reqBody.projectId}`,
     );
 
     return {
@@ -119,4 +123,4 @@ export class CreateTicketStep extends BaseActionStep<typeof CreateTicketConfigSc
   }
 }
 
-export const createTicketStep = new CreateTicketStep();
+export const promoteMessageToTicketStep = new PromoteMessageToTicketStep();

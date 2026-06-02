@@ -11,6 +11,7 @@ import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
+import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
@@ -120,6 +121,8 @@ import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
+import automationSeriesIdBackfillRoutes from '@/routes/automationSeriesIdBackfill';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -223,6 +226,9 @@ export class App {
 
     // Logging
     if (config.env !== 'test') {
+      morgan.token('url', req =>
+        redactSensitiveUrl((req as { originalUrl?: string; url?: string }).originalUrl ?? (req as { url?: string }).url),
+      );
       this.app.use(morgan('combined', { stream }));
     }
     this.app.use(requestLogger);
@@ -343,6 +349,8 @@ export class App {
     this.app.use('/api/admin/ticket-email-count-backfill', ticketEmailCountBackfillRoutes);
     this.app.use('/migrate/api/admin/email-read-at-backfill', emailReadAtBackfillRoutes);
     this.app.use('/api/admin/email-read-at-backfill', emailReadAtBackfillRoutes);
+    this.app.use('/migrate/api/admin/automation-series-id-backfill', automationSeriesIdBackfillRoutes);
+    this.app.use('/api/admin/automation-series-id-backfill', automationSeriesIdBackfillRoutes);
     this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
     this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
     this.app.use('/migrate/api/admin/queries-entity-type-backfill', queriesEntityTypeBackfillRoutes);
@@ -520,6 +528,10 @@ export class App {
 
     // Scheduled messages routes (auth required)
     this.app.use('/api/scheduled-messages', authMiddleware.authenticate, scheduledMessageRoutes);
+
+    // Public inbound webhook trigger for automations — authenticated per-request
+    // by the encrypted per-series secret, so no JWT/ACL middleware here.
+    this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
     // Automations routes (auth required, no ACL — matches /api/calls)
     this.app.use('/api/automations', authMiddleware.authenticate, automationRoutes);

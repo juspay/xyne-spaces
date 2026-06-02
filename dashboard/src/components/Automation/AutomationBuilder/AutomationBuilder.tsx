@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import {
+  Archive,
   ArrowLeft,
   Check,
   History,
@@ -30,7 +31,7 @@ import {
   type SaveResult,
   type ValidationResult,
 } from '../Automation.types';
-import { useCanWriteAutomations, useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
+import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import {
   fetchOperators,
   fetchStepCatalog,
@@ -50,6 +51,7 @@ import { ConditionalCard } from './ConditionalCard/ConditionalCard';
 import { AddStepRow } from './AddStepRow/AddStepRow';
 import { ScheduleCard } from './ScheduleCard/ScheduleCard';
 import { ValidationBanner } from './ValidationBanner/ValidationBanner';
+import { WebhookEndpointPanel } from './WebhookEndpointPanel';
 import {
   buildVariableSources,
   collectStepTypes,
@@ -201,23 +203,27 @@ export function AutomationBuilder({
   const me = useSelf();
   const navigate = useNavigate();
   const isAutomationsAdmin = useIsAutomationsAdmin();
-  const canWriteAutomations = useCanWriteAutomations();
 
-  const isLockedStatus =
-    savedStatus === AutomationStatusValues.PENDING_APPROVAL ||
+  const isEditableDeadStatus =
     savedStatus === AutomationStatusValues.REJECTED ||
     savedStatus === AutomationStatusValues.REVOKED ||
-    savedStatus === AutomationStatusValues.AUTO_REVOKED ||
-    savedStatus === AutomationStatusValues.ARCHIVED;
+    savedStatus === AutomationStatusValues.ARCHIVED ||
+    savedStatus === AutomationStatusValues.AUTO_REVOKED;
+
+  const isLockedStatus = savedStatus === AutomationStatusValues.PENDING_APPROVAL;
 
   const isLiveRow =
     automation?.status === AutomationStatusValues.ACTIVE ||
     automation?.status === AutomationStatusValues.DISABLED;
 
   const canEdit =
-    canWriteAutomations &&
     !isLockedStatus &&
-    (savedStatus === AutomationStatusValues.DRAFT || savedStatus === AutomationStatusValues.ACTIVE);
+    (savedStatus === AutomationStatusValues.DRAFT ||
+      savedStatus === AutomationStatusValues.ACTIVE ||
+      savedStatus === AutomationStatusValues.DISABLED ||
+      isEditableDeadStatus);
+
+  const forksOnEdit = isLiveRow || isEditableDeadStatus;
 
   const saveMutation = useMutation({
     mutationFn: async (payload: {
@@ -361,6 +367,19 @@ export function AutomationBuilder({
     },
     onError: err => {
       setErrorMessage(err instanceof Error ? err.message : 'Disable failed');
+    },
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: (id: string): Promise<void> => {
+      setSavedStatus(AutomationStatusValues.ARCHIVED);
+      setErrorMessage(null);
+      zero.mutate(mutators.automations.archive({ id, timestamp: Date.now() }));
+      toast.success('Automation archived');
+      return Promise.resolve();
+    },
+    onError: err => {
+      setErrorMessage(err instanceof Error ? err.message : 'Archive failed');
     },
   });
 
@@ -530,7 +549,10 @@ export function AutomationBuilder({
         if (!target) return prev;
         if (target.type === CONDITIONAL_STEP_TYPE) return prev;
         const copy = prev.steps.slice();
-        copy[index] = { ...target, config: cfg } as ActionStepConfig;
+        copy[index] = {
+          ...target,
+          config: { ...(target as ActionStepConfig).config, ...cfg },
+        } as ActionStepConfig;
         return { ...prev, steps: copy };
       });
     },
@@ -589,6 +611,11 @@ export function AutomationBuilder({
     if (!savedId) return;
     disableMutation.mutate(savedId);
   }, [disableMutation, savedId]);
+
+  const handleArchive = useCallback((): void => {
+    if (!savedId) return;
+    archiveMutation.mutate(savedId);
+  }, [archiveMutation, savedId]);
 
   const triggerCatalog = triggerCatalogQuery.data ?? [];
   const stepCatalog = stepCatalogQuery.data ?? [];
@@ -705,7 +732,7 @@ export function AutomationBuilder({
                       Disable
                     </Button>
                   ) : null
-                ) : canWriteAutomations ? (
+                ) : (
                   <Button
                     variant='outline'
                     size='sm'
@@ -717,13 +744,24 @@ export function AutomationBuilder({
                     <Power className='size-4' />
                     Activate
                   </Button>
-                ) : null
+                )
               ) : null}
-              {/* DRAFT proposals can be sent for approval — write action. */}
-              {canWriteAutomations &&
-              savedId &&
-              savedStatus === AutomationStatusValues.DRAFT &&
-              !isLiveRow ? (
+              {/* Admin-only: permanently retire a live automation. */}
+              {isLiveRow && savedId && isAutomationsAdmin ? (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={handleArchive}
+                  disabled={archiveMutation.isPending}
+                  data-track-category='automation-builder'
+                  data-track-name='header-archive'
+                >
+                  <Archive className='size-4' />
+                  Archive
+                </Button>
+              ) : null}
+              {/* DRAFT proposals can be sent for approval. */}
+              {savedId && savedStatus === AutomationStatusValues.DRAFT && !isLiveRow ? (
                 <Button
                   onClick={() => submitForApprovalMutation.mutate(savedId)}
                   loading={submitForApprovalMutation.isPending}
@@ -736,10 +774,9 @@ export function AutomationBuilder({
                   Send for approval
                 </Button>
               ) : null}
-              {/* PENDING_APPROVAL: author with WRITE can revoke. The proposer
-                  is the row's createdById (set when the proposal was created). */}
-              {canWriteAutomations &&
-              savedId &&
+              {/* PENDING_APPROVAL: the author can revoke. The proposer is the
+                  row's createdById (set when the proposal was created). */}
+              {savedId &&
               savedStatus === AutomationStatusValues.PENDING_APPROVAL &&
               automation?.createdById === me?.id ? (
                 <Button
@@ -760,11 +797,11 @@ export function AutomationBuilder({
               {canEdit ? (
                 <Button
                   onClick={() => {
-                    if (isLiveRow) setProposeChangeConfirmOpen(true);
+                    if (forksOnEdit) setProposeChangeConfirmOpen(true);
                     else setEditConfirmOpen(true);
                   }}
                   data-track-category='automation-builder'
-                  data-track-name={isLiveRow ? 'header-propose-change' : 'header-edit'}
+                  data-track-name={forksOnEdit ? 'header-propose-change' : 'header-edit'}
                   className='font-semibold'
                 >
                   <Pencil className='size-4' />
@@ -857,6 +894,11 @@ export function AutomationBuilder({
               onConfigChange={handleTriggerConfigChange}
               issues={triggerIssues}
             />
+            {config.trigger.type === 'WEBHOOK' && (
+              <div className='mt-4'>
+                <WebhookEndpointPanel automationId={savedId} />
+              </div>
+            )}
           </BuilderSection>
 
           <BuilderSection
@@ -1021,7 +1063,7 @@ export function AutomationBuilder({
       >
         <div className='flex flex-col gap-4 px-5 py-4 text-sm text-foreground'>
           <p>
-            This won&apos;t touch the live automation. You&apos;ll start a new draft prefilled with
+            This leaves the existing version untouched. You&apos;ll start a new draft prefilled with
             the current config — edit it, then click <strong>Save</strong> to create the proposal
             and <strong>Send for approval</strong> when you&apos;re ready.
           </p>

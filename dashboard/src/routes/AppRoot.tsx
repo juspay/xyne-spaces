@@ -1077,51 +1077,27 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'automations',
-                element: (
-                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
-                    <AutomationsListScreen />
-                  </ResourceProtectedRoute>
-                ),
+                element: <AutomationsListScreen />,
               },
               {
                 path: 'automations/approvals',
-                element: (
-                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
-                    <AutomationApprovalsScreen />
-                  </ResourceProtectedRoute>
-                ),
+                element: <AutomationApprovalsScreen />,
               },
               {
                 path: 'automations/new',
-                element: (
-                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
-                    <AutomationBuilderScreen />
-                  </ResourceProtectedRoute>
-                ),
+                element: <AutomationBuilderScreen />,
               },
               {
                 path: 'automations/:id',
-                element: (
-                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
-                    <AutomationBuilderScreen />
-                  </ResourceProtectedRoute>
-                ),
+                element: <AutomationBuilderScreen />,
               },
               {
                 path: 'automations/:id/runs',
-                element: (
-                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
-                    <AutomationRunsScreen />
-                  </ResourceProtectedRoute>
-                ),
+                element: <AutomationRunsScreen />,
               },
               {
                 path: 'automations/:id/runs/:runId',
-                element: (
-                  <ResourceProtectedRoute resourceName='AUTOMATIONS' minAccess='READ'>
-                    <AutomationRunDetailScreen />
-                  </ResourceProtectedRoute>
-                ),
+                element: <AutomationRunDetailScreen />,
               },
               {
                 path: 'apps',

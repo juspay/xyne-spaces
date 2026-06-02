@@ -21,26 +21,37 @@ const PREFERRED_PATHS_BY_KIND: Record<string, string[]> = {
 export function findSoleMatchingVariable(
   sources: VariablePickerSource[],
   targetEntityKind: string | null | undefined,
+  targetLeafType?: string | null,
 ): VariableEntry | null {
-  if (!targetEntityKind) return null;
+  const accept = (entry: VariableEntry): boolean => {
+    if (targetEntityKind) return entry.entityKind === targetEntityKind;
+    if (targetLeafType) {
+      return entry.leafType === targetLeafType || entry.leafType.includes(targetLeafType);
+    }
+    return true;
+  };
+
   const matches: VariableEntry[] = [];
   for (const source of sources) {
     for (const entry of flattenSource(source)) {
-      if (entry.entityKind === targetEntityKind) {
-        matches.push(entry);
-      }
+      if (accept(entry)) matches.push(entry);
     }
   }
+
   if (matches.length === 0) return null;
   if (matches.length === 1) return matches[0]!;
-  const preferred = PREFERRED_PATHS_BY_KIND[targetEntityKind];
-  if (preferred) {
-    for (const path of preferred) {
-      const hit = matches.find(m => m.path === path);
-      if (hit) return hit;
+
+  if (targetEntityKind) {
+    const preferred = PREFERRED_PATHS_BY_KIND[targetEntityKind];
+    if (preferred) {
+      for (const path of preferred) {
+        const hit = matches.find(m => m.path === path);
+        if (hit) return hit;
+      }
     }
+    return matches[0]!;
   }
-  return matches[0]!;
+  return null;
 }
 
 export function flattenSource(source: VariablePickerSource): VariableEntry[] {

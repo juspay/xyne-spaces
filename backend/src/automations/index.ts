@@ -7,6 +7,8 @@ import { ticketUpdatedTrigger } from './triggers/ticket-updated.trigger';
 import { emailReceivedTrigger } from './triggers/email-received.trigger';
 import { emailSentTrigger } from './triggers/email-sent.trigger';
 import { ticketCommentedTrigger } from './triggers/ticket-commented.trigger';
+import { messageReceivedTrigger } from './triggers/message-received.trigger';
+import { webhookTrigger } from './triggers/webhook.trigger';
 
 import { conditionalStep } from './steps/conditional.step';
 
@@ -25,6 +27,9 @@ import { updateTagsStep } from './steps/update-tags.step';
 import { assignTicketToGroupStep } from './steps/assign-ticket-to-group.step';
 import { triggerWebhookStep } from './steps/trigger-webhook.step';
 import { runAgentStep } from './steps/run-agent.step';
+import { createEmailDraftStep } from './steps/create-email-draft.step';
+import { replyOnMessageStep } from './steps/reply-on-message.step';
+import { promoteMessageToTicketStep } from './steps/promote-message-to-ticket.step';
 
 import { automationQueue } from './queue/automation.queue';
 
@@ -39,6 +44,8 @@ export async function initializeAutomations(): Promise<void> {
   triggerRegistry.register(emailReceivedTrigger);
   triggerRegistry.register(emailSentTrigger);
   triggerRegistry.register(ticketCommentedTrigger);
+  triggerRegistry.register(messageReceivedTrigger);
+  triggerRegistry.register(webhookTrigger);
 
   stepRegistry.register(conditionalStep);
 
@@ -57,6 +64,9 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(assignTicketToGroupStep);
   stepRegistry.register(triggerWebhookStep);
   stepRegistry.register(runAgentStep);
+  stepRegistry.register(createEmailDraftStep);
+  stepRegistry.register(replyOnMessageStep);
+  stepRegistry.register(promoteMessageToTicketStep);
 
   await automationQueue.initialize();
 

@@ -1,36 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Sparkles, Wand2, X } from 'lucide-react';
-import CodeMirror from '@uiw/react-codemirror';
-import { json, jsonLanguage } from '@codemirror/lang-json';
-import {
-  autocompletion,
-  type CompletionContext,
-  type CompletionResult,
-} from '@codemirror/autocomplete';
-import { Button } from '../../../ui/Button/Button';
+import { Sparkles, X } from 'lucide-react';
 import { Combobox } from '../../../ui/Combobox/Combobox';
 import { AutomationRichTextField } from '../SchemaForm/AutomationRichTextField';
+import { SchemaJsonEditor, type SchemaTree } from '../SchemaForm/SchemaJsonEditor';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
 import { fetchClawAgents, type ClawAgent } from '../../../../api/automationsApi';
-const FIELD_TYPES = ['string', 'number', 'boolean', 'object', 'array'] as const;
-type FieldType = (typeof FIELD_TYPES)[number];
-
-// A node in the output-schema tree: either a leaf type or a nested object.
-type SchemaNode = FieldType | { [k: string]: SchemaNode };
-type SchemaTree = Record<string, SchemaNode>;
 
 interface RunAgentConfigShape {
   agentSlug?: string;
   prompt?: string;
   outputSchema?: SchemaTree;
 }
-
-const DEFAULT_SCHEMA: SchemaTree = {
-  category: 'string',
-  summary: 'string',
-};
 
 interface RunAgentStepFormProps {
   value: Record<string, unknown>;
@@ -212,181 +194,11 @@ export function RunAgentStepForm({
           value={outputSchema}
           onChange={next => setField('outputSchema', next)}
           readOnly={readOnly}
+          emptyHint='Empty schema — downstream steps will see no variables.'
         />
       </FieldRow>
     </div>
   );
-}
-
-function SchemaJsonEditor({
-  value,
-  onChange,
-  readOnly = false,
-}: {
-  value: SchemaTree;
-  onChange: (next: SchemaTree) => void;
-  readOnly?: boolean;
-}): React.ReactElement {
-  const [draft, setDraft] = useState(() => stringify(value));
-  const [error, setError] = useState<string | null>(null);
-
-  // Reflect external value changes back into the draft (e.g. user navigates
-  // between steps and the parent re-mounts with a different value), but
-  // never clobber a mid-edit local string when canonical content matches.
-  useEffect(() => {
-    const incoming = stringify(value);
-    setDraft(prev => (canonical(prev) === canonical(incoming) ? prev : incoming));
-  }, [value]);
-
-  const handleChange = (next: string): void => {
-    setDraft(next);
-    const parsed = tryParseSchema(next);
-    if (parsed.ok) {
-      setError(null);
-      onChange(parsed.value);
-    } else {
-      setError(parsed.error);
-    }
-  };
-
-  const insertExample = (): void => {
-    const text = stringify(DEFAULT_SCHEMA);
-    setDraft(text);
-    setError(null);
-    onChange(DEFAULT_SCHEMA);
-  };
-
-  const isEmpty = Object.keys(value).length === 0;
-
-  return (
-    <div className='flex flex-col gap-2'>
-      <div
-        className={
-          error
-            ? 'overflow-hidden rounded-md border border-red-500/50'
-            : 'overflow-hidden rounded-md border border-border'
-        }
-      >
-        <CodeMirror
-          value={draft}
-          height='auto'
-          minHeight='120px'
-          maxHeight='480px'
-          editable={!readOnly}
-          extensions={[
-            json(),
-            // Type autocomplete: when the cursor is positioned to type a
-            // value (`"category": "<here>"` or `"category": <here>`), we
-            // surface the FIELD_TYPES literals so users don't need to
-            // remember the exact strings.
-            jsonLanguage.data.of({ autocomplete: typeAutocomplete }),
-            autocompletion({ activateOnTyping: true, defaultKeymap: true }),
-          ]}
-          onChange={handleChange}
-          basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true }}
-        />
-      </div>
-      <div className='flex items-center justify-between gap-2'>
-        <div className='min-h-[14px] text-[11px]'>
-          {error ? (
-            <span className='text-red-600'>{error}</span>
-          ) : isEmpty ? (
-            <span className='text-muted-foreground'>
-              Empty schema — downstream steps will see no variables.
-            </span>
-          ) : (
-            <span className='text-muted-foreground'>
-              Valid. Leaf types: {FIELD_TYPES.join(', ')}. Press <kbd>Ctrl</kbd>+<kbd>Space</kbd>{' '}
-              after a <code>:</code> to pick a type.
-            </span>
-          )}
-        </div>
-        {isEmpty && (
-          <Button type='button' variant='outline' size='sm' onClick={insertExample}>
-            <Wand2 className='mr-1 size-3.5' />
-            Insert example
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function typeAutocomplete(context: CompletionContext): CompletionResult | null {
-  const before = context.state.doc.sliceString(0, context.pos);
-  const inString = /:\s*"([^"]*)$/.exec(before);
-  if (inString) {
-    const partial = inString[1] ?? '';
-    return {
-      from: context.pos - partial.length,
-      options: FIELD_TYPES.map(t => ({ label: t, type: 'enum' })),
-      validFor: /^[a-zA-Z]*$/,
-    };
-  }
-
-  const afterColon = /:\s*$/.test(before);
-  if (afterColon && (context.explicit || context.matchBefore(/:\s*$/))) {
-    return {
-      from: context.pos,
-      options: FIELD_TYPES.map(t => ({
-        label: `"${t}"`,
-        type: 'enum',
-        detail: t,
-      })),
-    };
-  }
-
-  return null;
-}
-
-function stringify(v: unknown): string {
-  try {
-    return JSON.stringify(v ?? {}, null, 2);
-  } catch {
-    return '{}';
-  }
-}
-
-function canonical(s: string): string {
-  try {
-    return JSON.stringify(JSON.parse(s));
-  } catch {
-    return s;
-  }
-}
-
-function tryParseSchema(
-  text: string,
-): { ok: true; value: SchemaTree } | { ok: false; error: string } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    return { ok: false, error: `Invalid JSON: ${e instanceof Error ? e.message : 'parse error'}` };
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { ok: false, error: 'Top-level must be an object {…}.' };
-  }
-  const check = walkSchema(parsed as Record<string, unknown>, '');
-  if (check) return { ok: false, error: check };
-  return { ok: true, value: parsed as SchemaTree };
-}
-
-function walkSchema(node: Record<string, unknown>, path: string): string | null {
-  for (const [k, v] of Object.entries(node)) {
-    const here = path ? `${path}.${k}` : k;
-    if (typeof v === 'string') {
-      if (!(FIELD_TYPES as readonly string[]).includes(v)) {
-        return `Field "${here}" has invalid type "${v}". Allowed: ${FIELD_TYPES.join(', ')}.`;
-      }
-    } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-      const sub = walkSchema(v as Record<string, unknown>, here);
-      if (sub) return sub;
-    } else {
-      return `Field "${here}" must be a type string or nested object.`;
-    }
-  }
-  return null;
 }
 
 function FieldRow({

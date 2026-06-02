@@ -20,6 +20,7 @@ import {
 import { createDirectMessageActivities } from '@/utils/messageActivityUtils';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
+import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
 import { activityTrackingService } from '@/services/activityTrackingService';
 import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkPreviewMd, parseForwardedMessageXml, type MessagePreviewData, type TicketPreviewSnapshot } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
@@ -224,6 +225,16 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const { senderId, content, conversationId } = message;
     const { channelId } = conversation;
+
+    if (conversation.initialMessageId === message.messageId) {
+      void emitMessageReceived({
+        messageId: message.messageId,
+        conversationId,
+        channelId,
+        msgType: message.msgType,
+        userId: senderId,
+      });
+    }
 
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({

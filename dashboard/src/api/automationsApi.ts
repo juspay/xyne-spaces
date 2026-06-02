@@ -115,6 +115,7 @@ export interface TriggerSchema {
   icon?: string;
   configSchema: JsonSchema;
   outputSchema: JsonSchema;
+  webhookUrl?: string;
 }
 
 export interface StepSchema {
@@ -283,6 +284,19 @@ export interface ClawAgent {
   isDefault: boolean;
   color: string;
   spacesAppUserId?: string | null;
+}
+
+export interface AutomationWebhookInfo {
+  url: string | null;
+  alreadyIssued: boolean;
+}
+
+export function issueAutomationWebhook(automationId: string): Promise<AutomationWebhookInfo> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<AutomationWebhookInfo>>(
+      `/automations/${automationId}/webhook`,
+    ),
+  );
 }
 
 export function fetchClawAgents(): Promise<ClawAgent[]> {

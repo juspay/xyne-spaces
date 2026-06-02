@@ -78,9 +78,7 @@ export default function AutomationBuilderScreen(): ReactElement {
               initialConfig: forkSource.config,
               initialName: forkSource.name,
               ...(forkSource.description ? { initialDescription: forkSource.description } : {}),
-              ...(forkSource.automationSeriesId
-                ? { forkFromSeriesId: forkSource.automationSeriesId }
-                : {}),
+              forkFromSeriesId: forkSource.automationSeriesId ?? forkSource.id,
               ...(forkFromId ? { forkSourceAutomationId: forkFromId } : {}),
             }
           : {})}

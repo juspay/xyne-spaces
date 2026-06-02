@@ -250,13 +250,10 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
   ): Promise<{ approved: Workflow; autoRevoked: Workflow[] }> {
     return await this.db.$transaction(async tx => {
       const proposal = await tx.workflow.findUnique({ where: { id: proposalId } });
-      if (
-        !proposal ||
-        proposal.workflowType !== 'Automations' ||
-        !proposal.automationSeriesId
-      ) {
+      if (!proposal || proposal.workflowType !== 'Automations') {
         throw new Error(`Cannot approve proposal ${proposalId}: not an automation row.`);
       }
+      const rootId = proposal.automationSeriesId ?? proposal.id;
 
       const approved =
         proposal.status === 'DISABLED'
@@ -269,7 +266,7 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
       const siblings = await tx.workflow.findMany({
         where: {
           workflowType: 'Automations',
-          automationSeriesId: proposal.automationSeriesId,
+          automationSeriesId: rootId,
           status: 'PENDING_APPROVAL',
           id: { not: proposal.id },
         },
