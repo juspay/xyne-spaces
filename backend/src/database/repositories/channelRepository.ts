@@ -35,7 +35,13 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async create(data: CreateChannelInput): Promise<Channel> {
-    await this.validateString(data.name, 'name', 255);
+    // Skip 255 char validation for DM and GROUP_DM channels
+    // Their names are comma-separated user IDs (internal identifiers)
+    // and can exceed 255 chars with many participants
+    const isDMChannel = data.scopeType === 'DM' || data.scopeType === 'GROUP_DM';
+    if (!isDMChannel) {
+      await this.validateString(data.name, 'name', 255);
+    }
     await this.validateString(data.createdBy, 'createdBy');
     await this.validateString(data.scopeType, 'scopeType');
     await this.validateString(data.projectId, 'projectId');

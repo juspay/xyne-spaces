@@ -13,6 +13,12 @@ export interface DialogProps {
   description?: ReactNode;
   className?: string;
   focusRef?: RefObject<HTMLElement | null>;
+  /**
+   * Escape hatch for the dialog's open auto-focus. When provided it takes
+   * precedence over `focusRef` — e.g. pass `(e) => e.preventDefault()` to stop
+   * the dialog stealing focus so a child can manage focus on its own schedule.
+   */
+  onOpenAutoFocus?: (e: Event) => void;
   testId?: string;
 }
 
@@ -42,6 +48,7 @@ export const Dialog = ({
   description,
   className,
   focusRef,
+  onOpenAutoFocus,
   testId,
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
@@ -95,20 +102,22 @@ export const Dialog = ({
         />
 
         <DialogPrimitive.Content
-          {...(focusRef !== undefined && {
-            onOpenAutoFocus: (event: Event) => {
-              event.preventDefault();
-              if (focusRef.current) {
-                focusRef.current.focus();
-              } else {
-                // focusRef may not be populated yet (e.g. child assigns it in a
-                // ref callback that hasn't fired). Retry after the next paint.
-                requestAnimationFrame(() => {
-                  focusRef.current?.focus();
-                });
-              }
-            },
-          })}
+          {...(onOpenAutoFocus
+            ? { onOpenAutoFocus }
+            : focusRef !== undefined && {
+                onOpenAutoFocus: (event: Event) => {
+                  event.preventDefault();
+                  if (focusRef.current) {
+                    focusRef.current.focus();
+                  } else {
+                    // focusRef may not be populated yet (e.g. child assigns it in a
+                    // ref callback that hasn't fired). Retry after the next paint.
+                    requestAnimationFrame(() => {
+                      focusRef.current?.focus();
+                    });
+                  }
+                },
+              })}
           data-testid={testId ?? 'dialog-content'}
           className={cn(
             'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',

@@ -4,6 +4,7 @@ export type DropdownListItemType = {
   label: string;
   description?: string;
   value: string;
+  tooltip?: React.ReactNode;
 };
 
 export type ComboboxProps = {
