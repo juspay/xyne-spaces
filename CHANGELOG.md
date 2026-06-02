@@ -1,3 +1,23 @@
+## [1.150.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.149.0...v1.150.0) (2026-06-02)
+
+
+### Features
+
+* added apps permission ([09cf553](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/09cf553f27ca0ba1dc4451b84863dd6bf5a96436)), closes [#6651](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6651)
+* merge feature-deploy-xyne-claw to main ([32c1667](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/32c1667a2baec0255df7829824ccef59a3f8f407)), closes [#6822](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6822)
+* mtls workspace integration ([c030fc8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c030fc8d499906d406cc224e9423a64d57693a0c)), closes [#6984](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6984)
+* query improvements ([931c4ab](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/931c4abc37beeb3decfa04bdec619f9c084de9cd)), closes [#6722](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6722)
+
+
+### Bug Fixes
+
+* add messageAttachment to ALLOWED_MODELS in pythonQuery validator ([8de958d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8de958d7d1c612482b401cb53fefbea0d8499228)), closes [#6856](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6856)
+* fixed deletion of a soft deleted conversation ([1351c87](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1351c87b5d2ee0f032d98e63c038692c86fb9de7))
+* fixes bug, groupd_dm suggestions not coming in the forward message modal ([971a7c3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/971a7c306488a2333c614877e775d5f1998ecbce))
+* optimize rendering and reduce main thread blocking ([9612347](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9612347af84bb54f1f123c7b55055a6da2138081)), closes [#6949](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6949)
+* revert ticket attachments relation from conversation list queries ([2812195](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/28121959127c728a4dd2025dd2f17f6ff6fe8360)), closes [#6980](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6980) [#6475](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6475)
+* sidebar alignment ([5eada1b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5eada1b7c3456f1772b2b70ac5b030c411a7633c)), closes [#6900](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6900)
+
 ## [1.149.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.148.0...v1.149.0) (2026-06-02)
 
 
