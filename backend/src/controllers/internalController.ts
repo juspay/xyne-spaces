@@ -4,6 +4,8 @@ import { db } from '@/database/client';
 export interface OrgMemberCheckResponse {
   isActiveMember: boolean;
   memberId?: string;
+  orgId?: string;
+  orgName?: string;
 }
 
 export class InternalController {
@@ -35,6 +37,10 @@ export class InternalController {
         select: {
           memberId: true,
           leftAt: true,
+          orgId: true,
+          organization: {
+            select: { name: true },
+          },
         },
       });
 
@@ -51,6 +57,8 @@ export class InternalController {
       res.status(200).json({
         isActiveMember: true,
         memberId: member.memberId,
+        orgId: member.orgId,
+        orgName: member.organization.name,
       } as OrgMemberCheckResponse);
     } catch (error) {
       res.status(503).json({ error: 'Service Unavailable' });
