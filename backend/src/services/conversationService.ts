@@ -104,6 +104,13 @@ export interface AddMessageToConversationParams {
   createdAt?: Date;
   isAddingParticipant?: boolean;
   isMarkdown?: boolean;
+  /**
+   * When true, skips the `conversationParticipant.updateMany` inside
+   * `incrementReplyCount`. During migration the value written would be the
+   * migration run time (not the historical Slack timestamp), so it is
+   * incorrect regardless. Skipping it avoids unnecessary DB writes.
+   */
+  isMigration?: boolean;
 }
 
 export interface UpdateMessageParams {
@@ -497,6 +504,7 @@ export class ConversationService {
       isBot,
       createdAt,
       isAddingParticipant = true,
+      isMigration = false,
     } = params;
 
     const conversation = await this.conversationRepository.findById(conversationId);
@@ -650,8 +658,10 @@ export class ConversationService {
       await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
-    // Update conversation reply count and last activity
-    await this.conversationRepository.incrementReplyCount(conversationId);
+    // Update conversation reply count and last activity.
+    // Pass isMigration to skip the conversationParticipant.updateMany — during
+    // migration the timestamp would be wrong (run time, not Slack ts) anyway.
+    await this.conversationRepository.incrementReplyCount(conversationId, isMigration);
     await messageMetadataService.addReply(conversationId, userId);
 
     // Update reply count for previous message's child conversation if it exists

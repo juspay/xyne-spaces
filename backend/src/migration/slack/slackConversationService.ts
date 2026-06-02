@@ -297,20 +297,32 @@ async function validateInput(input: MigrationInput): Promise<void> {
   }
 }
 
+// ============================================================================
+// Participant Resolution + Insertion (split for migration performance)
+// ============================================================================
+
 /**
- * Add all Slack channel members as Xyne channel participants before migration
- * First collects and validates all users, then batch adds if no failures
- * If any failures exist, posts error to Slack and throws without adding anyone
+ * Phase 1 of participant sync: resolves every Slack channel member to a Xyne
+ * user, creating the user in the DB if they do not exist yet.
+ *
+ * This MUST run before message ingestion so that `resolveSlackMentions` can
+ * embed correct `data-user-id` attributes into message HTML. If a user is not
+ * in the DB when a message is ingested, the @mention becomes permanent plain
+ * text with no retroactive fix.
+ *
+ * Intentionally does NOT insert `channel_participant` or `channel_user_status`
+ * rows — those are handled by `addChannelParticipantsAfterMigration` once all
+ * messages are in the DB, so that Zero's real-time sync has zero subscribers
+ * during the (potentially large) ingestion phase.
+ *
+ * Returns the resolved user list and the channel creator's Slack ID so that
+ * the caller can pass them directly to `addChannelParticipantsAfterMigration`.
  */
-export async function addChannelParticipantsBeforeMigration(
+export async function resolveAndCreateChannelUsers(
   slackChannelId: string,
   xyneChannelId: string,
-  batchSync: boolean = false,
-  threadTs?: string,
-  logChannelId?: string
-): Promise<void> {
-  logChannelId = logChannelId || slackChannelId;
-  logger.info('[Migration] Preparing channel participants before migration', {
+): Promise<{ usersToBeAdded: UserToAdd[]; channelCreatorSlackId: string | undefined }> {
+  logger.info('[Migration] Resolving channel members (user creation only)', {
     slackChannelId,
     xyneChannelId,
   });
@@ -341,9 +353,7 @@ export async function addChannelParticipantsBeforeMigration(
   const usersToBeAdded: UserToAdd[] = [];
   const failedUsers: ParticipantFailure[] = [];
 
-  // Phase 1: Collect all users to be added and identify failures
-  for (let i = 0; i < channelMemberIds.length; i++) {
-    const memberId = channelMemberIds[i];
+  for (const memberId of channelMemberIds) {
     try {
       const userInfo = await getUserInfo(memberId, userInfoCache, workspaceId);
       if (userInfo?.isBot) {
@@ -385,123 +395,216 @@ export async function addChannelParticipantsBeforeMigration(
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('[Migration] Failed to resolve channel participant', {
-        memberId,
-        error: reason,
-      });
-      failedUsers.push({
-        slackUserId: memberId,
-        reason,
-      });
+      logger.error('[Migration] Failed to resolve channel participant', { memberId, error: reason });
+      failedUsers.push({ slackUserId: memberId, reason });
     }
-
   }
 
-  logger.info('[Migration] Channel participants validation complete', {
+  logger.info('[Migration] Channel member resolution complete', {
     xyneChannelId,
     totalMembers: channelMemberIds.length,
     validUsers: usersToBeAdded.length,
     failedUsers: failedUsers.length,
   });
 
-  // Phase 2: If any failures exist, throw error (will be caught by runMigration's catch block)
+  // Fail fast if any member could not be resolved — same behaviour as before
   if (failedUsers.length > 0) {
     const failureDetails = failedUsers
       .map((f) => {
-        const userInfo = f.userName || f.userEmail ? ` (${f.userName || ''}${f.userName && f.userEmail ? ' - ' : ''}${f.userEmail || ''})` : '';
+        const userInfo = f.userName || f.userEmail
+          ? ` (${f.userName || ''}${f.userName && f.userEmail ? ' - ' : ''}${f.userEmail || ''})` : '';
         return `- ${f.slackUserId}${userInfo}: ${f.reason}`;
       })
       .join('\n');
-
-    const errorMessage = `❌ Migration failed: ${failedUsers.length} participant(s) could not be resolved:\n${failureDetails}`;
-    throw new Error(errorMessage);
+    throw new Error(
+      `❌ Migration failed: ${failedUsers.length} participant(s) could not be resolved:\n${failureDetails}`
+    );
   }
 
-  // Phase 3: Batch add all participants since no failures
-  if (usersToBeAdded.length > 0) {
-    const channelParticipantRepo = new ChannelParticipantRepository();
+  return { usersToBeAdded, channelCreatorSlackId };
+}
 
-    // Identify the channel creator to add as ADMIN
-    const creatorUser = channelCreatorSlackId
-      ? usersToBeAdded.find((u) => u.slackUserId === channelCreatorSlackId)
-      : undefined;
+/**
+ * Phase 2 of participant sync: inserts `channel_participant` and
+ * `channel_user_status` rows for the users resolved by
+ * `resolveAndCreateChannelUsers`.
+ *
+ * Must be called AFTER all messages have been ingested so that:
+ *  - Zero's real-time push has 0 subscribers during ingestion (no per-message
+ *    fan-out to hundreds of clients).
+ *  - `conversationSeenCutoffAt` is set to `new Date()` so all already-ingested
+ *    historical messages are immediately marked as seen — no spurious unread
+ *    badge for migrated content.
+ */
+export async function addChannelParticipantsAfterMigration(
+  xyneChannelId: string,
+  usersToBeAdded: UserToAdd[],
+  channelCreatorSlackId: string | undefined,
+): Promise<void> {
+  if (usersToBeAdded.length === 0) return;
 
-    const memberUsers = usersToBeAdded.filter((u) => u.slackUserId !== channelCreatorSlackId);
+  const channelRepo = new ChannelRepository();
+  const channel = await channelRepo.findById(xyneChannelId);
+  const workspaceId = channel?.workspaceId ?? '';
 
-    // Add the creator as ADMIN (handles all cases: new user, existing MEMBER, or already ADMIN)
-    if (creatorUser) {
-      const existingParticipant = await channelParticipantRepo.addParticipant(
+  const channelParticipantRepo = new ChannelParticipantRepository();
+
+  // All migrated messages are already in the DB — mark them all as seen by
+  // passing `now` as the cutoff. This bypasses getConversationSeenCutoffAt
+  // entirely and ensures no user gets an unread badge for historical content.
+  const seenCutoffAt = new Date();
+
+  const creatorUser = channelCreatorSlackId
+    ? usersToBeAdded.find((u) => u.slackUserId === channelCreatorSlackId)
+    : undefined;
+  const memberUsers = usersToBeAdded.filter((u) => u.slackUserId !== channelCreatorSlackId);
+
+  // Add the channel creator as ADMIN
+  if (creatorUser) {
+    const existingParticipant = await channelParticipantRepo.addParticipant(
+      xyneChannelId,
+      creatorUser.xyneUserId,
+      'ADMIN'
+    );
+    // addParticipant returns the existing record unchanged if the user is already
+    // a participant — explicitly promote to ADMIN if needed.
+    if (existingParticipant.role !== 'ADMIN') {
+      await channelParticipantRepo.updateParticipantRole(
         xyneChannelId,
         creatorUser.xyneUserId,
         'ADMIN'
       );
-      // If the user already existed, addParticipant returns the existing record without
-      // updating the role. Ensure role is ADMIN if they were previously a MEMBER.
-      if (existingParticipant.role !== 'ADMIN') {
-        await channelParticipantRepo.updateParticipantRole(
-          xyneChannelId,
-          creatorUser.xyneUserId,
-          'ADMIN'
-        );
-      }
-      logger.info('[Migration] Channel creator added as ADMIN', {
-        xyneChannelId,
-        creatorSlackId: channelCreatorSlackId,
-        creatorXyneId: creatorUser.xyneUserId,
-      });
     }
+    logger.info('[Migration] Channel creator added as ADMIN', {
+      xyneChannelId,
+      creatorSlackId: channelCreatorSlackId,
+      creatorXyneId: creatorUser.xyneUserId,
+    });
+  }
 
-    // Add remaining members as MEMBER
-    const memberUserIds = memberUsers.map((u) => u.xyneUserId);
-    if (memberUserIds.length > 0) {
-      if (batchSync) {
-        const BATCH_SIZE = 50;
-        const PARTICIPANT_BATCH_DELAY_MS = 60000;
-        for (let i = 0; i < memberUserIds.length; i += BATCH_SIZE) {
-          const chunk = memberUserIds.slice(i, i + BATCH_SIZE);
-          const result = await channelParticipantRepo.addParticipantsBatch(xyneChannelId, chunk, 'MEMBER');
-          const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-          const totalBatches = Math.ceil(memberUserIds.length / BATCH_SIZE);
-          logger.info('[Migration] Participant batch added', {
-            xyneChannelId,
-            batchNum,
-            totalBatches,
-            addedCount: result.addedCount,
-            existingCount: result.existingCount,
-          });
+  // Batch-add all remaining members in a single transaction
+  const memberUserIds = memberUsers.map((u) => u.xyneUserId);
+  if (memberUserIds.length > 0) {
+    const result = await channelParticipantRepo.addParticipantsBatch(
+      xyneChannelId,
+      memberUserIds,
+      'MEMBER',
+      false,
+      seenCutoffAt,
+    );
+    logger.info('[Migration] Channel participants batch added after migration', {
+      xyneChannelId,
+      addedCount: result.addedCount,
+      existingCount: result.existingCount,
+    });
+  }
+
+  // Queue Vespa re-indexing for the channel
+  const allUserIds = usersToBeAdded.map((u) => u.xyneUserId);
+  await pushVespaJobForChannel(xyneChannelId, allUserIds[0], workspaceId || undefined);
+
+  logger.info('[Migration] Channel participants added after migration complete', {
+    xyneChannelId,
+    total: usersToBeAdded.length,
+  });
+}
+
+/**
+ * @deprecated Use `resolveAndCreateChannelUsers` + `addChannelParticipantsAfterMigration`
+ * instead. Kept for the `/sync-participants` command which intentionally adds
+ * participants in standalone mode (batchSync=true path).
+ */
+export async function addChannelParticipantsBeforeMigration(
+  slackChannelId: string,
+  xyneChannelId: string,
+  batchSync: boolean = false,
+  threadTs?: string,
+  logChannelId?: string
+): Promise<void> {
+  logChannelId = logChannelId || slackChannelId;
+
+  const { usersToBeAdded, channelCreatorSlackId } = await resolveAndCreateChannelUsers(
+    slackChannelId,
+    xyneChannelId,
+  );
+
+  if (usersToBeAdded.length === 0) return;
+
+  const channelRepo = new ChannelRepository();
+  const channel = await channelRepo.findById(xyneChannelId);
+  const workspaceId = channel?.workspaceId ?? '';
+
+  const channelParticipantRepo = new ChannelParticipantRepository();
+
+  const creatorUser = channelCreatorSlackId
+    ? usersToBeAdded.find((u) => u.slackUserId === channelCreatorSlackId)
+    : undefined;
+  const memberUsers = usersToBeAdded.filter((u) => u.slackUserId !== channelCreatorSlackId);
+
+  if (creatorUser) {
+    const existingParticipant = await channelParticipantRepo.addParticipant(
+      xyneChannelId,
+      creatorUser.xyneUserId,
+      'ADMIN'
+    );
+    if (existingParticipant.role !== 'ADMIN') {
+      await channelParticipantRepo.updateParticipantRole(
+        xyneChannelId,
+        creatorUser.xyneUserId,
+        'ADMIN'
+      );
+    }
+    logger.info('[Migration] Channel creator added as ADMIN', {
+      xyneChannelId,
+      creatorSlackId: channelCreatorSlackId,
+      creatorXyneId: creatorUser.xyneUserId,
+    });
+  }
+
+  const memberUserIds = memberUsers.map((u) => u.xyneUserId);
+  if (memberUserIds.length > 0) {
+    if (batchSync) {
+      const BATCH_SIZE = 50;
+      const PARTICIPANT_BATCH_DELAY_MS = 60000;
+      for (let i = 0; i < memberUserIds.length; i += BATCH_SIZE) {
+        const chunk = memberUserIds.slice(i, i + BATCH_SIZE);
+        const result = await channelParticipantRepo.addParticipantsBatch(xyneChannelId, chunk, 'MEMBER');
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(memberUserIds.length / BATCH_SIZE);
+        logger.info('[Migration] Participant batch added', {
+          xyneChannelId, batchNum, totalBatches,
+          addedCount: result.addedCount, existingCount: result.existingCount,
+        });
+        if (ENABLE_NOTIFICATIONS) {
           await postMessage({
             channelId: logChannelId,
             text: `✅ Batch ${batchNum}/${totalBatches}: added ${result.addedCount} participant(s).`,
             threadTs,
           });
-          if (i + BATCH_SIZE < memberUserIds.length) {
+        }
+        if (i + BATCH_SIZE < memberUserIds.length) {
+          if (ENABLE_NOTIFICATIONS) {
             await postMessage({
               channelId: logChannelId,
               text: `⏳ Waiting 60 seconds before next batch...`,
               threadTs,
             });
-            await new Promise((resolve) => setTimeout(resolve, PARTICIPANT_BATCH_DELAY_MS));
           }
+          await new Promise((resolve) => setTimeout(resolve, PARTICIPANT_BATCH_DELAY_MS));
         }
-      } else {
-        const result = await channelParticipantRepo.addParticipantsBatch(
-          xyneChannelId,
-          memberUserIds,
-          'MEMBER'
-        );
-
-        logger.info('[Migration] Channel participants batch added', {
-          xyneChannelId,
-          addedCount: result.addedCount,
-          existingCount: result.existingCount,
-        });
       }
+    } else {
+      const result = await channelParticipantRepo.addParticipantsBatch(
+        xyneChannelId, memberUserIds, 'MEMBER'
+      );
+      logger.info('[Migration] Channel participants batch added', {
+        xyneChannelId, addedCount: result.addedCount, existingCount: result.existingCount,
+      });
     }
-
-    // Queue Vespa re-indexing for the channel (single job for all participants)
-    const allUserIds = usersToBeAdded.map((u) => u.xyneUserId);
-    await pushVespaJobForChannel(xyneChannelId, allUserIds[0], workspaceId || undefined);
   }
+
+  const allUserIds = usersToBeAdded.map((u) => u.xyneUserId);
+  await pushVespaJobForChannel(xyneChannelId, allUserIds[0], workspaceId || undefined);
 }
 
 /**
@@ -552,19 +655,26 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         })
       : null;
 
-    // Add all channel participants before migration (if target channel is specified)
+    // ── Step 1: resolve + create all Slack members as Xyne users ────────────
+    // This must happen before message ingestion so that resolveSlackMentions
+    // can embed correct data-user-id attributes in message HTML.
+    // We do NOT insert channel_participant rows yet — that happens after
+    // ingestion (Step 3) so that Zero has 0 subscribers during the bulk write.
+    let resolvedUsers: { usersToBeAdded: UserToAdd[]; channelCreatorSlackId: string | undefined } | null = null;
     if (input.xyneSpaceChannelId) {
       if (ENABLE_NOTIFICATIONS && messageTs) {
         await postMessage({
           channelId: logChannelId,
-          text: '🔄 Syncing channel participants...',
+          text: '🔄 Resolving channel members...',
           threadTs: messageTs,
         });
       }
-      await addChannelParticipantsBeforeMigration(input.channelId!, input.xyneSpaceChannelId, false, messageTs ?? undefined, logChannelId);
+      resolvedUsers = await resolveAndCreateChannelUsers(input.channelId!, input.xyneSpaceChannelId);
     }
 
-    // Create time batches
+    // ── Step 2: ingest messages ───────────────────────────────────────────────
+    // Zero has 0 subscribers for this channel at this point, so no per-message
+    // fan-out to connected clients occurs during ingestion.
     const batches = createTimeBatches(input.syncDate!, input.syncEndDate);
 
     if (ENABLE_NOTIFICATIONS && messageTs) {
@@ -617,6 +727,25 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         }
         // Continue with next batch
       }
+    }
+
+    // ── Step 3: add channel participants ─────────────────────────────────────
+    // Now that all messages are in the DB:
+    //  - Zero subscribers are added for the first time → one bulk sync per client
+    //  - conversationSeenCutoffAt = now → no unread badge for migrated content
+    if (resolvedUsers && input.xyneSpaceChannelId) {
+      if (ENABLE_NOTIFICATIONS && messageTs) {
+        await postMessage({
+          channelId: logChannelId,
+          text: '🔄 Adding channel participants...',
+          threadTs: messageTs,
+        });
+      }
+      await addChannelParticipantsAfterMigration(
+        input.xyneSpaceChannelId,
+        resolvedUsers.usersToBeAdded,
+        resolvedUsers.channelCreatorSlackId,
+      );
     }
 
     // Post final summary to log channel (threaded)

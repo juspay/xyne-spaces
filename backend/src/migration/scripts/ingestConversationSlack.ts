@@ -393,6 +393,7 @@ export async function ingestConversationSlack(
           lastActivityAt: createdAt,
           createdAt,
           isAddingParticipant: false,
+          isMigration: true,
         });
 
         message = result.message;

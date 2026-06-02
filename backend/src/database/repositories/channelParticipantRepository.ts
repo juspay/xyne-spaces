@@ -291,14 +291,20 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
   }
 
   /**
-   * Batch add participants to a channel in a single transaction
-   * Returns the number of participants actually added (excludes duplicates)
+   * Batch add participants to a channel in a single transaction.
+   * Returns the number of participants actually added (excludes duplicates).
+   *
+   * @param overrideCutoffAt - When provided, skips the `getConversationSeenCutoffAt` query
+   *   and uses this value directly as `conversationSeenCutoffAt` on every new
+   *   `channel_user_status` row. Pass `new Date()` during migration so all
+   *   already-ingested messages are pre-marked as seen (no unread badge).
    */
   async addParticipantsBatch(
     channelId: string,
     userIds: string[],
     role: ChannelRole = 'MEMBER',
-    isClosed: boolean = false
+    isClosed: boolean = false,
+    overrideCutoffAt?: Date,
   ): Promise<{ addedCount: number; existingCount: number }> {
     if (userIds.length === 0) {
       return { addedCount: 0, existingCount: 0 };
@@ -306,7 +312,9 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
 
     return await this.db.$transaction(async (tx) => {
       const now = new Date();
-      const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(tx, channelId, now);
+      const conversationSeenCutoffAt = overrideCutoffAt !== undefined
+        ? overrideCutoffAt
+        : await this.getConversationSeenCutoffAt(tx, channelId, now);
       const existingParticipants = await tx.channelParticipant.findMany({
         where: {
           channelId,
