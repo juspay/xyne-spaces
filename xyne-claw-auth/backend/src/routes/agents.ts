@@ -1,17 +1,25 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
-import type { Prisma } from "@prisma/client";
-import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, skillRepository } from "../repositories/index.js";
+import crypto from "node:crypto";
+import { Prisma } from "@prisma/client";
+import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, skillRepository } from "../repositories/index.js";
+import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
+import { getSubagentDefinition } from "xyne-claw-shared";
+import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
+import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
+import { extractCodexBearer } from "../lib/codex-creds.js";
 import { redisService } from "../redis.js";
 import {
   requireClawAdmin,
   requireAgentOwnerOrAdmin,
+  requireAgentOwnerContributorOrAdmin,
   getRequesterId,
   isClawAdmin,
 } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
+import { buildAvailableToolsCatalog } from "./tools.js";
 
 const router = Router();
 
@@ -34,6 +42,60 @@ router.post("/generate-prompt", async (req: Request, res: Response) => {
   } catch (err) {
     console.error("[agents] generate-prompt proxy error:", err);
     res.status(500).json({ success: false, error: "Failed to generate prompt" });
+  }
+});
+
+// ── Suggest tools (proxy to xyne-claw, with catalog from this DB) ────
+//
+// Frontend sends { systemPrompt | description }. We attach a compressed
+// catalog so xyne-claw doesn't need DB access, then forward to its
+// /suggest-tools route which does the LLM call. The response is a
+// proposal; the UI renders it as a diff for the user to accept.
+
+router.post("/suggest-tools", async (req: Request, res: Response) => {
+  try {
+    const { systemPrompt, description } = req.body as {
+      systemPrompt?: string;
+      description?: string;
+    };
+    const intent = (systemPrompt && systemPrompt.trim()) || (description && description.trim());
+    if (!intent) {
+      res.status(400).json({ success: false, error: "systemPrompt or description is required" });
+      return;
+    }
+
+    const full = await buildAvailableToolsCatalog();
+    // Compress: drop fields the LLM doesn't need (mcpServers, customGroups,
+    // serverTools, writeTools — all derivable from `integrations`).
+    const catalog = {
+      subagents: full.subagents.map((s) => ({ name: s.name, description: s.description })),
+      integrations: full.integrations.map((i) => ({
+        slug: i.slug,
+        label: i.label,
+        readTools: i.readTools.map((t) => ({
+          name: t.name, description: t.description, riskLevel: t.riskLevel,
+        })),
+        writeTools: i.writeTools.map((t) => ({
+          name: t.name, description: t.description, riskLevel: t.riskLevel,
+        })),
+      })),
+    };
+
+    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: JSON.stringify({ intent, catalog }),
+      signal: AbortSignal.timeout(50_000),
+    });
+
+    const data = await clawRes.json();
+    res.status(clawRes.status).json(data);
+  } catch (err) {
+    console.error("[agents] suggest-tools proxy error:", err);
+    res.status(500).json({ success: false, error: "Failed to suggest tools" });
   }
 });
 
@@ -182,23 +244,24 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     if (requesterId) {
       const admin = await isClawAdmin(requesterId);
       const isOwner = existing.ownerUserId === requesterId;
+      const share = await agentShareRepository.findByAgentAndUser(existing.id, requesterId);
+      const isContributor = share?.role === "EDITOR" || share?.role === "CONTRIBUTOR";
 
-      if (existing.scope === "global" && !admin && !isOwner) {
-        res.status(403).json({ success: false, error: "Only admins or the original owner can edit global agents" });
+      if (existing.scope === "global" && !admin && !isOwner && !isContributor) {
+        res.status(403).json({ success: false, error: "Only admins, the original owner, or contributors can edit global agents" });
         return;
       }
 
       if (existing.scope === "personal" && existing.ownerUserId) {
-        const share = await agentShareRepository.findByAgentAndUser(existing.id, requesterId);
-        const isEditor = share?.role === "EDITOR";
-        if (!admin && !isOwner && !isEditor) {
-          res.status(403).json({ success: false, error: "Only the owner, editors, or admins can update this agent" });
+        if (!admin && !isOwner && !isContributor) {
+          res.status(403).json({ success: false, error: "Only the owner, contributors, or admins can update this agent" });
           return;
         }
       }
     }
 
-    const { name, description, systemPrompt, enabled, color, modelId, config, skills } = req.body as {
+    const { slug: nextSlug, name, description, systemPrompt, enabled, color, modelId, config, skills } = req.body as {
+      slug?: string;
       name?: string;
       description?: string;
       systemPrompt?: string;
@@ -210,6 +273,34 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     };
 
     const data: Prisma.AgentUpdateInput = {};
+
+    // Slug rename — owner/admin-only on the route ACL above. Validate
+    // format, length, and uniqueness; reject collisions with a typed 409
+    // so the frontend can render a useful error.
+    if (nextSlug !== undefined) {
+      const trimmedSlug = nextSlug.trim().toLowerCase();
+      if (trimmedSlug !== existing.slug) {
+        if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(trimmedSlug)) {
+          res.status(400).json({
+            success: false,
+            error: "Invalid handle. Use 2-64 lowercase letters, digits, or hyphens. No leading or trailing hyphen.",
+            code: "INVALID_SLUG",
+          });
+          return;
+        }
+        const collision = await agentRepository.findBySlug(trimmedSlug);
+        if (collision && collision.id !== existing.id) {
+          res.status(409).json({
+            success: false,
+            error: `Handle "${trimmedSlug}" is already taken.`,
+            code: "SLUG_TAKEN",
+          });
+          return;
+        }
+        data.slug = trimmedSlug;
+      }
+    }
+
     if (name !== undefined) data.name = name.trim();
     if (description !== undefined) data.description = description.trim();
     if (systemPrompt !== undefined) data.systemPrompt = systemPrompt.trim();
@@ -307,7 +398,7 @@ router.get("/requests/pending", requireClawAdmin, async (_req: Request, res: Res
   try {
     const requests = await agentRequestRepository.listPending();
 
-    // Batch-fetch agents, skills, and requesters to avoid N+1
+    // Batch-fetch agents, skills, requesters, and agent owners to avoid N+1
     const agentIds = [...new Set(requests.map((r) => r.agentId).filter((id): id is string => !!id))];
     const skillIds = [...new Set(requests.map((r) => r.skillId).filter((id): id is string => !!id))];
     const requesterIds = [...new Set(requests.map((r) => r.requesterId))];
@@ -320,11 +411,17 @@ router.get("/requests/pending", requireClawAdmin, async (_req: Request, res: Res
     const skillMap = new Map(skills.map((s) => [s.id, s]));
     const requesterMap = new Map(requesters.map((u) => [u.id, u]));
 
+    // Batch-fetch agent owners (distinct from requesters)
+    const ownerIds = [...new Set(agents.map((a) => a.ownerUserId).filter((id): id is string => !!id))];
+    const owners = await userRepository.findByIds(ownerIds);
+    const ownerMap = new Map(owners.map((u) => [u.id, u]));
+
     const enriched = requests.map((r) => {
       const agent = r.agentId ? agentMap.get(r.agentId) : undefined;
       const skill = r.skillId ? skillMap.get(r.skillId) : undefined;
       const requester = requesterMap.get(r.requesterId);
-      return { ...r, agentName: agent?.name ?? r.agentSlug, skillName: skill?.name, requesterName: requester?.name, requesterEmail: requester?.email };
+      const agentOwner = agent?.ownerUserId ? ownerMap.get(agent.ownerUserId) : undefined;
+      return { ...r, agentName: agent?.name ?? r.agentSlug, skillName: skill?.name, requesterName: requester?.name, requesterEmail: requester?.email, agentOwnerName: agentOwner?.name, agentOwnerEmail: agentOwner?.email };
     });
 
     res.json({ success: true, data: enriched });
@@ -483,16 +580,25 @@ router.post("/:slug/demote", requireClawAdmin, async (req: Request<{ slug: strin
 // ── Agent sharing (owner or admin can share a personal agent) ─────────────────
 
 // POST /agents/:slug/shares — share agent with a user
-router.post("/:slug/shares", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+//
+// ACL:
+//   - Personal agent  → owner / admin only (preventing contributor-driven
+//                       privilege expansion on private agents)
+//   - Global agent    → owner / admin / contributors. Contributors can
+//                       co-manage the team because everyone can see the
+//                       agent anyway; this is about granting EDIT rights.
+router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
-    const agent = await agentRepository.findBySlug(req.params.slug);
-    if (!agent) {
-      res.status(404).json({ success: false, error: "Agent not found" });
-      return;
-    }
-    if (agent.scope === "global") {
-      res.status(400).json({ success: false, error: "Global agents are already visible to all users" });
+    const ctx = (req as Request & { agentContext: import("../middleware/agent-acl.js").AgentContext }).agentContext;
+    const agent = ctx.agent;
+    // Contributors can only add new contributors on GLOBAL agents.
+    // On personal agents they must be promoted to owner/admin first.
+    if (!ctx.isOwner && !ctx.isAdmin && agent.scope !== "global") {
+      res.status(403).json({
+        success: false,
+        error: "Contributors can only add other contributors on global agents",
+      });
       return;
     }
 
@@ -512,7 +618,8 @@ router.post("/:slug/shares", requireAgentOwnerOrAdmin, async (req: Request<{ slu
       return;
     }
 
-    const shareRole = role === "EDITOR" ? "EDITOR" : "VIEWER";
+    const VALID_ROLES = ["VIEWER", "EDITOR", "CONTRIBUTOR"];
+    const shareRole = VALID_ROLES.includes(role ?? "") ? (role as string) : "VIEWER";
     const share = await agentShareRepository.upsert(agent.id, userId, shareRole, requesterId);
 
     await writeAuditLog({
@@ -531,12 +638,19 @@ router.post("/:slug/shares", requireAgentOwnerOrAdmin, async (req: Request<{ slu
 });
 
 // DELETE /agents/:slug/shares/:userId — remove share
-router.delete("/:slug/shares/:userId", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
+//
+// Same scope-aware ACL as POST: contributors can remove a share only on
+// global agents. On personal agents, owner/admin only.
+router.delete("/:slug/shares/:userId", requireAgentOwnerContributorOrAdmin, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
-    const agent = await agentRepository.findBySlug(req.params.slug);
-    if (!agent) {
-      res.status(404).json({ success: false, error: "Agent not found" });
+    const ctx = (req as Request & { agentContext: import("../middleware/agent-acl.js").AgentContext }).agentContext;
+    const agent = ctx.agent;
+    if (!ctx.isOwner && !ctx.isAdmin && agent.scope !== "global") {
+      res.status(403).json({
+        success: false,
+        error: "Contributors can only manage shares on global agents",
+      });
       return;
     }
 
@@ -560,17 +674,13 @@ router.delete("/:slug/shares/:userId", requireAgentOwnerOrAdmin, async (req: Req
   }
 });
 
-// GET /agents/:slug/shares — list who an agent is shared with (owner or admin only)
-router.get("/:slug/shares", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+// GET /agents/:slug/shares — list who an agent is shared with.
+// Visible to owner, admin, and contributors so contributors can see who
+// else is on the team. Read-only — no privilege-escalation risk.
+router.get("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const agent = await agentRepository.findBySlug(req.params.slug);
-    if (!agent) {
-      res.status(404).json({ success: false, error: "Agent not found" });
-      return;
-    }
-
-    const shares = await agentShareRepository.listByAgent(agent.id);
-
+    const ctx = (req as Request & { agentContext: import("../middleware/agent-acl.js").AgentContext }).agentContext;
+    const shares = await agentShareRepository.listByAgent(ctx.agent.id);
     res.json({ success: true, data: shares });
   } catch (err) {
     console.error("[agents] list shares error:", err);
@@ -667,12 +777,31 @@ function extractUserToken(req: Request): string | undefined {
 function extractSessionId(req: Request): string | undefined {
   const header = req.headers["x-session-id"];
   if (typeof header === "string" && header) return header;
-  return getCookieValue(req, "user_session_id");
+  return getCookieValue(req, "xyne_session") ?? getCookieValue(req, "user_session_id");
 }
 
-function spacesUserAuthHeaders(userToken: string, sessionId: string | undefined): Record<string, string> {
+function extractWorkspaceId(req: Request): string | undefined {
+  const header = req.headers["x-workspace-id"];
+  if (typeof header === "string" && header) return header;
+  return getCookieValue(req, "xyne_last_workspace");
+}
+
+// /api/apps/* routes are mounted on Spaces' legacy `auth.ts` middleware, which
+// reads the session ONLY from the `xyne_session` cookie (gated behind a
+// truthy workspaceId). Send both Cookie + headers so we work on both legacy
+// and authV2 routes; otherwise these calls 401 ~15min after the JWT issues.
+function spacesUserAuthHeaders(
+  userToken: string,
+  sessionId: string | undefined,
+  workspaceId: string | undefined,
+): Record<string, string> {
   const headers: Record<string, string> = { Authorization: `Bearer ${userToken}` };
   if (sessionId) headers["x-session-id"] = sessionId;
+  if (workspaceId) headers["x-workspace-id"] = workspaceId;
+  const cookieParts: string[] = [];
+  if (sessionId) cookieParts.push(`xyne_session=${sessionId}`);
+  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+  if (cookieParts.length > 0) headers["Cookie"] = cookieParts.join("; ");
   return headers;
 }
 
@@ -687,11 +816,12 @@ router.post("/:slug/create-app", async (req: Request<{ slug: string }>, res: Res
     if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
     if (agent.spacesAppId) { res.status(400).json({ success: false, error: "Agent already has a Spaces App" }); return; }
 
-    const spacesUrl = CONFIG.spacesBackendUrl;
+    const spacesUrl = CONFIG.spacesInternalUrl;
     const sessionId = extractSessionId(req);
+    const workspaceId = extractWorkspaceId(req);
     const createRes = await fetch(`${spacesUrl}/api/apps/create`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId) },
+      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
       body: JSON.stringify({ name: agent.name, description: agent.description }),
     });
 
@@ -724,11 +854,12 @@ router.post("/:slug/install-app", async (req: Request<{ slug: string }>, res: Re
     if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
     if (agent.spacesAppToken) { res.status(400).json({ success: false, error: "App already installed" }); return; }
 
-    const spacesUrl = CONFIG.spacesBackendUrl;
+    const spacesUrl = CONFIG.spacesInternalUrl;
     const sessionId = extractSessionId(req);
+    const workspaceId = extractWorkspaceId(req);
     const installRes = await fetch(`${spacesUrl}/api/apps/install/${agent.spacesAppId}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId) },
+      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
     });
 
     if (!installRes.ok) {
@@ -773,13 +904,14 @@ router.post("/:slug/configure-webhook", async (req: Request<{ slug: string }>, r
     if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
     if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
 
-    const spacesUrl = CONFIG.spacesBackendUrl;
+    const spacesUrl = CONFIG.spacesInternalUrl;
     const sessionId = extractSessionId(req);
+    const workspaceId = extractWorkspaceId(req);
     const webhookUrl = `${CONFIG.selfUrl}/claw/api/v1/webhook/${req.params.slug}`;
 
     const configRes = await fetch(`${spacesUrl}/api/apps/configureWebhook/${agent.spacesAppId}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId) },
+      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
       body: JSON.stringify({ webhookUrl }),
     });
 
@@ -790,6 +922,22 @@ router.post("/:slug/configure-webhook", async (req: Request<{ slug: string }>, r
     }
 
     console.log(`[agents] Configured webhook for ${req.params.slug}: ${webhookUrl}`);
+
+    // Fetch + persist the per-app signingSecret so verify-spaces-signature can
+    // HMAC-check inbound webhook bodies. Best-effort — if Spaces is reachable
+    // for configureWebhook (just succeeded above) it's almost certainly
+    // reachable for signing-secret too. On failure we log and leave the
+    // signature column null; verify middleware stays warn-only for this agent
+    // until a future call (or the backfill script) succeeds.
+    await fetchAndStoreSigningSecretFromSpacesApi({
+      agentId: agent.id,
+      spacesAppId: agent.spacesAppId,
+      userAuthHeaders: spacesUserAuthHeaders(userToken, sessionId, workspaceId),
+    }).catch((err) => {
+      console.warn(`[agents] signing-secret fetch swallowed for ${req.params.slug}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    });
+
     res.json({ success: true, data: { webhookUrl } });
   } catch (err) {
     console.error("[agents] configure-webhook error:", err);
@@ -822,11 +970,12 @@ router.post(
       const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype });
       form.append("picture", blob, file.originalname);
 
-      const spacesUrl = CONFIG.spacesBackendUrl;
+      const spacesUrl = CONFIG.spacesInternalUrl;
       const sessionId = extractSessionId(req);
+      const workspaceId = extractWorkspaceId(req);
       const uploadRes = await fetch(`${spacesUrl}/api/apps/upload-picture/${agent.spacesAppId}`, {
         method: "POST",
-        headers: spacesUserAuthHeaders(userToken, sessionId),
+        headers: spacesUserAuthHeaders(userToken, sessionId, workspaceId),
         body: form,
       });
 
@@ -931,15 +1080,26 @@ export interface ClaudeModelInfo {
   displayName: string;
 }
 
-export async function fetchAnthropicModels(apiKey: string, baseUrl?: string): Promise<ClaudeModelInfo[]> {
+export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, authType?: string): Promise<ClaudeModelInfo[]> {
   const root = (baseUrl?.trim() || ANTHROPIC_BASE_URL).replace(/\/+$/, "");
+  // Anthropic OAuth tokens (Pro/Max via `claude setup-token`) authenticate
+  // with Authorization: Bearer + anthropic-beta=oauth-2025-04-20. The API
+  // key path (Console keys) uses x-api-key. Sending the OAuth token as
+  // x-api-key returns 401 "invalid x-api-key".
+  const isOAuth = authType === "oauth_token";
+  const headers: Record<string, string> = {
+    "anthropic-version": ANTHROPIC_VERSION,
+    "content-type": "application/json",
+  };
+  if (isOAuth) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+    headers["anthropic-beta"] = "oauth-2025-04-20";
+  } else {
+    headers["x-api-key"] = apiKey;
+  }
   const res = await fetch(`${root}/v1/models`, {
     method: "GET",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
+    headers,
     signal: AbortSignal.timeout(10_000),
   });
 
@@ -1077,13 +1237,15 @@ router.post("/:slug/user-config/:userId/github-poll", async (req: Request<{ slug
 
 router.post("/:slug/user-config/:userId/claude-models", async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
-    const { apiKey, baseUrl } = req.body as { apiKey?: string; baseUrl?: string };
+    const { apiKey, baseUrl, authType } = req.body as { apiKey?: string; baseUrl?: string; authType?: string };
     let resolvedApiKey = apiKey?.trim();
+    let resolvedAuthType: string | undefined = authType;
 
     if (!resolvedApiKey) {
       const existing = await userProviderCredentialsRepository.findByUserAndProvider(req.params.userId, "claude");
       if (existing?.encryptedKey && existing.iv && existing.authTag) {
         resolvedApiKey = decrypt(existing.encryptedKey, existing.iv, existing.authTag, CONFIG.encryptionKey);
+        if (!resolvedAuthType) resolvedAuthType = existing.authType ?? undefined;
       }
     }
 
@@ -1092,7 +1254,7 @@ router.post("/:slug/user-config/:userId/claude-models", async (req: Request<{ sl
       return;
     }
 
-    const models = await fetchAnthropicModels(resolvedApiKey, baseUrl);
+    const models = await fetchAnthropicModels(resolvedApiKey, baseUrl, resolvedAuthType);
     res.json({ success: true, data: models });
   } catch (err) {
     console.error("[agents] claude-models error:", err);
@@ -1155,5 +1317,868 @@ router.delete("/:slug/skills/:skillId", async (req: Request<{ slug: string; skil
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
+
+// ── Agent-scoped MCP connections ─────────────────────────────────────
+//
+// Each row pins a specific MCP credential set to this agent. At session
+// time, the credentials-resolver checks here BEFORE UserMcpConnection so
+// the agent owner's pinned creds always win for that agent's runs.
+//
+// All writes gated by requireAgentOwnerOrAdmin (same ACL as agent edit).
+// GET is gated the same way so we never leak "which MCPs are pinned"
+// metadata to non-editors. Decrypted credentials are never returned —
+// only { mcpServerId, mcpServerType, mcpServerName, createdByUserId,
+// createdAt }. To replace creds, callers POST the full new set; there's
+// no partial update.
+
+// Validate an instance slug: lowercase alphanumeric + hyphen, 1-32 chars.
+// Used to avoid funny chars leaking into the tool-prefix surface later
+// (`<serverType>-<slug>__<tool>`). 'default' is reserved for backfill.
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const isValidSlug = (s: unknown): s is string =>
+  typeof s === "string" && SLUG_RE.test(s);
+
+router.get("/:slug/mcp/connections", requireAgentOwnerContributorOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const agent = req.agentContext!.agent;
+    const connections = await prisma.agentMcpConnection.findMany({
+      where: { agentId: agent.id },
+      include: { mcpServer: { select: { id: true, type: true, name: true } } },
+      orderBy: [{ mcpServerId: "asc" }, { createdAt: "asc" }],
+    });
+    res.json({
+      success: true,
+      data: connections.map((c) => ({
+        id: c.id,
+        mcpServerId: c.mcpServerId,
+        mcpServerType: c.mcpServer.type,
+        mcpServerName: c.mcpServer.name,
+        slug: c.slug,
+        displayName: c.displayName ?? c.mcpServer.name,
+        createdByUserId: c.createdByUserId,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      })),
+    });
+  } catch (err) {
+    console.error("[agents] list mcp connections error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// Create a new agent-MCP instance OR update an existing one in place.
+// Identified by (agent, mcpServerType, slug). slug defaults to 'default'
+// (same key the backfill migration writes), so old single-instance callers
+// that didn't send a slug keep working — they always upsert the same row.
+router.post("/:slug/mcp/connections", requireAgentOwnerContributorOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const agent = req.agentContext!.agent;
+    const requesterId = getRequesterId(req);
+    const { mcpServerType, slug: rawSlug, displayName, credentials } = req.body as {
+      mcpServerType?: string;
+      slug?: string;
+      displayName?: string;
+      credentials?: Record<string, unknown>;
+    };
+    if (!mcpServerType || typeof mcpServerType !== "string") {
+      res.status(400).json({ success: false, error: "mcpServerType is required" });
+      return;
+    }
+    if (!credentials || typeof credentials !== "object") {
+      res.status(400).json({ success: false, error: "credentials object is required" });
+      return;
+    }
+    const instanceSlug = rawSlug ?? "default";
+    if (!isValidSlug(instanceSlug)) {
+      res.status(400).json({ success: false, error: "slug must be lowercase alphanumeric + hyphen, 1-32 chars" });
+      return;
+    }
+    const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+    if (!server) {
+      res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
+      return;
+    }
+
+    const { ciphertext, iv, authTag } = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
+    const cleanDisplayName = typeof displayName === "string" && displayName.trim().length > 0
+      ? displayName.trim()
+      : null;
+
+    const row = await prisma.agentMcpConnection.upsert({
+      where: { agentId_mcpServerId_slug: { agentId: agent.id, mcpServerId: server.id, slug: instanceSlug } },
+      create: {
+        agentId: agent.id,
+        mcpServerId: server.id,
+        slug: instanceSlug,
+        displayName: cleanDisplayName,
+        encryptedCreds: ciphertext,
+        iv,
+        authTag,
+        ...(requesterId ? { createdByUserId: requesterId } : {}),
+      },
+      update: {
+        encryptedCreds: ciphertext,
+        iv,
+        authTag,
+        // Only overwrite displayName when caller explicitly sent one.
+        // Stops a creds-only update from blowing away a previously-set label.
+        ...(cleanDisplayName !== null ? { displayName: cleanDisplayName } : {}),
+      },
+    });
+
+    await writeAuditLog({
+      ...(requesterId ? { actorUserId: requesterId } : {}),
+      eventType: "AGENT_SHARED", // closest existing enum — TODO: add AGENT_MCP_UPDATED
+      targetId: agent.id,
+      description: `Updated MCP "${mcpServerType}" / instance "${instanceSlug}" on agent "${agent.slug}"`,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        id: row.id,
+        mcpServerId: row.mcpServerId,
+        mcpServerType: server.type,
+        mcpServerName: server.name,
+        slug: row.slug,
+        displayName: row.displayName ?? server.name,
+        createdByUserId: row.createdByUserId,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      },
+    });
+  } catch (err) {
+    console.error("[agents] upsert mcp connection error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.delete(
+  "/:slug/mcp/connections/:mcpServerType/:instanceSlug",
+  requireAgentOwnerContributorOrAdmin,
+  async (req: Request<{ slug: string; mcpServerType: string; instanceSlug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const requesterId = getRequesterId(req);
+      const { mcpServerType, instanceSlug } = req.params;
+      if (!isValidSlug(instanceSlug)) {
+        res.status(400).json({ success: false, error: "Invalid instance slug" });
+        return;
+      }
+      const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+      if (!server) {
+        res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
+        return;
+      }
+      await prisma.agentMcpConnection.delete({
+        where: { agentId_mcpServerId_slug: { agentId: agent.id, mcpServerId: server.id, slug: instanceSlug } },
+      }).catch(() => undefined);
+
+      await writeAuditLog({
+        ...(requesterId ? { actorUserId: requesterId } : {}),
+        eventType: "AGENT_UNSHARED", // closest existing enum — TODO: add AGENT_MCP_DELETED
+        targetId: agent.id,
+        description: `Removed MCP "${mcpServerType}" / instance "${instanceSlug}" from agent "${agent.slug}"`,
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[agents] delete mcp connection error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+// ── POST /:slug/fork-subagent ────────────────────────────────────────
+//
+// One-click "fork a subagent for this agent's MCP instance" — primary
+// surface for the multi-instance MCP workflow. Lives on the agent route
+// (not the subagent route) because the agent's owner is the one who
+// knows BOTH which MCP instances they have AND which subagents they want
+// to specialize. The caller picks a source subagent and a slug map; we
+// copy the source's prompt/tools/skills into a NEW SubagentDefinition
+// with `mcpInstanceMap` set, and optionally enable the new subagent on
+// this agent in one shot.
+//
+// Body:
+//   {
+//     sourceName: string,                           // existing subagent to fork
+//     newName: string,                              // new SubagentDefinition.name
+//     mcpInstanceMap: Record<string, string>,       // pin map for the new fork
+//     enableOnAgent?: boolean = true,               // append to agent.config.tools.subagents
+//   }
+//
+// Note on builtins: forking a builtin is not supported in this slice — we
+// don't carry the builtin's tool surface into a custom row cleanly without
+// inventing a tool config. Caller should pick a CUSTOM source. Builtin
+// forking is a separate v1.5 follow-up.
+router.post("/:slug/fork-subagent", requireAgentOwnerContributorOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const agent = req.agentContext!.agent;
+    const requesterId = getRequesterId(req);
+    const { sourceName, newName, mcpInstanceMap, enableOnAgent } = req.body as {
+      sourceName?: string;
+      newName?: string;
+      mcpInstanceMap?: Record<string, string>;
+      enableOnAgent?: boolean;
+    };
+    if (!sourceName || typeof sourceName !== "string") {
+      res.status(400).json({ success: false, error: "sourceName is required" });
+      return;
+    }
+    if (!newName || typeof newName !== "string") {
+      res.status(400).json({ success: false, error: "newName is required" });
+      return;
+    }
+    if (sourceName === newName) {
+      res.status(400).json({ success: false, error: "newName must differ from sourceName" });
+      return;
+    }
+    if (!mcpInstanceMap || typeof mcpInstanceMap !== "object" || Array.isArray(mcpInstanceMap)) {
+      res.status(400).json({ success: false, error: "mcpInstanceMap is required and must be an object" });
+      return;
+    }
+
+    // 1) Resolve source. Try DB (custom subagents) first, then fall back to
+    //    the in-code SUBAGENT_DEFINITIONS (builtins like "sandbox", "spaces",
+    //    "bitbucket", etc.). Forking a builtin creates a NEW custom subagent
+    //    in the DB seeded from the builtin's prompt + param shape — the
+    //    builtin itself stays untouched.
+    // `progressLabels` and `tools` are typed `unknown` here because the
+    // validator accepts those shapes broadly — Prisma returns JsonValue
+    // shapes that don't narrow cleanly to string[] without a runtime guard
+    // we already trust the validator to perform.
+    type ForkSource = {
+      description: string;
+      progressLabels: unknown;
+      systemPrompt: string;
+      paramName: string;
+      paramDescription: string;
+      tools: unknown;
+      skillIds: string[];
+    };
+
+    let source: ForkSource | null = null;
+
+    const customSource = await prisma.subagentDefinition.findUnique({
+      where: { name: sourceName },
+      include: { skills: { include: { skill: true } } },
+    });
+    if (customSource) {
+      source = {
+        description: customSource.description,
+        progressLabels: customSource.progressLabels,
+        systemPrompt: customSource.systemPrompt,
+        paramName: customSource.paramName,
+        paramDescription: customSource.paramDescription,
+        tools: customSource.tools,
+        skillIds: customSource.skills.map((s) => s.skill.id),
+      };
+    } else {
+      // Builtin fallback. Builtin definitions don't carry `tools` or `skills`
+      // — the new custom subagent starts with an empty palette and inherits
+      // the builtin's MCP server via `mcpInstanceMap` from the request body.
+      // Admins can edit the resulting subagent to add tools/skills if needed.
+      const builtin = getSubagentDefinition(sourceName);
+      if (builtin) {
+        source = {
+          description: builtin.description,
+          progressLabels: builtin.progressLabels,
+          systemPrompt: builtin.systemPrompt,
+          paramName: builtin.paramName,
+          paramDescription: builtin.paramDescription,
+          tools: [],
+          skillIds: [],
+        };
+      }
+    }
+
+    if (!source) {
+      res.status(404).json({
+        success: false,
+        error: `Source subagent "${sourceName}" not found (neither a custom subagent nor a builtin)`,
+      });
+      return;
+    }
+
+    // 2) Reject duplicate newName up front — friendlier than the unique-key error.
+    const collision = await prisma.subagentDefinition.findUnique({ where: { name: newName }, select: { id: true } });
+    if (collision) {
+      res.status(409).json({ success: false, error: `A subagent named "${newName}" already exists` });
+      return;
+    }
+
+    // 3) Validate the rest via the standard validator, reusing the source's
+    //    fields. validateSubagentInput catches name shape, mcpInstanceMap
+    //    shape, and the source's tools/skills format.
+    const validated = await validateSubagentInput(
+      prisma,
+      {
+        name: newName,
+        description: source.description,
+        progressLabels: source.progressLabels,
+        systemPrompt: source.systemPrompt,
+        paramName: source.paramName,
+        paramDescription: source.paramDescription,
+        tools: source.tools,
+        skillIds: source.skillIds,
+        mcpInstanceMap,
+      },
+      { isCreate: true },
+    );
+
+    // 4) Create the new SubagentDefinition AND (optionally) enable it on the
+    //    agent in one transaction. If the agent update fails, we don't want
+    //    to leak an orphan subagent — Postgres rollback keeps both sides
+    //    consistent. Read-back of the agent inside the txn so we work off
+    //    fresh config in case someone else just edited it.
+    const { created, updatedAgent } = await prisma.$transaction(async (tx) => {
+      const createdRow = await tx.subagentDefinition.create({
+        data: {
+          name: validated.name,
+          description: validated.description,
+          progressLabels: validated.progressLabels,
+          systemPrompt: validated.systemPrompt,
+          paramName: validated.paramName,
+          paramDescription: validated.paramDescription,
+          tools: validated.tools as Prisma.InputJsonValue,
+          mcpInstanceMap: Object.keys(validated.mcpInstanceMap).length > 0
+            ? (validated.mcpInstanceMap as Prisma.InputJsonValue)
+            : Prisma.JsonNull,
+          ...(requesterId ? { createdByUserId: requesterId } : {}),
+          ...(validated.skillIds.length > 0
+            ? { skills: { create: validated.skillIds.map((skillId) => ({ skillId })) } }
+            : {}),
+        },
+        include: { skills: { include: { skill: true } } },
+      });
+
+      let nextAgent = agent;
+      if (enableOnAgent !== false) {
+        const fresh = await tx.agent.findUnique({ where: { id: agent.id } });
+        const cfg = (fresh?.config as Record<string, unknown> | null) ?? {};
+        const tools = (cfg["tools"] as Record<string, unknown> | undefined) ?? {};
+        const existingSubagents = Array.isArray(tools["subagents"]) ? (tools["subagents"] as string[]) : [];
+        if (!existingSubagents.includes(createdRow.name)) {
+          const nextTools = { ...tools, subagents: [...existingSubagents, createdRow.name] };
+          const nextConfig = { ...cfg, tools: nextTools };
+          nextAgent = await tx.agent.update({
+            where: { id: agent.id },
+            data: { config: nextConfig as Prisma.InputJsonValue },
+          });
+        } else if (fresh) {
+          nextAgent = fresh;
+        }
+      }
+      return { created: createdRow, updatedAgent: nextAgent };
+    });
+
+    await writeAuditLog({
+      ...(requesterId ? { actorUserId: requesterId } : {}),
+      eventType: "AGENT_SHARED", // closest existing enum — TODO: AGENT_SUBAGENT_FORKED
+      targetId: agent.id,
+      description: `Forked subagent "${sourceName}" → "${newName}" on agent "${agent.slug}" with mcpInstanceMap=${JSON.stringify(validated.mcpInstanceMap)}`,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        subagent: {
+          id: created.id,
+          name: created.name,
+          description: created.description,
+          systemPrompt: created.systemPrompt,
+          paramName: created.paramName,
+          paramDescription: created.paramDescription,
+          tools: created.tools,
+          mcpInstanceMap: created.mcpInstanceMap ?? {},
+          createdByUserId: created.createdByUserId,
+          createdAt: created.createdAt,
+          updatedAt: created.updatedAt,
+          skills: created.skills.map((s) => ({
+            id: s.skill.id,
+            slug: s.skill.slug,
+            name: s.skill.name,
+          })),
+        },
+        agent: {
+          slug: updatedAgent.slug,
+          subagents: ((((updatedAgent.config as Record<string, unknown> | null) ?? {})["tools"] as Record<string, unknown> | undefined)?.["subagents"] as string[] | undefined) ?? [],
+        },
+      },
+    });
+  } catch (err) {
+    // Surface validation errors as 400, everything else as 500.
+    if (err instanceof SubagentValidationError) {
+      res.status(400).json({ success: false, error: err.message, field: err.field });
+      return;
+    }
+    console.error("[agents] fork-subagent error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// `decrypt` is exported from crypto and used by other routes; keep the import
+// active here even if we don't decrypt in this slice — future "test connection"
+// endpoint will need it.
+void decrypt;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent-scoped OAuth flows (Codex ChatGPT PKCE + GitHub Copilot device code)
+//
+// Mirror of the user-scoped flows in routes/settings.ts but targets are:
+//   - Redis keys are scoped to (agentId, state) instead of (userId, state)
+//   - The minted credential bundle lands in agentProviderCredentials, not
+//     userProviderCredentials.
+//   - Gated by `requireAgentOwnerOrAdmin` — only owner/admin can wire up the
+//     team's Codex sub (or Copilot account) to the shared agent slot.
+//
+// Why duplicate rather than parameterize the existing user-scoped routes:
+//   - The user-scoped routes mix request identity (req.headers["x-user-id"])
+//     with storage targeting. Threading an "agentSlug" param into them would
+//     require both flows to live in one handler with a permission switch,
+//     which is harder to audit. Mirroring keeps each handler's permission
+//     contract simple: agent-scoped routes go through `requireAgentOwnerOrAdmin`,
+//     user-scoped routes go through user-session middleware. No shared mutable
+//     state path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AGENT_CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const AGENT_CODEX_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
+const AGENT_CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
+const AGENT_CODEX_REDIRECT_URI = "http://localhost:1455/auth/callback";
+const AGENT_CODEX_SCOPE = "openid profile email offline_access";
+const AGENT_CODEX_PKCE_PREFIX = "codex-pkce-agent:";
+const AGENT_CODEX_PKCE_TTL = 600;
+
+function agentBase64UrlEncode(buf: Buffer): string {
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function generateAgentCodexPkce(): { verifier: string; challenge: string } {
+  const verifier = agentBase64UrlEncode(crypto.randomBytes(32));
+  const challenge = agentBase64UrlEncode(crypto.createHash("sha256").update(verifier).digest());
+  return { verifier, challenge };
+}
+
+router.post(
+  "/:slug/provider-credentials/codex/oauth/start",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const { verifier, challenge } = generateAgentCodexPkce();
+      const state = agentBase64UrlEncode(crypto.randomBytes(16));
+
+      const redis = redisService.getConnection();
+      await redis.set(`${AGENT_CODEX_PKCE_PREFIX}${agent.id}:${state}`, verifier, "EX", AGENT_CODEX_PKCE_TTL);
+
+      const url = new URL(AGENT_CODEX_AUTHORIZE_URL);
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("client_id", AGENT_CODEX_CLIENT_ID);
+      url.searchParams.set("redirect_uri", AGENT_CODEX_REDIRECT_URI);
+      url.searchParams.set("scope", AGENT_CODEX_SCOPE);
+      url.searchParams.set("code_challenge", challenge);
+      url.searchParams.set("code_challenge_method", "S256");
+      url.searchParams.set("state", state);
+      url.searchParams.set("id_token_add_organizations", "true");
+      url.searchParams.set("codex_cli_simplified_flow", "true");
+      url.searchParams.set("originator", "codex_cli_rs");
+
+      res.json({ success: true, data: { url: url.toString(), state, expiresIn: AGENT_CODEX_PKCE_TTL } });
+    } catch (err) {
+      console.error("[agents] codex/oauth/start error:", err);
+      res.status(500).json({ success: false, error: "Failed to start Codex login" });
+    }
+  },
+);
+
+router.post(
+  "/:slug/provider-credentials/codex/oauth/exchange",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const requesterId = getRequesterId(req);
+      let { code, state } = (req.body ?? {}) as { code?: string; state?: string };
+
+      // Tolerate user pasting the full callback URL instead of bare code.
+      const raw = (code ?? "").trim();
+      if (raw && (raw.startsWith("http") || raw.includes("code="))) {
+        try {
+          const u = raw.startsWith("http") ? new URL(raw) : new URL(`http://x?${raw}`);
+          code = u.searchParams.get("code") ?? code;
+          state = u.searchParams.get("state") ?? state;
+        } catch { /* keep original */ }
+      }
+
+      if (!code || !state) {
+        res.status(400).json({ success: false, error: "code and state are required" });
+        return;
+      }
+
+      const redis = redisService.getConnection();
+      const key = `${AGENT_CODEX_PKCE_PREFIX}${agent.id}:${state}`;
+      const verifier = await redis.get(key);
+      if (!verifier) {
+        res.status(400).json({ success: false, error: "PKCE verifier expired — start login again" });
+        return;
+      }
+      await redis.del(key);
+
+      const tokRes = await fetch(AGENT_CODEX_TOKEN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: AGENT_CODEX_CLIENT_ID,
+          code,
+          code_verifier: verifier,
+          redirect_uri: AGENT_CODEX_REDIRECT_URI,
+        }),
+      });
+
+      if (!tokRes.ok) {
+        const text = await tokRes.text().catch(() => "");
+        res.status(502).json({ success: false, error: `OpenAI token exchange failed: ${tokRes.status} ${text.slice(0, 200)}` });
+        return;
+      }
+
+      const tokens = (await tokRes.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
+      if (!tokens.access_token || !tokens.refresh_token) {
+        res.status(502).json({ success: false, error: "OpenAI did not return tokens" });
+        return;
+      }
+
+      // Store the bundle (access + refresh + expiry) so a future refresh flow
+      // can mint new access tokens without re-prompting.
+      const bundle = JSON.stringify({
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: Date.now() + (tokens.expires_in ?? 600) * 1000,
+      });
+      const enc = encrypt(bundle, CONFIG.encryptionKey);
+
+      await agentProviderCredentialsRepository.upsert(agent.id, "codex", {
+        encryptedKey: enc.ciphertext,
+        iv: enc.iv,
+        authTag: enc.authTag,
+        authType: "oauth_token",
+        baseUrl: "https://api.openai.com/v1",
+        ...(requesterId ? { createdByUserId: requesterId } : {}),
+      });
+
+      await writeAuditLog({
+        ...(requesterId ? { actorUserId: requesterId } : {}),
+        eventType: "AGENT_SHARED",
+        targetId: agent.id,
+        description: `Configured Codex OAuth credentials on agent "${agent.slug}" via ChatGPT sign-in`,
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[agents] codex/oauth/exchange error:", err);
+      res.status(500).json({ success: false, error: "Codex login exchange failed" });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent-level Codex model list — mirror of `/settings/codex/models` but reads
+// the agent-scoped credential. ChatGPT OAuth tokens cannot hit OpenAI's
+// `/v1/models` (missing `api.model.read` scope, returns 403); Codex CLI works
+// around this by calling the ChatGPT backend's `/codex/models` endpoint with
+// `originator=codex_cli_rs`, which IS authorized for ChatGPT tokens and
+// returns the exact model picker list (gpt-5.5, gpt-5.4, gpt-5.3-codex, etc.).
+// API-key mode uses the standard Platform `/v1/models`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AGENT_CODEX_CHATGPT_BACKEND = "https://chatgpt.com/backend-api";
+
+interface AgentCodexBackendModel {
+  slug: string;
+  display_name?: string;
+  visibility?: string;
+  priority?: number;
+}
+
+function decodeAgentChatgptAccountId(jwt: string): string | undefined {
+  try {
+    const parts = jwt.split(".");
+    if (parts.length !== 3 || !parts[1]) return undefined;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString()) as Record<string, unknown>;
+    const auth = payload["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
+    const accountId = auth?.["chatgpt_account_id"];
+    return typeof accountId === "string" ? accountId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+router.get(
+  "/:slug/provider-credentials/codex/models",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const cred = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, "codex");
+      if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
+        res.status(400).json({ success: false, error: "Codex is not configured on this agent. Sign in or save an API key first." });
+        return;
+      }
+
+      const decrypted = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
+      const apiKey = extractCodexBearer(decrypted);
+      const isOauth = cred.authType === "oauth_token";
+
+      const url = isOauth
+        ? `${AGENT_CODEX_CHATGPT_BACKEND}/codex/models?client_version=0.0.0`
+        : `${(cred.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "")}/models`;
+
+      const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
+      if (isOauth) {
+        headers["originator"] = "codex_cli_rs";
+        headers["User-Agent"] = "codex_cli_rs/0.0.0 (xyne-claw-auth)";
+        const accountId = decodeAgentChatgptAccountId(apiKey);
+        if (accountId) headers["ChatGPT-Account-Id"] = accountId;
+      } else {
+        headers["User-Agent"] = "codex-cli";
+      }
+
+      const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+      if (!upstream.ok) {
+        const text = await upstream.text().catch(() => "");
+        res.status(502).json({ success: false, error: `Models endpoint ${upstream.status}: ${text.slice(0, 200)}` });
+        return;
+      }
+
+      if (isOauth) {
+        const body = (await upstream.json()) as { models?: AgentCodexBackendModel[] };
+        const data = body.models ?? [];
+        const models = data
+          .filter((m) => m.slug)
+          .filter((m) => m.visibility !== "hide" && m.visibility !== "none")
+          .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+          .map((m) => ({ id: m.slug, name: m.display_name ?? m.slug }));
+        res.json({ success: true, data: models });
+        return;
+      }
+
+      const body = (await upstream.json()) as { data?: Array<{ id?: string }> };
+      const models = (body.data ?? [])
+        .filter((m): m is { id: string } => Boolean(m.id))
+        .filter((m) => /^(gpt-|o\d|chatgpt-)/i.test(m.id))
+        .map((m) => ({ id: m.id, name: m.id }));
+      res.json({ success: true, data: models });
+    } catch (err) {
+      console.error("[agents] codex/models error:", err);
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Failed to fetch models" });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent-level provider credentials
+//
+// Shared API keys (Codex sub, team Anthropic key, OpenRouter, etc.) configured
+// at the AGENT level. Used as the fallback when a user runs the agent without
+// their own personal provider in Settings → Providers.
+//
+// Permission model:
+//   - Write (POST/PATCH/DELETE) → AGENT_OWNER or admin (requireAgentOwnerOrAdmin)
+//   - Read status (GET — never the decrypted key) → OWNER / CONTRIBUTOR / admin
+//     (requireAgentOwnerContributorOrAdmin)
+//   - The decrypted apiKey is NEVER returned by any endpoint; it is only ever
+//     decrypted in-process at dispatch time (webhook.ts / agent-chat.ts) and
+//     forwarded to xyne-claw inside the /run payload.
+//
+// Resolution precedence at session dispatch (see webhook.ts ≈ line 962):
+//   1. user's personal provider (userAgentConfig + userProviderCredentials)
+//   2. agent-level provider (agent.config.provider + THIS TABLE)
+//   3. "spaces" / LiteLLM platform default
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ALLOWED_PROVIDERS = new Set(["copilot", "claude", "codex", "openrouter"]);
+
+router.get(
+  "/:slug/provider-credentials",
+  requireAgentOwnerContributorOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const rows = await agentProviderCredentialsRepository.listByAgent(agent.id);
+      // Return STATUS only — provider/model/baseUrl/authType + metadata.
+      // Never echo encryptedKey, iv, or authTag.
+      res.json({
+        success: true,
+        data: {
+          providers: rows.map((r) => ({
+            provider: r.provider,
+            model: r.model ?? null,
+            baseUrl: r.baseUrl ?? null,
+            authType: r.authType ?? null,
+            reasoningEffort: r.reasoningEffort ?? null,
+            configured: Boolean(r.encryptedKey && r.iv && r.authTag),
+            createdByUserId: r.createdByUserId ?? null,
+            createdAt: r.createdAt,
+            updatedAt: r.updatedAt,
+          })),
+        },
+      });
+    } catch (err) {
+      console.error("[agents] list provider-credentials error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+router.post(
+  "/:slug/provider-credentials",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const requesterId = getRequesterId(req);
+      const body = req.body as {
+        provider?: string;
+        apiKey?: string;
+        model?: string;
+        baseUrl?: string;
+        authType?: string;
+        reasoningEffort?: string | null;
+      };
+
+      const provider = (body.provider ?? "").trim();
+      const apiKey = (body.apiKey ?? "").trim();
+      const model = (body.model ?? "").trim() || null;
+      const baseUrl = (body.baseUrl ?? "").trim() || null;
+      const authType = (body.authType ?? "").trim() || null;
+      const rawEffort = typeof body.reasoningEffort === "string" ? body.reasoningEffort.trim() : body.reasoningEffort;
+      let reasoningEffort: string | null;
+      if (rawEffort === undefined || rawEffort === null || rawEffort === "") {
+        reasoningEffort = null;
+      } else if (rawEffort !== "low" && rawEffort !== "medium" && rawEffort !== "high") {
+        res.status(400).json({ success: false, error: "reasoningEffort must be 'low', 'medium', or 'high'" });
+        return;
+      } else {
+        reasoningEffort = rawEffort;
+      }
+
+      if (!provider || !ALLOWED_PROVIDERS.has(provider)) {
+        res.status(400).json({
+          success: false,
+          error: `provider must be one of: ${[...ALLOWED_PROVIDERS].join(", ")}`,
+        });
+        return;
+      }
+      if (authType && authType !== "api_key" && authType !== "oauth_token") {
+        res.status(400).json({ success: false, error: "authType must be 'api_key' or 'oauth_token'" });
+        return;
+      }
+
+      const existing = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, provider);
+
+      // Allow model-only / baseUrl-only updates when the credential already
+      // exists (no apiKey supplied). The OAuth flow saves the bundle first
+      // with no model, then the UI calls back with the chosen model from the
+      // dropdown — we must not require apiKey for that follow-up update.
+      if (!apiKey && !existing) {
+        res.status(400).json({ success: false, error: "apiKey is required for the first save" });
+        return;
+      }
+
+      if (apiKey) {
+        const { ciphertext, iv, authTag } = encrypt(apiKey, CONFIG.encryptionKey);
+        await agentProviderCredentialsRepository.upsert(agent.id, provider, {
+          encryptedKey: ciphertext,
+          iv,
+          authTag,
+          model,
+          baseUrl,
+          authType,
+          reasoningEffort,
+          ...(requesterId ? { createdByUserId: requesterId } : {}),
+        });
+      } else {
+        // Update metadata only — preserve the existing encrypted bundle, iv,
+        // authTag, and (where unspecified) authType. Useful for: pick model
+        // from dropdown after OAuth, rename baseUrl, etc.
+        await agentProviderCredentialsRepository.upsert(agent.id, provider, {
+          encryptedKey: existing!.encryptedKey,
+          iv: existing!.iv,
+          authTag: existing!.authTag,
+          model,
+          baseUrl: baseUrl ?? existing!.baseUrl,
+          authType: authType ?? existing!.authType,
+          reasoningEffort: rawEffort === undefined ? existing!.reasoningEffort : reasoningEffort,
+          ...(requesterId ? { createdByUserId: requesterId } : {}),
+        });
+      }
+
+      await writeAuditLog({
+        ...(requesterId ? { actorUserId: requesterId } : {}),
+        eventType: "AGENT_SHARED", // closest existing enum — TODO: AGENT_PROVIDER_CRED_SET
+        targetId: agent.id,
+        description: `${existing ? "Updated" : "Set"} ${provider} provider credentials on agent "${agent.slug}" (model=${model ?? "default"}, authType=${authType ?? "api_key"})`,
+      });
+
+      res.status(existing ? 200 : 201).json({
+        success: true,
+        data: {
+          provider,
+          model,
+          baseUrl,
+          authType,
+          reasoningEffort: rawEffort === undefined ? existing?.reasoningEffort ?? null : reasoningEffort,
+          configured: true,
+        },
+      });
+    } catch (err) {
+      console.error("[agents] set provider-credentials error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+router.delete(
+  "/:slug/provider-credentials/:provider",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string; provider: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const requesterId = getRequesterId(req);
+      const provider = req.params.provider;
+
+      if (!ALLOWED_PROVIDERS.has(provider)) {
+        res.status(400).json({ success: false, error: "invalid provider" });
+        return;
+      }
+
+      try {
+        await agentProviderCredentialsRepository.delete(agent.id, provider);
+      } catch (err) {
+        // Prisma throws P2025 when the row doesn't exist — treat as idempotent 404.
+        const code = (err as { code?: string } | undefined)?.code;
+        if (code === "P2025") {
+          res.status(404).json({ success: false, error: "no credentials configured for that provider" });
+          return;
+        }
+        throw err;
+      }
+
+      await writeAuditLog({
+        ...(requesterId ? { actorUserId: requesterId } : {}),
+        eventType: "AGENT_SHARED", // closest existing enum — TODO: AGENT_PROVIDER_CRED_DELETED
+        targetId: agent.id,
+        description: `Deleted ${provider} provider credentials from agent "${agent.slug}"`,
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[agents] delete provider-credentials error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
 
 export { router as agentsRouter };

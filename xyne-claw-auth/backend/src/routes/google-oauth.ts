@@ -9,6 +9,8 @@ import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
+import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
+import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 
 const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -18,8 +20,20 @@ const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/contacts.readonly",
   "https://www.googleapis.com/auth/tasks",
+  // Needed for creating/updating spreadsheets and sheet values.
+  "https://www.googleapis.com/auth/spreadsheets",
+  // Needed for creating/updating Google Docs document content.
+  "https://www.googleapis.com/auth/documents",
+  // Needed for creating/updating Google Slides presentations.
+  "https://www.googleapis.com/auth/presentations",
+  // Needed for reading/updating Google Forms structure/content.
+  "https://www.googleapis.com/auth/forms.body",
+  // Needed for reading Google Forms response data.
+  "https://www.googleapis.com/auth/forms.responses.readonly",
+  // Needed for creating/managing Sheets files the app can access/write.
+  "https://www.googleapis.com/auth/drive.file",
+  // Needed for searching/reading all user Drive files (not just app-created ones).
   "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/spreadsheets.readonly",
 ];
 
 function getGoogleCredentials(): { clientId: string; clientSecret: string } {
@@ -38,6 +52,7 @@ interface GoogleTokens {
 }
 
 const router = Router();
+router.use("/:userId", pinUserIdParam);
 
 /**
  * GET /:userId/oauth/google/token
@@ -131,7 +146,7 @@ router.post("/:userId/oauth/google/authorize", async (req: Request<{ userId: str
     authUrl.searchParams.set("scope", GOOGLE_SCOPES.join(" "));
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
-    authUrl.searchParams.set("state", userId);
+    authUrl.searchParams.set("state", signOAuthState(userId));
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
@@ -241,14 +256,14 @@ router.post("/:userId/oauth/google/callback", async (req: Request<{ userId: stri
 export const googleCallbackRouter = Router();
 
 googleCallbackRouter.get("/google/callback", async (req: Request, res: Response) => {
+  const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
+
   try {
-    const { code, state: userId, error: oauthError } = req.query as {
+    const { code, state, error: oauthError } = req.query as {
       code?: string;
       state?: string;
       error?: string;
     };
-
-    const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
 
     if (oauthError) {
       console.error(`[google-oauth] OAuth error: ${oauthError}`);
@@ -256,8 +271,18 @@ googleCallbackRouter.get("/google/callback", async (req: Request, res: Response)
       return;
     }
 
-    if (!code || !userId) {
+    if (!code || !state) {
       res.redirect(`${frontendUrl}?google_error=missing_code_or_state`);
+      return;
+    }
+
+    let userId: string;
+    try {
+      userId = verifyOAuthState(state).userId;
+    } catch (err) {
+      const reason = err instanceof OAuthStateError ? err.reason : "malformed";
+      console.error(`[google-oauth] state ${reason}`);
+      res.redirect(`${frontendUrl}?google_error=invalid_state`);
       return;
     }
 
@@ -346,7 +371,6 @@ googleCallbackRouter.get("/google/callback", async (req: Request, res: Response)
     res.redirect(`${frontendUrl}?google_connected=true`);
   } catch (err) {
     console.error("[google-oauth] browser callback error:", err);
-    const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
     res.redirect(`${frontendUrl}?google_error=internal_error`);
   }
 });

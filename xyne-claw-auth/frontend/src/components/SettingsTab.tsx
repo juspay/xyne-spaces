@@ -204,7 +204,7 @@ function ProviderCredentialCard({
   provider: string;
   existing?: ProviderCredential;
   saving: boolean;
-  onSave: (payload: { apiKey?: string; model?: string; baseUrl?: string; authType?: "api_key" | "oauth_token" }) => Promise<void>;
+  onSave: (payload: { apiKey?: string; model?: string; baseUrl?: string; authType?: "api_key" | "oauth_token"; reasoningEffort?: "low" | "medium" | "high" }) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const meta = PROVIDER_META[provider];
@@ -212,6 +212,11 @@ function ProviderCredentialCard({
   const [authType, setAuthType] = useState<"api_key" | "oauth_token">(existing?.authType === "oauth_token" ? "oauth_token" : "api_key");
   const [model, setModel] = useState(existing?.model ?? meta?.defaultModel ?? "");
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? meta?.defaultBaseUrl ?? "");
+  const [reasoningEffort, setReasoningEffort] = useState<"low" | "medium" | "high">(
+    existing?.reasoningEffort === "low" || existing?.reasoningEffort === "medium" || existing?.reasoningEffort === "high"
+      ? existing.reasoningEffort
+      : "medium",
+  );
   const [editing, setEditing] = useState(false);
   const [models, setModels] = useState<ClaudeModelInfo[] | null>(null);
   const [modelsErr, setModelsErr] = useState<string | null>(null);
@@ -225,7 +230,10 @@ function ProviderCredentialCard({
     setModel(existing?.model ?? meta?.defaultModel ?? "");
     setBaseUrl(existing?.baseUrl ?? meta?.defaultBaseUrl ?? "");
     setAuthType(existing?.authType === "oauth_token" ? "oauth_token" : "api_key");
-  }, [existing?.model, existing?.baseUrl, existing?.authType, meta?.defaultModel, meta?.defaultBaseUrl]);
+    if (existing?.reasoningEffort === "low" || existing?.reasoningEffort === "medium" || existing?.reasoningEffort === "high") {
+      setReasoningEffort(existing.reasoningEffort);
+    }
+  }, [existing?.model, existing?.baseUrl, existing?.authType, existing?.reasoningEffort, meta?.defaultModel, meta?.defaultBaseUrl]);
 
   const hasKey = Boolean(existing?.hasApiKey);
   const isClaude = provider === "claude";
@@ -422,9 +430,24 @@ function ProviderCredentialCard({
               className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 shadow-sm transition-colors hover:border-zinc-600 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
             />
           </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-zinc-400">Reasoning effort</label>
+            <select
+              value={reasoningEffort}
+              onChange={(e) => setReasoningEffort(e.target.value as "low" | "medium" | "high")}
+              className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 shadow-sm transition-colors hover:border-zinc-600 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+            >
+              <option value="low">Low — fastest, minimal think time</option>
+              <option value="medium">Medium — balanced (default)</option>
+              <option value="high">High — deepest reasoning, slowest</option>
+            </select>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Only applies to reasoning-capable models (e.g. gpt-5.x, codex). Lower = faster per-turn responses.
+            </p>
+          </div>
           <button
             onClick={async () => {
-              const payload: { apiKey?: string; model?: string; baseUrl?: string; authType?: "api_key" | "oauth_token" } = { model, baseUrl };
+              const payload: { apiKey?: string; model?: string; baseUrl?: string; authType?: "api_key" | "oauth_token"; reasoningEffort?: "low" | "medium" | "high" } = { model, baseUrl, reasoningEffort };
               if (supportsOauth) payload.authType = authType;
               if (apiKey) payload.apiKey = apiKey;
               else if (!hasKey) { return; }

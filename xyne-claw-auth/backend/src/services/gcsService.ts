@@ -63,6 +63,16 @@ class GCSService {
     const [ok] = await this.bucket.file(gcsPath).exists();
     return ok;
   }
+
+  /**
+   * List file paths under a prefix. Returns the GCS object names (paths)
+   * sorted lexicographically. Used by the session-restore endpoint to find
+   * everything archived under `claw-sessions/{conversationId}/`.
+   */
+  async listFiles(prefix: string): Promise<string[]> {
+    const [files] = await this.bucket.getFiles({ prefix });
+    return files.map((f) => f.name).sort();
+  }
 }
 
 export const gcsService = GCSService.getInstance();

@@ -3,11 +3,18 @@ import type { RepoSetupConfig } from "./tools.js";
 /**
  * Centralized repository setup configurations.
  * Single source of truth for all repo sandbox setups.
- * 
+ *
  * To add a new repo:
  * 1. Add config object to REPO_CONFIGS
  * 2. Tools are auto-registered in registry.ts
  */
+
+// Branches that have the `claw:test` script (sandbox-specific test mode with
+// SANDBOX_TEST_MODE / VITE_SANDBOX_TEST_MODE) prefer it; older branches fall
+// back to plain `dev:test`. Use `if/then/else/fi` rather than `cmd && a || b`
+// so a real failure inside `claw:test` doesn't silently re-run `dev:test`.
+const TEST_CMD = `if grep -q '"claw:test"' package.json; then npm run claw:test; else npm run dev:test; fi`;
+
 export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
   
   "xyne-spaces": {
@@ -64,15 +71,17 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
       {
         type: "devserver",
         name: "backend",
-        // Use dev:test so NODE_ENV=test, which registers the
-        // /api/test/auth/login route the testing skill relies on.
-        // Plain `npm run dev` hardcodes NODE_ENV=development, so
-        // wrapping with `NODE_ENV=test` from outside is ignored.
-        cmd: "npm run dev:test",
+        // Prefer `claw:test` when the branch has it (sets
+        // SANDBOX_TEST_MODE on top of NODE_ENV=test); otherwise fall back
+        // to `dev:test` which still registers the /api/test/auth/login
+        // route the testing skill relies on. Plain `npm run dev`
+        // hardcodes NODE_ENV=development, so wrapping with `NODE_ENV=test`
+        // from outside is ignored.
+        cmd: TEST_CMD,
         cwd: "/workspace/xyne-spaces/backend",
-        // entrypoint.sh prebake runs the same `npm run dev:test`; this
-        // skips a duplicate start (port 3001 EADDRINUSE) when the
-        // marker is present.
+        // entrypoint.sh prebake runs the same test command; this skips a
+        // duplicate start (port 3001 EADDRINUSE) when the marker is
+        // present.
         markerPath: "/tmp/backend-up",
       },
       {
@@ -80,15 +89,14 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
         name: "dashboard",
         // Vite test mode — frontend auth guards check
         // import.meta.env.MODE === 'test' (dashboard/src/config.ts)
-        // before allowing the deterministic test-login flow.
-        cmd: "npm run dev:test",
+        // before allowing the deterministic test-login flow. `claw:test`
+        // additionally exposes VITE_SANDBOX_TEST_MODE; older branches
+        // without it fall back to `dev:test`.
+        cmd: TEST_CMD,
         cwd: "/workspace/xyne-spaces/dashboard",
         markerPath: "/tmp/dashboard-up",
       },
     ],
     ports: { backend: 3001, dashboard: 5173 },
   },
-
-  // Future repos go here...
-  // "my-service": { ... },
 };

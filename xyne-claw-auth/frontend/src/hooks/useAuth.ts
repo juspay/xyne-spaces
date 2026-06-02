@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { getMe, getLoginUrl, upsertUser } from "../lib/api";
+import { frontendConfig } from "../lib/config";
 import type { User } from "../lib/types";
 
 type AuthState =
@@ -7,7 +8,7 @@ type AuthState =
   | { status: "authenticated"; user: User }
   | { status: "unauthenticated" };
 
-const AUTH_BASE_URL = (import.meta.env.VITE_XYNE_BACKEND_URL || "") + "/api/auth";
+const AUTH_BASE_URL = `${frontendConfig.spacesAuthBaseUrl}/api/auth`;
 
 /**
  * Gate the authV2 two-step login handshake (Google callback redirect with

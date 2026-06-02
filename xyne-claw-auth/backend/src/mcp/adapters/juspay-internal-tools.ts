@@ -12,22 +12,16 @@ export const juspayInternalToolsAdapter: StdioMcpAdapter = {
   type: "juspay-internal-tools",
   healthCheck: { name: "ping", params: {} },
   writeTools: [],
-  credentialFields: [
-    { name: "token", label: "Xyne Space Token", type: "password", placeholder: "******************" },
-    { name: "juspay_token", label: "Juspay Token", type: "password", placeholder: "*****************" },
-    { name: "pomerium_cookie", label: "Pomerium Cookie (_pomerium value)", type: "password", placeholder: "eyJhbGciOi..." },
-  ],
-  buildCommand(credentials) {
-    const token = credentials["token"] as string;
-    const juspayToken = credentials["juspay_token"] as string;
-    const pomeriumCookie = (credentials["pomerium_cookie"] as string) ?? "";
+  credentialFields: [],
+  buildCommand(_credentials) {
     return {
       cmd: "node",
       args: ["--import", "tsx/esm", SERVER_PATH],
       env: {
-        XYNE_SPACE_TOKEN: token,
-        JUSPAY_TOKEN: juspayToken,
-        JUSPAY_POMERIUM_COOKIE: pomeriumCookie,
+        JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN: process.env["JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN"] ?? "",
+        ...(process.env["JUSPAY_INTERNAL_TOOLS_BASE_URL"]
+          ? { JUSPAY_INTERNAL_TOOLS_BASE_URL: process.env["JUSPAY_INTERNAL_TOOLS_BASE_URL"] }
+          : {}),
       },
     };
   },

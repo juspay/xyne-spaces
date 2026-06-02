@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Trash2, ChevronDown, ChevronRight, Link2, Save, X, Plus, Settings, Sparkles, Loader2 } from "lucide-react";
-import { listAgents, getAgentDetail, updateAgent, listScheduledJobs, deleteScheduledJob, listScheduledJobRuns, getUserChainConfig, setUserChainConfig } from "../lib/api";
+import { ArrowLeft, Trash2, ChevronDown, ChevronRight, Link2, Save, X, Plus, Settings, Sparkles, Loader2, Share2, UserPlus, Brain, Plug, Cpu } from "lucide-react";
+import { listAgents, getAgentDetail, updateAgent, listScheduledJobs, deleteScheduledJob, updateScheduledJob, listScheduledJobRuns, getUserChainConfig, setUserChainConfig, listAgentShares, addAgentShare, removeAgentShare } from "../lib/api";
+import { ChainWorkflowEditor } from "./ChainWorkflowEditor";
+import { CollapsibleSection } from "./CollapsibleSection";
+import { MemoryTab } from "../v2/components/MemoryTab";
+import { AgentMcpTab } from "./AgentMcpTab";
 import type { Agent, AgentSkill, ScheduledJob, ScheduledJobRun } from "../lib/types";
 
 interface Props {
@@ -53,10 +57,11 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
   const [runs, setRuns] = useState<ScheduledJobRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"configure" | "jobs" | "runs" | "chain">("jobs");
+  const [activeTab, setActiveTab] = useState<"configure" | "jobs" | "runs" | "chain" | "share" | "memory" | "mcp" | "provider">("configure");
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [allAgents, setAllAgents] = useState<Agent[]>([]);
+  const [myShare, setMyShare] = useState<{ role: string } | null>(null);
 
   const loadData = useCallback(async () => {
     if (!slug) return;
@@ -73,6 +78,18 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
       setAllAgents(agentList);
       setJobs(jobList);
       setRuns(runList);
+      // Fetch my share record if I'm not the owner
+      if (agentDetail && agentDetail.ownerUserId !== userId) {
+        try {
+          const shares = await listAgentShares(slug, userId);
+          const mine = shares.find((s) => s.userId === userId);
+          setMyShare(mine ? { role: mine.role } : null);
+        } catch {
+          setMyShare(null);
+        }
+      } else {
+        setMyShare(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load data");
     } finally {
@@ -101,6 +118,40 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
     }
   }, [loadData]);
 
+  // Returns a structured result instead of throwing. Existing callers
+  // (replyMode dropdown, channel picker) keep their existing behavior —
+  // failures surface via the page-level error banner. The cron-edit flow
+  // inspects the result so the editor can stay open with an inline error
+  // on validation failures (typos, min-interval breaches).
+  const handleUpdateJob = useCallback(
+    async (
+      jobId: string,
+      patch: { replyMode?: "thread" | "channel"; targetChannelId?: string | null; cronExpression?: string; nextRunAt?: string },
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+      try {
+        const updated = await updateScheduledJob(jobId, patch);
+        setJobs((prev) => prev.map((j) => (j.id === jobId ? updated : j)));
+        return { ok: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to update job";
+        // Skip the page-level banner when this is a cron-edit failure —
+        // the JobCard owns inline error rendering for that flow and we
+        // don't want the message duplicated. Other flows (replyMode,
+        // targetChannelId) have no local UI, so we still surface to
+        // the page banner there.
+        // Cron and once-time reschedule both render error inline next to
+        // their input in the card. Skip the page banner for those.
+        const isInlineHandledPatch =
+          (patch.cronExpression !== undefined || patch.nextRunAt !== undefined) &&
+          patch.replyMode === undefined &&
+          patch.targetChannelId === undefined;
+        if (!isInlineHandledPatch) setError(msg);
+        return { ok: false, error: msg };
+      }
+    },
+    [],
+  );
+
   if (loading) {
     return <p className="text-zinc-400">Loading...</p>;
   }
@@ -117,7 +168,14 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
   }
 
   const isOwner = agent.ownerUserId === userId;
-  const canEdit = isOwner || (agent.scope === "global" && !!isAdmin);
+  const isContributor = myShare?.role === "CONTRIBUTOR" || myShare?.role === "EDITOR";
+  const canEdit = isOwner || (!!isAdmin) || isContributor;
+  const canShare = isOwner || (!!isAdmin);
+  // Anyone can VIEW the configure tab of a global agent in read-only mode —
+  // prompt + tool selection are public so callers can understand what the
+  // agent does before invoking it. Personal agents stay invisible to
+  // non-owners.
+  const canViewConfigure = canEdit || agent.scope === "global";
   const activeJobs = jobs.filter((j) => j.status === "active");
   const inactiveJobs = jobs.filter((j) => j.status !== "active");
 
@@ -146,7 +204,7 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
 
       {/* Tab bar */}
       <div className="mb-6 flex gap-1 border-b border-zinc-800">
-        {canEdit && (
+        {canViewConfigure && (
           <button
             onClick={() => setActiveTab("configure")}
             className={`px-4 py-2 text-sm font-medium transition ${
@@ -155,7 +213,7 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
                 : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            <span className="flex items-center gap-1.5"><Settings size={14} /> Configure</span>
+            <span className="flex items-center gap-1.5"><Settings size={14} /> {canEdit ? "Configure" : "View Config"}</span>
           </button>
         )}
         <button
@@ -188,11 +246,60 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
         >
           <span className="flex items-center gap-1.5"><Link2 size={14} /> Chain</span>
         </button>
+        {canShare && (
+          <button
+            onClick={() => setActiveTab("share")}
+            className={`px-4 py-2 text-sm font-medium transition ${
+              activeTab === "share"
+                ? "border-b-2 border-zinc-100 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <span className="flex items-center gap-1.5"><Share2 size={14} /> Contributors</span>
+          </button>
+        )}
+        {canEdit && (
+          <button
+            onClick={() => setActiveTab("memory")}
+            className={`px-4 py-2 text-sm font-medium transition ${
+              activeTab === "memory"
+                ? "border-b-2 border-zinc-100 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <span className="flex items-center gap-1.5"><Brain size={14} /> Memory</span>
+          </button>
+        )}
+        {canEdit && (
+          <button
+            onClick={() => setActiveTab("mcp")}
+            className={`px-4 py-2 text-sm font-medium transition ${
+              activeTab === "mcp"
+                ? "border-b-2 border-zinc-100 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <span className="flex items-center gap-1.5"><Plug size={14} /> MCPs</span>
+          </button>
+        )}
+        {(isOwner || !!isAdmin) && (
+          <button
+            onClick={() => setActiveTab("provider")}
+            className={`px-4 py-2 text-sm font-medium transition ${
+              activeTab === "provider"
+                ? "border-b-2 border-zinc-100 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <span className="flex items-center gap-1.5"><Cpu size={14} /> Provider</span>
+          </button>
+        )}
       </div>
 
-      {/* Configure tab (personal agents only) */}
-      {activeTab === "configure" && canEdit && agent && (
-        <AgentConfigEditor agent={agent} userId={userId} onSave={loadData} />
+      {/* Configure tab — full edit for owner/admin/contributor; read-only
+          view for everyone else if the agent is global. */}
+      {activeTab === "configure" && canViewConfigure && agent && (
+        <AgentConfigEditor agent={agent} userId={userId} onSave={loadData} readOnly={!canEdit} />
       )}
 
       {/* Scheduled Jobs tab */}
@@ -208,7 +315,7 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
                 <div className="space-y-2">
                   <h3 className="text-sm font-medium text-zinc-300">Active</h3>
                   {activeJobs.map((job) => (
-                    <JobCard key={job.id} job={job} deleting={deleting === job.id} onDelete={handleDelete} />
+                    <JobCard key={job.id} job={job} deleting={deleting === job.id} onDelete={handleDelete} onUpdate={handleUpdateJob} />
                   ))}
                 </div>
               )}
@@ -216,7 +323,7 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
                 <div className="mt-4 space-y-2">
                   <h3 className="text-sm font-medium text-zinc-500">Completed / Cancelled</h3>
                   {inactiveJobs.map((job) => (
-                    <JobCard key={job.id} job={job} deleting={deleting === job.id} onDelete={handleDelete} />
+                    <JobCard key={job.id} job={job} deleting={deleting === job.id} onDelete={handleDelete} onUpdate={handleUpdateJob} />
                   ))}
                 </div>
               )}
@@ -247,24 +354,903 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
 
       {/* Chain Configuration tab */}
       {activeTab === "chain" && agent && (
-        <ChainEditor
+        <div className="space-y-8">
+          <ChainWorkflowEditor
+            agent={agent}
+            allAgents={allAgents.filter((a) => a.slug !== agent.slug)}
+          />
+
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+            <h3 className="mb-2 text-sm font-semibold text-zinc-300">Legacy per-user chain config</h3>
+            <p className="mb-4 text-xs text-zinc-500">Kept temporarily for compatibility; channel-level workflow above is the new path.</p>
+            <ChainEditor
+              agent={agent}
+              userId={userId}
+              allAgents={allAgents.filter((a) => a.slug !== agent.slug)}
+              onSave={async (chainConfig) => {
+                await setUserChainConfig(agent.slug, userId, chainConfig);
+              }}
+              loadConfig={async () => {
+                return getUserChainConfig(agent.slug, userId);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Contributors tab */}
+      {activeTab === "share" && canShare && agent && (
+        <ContributorsPanel
           agent={agent}
           userId={userId}
-          allAgents={allAgents.filter((a) => a.slug !== agent.slug)}
-          onSave={async (chainConfig) => {
-            await setUserChainConfig(agent.slug, userId, chainConfig);
-          }}
-          loadConfig={async () => {
-            return getUserChainConfig(agent.slug, userId);
-          }}
+          onUpdate={loadData}
         />
+      )}
+
+      {/* Memory tab — gated on canEdit, same as Configure. */}
+      {activeTab === "memory" && canEdit && agent && (
+        <MemoryTab agentSlug={agent.slug} canDelete={canEdit} />
+      )}
+
+      {/* MCPs tab — pin per-agent MCP credentials. Gated on canEdit. */}
+      {activeTab === "mcp" && canEdit && agent && (
+        <AgentMcpTab agentSlug={agent.slug} userId={userId} canEdit={canEdit} />
+      )}
+
+      {/* Provider tab — agent-level default LLM + shared API credentials.
+          Gated on owner/admin: contributors and viewers don't see the tab
+          button at all (defense in depth: backend also enforces). */}
+      {activeTab === "provider" && (isOwner || !!isAdmin) && agent && (
+        <ProviderTab agent={agent} onSave={loadData} />
       )}
 
     </div>
   );
 }
 
-function JobCard({ job, deleting, onDelete }: { job: ScheduledJob; deleting: boolean; onDelete: (id: string) => void }) {
+/**
+ * Provider tab — owner/admin-only surface to configure the agent-level
+ * default LLM provider and the shared API credentials behind it.
+ *
+ * Resolution precedence at session dispatch (in claw-auth/webhook.ts):
+ *   1. user's personal provider (Settings → Providers)
+ *   2. agent.config.provider + this tab's credentials  ← here
+ *   3. "spaces" / LiteLLM platform default
+ *
+ * Permission model: tab button only renders for owner/admin, but backend
+ * enforces the same gate independently — a contributor manipulating the
+ * frontend would still get 403 from the POST/DELETE endpoints.
+ *
+ * Decrypted key is never echoed back by any read endpoint. The "Save
+ * credential" flow writes encrypted-at-rest; subsequent loads show only
+ * { provider, model, baseUrl, authType, configured: true } metadata.
+ */
+function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
+  // Provider preference order is now the single source of truth — first entry
+  // serves as the parent (formerly "default provider"), subsequent entries
+  // form the quota-fallback chain. Backwards compat: if no list is set we
+  // seed from the legacy `config.provider` field so existing agents look
+  // sensible without a manual re-save.
+  const seedOrder: string[] = (() => {
+    if (Array.isArray(agent.config?.providerOrder)) {
+      return (agent.config?.providerOrder as unknown[]).filter((p): p is string => typeof p === "string");
+    }
+    const legacy = agent.config?.provider as string | undefined;
+    return legacy ? [legacy] : [];
+  })();
+  const [providerOrder, setProviderOrder] = useState<string[]>(seedOrder);
+  const [orderSaving, setOrderSaving] = useState(false);
+  const [orderSaved, setOrderSaved] = useState(false);
+
+  const [creds, setCreds] = useState<import("../lib/api").AgentProviderCredentialStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({
+    provider: "codex" as "copilot" | "claude" | "codex" | "openrouter",
+    apiKey: "",
+    model: "",
+    baseUrl: "",
+    authType: "api_key" as "api_key" | "oauth_token",
+    reasoningEffort: "medium" as "low" | "medium" | "high",
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Codex agent-scoped browser-OAuth flow. Mirrors what SettingsTab does for
+  // user-level Codex creds, but targets agentProviderCredentials via the
+  // /agents/:slug/provider-credentials/codex/oauth/{start,exchange} routes.
+  // Only relevant when form.provider="codex" + form.authType="oauth_token".
+  const [codexFlow, setCodexFlow] = useState<{ url: string; state: string } | null>(null);
+  const [codexCode, setCodexCode] = useState("");
+  const [codexBusy, setCodexBusy] = useState(false);
+  const [codexErr, setCodexErr] = useState<string | null>(null);
+
+  // Codex model list — fetched after a codex credential exists on the agent.
+  // The OAuth bundle is required to hit ChatGPT backend's /codex/models, so
+  // this only loads once we have a saved codex cred. Same picker the Codex
+  // CLI shows: gpt-5.5, gpt-5.4, gpt-5.3-codex, etc.
+  const [codexModels, setCodexModels] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [codexModelsErr, setCodexModelsErr] = useState<string | null>(null);
+  const hasCodexCred = creds.some((c) => c.provider === "codex" && c.configured);
+  useEffect(() => {
+    if (!hasCodexCred) {
+      setCodexModels(null);
+      setCodexModelsErr(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { listAgentCodexModels } = await import("../lib/api");
+        const rows = await listAgentCodexModels(agent.slug);
+        if (!cancelled) {
+          setCodexModels(rows);
+          setCodexModelsErr(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCodexModels(null);
+          setCodexModelsErr(err instanceof Error ? err.message : "Failed to load Codex models");
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [agent.slug, hasCodexCred]);
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const { listAgentProviderCredentials } = await import("../lib/api");
+      const rows = await listAgentProviderCredentials(agent.slug);
+      setCreds(rows);
+    } catch (err) {
+      console.warn("[provider-tab] failed to load credentials", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.slug]);
+
+  const saveOrder = async () => {
+    setOrderSaving(true);
+    setOrderSaved(false);
+    try {
+      const cfg = { ...(agent.config ?? {}) };
+      if (providerOrder.length > 0) cfg.providerOrder = providerOrder;
+      else delete cfg.providerOrder;
+      // Retire the legacy single-pick field — preference order is now
+      // canonical. Avoids drift where the two disagree.
+      delete cfg.provider;
+      await updateAgent(agent.slug, { config: cfg });
+      setOrderSaved(true);
+      onSave();
+      setTimeout(() => setOrderSaved(false), 3000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOrderSaving(false);
+    }
+  };
+
+  const moveOrderItem = (idx: number, dir: -1 | 1) => {
+    setProviderOrder((curr) => {
+      const target = idx + dir;
+      if (target < 0 || target >= curr.length) return curr;
+      const next = [...curr];
+      const tmp = next[idx]!;
+      next[idx] = next[target]!;
+      next[target] = tmp;
+      return next;
+    });
+  };
+  const removeOrderItem = (idx: number) =>
+    setProviderOrder((curr) => curr.filter((_, i) => i !== idx));
+  const addOrderItem = (p: string) =>
+    setProviderOrder((curr) => (curr.includes(p) ? curr : [...curr, p]));
+
+  const submitForm = async () => {
+    // apiKey is only required the FIRST time. If a credential already exists
+    // for the chosen provider (e.g. just-completed Codex OAuth), this same
+    // Save updates only model/baseUrl/authType without re-encrypting.
+    const existingForProvider = creds.find((c) => c.provider === form.provider && c.configured);
+    if (!form.apiKey.trim() && !existingForProvider) {
+      setError("apiKey is required");
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      const { setAgentProviderCredential } = await import("../lib/api");
+      await setAgentProviderCredential(agent.slug, {
+        provider: form.provider,
+        ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+        ...(form.model.trim() ? { model: form.model.trim() } : {}),
+        ...(form.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
+        ...(form.authType ? { authType: form.authType } : {}),
+        reasoningEffort: form.reasoningEffort,
+      });
+      setAdding(false);
+      setForm({ provider: "codex", apiKey: "", model: "", baseUrl: "", authType: "api_key", reasoningEffort: "medium" });
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (provider: string) => {
+    if (!confirm(`Remove ${provider} credentials from this agent? Users who run the agent without their own ${provider} key will fall back to the platform default.`)) return;
+    try {
+      const { deleteAgentProviderCredential } = await import("../lib/api");
+      await deleteAgentProviderCredential(agent.slug, provider);
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Provider preference order — single source of truth */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+        <h3 className="mb-1 text-sm font-semibold text-zinc-200">Provider preference order</h3>
+        <p className="mb-3 text-xs text-zinc-500">
+          The first provider in this list runs the agent. If it hits a rate limit or quota error, the next provider takes over, and so on — ending at the platform default (Kimi). Personal user keys still win — this order only applies to users who haven't configured a personal provider in Settings → Providers. Leave empty to fall straight through to Kimi.
+        </p>
+        {providerOrder.length === 0 ? (
+          <p className="mb-2 rounded border border-dashed border-zinc-700 px-3 py-2 text-xs text-zinc-500">No order configured. Add a provider below to start.</p>
+        ) : (
+          <ol className="mb-2 space-y-1.5">
+            {providerOrder.map((p, idx) => (
+              <li key={p} className="flex items-center gap-2 rounded border border-zinc-700 bg-zinc-800 px-2.5 py-1.5">
+                <span className="w-5 text-center text-xs font-mono text-zinc-500">{idx + 1}.</span>
+                <span className="flex-1 text-sm text-zinc-200">{p}</span>
+                <button
+                  type="button"
+                  disabled={idx === 0}
+                  onClick={() => moveOrderItem(idx, -1)}
+                  className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+                  title="Move up"
+                >↑</button>
+                <button
+                  type="button"
+                  disabled={idx === providerOrder.length - 1}
+                  onClick={() => moveOrderItem(idx, 1)}
+                  className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+                  title="Move down"
+                >↓</button>
+                <button
+                  type="button"
+                  onClick={() => removeOrderItem(idx)}
+                  className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-red-950/40 hover:text-red-400"
+                  title="Remove"
+                >×</button>
+              </li>
+            ))}
+          </ol>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {(["codex", "claude", "copilot", "openrouter", "spaces"] as const)
+            .filter((p) => !providerOrder.includes(p))
+            .map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => addOrderItem(p)}
+                className="rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:border-zinc-600 hover:bg-zinc-700"
+              >
+                + {p}
+              </button>
+            ))}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={() => void saveOrder()}
+            disabled={orderSaving}
+            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+          >
+            {orderSaving ? "Saving…" : "Save order"}
+          </button>
+          {orderSaved && <span className="text-xs text-emerald-400">Saved ✓</span>}
+        </div>
+      </div>
+
+      {/* Configured credentials */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-200">Configured credentials</h3>
+            <p className="mt-0.5 text-xs text-zinc-500">Encrypted at rest. Decrypted keys are never returned by any API after upload.</p>
+          </div>
+          {!adding && (
+            <button
+              onClick={() => { setError(null); setAdding(true); }}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800"
+            >
+              <Plus size={14} /> Add credential
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <p className="text-xs text-zinc-500">Loading…</p>
+        ) : creds.length === 0 && !adding ? (
+          <p className="text-xs text-zinc-500">No agent-level credentials configured. Users running this agent will fall through to their personal provider or the platform default.</p>
+        ) : (
+          <ul className="space-y-2">
+            {creds.map((c) => (
+              <li key={c.provider} className="flex items-start justify-between gap-3 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-zinc-200">{c.provider}</span>
+                    {c.authType && <span className="rounded bg-zinc-700 px-1.5 py-0.5 text-[10px] uppercase text-zinc-300">{c.authType}</span>}
+                    {!c.configured && <span className="rounded bg-amber-950/40 px-1.5 py-0.5 text-[10px] uppercase text-amber-400">no key</span>}
+                  </div>
+                  <div className="mt-0.5 text-xs text-zinc-400">
+                    model: <code className="font-mono">{c.model ?? "default"}</code>
+                    {c.baseUrl && <> · baseUrl: <code className="font-mono text-[11px]">{c.baseUrl}</code></>}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-zinc-500">
+                    Updated {new Date(c.updatedAt).toLocaleString()}{c.createdByUserId ? ` · by ${c.createdByUserId}` : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void remove(c.provider)}
+                  title={`Remove ${c.provider} credentials`}
+                  className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-red-700 hover:bg-red-950/30 hover:text-red-400"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {adding && (
+          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-800 p-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-400">Provider</label>
+                <select
+                  value={form.provider}
+                  onChange={(e) => setForm((p) => ({ ...p, provider: e.target.value as typeof p.provider }))}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
+                >
+                  <option value="codex">Codex</option>
+                  <option value="claude">Claude (Anthropic)</option>
+                  <option value="copilot">Copilot</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-400">Auth type</label>
+                <select
+                  value={form.authType}
+                  onChange={(e) => setForm((p) => ({ ...p, authType: e.target.value as typeof p.authType }))}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
+                >
+                  <option value="api_key">api_key</option>
+                  <option value="oauth_token">oauth_token</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-medium text-zinc-400">
+                  Reasoning effort
+                </label>
+                <select
+                  value={form.reasoningEffort}
+                  onChange={(e) => setForm((p) => ({ ...p, reasoningEffort: e.target.value as typeof p.reasoningEffort }))}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
+                >
+                  <option value="low">Low — fastest, minimal think time</option>
+                  <option value="medium">Medium — balanced (default)</option>
+                  <option value="high">High — deepest reasoning, slowest</option>
+                </select>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  Only applies to reasoning-capable models (e.g. gpt-5.x, codex). Lower = faster per-turn responses.
+                </p>
+              </div>
+              {/* Codex ChatGPT browser-OAuth flow — replaces the raw paste-bundle path
+                  with a "Sign in with ChatGPT" button that mirrors what the user-level
+                  Settings UI uses. Stores the OAuth bundle (access + refresh + expiry)
+                  into agentProviderCredentials via the backend's /codex/oauth/exchange.
+                  Falls back to the manual-paste field if the user isn't on Codex + OAuth. */}
+              {form.provider === "codex" && form.authType === "oauth_token" ? (
+                <div className="sm:col-span-2 space-y-2 rounded border border-purple-900/50 bg-purple-950/20 px-3 py-2.5 text-xs text-purple-200">
+                  <p>
+                    Sign in with the team's ChatGPT account in the browser. After authorizing, OpenAI's page will show a code — copy it (or the full callback URL) and paste it below to finish. The team's Codex sub will be used for every user who runs this agent without a personal Codex key.
+                  </p>
+                  {!codexFlow ? (
+                    <button
+                      type="button"
+                      disabled={codexBusy}
+                      onClick={async () => {
+                        setCodexBusy(true);
+                        setCodexErr(null);
+                        try {
+                          const { startAgentCodexOauth } = await import("../lib/api");
+                          const flow = await startAgentCodexOauth(agent.slug);
+                          setCodexFlow({ url: flow.url, state: flow.state });
+                          window.open(flow.url, "_blank", "noopener,noreferrer");
+                        } catch (e) {
+                          setCodexErr(e instanceof Error ? e.message : "Failed to start sign-in");
+                        } finally {
+                          setCodexBusy(false);
+                        }
+                      }}
+                      className="rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+                    >
+                      {codexBusy ? "Opening…" : "Sign in with ChatGPT"}
+                    </button>
+                  ) : (
+                    <>
+                      <p>
+                        If the new tab didn't open,{" "}
+                        <a href={codexFlow.url} target="_blank" rel="noopener noreferrer" className="underline text-purple-100 hover:text-white">click here</a>.
+                      </p>
+                      <textarea
+                        value={codexCode}
+                        onChange={(e) => setCodexCode(e.target.value)}
+                        placeholder="Paste the code or the full http://localhost:1455/auth/callback?code=…&state=… URL"
+                        rows={3}
+                        className="w-full rounded-md border border-purple-900 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={codexBusy || !codexCode.trim()}
+                          onClick={async () => {
+                            setCodexBusy(true);
+                            setCodexErr(null);
+                            try {
+                              const { exchangeAgentCodexOauth } = await import("../lib/api");
+                              await exchangeAgentCodexOauth(agent.slug, { code: codexCode.trim(), state: codexFlow.state });
+                              setCodexFlow(null);
+                              setCodexCode("");
+                              // Keep the form open so the user can pick a model
+                              // from the dropdown (now fetchable since the
+                              // credential is saved). Reload triggers the
+                              // codex-models effect.
+                              await reload();
+                            } catch (e) {
+                              setCodexErr(e instanceof Error ? e.message : "Sign-in failed");
+                            } finally {
+                              setCodexBusy(false);
+                            }
+                          }}
+                          className="rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+                        >
+                          {codexBusy ? "Verifying…" : "Complete sign-in"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setCodexFlow(null); setCodexCode(""); setCodexErr(null); }}
+                          className="rounded-md px-2 py-1.5 text-xs text-purple-300 hover:text-purple-100"
+                        >
+                          Cancel sign-in
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {codexErr && <p className="text-red-300">{codexErr}</p>}
+                  <p className="text-[10px] text-purple-300/70">
+                    No keys are typed or stored in your browser — only the OAuth code-exchange round-trip ever sees the token.
+                  </p>
+                </div>
+              ) : (
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">API key / OAuth bundle (encrypted on save — never shown again)</label>
+                  <input
+                    type="password"
+                    value={form.apiKey}
+                    onChange={(e) => setForm((p) => ({ ...p, apiKey: e.target.value }))}
+                    placeholder="sk-…  or  {access_token: ...}"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-400">Model{form.provider === "codex" && codexModels && codexModels.length > 0 ? "" : " (optional)"}</label>
+                {form.provider === "codex" && codexModels && codexModels.length > 0 ? (
+                  <select
+                    value={form.model}
+                    onChange={(e) => setForm((p) => ({ ...p, model: e.target.value }))}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
+                  >
+                    <option value="">Use default</option>
+                    {codexModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={form.model}
+                    onChange={(e) => setForm((p) => ({ ...p, model: e.target.value }))}
+                    placeholder="gpt-5.5 / claude-sonnet-4-5 / …"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+                  />
+                )}
+                {form.provider === "codex" && codexModelsErr && (
+                  <p className="mt-1 text-[11px] text-amber-400">Couldn't load Codex models ({codexModelsErr}). Free-text is fine.</p>
+                )}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-400">Base URL (optional)</label>
+                <input
+                  value={form.baseUrl}
+                  onChange={(e) => setForm((p) => ({ ...p, baseUrl: e.target.value }))}
+                  placeholder="https://openrouter.ai/api/v1"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                onClick={() => void submitForm()}
+                disabled={busy}
+                className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+              >
+                {busy ? "Saving…" : "Save credential"}
+              </button>
+              <button
+                onClick={() => { setAdding(false); setError(null); }}
+                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:border-zinc-600 hover:bg-zinc-900"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface UserOption { id: string; name: string; email: string }
+
+function ContributorsPanel({ agent, userId, onUpdate }: { agent: Agent; userId: string; onUpdate: () => void }) {
+  const [shares, setShares] = useState<Array<{ id: string; userId: string; role: string; user: { id: string; name: string; email: string } }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<UserOption[]>([]);
+  const [selected, setSelected] = useState<UserOption | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [newRole, setNewRole] = useState<"CONTRIBUTOR" | "EDITOR" | "VIEWER">("CONTRIBUTOR");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await listAgentShares(agent.slug, userId);
+      setShares(data);
+    } catch {
+      setError("Failed to load shares");
+    } finally {
+      setLoading(false);
+    }
+  }, [agent.slug, userId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Live search against the local users table. Debounced via a small delay so
+  // typing doesn't fire a request per keystroke. Hits `GET /users?q=`.
+  useEffect(() => {
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const url = `/claw/api/v1/users${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ""}`;
+        const res = await fetch(url, {
+          headers: { "x-user-id": userId },
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = await res.json() as { success: boolean; data?: UserOption[] };
+        if (!cancelled) setResults(data.data ?? []);
+      } catch {
+        if (!cancelled) setResults([]);
+      }
+    }, 150);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [query, userId]);
+
+  // Hide the selected user from the dropdown list and anyone who's already a contributor.
+  const existingShareIds = new Set(shares.map((s) => s.userId));
+  const visibleResults = results.filter((u) => !existingShareIds.has(u.id));
+
+  const handleAdd = async () => {
+    if (!selected) return;
+    setAdding(true);
+    setError(null);
+    try {
+      await addAgentShare(agent.slug, userId, selected.id, newRole);
+      setQuery("");
+      setSelected(null);
+      setResults([]);
+      await load();
+      onUpdate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add contributor");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleRemove = async (targetUserId: string) => {
+    setRemoving(targetUserId);
+    setError(null);
+    try {
+      await removeAgentShare(agent.slug, userId, targetUserId);
+      await load();
+      onUpdate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove contributor");
+    } finally {
+      setRemoving(null);
+    }
+  };
+
+  const roleBadge = (role: string) => {
+    const styles: Record<string, string> = {
+      CONTRIBUTOR: "bg-blue-950 text-blue-400",
+      EDITOR: "bg-purple-950 text-purple-400",
+      VIEWER: "bg-zinc-800 text-zinc-400",
+    };
+    return (
+      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${styles[role] ?? "bg-zinc-800 text-zinc-400"}`}>
+        {role}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Add contributor */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-200">
+          <UserPlus size={14} /> Add Contributor
+        </h3>
+        <p className="mb-4 text-xs text-zinc-500">
+          Contributors can edit this agent's configuration. Viewers can only see it in their list.
+        </p>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={selected ? `${selected.name || selected.email} <${selected.email}>` : query}
+              onChange={(e) => { setSelected(null); setQuery(e.target.value); setDropdownOpen(true); }}
+              onFocus={() => setDropdownOpen(true)}
+              onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
+              placeholder="Search by name or email…"
+              spellCheck={false}
+              autoComplete="off"
+              className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
+            />
+            {dropdownOpen && !selected && visibleResults.length > 0 && (
+              <div className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border border-zinc-700 bg-zinc-900 shadow-lg">
+                {visibleResults.map((u) => (
+                  <button
+                    key={u.id}
+                    onMouseDown={(e) => { e.preventDefault(); setSelected(u); setDropdownOpen(false); }}
+                    className="block w-full px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                  >
+                    <div>{u.name || u.email}</div>
+                    {u.name && <div className="text-xs text-zinc-500">{u.email}</div>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {dropdownOpen && !selected && visibleResults.length === 0 && query.trim().length > 0 && (
+              <div className="absolute z-10 mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-500 shadow-lg">
+                No matching claw users.
+              </div>
+            )}
+          </div>
+          <select
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value as "CONTRIBUTOR" | "EDITOR" | "VIEWER")}
+            className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-zinc-500 focus:outline-none"
+          >
+            <option value="CONTRIBUTOR">Contributor (can edit)</option>
+            <option value="VIEWER">Viewer (read-only)</option>
+          </select>
+          <button
+            onClick={handleAdd}
+            disabled={adding || !selected}
+            className="inline-flex items-center gap-1.5 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-white disabled:opacity-50"
+          >
+            {adding ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+            Add
+          </button>
+        </div>
+        {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+      </div>
+
+      {/* Existing shares */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+        <h3 className="mb-3 text-sm font-semibold text-zinc-200">Current Access</h3>
+        {loading ? (
+          <p className="text-sm text-zinc-500">Loading...</p>
+        ) : shares.length === 0 ? (
+          <p className="text-sm text-zinc-500">No one has been granted access yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {shares.map((share) => (
+              <div key={share.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div>
+                    <p className="text-sm text-zinc-200">{share.user.name || share.user.email}</p>
+                    {share.user.name && <p className="text-xs text-zinc-500">{share.user.email}</p>}
+                  </div>
+                  {roleBadge(share.role)}
+                </div>
+                <button
+                  onClick={() => handleRemove(share.userId)}
+                  disabled={removing === share.userId}
+                  className="rounded p-1.5 text-zinc-600 transition hover:bg-red-950 hover:text-red-400 disabled:opacity-50"
+                  title="Remove access"
+                >
+                  {removing === share.userId ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type JobUpdateResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Convert an ISO timestamp to the "YYYY-MM-DDTHH:mm" format that
+ * <input type="datetime-local"> renders/accepts. The format is implicitly
+ * local-tz (no offset stored), which matches what the user is typing into
+ * the picker.
+ */
+function isoToDatetimeLocal(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function JobCard({ job, deleting, onDelete, onUpdate }: { job: ScheduledJob; deleting: boolean; onDelete: (id: string) => void; onUpdate?: (id: string, patch: { replyMode?: "thread" | "channel"; targetChannelId?: string | null; cronExpression?: string; nextRunAt?: string }) => Promise<JobUpdateResult> }) {
+  const [savingReplyMode, setSavingReplyMode] = useState(false);
+  const [channelSearch, setChannelSearch] = useState("");
+  const [channelResults, setChannelResults] = useState<import("../lib/api").SpacesChannel[]>([]);
+  const [channelDropdownOpen, setChannelDropdownOpen] = useState(false);
+  const [savingChannel, setSavingChannel] = useState(false);
+  const [editingCron, setEditingCron] = useState(false);
+  const [cronDraft, setCronDraft] = useState(job.cronExpression ?? "");
+  const [savingCron, setSavingCron] = useState(false);
+  const [cronErr, setCronErr] = useState<string | null>(null);
+  const [editingRunAt, setEditingRunAt] = useState(false);
+  // <input type="datetime-local"> uses the format "YYYY-MM-DDTHH:mm" in
+  // the local timezone — we render the existing nextRunAt that way.
+  const [runAtDraft, setRunAtDraft] = useState(() => isoToDatetimeLocal(job.nextRunAt));
+  const [savingRunAt, setSavingRunAt] = useState(false);
+  const [runAtErr, setRunAtErr] = useState<string | null>(null);
+  const replyMode = job.replyMode ?? "thread";
+
+  const handleReplyModeChange = async (next: "thread" | "channel") => {
+    if (!onUpdate || next === replyMode) return;
+    setSavingReplyMode(true);
+    try {
+      await onUpdate(job.id, { replyMode: next });
+    } finally {
+      setSavingReplyMode(false);
+    }
+  };
+
+  // Live channel search — fires only when the user opens the picker for
+  // "Post in channel" mode. Uses `/api/v1/spaces/channels` which scopes to
+  // channels the requesting user can see (live-first via SPACES_DB_URL).
+  useEffect(() => {
+    if (!channelDropdownOpen) return;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const { listSpacesChannels } = await import("../lib/api");
+        const rows = await listSpacesChannels(channelSearch || undefined, 20, job.agentSlug);
+        if (!cancelled) setChannelResults(rows);
+      } catch {
+        if (!cancelled) setChannelResults([]);
+      }
+    }, 200);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [channelDropdownOpen, channelSearch]);
+
+  const handleChannelPick = async (channelId: string | null) => {
+    if (!onUpdate) return;
+    setSavingChannel(true);
+    try {
+      await onUpdate(job.id, { targetChannelId: channelId });
+      setChannelDropdownOpen(false);
+      setChannelSearch("");
+    } finally {
+      setSavingChannel(false);
+    }
+  };
+
+  const targetChannelLabel = job.targetChannelId
+    ? channelResults.find((c) => c.id === job.targetChannelId)?.name ?? job.targetChannelId.slice(0, 8)
+    : "originating channel";
+
+  const handleCronSave = async () => {
+    if (!onUpdate) return;
+    const next = cronDraft.trim();
+    if (!next) {
+      setCronErr("Cron expression is required");
+      return;
+    }
+    if (next === job.cronExpression) {
+      setEditingCron(false);
+      setCronErr(null);
+      return;
+    }
+    setSavingCron(true);
+    setCronErr(null);
+    try {
+      const result = await onUpdate(job.id, { cronExpression: next });
+      if (result.ok) {
+        setEditingCron(false);
+      } else {
+        // Inline error — editor stays open so the user can correct their
+        // input without losing what they typed.
+        setCronErr(result.error);
+      }
+    } finally {
+      setSavingCron(false);
+    }
+  };
+
+  const canRescheduleCron = onUpdate && job.type === "cron" && job.status === "active";
+  const canRescheduleOnce = onUpdate && job.type === "once" && job.status === "active";
+
+  const handleRunAtSave = async () => {
+    if (!onUpdate) return;
+    const local = runAtDraft.trim();
+    if (!local) {
+      setRunAtErr("Pick a date and time");
+      return;
+    }
+    // datetime-local produces a local-tz string with no offset (e.g.
+    // "2026-05-26T19:30"). `new Date(localString)` parses it as local-tz,
+    // and toISOString() converts to UTC for the wire format the backend
+    // expects.
+    const parsed = new Date(local);
+    if (isNaN(parsed.getTime())) {
+      setRunAtErr("Invalid date");
+      return;
+    }
+    if (parsed.getTime() - Date.now() < 5_000) {
+      setRunAtErr("Must be at least a few seconds in the future");
+      return;
+    }
+    setSavingRunAt(true);
+    setRunAtErr(null);
+    try {
+      const result = await onUpdate(job.id, { nextRunAt: parsed.toISOString() });
+      if (result.ok) {
+        setEditingRunAt(false);
+      } else {
+        setRunAtErr(result.error);
+      }
+    } finally {
+      setSavingRunAt(false);
+    }
+  };
+
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
       <div className="flex items-start justify-between">
@@ -274,11 +1260,107 @@ function JobCard({ job, deleting, onDelete }: { job: ScheduledJob; deleting: boo
             <StatusBadge status={job.status} />
           </div>
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
-            {job.type === "cron" && job.cronExpression && (
-              <span title="Cron expression">cron: {job.cronExpression}</span>
+            {job.type === "cron" && job.cronExpression && !editingCron && (
+              <span title="Cron expression" className="inline-flex items-center gap-1">
+                cron: <span className="font-mono text-zinc-400">{job.cronExpression}</span>
+                {canRescheduleCron && (
+                  <button
+                    onClick={() => {
+                      setCronDraft(job.cronExpression ?? "");
+                      setCronErr(null);
+                      setEditingCron(true);
+                    }}
+                    className="ml-1 rounded px-1 py-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                    title="Reschedule — interpreted in Asia/Kolkata"
+                  >
+                    edit
+                  </button>
+                )}
+              </span>
             )}
-            {job.type === "once" && job.nextRunAt && (
-              <span>runs at: {new Date(job.nextRunAt).toLocaleString()}</span>
+            {job.type === "cron" && editingCron && (
+              <span className="flex w-full items-center gap-2">
+                <span>cron:</span>
+                <input
+                  autoFocus
+                  type="text"
+                  value={cronDraft}
+                  onChange={(e) => { setCronDraft(e.target.value); setCronErr(null); }}
+                  disabled={savingCron}
+                  placeholder="e.g. 0 9 * * 1-5"
+                  className="w-44 rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 font-mono text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); void handleCronSave(); }
+                    if (e.key === "Escape") { setEditingCron(false); setCronErr(null); }
+                  }}
+                />
+                <button
+                  onClick={handleCronSave}
+                  disabled={savingCron || !cronDraft.trim()}
+                  className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white hover:bg-emerald-600 disabled:opacity-50"
+                >
+                  {savingCron ? "Saving…" : "Save"}
+                </button>
+                <button
+                  onClick={() => { setEditingCron(false); setCronErr(null); }}
+                  disabled={savingCron}
+                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                <span className="text-[10px] text-zinc-500">IST</span>
+                {cronErr && <span className="text-xs text-red-400">{cronErr}</span>}
+              </span>
+            )}
+            {job.type === "once" && job.nextRunAt && !editingRunAt && (
+              <span className="inline-flex items-center gap-1">
+                runs at: {new Date(job.nextRunAt).toLocaleString()}
+                {canRescheduleOnce && (
+                  <button
+                    onClick={() => {
+                      setRunAtDraft(isoToDatetimeLocal(job.nextRunAt));
+                      setRunAtErr(null);
+                      setEditingRunAt(true);
+                    }}
+                    className="ml-1 rounded px-1 py-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                    title="Reschedule"
+                  >
+                    edit
+                  </button>
+                )}
+              </span>
+            )}
+            {job.type === "once" && editingRunAt && (
+              <span className="flex w-full items-center gap-2">
+                <span>runs at:</span>
+                <input
+                  autoFocus
+                  type="datetime-local"
+                  value={runAtDraft}
+                  onChange={(e) => { setRunAtDraft(e.target.value); setRunAtErr(null); }}
+                  disabled={savingRunAt}
+                  className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); void handleRunAtSave(); }
+                    if (e.key === "Escape") { setEditingRunAt(false); setRunAtErr(null); }
+                  }}
+                />
+                <button
+                  onClick={handleRunAtSave}
+                  disabled={savingRunAt || !runAtDraft.trim()}
+                  className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white hover:bg-emerald-600 disabled:opacity-50"
+                >
+                  {savingRunAt ? "Saving…" : "Save"}
+                </button>
+                <button
+                  onClick={() => { setEditingRunAt(false); setRunAtErr(null); }}
+                  disabled={savingRunAt}
+                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                {runAtErr && <span className="text-xs text-red-400">{runAtErr}</span>}
+              </span>
             )}
             <span>runs: {job.runCount}{job.maxRuns ? `/${job.maxRuns}` : ""}</span>
             {job.lastRunAt && <span>last run: {timeAgo(job.lastRunAt)}</span>}
@@ -287,6 +1369,88 @@ function JobCard({ job, deleting, onDelete }: { job: ScheduledJob; deleting: boo
           {job.label && (
             <p className="mt-1 truncate text-xs text-zinc-600">{job.task}</p>
           )}
+          {/* Output target — where the agent's result is posted when the job fires.
+              "thread" = reply in the original conversation thread (default).
+              "channel" = top-level post in the channel, no thread context. */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-zinc-500">output:</span>
+            {onUpdate ? (
+              <select
+                value={replyMode}
+                onChange={(e) => handleReplyModeChange(e.target.value as "thread" | "channel")}
+                disabled={savingReplyMode || job.status !== "active"}
+                className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+              >
+                <option value="thread">Reply in thread</option>
+                <option value="channel">Post in channel</option>
+              </select>
+            ) : (
+              <span className="text-zinc-400">{replyMode === "channel" ? "Post in channel" : "Reply in thread"}</span>
+            )}
+            {savingReplyMode && <Loader2 size={12} className="animate-spin text-zinc-500" />}
+
+            {/* Channel override picker — only visible when "Post in channel"
+                is selected. Click the chip to open a typeahead. Clicking "use
+                originating channel" clears the override. */}
+            {replyMode === "channel" && onUpdate && job.status === "active" && (
+              <div className="relative inline-block">
+                <button
+                  onClick={() => setChannelDropdownOpen((v) => !v)}
+                  disabled={savingChannel}
+                  className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200 hover:border-zinc-500 disabled:opacity-50"
+                  title="Pick a channel for this job's output"
+                >
+                  channel: <span className="font-mono text-zinc-300">{targetChannelLabel}</span>
+                </button>
+                {savingChannel && <Loader2 size={12} className="ml-1 inline animate-spin text-zinc-500" />}
+                {channelDropdownOpen && (
+                  <div className="absolute left-0 z-10 mt-1 w-72 rounded-md border border-zinc-700 bg-zinc-900 shadow-lg">
+                    <div className="border-b border-zinc-800 p-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={channelSearch}
+                        onChange={(e) => setChannelSearch(e.target.value)}
+                        placeholder="Search channels…"
+                        className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="max-h-60 overflow-auto">
+                      {/* Allow clearing override → revert to originating channel. */}
+                      <button
+                        onMouseDown={(e) => { e.preventDefault(); handleChannelPick(null); }}
+                        className="block w-full px-3 py-2 text-left text-xs italic text-zinc-400 hover:bg-zinc-800"
+                      >
+                        Use originating channel (default)
+                      </button>
+                      {channelResults.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-zinc-500">No matches.</p>
+                      ) : (
+                        channelResults.map((c) => (
+                          <button
+                            key={c.id}
+                            onMouseDown={(e) => { e.preventDefault(); handleChannelPick(c.id); }}
+                            className="block w-full px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                          >
+                            <div className="font-medium">#{c.name}</div>
+                            <div className="text-[10px] text-zinc-500">{c.scopeType}{c.projectName ? ` · ${c.projectName}` : ""}</div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    <div className="border-t border-zinc-800 p-1">
+                      <button
+                        onClick={() => setChannelDropdownOpen(false)}
+                        className="block w-full rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         {job.status === "active" && (
           <button
@@ -716,7 +1880,17 @@ function ChainEditor({ agent, userId, allAgents, onSave, loadConfig }: ChainEdit
 
 // ── Agent Config Editor (System Prompt + Skills + Tools) ─────────────
 
-function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: string; onSave: () => void }) {
+/**
+ * Collapsible card used to chunk the agent edit form into sections that can
+ * be folded away. The form has 6+ sections and rendering everything expanded
+ * by default makes the page a mile long. Each section folds independently;
+ * `defaultOpen` controls the initial state. Pass a `badge` (count, status,
+ * etc.) to surface at-a-glance info in the collapsed header.
+ *
+ * `bordered={true}` (default) renders the card chrome (border + background).
+ * Pass `false` for nested use inside another section (no double border).
+ */
+function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent: Agent; userId: string; onSave: () => void; readOnly?: boolean }) {
   const configTools = (agent.config?.tools as { subagents?: string[]; direct?: string[]; custom?: string[] } | undefined) ?? {};
   const configSubagentSkills = (agent.config?.subagentSkills as Record<string, string[]> | undefined) ?? {};
   const [prompt, setPrompt] = useState(agent.systemPrompt ?? "");
@@ -738,11 +1912,16 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
   const [skillTriggers, setSkillTriggers] = useState<Array<{ toolName: string; skillSlug: string; when: "before" | "after"; prompt: string }>>(
     (agent.config?.skillTriggers as Array<{ toolName: string; skillSlug: string; when: string; prompt?: string }> ?? []).map((t) => ({ ...t, when: t.when as "before" | "after", prompt: t.prompt ?? "" })),
   );
+  // Dedicated input for `config.repoUrl` — the agent's git URL. Surfaced as
+  // its own labelled field instead of buried inside the generic key/value
+  // editor so admins discover it. Excluded from the scalar editor below to
+  // avoid the same value appearing in two places.
+  const [repoUrl, setRepoUrl] = useState<string>((agent.config?.repoUrl as string | undefined) ?? "");
   const [aiIntent, setAiIntent] = useState("");
   const [generating, setGenerating] = useState(false);
 
   // Free-form scalar config (env-style key/value), excludes structured keys managed above.
-  const STRUCTURED_KEYS = new Set(["tools", "subagentSkills", "skillTriggers", "promptInjections"]);
+  const STRUCTURED_KEYS = new Set(["tools", "subagentSkills", "skillTriggers", "promptInjections", "repoUrl"]);
   const initialCustomConfig: Record<string, string> = {};
   for (const [k, v] of Object.entries(agent.config ?? {})) {
     if (STRUCTURED_KEYS.has(k)) continue;
@@ -772,12 +1951,28 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
         credentials: "include",
         body: JSON.stringify({ intent: aiIntent, agentName: agent.name, existingPrompt: prompt }),
       });
-      if (res.ok) {
-        const data = (await res.json()) as { success: boolean; data?: { prompt: string } };
-        if (data.success && data.data?.prompt) setPrompt(data.data.prompt);
+      // Every failure path used to silently no-op so the button just spun
+      // and stopped with no feedback. Now: any non-2xx or empty response
+      // raises a visible alert with the actual reason. Three modes:
+      //   1. HTTP non-OK → server error (LLM timeout, 5xx from claw-auth, etc.)
+      //   2. data.success=false → backend returned a structured error
+      //   3. data.data.prompt empty → LLM returned blank content
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Server returned ${res.status}: ${text.slice(0, 200) || "no body"}`);
       }
+      const data = (await res.json()) as { success: boolean; error?: string; data?: { prompt: string } };
+      if (!data.success) {
+        throw new Error(data.error || "Server reported failure but gave no reason");
+      }
+      const newPrompt = data.data?.prompt?.trim();
+      if (!newPrompt) {
+        throw new Error("LLM returned an empty prompt — try a more specific instruction");
+      }
+      setPrompt(newPrompt);
     } catch (err) {
       console.error("[agent-config] generate prompt error:", err);
+      alert(`Failed to ${prompt.trim() ? "update" : "generate"} prompt:\n\n${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setGenerating(false);
     }
@@ -839,6 +2034,9 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
       for (const [k, v] of Object.entries(customConfig)) {
         existingConfig[k] = v;
       }
+      // Empty input preserves the previous value rather than wiping it.
+      const trimmedRepoUrl = repoUrl.trim();
+      if (trimmedRepoUrl) existingConfig.repoUrl = trimmedRepoUrl;
       await updateAgent(agent.slug, { systemPrompt: prompt, skills: selectedSkillIds, config: existingConfig });
       setSaved(true);
       onSave();
@@ -855,7 +2053,16 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
   };
 
   return (
+    // When readOnly is true, the outer fieldset disables every <input>,
+    // <textarea>, <button>, and <select> inside the form automatically.
+    // We hide the Save section separately below.
+    <fieldset disabled={readOnly} className="contents">
     <div className="space-y-6">
+      {readOnly && (
+        <div className="rounded-lg border border-amber-800/50 bg-amber-950/20 p-3 text-sm text-amber-200">
+          Read-only view. You don't have edit access to this global agent — only the owner, contributors, or a CLAW admin can modify it.
+        </div>
+      )}
       {/* System Prompt */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
         <h3 className="mb-3 text-sm font-semibold text-zinc-200">System Prompt</h3>
@@ -898,10 +2105,45 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
         {toolsLoading ? (
           <p className="text-xs text-zinc-500">Loading...</p>
         ) : availableTools ? (
-          <div className="space-y-5">
+          (() => {
+            // Pre-compute per-section selection counts for the accordion badges
+            // and the server-tools grouping (used in two places: the count
+            // badge and the render). Hoisting it out of inline IIFE so it's
+            // available to BOTH the header (for `badge`) and the body.
+            const writeToolNames = new Set(availableTools.writeTools.map((t) => t.name));
+            // Group write tools by their owning MCP server (e.g. github,
+            // bitbucket, asana). Same grouping shape as serverGroups below
+            // so the UI is consistent across the two sections.
+            const writeGroupsMap = new Map<string, Array<{ name: string }>>();
+            for (const t of availableTools.writeTools) {
+              const arr = writeGroupsMap.get(t.source) ?? [];
+              if (!arr.some((x) => x.name === t.name)) arr.push({ name: t.name });
+              writeGroupsMap.set(t.source, arr);
+            }
+            const writeGroups = Array.from(writeGroupsMap.entries())
+              .map(([source, tools]) => ({ source, tools }))
+              .sort((a, b) => a.source.localeCompare(b.source));
+            const serverGroups = Object.entries(availableTools.serverTools ?? {})
+              .filter(([source]) => !source.startsWith("custom:"))
+              .map(([source, tools]) => ({
+                source,
+                tools: (tools as Array<{ slug: string; name: string }>)
+                  .filter((t) => !writeToolNames.has(t.name)),
+              }))
+              .filter((g) => g.tools.length > 0);
+            const serverToolNames = new Set(
+              serverGroups.flatMap((g) => g.tools.map((t) => t.name)),
+            );
+            const selectedWriteCount = direct.filter((n) => writeToolNames.has(n)).length;
+            const selectedServerCount = direct.filter((n) => serverToolNames.has(n)).length;
+            return (
+          <div className="space-y-2">
             {availableTools.subagents.length > 0 && (
-              <div>
-                <h4 className="mb-2 text-xs font-medium text-zinc-400">Subagents</h4>
+              <CollapsibleSection
+                bordered={false}
+                title="Subagents"
+                badge={`${subagents.length} / ${availableTools.subagents.length} selected`}
+              >
                 <div className="flex flex-wrap gap-2">
                   {availableTools.subagents.map((sa) => (
                     <div key={sa.name} className={subagents.includes(sa.name) ? "w-full" : ""}>
@@ -909,48 +2151,40 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
                         className={`rounded-lg border px-3 py-1.5 text-sm transition ${subagents.includes(sa.name) ? "border-purple-500 bg-purple-950/30 text-purple-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}>
                         {sa.name}
                       </button>
-                      {/* Per-subagent skill picker — all parent skills inherited by default */}
+                      {/* Per-subagent skill picker. Default is NONE — user
+                          adds the specific skills they want to propagate into
+                          each subagent. */}
                       {subagents.includes(sa.name) && availableSkills.length > 0 && (() => {
-                        // If no override exists for this subagent, show all skills (inherited)
-                        const isOverridden = sa.name in saSkills;
-                        const activeSkills = isOverridden ? saSkills[sa.name]! : availableSkills.map((s) => s.name);
+                        const activeSkills = saSkills[sa.name] ?? [];
                         return (
                           <div className="ml-4 mt-1.5">
-                            {!isOverridden && <p className="mb-1 text-xs text-zinc-600">All skills inherited. Remove any to customize.</p>}
+                            {activeSkills.length === 0 && (
+                              <p className="mb-1 text-xs text-zinc-600">No skills. Add to propagate into this subagent.</p>
+                            )}
                             <div className="flex flex-wrap items-center gap-1.5">
                               {activeSkills.map((skillName) => (
-                                <span key={skillName} className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${isOverridden ? "bg-purple-950 text-purple-300" : "bg-zinc-800 text-zinc-400"}`}>
+                                <span key={skillName} className="inline-flex items-center gap-1 rounded bg-purple-950 px-2 py-0.5 text-xs text-purple-300">
                                   {skillName}
-                                  <button onClick={() => {
-                                    if (!isOverridden) {
-                                      // First removal — create override with all skills minus this one
-                                      setSaSkills((prev) => ({ ...prev, [sa.name]: availableSkills.map((s) => s.name).filter((n) => n !== skillName) }));
-                                    } else {
-                                      setSaSkills((prev) => ({ ...prev, [sa.name]: prev[sa.name]!.filter((n) => n !== skillName) }));
-                                    }
-                                  }} className="text-zinc-500 hover:text-zinc-200"><X size={10} /></button>
+                                  <button
+                                    onClick={() => setSaSkills((prev) => ({ ...prev, [sa.name]: (prev[sa.name] ?? []).filter((n) => n !== skillName) }))}
+                                    className="text-zinc-500 hover:text-zinc-200"
+                                  ><X size={10} /></button>
                                 </span>
                               ))}
-                              {isOverridden && (
-                                <select
-                                  onChange={(e) => {
-                                    if (!e.target.value) return;
-                                    setSaSkills((prev) => ({ ...prev, [sa.name]: [...new Set([...(prev[sa.name] ?? []), e.target.value])] }));
-                                    e.target.value = "";
-                                  }}
-                                  defaultValue=""
-                                  className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400 focus:border-purple-500 focus:outline-none"
-                                >
-                                  <option value="">+ Skill</option>
-                                  {availableSkills.filter((s) => !activeSkills.includes(s.name)).map((s) => (
-                                    <option key={s.id} value={s.name}>{s.name}</option>
-                                  ))}
-                                </select>
-                              )}
-                              {isOverridden && (
-                                <button onClick={() => setSaSkills((prev) => { const next = { ...prev }; delete next[sa.name]; return next; })}
-                                  className="text-xs text-zinc-500 hover:text-zinc-300">Reset to all</button>
-                              )}
+                              <select
+                                onChange={(e) => {
+                                  if (!e.target.value) return;
+                                  setSaSkills((prev) => ({ ...prev, [sa.name]: [...new Set([...(prev[sa.name] ?? []), e.target.value])] }));
+                                  e.target.value = "";
+                                }}
+                                defaultValue=""
+                                className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400 focus:border-purple-500 focus:outline-none"
+                              >
+                                <option value="">+ Skill</option>
+                                {availableSkills.filter((s) => !activeSkills.includes(s.name)).map((s) => (
+                                  <option key={s.id} value={s.name}>{s.name}</option>
+                                ))}
+                              </select>
                             </div>
                           </div>
                         );
@@ -958,26 +2192,62 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
                     </div>
                   ))}
                 </div>
-              </div>
+              </CollapsibleSection>
             )}
-            {availableTools.writeTools.length > 0 && (
-              <div>
-                <h4 className="mb-2 text-xs font-medium text-zinc-400">Direct Tools</h4>
-                <div className="flex flex-wrap gap-2">
-                  {availableTools.writeTools.map((t) => (
-                    <button key={`${t.source}-${t.name}`} onClick={() => toggleItem(direct, setDirect, t.name)}
-                      className={`rounded-lg border px-3 py-1.5 text-sm transition ${direct.includes(t.name) ? "border-green-500 bg-green-950/30 text-green-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}>
-                      {t.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
+            {writeGroups.length > 0 && (
+              <CollapsibleSection
+                bordered={false}
+                title="Write Tools"
+                badge={`${selectedWriteCount} / ${availableTools.writeTools.length} selected`}
+              >
+                {writeGroups.map((g) => (
+                  <div key={g.source} className="mb-3 last:mb-0">
+                    <p className="mb-1 text-xs text-zinc-500">{g.source}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {g.tools.map((t) => (
+                        <button key={`${g.source}-${t.name}`} onClick={() => toggleItem(direct, setDirect, t.name)}
+                          className={`rounded-lg border px-3 py-1.5 text-sm transition ${direct.includes(t.name) ? "border-green-500 bg-green-950/30 text-green-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}>
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </CollapsibleSection>
+            )}
+            {/* Non-write MCP server tools (e.g. claw-builtin:webfetch, github
+                read-only tools). The "Direct Tools" section above only renders
+                writeTools, which silently drops every read-only MCP tool from
+                the picker. Read groups computed in the outer IIFE. */}
+            {serverGroups.length > 0 && (
+              <CollapsibleSection
+                bordered={false}
+                title="MCP Server Tools"
+                badge={`${selectedServerCount} / ${serverToolNames.size} selected`}
+              >
+                {serverGroups.map((g) => (
+                  <div key={g.source} className="mb-3 last:mb-0">
+                    <p className="mb-1 text-xs text-zinc-500">{g.source}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {g.tools.map((t) => (
+                        <button key={t.slug} onClick={() => toggleItem(direct, setDirect, t.name)}
+                          className={`rounded-lg border px-3 py-1.5 text-sm transition ${direct.includes(t.name) ? "border-green-500 bg-green-950/30 text-green-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}>
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </CollapsibleSection>
             )}
             {availableTools.customGroups.length > 0 && (
-              <div>
-                <h4 className="mb-2 text-xs font-medium text-zinc-400">Custom Tools</h4>
+              <CollapsibleSection
+                bordered={false}
+                title="System Tools"
+                badge={`${custom.length} / ${availableTools.customGroups.reduce((sum, g) => sum + g.tools.length, 0)} selected`}
+              >
                 {availableTools.customGroups.map((g) => (
-                  <div key={g.source} className="mb-3">
+                  <div key={g.source} className="mb-3 last:mb-0">
                     <p className="mb-1 text-xs text-zinc-500">{g.source.replace("custom:", "")}</p>
                     <div className="flex flex-wrap gap-2">
                       {g.tools.map((t) => (
@@ -989,9 +2259,11 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
                     </div>
                   </div>
                 ))}
-              </div>
+              </CollapsibleSection>
             )}
           </div>
+            );
+          })()
         ) : (
           <p className="text-xs text-zinc-500">Failed to load available tools.</p>
         )}
@@ -1019,6 +2291,24 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
         {selectedSkillIds.length > 0 && (
           <p className="mt-2 text-xs text-zinc-500">{selectedSkillIds.length} skill(s) selected</p>
         )}
+      </div>
+
+      {/* Git Repository URL */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+        <h3 className="mb-3 text-sm font-semibold text-zinc-200">Git Repository URL</h3>
+        <p className="mb-3 text-xs text-zinc-500">
+          Optional. The git URL this agent's session should clone/checkout into its working directory.
+          Format: <code className="font-mono text-zinc-400">ssh://git@host/org/repo.git</code> or <code className="font-mono text-zinc-400">https://host/org/repo.git</code>.
+          Leave blank for non-repo agents. URLs not in the warmpool will incur a slow first-clone (~30s).
+        </p>
+        <input
+          value={repoUrl}
+          onChange={(e) => setRepoUrl(e.target.value)}
+          placeholder="ssh://git@github.com/example-org/arya.git"
+          spellCheck={false}
+          autoComplete="off"
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+        />
       </div>
 
       {/* Skill Triggers */}
@@ -1134,18 +2424,21 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
         </button>
       </div>
 
-      {/* Save */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-white disabled:opacity-50"
-        >
-          <Save size={16} />
-          {saving ? "Saving..." : "Save Configuration"}
-        </button>
-        {saved && <span className="text-sm text-green-400">Saved</span>}
-      </div>
+      {/* Save — hidden entirely in read-only mode. */}
+      {!readOnly && (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-white disabled:opacity-50"
+          >
+            <Save size={16} />
+            {saving ? "Saving..." : "Save Configuration"}
+          </button>
+          {saved && <span className="text-sm text-green-400">Saved</span>}
+        </div>
+      )}
     </div>
+    </fieldset>
   );
 }

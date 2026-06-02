@@ -1,6 +1,7 @@
 import { KataClient } from "@xyne/kata-sdk";
 import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition } from "../types.js";
+import { redactSecrets, redactAndStringify } from "./redact.js";
 
 const SESSION_STORE = new Map<string, Session>();
 
@@ -13,6 +14,15 @@ const SESSION_STORE = new Map<string, Session>();
 // during prebake evicts the cache and creates a NEW claim, causing
 // runaway claim-creation storms.
 const SESSION_CREATED_AT = new Map<string, number>();
+
+// Template name the session was created with. Used by sandbox-repo-setup
+// on reuse to confirm the cached session is the right template type.
+// Without this we fall back to a fragile substring-on-session-id check
+// (cached.id.includes("agent-workspace") || ...) which fails for new
+// templates like hyperswitch-workspace-template — kata-claim-* IDs don't
+// encode the template name, so the check evicts perfectly good sessions
+// and spawns duplicate claims.
+const SESSION_TEMPLATE = new Map<string, string>();
 // Sessions younger than this are considered "still warming up" — probe
 // failures during this window get retried/ignored instead of triggering
 // eviction. Matches the SandboxTemplate's prebake budget (~8 min).
@@ -32,12 +42,16 @@ function isStaleSessionError(err: unknown): boolean {
   return STALE_PATTERNS.some((re) => re.test(msg));
 }
 
-function rememberSession(storeKey: string | undefined, session: Session): void {
+function rememberSession(storeKey: string | undefined, session: Session, template?: string): void {
   if (storeKey) SESSION_STORE.set(storeKey, session);
   SESSION_STORE.set(session.id, session);
   const now = Date.now();
   if (storeKey) SESSION_CREATED_AT.set(storeKey, now);
   SESSION_CREATED_AT.set(session.id, now);
+  if (template) {
+    if (storeKey) SESSION_TEMPLATE.set(storeKey, template);
+    SESSION_TEMPLATE.set(session.id, template);
+  }
 }
 
 function isFreshSession(session: Session, storeKey?: string): boolean {
@@ -51,13 +65,16 @@ function evictSession(session: Session, storeKey?: string): void {
   if (storeKey) {
     SESSION_STORE.delete(storeKey);
     SESSION_CREATED_AT.delete(storeKey);
+    SESSION_TEMPLATE.delete(storeKey);
   }
   SESSION_STORE.delete(session.id);
   SESSION_CREATED_AT.delete(session.id);
+  SESSION_TEMPLATE.delete(session.id);
   for (const [k, v] of SESSION_STORE.entries()) {
     if (v === session) {
       SESSION_STORE.delete(k);
       SESSION_CREATED_AT.delete(k);
+      SESSION_TEMPLATE.delete(k);
     }
   }
 }
@@ -113,6 +130,17 @@ export type SetupStep =
   | { type: "devserver"; name: string; cmd: string; cwd: string; markerPath?: string }
   | { type: "run"; label: string; cmd: string; cwd?: string; timeoutMs?: number };
 
+// Auxiliary repos baked into a sandbox template alongside the primary
+// repo. Each entry's branch is independently overridable at claim time
+// via the tool's `auxBranches` input. Currently used by the hyperswitch
+// template (primary: hyperswitch; aux: prism, control-center, web).
+export interface AuxRepo {
+  name: string;          // stable key the agent references (e.g. "prism")
+  url: string;           // origin URL (for reference; clones live in the image)
+  defaultBranch: string;
+  workDir: string;       // path inside the pod
+}
+
 export interface RepoSetupConfig {
   slug: string;
   name: string;
@@ -127,6 +155,10 @@ export interface RepoSetupConfig {
   readyTimeoutMs?: number;
   steps: SetupStep[];
   ports?: Record<string, number>;
+  // When the template bakes multiple repos, list the auxiliary ones here.
+  // The tool input schema then gains `auxBranches: Record<name, branch>`
+  // letting the agent override branches on these repos at claim time.
+  auxRepos?: AuxRepo[];
 }
 
 export const SANDBOX_CONFIG_SCHEMA = {
@@ -214,7 +246,7 @@ export const sandboxCreate: ToolDefinition = {
     try {
       const client = makeClient(context.config);
       const session = await client.createSession({ timeoutMs, idleTimeoutMs, ...(template ? { template } : {}) });
-      rememberSession(storeKey, session);
+      rememberSession(storeKey, session, template);
       return JSON.stringify({ sessionId: session.id, status: "ready" });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -268,7 +300,7 @@ export const sandboxRun: ToolDefinition = {
 
       try {
         const result = await session.commands.run(cmd, timeoutMs);
-        return JSON.stringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
+        return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
       } catch (err) {
         if (isStaleSessionError(err)) {
           evictSession(session);
@@ -291,7 +323,7 @@ export const sandboxRun: ToolDefinition = {
       if (session) {
         try {
           const result = await session.commands.run(cmd, timeoutMs);
-          return JSON.stringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
+          return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
         } catch (err) {
           if (isStaleSessionError(err)) {
             evictSession(session, storeKey);
@@ -310,7 +342,7 @@ export const sandboxRun: ToolDefinition = {
     try {
       const client = makeClient(context.config);
       const result = await client.exec(cmd, { timeoutMs });
-      return JSON.stringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
+      return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : String(err)}`;
     }
@@ -398,7 +430,9 @@ export const sandboxPollJob: ToolDefinition = {
 
     try {
       const status = await session.commands.pollJob(jobId);
-      return JSON.stringify(status);
+      // status shape varies by job state; redact across whatever string fields
+      // it carries (stdout/stderr typically).
+      return redactAndStringify(status as unknown as Record<string, unknown>);
     } catch (err) {
       if (isStaleSessionError(err)) {
         evictSession(session);
@@ -466,13 +500,27 @@ export const sandboxWriteFile: ToolDefinition = {
   },
 };
 
+const BINARY_MIME: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+  pdf: "application/pdf", zip: "application/zip",
+};
+
 /**
  * Read a file from the sandbox.
+ *
+ * Text files: return the content inline.
+ * Binary files: return as `[INSPECT:...]` — visible to the agent for
+ * self-verification, but NOT delivered to the user. To send a file to the
+ * user, use `sandbox-deliver-files`.
  */
 export const sandboxReadFile: ToolDefinition = {
   slug: "sandbox-read-file",
   name: "Sandbox Read File",
-  description: "Read the contents of a file from an existing sandbox session. For binary files (images, PDFs, etc.) the file is automatically delivered as an attachment to the user — always use this tool to send files like screenshots instead of base64-encoding them via sandbox-run.",
+  description:
+    "Read a file from a sandbox session. " +
+    "Text files are returned inline. Binary files (images, PDFs, etc.) are loaded into your context for self-inspection ONLY — the user does NOT see them. " +
+    "If you want to actually send files to the user, call `sandbox-deliver-files` (it accepts multiple paths in one call).",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -502,17 +550,22 @@ export const sandboxReadFile: ToolDefinition = {
       const buf = await session.files.read(path);
       const isText = !buf.slice(0, 512).some((b) => b === 0);
       if (isText) {
-        return JSON.stringify({ path, content: buf.toString("utf8"), encoding: "utf8" });
+        // Redact known secret patterns in text-file reads. Catches the obvious
+        // exfil paths (sandbox-read-file ~/.ssh/id_rsa, ~/.git-credentials,
+        // ~/.npmrc, ~/.netrc, etc.) for the same reasons the sandbox-run
+        // redactor exists — defence-in-depth against accidental / unsophisticated
+        // leaks; ephemeral creds are the real fix against determined attackers.
+        const content = redactSecrets(buf.toString("utf8"));
+        return JSON.stringify({ path, content, encoding: "utf8" });
       }
       const fileName = path.split("/").pop() ?? "file";
       const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
-      const MIME: Record<string, string> = {
-        png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-        gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
-        pdf: "application/pdf", zip: "application/zip",
-      };
-      const mimeType = MIME[ext] ?? "application/octet-stream";
-      return `[ATTACHMENT:${fileName}:${mimeType}]\n${buf.toString("base64")}`;
+      const mimeType = BINARY_MIME[ext] ?? "application/octet-stream";
+      // INSPECT marker (not ATTACHMENT) — xyne-claw routes the bytes into the
+      // agent's tool-result content for visual self-check but does NOT push
+      // to user-facing attachments. This stops the "agent took 12 screenshots
+      // for verification → user got 12" leak.
+      return `[INSPECT:${fileName}:${mimeType}]\n${buf.toString("base64")}`;
     } catch (err) {
       if (isStaleSessionError(err)) {
         evictSession(session);
@@ -523,7 +576,111 @@ export const sandboxReadFile: ToolDefinition = {
   },
 };
 
+/**
+ * Deliver one or more files from the sandbox to the user as attachments.
+ *
+ * Use this AFTER inspecting candidates via `sandbox-read-file`. Pass the exact
+ * subset of paths you want the user to receive. All files are delivered in a
+ * single message attachment list.
+ */
+export const sandboxDeliverFiles: ToolDefinition = {
+  slug: "sandbox-deliver-files",
+  name: "Sandbox Deliver Files",
+  description:
+    "Send one or more files from the sandbox to the user as message attachments. " +
+    "Pass the exact paths you want delivered. Use this after inspecting screenshots/PDFs via `sandbox-read-file` to send the relevant subset — the user does NOT see anything you only `sandbox-read-file`.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: {
+        type: "string",
+        description: "Session ID returned by sandbox-create",
+      },
+      paths: {
+        type: "array",
+        items: { type: "string" },
+        description: "Absolute paths inside the sandbox to deliver as attachments. Order is preserved.",
+        minItems: 1,
+      },
+    },
+    required: ["sessionId", "paths"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const sessionId = params["sessionId"] as string;
+    const paths = params["paths"] as string[];
+    if (!Array.isArray(paths) || paths.length === 0) {
+      return "Error: paths must be a non-empty array of absolute file paths.";
+    }
+
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found.`;
+
+    const blocks: string[] = [];
+    const errors: string[] = [];
+    for (const p of paths) {
+      try {
+        const buf = await session.files.read(p);
+        const fileName = p.split("/").pop() ?? "file";
+        const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
+        const mimeType = BINARY_MIME[ext] ?? "application/octet-stream";
+        blocks.push(`[ATTACHMENT:${fileName}:${mimeType}]\n${buf.toString("base64")}`);
+      } catch (err) {
+        if (isStaleSessionError(err)) {
+          evictSession(session);
+          return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+        }
+        errors.push(`${p}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    if (blocks.length === 0) {
+      return `Error: failed to read any of ${paths.length} file(s):\n${errors.join("\n")}`;
+    }
+
+    // Concatenate ATTACHMENT blocks. xyne-claw's custom-tools.ts scans for all
+    // matches and emits one attachment per block. Trailing error notes are
+    // appended for the agent's awareness without breaking the global match.
+    const result = blocks.join("\n");
+    if (errors.length > 0) {
+      return `${result}\n\nNote: ${errors.length} file(s) failed:\n${errors.join("\n")}`;
+    }
+    return result;
+  },
+};
+
 export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
+  // Build input schema. When the config has auxRepos, add an optional
+  // auxBranches field so the agent can override branches on the bundled
+  // repos independently of the primary branchName.
+  const inputProperties: Record<string, unknown> = {
+    branchName: {
+      type: "string",
+      description: `New branch name to cut (e.g. feat/my-feature). Cut from baseBranch, which defaults to ${config.defaultBranch}.`,
+    },
+    baseBranch: {
+      type: "string",
+      description: `Base branch to clone and cut from. Defaults to ${config.defaultBranch} when omitted.`,
+    },
+    sessionDurationMs: {
+      type: "number",
+      description: "Session lifetime in milliseconds (default: 3600000 = 1 hour)",
+    },
+  };
+  if (config.auxRepos?.length) {
+    const auxNames = config.auxRepos.map((r) => `${r.name} (default ${r.defaultBranch})`).join(", ");
+    inputProperties["auxBranches"] = {
+      type: "object",
+      description:
+        `Optional. Override branches for the auxiliary repos bundled in this template. ` +
+        `Keys: ${auxNames}. Values: branch name to check out. Example: { "prism": "feat/foo" }. ` +
+        `Omitted keys stay on their default branch.`,
+      additionalProperties: { type: "string" },
+    };
+  }
   return {
     slug: config.slug,
     name: config.name,
@@ -532,20 +689,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
     configSchema: SANDBOX_CONFIG_SCHEMA,
     inputSchema: {
       type: "object",
-      properties: {
-        branchName: {
-          type: "string",
-          description: `New branch name to cut (e.g. feat/my-feature). Cut from baseBranch, which defaults to ${config.defaultBranch}.`,
-        },
-        baseBranch: {
-          type: "string",
-          description: `Base branch to clone and cut from. Defaults to ${config.defaultBranch} when omitted.`,
-        },
-        sessionDurationMs: {
-          type: "number",
-          description: "Session lifetime in milliseconds (default: 3600000 = 1 hour)",
-        },
-      },
+      properties: inputProperties,
       required: ["branchName"],
     },
 
@@ -559,31 +703,80 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       const branchName = params["branchName"] as string;
       const baseBranch = (params["baseBranch"] as string | undefined) ?? config.defaultBranch;
       const sessionDurationMs = (params["sessionDurationMs"] as number | undefined) ?? (config.sessionTimeoutMs || 60 * 60 * 1000);
+      const auxBranches = (params["auxBranches"] as Record<string, string> | undefined) ?? {};
 
       const log: string[] = [];
 
+      // Fetch + checkout each auxiliary repo onto the requested branch
+      // (or its default). Idempotent: if the branch is already current,
+      // git fetch + checkout -B is a no-op on the worktree. Failures are
+      // logged but don't abort setup — the image's baked default branch
+      // is still usable.
+      const checkoutAuxBranches = async (session: Session) => {
+        if (!config.auxRepos?.length) return;
+        for (const aux of config.auxRepos) {
+          const branch = auxBranches[aux.name] ?? aux.defaultBranch;
+          try {
+            log.push(`Aux ${aux.name}: fetching ${branch}...`);
+            const jobId = await session.commands.runDetached(
+              `cd ${aux.workDir} && git fetch origin ${branch} && git checkout -B ${branch} FETCH_HEAD`,
+            );
+            const deadline = Date.now() + 60_000;
+            let done = false;
+            while (Date.now() < deadline) {
+              await new Promise((r) => setTimeout(r, 2_000));
+              const status = await session.commands.pollJob(jobId);
+              if (status.done) {
+                done = true;
+                if (status.exitCode !== null && status.exitCode !== 0) {
+                  log.push(`Aux ${aux.name}: WARN ${branch} checkout failed (exit ${status.exitCode}); leaving on baked default.`);
+                } else {
+                  log.push(`Aux ${aux.name}: on ${branch}`);
+                }
+                break;
+              }
+            }
+            if (!done) log.push(`Aux ${aux.name}: checkout still running after 60s; continuing.`);
+          } catch (err) {
+            log.push(`Aux ${aux.name}: WARN error — ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      };
+
       const cached = SESSION_STORE.get(storeKey);
       if (cached) {
-        // Only reuse sessions on a real repo-template. A bare-warmpool VM
-        // (`kata-workspace-warmpool-*`) has no git creds, no Nix services,
-        // no prebaked node_modules — running git checkout / npm install /
-        // just services in it just fails. Match either the new agent-
-        // workspace-gvisor template or the legacy kata docker-dev one for
-        // a clean transition window.
-        const isRepoTemplate =
-          cached.id.includes("agent-workspace") ||
-          cached.id.includes("docker-dev");
+        // Only reuse sessions that were created with THIS config's
+        // template. Two reasons to skip reuse:
+        //   1. Different template — e.g. session was a hyperswitch one
+        //      but this call is for xyne-spaces. The repo layout and
+        //      services are wrong; evict + create fresh.
+        //   2. Bare-warmpool VM (template-less sandbox-create session)
+        //      — no git creds, no Nix services, no prebaked node_modules.
+        // SESSION_TEMPLATE is populated by sandbox-repo-setup at
+        // rememberSession time. If absent (legacy session created
+        // before this tracking landed), fall back to the old fragile
+        // substring check.
+        const cachedTemplate =
+          SESSION_TEMPLATE.get(storeKey) ?? SESSION_TEMPLATE.get(cached.id);
+        const isRepoTemplate = cachedTemplate
+          ? cachedTemplate === config.template
+          : cached.id.includes("agent-workspace") || cached.id.includes("docker-dev");
         if (isRepoTemplate && await probeSession(cached, storeKey)) {
           log.push(`Reusing existing sandbox session ${cached.id}`);
           try {
             // The pod prebakes a shallow clone of the default branch.
-            // Other branches need to be fetched on demand. `git fetch
-            // origin <branch>` adds that branch's tip to .git (Git
-            // auto-handles shallow-update); `checkout -B` resets the
-            // working tree to match (works whether the branch exists
-            // locally or not).
+            // branchName might be:
+            //   (a) an existing branch on origin (resume work on it), or
+            //   (b) a brand-new branch to cut from baseBranch.
+            // Try (a) first: `git fetch origin <branchName>` succeeds iff
+            // the branch exists on remote → checkout from FETCH_HEAD.
+            // Fall back to (b): fetch baseBranch + cut new branch from
+            // its tip. `checkout -B` is idempotent on re-runs.
             const checkoutJob = await cached.commands.runDetached(
-              `cd ${config.workDir} && git fetch origin ${branchName} && git checkout -B ${branchName} FETCH_HEAD`,
+              `cd ${config.workDir} && ` +
+              `(if git fetch origin ${branchName} 2>/dev/null; then ` +
+              `git checkout -B ${branchName} FETCH_HEAD; else ` +
+              `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
             );
             const deadline = Date.now() + 30_000;
             while (Date.now() < deadline) {
@@ -595,6 +788,10 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
           } catch (err) {
             log.push(`Branch checkout failed: ${err instanceof Error ? err.message : String(err)} (continuing anyway)`);
           }
+          // Re-run aux branch checkouts even on reuse: caller may have
+          // passed a different auxBranches map this turn. Idempotent if
+          // already on the requested branches.
+          await checkoutAuxBranches(cached);
           return JSON.stringify({
             sessionId: cached.id,
             branch: branchName,
@@ -619,7 +816,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         template: config.template,
         readyTimeoutMs: config.readyTimeoutMs || 10 * 60 * 1000,
       });
-      rememberSession(storeKey, session);
+      rememberSession(storeKey, session, config.template);
       log.push(`Session created: ${session.id}`);
 
       const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
@@ -639,30 +836,74 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         throw new Error(`${label} timed out after ${timeoutMs / 1000}s`);
       };
 
-      // Probe for a baked clone in the kata-workspace image. The new image
-      // (kata-workspace/Dockerfile + scripts/build-kata-workspace.sh) ships
-      // with /workspace/xyne-spaces already cloned and node_modules installed.
-      // If it's there, fast-path: fetch + checkout instead of clone+install.
+      // Probe for a baked clone in the workspace image.
+      //
+      // Two flavors of "baked":
+      //   1. Legacy agent-workspace image — clone is in the docker
+      //      image at build time, so /workspace/<repo>/.git is present
+      //      from second 0 of pod life. Probe succeeds immediately.
+      //   2. Golden image + per-template prebake ConfigMap (hyperswitch
+      //      and any future template) — repos are cloned at BOOT by
+      //      prebake.sh. The :8888 workspace server opens before the
+      //      prebake's clone finishes, so the probe could race and see
+      //      "missing", which would fall through to the manual-clone
+      //      else-branch below and skip the prebake-done wait entirely.
+      //
+      // To handle both, poll for the clone for up to 10 min. Legacy
+      // templates hit it on the first probe; golden+prebake templates
+      // hit it once the prebake's clone step lands (typically <60s).
+      // If it really never appears (network failure on git clone), we
+      // fall through to the manual-clone safety net as before.
+      log.push("Waiting for baked clone to appear...");
+      const cloneWaitDeadline = Date.now() + 10 * 60_000;
       let bakedCloneFound = false;
-      try {
-        const probe = await session.commands.run(
-          `test -d ${config.workDir}/.git && echo present || echo missing`,
-          5_000,
-        );
-        bakedCloneFound = (probe.stdout ?? "").trim() === "present";
-      } catch {
-        bakedCloneFound = false;
+      while (Date.now() < cloneWaitDeadline) {
+        try {
+          const probe = await session.commands.run(
+            `test -d ${config.workDir}/.git && echo present || echo missing`,
+            5_000,
+          );
+          if ((probe.stdout ?? "").trim() === "present") {
+            bakedCloneFound = true;
+            break;
+          }
+        } catch {
+          // transient — keep polling
+        }
+        await new Promise((r) => setTimeout(r, 5_000));
+      }
+      if (bakedCloneFound) {
+        log.push("Baked clone present.");
+      } else {
+        log.push("Baked clone not found after 10 min — falling back to manual clone.");
       }
 
       if (bakedCloneFound) {
-        // Pod's prebake clones the default branch shallowly. To switch to
-        // any branch (default or other), we fetch its tip + reset working
-        // tree to it. This works whether branchName is already in the
-        // local repo or not, and survives the shallow clone (Git
-        // auto-extends with the new fetch).
-        log.push(`Baked clone detected at ${config.workDir} — fetching ${branchName} and checking out.`);
+        // The prebake clones the default branch shallowly. branchName
+        // might be (a) an existing remote branch (resume work) or (b)
+        // a new branch to cut from baseBranch. Try (a); fall back to
+        // (b). `checkout -B` is idempotent across re-runs.
+        log.push(`Baked clone detected at ${config.workDir} — checking out ${branchName} (resume if exists, else cut from ${baseBranch}).`);
+        // Discard any tree modifications left by the image build or the
+        // in-flight boot-time prebake. The prebake runs `npm ci × 3` and
+        // `nix build` in the background, and those can race ahead of this
+        // checkout — `npm ci` regenerates package-lock.json on minor engine
+        // drift, nix-build can stage shadow files inside the worktree, etc.
+        // Without this reset, `git checkout -B` would refuse with
+        // "Your local changes to the following files would be overwritten by
+        // checkout" (observed on the doctor-agent daily-sync cron — the cron
+        // always lands here because its scheduler uses a unique
+        // conversationId per firing, so it never hits the reuse path).
+        // Safe here because this fresh-VM branch only ever runs against a
+        // brand-new sandbox whose tree mutations all come from automated
+        // boot scripts — never user work. Interactive re-calls hit the
+        // reuse path (above) which leaves the tree alone.
         const branchJobId = await session.commands.runDetached(
-          `cd ${config.workDir} && git fetch origin ${branchName} && git checkout -B ${branchName} FETCH_HEAD`,
+          `cd ${config.workDir} && ` +
+          `git reset --hard HEAD 2>/dev/null; git clean -fd 2>/dev/null; ` +
+          `(if git fetch origin ${branchName} 2>/dev/null; then ` +
+          `git checkout -B ${branchName} FETCH_HEAD; else ` +
+          `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
         );
         await pollUntilDone(branchJobId, `git fetch+checkout ${branchName}`, 60_000);
 
@@ -681,7 +922,12 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // claim eviction storm. Instead: 2-sec probes in a JS loop, with
         // sleep on the claw side, so the event loop stays unblocked.
         log.push("Waiting for prebake-done marker...");
-        const prebakeDeadline = Date.now() + 10 * 60_000;
+        // 45-min budget covers the worst-case template cold-start
+        // (hyperswitch's prebake gates prebake-done on services-up,
+        // migrations-up, ucs-up, router-up — cargo cold build is
+        // 25-35 min). xyne-spaces hits this marker within minutes;
+        // the long ceiling only matters for slow templates.
+        const prebakeDeadline = Date.now() + 45 * 60_000;
         let prebakeDone = false;
         while (Date.now() < prebakeDeadline) {
           try {
@@ -717,6 +963,12 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         );
         await pollUntilDone(branchJobId, "git checkout", 30_000);
       }
+
+      // Auxiliary repos: fetch + checkout user-overridable branches. The
+      // prebake clones these alongside the primary; here we just refresh
+      // them to the agent's requested branch. No-op when config has no
+      // auxRepos (xyne-spaces and any other single-repo template).
+      await checkoutAuxBranches(session);
 
       const jobIds: Record<string, string> = {};
 

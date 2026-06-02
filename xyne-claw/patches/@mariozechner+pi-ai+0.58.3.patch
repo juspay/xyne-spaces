@@ -1,0 +1,29 @@
+diff --git a/node_modules/@mariozechner/pi-ai/dist/cli.js b/node_modules/@mariozechner/pi-ai/dist/cli.js
+old mode 100755
+new mode 100644
+diff --git a/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js b/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
+index f574ad9..c7b93e6 100644
+--- a/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
++++ b/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
+@@ -338,14 +338,15 @@ export const streamAnthropic = (model, context, options) => {
+     return stream;
+ };
+ /**
+- * Check if a model supports adaptive thinking (Opus 4.6 and Sonnet 4.6)
++ * Check if a model supports adaptive thinking (Opus 4.6+ and Sonnet 4.6+).
++ * Patched for opus-4-7 / sonnet-4-7 etc — see patches/@mariozechner+pi-ai+0.58.3.patch
+  */
+ function supportsAdaptiveThinking(modelId) {
+-    // Opus 4.6 and Sonnet 4.6 model IDs (with or without date suffix)
+-    return (modelId.includes("opus-4-6") ||
+-        modelId.includes("opus-4.6") ||
+-        modelId.includes("sonnet-4-6") ||
+-        modelId.includes("sonnet-4.6"));
++    // Adaptive thinking landed in Claude 4.6 and is the API shape going
++    // forward. Match opus/sonnet/haiku 4-6 and any newer minor (4-7, 4-8, ...)
++    // including the "4.6" dotted form. Older models (<= 4.5) keep the
++    // budget-based path the caller falls through to.
++    return /(?:opus|sonnet|haiku)-4[-.](?:[6-9]|\d{2,})/i.test(modelId);
+ }
+ /**
+  * Map ThinkingLevel to Anthropic effort levels for adaptive thinking.

@@ -5,8 +5,22 @@
  * Handlers call the Spaces HTTP client and return MCP-formatted results.
  */
 
-import { interact, search, memorySearch, spacesFetch, CURRENT_USER_ID } from "./xyne-spaces-client.js";
+import { interact, search, memorySearch, spacesFetch, spacesFetchBuffer } from "./xyne-spaces-client.js";
 import type { Citation } from "xyne-claw-shared";
+import { CONFIG } from "../../config.js";
+
+/**
+ * Build a clickable Spaces thread URL for a ticket. Mirrors the
+ * pattern used by claw-auth's citations.ts buildThreadUrl so the link
+ * format stays consistent across the codebase. Returns null when
+ * required fields are missing so callers can fall back to plain text.
+ */
+function buildTicketUrl(channelId: string | undefined, conversationId: string | undefined): string | null {
+  const base = CONFIG.spacesAppUrl;
+  if (!base || !channelId || !conversationId) return null;
+  const trimmed = base.replace(/\/+$/, "");
+  return `${trimmed}/chat/dir/${encodeURIComponent(channelId)}/${encodeURIComponent(conversationId)}`;
+}
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -20,11 +34,15 @@ interface ToolResult {
   _meta?: { citations?: Citation[]; [k: string]: unknown };
 }
 
+export interface HandlerContext {
+  userId: string;
+}
+
 export interface ToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  handler: (params: Record<string, unknown>) => Promise<ToolResult>;
+  handler: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>;
 }
 
 function ok(text: string): ToolResult {
@@ -334,7 +352,7 @@ const spacesMemoryCreate: ToolDef = {
     },
     required: ["docType", "content"],
   },
-  async handler(args) {
+  async handler(args, ctx) {
     try {
       const docType = args["docType"] as string;
       const content = args["content"] as string;
@@ -345,7 +363,7 @@ const spacesMemoryCreate: ToolDef = {
       const document = {
         docId,
         docType,
-        userId: CURRENT_USER_ID,
+        userId: ctx.userId,
         sessionId: `manual-${docId}`,
         userQuery: query,
         chatSummary: [query || content.slice(0, 200)],
@@ -377,22 +395,51 @@ const spacesTickets: ToolDef = {
   name: "spaces-tickets",
   description:
     "PRIMARY tool for all ticket queries. ALWAYS use this when the user asks about tickets, ticket status, ticket lists, " +
-    "or anything ticket-related. Filter by status, priority, assignee, board, project, tags, or stage. " +
-    "Returns structured ticket details including assignee, tags, stage, and conversation ID. " +
-    "Prefer this over spaces-search for ticket queries — it returns richer, more accurate data.",
+    "or anything ticket-related. Filter by status, priority, assignee, creator, board, project, tags, stage, channel, " +
+    "or creation date range. Returns structured ticket details including assignee, tags, stage, channel ID, conversation ID, " +
+    "createdAt, and updatedAt. Prefer this over spaces-search for ticket queries — it returns richer, more accurate data.",
   inputSchema: {
     type: "object",
     properties: {
       status: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"], description: "Filter by status" },
       priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Filter by priority" },
-      assignedTo: { type: "string", description: "Filter by assigned user's ID (defaults to current user)" },
-      createdBy: { type: "string", description: "Filter by ticket creator's user ID" },
+      assignedTo: { type: "string", description: "Filter by assigned user — accepts either the user's ID (cm…) or their email address. Email is resolved to userId server-side before the ticket query." },
+      createdBy: { type: "string", description: "Filter by ticket creator — accepts either the user's ID (cm…) or their email address. Email is resolved to userId server-side before the ticket query." },
+      createdByIn: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Filter by ticket creator across MANY users in one call. Accepts an array of emails or userIds (mix allowed). " +
+          "Use this for daily/team reports where you need tickets from a fixed user group — one tool call instead of N. " +
+          "Emails are resolved server-side in a single batch query. " +
+          "If this is provided, the singular `createdBy` is ignored. Unresolved emails are noted in the response.",
+      },
       boardId: { type: "string", description: "Filter by board ID" },
       projectId: { type: "string", description: "Filter by project ID" },
       stageName: { type: "string", description: "Filter by stage name" },
       tags: { type: "string", description: "Filter by tag name(s), comma-separated (e.g. 'April-Launch,Q2')" },
-      limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max tickets (default 20)" },
+      channelId: { type: "string", description: "Filter to tickets in this channel only" },
+      createdAfter: { type: "string", description: "ISO 8601 timestamp — only tickets created at or after this time (e.g. '2026-04-20T00:00:00Z')" },
+      createdBefore: { type: "string", description: "ISO 8601 timestamp — only tickets created strictly before this time" },
+      limit: { type: "number", minimum: 1, maximum: 500, default: 20, description: "Max tickets (default 20, max 500). Use higher values with createdByIn for team-wide reports." },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
+      classifyActionable: {
+        type: "boolean",
+        description:
+          "When true, the server computes an `actionReason` per ticket — one of 'critical' | 'overdue' | 'no-assignee' | 'stale' | null — using deterministic rules with proper preconditions (terminal states never actionable). " +
+          "Use this for daily reports / triage views so the agent never has to classify tickets itself (which it does badly). Default false (no classification).",
+      },
+      summary: {
+        type: "boolean",
+        description:
+          "When true, appends a Summary block to the response containing aggregate counts: total, actionableCount (if classifyActionable also true), byStatus, byPriority, byUser. Computed server-side from the response data — agents that render reports never need to do arithmetic themselves. Default false.",
+      },
+      expectedUserGroup: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional list of emails (or userIds) the caller expects to see in the data. When provided alongside summary=true, summary.byUser includes every member of this list — those with 0 tickets are kept (with all-zero counts). Lets a daily-report caller surface 'Members with No Tickets' without doing set-difference math itself.",
+      },
     },
   },
   async handler(args) {
@@ -403,30 +450,69 @@ const spacesTickets: ToolDef = {
       if (args["boardId"]) baseWhere["boardId"] = { equals: args["boardId"] };
       if (args["projectId"]) baseWhere["projectId"] = { equals: args["projectId"] };
       if (args["stageName"]) baseWhere["stageName"] = { equals: args["stageName"] };
+      if (args["channelId"]) baseWhere["channelId"] = { equals: args["channelId"] };
       if (args["tags"]) {
         const tagNames = (args["tags"] as string).split(",").map((t) => t.trim()).filter(Boolean);
         if (tagNames.length > 0) {
           baseWhere["tags"] = { some: { name: { in: tagNames } } };
         }
       }
+      const createdAtFilter: Record<string, string> = {};
+      if (args["createdAfter"]) createdAtFilter["gte"] = args["createdAfter"] as string;
+      if (args["createdBefore"]) createdAtFilter["lt"] = args["createdBefore"] as string;
+      if (Object.keys(createdAtFilter).length > 0) baseWhere["createdAt"] = createdAtFilter;
 
       const take = (args["limit"] as number | undefined) ?? 20;
       const skip = (args["offset"] as number | undefined) ?? 0;
       const include = {
-        assignedToUser: { select: { name: true } },
-        createdByUser: { select: { name: true } },
+        assignedToUser: { select: { name: true, email: true } },
+        createdByUser: { select: { name: true, email: true } },
         board: { select: { name: true } },
         project: { select: { name: true } },
         tags: { select: { name: true } },
       };
 
-      const userId = args["assignedTo"] as string | undefined;
+      // Resolve email-form values for assignedTo / createdBy → userId via one
+      // lookup. Saves the caller a round-trip to spaces-users when they only
+      // have an email handy (the common case for merchant-paglu user-tickets).
+      const assignedToUserId = await resolveUserIdentifier(args["assignedTo"] as string | undefined);
+      if (args["assignedTo"] && !assignedToUserId) return ok(`No user found for assignedTo='${args["assignedTo"]}'.`);
 
-      // If we have a user to scope to, fetch both assigned + created and merge
-      if (userId && !args["createdBy"]) {
+      // Bulk createdByIn — resolve every email-or-userId in a single batch
+      // query, then filter with `createdBy IN (…)`. Lets a single tool call
+      // span a whole team for daily reports, replacing N parallel subagent
+      // calls. If createdByIn is set, the singular createdBy is ignored.
+      let unresolvedEmails: string[] = [];
+      let bulkActive = false;
+      const rawIn = args["createdByIn"];
+      if (Array.isArray(rawIn) && rawIn.length > 0) {
+        bulkActive = true;
+        const { userIds, unresolved } = await resolveUserIdentifiersBatch(
+          (rawIn as unknown[]).map((v) => String(v)),
+        );
+        if (userIds.length === 0) {
+          return ok(
+            `No matching users found for any of the ${rawIn.length} createdByIn entries. ` +
+              `Unresolved: ${unresolved.join(", ")}.`,
+          );
+        }
+        baseWhere["createdBy"] = { in: userIds };
+        unresolvedEmails = unresolved;
+      }
+
+      // Singular createdBy — only when bulk is not active.
+      let createdByUserId: string | null = null;
+      if (!bulkActive) {
+        createdByUserId = await resolveUserIdentifier(args["createdBy"] as string | undefined);
+        if (args["createdBy"] && !createdByUserId) return ok(`No user found for createdBy='${args["createdBy"]}'.`);
+      }
+
+      // Single-user merged fetch (assigned OR created by the same person) only
+      // applies when bulk isn't in play and createdBy wasn't supplied.
+      if (assignedToUserId && !bulkActive && !createdByUserId) {
         const [assigned, created] = await Promise.all([
-          interact({ model: "ticket", operation: "findMany", where: { ...baseWhere, assignedTo: { equals: userId } }, orderBy: [{ updatedAt: "desc" }], take, skip, include }) as Promise<TicketRow[]>,
-          interact({ model: "ticket", operation: "findMany", where: { ...baseWhere, createdBy: { equals: userId } }, orderBy: [{ updatedAt: "desc" }], take, skip, include }) as Promise<TicketRow[]>,
+          interact({ model: "ticket", operation: "findMany", where: { ...baseWhere, assignedTo: { equals: assignedToUserId } }, orderBy: [{ updatedAt: "desc" }], take, skip, include }) as Promise<TicketRow[]>,
+          interact({ model: "ticket", operation: "findMany", where: { ...baseWhere, createdBy: { equals: assignedToUserId } }, orderBy: [{ updatedAt: "desc" }], take, skip, include }) as Promise<TicketRow[]>,
         ]);
         const seen = new Set<string>();
         const merged: TicketRow[] = [];
@@ -434,43 +520,422 @@ const spacesTickets: ToolDef = {
           if (!seen.has(t.id)) { seen.add(t.id); merged.push(t); }
         }
         merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-        return await formatTickets(merged.slice(0, take));
+        return await formatTickets(merged.slice(0, take), {
+          classifyActionable: args["classifyActionable"] === true,
+          summary: args["summary"] === true,
+          expectedUserGroup: Array.isArray(args["expectedUserGroup"])
+            ? (args["expectedUserGroup"] as unknown[]).map((v) => String(v))
+            : [],
+        });
       }
 
-      // Explicit createdBy filter only
-      if (args["createdBy"]) {
-        baseWhere["createdBy"] = { equals: args["createdBy"] };
+      // Explicit single createdBy filter (only when bulk isn't active).
+      if (createdByUserId) {
+        baseWhere["createdBy"] = { equals: createdByUserId };
       }
 
       const rows = (await interact({ model: "ticket", operation: "findMany", where: baseWhere, orderBy: [{ updatedAt: "desc" }], take, skip, include })) as TicketRow[];
-      return await formatTickets(rows);
+
+      const classifyActionable = args["classifyActionable"] === true;
+      const wantSummary = args["summary"] === true;
+      const expectedGroup = Array.isArray(args["expectedUserGroup"])
+        ? (args["expectedUserGroup"] as unknown[]).map((v) => String(v))
+        : [];
+
+      const result = await formatTickets(rows, {
+        classifyActionable,
+        summary: wantSummary,
+        expectedUserGroup: expectedGroup,
+      });
+
+      // When the caller did a bulk lookup, surface the unresolved email list
+      // so they can flag those users in their downstream report.
+      if (bulkActive && unresolvedEmails.length > 0) {
+        const note = `\n\n_Note: ${unresolvedEmails.length} email(s) did not match any user and were excluded: ${unresolvedEmails.join(", ")}_`;
+        if (result.content[0] && result.content[0].type === "text") {
+          result.content[0].text = result.content[0].text + note;
+        }
+      }
+      return result;
     } catch (e) {
       return err(`Tickets error: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 };
 
-async function formatTickets(rows: TicketRow[]): Promise<ToolResult> {
-  if (!rows || rows.length === 0) return ok("No tickets found.");
+/**
+ * Resolve a mixed list of emails + userIds to a flat userId list in a single
+ * `user findMany` query. Returns the resolved userIds and any emails that
+ * didn't match any user. Inputs that don't contain '@' are passed through as
+ * userIds without DB lookup.
+ */
+async function resolveUserIdentifiersBatch(raw: string[]): Promise<{ userIds: string[]; unresolved: string[] }> {
+  const trimmed = raw.map((s) => s.trim()).filter((s) => s.length > 0);
+  if (trimmed.length === 0) return { userIds: [], unresolved: [] };
+
+  const emails = trimmed.filter((s) => s.includes("@"));
+  const idPassthrough = trimmed.filter((s) => !s.includes("@"));
+
+  if (emails.length === 0) {
+    return { userIds: idPassthrough, unresolved: [] };
+  }
+
+  const rows = (await interact({
+    model: "user",
+    operation: "findMany",
+    where: { email: { in: emails } },
+    select: { id: true, email: true },
+  })) as Array<{ id: string; email: string }>;
+
+  const emailToId = new Map(rows.map((r) => [r.email, r.id] as const));
+  const resolvedFromEmails: string[] = [];
+  const unresolved: string[] = [];
+  for (const e of emails) {
+    const id = emailToId.get(e);
+    if (id) resolvedFromEmails.push(id);
+    else unresolved.push(e);
+  }
+  return { userIds: [...idPassthrough, ...resolvedFromEmails], unresolved };
+}
+
+/**
+ * Accept either a user id (starts with "cm" or any non-email string) or an
+ * email address. Emails are resolved to the underlying userId via a single
+ * `/api/query` call against the user model. Returns null if nothing was
+ * passed in OR if an email didn't match any user. The empty-arg → null path
+ * is intentional so callers can write `if (resolved) ...` without juggling
+ * undefined separately.
+ */
+async function resolveUserIdentifier(raw: string | undefined): Promise<string | null> {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (!trimmed.includes("@")) return trimmed; // already a userId
+  const rows = (await interact({
+    model: "user",
+    operation: "findMany",
+    where: { email: { equals: trimmed } },
+    take: 1,
+    select: { id: true },
+  })) as Array<{ id: string }>;
+  return rows && rows.length > 0 ? rows[0]!.id : null;
+}
+
+interface FormatOptions {
+  classifyActionable?: boolean;
+  summary?: boolean;
+  expectedUserGroup?: string[];
+}
+
+type ActionReason = "critical" | "overdue" | "no-assignee" | "stale" | null;
+
+/**
+ * Deterministic actionability classifier — same rules every caller, no LLM in
+ * the loop. Terminal states (COMPLETED / CANCELLED) are never actionable.
+ * Priority order: critical > overdue > no-assignee > stale.
+ */
+function classifyTicket(t: TicketRow, now: Date): ActionReason {
+  const status = (t.statusV2 ?? "").toUpperCase();
+  if (status === "COMPLETED" || status === "CANCELLED") return null;
+
+  if ((t.priority ?? "").toUpperCase() === "CRITICAL") return "critical";
+
+  if (t.eta) {
+    const due = new Date(t.eta);
+    if (!Number.isNaN(due.getTime()) && due.getTime() < now.getTime()) return "overdue";
+  }
+
+  if (!t.assignedTo) {
+    const created = new Date(t.createdAt);
+    if (!Number.isNaN(created.getTime())) {
+      const hoursSinceCreated = (now.getTime() - created.getTime()) / 3_600_000;
+      if (hoursSinceCreated > 24) return "no-assignee";
+    }
+  }
+
+  // "Stale" check excludes PAUSED — work paused intentionally isn't stale.
+  if (status !== "PAUSED") {
+    const updated = new Date(t.updatedAt);
+    if (!Number.isNaN(updated.getTime())) {
+      const hoursSinceUpdated = (now.getTime() - updated.getTime()) / 3_600_000;
+      if (hoursSinceUpdated > 48) return "stale";
+    }
+  }
+  return null;
+}
+
+interface UserBreakdownRow {
+  userId: string;
+  name: string;
+  email: string | null;
+  total: number;
+  actionable: number;
+  byStatus: Record<string, number>;
+  byPriority: Record<string, number>;
+}
+
+interface SummaryShape {
+  total: number;
+  /** Only set when classifyActionable=true. Otherwise undefined, and the
+   * renderer skips the Actionable line to avoid emitting misleading zeros. */
+  actionableCount?: number;
+  /** Only set when classifyActionable=true. */
+  hasActionableInfo: boolean;
+  byStatus: Record<string, number>;
+  byPriority: Record<string, number>;
+  byUser: UserBreakdownRow[];
+  membersWithNoTickets?: string[];
+}
+
+async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promise<ToolResult> {
+  if (!rows || rows.length === 0) {
+    // Even with zero tickets, the caller may want the expectedUserGroup as
+    // "members with no tickets" — emit a minimal summary if asked.
+    if (opts.summary && opts.expectedUserGroup && opts.expectedUserGroup.length > 0) {
+      const empty: SummaryShape = {
+        total: 0,
+        hasActionableInfo: opts.classifyActionable === true,
+        ...(opts.classifyActionable ? { actionableCount: 0 } : {}),
+        byStatus: {},
+        byPriority: {},
+        byUser: [],
+        membersWithNoTickets: opts.expectedUserGroup.slice(),
+      };
+      return ok(`${renderSummaryBlock(empty)}\n\nNo tickets found.`);
+    }
+    return ok("No tickets found.");
+  }
+
+  // Hydrate missing user-relation joins. Spaces' /api/query sometimes
+  // returns `createdByUser`/`assignedToUser` as null even though the scalar
+  // `createdBy`/`assignedTo` userId is present — observed especially on
+  // bulk-IN queries. Without this hydration, the report would render raw
+  // userIds like `n04kedw3hqlpz0Itc75tfvbr` in the Created By column.
+  // One batch lookup covers every missing id across the whole result set.
+  const missingIds = new Set<string>();
+  for (const t of rows) {
+    if (!t.createdByUser?.name && t.createdBy) missingIds.add(t.createdBy);
+    if (!t.assignedToUser?.name && t.assignedTo) missingIds.add(t.assignedTo);
+  }
+  let nameMap = new Map<string, { name: string; email?: string }>();
+  if (missingIds.size > 0) {
+    try {
+      const users = (await interact({
+        model: "user",
+        operation: "findMany",
+        where: { id: { in: Array.from(missingIds) } },
+        select: { id: true, name: true, email: true },
+      })) as Array<{ id: string; name: string; email?: string }>;
+      nameMap = new Map(
+        users.map((u) => [u.id, u.email ? { name: u.name, email: u.email } : { name: u.name }] as const),
+      );
+    } catch {
+      // Non-fatal — fall through to raw-id rendering for whatever didn't resolve.
+    }
+  }
+
+  const now = new Date();
+  // Pre-classify every ticket if the caller asked. Same Date snapshot used
+  // for every ticket so the report is internally consistent (no drift
+  // between "stale" cutoffs across rows in the same response).
+  const reasons = new Map<string, ActionReason>();
+  if (opts.classifyActionable) {
+    for (const t of rows) reasons.set(t.id, classifyTicket(t, now));
+  }
+
   const citations: Citation[] = [];
   const seen = new Set<string>();
   const lines = rows.map((t) => {
-    const parts = [`[${t.xyneId}] ${t.title}`];
+    // Render ticketId as a clickable markdown link when we have the channel +
+    // conversation pair needed to deep-link into Spaces. Falls back to plain
+    // `[xyneId]` when either is missing so the output never breaks. The
+    // deterministic link removes the agent's need to fabricate URLs in its
+    // rendered report.
+    const ticketUrl = buildTicketUrl(t.channelId, t.conversationId);
+    const idCell = ticketUrl ? `[${t.xyneId}](${ticketUrl})` : `[${t.xyneId}]`;
+    const parts = [`${idCell} ${t.title} (id: ${t.id})`];
     parts.push(`  Board Status: ${t.statusV2} (workflow state, not PR verification) · Priority: ${t.priority}${t.stageName ? ` · Stage: ${t.stageName}` : ""}`);
-    if (t.assignedToUser) parts.push(`  Assigned: ${t.assignedToUser.name}`);
-    if (t.createdByUser) parts.push(`  Created by: ${t.createdByUser.name}`);
+    // Assignee: prefer the joined user (name + email); fall back to the raw
+    // assignedTo userId when the relation isn't populated. Always emit the
+    // line if EITHER field is present so bulk callers (e.g. user-tickets
+    // subagent) can always pin a ticket to a user.
+    if (t.assignedToUser || t.assignedTo) {
+      const u = t.assignedToUser ?? (t.assignedTo ? nameMap.get(t.assignedTo) : undefined);
+      const id = t.assignedTo ?? "";
+      const label = u
+        ? `${u.name}${u.email ? ` <${u.email}>` : ""}${id ? ` (id: ${id})` : ""}`
+        : `userId: ${id}`;
+      parts.push(`  Assigned: ${label}`);
+    }
+    if (t.createdByUser || t.createdBy) {
+      const u = t.createdByUser ?? (t.createdBy ? nameMap.get(t.createdBy) : undefined);
+      const id = t.createdBy ?? "";
+      const label = u
+        ? `${u.name}${u.email ? ` <${u.email}>` : ""}${id ? ` (id: ${id})` : ""}`
+        : `userId: ${id}`;
+      parts.push(`  Created by: ${label}`);
+    }
     if (t.board) parts.push(`  Board: ${t.board.name}${t.project ? ` · Project: ${t.project.name}` : ""}`);
     if (t.tags && t.tags.length > 0) parts.push(`  Tags: ${t.tags.map((tg) => tg.name).join(", ")}`);
     if (t.eta) parts.push(`  ETA: ${new Date(t.eta).toLocaleDateString()}`);
+    if (t.description && t.description.trim().length > 0) {
+      // Cap at 1200 chars so a single fat ticket can't blow the response;
+      // MID strings are short and usually near the top of the description.
+      const trimmed = t.description.trim();
+      const body = trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}…[truncated]` : trimmed;
+      parts.push(`  Description: ${body}`);
+    }
     if (t.channelId) parts.push(`  ChannelID: ${t.channelId}`);
     if (t.conversationId) parts.push(`  ConversationID: ${t.conversationId}`);
-    parts.push(`  Updated: ${new Date(t.updatedAt).toLocaleString()}`);
+    parts.push(`  Created: ${new Date(t.createdAt).toISOString()} · Updated: ${new Date(t.updatedAt).toISOString()}`);
+    if (opts.classifyActionable) {
+      const reason = reasons.get(t.id) ?? null;
+      parts.push(`  Action: ${reason ?? "none"}`);
+    }
     pushThreadCitation(citations, seen, t.channelId, t.conversationId, `Ticket ${t.xyneId}`);
     return parts.join("\n");
   });
   const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
   applyChannelInfo(citations, channelInfo);
-  return okCited(`${rows.length} ticket(s):\n\n${lines.join("\n\n")}`, citations);
+
+  // Render order matters: when the response is large (200+ tickets), claw's
+  // agent.ts truncates tool output at MAX_RESULT_LEN. If the Summary were at
+  // the END, it'd be the FIRST thing dropped — losing the most useful info
+  // for the agent. We put it at the TOP so it always survives truncation.
+  const bodyParts: string[] = [];
+  if (opts.summary) {
+    const summary = buildSummary(rows, reasons, nameMap, opts.expectedUserGroup ?? [], opts.classifyActionable === true);
+    bodyParts.push(renderSummaryBlock(summary));
+    bodyParts.push(""); // blank separator
+  }
+  bodyParts.push(`${rows.length} ticket(s):`);
+  bodyParts.push("");
+  bodyParts.push(lines.join("\n\n"));
+
+  return okCited(bodyParts.join("\n"), citations);
+}
+
+/**
+ * Compute aggregate counts from the ticket list. Pre-computed action reasons
+ * (from classifyTicket) feed actionableCount and the per-user `actionable`
+ * column. If a name hydration map is available, byUser rows are labelled
+ * with names instead of raw userIds.
+ */
+function buildSummary(
+  rows: TicketRow[],
+  reasons: Map<string, ActionReason>,
+  nameMap: Map<string, { name: string; email?: string }>,
+  expectedUserGroup: string[],
+  hasActionableInfo: boolean,
+): SummaryShape {
+  const byStatus: Record<string, number> = {};
+  const byPriority: Record<string, number> = {};
+  let actionableCount = 0;
+
+  const userBuckets = new Map<string, UserBreakdownRow>();
+
+  for (const t of rows) {
+    const status = (t.statusV2 ?? "UNKNOWN").toUpperCase();
+    const priority = (t.priority ?? "UNKNOWN").toUpperCase();
+    byStatus[status] = (byStatus[status] ?? 0) + 1;
+    byPriority[priority] = (byPriority[priority] ?? 0) + 1;
+
+    const isActionable = (reasons.get(t.id) ?? null) !== null;
+    if (isActionable) actionableCount += 1;
+
+    const creatorId = t.createdBy ?? "";
+    if (!creatorId) continue;
+    let bucket = userBuckets.get(creatorId);
+    if (!bucket) {
+      const user = t.createdByUser ?? nameMap.get(creatorId);
+      bucket = {
+        userId: creatorId,
+        name: user?.name ?? `userId:${creatorId}`,
+        email: user?.email ?? null,
+        total: 0,
+        actionable: 0,
+        byStatus: {},
+        byPriority: {},
+      };
+      userBuckets.set(creatorId, bucket);
+    }
+    bucket.total += 1;
+    if (isActionable) bucket.actionable += 1;
+    bucket.byStatus[status] = (bucket.byStatus[status] ?? 0) + 1;
+    bucket.byPriority[priority] = (bucket.byPriority[priority] ?? 0) + 1;
+  }
+
+  // Compute "members with no tickets" against the caller's expected list.
+  // Match by email primarily (since the caller usually passes emails); fall
+  // back to userId match when an entry doesn't contain '@'.
+  let membersWithNoTickets: string[] | undefined;
+  if (expectedUserGroup.length > 0) {
+    const presentEmails = new Set<string>();
+    const presentUserIds = new Set<string>();
+    for (const b of userBuckets.values()) {
+      if (b.email) presentEmails.add(b.email.toLowerCase());
+      presentUserIds.add(b.userId);
+    }
+    membersWithNoTickets = expectedUserGroup.filter((e) => {
+      const lower = e.toLowerCase();
+      if (e.includes("@")) return !presentEmails.has(lower);
+      return !presentUserIds.has(e);
+    });
+  }
+
+  const byUser = Array.from(userBuckets.values()).sort((a, b) => b.total - a.total);
+
+  return {
+    total: rows.length,
+    hasActionableInfo,
+    ...(hasActionableInfo ? { actionableCount } : {}),
+    byStatus,
+    byPriority,
+    byUser,
+    ...(membersWithNoTickets ? { membersWithNoTickets } : {}),
+  };
+}
+
+/**
+ * Render a deterministic Summary block at the end of the tool response.
+ * The agent doesn't need to count anything — it copies these numbers.
+ */
+function renderSummaryBlock(s: SummaryShape): string {
+  const L: string[] = [];
+  L.push(`Summary:`);
+  L.push(`  Total: ${s.total}`);
+  // Skip Actionable line when classification didn't run — emitting "0" would
+  // be misleading (it'd mean "we didn't classify" not "no actionable tickets").
+  if (s.hasActionableInfo) {
+    L.push(`  Actionable: ${s.actionableCount ?? 0}`);
+  }
+
+  const statuses = Object.entries(s.byStatus).sort((a, b) => b[1] - a[1]);
+  if (statuses.length > 0) {
+    L.push(`  ByStatus: ${statuses.map(([k, v]) => `${k}=${v}`).join(" · ")}`);
+  }
+  const priorities = Object.entries(s.byPriority).sort((a, b) => b[1] - a[1]);
+  if (priorities.length > 0) {
+    L.push(`  ByPriority: ${priorities.map(([k, v]) => `${k}=${v}`).join(" · ")}`);
+  }
+
+  if (s.byUser.length > 0) {
+    L.push(`  ByUser:`);
+    for (const u of s.byUser) {
+      const status = Object.entries(u.byStatus).map(([k, v]) => `${k}=${v}`).join(",");
+      const prio = Object.entries(u.byPriority).map(([k, v]) => `${k}=${v}`).join(",");
+      const actionableField = s.hasActionableInfo ? ` actionable=${u.actionable}` : "";
+      L.push(
+        `    - ${u.name}${u.email ? ` <${u.email}>` : ""} (id: ${u.userId}) — total=${u.total}${actionableField} status=[${status}] priority=[${prio}]`,
+      );
+    }
+  }
+
+  if (s.membersWithNoTickets && s.membersWithNoTickets.length > 0) {
+    L.push(`  MembersWithNoTickets: ${s.membersWithNoTickets.join(", ")}`);
+  }
+
+  return L.join("\n");
 }
 
 interface TicketRow {
@@ -485,8 +950,19 @@ interface TicketRow {
   updatedAt: string;
   channelId?: string;
   conversationId?: string;
-  assignedToUser?: { name: string } | null;
-  createdByUser?: { name: string } | null;
+  // Description body of the ticket (markdown). Often contains the MID (merchant
+  // id) and other free-form context the agent needs but isn't in scalar columns.
+  // Surfacing it here means a single spaces-tickets call gives the agent enough
+  // to fill the MID column without spaces-messages.
+  description?: string;
+  // Raw foreign keys — always present in Prisma scalar output even when the
+  // relation include is omitted / unpopulated. Used as a fallback in
+  // formatTickets so we never lose the creator/assignee identity in bulk
+  // results when Spaces' /api/query doesn't hydrate the relation object.
+  assignedTo?: string;
+  createdBy?: string;
+  assignedToUser?: { name: string; email?: string } | null;
+  createdByUser?: { name: string; email?: string } | null;
   board?: { name: string } | null;
   project?: { name: string } | null;
   tags?: Array<{ name: string }>;
@@ -788,10 +1264,10 @@ const spacesActivity: ToolDef = {
       limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max entries (default 20)" },
     },
   },
-  async handler(args) {
+  async handler(args, ctx) {
     try {
       const where: Record<string, unknown> = {
-        userId: { equals: CURRENT_USER_ID },
+        userId: { equals: ctx.userId },
       };
       if (args["classification"]) where["classification"] = { equals: args["classification"] };
       if (args["unreadOnly"] === true) where["isRead"] = { equals: false };
@@ -1189,42 +1665,6 @@ interface BoardRow {
   updatedAt?: string;
 }
 
-// ── spaces-send-message ─────────────────────────────────────────────
-
-const spacesSendMessage: ToolDef = {
-  name: "spaces-send-message",
-  description:
-    "Send a message as the bot in Spaces. Supports HTML content for @mentions. " +
-    "Use conversationId to reply in a thread, or channelId to post in a channel. " +
-    "For @mentions, use HTML: <span data-mention=\"\" data-mention-type=\"user\" data-user-id=\"USER_ID\" data-username=\"NAME\" class=\"chat-input-mention\">@NAME</span>",
-  inputSchema: {
-    type: "object",
-    properties: {
-      conversationId: { type: "string", description: "Reply in this conversation thread" },
-      channelId: { type: "string", description: "Post in this channel (use if no conversationId)" },
-      content: { type: "string", description: "Message content (supports HTML for mentions)" },
-    },
-    required: ["content"],
-  },
-  async handler(args) {
-    // This handler is intercepted at the /mcp/call level in mcp.ts
-    // and posted as bot using the agent's app token.
-    // This code only runs if called directly (not through /mcp/call).
-    try {
-      const conversationId = args["conversationId"] as string | undefined;
-      const channelId = args["channelId"] as string | undefined;
-      const content = String(args["content"]);
-      const data = (await spacesFetch(`/api/conversations/${conversationId ?? channelId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ content }),
-      })) as { messageId: string; conversationId: string };
-      return ok(`Message sent. messageId: ${data.messageId}`);
-    } catch (e) {
-      return err(`Send message error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
-};
-
 // ── spaces-create-ticket ────────────────────────────────────────────
 
 const spacesCreateTicket: ToolDef = {
@@ -1232,9 +1672,11 @@ const spacesCreateTicket: ToolDef = {
   description:
     "Create a new ticket in Spaces. Requires projectId, boardId, and channelId — " +
     "use spaces-projects, spaces-boards, and spaces-channels to look these up first. " +
-    "IMPORTANT: If the user's message contained file attachments, pass the conversationId from " +
-    "the session context as sourceConversationId so those attachments are automatically linked " +
-    "to the new ticket. Do NOT pass channelId when using sourceConversationId.",
+    "The ticket lives in the channel identified by channelId. " +
+    "If the user's triggering message had file attachments, ALSO pass attachConversationId " +
+    "= the conversationId from your session (the thread that triggered this run). " +
+    "Attachments will be copied from that conversation onto the ticket in the same operation. " +
+    "attachConversationId is attachments-only — it does NOT change where the ticket lives.",
   inputSchema: {
     type: "object",
     properties: {
@@ -1242,41 +1684,80 @@ const spacesCreateTicket: ToolDef = {
       description: { type: "string", description: "Ticket description" },
       projectId: { type: "string", description: "Project ID (use spaces-projects to find)" },
       boardId: { type: "string", description: "Board ID (use spaces-boards to find)" },
-      channelId: { type: "string", description: "Channel ID — use when NOT passing sourceConversationId (use spaces-channels to find)" },
-      sourceConversationId: {
+      channelId: { type: "string", description: "Channel ID where the ticket will live (use spaces-channels to find)." },
+      attachConversationId: {
         type: "string",
-        description: "ConversationId of the message that triggered this ticket creation. Pass this (instead of channelId) whenever the triggering message had file attachments — the backend will automatically transfer those attachments to the ticket.",
+        description: "Optional. ConversationId of the user's triggering message. When set, any file attachments on that message are copied to the new ticket in the same operation. Does NOT affect routing — channelId still determines where the ticket lives.",
       },
       priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Ticket priority" },
       assignedTo: { type: "string", description: "User ID to assign (use spaces-users to find)" },
       eta: { type: "string", description: "Due date as ISO 8601 string" },
       tags: { type: "array", items: { type: "string" }, description: "Tags to apply" },
     },
-    required: ["title", "description", "projectId", "boardId"],
+    required: ["title", "description", "projectId", "boardId", "channelId"],
   },
-  async handler(args) {
+  async handler(args, ctx) {
     try {
-      if (!args["channelId"] && !args["sourceConversationId"]) {
-        return err("Either channelId or sourceConversationId is required.");
+      if (!args["channelId"]) {
+        return err("channelId is required.");
       }
+
+      const attachConversationId = (args["attachConversationId"] as string | undefined)?.trim() || undefined;
 
       const body: Record<string, unknown> = {
         title: args["title"],
         description: args["description"],
         projectId: args["projectId"],
         boardId: args["boardId"],
+        channelId: args["channelId"],
       };
-      if (args["sourceConversationId"]) body["sourceConversationId"] = args["sourceConversationId"];
-      else body["channelId"] = args["channelId"];
       if (args["priority"]) body["priority"] = args["priority"];
       if (args["assignedTo"]) body["assignedTo"] = args["assignedTo"];
       if (args["eta"]) body["eta"] = args["eta"];
       if (args["tags"]) body["tags"] = args["tags"];
 
+      // WORKAROUND for xyne-backend bug (ticketController.ts:500): when the
+      // body omits createdBy, the conversationParticipant.upsert in the
+      // ticket-create path passes `userId: undefined` and Prisma 500s the
+      // whole request. The backend's ticket itself uses `finalCreatedBy`
+      // (req.body.createdBy || req.user.id) which works fine — only the
+      // participant upsert reads the raw body field. Explicitly pass
+      // createdBy = ctx.userId here so the participant insert sees a real
+      // userId. Remove once the backend fix lands (use finalCreatedBy in
+      // that upsert).
+      if (ctx.userId) body["createdBy"] = ctx.userId;
+
+      // Step 1: create the ticket. channelId in the body, no
+      // sourceConversationId — routing is honored as the caller specified.
       const data = (await spacesFetch("/api/tickets", {
         method: "POST",
         body: JSON.stringify(body),
       })) as { id: string; xyneId: string; conversationId: string; title: string; priority: string; status: string };
+
+      // Step 2: if the caller wants attachments carried over from another
+      // conversation, transfer them via the existing standalone endpoint.
+      // From the agent's POV this remains a single tool call (one approval).
+      // We do not modify the spaces backend — both requests come from this
+      // handler. If the transfer fails, the ticket itself still exists; we
+      // surface the error in the response text so the model can report it.
+      let attachLine = "";
+      if (attachConversationId) {
+        try {
+          const attachResp = (await spacesFetch(
+            `/api/tickets/${encodeURIComponent(data.id)}/attachments/from-conversation`,
+            {
+              method: "POST",
+              body: JSON.stringify({ sourceConversationId: attachConversationId }),
+            },
+          )) as { count?: number };
+          const count = typeof attachResp?.count === "number" ? attachResp.count : 0;
+          attachLine = count > 0
+            ? `  Attachments: ${count} file(s) carried over`
+            : `  Attachments: 0 files found on source conversation`;
+        } catch (e) {
+          attachLine = `  Attachments: transfer failed — ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
 
       return ok([
         `Ticket created:`,
@@ -1285,6 +1766,7 @@ const spacesCreateTicket: ToolDef = {
         `  Status: ${data.status}`,
         `  Priority: ${data.priority}`,
         `  ConversationID: ${data.conversationId}`,
+        ...(attachLine ? [attachLine] : []),
       ].join("\n"));
     } catch (e) {
       return err(`Create ticket error: ${e instanceof Error ? e.message : String(e)}`);
@@ -1292,53 +1774,68 @@ const spacesCreateTicket: ToolDef = {
   },
 };
 
-// ── spaces-schedule-call ────────────────────────────────────────────
+// ── spaces-update-ticket ────────────────────────────────────────────
 
-const spacesAddTicketAttachments: ToolDef = {
-  name: "spaces-add-ticket-attachments",
+const spacesUpdateTicket: ToolDef = {
+  name: "spaces-update-ticket",
   description:
-    "Transfer file attachments from a Spaces conversation message to an existing ticket. " +
-    "Call this after spaces-create-ticket when the ticket was created without sourceConversationId, " +
-    "or when the user explicitly asks to attach files from a message to a ticket.",
+    "Update an existing ticket in Spaces. At least one update field must be provided. " +
+    "Use spaces-tickets to find the ticket ID (use the Internal ID, not the Xyne ID), spaces-users for user IDs, and spaces-boards for valid stage names. " +
+    "Stage changes also update the ticket status to the stage's default status unless you explicitly provide a status override.",
   inputSchema: {
     type: "object",
     properties: {
-      ticketId: {
-        type: "string",
-        description: "Ticket ID — the `id` field returned by spaces-create-ticket (NOT the xyneId).",
-      },
-      sourceConversationId: {
-        type: "string",
-        description: "ConversationId of the Spaces message that contains the attachments.",
-      },
-      sourceMessageId: {
-        type: "string",
-        description: "Optional. MessageId of the specific message with the attachments. If omitted, falls back to the first message in the conversation.",
-      },
+      ticketId: { type: "string", description: "Internal database ID of the ticket to update (use spaces-tickets to find — use 'Internal ID', not 'Xyne ID')" },
+      assigneeId: { type: "string", description: "User ID to assign the ticket to (use spaces-users to find)" },
+      stage: { type: "string", description: "Stage name to move the ticket to (must be a valid stage on the ticket's board)" },
+      groupId: { type: "string", description: "User group ID to assign to the ticket" },
+      title: { type: "string", description: "New title for the ticket" },
+      description: { type: "string", description: "New description for the ticket" },
+      priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "New priority" },
+      status: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"], description: "New status. Note: changing the stage may also change the status to the stage's default — provide this field to override." },
+      eta: { type: "string", description: "New due date as ISO 8601 string (e.g. '2026-06-01T00:00:00Z')" },
     },
-    required: ["ticketId", "sourceConversationId"],
+    required: ["ticketId"],
   },
-  async handler(args) {
+  async handler(args, ctx) {
     try {
-      const ticketId = String(args["ticketId"]);
-      const sourceConversationId = String(args["sourceConversationId"]);
-      const sourceMessageId = args["sourceMessageId"] as string | undefined;
+      const ticketId = String(args["ticketId"] ?? "").trim();
+      const assigneeId = (args["assigneeId"] as string | undefined)?.trim();
+      const stage = (args["stage"] as string | undefined)?.trim();
+      const groupId = (args["groupId"] as string | undefined)?.trim();
+      const title = (args["title"] as string | undefined)?.trim();
+      const description = (args["description"] as string | undefined)?.trim();
+      const priority = (args["priority"] as string | undefined)?.trim();
+      const status = (args["status"] as string | undefined)?.trim();
+      const eta = (args["eta"] as string | undefined)?.trim();
 
-      const body: Record<string, unknown> = { sourceConversationId };
-      if (sourceMessageId) body["sourceMessageId"] = sourceMessageId;
+      if (!ticketId) return err("ticketId is required.");
+      if (!assigneeId && !stage && !groupId && !title && !description && !priority && !status && !eta) {
+        return err("At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, or eta).");
+      }
 
-      const data = (await spacesFetch(`/api/tickets/${encodeURIComponent(ticketId)}/attachments/from-conversation`, {
-        method: "POST",
+      const body: Record<string, unknown> = {};
+      if (assigneeId) body["assigneeId"] = assigneeId;
+      if (stage) body["stage"] = stage;
+      if (groupId) body["groupId"] = groupId;
+      if (title) body["title"] = title;
+      if (description) body["description"] = description;
+      if (priority) body["priority"] = priority;
+      if (status) body["status"] = status;
+      if (eta) body["eta"] = eta;
+
+      const result = (await spacesFetch(`/api/tickets/${encodeURIComponent(ticketId)}`, {
+        method: "PATCH",
         body: JSON.stringify(body),
-      })) as { count: number };
+      })) as { success: boolean; updated?: string[] };
 
-      return ok(`Attached ${data.count} file(s) to ticket ${ticketId}.`);
+      const updates = result.updated ?? [];
+      return ok(`Ticket ${ticketId} updated${updates.length > 0 ? `: ${updates.join(", ")}` : ""}.`);
     } catch (e) {
-      return err(`Add ticket attachments error: ${e instanceof Error ? e.message : String(e)}`);
+      return err(`Update ticket error: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 };
-
 // ── spaces-schedule-call ────────────────────────────────────────────
 
 const spacesScheduleCall: ToolDef = {
@@ -1388,90 +1885,27 @@ const spacesScheduleCall: ToolDef = {
   },
 };
 
-// ── webfetch ────────────────────────────────────────────────────────
-
-const webfetchTool: ToolDef = {
-  name: "webfetch",
-  description:
-    "Fetch an external URL and return its content as text. " +
-    "Only use for URLs outside Xyne Spaces (e.g. GitHub PRs, docs, external links from messages). " +
-    "Do NOT use for Xyne Spaces internal URLs — use the other spaces tools instead.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      url: { type: "string", description: "The URL to fetch" },
-    },
-    required: ["url"],
-  },
-  async handler(args) {
-    try {
-      const url = String(args["url"]);
-      if (!url.startsWith("http://") && !url.startsWith("https://")) {
-        return err("URL must start with http:// or https://");
-      }
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30_000);
-
-      try {
-        const response = await fetch(url, {
-          signal: controller.signal,
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-            Accept: "text/html;q=1.0, text/plain;q=0.8, */*;q=0.1",
-          },
-          redirect: "follow",
-        });
-        clearTimeout(timer);
-
-        if (!response.ok) return err(`Fetch failed: ${response.status} ${response.statusText}`);
-
-        const contentType = response.headers.get("content-type") ?? "";
-        let text = await response.text();
-
-        if (contentType.includes("html")) {
-          text = text
-            .replace(/<script[\s\S]*?<\/script>/gi, "")
-            .replace(/<style[\s\S]*?<\/style>/gi, "")
-            .replace(/<noscript[\s\S]*?<\/noscript>/gi, "")
-            .replace(/<[^>]+>/g, " ")
-            .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-            .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-        }
-
-        if (text.length > 15000) text = text.slice(0, 15000) + "\n\n... (truncated)";
-        return ok(text);
-      } finally {
-        clearTimeout(timer);
-      }
-    } catch (e) {
-      return err(`Webfetch error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
-};
 
 // ── spaces-whoami ─────────────────────────────────────────────────────
 
 const spacesWhoami: ToolDef = {
   name: "spaces-whoami",
   description:
-    "Returns the current user's Spaces profile — userId, name, email. " +
+    "Returns the current user's Spaces profile — userId, name, email and workspaceId of the User " +
     "Call this first to get the userId needed for filtering other tools (e.g. assignedTo, from, createdBy).",
   inputSchema: { type: "object", properties: {} },
-  async handler() {
+  async handler(_args, ctx) {
     try {
-      if (!CURRENT_USER_ID) return err("Could not determine current user from token.");
+      if (!ctx.userId) return err("Could not determine current user.");
       const rows = (await interact({
         model: "user",
         operation: "findMany",
-        where: { id: { equals: CURRENT_USER_ID } },
+        where: { id: { equals: ctx.userId } },
         take: 1,
-      })) as Array<{ id: string; name: string; email: string }>;
+      })) as Array<{ id: string; name: string; email: string; workspaceId: string }>;
       const u = rows?.[0];
-      if (!u) return ok(`Current user ID: ${CURRENT_USER_ID} (profile not found)`);
-      return ok(`Current user:\n- ID: ${u.id}\n- Name: ${u.name}\n- Email: ${u.email}`);
+      if (!u) return ok(`Current user ID: ${ctx.userId} (profile not found)`);
+      return ok(`Current user:\n- ID: ${u.id}\n- Name: ${u.name}\n- Email: ${u.email}\n- Workspace ID: ${u.workspaceId}`);
     } catch (e) {
       return err(`Whoami error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -1525,12 +1959,19 @@ const spacesPublishDocs: ToolDef = {
       const baseUrl = (process.env["XYNE_SPACES_URL"] ?? "").replace(/\/+$/, "");
       const token = process.env["XYNE_SPACES_TOKEN"] ?? "";
       const sessionId = process.env["XYNE_SPACES_SESSION_ID"] ?? "";
+      const workspaceId = process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "";
+      const cookieParts: string[] = [];
+      if (sessionId) cookieParts.push(`xyne_session=${sessionId}`);
+      if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+      const cookieHeader = cookieParts.join("; ");
       const url = `${baseUrl}/api/docs/publish`;
       const response = await fetch(url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           ...(sessionId ? { "x-session-id": sessionId } : {}),
+          ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
+          ...(cookieHeader ? { Cookie: cookieHeader } : {}),
         },
         body: formData,
         signal: AbortSignal.timeout(120_000),
@@ -1549,42 +1990,53 @@ const spacesPublishDocs: ToolDef = {
   },
 };
 
-// ── spaces-create-canvas ─────────────────────────────────────────────
+// ── spaces-read-canvas ──────────────────────────────────────────────
 
-const spacesCreateCanvas: ToolDef = {
-  name: "spaces-create-canvas",
+const spacesReadCanvas: ToolDef = {
+  name: "spaces-read-canvas",
   description:
-    "Create a new canvas in Xyne Spaces from markdown content. " +
-    "The canvas is shared collaboratively (BlockNote + Y-Sweet) and owned by the Ask-AI bot plus the current user. " +
-    "Returns the canvas URL on success. Use this when the user asks to create a document, notes, meeting summary, or any rich-text artifact.",
+    "Read the full markdown content of an existing canvas. " +
+    "Pass the viewAccessId (the ID from the canvas URL: /chat/canvas/<viewAccessId>). " +
+    "Returns the canvas title and markdown body.",
   inputSchema: {
     type: "object",
     properties: {
-      title: { type: "string", description: "Canvas title (shown in the canvas list and tab)." },
-      markdown: {
+      viewAccessId: {
         type: "string",
-        description:
-          "The markdown content for the canvas. Headings, lists, tables, code blocks, and links are all preserved. Max 5MB.",
+        description: "viewAccessId of the canvas to read — the ID that appears in the canvas URL.",
       },
     },
-    required: ["title", "markdown"],
+    required: ["viewAccessId"],
   },
-  async handler(params) {
+  async handler(params, ctx) {
     try {
-      const title = String(params["title"] ?? "").trim();
-      const markdown = String(params["markdown"] ?? "");
-      if (!title) return err("title is required");
-      if (!markdown) return err("markdown is required");
+      const viewAccessId = String(params["viewAccessId"] ?? "").trim();
+      if (!viewAccessId) return err("viewAccessId is required");
 
-      const result = (await spacesFetch("/api/canvas", {
-        method: "POST",
-        body: JSON.stringify({ title, markdown }),
-      })) as { success?: boolean; url?: string | null; message?: string; error?: string };
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const result = (await spacesFetch(
+        `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
+        {
+          method: "GET",
+          headers: { "x-user-id": ctx.userId },
+        },
+        { s2sKey }
+      )) as { title?: string; markdown?: string; url?: string; error?: string };
 
-      if (!result.success) return err(result.error ?? "Failed to create canvas");
-      return ok(result.message ?? `Canvas created.\nURL: ${result.url ?? "(unknown)"}`);
+      if (result.error) return err(result.error);
+      const title = result.title ?? "Untitled";
+      const markdown = result.markdown ?? "";
+      const url = result.url ?? "";
+
+      return ok([
+        `# ${title}`,
+        ``,
+        `URL: ${url}`,
+        ``,
+        markdown,
+      ].join("\n"));
     } catch (e) {
-      return err(`Create canvas error: ${e instanceof Error ? e.message : String(e)}`);
+      return err(`Read canvas error: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 };
@@ -1612,7 +2064,7 @@ const spacesEditCanvas: ToolDef = {
     },
     required: ["viewAccessId", "content"],
   },
-  async handler(params) {
+  async handler(params, ctx) {
     try {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       const content = String(params["content"] ?? "");
@@ -1620,13 +2072,19 @@ const spacesEditCanvas: ToolDef = {
       if (!viewAccessId) return err("viewAccessId is required");
       if (!content) return err("content is required");
 
-      const result = (await spacesFetch(`/api/canvas/view/${encodeURIComponent(viewAccessId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ content, ...(title ? { title } : {}) }),
-      })) as { success?: boolean; url?: string | null; message?: string; error?: string };
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const result = (await spacesFetch(
+        `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ markdown: content, ...(title ? { title } : {}) }),
+          headers: { "x-user-id": ctx.userId },
+        },
+        { s2sKey }
+      )) as { url?: string | null; title?: string; viewAccessId?: string; error?: string; updatedAt?: string };
 
-      if (!result.success) return err(result.error ?? "Failed to edit canvas");
-      return ok(result.message ?? `Canvas updated.\nURL: ${result.url ?? "(unknown)"}`);
+      if (result.error) return err(result.error);
+      return ok(`Canvas updated.\nTitle: ${result.title ?? "(unknown)"}\nURL: ${result.url ?? "(unknown)"}`);
     } catch (e) {
       return err(`Edit canvas error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -1754,6 +2212,257 @@ const spacesMeetingInsights: ToolDef = {
   },
 };
 
+// ── spaces-create-canvas ────────────────────────────────────────────
+const spacesCreateCanvas: ToolDef = {
+  name: "spaces-create-canvas",
+  description:
+    "Create a new canvas in Xyne Spaces from markdown content. " +
+    "Returns the canvas URL and viewAccessId. " +
+    "The user will be set as an OWNER of the canvas.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: {
+        type: "string",
+        description: "Title for the canvas",
+      },
+      markdown: {
+        type: "string",
+        description: "Content in markdown format (max 5MB)",
+      },
+      visibility: {
+        type: "string",
+        enum: ["PUBLIC", "PRIVATE"],
+        description: "Visibility: PUBLIC (team-visible) or PRIVATE (invite-only). Default: PRIVATE",
+      },
+    },
+    required: ["title", "markdown"],
+  },
+  async handler(args) {
+    try {
+      const title = String(args["title"] ?? "").trim();
+      const markdown = String(args["markdown"] ?? "");
+      const visibility = String(args["visibility"] ?? "PRIVATE");
+
+      if (!title) return err("Title is required");
+      if (!markdown) return err("Markdown content is required");
+
+      const data = (await spacesFetch("/api/canvas/create", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          markdown,
+          visibility: visibility === "PUBLIC" ? "PUBLIC" : "PRIVATE",
+        }),
+      })) as {
+        id: string;
+        viewAccessId: string;
+        title: string;
+        url: string;
+        visibility: string;
+      };
+
+      return ok([
+        `Canvas created successfully!`,
+        ``,
+        `Title: ${data.title}`,
+        `URL: ${data.url}`,
+        `Visibility: ${data.visibility}`,
+        `View Access ID: ${data.viewAccessId}`,
+      ].join("\n"));
+    } catch (e) {
+      return err(`Create canvas error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+
+// ── spaces-emails ──────────────────────────────────────────────────
+
+const spacesEmails: ToolDef = {
+  name: "spaces-emails",
+  description:
+    "Get the full email thread for an Xyne Desk ticket. Returns all emails (inbound and outbound) " +
+    "associated with a desk ticket's conversation — subject, from, to, cc, bcc, body, and timestamps. " +
+    "Use the conversationId from spaces-tickets results. Desk tickets have their email history here; " +
+    "regular chat messages live in spaces-messages instead.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      conversationId: { type: "string", description: "The conversationId from a spaces-tickets desk ticket." },
+      limit: { type: "number", minimum: 1, maximum: 100, default: 20, description: "Max emails to return (default 20)" },
+    },
+    required: ["conversationId"],
+  },
+  async handler(args) {
+    try {
+      const conversationId = String(args["conversationId"]);
+      const take = (args["limit"] as number | undefined) ?? 20;
+
+      const rows = (await interact({
+        model: "email",
+        operation: "findMany",
+        where: { conversationId: { equals: conversationId } },
+        orderBy: [{ createdAt: "asc" }],
+        take,
+      })) as EmailRow[];
+
+      if (!rows || rows.length === 0) return ok(`No emails found for conversation ${conversationId}.`);
+
+      const lines = rows.map((e, idx) => {
+        const parts = [`[${idx + 1}] ${e.type === "DEFAULT" ? "\u{1F4E5} Inbound" : "\u{1F4E4} Outbound"}`];
+        parts.push(`  Subject: ${e.subject}`);
+        parts.push(`  From: ${e.from}`);
+        parts.push(`  To: ${Array.isArray(e.to) ? e.to.join(", ") : e.to}`);
+        if (e.cc && e.cc.length > 0) parts.push(`  CC: ${e.cc.join(", ")}`);
+        if (e.bcc && e.bcc.length > 0) parts.push(`  BCC: ${e.bcc.join(", ")}`);
+        parts.push(`  Date: ${new Date(e.createdAt).toLocaleString()}`);
+        const body = e.body
+          ? e.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 500)
+          : "(no body)";
+        parts.push(`  Body: ${body}${e.body && e.body.length > 500 ? "..." : ""}`);
+        return parts.join("\n");
+      });
+
+      const citations: Citation[] = [];
+      const seen = new Set<string>();
+      const channelId = rows.find((r) => r.channelId)?.channelId;
+      pushThreadCitation(citations, seen, channelId, conversationId, "Desk email thread");
+      const channelInfo = await resolveChannelInfo(
+        citations.map((c) => c.channelId).filter((v): v is string => !!v),
+      );
+      applyChannelInfo(citations, channelInfo);
+
+      return okCited(`${rows.length} email(s) in thread:\n\n${lines.join("\n\n")}`, citations);
+    } catch (e) {
+      return err(`Emails error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+interface EmailRow {
+  id: string;
+  type: string;
+  subject: string;
+  body: string;
+  to: string[];
+  from: string;
+  cc: string[];
+  bcc: string[];
+  conversationId: string;
+  channelId: string;
+  createdAt: string;
+}
+
+// ── spaces-thread-attachments / spaces-fetch-attachment ──────────────
+// Surface non-trigger thread attachments to the agent. The webhook path
+// only ships attachments from the @mention message itself; without these
+// tools, the agent has no way to reach files posted earlier in the
+// thread. Both tools rely on the python query gateway's messageAttachment
+// allowlist + the existing MessageAttachmentsACL (workspaceId scoped).
+
+interface MessageAttachmentRow {
+  id: string;
+  originalFilename: string;
+  mimetype: string;
+  size: number;
+  createdAt: string;
+  uploadedByUserId: string;
+  entityId: string;          // messageId for CHAT entityType
+  url?: string;
+  isDeleted?: boolean;
+}
+
+const spacesThreadAttachments: ToolDef = {
+  name: "spaces-thread-attachments",
+  description:
+    "List every non-deleted attachment in a Spaces conversation thread. " +
+    "Pass the conversationId from your Session Metadata block. " +
+    "Returns one line per attachment with id, filename, mimetype, size, uploader, posted time, and source messageId. " +
+    "Use the returned id with spaces-fetch-attachment to download.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      conversationId: { type: "string", description: "Thread/conversation id (from Session Metadata or spaces-messages results)." },
+      limit: { type: "number", minimum: 1, maximum: 200, default: 50, description: "Max attachments to return (default 50)." },
+    },
+    required: ["conversationId"],
+  },
+  async handler(args) {
+    try {
+      const conversationId = String(args["conversationId"] ?? "");
+      if (!conversationId) return err("conversationId is required");
+      const limit = (args["limit"] as number | undefined) ?? 50;
+
+      const rows = (await interact({
+        model: "messageAttachment",
+        operation: "findMany",
+        where: { conversationId: { equals: conversationId }, isDeleted: { equals: false } },
+        orderBy: [{ createdAt: "asc" }],
+        take: limit,
+      })) as MessageAttachmentRow[];
+
+      if (!rows || rows.length === 0) {
+        return ok(`No attachments in conversation ${conversationId}.`);
+      }
+
+      const lines = rows.map((r) =>
+        `- id=${r.id}  ${r.originalFilename}  (${r.mimetype}, ${r.size}B)  uploadedBy=${r.uploadedByUserId}  at=${r.createdAt}  messageId=${r.entityId}`,
+      );
+      return ok(`${rows.length} attachment(s) in ${conversationId}:\n\n${lines.join("\n")}`);
+    } catch (e) {
+      return err(`Thread attachments error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+const spacesFetchAttachment: ToolDef = {
+  name: "spaces-fetch-attachment",
+  description:
+    "Download a Spaces attachment by id. The file lands in `.context/<fileName>` inside the agent's workspace; " +
+    "use the standard `read` tool to view it afterwards. " +
+    "Use this AFTER spaces-thread-attachments to retrieve specific files the user is asking about.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      attachmentId: { type: "string", description: "Attachment id from spaces-thread-attachments." },
+    },
+    required: ["attachmentId"],
+  },
+  async handler(args) {
+    try {
+      const attachmentId = String(args["attachmentId"] ?? "");
+      if (!attachmentId) return err("attachmentId is required");
+
+      // Look up metadata so we can name the file correctly downstream.
+      const meta = (await interact({
+        model: "messageAttachment",
+        operation: "findMany",
+        where: { id: { equals: attachmentId }, isDeleted: { equals: false } },
+        take: 1,
+      })) as MessageAttachmentRow[];
+      if (!meta || meta.length === 0) {
+        return err(`Attachment ${attachmentId} not found or deleted`);
+      }
+      const m = meta[0]!;
+
+      // Download via the user-token route. The MCP child has the user's
+      // bearer in XYNE_SPACES_TOKEN, so this resolves the same as a UI fetch.
+      const { buffer } = await spacesFetchBuffer(`/api/attachments/${encodeURIComponent(attachmentId)}/download`);
+
+      // Sanitise filename to keep it within .context/ — strip path separators
+      // and leading dots so the agent can't be tricked into reading outside.
+      const safeName = m.originalFilename.replace(/[/\\]/g, "_").replace(/^\.+/, "");
+
+      // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
+      // base64 and writes the buffer to .context/<fileName> in the workspace.
+      return ok(`[SPACES_ATTACHMENT:${safeName}:${m.mimetype}]\n${buffer.toString("base64")}`);
+    } catch (e) {
+      return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
   spacesSearch,
@@ -1771,13 +2480,15 @@ export const tools: ToolDef[] = [
   spacesCanvases,
   spacesCalls,
   spacesBoards,
-  spacesSendMessage,
+  spacesEmails,
+  spacesThreadAttachments,
+  spacesFetchAttachment,
   spacesCreateTicket,
-  spacesAddTicketAttachments,
+  spacesUpdateTicket,
   spacesScheduleCall,
   spacesPublishDocs,
-  spacesCreateCanvas,
+  spacesReadCanvas,
   spacesEditCanvas,
   spacesTriggerAgent,
-  webfetchTool,
+  spacesCreateCanvas,
 ];

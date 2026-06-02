@@ -7,6 +7,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { redisService } from "../redis.js";
+import { requireS2S } from "../middleware/require-auth.js";
 
 const router = Router();
 const PREFIX = "pending-question:";
@@ -35,7 +36,7 @@ export async function deleteQuestion(questionId: string): Promise<void> {
 }
 
 // POST / — store a pending question
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", requireS2S, async (req: Request, res: Response) => {
   try {
     const { questionId, userId, agentSlug, channelId, conversationId, question, options } = req.body as {
       questionId?: string;
@@ -74,7 +75,7 @@ router.post("/", async (req: Request, res: Response) => {
 });
 
 // GET /:id — retrieve a pending question
-router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
+router.get("/:id", requireS2S, async (req: Request<{ id: string }>, res: Response) => {
   try {
     const data = await getQuestion(req.params.id);
     if (!data) {

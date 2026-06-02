@@ -78,20 +78,44 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
     }
 
     // 2c. MCP-based adapters (xyne-spaces, bitbucket, ardra-finops, github, ...)
-    const { callTool, hasAdapter } = await import("../mcp/runner.js");
-    if (!hasAdapter(serverType)) {
+    // Also covers dynamic DB-stored connectors (e.g. cloudinary, airtable)
+    const { callTool } = await import("../mcp/runner.js");
+    const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
+    if (!(await hasConnectorDefinition(serverType))) {
       return { ok: false, content: "", error: `No adapter for server type: ${serverType}` };
     }
 
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: serverType } },
-    });
-    if (!connection) {
-      return { ok: false, content: "", error: `No ${serverType} connection for this user.` };
-    }
+    // For xyne-spaces: resolve credentials from the Spaces DB directly, same as
+    // the MCP runner does in getOrCreateSession(). The userMcpConnection table
+    // may not have a row (user hasn't gone through dashboard connection flow),
+    // but their Spaces session still exists in workflow.user_sessions. Without
+    // this, all write-action approvals fail with "No xyne-spaces connection".
+    let credentials: Record<string, unknown>;
+    if (serverType === "xyne-spaces") {
+      const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
+      const live = await getSpacesAuthForUser(userId, "write-action");
+      if (live) {
+        credentials = {
+          url: CONFIG.spacesAppUrl,
+          token: live.token,
+          sessionId: live.sessionId,
+          workspaceId: live.workspaceId,
+          userId,
+        };
+      } else {
+        return { ok: false, content: "", error: `No xyne-spaces connection for this user.` };
+      }
+    } else {
+      const connection = await prisma.userMcpConnection.findFirst({
+        where: { userId, mcpServer: { type: serverType } },
+      });
+      if (!connection) {
+        return { ok: false, content: "", error: `No ${serverType} connection for this user.` };
+      }
 
-    const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-    const credentials = JSON.parse(decrypted) as Record<string, unknown>;
+      const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
+      credentials = JSON.parse(decrypted) as Record<string, unknown>;
+    }
 
     const result = await callTool(userId, serverType, credentials, tool, params);
     return { ok: true, content: result.content };

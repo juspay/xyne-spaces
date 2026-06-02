@@ -138,8 +138,13 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
 export async function resolveConnectorDefinition(serverType: string): Promise<ResolvedConnectorDefinition | undefined> {
   const row = await prisma.mcpServer.findUnique({ where: { type: serverType } });
   if (row && row.enabled) {
-    const hasDynamicSpec = row.launchConfigTemplate !== null || row.httpConfigTemplate !== null || row.credentialForm !== null || row.credentialSchema !== null;
-    if (hasDynamicSpec) return buildDynamicDefinition(row);
+    // Only use the dynamic (DB-driven) path when the row has an actual launch
+    // config — launchConfigTemplate for stdio or httpConfigTemplate for http.
+    // Having only credentialForm/credentialSchema is not enough: those define
+    // the UI form but the static adapter may still provide the buildCommand()
+    // logic (e.g. BigQuery writes a temp key file before spawning).
+    const hasLaunchConfig = row.launchConfigTemplate !== null || row.httpConfigTemplate !== null;
+    if (hasLaunchConfig) return buildDynamicDefinition(row);
   }
   return fromStaticAdapter(serverType);
 }

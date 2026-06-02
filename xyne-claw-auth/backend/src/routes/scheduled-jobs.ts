@@ -15,6 +15,7 @@ import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getSpacesAuthForUser } from "../lib/spaces-db.js";
 import {
   enqueueDelayedJob,
   enqueueCronJob,
@@ -22,8 +23,77 @@ import {
   cancelCronJob,
   type ScheduledJobData,
 } from "../queue/scheduled-jobs-queue.js";
+// cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
+// loader can't statically detect named exports from that pattern, so a
+// `import { parseExpression } from "cron-parser"` throws at runtime even
+// though the .d.ts file claims the export exists. Default-import the
+// module object and pull the static method off it.
+import cronParser from "cron-parser";
+const { parseExpression } = cronParser;
 
 const router = Router();
+
+/**
+ * Read the `xyne_last_workspace` cookie to determine which Spaces workspace
+ * the request is scoped to. Used to capture workspaceId on scheduled-job
+ * create so we can pass it to Spaces' app API at result-delivery time.
+ */
+function readWorkspaceCookie(req: Request): string | undefined {
+  const cookie = req.headers.cookie ?? "";
+  const match = cookie.match(/(?:^|;\s*)xyne_last_workspace=([^;]*)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+}
+
+// ── Cron validation ─────────────────────────────────────────────────
+//
+// Shared by POST (create) and PATCH (reschedule). Two checks:
+//   1. Parseability via cron-parser (5-field standard, IST tz). Bullmq
+//      uses the same parser, so anything that fails here would later
+//      fail in upsertJobScheduler — better to reject up-front with a
+//      structured 400 instead of a thrown 500.
+//   2. Minimum-interval policy. Reads CONFIG.minCronIntervalMinutes
+//      (env: MIN_CRON_INTERVAL_MINUTES, default 30). Blocks bare `*`
+//      and `*/N` where N is smaller than the configured floor — both
+//      would let users burn LLM quota by firing far too often.
+function validateCronExpression(
+  expr: string,
+): { ok: true; cron: string } | { ok: false; error: string } {
+  const trimmed = expr.trim();
+  if (!trimmed) {
+    return { ok: false, error: "cronExpression is required" };
+  }
+  try {
+    parseExpression(trimmed, { tz: "Asia/Kolkata" }).next();
+  } catch (err) {
+    return {
+      ok: false,
+      error: `Invalid cronExpression: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const minInterval = CONFIG.minCronIntervalMinutes;
+  if (minInterval > 0) {
+    const parts = trimmed.split(/\s+/);
+    if (parts.length >= 1) {
+      const minuteField = parts[0]!;
+      if (minuteField === "*") {
+        return {
+          ok: false,
+          error: `Minimum cron interval is ${minInterval} minutes. Use '*/${minInterval} * * * *' or longer.`,
+        };
+      }
+      const stepMatch = minuteField.match(/^\*\/(\d+)$/);
+      if (stepMatch && parseInt(stepMatch[1]!, 10) < minInterval) {
+        return {
+          ok: false,
+          error: `Minimum cron interval is ${minInterval} minutes. Got every ${stepMatch[1]} minutes.`,
+        };
+      }
+    }
+  }
+
+  return { ok: true, cron: trimmed };
+}
 
 // ── Auth helpers ────────────────────────────────────────────────────
 
@@ -63,7 +133,8 @@ router.post("/", async (req: Request, res: Response) => {
       userId: bodyUserId, agentSlug, task, context,
       channelId, conversationId,
       type, delayMs, cronExpression,
-      label, maxRuns,
+      label, maxRuns, replyMode,
+      workspaceId: bodyWorkspaceId,
     } = req.body as {
       userId?: string;
       agentSlug?: string;
@@ -76,7 +147,18 @@ router.post("/", async (req: Request, res: Response) => {
       cronExpression?: string;
       label?: string;
       maxRuns?: number;
+      replyMode?: string;
+      workspaceId?: string;
     };
+
+    // Spaces' app API requires workspaceId on postMessage / openDm. Capture
+    // it now so the result handler can pass it through later. Priority:
+    //   1. Body (S2S callers may pass explicitly)
+    //   2. `xyne_last_workspace` cookie (browser flow)
+    //   3. Spaces DB live read (works even when neither of the above is set —
+    //      common for non-browser triggers or when the cookie can't cross
+    //      the claw / spaces domain boundary)
+    let workspaceId: string | undefined = bodyWorkspaceId?.trim() || readWorkspaceCookie(req);
 
     // Force userId from the authed requester; only S2S (no requesterId) or admins
     // can create jobs owned by someone else.
@@ -90,6 +172,21 @@ router.post("/", async (req: Request, res: Response) => {
     if (!userId || !agentSlug || !task || !type) {
       res.status(400).json({ success: false, error: "userId, agentSlug, task, and type are required" });
       return;
+    }
+
+    // Fallback: pull workspaceId from the user's active Spaces session row.
+    // Most browser callers don't currently send it in the body, and the
+    // `xyne_last_workspace` cookie can be absent in non-browser triggers.
+    // Without this fallback the row gets workspaceId=NULL and Spaces rejects
+    // the result-delivery call when the job fires.
+    if (!workspaceId) {
+      const live = await getSpacesAuthForUser(userId, "scheduled-job");
+      if (live?.workspaceId) {
+        workspaceId = live.workspaceId;
+        console.log(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces DB for userId=${userId}`);
+      } else {
+        console.warn(`[scheduled-jobs] no workspaceId from body/cookie/SpacesDB for userId=${userId} — row will be created with NULL and result delivery will fail`);
+      }
     }
 
     if (type !== "once" && type !== "cron") {
@@ -107,22 +204,15 @@ router.post("/", async (req: Request, res: Response) => {
       return;
     }
 
-    // Enforce minimum cron interval
-    const minInterval = CONFIG.minCronIntervalMinutes;
-    if (type === "cron" && cronExpression && minInterval > 0) {
-      const parts = cronExpression.trim().split(/\s+/);
-      if (parts.length >= 1) {
-        const minuteField = parts[0]!;
-        if (minuteField === "*") {
-          res.status(400).json({ success: false, error: `Minimum cron interval is ${minInterval} minutes. Use '*/${minInterval} * * * *' or longer.` });
-          return;
-        }
-        const stepMatch = minuteField.match(/^\*\/(\d+)$/);
-        if (stepMatch && parseInt(stepMatch[1]!, 10) < minInterval) {
-          res.status(400).json({ success: false, error: `Minimum cron interval is ${minInterval} minutes. Got every ${stepMatch[1]} minutes.` });
-          return;
-        }
+    // Validate parseability + min-interval policy. Shared with PATCH.
+    let normalizedCron: string | undefined;
+    if (type === "cron" && cronExpression) {
+      const v = validateCronExpression(cronExpression);
+      if (!v.ok) {
+        res.status(400).json({ success: false, error: v.error });
+        return;
       }
+      normalizedCron = v.cron;
     }
 
     const nextRunAt = type === "once" ? new Date(Date.now() + delayMs!) : null;
@@ -138,10 +228,12 @@ router.post("/", async (req: Request, res: Response) => {
         conversationId: conversationId ?? null,
         type,
         delayMs: type === "once" ? BigInt(delayMs!) : null,
-        cronExpression: type === "cron" ? (cronExpression ?? null) : null,
+        cronExpression: type === "cron" ? (normalizedCron ?? null) : null,
         maxRuns: maxRuns ?? (type === "once" ? 1 : null),
         nextRunAt,
         label: label ?? null,
+        workspaceId: workspaceId ?? null,
+        replyMode: replyMode ?? "thread",
       },
     });
 
@@ -164,7 +256,7 @@ router.post("/", async (req: Request, res: Response) => {
       });
     } else {
       const schedulerId = `cron-${row.id}`;
-      await enqueueCronJob(schedulerId, data, cronExpression!);
+      await enqueueCronJob(schedulerId, data, normalizedCron!);
       await prisma.scheduledJob.update({
         where: { id: row.id },
         data: { bullSchedulerId: schedulerId },
@@ -278,6 +370,200 @@ router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
   } catch (err) {
     console.error("[scheduled-jobs] Get error:", err);
     res.status(500).json({ success: false, error: "Failed to get scheduled job" });
+  }
+});
+
+// ── PATCH /:id — update editable fields on a job ────────────────────
+//
+// Owner (or admin) can change display/delivery options AND, for active cron
+// jobs, the cron expression itself. Rescheduling a cron job re-binds the
+// BullMQ scheduler in Redis to the new pattern (still tz="Asia/Kolkata"
+// per scheduled-jobs-queue.ts). delayMs / agentSlug / type remain
+// non-editable — those should go through delete + recreate.
+
+router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
+    if (!row) {
+      res.status(404).json({ success: false, error: "Not found" });
+      return;
+    }
+    const requesterId = getRequesterId(req);
+    if (requesterId && row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+      res.status(404).json({ success: false, error: "Not found" });
+      return;
+    }
+
+    const { replyMode, label, targetChannelId, cronExpression, nextRunAt } = req.body as {
+      replyMode?: string;
+      label?: string | null;
+      targetChannelId?: string | null;
+      cronExpression?: string;
+      nextRunAt?: string;
+    };
+
+    const data: {
+      replyMode?: string;
+      label?: string | null;
+      targetChannelId?: string | null;
+      cronExpression?: string;
+      delayMs?: bigint;
+      nextRunAt?: Date;
+    } = {};
+    if (replyMode !== undefined) {
+      if (replyMode !== "thread" && replyMode !== "channel") {
+        res.status(400).json({ success: false, error: "replyMode must be 'thread' or 'channel'" });
+        return;
+      }
+      data.replyMode = replyMode;
+    }
+    if (label !== undefined) {
+      data.label = label === null ? null : String(label);
+    }
+    if (targetChannelId !== undefined) {
+      // Empty string / null clears the override (revert to originating channel).
+      const trimmed = targetChannelId == null ? null : String(targetChannelId).trim();
+      data.targetChannelId = trimmed && trimmed.length > 0 ? trimmed : null;
+    }
+
+    let cronChanged = false;
+    if (cronExpression !== undefined) {
+      if (row.type !== "cron") {
+        res.status(400).json({ success: false, error: "cronExpression can only be changed on type='cron' jobs" });
+        return;
+      }
+      if (row.status !== "active") {
+        res.status(400).json({ success: false, error: "Only active jobs can be rescheduled" });
+        return;
+      }
+      // Same parseability + min-interval policy as POST. validateCronExpression
+      // returns the trimmed value on success.
+      const v = validateCronExpression(String(cronExpression));
+      if (!v.ok) {
+        res.status(400).json({ success: false, error: v.error });
+        return;
+      }
+      if (v.cron !== row.cronExpression) {
+        data.cronExpression = v.cron;
+        cronChanged = true;
+      }
+    }
+
+    let onceRescheduled = false;
+    let newDelayMsForRescheduledOnce = 0;
+    if (nextRunAt !== undefined) {
+      if (row.type !== "once") {
+        res.status(400).json({ success: false, error: "nextRunAt can only be changed on type='once' jobs" });
+        return;
+      }
+      if (row.status !== "active") {
+        res.status(400).json({ success: false, error: "Only active jobs can be rescheduled" });
+        return;
+      }
+      const newDate = new Date(String(nextRunAt));
+      if (isNaN(newDate.getTime())) {
+        res.status(400).json({ success: false, error: "nextRunAt must be a valid ISO datetime (e.g. '2026-05-26T19:30:00Z')" });
+        return;
+      }
+      const newDelayMs = newDate.getTime() - Date.now();
+      // 5s floor so a clock-skew race between client/server doesn't push
+      // the new schedule into the past on submit.
+      if (newDelayMs < 5_000) {
+        res.status(400).json({ success: false, error: "nextRunAt must be at least 5 seconds in the future" });
+        return;
+      }
+      data.nextRunAt = newDate;
+      data.delayMs = BigInt(newDelayMs);
+      onceRescheduled = true;
+      newDelayMsForRescheduledOnce = newDelayMs;
+    }
+
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ success: false, error: "No editable fields supplied" });
+      return;
+    }
+
+    const updated = await prisma.scheduledJob.update({ where: { id: row.id }, data });
+
+    // Re-bind the BullMQ scheduler so the new pattern actually takes effect
+    // in Redis. upsertJobScheduler is idempotent — re-registering the same
+    // schedulerId with a new pattern atomically replaces it.
+    if (cronChanged) {
+      const schedulerId = updated.bullSchedulerId ?? `cron-${updated.id}`;
+      const jobData: ScheduledJobData = {
+        scheduledJobId: updated.id,
+        userId: updated.userId,
+        agentSlug: updated.agentSlug,
+        task: updated.task,
+        ...(updated.context ? { context: updated.context } : {}),
+        ...(updated.channelId ? { channelId: updated.channelId } : {}),
+        ...(updated.conversationId ? { conversationId: updated.conversationId } : {}),
+      };
+      try {
+        await enqueueCronJob(schedulerId, jobData, updated.cronExpression!);
+        if (!updated.bullSchedulerId) {
+          await prisma.scheduledJob.update({
+            where: { id: updated.id },
+            data: { bullSchedulerId: schedulerId },
+          });
+        }
+        console.log(`[scheduled-jobs] Rescheduled ${updated.id} → '${updated.cronExpression}'`);
+      } catch (err) {
+        console.error(`[scheduled-jobs] Failed to re-bind scheduler ${schedulerId}:`, err);
+        // DB is already updated — surface the Redis failure so the caller
+        // knows the binding may be stale and can retry.
+        res.status(500).json({
+          success: false,
+          error: `Saved cron in DB but failed to update Redis scheduler: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return;
+      }
+    }
+
+    // Once-job reschedule: cancel the prior BullMQ delayed job (if still
+    // pending) and re-enqueue with the new delay. Cancel is best-effort —
+    // if the old job already fired or was already cleaned up, ignore.
+    if (onceRescheduled) {
+      if (updated.bullJobId) {
+        await cancelJob(updated.bullJobId).catch((err) => {
+          console.warn(`[scheduled-jobs] Failed to cancel old bullJob ${updated.bullJobId} for ${updated.id}:`, err instanceof Error ? err.message : err);
+        });
+      }
+      const jobData: ScheduledJobData = {
+        scheduledJobId: updated.id,
+        userId: updated.userId,
+        agentSlug: updated.agentSlug,
+        task: updated.task,
+        ...(updated.context ? { context: updated.context } : {}),
+        ...(updated.channelId ? { channelId: updated.channelId } : {}),
+        ...(updated.conversationId ? { conversationId: updated.conversationId } : {}),
+      };
+      try {
+        const newBullJobId = await enqueueDelayedJob(jobData, newDelayMsForRescheduledOnce);
+        await prisma.scheduledJob.update({
+          where: { id: updated.id },
+          data: { bullJobId: newBullJobId },
+        });
+        console.log(`[scheduled-jobs] Rescheduled once-job ${updated.id} → fires at ${updated.nextRunAt?.toISOString()} (delay ${newDelayMsForRescheduledOnce}ms)`);
+      } catch (err) {
+        console.error(`[scheduled-jobs] Failed to re-enqueue once-job ${updated.id}:`, err);
+        // DB is ahead of Redis. The next fire won't happen until the user
+        // retries the reschedule. Surface this so the caller knows.
+        res.status(500).json({
+          success: false,
+          error: `Saved nextRunAt in DB but failed to enqueue the new delayed job: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: { ...updated, delayMs: updated.delayMs != null ? Number(updated.delayMs) : null },
+    });
+  } catch (err) {
+    console.error("[scheduled-jobs] Patch error:", err);
+    res.status(500).json({ success: false, error: "Failed to update scheduled job" });
   }
 });
 
@@ -427,8 +713,48 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
   const spacesAppUserId = agent.spacesAppUserId ?? "";
 
   try {
-    if (row.channelId && row.conversationId) {
-      // Reply in the original thread
+    // Spaces' app API requires `workspaceId` on postMessage and openDm. We
+    // capture it at job-creation time (scheduled_jobs.workspaceId). Rows
+    // created before that column existed have null workspaceId — surface a
+    // clear error so the user knows to recreate the job.
+    if (!row.workspaceId) {
+      console.error(`[scheduled-jobs/result] Job ${id}: missing workspaceId on row — Spaces will reject delivery. Recreate the job.`);
+      return;
+    }
+
+    if (row.replyMode === "channel" && (row.targetChannelId || row.channelId)) {
+      // Top-level channel post — no conversationId, new message in channel.
+      // Prefer the explicit `targetChannelId` override (set by the user in the
+      // Scheduled Jobs UI). Falls back to the originating channelId if not set.
+      // Always pass workspaceId — Spaces' postMessage requires it.
+      const postChannelId = row.targetChannelId ?? row.channelId!;
+      if (payload.attachments?.length) {
+        const form = new FormData();
+        for (const att of payload.attachments) {
+          const buffer = Buffer.from(att.data, "base64");
+          const blob = new Blob([buffer], { type: att.mimeType });
+          form.append("files", blob, att.fileName);
+        }
+        form.append("channelId", postChannelId);
+        form.append("userId", spacesAppUserId);
+        form.append("workspaceId", row.workspaceId);
+        form.append("markdownText", payload.result);
+        form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
+
+        await spacesAppFetchMultipart("/files/filesUpload", form, appToken);
+      } else {
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: postChannelId,
+          markdownText: payload.result,
+          userId: spacesAppUserId,
+          workspaceId: row.workspaceId,
+          metadata: { contentFormat: "markdown" },
+        }, appToken);
+      }
+
+      console.log(`[scheduled-jobs/result] Posted result to channel ${postChannelId}${row.targetChannelId ? " (override)" : ""}`);
+    } else if (row.channelId && row.conversationId) {
+      // Reply in the original thread (default "thread" mode)
       if (payload.attachments?.length) {
         const form = new FormData();
         for (const att of payload.attachments) {
@@ -439,6 +765,7 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
         form.append("channelId", row.channelId);
         form.append("conversationId", row.conversationId);
         form.append("userId", spacesAppUserId);
+        form.append("workspaceId", row.workspaceId);
         form.append("markdownText", payload.result);
         form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
 
@@ -449,6 +776,7 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
           conversationId: row.conversationId,
           markdownText: payload.result,
           userId: spacesAppUserId,
+          workspaceId: row.workspaceId,
           metadata: { contentFormat: "markdown" },
         }, appToken);
       }
@@ -458,12 +786,14 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
       // DM the user
       const dmResult = (await spacesAppFetch("/channel/openDm", {
         targetUserId: row.userId,
+        workspaceId: row.workspaceId,
       }, appToken)) as { channelId: string };
 
       await spacesAppFetch("/chat/postMessage", {
         channelId: dmResult.channelId,
         markdownText: payload.result,
         userId: spacesAppUserId,
+        workspaceId: row.workspaceId,
         metadata: { contentFormat: "markdown" },
       }, appToken);
 

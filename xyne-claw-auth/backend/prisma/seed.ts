@@ -1,10 +1,29 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createCipheriv, randomBytes } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { getAllCustomTools } from "xyne-claw-shared";
 
 const prisma = new PrismaClient();
+
+/**
+ * Encrypt `data` using AES-256-GCM with the ENCRYPTION_KEY env var.
+ * Returns null when ENCRYPTION_KEY is not set (seed will skip writing the row).
+ */
+function encryptCreds(data: Record<string, unknown>): { encryptedCreds: string; iv: string; authTag: string } | null {
+  const keyHex = process.env["ENCRYPTION_KEY"];
+  if (!keyHex) return null;
+  const key = Buffer.from(keyHex, "hex");
+  const ivBuf = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, ivBuf);
+  const enc = Buffer.concat([cipher.update(JSON.stringify(data), "utf8"), cipher.final()]);
+  return {
+    encryptedCreds: enc.toString("base64"),
+    iv: ivBuf.toString("base64"),
+    authTag: cipher.getAuthTag().toString("base64"),
+  };
+}
 
 // Read skill files from the xyne-claw/skills/ directory (monorepo sibling)
 const SEED_DIR = dirname(fileURLToPath(import.meta.url));
@@ -114,6 +133,21 @@ const SERVERS = [
     description: "Internal Xyne Spaces platform integration",
   },
   {
+    type: "juspay-internal-tools",
+    name: "Juspay Internal Tools",
+    url: "",
+    description: "Juspay internal APIs (Curie lead/merchant CRM, Turing flows, Stein features).",
+    credentialForm: { fields: [] },
+  },
+  {
+    type: "xyne-spaces-app-tools",
+    name: "Xyne Spaces App Tools",
+    url: "",
+    description: "Bot/app-credential write tools for Xyne Spaces — always available to all agents, uses agent app token (not user token).",
+    credentialForm: { fields: [] },
+    writeToolPolicy: { mode: "allowlist", tools: [] },
+  },
+  {
     type: "ardra-finops",
     name: "Ardra FinOps",
     url: "",
@@ -134,6 +168,27 @@ const SERVERS = [
     },
     healthcheckSpec: { name: "fetchPolicies", params: {} },
     writeToolPolicy: { mode: "allowlist", tools: ["createManualReimbursement"] },
+  },
+  {
+    type: "curie",
+    name: "Curie",
+    url: "",
+    description: "Curie / Pulse S2S integration — fetch leads, orgs, and meeting actionables",
+    transport: "http",
+    credentialForm: {
+      fields: [
+        { name: "url", label: "Curie API URL", type: "text", placeholder: "https://curie.example.com" },
+        { name: "authorization", label: "Authorization (Basic credential)", type: "password", placeholder: "Base64-encoded user:password" },
+      ],
+    },
+    httpConfigTemplate: {
+      url: "{{url}}/curie/mcp",
+      headers: {
+        Authorization: "Basic {{authorization}}",
+      },
+    },
+    healthcheckSpec: { name: "curie-lead-fetch-all", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: ["curie-lead-fetch-all"] },
   },
   {
     type: "google",
@@ -254,6 +309,188 @@ const SERVERS = [
       ],
     },
   },
+  {
+    type: "bigquery",
+    name: "BigQuery",
+    url: "",
+    description: "Google BigQuery data warehouse — query datasets, explore schemas, list tables",
+    transport: "stdio",
+    credentialForm: {
+      fields: [
+        { name: "projectId", label: "GCP Project ID", type: "text", placeholder: "your-gcp-project-id" },
+        { name: "keyFile", label: "Service Account Key (JSON)", type: "password", placeholder: "Paste the full JSON key content" },
+        { name: "location", label: "BigQuery Location", type: "text", placeholder: "us-central1", optional: true },
+      ],
+    },
+    // No launchConfigTemplate — falls through to bigqueryAdapter.buildCommand() in static-adapters.ts
+    // which writes the key JSON to a temp file and passes the path via --key-file
+    healthcheckSpec: { name: "query", params: { sql: "SELECT 1" } },
+    writeToolPolicy: { mode: "allowlist", tools: [] },
+  },
+  {
+    type: "databricks",
+    name: "Databricks",
+    url: "",
+    description: "Databricks workspace — manage clusters, jobs, notebooks, execute SQL, browse files and Unity Catalog volumes",
+    transport: "stdio",
+    credentialForm: {
+      fields: [
+        { name: "host", label: "Databricks Workspace URL", type: "text", placeholder: "https://your-workspace.cloud.databricks.com" },
+        { name: "token", label: "Personal Access Token", type: "password", placeholder: "dapi_xxxxxxxxxxxxxxxxxxxx" },
+        { name: "httpPath", label: "SQL Warehouse HTTP Path", type: "text", placeholder: "/sql/1.0/warehouses/your-warehouse-id", optional: true },
+      ],
+    },
+    launchConfigTemplate: {
+      cmd: "uvx",
+      args: ["databricks-mcp-server"],
+      env: {
+        DATABRICKS_HOST: "{{host}}",
+        DATABRICKS_TOKEN: "{{token}}",
+        DATABRICKS_WAREHOUSE_ID: "{{httpPath}}",
+      },
+    },
+    healthcheckSpec: { name: "list_clusters", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: ["create_cluster", "terminate_cluster", "start_cluster", "run_job", "create_job", "create_notebook", "upload_file_to_volume", "upload_file_to_dbfs"] },
+  },
+  {
+    type: "slack",
+    name: "Slack",
+    url: "",
+    description: "Slack workspace — search messages, list channels, read conversations, post messages",
+    transport: "stdio",
+    credentialForm: {
+      fields: [
+        { name: "botToken", label: "Slack Bot Token", type: "password", placeholder: "xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx" },
+        { name: "teamId", label: "Slack Team ID", type: "text", placeholder: "T01234567" },
+      ],
+    },
+    launchConfigTemplate: {
+      cmd: "npx",
+      args: ["-y", "@modelcontextprotocol/server-slack"],
+      env: {
+        SLACK_BOT_TOKEN: "{{botToken}}",
+        SLACK_TEAM_ID: "{{teamId}}",
+      },
+    },
+    healthcheckSpec: { name: "slack_list_channels", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: ["slack_post_message", "slack_reply_to_thread", "slack_add_reaction"] },
+  },
+  {
+    type: "shopify",
+    name: "Shopify",
+    url: "",
+    description: "Shopify store — manage products, orders, customers, discounts, and inventory via GraphQL Admin API",
+    transport: "stdio",
+    credentialForm: {
+      fields: [
+        { name: "accessToken", label: "Admin API Access Token", type: "password", placeholder: "shpat_xxxxxxxxxxxxxxxxxxxx" },
+        { name: "domain", label: "Myshopify Domain", type: "text", placeholder: "your-store.myshopify.com" },
+      ],
+    },
+    launchConfigTemplate: {
+      cmd: "npx",
+      args: ["-y", "shopify-mcp", "--accessToken={{accessToken}}", "--domain={{domain}}"],
+      env: {},
+    },
+    healthcheckSpec: { name: "get-products", params: { limit: 1 } },
+    writeToolPolicy: { mode: "allowlist", tools: ["create-product", "update-product", "delete-product", "manage-product-variants", "delete-product-variants", "manage-product-options", "create-order", "update-order", "cancel-order", "create-customer", "update-customer", "create-discount", "update-discount"] },
+  },
+  {
+    type: "intercom",
+    name: "Intercom",
+    url: "",
+    description: "Intercom — search contacts, read conversations, list companies via official MCP",
+    transport: "stdio",
+    credentialForm: {
+      fields: [
+        { name: "accessToken", label: "Intercom Access Token", type: "password", placeholder: "your-intercom-access-token" },
+      ],
+    },
+    launchConfigTemplate: {
+      cmd: "npx",
+      args: ["-y", "mcp-remote", "https://mcp.intercom.com/mcp", "--header", "Authorization:Bearer {{accessToken}}"],
+      env: {},
+    },
+    healthcheckSpec: { name: "ic_list_conversations", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: [] },
+  },
+  {
+    type: "asana",
+    name: "Asana",
+    url: "",
+    description: "Asana — manage tasks, projects, sections, and workspaces via Personal Access Token",
+    transport: "stdio",
+    credentialForm: {
+      fields: [
+        { name: "accessToken", label: "Asana Personal Access Token", type: "password", placeholder: "1/1234567890:abcdef..." },
+      ],
+    },
+    launchConfigTemplate: {
+      cmd: "npx",
+      args: ["-y", "@roychri/mcp-server-asana"],
+      env: {
+        ASANA_ACCESS_TOKEN: "{{accessToken}}",
+      },
+    },
+    healthcheckSpec: { name: "asana_list_workspaces", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: ["asana_create_task", "asana_update_task", "asana_delete_task", "asana_create_project", "asana_update_project", "asana_delete_project", "asana_add_task_to_project", "asana_remove_task_from_project", "asana_create_section", "asana_update_section", "asana_delete_section", "asana_add_task_comment"] },
+  },
+  {
+    type: "salesforce",
+    name: "Salesforce",
+    url: "",
+    description: "Salesforce CRM — SOQL, objects, DML, metadata and Apex via acquis-salesforce-mcp (username + password + security token)",
+    transport: "stdio",
+    credentialForm: {
+      fields: [
+        { name: "username", label: "Salesforce Username", type: "text", placeholder: "user@yourcompany.com" },
+        { name: "password", label: "Salesforce Password", type: "password", placeholder: "your-password" },
+        { name: "securityToken", label: "Security Token", type: "password", placeholder: "your-security-token" },
+        { name: "instanceUrl", label: "Instance URL", type: "text", placeholder: "https://login.salesforce.com", optional: true },
+      ],
+    },
+    // Launch is implemented in static-adapters salesforceAdapter (default instance URL when omitted).
+    launchConfigTemplate: {
+      cmd: "npx",
+      args: ["-y", "@acquis-consulting/acquis-salesforce-mcp"],
+      env: {
+        SALESFORCE_CONNECTION_TYPE: "username_password",
+        SALESFORCE_USERNAME: "{{username}}",
+        SALESFORCE_PASSWORD: "{{password}}",
+        SALESFORCE_TOKEN: "{{securityToken}}",
+        SALESFORCE_INSTANCE_URL: "{{instanceUrl}}",
+      },
+    },
+    healthcheckSpec: { name: "salesforce_search_objects", params: { searchPattern: "Account" } },
+    writeToolPolicy: {
+      mode: "allowlist",
+      tools: [
+        "salesforce_dml",
+        "salesforce_manage_object",
+        "salesforce_manage_field",
+        "salesforce_manage_field_permissions",
+        "salesforce_write_apex_class",
+        "salesforce_write_apex_trigger",
+        "salesforce_execute_anonymous_apex",
+        "salesforce_write_metadata",
+        "salesforce_metadata_import",
+      ],
+    },
+  },
+  {
+    type: "rapidapi-linkedin",
+    name: "LinkedIn (RapidAPI)",
+    url: "",
+    description: "Fresh LinkedIn Profile Data via RapidAPI — get profiles, companies, employees, posts and search people",
+    transport: "stdio",
+    credentialForm: {
+      fields: [
+        { name: "apiKey", label: "X-RapidAPI-Key", type: "password", placeholder: "your-rapidapi-key" },
+      ],
+    },
+    healthcheckSpec: { name: "linkedin_get_profile", params: { linkedin_url: "https://www.linkedin.com/in/williamhgates" } },
+    writeToolPolicy: { mode: "allowlist", tools: [] },
+  },
 ] as const;
 
 async function main() {
@@ -275,8 +512,9 @@ async function main() {
         description: server.description,
         ...(s.transport ? { transport: s.transport } : {}),
         ...(s.credentialForm ? { credentialForm: s.credentialForm as Prisma.InputJsonValue } : {}),
-        ...(s.launchConfigTemplate ? { launchConfigTemplate: s.launchConfigTemplate as Prisma.InputJsonValue } : {}),
-        ...(s.httpConfigTemplate ? { httpConfigTemplate: s.httpConfigTemplate as Prisma.InputJsonValue } : {}),
+        // Explicitly set to null when absent so stale values don't block static adapter resolution
+        launchConfigTemplate: s.launchConfigTemplate != null ? (s.launchConfigTemplate as Prisma.InputJsonValue) : null,
+        httpConfigTemplate: s.httpConfigTemplate != null ? (s.httpConfigTemplate as Prisma.InputJsonValue) : null,
         ...(s.healthcheckSpec ? { healthcheckSpec: s.healthcheckSpec as Prisma.InputJsonValue } : {}),
         ...(s.writeToolPolicy ? { writeToolPolicy: s.writeToolPolicy as Prisma.InputJsonValue } : {}),
         connectorMeta: { seeded: true, version: 1 } as Prisma.InputJsonValue,
@@ -410,7 +648,7 @@ Some tools (like creating tickets or scheduling calls) require user approval bef
   console.log("[seed] Upserted assistant agent (default)");
 
   // Seed ask-ai agent (Ask AI v2 - mimics v1 with spaces, artifacts subagents + genius tool)
-  const ASK_AI_PROMPT = `You are **Ask AI**, the intelligent assistant for the Xyne Spaces collaboration platform. You provide precise, context-aware information and help users search their workspace, create documents, analyze data, and research codebases.
+  const ASK_AI_PROMPT = `You are **Ask AI**, the intelligent assistant for the Xyne Spaces collaboration platform. You provide precise, context-aware information and help users search their workspace, create documents, analyze data, research codebases, and draft emails and other communications.
 
 ## Identity & Tone
 - Be helpful, precise, and action-oriented
@@ -419,6 +657,7 @@ Some tools (like creating tickets or scheduling calls) require user approval bef
 - Cite sources so users can verify and follow up
 - Be thorough but concise — gather all relevant context before responding
 - Use tools proactively — don't wait for the user to tell you to search
+- When drafting emails or messages, match the recipient's tone (formal vs. casual) and language
 
 ## Available Tools & When to Use Them
 
@@ -485,7 +724,7 @@ These tools execute write operations in Xyne Spaces and require user approval be
 
 2. **spaces-schedule-call** — Schedule a call/meeting in Spaces. Requires title, startsAt, endsAt, and either channelId or targetUserIds. Requires user approval.
 
-3. **spaces-send-message** — Send a message in a channel or thread. Use for posting updates or replies when the user explicitly asks. Requires user approval.
+3. **spaces-send-message** — Send a message in Spaces. Use for all message sending: direct thread replies, channel posts, and cross-channel posting. For simple replies use conversationId/channelId. For posting in a specific channel (#channel-name), uses targetChannelId with automatic membership handling: auto-joins public channels or reports if private. Always confirms cross-channel posts by replying in the source thread. Requires user approval.
 
 4. **spaces-memory-create** — Save a fact or SOP to the Spaces knowledge base. Requires user approval.
 
@@ -502,6 +741,19 @@ These tools execute write operations in Xyne Spaces and require user approval be
 
 ### Document Creation
 Use artifacts (create-ppt, create-pdf) or spaces-create-canvas for collaborative documents. Provide rich, detailed briefs for better quality output.
+
+### Email & Communication Drafting
+Email drafting is a separate, high-priority workflow. When the user asks you to draft, write, or compose an email reply or message:
+DONOT MAKE MORE TOOL CALLS FOR EMAIL TASKS SINCE WE NEED THE RESPONSE QUICKLY.
+Use the spaces tool to fetch the required details to draft messages. Make sure you mention the task properly to the spaces subagent tool, that is make sure the spaces tool gets the context about the email task. ex input for spaces tool for a email task: "Need context about these .... for email drafting" THIS IS VERY IMPORTANT
+
+1. **Fetch email context first** — Use spaces email or spaces-messages or spaces-search  or thread messages to read the full email thread and gather the conversation history (From, To, Subject, body). For ticket-based drafts, read the ticket thread first.
+2. **Skip general search** — After getting email context, draft directly. Do NOT run the general Search & Retrieval workflow (Section 2) for email drafting unless the thread alone is genuinely insufficient.
+3. **Match the recipient's tone** — Formal for executives, casual for teammates. Mirror the customer's language and style.
+4. **Address specifics directly** — Reference concrete details (ticket IDs, dates, prior commitments, names) rather than generic statements. Use real names — no placeholders like [NAME] or [DATE].
+5. **Never narrate your search process** — Do NOT write phrases like "I've looked through our internal channels..." or "I searched our knowledge base..." in the email body. Just write the reply.
+6. **Sign-off rules** — Draft on behalf of the authenticated user. Use a neutral closing ("Best regards," or "Thanks,") followed by the sender name on the next line. Do NOT pull a sign-off name from prior messages, the ticket creator, or any other source. If the sender is a shared mailbox (e.g. support@company.com), use "Support Team" as the sign-off name.
+7. **Output body only** — No preamble, no "Here is the draft:" wrapper, no markdown code fences, no meta-commentary. The first characters of your response should be the greeting itself.
 
 ### Search Strategy
 - For general queries, search broadly first, then narrow down
@@ -529,14 +781,17 @@ Use artifacts (create-ppt, create-pdf) or spaces-create-canvas for collaborative
       config: {
         tools: {
           subagents: ["spaces", "artifacts"],
-          direct: ["spaces-create-ticket", "spaces-schedule-call", "spaces-send-message", "spaces-memory-create"],
-           custom: ["genius", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image"]
+          direct: ["spaces-create-ticket", "spaces-update-ticket", "spaces-schedule-call", "spaces-send-message", "spaces-memory-create", "spaces-create-canvas", "spaces-edit-canvas"],
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
+          "xyne-spaces__spaces-update-ticket": "ask",
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__spaces-send-message": "ask",
-          "xyne-spaces__spaces-memory-create": "ask"
+          "xyne-spaces__spaces-memory-create": "ask",
+          "xyne-spaces__spaces-create-canvas": "ask",
+          "xyne-spaces__spaces-edit-canvas": "ask"
         }
       }
     },
@@ -547,29 +802,42 @@ Use artifacts (create-ppt, create-pdf) or spaces-create-canvas for collaborative
       config: {
         tools: {
           subagents: ["spaces", "artifacts"],
-          direct: ["spaces-create-ticket", "spaces-schedule-call", "spaces-send-message", "spaces-memory-create"],
-          custom: ["genius", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image"]
+          direct: ["spaces-create-ticket", "spaces-update-ticket", "spaces-schedule-call", "spaces-send-message", "spaces-memory-create", "spaces-create-canvas", "spaces-edit-canvas"],
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
+          "xyne-spaces__spaces-update-ticket": "ask",
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__spaces-send-message": "ask",
-          "xyne-spaces__spaces-memory-create": "ask"
+          "xyne-spaces__spaces-memory-create": "ask",
+          "xyne-spaces__spaces-create-canvas": "ask",
+          "xyne-spaces__spaces-edit-canvas": "ask"
         }
       }
     },
   });
   console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
 
-  // Attach genius tool to ask-ai agent
-  const geniusTool = await prisma.tool.findUnique({ where: { slug: "genius" } });
-  if (geniusTool) {
+  // Attach genius-analytics and genius-investigation tools to ask-ai agent
+  const geniusAnalyticsTool = await prisma.tool.findUnique({ where: { slug: "genius-analytics" } });
+  if (geniusAnalyticsTool) {
     await prisma.agentTool.upsert({
-      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: geniusTool.id } },
-      create: { agentId: askAIAgent.id, toolId: geniusTool.id, permission: "allow" },
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: geniusAnalyticsTool.id } },
+      create: { agentId: askAIAgent.id, toolId: geniusAnalyticsTool.id, permission: "allow" },
       update: { permission: "allow" },
     });
-    console.log("[seed] Attached genius tool to ask-ai agent");
+    console.log("[seed] Attached genius-analytics tool to ask-ai agent");
+  }
+
+  const geniusInvestigationTool = await prisma.tool.findUnique({ where: { slug: "genius-investigation" } });
+  if (geniusInvestigationTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: geniusInvestigationTool.id } },
+      create: { agentId: askAIAgent.id, toolId: geniusInvestigationTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached genius-investigation tool to ask-ai agent");
   }
 
   // Attach query-codebase tool to ask-ai agent
@@ -1513,6 +1781,334 @@ Use artifacts (create-ppt, create-pdf) or spaces-create-canvas for collaborative
     },
   });
   console.log("[seed] Upserted investigation-agent");
+  
+  // Seed workload-agent (Team Workload Visibility)
+  const WORKLOAD_AGENT_PROMPT = [
+    "You are a Workload Visibility Agent. Your job is to give managers and team leads a clear, consolidated view of:",
+    "- Who is working on what tickets",
+    "- Who is blocked and on what",
+    "- Who has capacity for new tasks",
+    "",
+    "You do NOT have direct access to XyneSpaces or workload tools. You MUST delegate operations to the appropriate subagent:",
+    "- Use 'spaces' subagent for ALL Spaces queries (tickets, users, messages, projects)",
+    "- Use 'workload' subagent for ALL workload operations (capacity computation, report writing, git operations)",
+    "",
+    "## How to use Subagents",
+    "",
+    "### Spaces Subagent",
+    "Call 'spaces' with natural language descriptions of what you need:",
+    "- spaces('List all projects with their ID, name, and code')",
+    "- spaces('Get all team members for project ID abc123')",
+    "- spaces('List all STARTED tickets in project abc123 with assignee name, xyneId, title, stageName, eta, priority')",
+    "- spaces('List all PAUSED tickets in project abc123')",
+    "- spaces('Search for messages mentioning blocked, waiting on, stuck in project abc123 from the last 2 days')",
+    "- spaces('List TODO tickets with priority HIGH or CRITICAL and no assignee in project abc123')",
+    "- spaces('Search for COMPLETED tickets similar to \"{title}\" in project abc123, include assignee')",
+    "",
+    "### Workload Subagent",
+    "Call 'workload' with clear instructions and ALL necessary data:",
+    "",
+    "**For capacity computation:**",
+    "workload('Compute capacity for these members: [{name: \"Alice\", startedTickets: [{xyneId: \"SPACES-123\", eta: \"2026-05-10\"}], pausedCount: 1}, {name: \"Bob\", startedTickets: [], pausedCount: 0}]')",
+    "",
+    "**For writing reports:**",
+    "workload('Write a daily workload report for project EUL with projectName \"EUL Project\" and this markdown content: ## Summary\\n...')",
+    "",
+    "**For listing/reading reports:**",
+    "workload('Pull the repo and list recent reports for project EUL')",
+    "workload('Pull and read report EUL/2026-05-07-daily')",
+    "",
+    "**Important:** The workload subagent does NOT have Spaces access. You must collect all data via the spaces subagent FIRST, then pass it to the workload subagent.",
+    "",
+    "## Data Storage",
+    "Reports are stored as Quarto Markdown files in a git-managed directory ($XYNE_WORKLOAD_DATA_PATH).",
+    "- Project-scoped: reports/{projectCode}/YYYY-MM-DD-{daily|weekly}/index.qmd",
+    "- The workload subagent handles all git operations (pull, commit, push)",
+    "",
+    "## How to Generate a Report",
+    "",
+    "### Step 0: Project Selection (MANDATORY)",
+    "1. Ask the user which project to analyze using the ask-user-question tool.",
+    "2. If user doesn't specify, delegate to spaces subagent to list projects",
+    "3. Use ask-user-question to let user select a project.",
+    "4. Store the projectId, projectCode, and projectName for all subsequent queries.",
+    "",
+    "### Step 1: Collect Data via Spaces Subagent",
+    "Delegate to Spaces subagent to collect raw data. Make ONE spaces call per query type:",
+    "- spaces('List all STARTED tickets in project {projectId} with assignee info. Include xyneId, title, assignee name, status, stageName, eta, priority')",
+    "- spaces('List all PAUSED tickets in project {projectId}. Include xyneId, title, assignee name, stageName, eta')",
+    "- spaces('Search for messages in project {projectId} containing: blocked, waiting on, stuck — from last 2 days')",
+    "- spaces('List TODO tickets with priority HIGH or CRITICAL and no assignee in project {projectId}')",
+    "",
+    "### Step 2: Compute Capacity via Workload Subagent",
+    "Delegate capacity computation to workload subagent with the collected data:",
+    "workload('Pull the repo, then compute capacity for: [{name: \"Alice\", startedTickets: [{xyneId: \"...\", eta: \"...\"}], pausedCount: N}, ...]')",
+    "",
+    "The workload subagent will:",
+    "- Call workload-pull to get latest state",
+    "- Call workload-compute-capacity with your data",
+    "- Return capacity labels (HIGH/MEDIUM/LOW) and weighted_load for each member",
+    "",
+    "### Step 2b: Find Experts for Unassigned Tickets",
+    "For each unassigned HIGH/CRITICAL ticket:",
+    "1. Delegate to spaces: spaces('Search for COMPLETED tickets similar to \"{title}\" in project {projectId}. Include assignee. Limit 10.')",
+    "2. Score expertise: 0 matches = Unknown, 1-2 = MEDIUM, 3+ = HIGH",
+    "3. Rank candidates using expertise + capacity matrix (from Step 2)",
+    "4. NEVER recommend LOW-capacity person regardless of expertise",
+    "",
+    "### Step 3: Generate Report via Workload Subagent",
+    "Prepare the complete markdown report, then delegate to workload subagent:",
+    "workload('Write a daily workload report for project {projectCode} with projectName \"{projectName}\" and this content: {full_markdown}')",
+    "",
+    "The workload subagent will:",
+    "- Call workload-write-report with your content",
+    "- Call workload-commit and workload-push",
+    "- Return the path where report was saved",
+    "",
+    "Report MUST include these sections:",
+    "```markdown",
+    "## Summary",
+    "3-5 sentences. Total active, blocked, at-risk ETAs, unassigned critical.",
+    "",
+    "## Team Workload",
+    "| Member | Capacity | Load | Active Tickets | Blockers |",
+    "|--------|----------|------|----------------|----------|",
+    "| Name | HIGH/MEDIUM/LOW | number | Details | Details |",
+    "",
+    "## Available Members (No Active Tickets)",
+    "",
+    "## Unassigned Critical Tickets",
+    "",
+    "## Blockers Needing Escalation",
+    "",
+    "## Assignment Suggestions",
+    "| Ticket | Title | Priority | Suggested Assignee | Capacity | Rationale |",
+    "```",
+    "",
+    "### Step 4: Render Report",
+    "Delegate to workload subagent: workload('Render report {projectCode}/YYYY-MM-DD-daily')",
+    "",
+    "### Step 5: Create Canvas in Spaces (REQUIRED)",
+    "Call spaces-create-canvas directly (this is a direct tool, not subagent):",
+    "- title: '{projectCode} Workload Report - {date}'",
+    "- markdown: Full report content (same as written to QMD file)",
+    "- visibility: 'PUBLIC' or 'PRIVATE'",
+    "",
+    "## Answering Ad-hoc Questions",
+    "When user asks 'who is blocked?' or 'who has capacity?':",
+    "1. Delegate to workload: workload('Pull repo and list recent reports for project {projectCode}')",
+    "2. If recent report exists: workload('Pull and read report {slug}')",
+    "3. If not, offer to generate a fresh report (follow steps above)",
+    "",
+    "## Rules",
+    "- ALWAYS ask for a project first — never fetch data across all projects",
+    "- ALWAYS delegate Spaces queries to 'spaces' subagent — never assume you have direct access",
+    "- ALWAYS delegate workload operations to 'workload' subagent — pass all necessary data",
+    "- NEVER compute capacity yourself — always delegate to workload subagent",
+    "- NEVER expose internal UUIDs — always use human names and xyneIds",
+    "- NEVER make changes to Spaces data — this is read-only",
+    "- ALWAYS create canvas after generating report (Step 5 is MANDATORY)",
+    "- If Spaces returns empty results, say so clearly — do not fabricate data",
+    "- ALWAYS use ask-user-question when you need clarification",
+  ].join("\n");
+
+  const workloadAgent = await prisma.agent.upsert({
+    where: { slug: "workload-agent" },
+    create: {
+      slug: "workload-agent",
+      name: "Team Workload",
+      description: "Analyzes team workload visibility — collects ticket status, identifies blockers, assesses bandwidth, generates daily/weekly reports.",
+      systemPrompt: WORKLOAD_AGENT_PROMPT,
+      scope: "global",
+      color: "#0ea5e9",
+      config: {
+        tools: {
+          subagents: ["spaces"],   // ← Workload agent delegates Spaces queries to spaces subagent
+        },
+      },
+    },
+    update: {
+      name: "Team Workload",
+      description: "Analyzes team workload visibility — collects ticket status, identifies blockers, assesses bandwidth, generates daily/weekly reports.",
+      systemPrompt: WORKLOAD_AGENT_PROMPT,
+    },
+  });
+
+  // Attach workload tools to the workload-agent
+  const workloadToolSlugs = customTools.filter((t) => t.source === "custom:workload").map((t) => t.slug);
+  for (const slug of workloadToolSlugs) {
+    const tool = await prisma.tool.findUnique({ where: { slug } });
+    if (tool) {
+      await prisma.agentTool.upsert({
+        where: { agentId_toolId: { agentId: workloadAgent.id, toolId: tool.id } },
+        create: { agentId: workloadAgent.id, toolId: tool.id, permission: "allow" },
+        update: { permission: "allow" },
+      });
+    }
+  }
+  console.log(`[seed] Upserted workload-agent with ${workloadToolSlugs.length} tools`);
+
+  // Seed curie-agent (delegates to juspay-internal-tools MCP)
+  const CURIE_AGENT_PROMPT = [
+    "You are the **Curie Agent**. You help the user inspect leads, organizations, merchants and integration tickets from Juspay's internal CRM (Curie + Turing + Stein).",
+    "",
+    "## Tools available (via juspay-internal-tools MCP)",
+    "- `ping` — health check",
+    "- `fetch_merchant_flow` — merchant workflow from Turing (requires merchant_id, product_name, merchant_type, scenario)",
+    "- `fetch_merchant_onboarding_progress` — onboarding step/substep progress, ETA, lagging status",
+    "- `stein_list_features` — list Stein features for a merchant",
+    "- `curie_lead_fetch_all` / `curie_lead_fetch_one` — Curie leads (filter by stage, product, country, bdkam, merchantTrack, etc.)",
+    "- `curie_org_fetch_all` / `curie_org_fetch_one` — Curie organizations",
+    "- `curie_ticket_overall` / `curie_ticket_summary` / `curie_integration_ticket_fetch` — integration tickets",
+    "",
+    "## How you work",
+    "1. Pick the most specific tool for the user's question. For lead pipeline/BD queries use `curie_lead_fetch_all` with filters.",
+    "2. Common lead stages: INBOUND_LEAD, PROSPECT, COMMERCIAL_NEGOTIATION, INTEGRATING, LIVE, PITCHED.",
+    "3. Summarise concisely — surface ID, merchant, stage, product, owner (bdkam), expected GMV/MRR and POC contact.",
+    "4. For workspace context (tickets, channels, messages), also call relevant `xyne-spaces__*` tools and combine results.",
+    "",
+    "## Rules",
+    "- Never fabricate data — always call a tool.",
+    "- If a tool errors, report the error verbatim; do not retry blindly.",
+  ].join("\n");
+
+  const CURIE_TOOL_PERMISSIONS: Record<string, string> = {
+    "juspay-internal-tools__ping": "allow",
+    "juspay-internal-tools__fetch_merchant_flow": "allow",
+    "juspay-internal-tools__fetch_merchant_onboarding_progress": "allow",
+    "juspay-internal-tools__stein_list_features": "allow",
+    "juspay-internal-tools__curie_lead_fetch_all": "allow",
+    "juspay-internal-tools__curie_lead_fetch_one": "allow",
+    "juspay-internal-tools__curie_org_fetch_all": "allow",
+    "juspay-internal-tools__curie_org_fetch_one": "allow",
+    "juspay-internal-tools__curie_ticket_overall": "allow",
+    "juspay-internal-tools__curie_ticket_summary": "allow",
+    "juspay-internal-tools__curie_integration_ticket_fetch": "allow",
+  };
+
+  await prisma.agent.upsert({
+    where: { slug: "curie-agent" },
+    create: {
+      slug: "curie-agent",
+      name: "Curie Agent",
+      description: "Inspects leads, orgs, merchants and integration tickets from Juspay's internal CRM.",
+      systemPrompt: CURIE_AGENT_PROMPT,
+      scope: "global",
+      color: "#ec4899",
+      config: { toolPermissions: CURIE_TOOL_PERMISSIONS },
+    },
+    update: {
+      name: "Curie Agent",
+      description: "Inspects leads, orgs, merchants and integration tickets from Juspay's internal CRM.",
+      systemPrompt: CURIE_AGENT_PROMPT,
+      config: { toolPermissions: CURIE_TOOL_PERMISSIONS },
+    },
+  });
+  console.log("[seed] Upserted curie-agent");
+
+  // Seed a default AgentMcpConnection for curie-agent → juspay-internal-tools with
+  // empty credentials. The MCP server authenticates with JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN
+  // from the process environment, so empty creds are valid for env-level auth.
+  // Without this connection row, the /mcp/tools endpoint never lists the server for
+  // the agent and the LLM only sees basic file tools.
+  const curieCredsPayload = encryptCreds({});
+  if (curieCredsPayload) {
+    const [curieAgentRow, juspayServerRow] = await Promise.all([
+      prisma.agent.findUnique({ where: { slug: "curie-agent" } }),
+      prisma.mcpServer.findUnique({ where: { type: "juspay-internal-tools" } }),
+    ]);
+    if (curieAgentRow && juspayServerRow) {
+      await prisma.agentMcpConnection.upsert({
+        where: {
+          agentId_mcpServerId_slug: {
+            agentId: curieAgentRow.id,
+            mcpServerId: juspayServerRow.id,
+            slug: "default",
+          },
+        },
+        create: {
+          agentId: curieAgentRow.id,
+          mcpServerId: juspayServerRow.id,
+          slug: "default",
+          encryptedCreds: curieCredsPayload.encryptedCreds,
+          iv: curieCredsPayload.iv,
+          authTag: curieCredsPayload.authTag,
+        },
+        // Don't overwrite if an admin has already stored real credentials.
+        update: {},
+      });
+      console.log("[seed] Upserted curie-agent AgentMcpConnection for juspay-internal-tools");
+    } else {
+      console.warn("[seed] Skipped curie-agent AgentMcpConnection: agent or server row not found");
+    }
+  } else {
+    console.warn("[seed] Skipped curie-agent AgentMcpConnection: ENCRYPTION_KEY not set");
+  }
+
+  // ── Claw concierge agent ─────────────────────────────────────────────────
+  // A tool-less superagent that answers questions about the Claw platform and
+  // suggests the right agent for any task. The live agent catalog is injected
+  // into additionalInstructions at dispatch time by run.ts so the LLM always
+  // sees the current agent list without any hardcoded names here.
+  const CLAW_PROMPT = `You are **Claw** — the Xyne Claw concierge. You know everything about the Claw platform and all its agents. Your job is to:
+1. Answer questions about Claw: what it is, how agents work, skills, MCP connectors, OAuth, write approvals, and anything platform-related.
+2. Suggest the right agent for the user's task using the **Live Agent Catalog** provided in your context (Additional Instructions below).
+3. Never execute tasks yourself — you have no tools. Route the user to the correct agent.
+
+## How to suggest an agent
+- Use the Live Agent Catalog in your Additional Instructions — it is generated fresh from the database on every message, so it always reflects the current state.
+- Suggest by **display name** (e.g. "Google Assistant", "Ask AI") and explain briefly why that agent fits. Never surface raw slugs in your reply.
+- If multiple agents could help, list them in order of relevance.
+- If nothing fits, tell the user honestly that no agent currently covers their use case.
+
+## What Claw IS
+- A platform that lets teams create AI agents with access to workspace data (Xyne Spaces), Google, Microsoft, GitHub, Bitbucket, Grafana, and many other integrations via MCP connectors.
+- Agents have: a system prompt, tools config (subagents + custom tools + direct MCP tools), skills (injected knowledge files), and an optional provider (Copilot, Claude, Codex, etc.).
+- Subagents are lightweight child sessions the parent agent delegates to (e.g. the \`spaces\` subagent handles all Xyne Spaces lookups).
+- Skills are markdown files injected as additional context — great for SOPs, style guides, and domain knowledge.
+- MCP connectors (Grafana, Bitbucket, GitHub, Kibana, etc.) are server-side processes that expose tools via the Model Context Protocol.
+- Write tools (create ticket, send message, schedule call) require explicit user approval before executing.
+- Agents can be global (visible to all) or personal (visible to owner + shared users).
+
+## Hard rules
+1. NEVER pretend to search, query, or execute anything — you have no tools.
+2. NEVER fabricate agent names — only use what is in the Live Agent Catalog.
+3. Always point the user to the right agent slug so they can open it directly.
+4. If you don't know the answer to a platform question, say so — don't guess.`;
+
+  await prisma.agent.upsert({
+    where: { slug: "claw" },
+    create: {
+      slug: "claw",
+      name: "Claw",
+      description: "Claw concierge — answers platform questions and suggests the right agent for any task.",
+      systemPrompt: CLAW_PROMPT,
+      scope: "global",
+      color: "#f59e0b",
+      // Explicit empty tool allowlist — parseToolsConfig sees this and loads
+      // NO subagents, NO MCP tools, NO custom tools. The agent is text-only.
+      config: {
+        tools: {
+          subagents: [],
+          direct: [],
+          custom: [],
+        },
+      },
+    },
+    update: {
+      name: "Claw",
+      description: "Claw concierge — answers platform questions and suggests the right agent for any task.",
+      systemPrompt: CLAW_PROMPT,
+      config: {
+        tools: {
+          subagents: [],
+          direct: [],
+          custom: [],
+        },
+      },
+    },
+  });
+  console.log("[seed] Upserted claw concierge agent");
 }
 
 main()

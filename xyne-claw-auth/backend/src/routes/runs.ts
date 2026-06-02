@@ -30,6 +30,48 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
+// GET /runs/light — minimal-payload variant for the v3 home page.
+//
+// Returns ONLY sessionId/agentSlug/status/triggerSource/startedAt/completedAt
+// per row. Skips the heavy fields (toolInvocations, task, result) that
+// dominate the response size for full listRuns. Use this for the home page
+// chart + sessions tile; full listRuns is still the right call for the
+// Control Center (which actually renders tool invocations).
+//
+// Query params:
+//   - sinceDays: number 1-90, defaults 7 — filters by startedAt >= now - days
+//   - limit: number 1-500, defaults 500 — defensive ceiling
+//   - status / agentSlug — optional pass-through filters
+//
+// Must be declared BEFORE /:sessionId so the literal path takes precedence.
+router.get("/light", async (req: Request, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+    const sinceDaysRaw = typeof req.query["sinceDays"] === "string" ? parseInt(req.query["sinceDays"], 10) : NaN;
+    const sinceDays = Number.isFinite(sinceDaysRaw) ? Math.min(Math.max(sinceDaysRaw, 1), 90) : 7;
+    const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
+    const limit = typeof req.query["limit"] === "string"
+      ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 500, 1), 500)
+      : 500;
+    const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+    const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
+    const runs = await agentRunRepository.listByUserLight(userId, {
+      since,
+      limit,
+      ...(status ? { status } : {}),
+      ...(agentSlug ? { agentSlug } : {}),
+    });
+    res.json({ success: true, data: runs });
+  } catch (err) {
+    console.error("[runs] /light error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 // GET /runs/session/export — download a full session (thread + agent) as Claude Code .jsonl or markdown.
 // Must be declared BEFORE /:sessionId so the literal path takes precedence.
 router.get("/session/export", async (req: Request, res: Response) => {

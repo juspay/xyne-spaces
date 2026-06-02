@@ -12,6 +12,7 @@ import { tools } from "./xyne-spaces-tools.js";
 
 const url = process.env["XYNE_SPACES_URL"];
 const token = process.env["XYNE_SPACES_TOKEN"];
+const userId = process.env["XYNE_USER_ID"] ?? "";
 
 if (!url || !token) {
   process.stderr.write("xyne-spaces-server: XYNE_SPACES_URL and XYNE_SPACES_TOKEN must be set\n");
@@ -37,7 +38,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
   if (!tool) {
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
   }
-  return tool.handler(args ?? {});
+  return tool.handler(args ?? {}, { userId });
 });
 
 const transport = new StdioServerTransport();

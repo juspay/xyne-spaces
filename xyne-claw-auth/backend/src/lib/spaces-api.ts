@@ -10,7 +10,7 @@ export async function spacesAppFetch(
   body: Record<string, unknown>,
   appToken: string,
 ): Promise<unknown> {
-  const url = `${CONFIG.spacesBackendUrl}/api/apps${path}`;
+  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
   if (!appToken) throw new Error("No app token provided");
   const res = await fetch(url, {
     method: "POST",
@@ -34,7 +34,7 @@ export async function spacesAppFetchGet(
   path: string,
   appToken: string,
 ): Promise<unknown> {
-  const url = `${CONFIG.spacesBackendUrl}/api/apps${path}`;
+  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
   if (!appToken) throw new Error("No app token provided");
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${appToken}` },
@@ -52,7 +52,7 @@ export async function spacesAppFetchMultipart(
   form: FormData,
   appToken: string,
 ): Promise<unknown> {
-  const url = `${CONFIG.spacesBackendUrl}/api/apps${path}`;
+  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
   if (!appToken) throw new Error("No app token provided");
   const res = await fetch(url, {
     method: "POST",

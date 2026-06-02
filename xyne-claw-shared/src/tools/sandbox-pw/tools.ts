@@ -43,25 +43,43 @@ async function inlinePlaywrightAttachments(text: string): Promise<string> {
   for (const m of text.matchAll(ATTACHMENT_RE)) {
     if (m[1]) matches.add(m[1]);
   }
-  if (matches.size === 0) return text;
+  if (matches.size === 0) {
+    // Tool text didn't reference any .playwright-mcp/ file at all — nothing to inline.
+    // This is normal for non-screenshot tools (browser_click, browser_type, etc.).
+    return text;
+  }
   // Pick the FIRST file we can read. xyne-claw's ATTACHMENT_RE
   // (xyne-claw/src/custom-tools.ts:29) is anchored with ^ and $ so the
   // marker has to be at the start of the result and there can be exactly
   // one. base64 must be one line; anything after the first newline that
   // follows the base64 is the tool's text result.
   let chosen: { file: string; base64: string; mime: string } | null = null;
+  const failures: string[] = [];
   for (const file of matches) {
     try {
       const buf = await readFile(path.join(PLAYWRIGHT_MCP_CWD, ".playwright-mcp", file));
       const ext = (file.split(".").pop() ?? "png").toLowerCase();
       const mime = MIME_BY_EXT[ext] ?? "application/octet-stream";
       chosen = { file, base64: buf.toString("base64"), mime };
+      console.log(`[sandbox-pw] inlined ${file} (${buf.length} bytes, ${mime})`);
       break;
     } catch (err) {
-      console.warn(`[sandbox-pw] failed to inline attachment ${file}: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      failures.push(`${file}: ${msg}`);
+      console.warn(`[sandbox-pw] failed to inline attachment ${file}: ${msg}`);
     }
   }
-  if (!chosen) return text;
+  if (!chosen) {
+    // None of the referenced files were readable from claw's filesystem. This
+    // happens when the file lives in the sandbox VM only (different fs mount)
+    // or playwright-mcp cleaned it up before we got there. The text result
+    // still flows through; only the inline image bytes are lost.
+    console.log(
+      `[sandbox-pw] no inline attachment for ${matches.size} referenced file(s) ` +
+      `(text still returned). Files: [${[...matches].join(", ")}]. Read failures: [${failures.join(" | ")}]`,
+    );
+    return text;
+  }
   // Rewrite all path references in the body text so the LLM doesn't try
   // to access them inside the sandbox VM.
   let rewritten = text;

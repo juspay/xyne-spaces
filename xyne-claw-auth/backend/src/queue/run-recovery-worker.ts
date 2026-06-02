@@ -195,9 +195,12 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
   await saveState(state);
 
   try {
-    const runRes = await fetch(`${CONFIG.selfUrl}/claw/api/v1/run`, {
+    const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
       body: JSON.stringify(state.dispatchPayload),
       signal: AbortSignal.timeout(30_000),
     });

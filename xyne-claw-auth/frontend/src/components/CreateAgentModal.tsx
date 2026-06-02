@@ -18,7 +18,7 @@ function slugify(name: string): string {
 
 interface State {
   step: number;
-  name: string; description: string; color: string; slug: string; slugManual: boolean;
+  name: string; description: string; color: string; slug: string; slugManual: boolean; repoUrl: string;
   systemPrompt: string; aiIntent: string; generating: boolean;
   availableTools: AvailableTools | null; toolsLoading: boolean;
   subagents: string[]; direct: string[]; custom: string[];
@@ -29,7 +29,7 @@ interface State {
 
 const INIT: State = {
   step: 0,
-  name: "", description: "", color: COLORS[0]!, slug: "", slugManual: false,
+  name: "", description: "", color: COLORS[0]!, slug: "", slugManual: false, repoUrl: "",
   systemPrompt: "", aiIntent: "", generating: false,
   availableTools: null, toolsLoading: false,
   subagents: [], direct: [], custom: [],
@@ -109,10 +109,15 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
       await createAgent({ slug: effectiveSlug, name: w.name.trim(), description: w.description.trim(), systemPrompt: w.systemPrompt.trim(), color: w.color, ownerUserId: userId });
       const hasTools = w.subagents.length || w.direct.length || w.custom.length;
       const hasSkills = w.selectedSkillIds.length > 0;
-      if (hasTools || hasSkills) {
+      const trimmedRepoUrl = w.repoUrl.trim();
+      const hasRepoUrl = trimmedRepoUrl.length > 0;
+      if (hasTools || hasSkills || hasRepoUrl) {
         const { updateAgent } = await import("../lib/api");
+        const config: Record<string, unknown> = {};
+        if (hasTools) config["tools"] = { subagents: w.subagents, direct: w.direct, custom: w.custom };
+        if (hasRepoUrl) config["repoUrl"] = trimmedRepoUrl;
         await updateAgent(effectiveSlug, {
-          ...(hasTools ? { config: { tools: { subagents: w.subagents, direct: w.direct, custom: w.custom } } } : {}),
+          ...(Object.keys(config).length > 0 ? { config } : {}),
           ...(hasSkills ? { skills: w.selectedSkillIds } : {}),
         });
       }
@@ -180,6 +185,15 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                     style={{ backgroundColor: c }} />)}
                 </div>
               </div>
+              <div>
+                <label className="mb-1 block text-sm text-zinc-400">Git Repository URL <span className="text-xs text-zinc-600">(optional)</span></label>
+                <input value={w.repoUrl} onChange={(e) => u({ repoUrl: e.target.value })}
+                  placeholder="ssh://git@github.com/example-org/arya.git"
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none" />
+                <p className="mt-1 text-xs text-zinc-600">If set, every session for this agent gets a fresh git worktree of this repo as its working directory. Leave blank for non-repo agents. URLs not in xyne-claw's warmpool incur a slow first-clone (~30s).</p>
+              </div>
             </div>
           )}
 
@@ -213,6 +227,32 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                 <div className="flex items-center gap-2 text-sm text-zinc-400"><Loader2 size={14} className="animate-spin" /> Loading available tools...</div>
               ) : w.availableTools ? (
                 <>
+                  {/* Subagents render first — they're higher-level abstractions
+                      that bundle related tools, so the most-common config
+                      surface gets top placement in the Create Agent flow. */}
+                  {w.availableTools.subagents.length > 0 && (
+                    <div>
+                      <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm font-medium text-zinc-300">Subagents</h3>
+                        <button onClick={() => toggleAll("subagents", w.availableTools!.subagents.map((x) => x.name))} className="text-xs text-purple-400 hover:text-purple-300">
+                          {w.subagents.length === w.availableTools.subagents.length ? "Deselect all" : "Select all"}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {w.availableTools.subagents.map((sa) => (
+                          <button key={sa.name} onClick={() => toggle("subagents", sa.name)}
+                            className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${w.subagents.includes(sa.name) ? "border-purple-500 bg-purple-950/30" : "border-zinc-700 bg-zinc-800 hover:border-zinc-600"}`}>
+                            <span className="text-lg">{SUBAGENT_EMOJI[sa.name] ?? "🤖"}</span>
+                            <div>
+                              <div className={`text-sm font-medium ${w.subagents.includes(sa.name) ? "text-purple-300" : "text-zinc-300"}`}>{sa.name}</div>
+                              <div className="text-xs text-zinc-500">{sa.description.slice(0, 80)}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {Object.entries(w.availableTools.serverTools)
                     .filter(([source, tools]) => {
                       if (source.startsWith("custom:")) return false;
@@ -254,29 +294,6 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                             </div>
                           );
                         })}
-                    </div>
-                  )}
-
-                  {w.availableTools.subagents.length > 0 && (
-                    <div>
-                      <div className="mb-3 flex items-center justify-between">
-                        <h3 className="text-sm font-medium text-zinc-300">Subagents</h3>
-                        <button onClick={() => toggleAll("subagents", w.availableTools!.subagents.map((x) => x.name))} className="text-xs text-purple-400 hover:text-purple-300">
-                          {w.subagents.length === w.availableTools.subagents.length ? "Deselect all" : "Select all"}
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {w.availableTools.subagents.map((sa) => (
-                          <button key={sa.name} onClick={() => toggle("subagents", sa.name)}
-                            className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${w.subagents.includes(sa.name) ? "border-purple-500 bg-purple-950/30" : "border-zinc-700 bg-zinc-800 hover:border-zinc-600"}`}>
-                            <span className="text-lg">{SUBAGENT_EMOJI[sa.name] ?? "🤖"}</span>
-                            <div>
-                              <div className={`text-sm font-medium ${w.subagents.includes(sa.name) ? "text-purple-300" : "text-zinc-300"}`}>{sa.name}</div>
-                              <div className="text-xs text-zinc-500">{sa.description.slice(0, 80)}</div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   )}
 
@@ -389,6 +406,7 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                 </div>
               </div>
               {w.description && <p className="text-sm text-zinc-400">{w.description}</p>}
+              {w.repoUrl.trim() && <div><h4 className="mb-1 text-xs font-medium text-zinc-500">Repository</h4><pre className="overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-xs text-zinc-400">{w.repoUrl.trim()}</pre></div>}
               <div>
                 <h4 className="mb-1 text-xs font-medium text-zinc-500">System Prompt</h4>
                 <pre className="max-h-32 overflow-auto rounded bg-zinc-950 p-3 text-xs text-zinc-400">{w.systemPrompt.slice(0, 500)}{w.systemPrompt.length > 500 ? "..." : ""}</pre>

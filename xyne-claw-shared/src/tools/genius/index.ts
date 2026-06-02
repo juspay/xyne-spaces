@@ -1,7 +1,7 @@
 /**
-    * Genius Analytics Tool
-    * 
-    * Export genius tool for business intelligence and analytics queries.
-    */
+ * Genius Tools
+ * 
+ * Export genius tools for business intelligence and investigation queries.
+ */
 
-   export { geniusTool, GENIUS_CONFIG_SCHEMA } from "./tools.js";
+export { geniusAnalyticsTool, geniusInvestigationTool, GENIUS_CONFIG_SCHEMA } from "./tools.js";

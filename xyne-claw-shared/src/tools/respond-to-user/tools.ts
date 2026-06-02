@@ -42,8 +42,23 @@ export const respondToUser: ToolDefinition = {
     const message = params["message"] as string;
     if (!message) return "Error: message is required.";
 
-    const responseId = crypto.randomUUID();
-    context.pendingResponses?.push({ responseId, message });
+    // Defense-in-depth: some models (Claude in particular) ignore the STOP
+    // signal and call respond-to-user multiple times in one turn. The
+    // contract is that respond-to-user is terminal — drop any duplicates so
+    // claw-auth never posts more than one Spaces message per turn.
+    const alreadyResponded = (context.pendingResponses?.length ?? 0) > 0;
+    if (!alreadyResponded) {
+      const responseId = crypto.randomUUID();
+      context.pendingResponses?.push({ responseId, message });
+      // Hard-stop the agent loop. Wired by claw's run dispatcher to
+      // AbortController.abort(). Idempotent — safe to call again if the model
+      // re-enters this branch before abort propagates.
+      try {
+        context.abortRun?.();
+      } catch {
+        // Never let an abort wiring bug poison the response path.
+      }
+    }
 
     return (
       "STOP — Response delivered to user. " +
@@ -73,4 +88,29 @@ not a direct input box. You MUST follow these rules on every single turn:
    something new or ask a follow-up question.
 
 This is the ONLY way the user can see your responses in this context.
+
+## When NOT to call respond-to-user
+
+\`respond-to-user\` is your **terminal** action for the turn — calling it ends
+the run immediately. Treat it like "submit final answer", not like "send a
+chat message mid-task". Specifically, do NOT call \`respond-to-user\` to:
+
+- Acknowledge a task you are about to start ("Understood, I'll do X…").
+- Confirm receipt of the user's message.
+- Summarize your plan before executing it.
+- Send progress updates while a multi-step task is running.
+
+If the user asked you to do work, **just start working**. Use the actual
+tools (sandbox, read, edit, bash, sandbox-pw-*, etc.) to make progress. Only
+call \`respond-to-user\` when:
+
+(a) the work is done and you have a final result to deliver, OR
+(b) you genuinely cannot proceed without an answer from the user (then ask
+    a single specific question), OR
+(c) the task hit a hard, verifiable failure with an exact tool error string
+    you can quote — and you've already retried at least once.
+
+Skipping the acknowledgment is correct — the user knows you received the
+task because you mentioned them and the run started. They want the result,
+not a confirmation.
 `.trim();

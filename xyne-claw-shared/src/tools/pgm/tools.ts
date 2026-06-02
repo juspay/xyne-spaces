@@ -650,12 +650,17 @@ export const pgmPublish: ToolDefinition = {
         const channel = frontmatter["channel"] as string | undefined;
         if (channel) {
           const channelName = channel.replace(/^#/, "").trim();
-          if (channelName) {
-            const mcpUrl = `${authServiceUrl()}/claw/api/v1/users/${encodeURIComponent(userId)}/mcp/call`;
+          const pgmSessionId = ctx?.sessionId;
+          const pgmSessionToken = ctx?.sessionToken;
+          if (channelName && pgmSessionId && pgmSessionToken) {
+            const mcpUrl = `${authServiceUrl()}/claw/api/v1/sessions/${encodeURIComponent(pgmSessionId)}/mcp/call`;
             try {
               const lookupRes = await fetch(mcpUrl, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${pgmSessionToken}`,
+                },
                 body: JSON.stringify({
                   serverType: "xyne-spaces",
                   tool: "spaces-channels",
@@ -741,7 +746,12 @@ export const pgmPublish: ToolDefinition = {
     const userRepo = `${repoName}/${branchName}/${program}`;
  
     // 6. Call spaces-publish-docs via xyne-claw-auth MCP call
-    const mcpCallUrl = `${authServiceUrl()}/claw/api/v1/users/${encodeURIComponent(userId)}/mcp/call`;
+    const publishSessionId = ctx?.sessionId;
+    const publishSessionToken = ctx?.sessionToken;
+    if (!publishSessionId || !publishSessionToken) {
+      return "Publish failed: missing sessionId/sessionToken in tool execution context (was the run dispatched by claw-auth?)";
+    }
+    const mcpCallUrl = `${authServiceUrl()}/claw/api/v1/sessions/${encodeURIComponent(publishSessionId)}/mcp/call`;
     const mcpPayload = {
       serverType: "xyne-spaces",
       tool: "spaces-publish-docs",
@@ -758,7 +768,10 @@ export const pgmPublish: ToolDefinition = {
     try {
       const res = await fetch(mcpCallUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${publishSessionToken}`,
+        },
         body: JSON.stringify(mcpPayload),
         signal: AbortSignal.timeout(120_000),
       });

@@ -4,8 +4,48 @@ import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer } from "../tool-sync.js";
-
 const router = Router();
+
+/**
+ * GET /users[?q=<substr>]
+ *
+ * List claw users for the Contributors typeahead. Only returns people who
+ * already exist locally — sharing is limited to people who've actually
+ * interacted with claw (webhook, dashboard, scheduled job). New Spaces
+ * users become resolvable automatically once they trigger any JIT path.
+ *
+ * The `q` filter does a case-insensitive substring match on both `email`
+ * and `name`. Capped at 20 to keep the dropdown payload small.
+ *
+ * Response: `{ success: true, data: [{ id, email, name }, ...] }`
+ */
+router.get("/", async (req: Request, res: Response) => {
+  try {
+    const qRaw = req.query["q"];
+    const q = typeof qRaw === "string" ? qRaw.trim() : "";
+
+    const users = await prisma.user.findMany({
+      ...(q
+        ? {
+            where: {
+              OR: [
+                { email: { contains: q, mode: "insensitive" as const } },
+                { name: { contains: q, mode: "insensitive" as const } },
+              ],
+            },
+          }
+        : {}),
+      select: { id: true, email: true, name: true },
+      orderBy: { name: "asc" },
+      take: 20,
+    });
+
+    res.json({ success: true, data: users });
+  } catch (err) {
+    console.error("[users] list error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
 
 router.post("/", async (req: Request, res: Response) => {
   try {
@@ -28,6 +68,12 @@ router.post("/", async (req: Request, res: Response) => {
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       res.status(400).json({ success: false, error: "name is required" });
+      return;
+    }
+
+    const sessionUserId = req.headers["x-user-id"];
+    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== id.trim()) {
+      res.status(403).json({ success: false, error: "Body id does not match authenticated session" });
       return;
     }
 
@@ -67,7 +113,7 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
     });
   }
 
-  const spacesUrl = CONFIG.spacesBackendUrl;
+  const spacesUrl = CONFIG.spacesInternalUrl;
   const credentials = { url: spacesUrl, token };
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
 
@@ -95,6 +141,69 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   }
 
   console.log(`[users] Auto-configured xyne-spaces for user ${userId}`);
+
+  // Also auto-connect xyne-spaces-app-tools for this user.
+  // Stores the default agent's spacesAppToken so the MCP server can post autonomously
+  // without user approval (bot action, not user action).
+  try {
+    let appToolsServer = await prisma.mcpServer.findFirst({ where: { type: "xyne-spaces-app-tools" } });
+    if (!appToolsServer) {
+      appToolsServer = await prisma.mcpServer.create({
+        data: {
+          name: "Xyne Spaces App Tools",
+          type: "xyne-spaces-app-tools",
+          url: "",
+          description: "Bot/app-credential write tools for Xyne Spaces — uses agent app token (not user token).",
+        },
+      });
+    }
+
+    // Resolve the default agent's app token — this is the bot identity the server will post as.
+    const defaultAgent = await prisma.agent.findFirst({ where: { isDefault: true } });
+    let decryptedAppToken = "";
+    if (defaultAgent?.spacesAppToken) {
+      const { decrypt } = await import("../crypto.js");
+      const { CONFIG: cfg } = await import("../config.js");
+      const parts = defaultAgent.spacesAppToken.split(":");
+      if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+        try {
+          decryptedAppToken = decrypt(parts[0], parts[1], parts[2], cfg.encryptionKey);
+        } catch {
+          console.error("[users] failed to decrypt agent spacesAppToken for xyne-spaces-app-tools");
+        }
+      }
+    }
+
+    const appToolsCredentials = { url: spacesUrl, app_token: decryptedAppToken };
+    const encryptedAppTools = encrypt(JSON.stringify(appToolsCredentials), CONFIG.encryptionKey);
+    await prisma.userMcpConnection.upsert({
+      where: { userId_mcpServerId: { userId, mcpServerId: appToolsServer.id } },
+      create: {
+        userId,
+        mcpServerId: appToolsServer.id,
+        encryptedCreds: encryptedAppTools.ciphertext,
+        iv: encryptedAppTools.iv,
+        authTag: encryptedAppTools.authTag,
+      },
+      update: {
+        encryptedCreds: encryptedAppTools.ciphertext,
+        iv: encryptedAppTools.iv,
+        authTag: encryptedAppTools.authTag,
+      },
+    });
+
+    const appToolsType = "xyne-spaces-app-tools";
+    if (await hasConnectorDefinition(appToolsType)) {
+      syncToolsForServer(userId, appToolsType, appToolsServer.name, appToolsCredentials).catch((err) => {
+        console.error(`[users] tool sync failed for ${appToolsType}:`, err);
+      });
+    }
+
+    console.log(`[users] Auto-configured xyne-spaces-app-tools for user ${userId}`);
+  } catch (err) {
+    console.error(`[users] auto-configure xyne-spaces-app-tools failed for user ${userId}:`, err);
+    // Non-fatal — don't block the spaces configuration
+  }
 }
 
 router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {

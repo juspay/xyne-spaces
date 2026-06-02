@@ -35,6 +35,7 @@ router.get("/provider-credentials", async (req: Request, res: Response) => {
       model: r.model,
       baseUrl: r.baseUrl,
       authType: r.authType,
+      reasoningEffort: r.reasoningEffort,
       hasApiKey: Boolean(r.encryptedKey),
     }));
     res.json({ success: true, data });
@@ -57,11 +58,12 @@ router.put("/provider-credentials/:provider", async (req: Request<{ provider: st
       res.status(400).json({ success: false, error: `provider must be one of ${[...VALID_PROVIDERS].join(", ")}` });
       return;
     }
-    const { apiKey, model, baseUrl, authType } = req.body as {
+    const { apiKey, model, baseUrl, authType, reasoningEffort } = req.body as {
       apiKey?: string;
       model?: string;
       baseUrl?: string;
       authType?: string;
+      reasoningEffort?: string | null;
     };
 
     const data: Record<string, unknown> = {};
@@ -73,6 +75,17 @@ router.put("/provider-credentials/:provider", async (req: Request<{ provider: st
         return;
       }
       data.authType = authType;
+    }
+    if (reasoningEffort !== undefined) {
+      // Empty string / null clears the override; otherwise must be a valid level.
+      if (reasoningEffort === null || reasoningEffort === "") {
+        data.reasoningEffort = null;
+      } else if (reasoningEffort !== "low" && reasoningEffort !== "medium" && reasoningEffort !== "high") {
+        res.status(400).json({ success: false, error: "reasoningEffort must be 'low', 'medium', or 'high'" });
+        return;
+      } else {
+        data.reasoningEffort = reasoningEffort;
+      }
     }
 
     if (apiKey) {
@@ -90,6 +103,7 @@ router.put("/provider-credentials/:provider", async (req: Request<{ provider: st
         model: row.model,
         baseUrl: row.baseUrl,
         authType: row.authType,
+        reasoningEffort: row.reasoningEffort,
         hasApiKey: Boolean(row.encryptedKey),
       },
     });
@@ -417,7 +431,10 @@ router.get("/copilot/models", async (req: Request, res: Response) => {
     }
     const githubToken = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
 
-    // Mirror xyne-claw/src/copilot-proxy.ts — GitHub OAuth token works directly as Bearer against api.githubcopilot.com
+    // Mirror opencode's CopilotAuthPlugin: use the GitHub OAuth token directly
+    // as Bearer for api.githubcopilot.com. GitHub's edge handles session-scoped
+    // token derivation server-side. No client-side /copilot_internal/v2/token
+    // exchange is needed (and that endpoint 404s for our OAuth scope anyway).
     const modelsRes = await fetch("https://api.githubcopilot.com/models", {
       headers: {
         Authorization: `Bearer ${githubToken}`,
@@ -459,7 +476,7 @@ router.get("/claude/models", async (req: Request, res: Response) => {
       return;
     }
     const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
-    const models = await fetchAnthropicModels(apiKey, cred.baseUrl ?? undefined);
+    const models = await fetchAnthropicModels(apiKey, cred.baseUrl ?? undefined, cred.authType ?? undefined);
     res.json({ success: true, data: models });
   } catch (err) {
     console.error("[settings] claude models error:", err);

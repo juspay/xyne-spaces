@@ -5,8 +5,11 @@ import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { listToolsForUser, callTool } from "../mcp/runner.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
-import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot } from "../mcp/adapters/bitbucket.js";
+import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments } from "../mcp/adapters/bitbucket.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase } from "../mcp/adapters/grafana.js";
+import { loadEffectiveCredentials } from "../lib/credentials-loader.js";
+import { requireSessionToken } from "../middleware/require-session-token.js";
+import { validateWriteAction } from "../mcp/validators.js";
 
 function signAction(action: Record<string, unknown>): string {
   return crypto.createHmac("sha256", CONFIG.encryptionKey).update(JSON.stringify(action)).digest("hex");
@@ -23,25 +26,81 @@ export function verifyActionSignature(action: Record<string, unknown>, signature
 
 const router = Router();
 
-router.get("/:userId/mcp/tools", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
+router.use("/:sessionId", requireSessionToken);
 
-    const connections = await prisma.userMcpConnection.findMany({
+router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, res: Response) => {
+  try {
+    const userId = req.session!.userId;
+    const agentSlug = req.session?.agentSlug;
+
+    // User connections + global-fallback servers (servers with allowGlobalFallback
+    // = true AND a global cred row, where this user has NO personal connection).
+    // Resolve as the union: the user gets to call tools for any server they
+    // have credentials for, whether their own or admin-shared.
+    const userConnections = await prisma.userMcpConnection.findMany({
       where: { userId },
       include: { mcpServer: true },
     });
+    const userServerIds = new Set(userConnections.map((c) => c.mcpServerId));
+
+    const globalServers = await prisma.mcpServer.findMany({
+      where: {
+        allowGlobalFallback: true,
+        globalCredentials: { isNot: null },
+        id: { notIn: Array.from(userServerIds) },
+      },
+      include: { globalCredentials: true },
+    });
+
+    type ListEntry = { type: "agent" | "user" | "global"; serverType: string; serverName: string };
+    const entries: ListEntry[] = [
+      ...userConnections.map((c) => ({ type: "user" as const, serverType: c.mcpServer.type, serverName: c.mcpServer.name })),
+      ...globalServers.map((s) => ({ type: "global" as const, serverType: s.type, serverName: s.name })),
+    ];
+
+    // Add MCPs the agent has pinned (only when this session is running an
+    // agent). Agent-pinned servers get added with type=agent and prepended
+    // to the resolution list so the resolver picks them first. If the user
+    // also has a connection for the same type, we still add the agent
+    // entry but the dedupe below keeps the agent one (it's pre-pended
+    // before user/global of the same type).
+    if (agentSlug) {
+      const agentConns = await prisma.agentMcpConnection.findMany({
+        where: { agent: { slug: agentSlug } },
+        include: { mcpServer: true },
+      });
+      for (const c of agentConns) {
+        const alreadyListed = entries.some((e) => e.serverType === c.mcpServer.type);
+        if (!alreadyListed) {
+          entries.unshift({ type: "agent", serverType: c.mcpServer.type, serverName: c.mcpServer.name });
+        }
+      }
+    }
+
+    // Virtual xyne-spaces entry: if SPACES_DB_URL is configured the user can
+    // use Spaces tools without ever clicking "Connect" — loadEffectiveCredentials
+    // synthesizes the creds from the live session row. Only add when there's
+    // no existing user/global row for xyne-spaces (else we'd duplicate).
+    const hasSpacesEntry = entries.some((e) => e.serverType === "xyne-spaces");
+    console.log(
+      `[mcp/tools] userId=${userId} userConns=${userConnections.length} globalServers=${globalServers.length} hasSpacesEntry=${hasSpacesEntry} spacesDbUrlSet=${!!CONFIG.spacesDbUrl}`,
+    );
+    if (!hasSpacesEntry && CONFIG.spacesDbUrl) {
+      const spacesServer = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces" } });
+      console.log(`[mcp/tools] spaces virtual-entry check: mcpServerRow=${!!spacesServer}`);
+      if (spacesServer) {
+        entries.push({ type: "user", serverType: "xyne-spaces", serverName: spacesServer.name });
+        console.log(`[mcp/tools] added virtual xyne-spaces entry for userId=${userId}`);
+      }
+    }
+    console.log(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
 
     const results = await Promise.allSettled(
-      connections.map(async (c) => {
-        if (!(await hasConnectorDefinition(c.mcpServer.type))) {
-          return null;
-        }
-
-        const decrypted = decrypt(c.encryptedCreds, c.iv, c.authTag, CONFIG.encryptionKey);
-        const credentials = JSON.parse(decrypted) as Record<string, unknown>;
-
-        return listToolsForUser(userId, c.mcpServer.type, c.mcpServer.name, credentials);
+      entries.map(async (entry) => {
+        if (!(await hasConnectorDefinition(entry.serverType))) return null;
+        const effective = await loadEffectiveCredentials(userId, entry.serverType, agentSlug);
+        if (!effective) return null;
+        return listToolsForUser(userId, entry.serverType, entry.serverName, effective.credentials);
       }),
     );
 
@@ -67,14 +126,20 @@ router.get("/:userId/mcp/tools", async (req: Request<{ userId: string }>, res: R
       }
     }
 
-    // Inject Grafana custom tools based on DB connections, not MCP server success
-    // (MCP server may fail due to uvx/token issues but custom tools work independently)
-    const grafanaConn = connections.find((c) => c.mcpServer.type === "grafana");
-    if (grafanaConn) {
+    // Inject Grafana custom tools based on credentials availability (user OR global),
+    // not MCP server success (MCP server may fail due to uvx/token issues but
+    // custom tools work independently).
+    const hasGrafanaCreds =
+      userConnections.some((c) => c.mcpServer.type === "grafana") ||
+      globalServers.some((s) => s.type === "grafana");
+    if (hasGrafanaCreds) {
       let gfServer = data.find((s) => s.serverType === "grafana");
       if (!gfServer) {
-        // MCP server failed — create a stub so custom tools still appear
-        gfServer = { serverType: "grafana", serverName: grafanaConn.mcpServer.name, tools: [], writeTools: [] };
+        const grafanaName =
+          userConnections.find((c) => c.mcpServer.type === "grafana")?.mcpServer.name ??
+          globalServers.find((s) => s.type === "grafana")?.name ??
+          "Grafana";
+        gfServer = { serverType: "grafana", serverName: grafanaName, tools: [], writeTools: [] };
         data.push(gfServer);
       }
       (gfServer.tools as typeof GRAFANA_CUSTOM_TOOLS).push(...GRAFANA_CUSTOM_TOOLS);
@@ -87,9 +152,10 @@ router.get("/:userId/mcp/tools", async (req: Request<{ userId: string }>, res: R
   }
 });
 
-router.post("/:userId/mcp/call", async (req: Request<{ userId: string }>, res: Response) => {
+router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, res: Response) => {
   try {
-    const { userId } = req.params;
+    const userId = req.session!.userId;
+    const agentSlug = req.session?.agentSlug;
     const { serverType, tool, params, permission } = req.body as {
       serverType?: string;
       tool?: string;
@@ -112,23 +178,12 @@ router.post("/:userId/mcp/call", async (req: Request<{ userId: string }>, res: R
       return;
     }
 
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: serverType } },
-      include: { mcpServer: true },
-    });
-
-    if (!connection) {
+    const effective = await loadEffectiveCredentials(userId, serverType, agentSlug);
+    if (!effective) {
       res.status(404).json({ success: false, error: `No connection found for user and server type: ${serverType}` });
       return;
     }
-
-    const decrypted = decrypt(
-      connection.encryptedCreds,
-      connection.iv,
-      connection.authTag,
-      CONFIG.encryptionKey,
-    );
-    const credentials = JSON.parse(decrypted) as Record<string, unknown>;
+    const credentials = effective.credentials;
 
     // Write tools always require approval — cannot be overridden by agent config
     const definition = await resolveConnectorDefinition(serverType);
@@ -138,6 +193,12 @@ router.post("/:userId/mcp/call", async (req: Request<{ userId: string }>, res: R
     console.log(`[mcp/call] user=${userId} server=${serverType} tool=${tool} permission=${effectivePermission}${isWriteTool ? " (write-tool, forced ask)" : ""}`);
 
     if (effectivePermission === "ask") {
+      const validationError = await validateWriteAction(serverType, tool, params ?? {}, { ...credentials, userId });
+      if (validationError) {
+        console.log(`[mcp/call] validator rejected ${serverType}/${tool}: ${validationError}`);
+        res.json({ success: true, data: { content: `Cannot ${tool}: ${validationError}` } });
+        return;
+      }
       const action = { serverType, tool, params: params ?? {}, userId };
       const signature = signAction(action);
       res.json({ success: true, data: { content: `Action queued for approval: ${tool}`, pendingAction: { ...action, signature } } });
@@ -147,6 +208,11 @@ router.post("/:userId/mcp/call", async (req: Request<{ userId: string }>, res: R
     // Handle custom tools locally instead of forwarding to MCP server
     if (serverType === "bitbucket" && tool === "upload-pr-screenshot") {
       const content = await handleUploadPrScreenshot(credentials, params ?? {});
+      res.json({ success: true, data: { content } });
+      return;
+    }
+    if (serverType === "bitbucket" && tool === "get-pr-comments") {
+      const content = await handleGetPrComments(credentials, params ?? {});
       res.json({ success: true, data: { content } });
       return;
     }
@@ -184,10 +250,13 @@ router.post("/:userId/mcp/call", async (req: Request<{ userId: string }>, res: R
       }
 
       try {
-        const runUrl = `${CONFIG.selfUrl}/claw/api/v1/run`;
+        const runUrl = `${CONFIG.internalUrl}/claw/api/v1/run`;
         const runRes = await fetch(runUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          },
           body: JSON.stringify({
             userId,
             task: `${task}\n\n## Session Metadata\n- channelId: ${chanId ?? "unknown"}\n- conversationId: ${convId ?? "unknown"}`,
@@ -195,7 +264,7 @@ router.post("/:userId/mcp/call", async (req: Request<{ userId: string }>, res: R
             ...(chanId ? { channelId: chanId } : {}),
             // Don't pass conversationId — it causes session resume with prior agent context.
             // Session Metadata is injected into the task text instead.
-            callbackUrl: `${CONFIG.selfUrl}/claw/api/v1/webhook/result`,
+            callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
           }),
         });
 
@@ -248,14 +317,9 @@ router.post("/:userId/mcp/call", async (req: Request<{ userId: string }>, res: R
   }
 });
 
-/**
- * POST /:userId/actions/sign
- * Sign a write-tool action so it can be verified on approval.
- * Called by xyne-claw for custom write tools (e.g. Google tools).
- */
-router.post("/:userId/actions/sign", (req: Request<{ userId: string }>, res: Response) => {
+router.post("/:sessionId/actions/sign", (req: Request<{ sessionId: string }>, res: Response) => {
   try {
-    const { userId } = req.params;
+    const userId = req.session!.userId;
     const { serverType, tool, params } = req.body as {
       serverType?: string;
       tool?: string;

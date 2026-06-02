@@ -1,35 +1,31 @@
 /**
- * Web Search Tool
- *
- * Perform a web search to find current information from the internet.
- * Uses the Xyne AI Extended websearch API.
+ * Web Search Tool — powered by Brave Search API
  */
 
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
 export const WEB_SEARCH_CONFIG_SCHEMA = {
-  XYNE_AI_EXTENDED_URL: {
-    label: "Xyne AI Extended URL",
+  BRAVE_SEARCH_API_KEY: {
+    label: "Brave Search API Key",
     default: "",
     required: true as const,
-    placeholder: "https://xyne-ai-extended.internal",
-  },
-  XYNE_AI_EXTENDED_API_KEY: {
-    label: "Xyne AI Extended API Key",
-    default: "",
-    required: false as const,
+    placeholder: "BSA...",
   },
 };
 
-interface SearchResult {
-  url: string;
+interface BraveWebResult {
   title: string;
-  content: string;
-  engine: string;
-  score: number;
-  publishedDate: string | null;
+  url: string;
+  description: string;
+  page_age?: string;
+  extra_snippets?: string[];
 }
 
+interface BraveResponse {
+  web?: { results?: BraveWebResult[] };
+}
+
+const BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
 const WEB_SEARCH_TIMEOUT_MS = 30_000;
 
 export const webSearchTool: ToolDefinition = {
@@ -58,32 +54,27 @@ export const webSearchTool: ToolDefinition = {
     const query = (params["query"] as string | undefined)?.trim();
     if (!query) return "Error: query is required.";
 
-    const configResult = resolveConfig(context);
-    if (typeof configResult === "string") return configResult;
-    const { url, apiKey } = configResult;
+    const config = context?.config ?? {};
+    const apiKey = config["BRAVE_SEARCH_API_KEY"] || process.env["BRAVE_SEARCH_API_KEY"] || "";
+    if (!apiKey) return "Error: BRAVE_SEARCH_API_KEY is not configured. Web search is unavailable.";
 
-    console.log(`[web-search] query="${query.substring(0, 80)}..."`);
+    console.log(`[web-search] query="${query.substring(0, 80)}"`);
 
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), WEB_SEARCH_TIMEOUT_MS);
 
-      const baseUrl = url.replace(/\/$/, "");
-      const searchUrl = new URL(`${baseUrl}/search`);
-      searchUrl.searchParams.append("q", query);
-      searchUrl.searchParams.append("format", "json");
-
-      const headers: Record<string, string> = {
-        Accept: "application/json",
-        "User-Agent": "JAF-WebSearch-Tool/1.0",
-      };
-      if (apiKey) {
-        headers["X-API-Key"] = apiKey;
-      }
+      const searchUrl = new URL(BRAVE_SEARCH_URL);
+      searchUrl.searchParams.set("q", query);
+      searchUrl.searchParams.set("count", "20");
 
       const response = await fetch(searchUrl.toString(), {
         method: "GET",
-        headers,
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "gzip",
+          "X-Subscription-Token": apiKey,
+        },
         signal: controller.signal,
       });
 
@@ -91,45 +82,26 @@ export const webSearchTool: ToolDefinition = {
 
       if (!response.ok) {
         const errorText = await response.text();
-        if (response.status === 401) return "Error: Authentication failed: Invalid API key";
-        if (response.status === 403) return "Error: Access forbidden: Insufficient permissions";
-        if (response.status === 429) return "Error: Rate limited. Please try again later.";
-        if (response.status === 404) return `Error: Search endpoint not found at ${baseUrl}`;
-        if (response.status >= 500) return `Error: Server error: ${response.status} ${response.statusText}`;
-        return `Error: Web search API returned status ${response.status}: ${errorText}`;
+        if (response.status === 401) return "Error: Authentication failed — check BRAVE_SEARCH_API_KEY";
+        if (response.status === 429) return "Error: Brave Search rate limit exceeded. Try again later.";
+        if (response.status >= 500) return `Error: Brave Search server error ${response.status}`;
+        return `Error: Brave Search returned status ${response.status}: ${errorText}`;
       }
 
-      const rawData = await response.json() as { results?: SearchResult[] };
+      const data = await response.json() as BraveResponse;
+      const results = data.web?.results ?? [];
 
-      const results: SearchResult[] = [];
-      if (Array.isArray(rawData.results)) {
-        for (const r of rawData.results) {
-          if (r.url && r.title) {
-            results.push({
-              url: r.url,
-              title: r.title,
-              content: r.content ?? "",
-              engine: r.engine ?? "unknown",
-              score: typeof r.score === "number" ? r.score : 0,
-              publishedDate: r.publishedDate ?? null,
-            });
-          }
-        }
-      }
+      if (results.length === 0) return "No search results found for the query.";
 
-      if (results.length === 0) {
-        return "No search results found for the query.";
-      }
-
-      const formattedResults = results
-        .slice(0, 30)
+      const formatted = results
         .map((r, idx) => {
-          const publishedDate = r.publishedDate ? ` (Published: ${r.publishedDate})` : "";
-          return `[${idx + 1}] ${r.title || "Untitled"}\nURL: ${r.url}\nSource: ${r.engine || "unknown"}${publishedDate}\n${r.content}`;
+          const age = r.page_age ? ` (${r.page_age})` : "";
+          const snippets = r.extra_snippets?.length ? "\n" + r.extra_snippets.join(" ") : "";
+          return `[${idx + 1}] ${r.title}\nURL: ${r.url}${age}\n${r.description}${snippets}`;
         })
         .join("\n\n");
 
-      return `Found ${results.length} search results:\n\n${formattedResults}`;
+      return `Found ${results.length} search results:\n\n${formatted}`;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         return "Error: Web search timed out after 30 seconds";
@@ -140,11 +112,3 @@ export const webSearchTool: ToolDefinition = {
     }
   },
 };
-
-function resolveConfig(context: ToolExecutionContext | undefined): { url: string; apiKey: string } | string {
-  const config = context?.config ?? {};
-  const url = config["XYNE_AI_EXTENDED_URL"] || process.env["XYNE_AI_EXTENDED_URL"] || "";
-  const apiKey = config["XYNE_AI_EXTENDED_API_KEY"] || process.env["XYNE_AI_EXTENDED_API_KEY"] || "";
-  if (!url) return "Error: XYNE_AI_EXTENDED_URL is not configured. Web search is unavailable.";
-  return { url, apiKey };
-}

@@ -7,6 +7,8 @@ import { PDFParse } from "pdf-parse";
 import { googleFetch } from "./oauth.js";
 
 const BASE = "https://www.googleapis.com/drive/v3";
+const MAX_DRIVE_UPLOAD_BYTES = 1_000_000; // 1MB text payload guardrail
+const MAX_DRIVE_SEARCH_RESULTS = 50;
 
 // ── Minimal ZIP + XLSX parser ────────────────────────────────────────
 
@@ -303,11 +305,17 @@ export async function searchDriveFiles(
   query: string,
   maxResults: number,
 ): Promise<string> {
-  const q = query.includes("'") ? query : `name contains '${query}' or fullText contains '${query}'`;
+  const cappedResults = Math.min(Math.max(maxResults, 1), MAX_DRIVE_SEARCH_RESULTS);
+  const looksLikeRawQuery =
+    /\b(name|fullText|mimeType|modifiedTime|parents|trashed)\b/.test(query) ||
+    query.includes(" and ") ||
+    query.includes(" or ");
+  const escaped = query.replace(/'/g, "\\'");
+  const q = looksLikeRawQuery ? query : `name contains '${escaped}' or fullText contains '${escaped}'`;
   const url = new URL(`${BASE}/files`);
   url.searchParams.set("q", `${q} and trashed = false`);
   url.searchParams.set("fields", "files(id,name,mimeType,size)");
-  url.searchParams.set("pageSize", String(maxResults));
+  url.searchParams.set("pageSize", String(cappedResults));
   url.searchParams.set("orderBy", "modifiedTime desc");
 
   const data = (await googleFetch(url.toString(), token)) as DriveListResponse;
@@ -320,4 +328,90 @@ export async function searchDriveFiles(
     return `- ${f.name}${size}\n  Type: ${f.mimeType}\n  ID: ${f.id}`;
   });
   return `Found ${files.length} file(s):\n\n${lines.join("\n\n")}`;
+}
+
+// ── Drive write helpers ──────────────────────────────────────────────
+
+/** Create a folder in Drive (optionally inside a parent folder). */
+export async function createDriveFolder(
+  token: string,
+  name: string,
+  parentId?: string,
+): Promise<string> {
+  if (!name.trim()) throw new Error("Folder name cannot be empty");
+  const body: Record<string, unknown> = { name, mimeType: "application/vnd.google-apps.folder" };
+  if (parentId) body.parents = [parentId];
+  const created = (await googleFetch(`${BASE}/files?fields=id,name,webViewLink`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })) as { id: string; name: string; webViewLink?: string };
+  return [
+    `Folder created: ${created.name}`,
+    `Folder ID: ${created.id}`,
+    `URL: ${created.webViewLink ?? `https://drive.google.com/drive/folders/${created.id}`}`,
+  ].join("\n");
+}
+
+/** Upload a text/utf-8 file to Drive (optionally into a parent folder). */
+export async function uploadDriveFile(
+  token: string,
+  name: string,
+  content: string,
+  mimeType: string,
+  parentId?: string,
+): Promise<string> {
+  if (!name.trim()) throw new Error("File name cannot be empty");
+  if (!mimeType.trim()) throw new Error("mimeType is required");
+  if (Buffer.byteLength(content, "utf8") > MAX_DRIVE_UPLOAD_BYTES) {
+    throw new Error(`File content too large. Max ${MAX_DRIVE_UPLOAD_BYTES} bytes.`);
+  }
+  const metadata: Record<string, unknown> = { name, mimeType };
+  if (parentId) metadata.parents = [parentId];
+
+  const boundary = `boundary_${Date.now().toString(16)}`;
+  const multipart =
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: ${mimeType}\r\n\r\n` +
+    `${content}\r\n` +
+    `--${boundary}--`;
+
+  const res = await fetch(
+    `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": `multipart/related; boundary=${boundary}`,
+      },
+      body: multipart,
+    },
+  );
+  if (!res.ok) throw new Error(`Drive upload ${res.status}: ${await res.text()}`);
+  const created = (await res.json()) as { id: string; name: string; webViewLink?: string };
+  return [
+    `File uploaded: ${created.name}`,
+    `File ID: ${created.id}`,
+    `URL: ${created.webViewLink ?? `https://drive.google.com/file/d/${created.id}/view`}`,
+  ].join("\n");
+}
+
+/** Share a Drive file. role: reader|commenter|writer; type: user|group|domain|anyone. */
+export async function shareDriveFile(
+  token: string,
+  fileId: string,
+  role: "reader" | "commenter" | "writer",
+  type: "user" | "group" | "domain" | "anyone",
+  emailAddress?: string,
+): Promise<string> {
+  const body: Record<string, unknown> = { role, type };
+  if (emailAddress) body.emailAddress = emailAddress;
+  await googleFetch(`${BASE}/files/${encodeURIComponent(fileId)}/permissions?sendNotificationEmail=false`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const target = emailAddress ?? type;
+  return `Granted ${role} access on ${fileId} to ${target}`;
 }

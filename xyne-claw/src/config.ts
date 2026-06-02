@@ -13,6 +13,10 @@ export const LITELLM = {
   url: process.env["LITELLM_URL"] ?? "http://localhost:4000",
   apiKey: process.env["LITELLM_API_KEY"] ?? "",
   model: process.env["LITELLM_MODEL"] ?? "claude-sonnet-4-20250514",
+  // Cheap-and-fast model used by judge/boss roles (chain-judge, goal-judge).
+  // Boss decisions are short structured calls; running them on the same big
+  // model as the worker would double the per-turn cost for marginal quality.
+  fastModel: process.env["LITELLM_FAST_MODEL"] ?? "private-large",
 } as const;
 
 export const AGENT = {
@@ -26,5 +30,22 @@ export const AGENT = {
 //   ${baseUrl}/claw-preview/<sandboxId>/  →  redirects to vnc.html?autoconnect=…
 // Empty string disables the announce.
 export const SANDBOX_PREVIEW = {
-  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? "https://app.spaces.sandbox.xyne.juspay.net",
+  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? "https://app.spaces.xyne.juspay.net",
+} as const;
+
+// Hindsight long-term memory.
+//
+// When HINDSIGHT_URL is set, xyne-claw prefetches relevant memories at the
+// start of each session (injected as PromptInjection items) and queues
+// completed sessions for nightly retain (written to data/memory-queue/).
+//
+// The nightly cron in xyne-claw-auth reads the queue at 2 AM IST, calls
+// hindsight.retain() for each session, and routes new memories through the
+// agent's configured memoryApprovalStrategy (HUMAN_ONLY | EVALS_ONLY |
+// EVALS_THEN_HUMAN). Leave HINDSIGHT_URL empty to disable memory entirely.
+export const HINDSIGHT = {
+  url: process.env["HINDSIGHT_URL"] ?? "",
+  tenant: process.env["HINDSIGHT_TENANT"] ?? "default",
+  apiKey: process.env["HINDSIGHT_API_KEY"] ?? "",
+  enabled: Boolean(process.env["HINDSIGHT_URL"]),
 } as const;

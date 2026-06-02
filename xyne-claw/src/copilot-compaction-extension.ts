@@ -12,8 +12,8 @@
  * customInstructions that force the summarizer to preserve them.
  */
 
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import { compact } from "@mariozechner/pi-coding-agent";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { compact } from "@earendil-works/pi-coding-agent";
 
 interface Exchange {
   index: number;
@@ -97,14 +97,22 @@ export const preserveCopilotContext: ExtensionFactory = (pi) => {
       return;
     }
 
-    const apiKey = await ctx.modelRegistry.getApiKey(model);
-    if (!apiKey) {
-      console.warn("[copilot-compaction] No API key available, falling back to default compaction");
+    // Pi v0.75:
+    //   - getApiKey(model) was removed; replaced by getApiKeyAndHeaders(model)
+    //     which returns both the bearer and any per-provider request headers.
+    //   - compact() gained a `headers` arg between apiKey and customInstructions
+    //     so we must pass headers explicitly (defaulting to {} when absent).
+    // getApiKeyAndHeaders returns a discriminated union: { ok: true, apiKey?, headers? }
+    // or { ok: false, error }. Bail when resolution failed.
+    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+    if (!auth.ok || !auth.apiKey) {
+      const reason = !auth.ok ? auth.error : "no API key returned";
+      console.warn(`[copilot-compaction] Auth unavailable (${reason}), falling back to default compaction`);
       return;
     }
 
     try {
-      const result = await compact(preparation, model, apiKey, customInstructions, signal);
+      const result = await compact(preparation, model, auth.apiKey, auth.headers ?? {}, customInstructions, signal);
       console.log(`[copilot-compaction] Preserved ${exchanges.length} respond-to-user exchange(s) in compaction summary`);
       return { compaction: result };
     } catch (err) {

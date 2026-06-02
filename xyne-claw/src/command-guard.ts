@@ -3,7 +3,7 @@
  * Blocks destructive shell commands via pi-agent-core's beforeToolCall hook.
  */
 
-import type { BeforeToolCallContext, BeforeToolCallResult } from "@mariozechner/pi-agent-core";
+import type { BeforeToolCallContext, BeforeToolCallResult } from "@earendil-works/pi-agent-core";
 
 const BLOCKED_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\brm\s+-rf\b/, label: "rm -rf" },

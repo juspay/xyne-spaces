@@ -394,8 +394,9 @@ async function renderPdfBuffer(docConfig: {
             html += `<table>\n`;
             for (let r = 0; r < rows.length; r++) {
               const row = rows[r];
+              if (!row) continue;
               const cells = (row.cells ?? row.columns ?? row) as string[];
-              html += `<tr>${cells.map((cell, ci) => 
+              html += `<tr>${cells.map((cell) =>
                 r === 0 ? `<th>${cell}</th>` : `<td>${cell}</td>`
               ).join("")}</tr>\n`;
             }
@@ -420,9 +421,17 @@ async function renderPdfBuffer(docConfig: {
 }
 
 async function convertHtmlToPdf(html: string): Promise<Buffer> {
-  let browser;
+  // playwright is an optional runtime-only dep — present in the deployed
+  // image's node_modules, not declared in xyne-claw-shared's package.json.
+  // We cast through `any` so TS doesn't fail to resolve the module type at
+  // compile time. Runtime resolution works in any image that has playwright
+  // installed (xyne-claw-auth's container does).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let browser: any;
   try {
-    const { chromium } = await import("playwright");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const playwright = (await import("playwright" as unknown as string)) as any;
+    const { chromium } = playwright;
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     

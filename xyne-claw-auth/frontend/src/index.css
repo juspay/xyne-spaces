@@ -1,2 +1,151 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+@import "./styles/tokens.css";
+
+/* ================================================================
+   Class-based dark mode.
+   Default in Tailwind v4 is `prefers-color-scheme`, which causes
+   dark: utilities to fire whenever the OS is in dark mode — even
+   if our app is in light mode. Override so dark: only activates
+   when <html> has the `.dark` class (managed by useTheme()).
+================================================================ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ================================================================
+   BASE STYLES
+   Inherit token values into sensible HTML defaults.
+================================================================ */
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html {
+    font-family: var(--comp-font-sans);
+    font-size: var(--comp-text-sm);
+    color: var(--color-xyne-fg-primary);
+    background-color: var(--color-xyne-surface-subtle);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+  }
+
+  /* Focus visible — consistent ring using brand token */
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--comp-focus-ring);
+  }
+
+  /*
+     Targeted override: some browsers (Safari/Chrome) draw a native
+     focus ring / shadow on inputs even when components suppress it.
+     Apply a narrow, targeted override for our app-styled inputs to
+     remove that native ring while keeping the global focus-visible
+     rule for accessibility elsewhere.
+  */
+  .group:focus-within,
+  [data-id$="-input"]:focus,
+  [data-id$="agents-search-input"]:focus,
+  [data-id$="agents-search-input"]:focus-visible,
+  input[type="text"][data-id$="-input"]:focus,
+  textarea[data-id$="chat-input"]:focus {
+    outline: none !important;
+    box-shadow: none !important;
+    -webkit-box-shadow: none !important;
+  }
+
+  /* Scrollbar — thin, neutral */
+  ::-webkit-scrollbar        { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track  { background: transparent; }
+  ::-webkit-scrollbar-thumb  { background: var(--color-xyne-border-strong); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-xyne-fg-muted); }
+}
+
+/* ================================================================
+   Dialog scale animations
+   Triggered by Base UI's data-open / data-closed attributes.
+   Center positioning lives in inline transform, the keyframes
+   only animate scale + opacity so they compose correctly.
+================================================================ */
+@keyframes dialog-scale-in {
+  from { transform: translate(-50%, -50%) scale(0.93); opacity: 0; }
+  to   { transform: translate(-50%, -50%) scale(1);    opacity: 1; }
+}
+@keyframes dialog-scale-out {
+  from { transform: translate(-50%, -50%) scale(1);    opacity: 1; }
+  to   { transform: translate(-50%, -50%) scale(0.96); opacity: 0; }
+}
+@keyframes dialog-backdrop-in {
+  from { opacity: 0; } to { opacity: 1; }
+}
+@keyframes dialog-backdrop-out {
+  from { opacity: 1; } to { opacity: 0; }
+}
+
+[data-id="dialog-popup"][data-open]   { animation: dialog-scale-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+[data-id="dialog-popup"][data-closed] { animation: dialog-scale-out 140ms cubic-bezier(0.4, 0, 1, 1) both; }
+
+[data-id="dialog-backdrop"][data-open]   { animation: dialog-backdrop-in 200ms ease-out both; }
+[data-id="dialog-backdrop"][data-closed] { animation: dialog-backdrop-out 140ms ease-in both; }
+
+/* ================================================================
+   Status pulse animation
+   Applied to online/enabled status dots for a gentle breathing effect.
+================================================================ */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.status-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+/* ================================================================
+   Studio empty-state — staggered entrance
+   ----------------------------------------------------------------
+   Cinematic reveal for the Studio hero + agent cards + their prompt
+   chips. Apply the utility class and set `style={{ animationDelay: ... }}`
+   on each element to control the stagger. `backwards` fill mode keeps
+   the element invisible during the delay so the cascade reads cleanly.
+
+   Reduced-motion users skip the entrance entirely.
+================================================================ */
+@keyframes studio-hero-enter {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes studio-card-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes studio-chip-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.studio-hero-fade {
+  animation: studio-hero-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.studio-card-stagger {
+  animation: studio-card-enter 480ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.studio-chip-stagger {
+  animation: studio-chip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-hero-fade,
+  .studio-card-stagger,
+  .studio-chip-stagger {
+    animation: none !important;
+  }
+}

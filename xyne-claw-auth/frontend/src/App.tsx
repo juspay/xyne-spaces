@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
-import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
-import { Shield, MessageSquare } from "lucide-react";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { Shield, MessageSquare, BarChart2, Brain } from "lucide-react";
 import { useAuth } from "./hooks/useAuth";
 import { DashboardPage } from "./components/DashboardPage";
 import { AgentDetailPage } from "./components/AgentDetailPage";
+import { SubagentDetailPage } from "./components/SubagentDetailPage";
 import { AdminPage } from "./components/AdminPage";
 import { AgentChat } from "./components/AgentChat";
+import { DigitalTwinPage } from "./components/DigitalTwinPage";
 import { AppV2 } from "./v2/AppV2";
+import { AppV3 } from "./v3/AppV3";
 import { checkIsAdmin } from "./lib/api";
 
 function AdminLink() {
@@ -27,21 +30,47 @@ function ChatLink() {
   );
 }
 
+function DashboardLink() {
+  const navigate = useNavigate();
+  // Dashboard now lives in V3 only — navigating here drops you into the V3
+  // shell (sidebar + theme toggle). The old /dashboard URL still works as a
+  // redirect (see route below) so deep links don't break.
+  return (
+    <button onClick={() => navigate("/v3/dashboard")} className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-emerald-400 transition hover:bg-zinc-800 hover:text-emerald-300">
+      <BarChart2 size={14} /> Dashboard
+    </button>
+  );
+}
+
+function DigitalTwinLink() {
+  const navigate = useNavigate();
+  return (
+    <button onClick={() => navigate("/digital-twin")} className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-indigo-400 transition hover:bg-zinc-800 hover:text-indigo-300">
+      <Brain size={14} /> Digital Twin
+    </button>
+  );
+}
+
 export function App() {
   const auth = useAuth();
   const location = useLocation();
   const [isAdmin, setIsAdmin] = useState(false);
-
-  // Pass /v2/* straight through — AppV2 owns its own full-screen layout
-  if (location.pathname.startsWith("/v2")) {
-    return <AppV2 />;
-  }
 
   useEffect(() => {
     if (auth.status === "authenticated") {
       checkIsAdmin(auth.user.id).then(setIsAdmin).catch(() => {});
     }
   }, [auth.status, auth.status === "authenticated" ? auth.user.id : ""]);
+
+  // Pass /v2/* straight through — AppV2 owns its own full-screen layout
+  if (location.pathname.startsWith("/v2")) {
+    return <AppV2 />;
+  }
+
+  // Pass /v3/* straight through — AppV3 owns its own full-screen layout
+  if (location.pathname.startsWith("/v3")) {
+    return <AppV3 />;
+  }
 
   if (auth.status === "loading") {
     return (
@@ -73,6 +102,8 @@ export function App() {
           <h1 className="text-lg font-semibold">XyneClaw Auth</h1>
           <div className="flex items-center gap-4">
             <ChatLink />
+            <DashboardLink />
+            <DigitalTwinLink />
             {isAdmin && <AdminLink />}
             <span className="text-sm text-zinc-400">{auth.user.email}</span>
             <button
@@ -87,9 +118,20 @@ export function App() {
 
       <main className="mx-auto max-w-6xl px-6 py-8">
         <Routes>
-          <Route path="/" element={<DashboardPage userId={auth.user.id} isAdmin={isAdmin} />} />
+          {/* V3 is the main surface — root drops users into the V3 home. */}
+          <Route path="/" element={<Navigate to="/v3/home" replace />} />
+          {/* V1 dashboard kept reachable for the "Switch to v1" affordance
+              in the V3 top nav. Other V1 sub-routes below are unchanged. */}
+          <Route path="/v1" element={<DashboardPage userId={auth.user.id} isAdmin={isAdmin} />} />
           <Route path="/agents/:slug" element={<AgentDetailPage userId={auth.user.id} isAdmin={isAdmin} />} />
+          <Route path="/subagents/new" element={<SubagentDetailPage userId={auth.user.id} isAdmin={isAdmin} mode="create" />} />
+          <Route path="/subagents/:name" element={<SubagentDetailPage userId={auth.user.id} isAdmin={isAdmin} mode="edit" />} />
           <Route path="/chat" element={<AgentChat userId={auth.user.id} />} />
+          <Route path="/digital-twin" element={<DigitalTwinPage userId={auth.user.id} />} />
+          {/* Dashboard moved to V3. Keep the old URL working via redirect so
+              any deep link / bookmark still resolves. `replace` so the V1
+              `/dashboard` URL doesn't sit in the history stack. */}
+          <Route path="/dashboard" element={<Navigate to="/v3/dashboard" replace />} />
           {isAdmin && <Route path="/admin" element={<AdminPage userId={auth.user.id} />} />}
         </Routes>
       </main>

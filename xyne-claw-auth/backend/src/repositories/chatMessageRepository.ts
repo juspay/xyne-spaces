@@ -13,4 +13,14 @@ export const chatMessageRepository = {
 
   findByUserAndAgent: (userId: string, agentSlug: string) =>
     prisma.chatMessage.findMany({ where: { userId, agentSlug }, orderBy: { createdAt: "asc" } }),
+
+  /** Delete every message in a conversation belonging to this user+agent.
+   *  Scoped by all three to prevent one user from deleting another's chat
+   *  even if they guess a conversationId. Returns the delete count. */
+  deleteConversation: async (userId: string, agentSlug: string, conversationId: string) => {
+    const result = await prisma.chatMessage.deleteMany({
+      where: { userId, agentSlug, conversationId },
+    });
+    return result.count;
+  },
 };

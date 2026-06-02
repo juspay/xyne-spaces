@@ -5,6 +5,33 @@ import { isValidServerType } from "../validation.js";
 import type { CredentialField } from "../mcp/types.js";
 import { getCredentialFieldsByServerType } from "../mcp/connector-definitions.js";
 import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
+import { writeAuditLog } from "../lib/audit.js";
+
+/**
+ * Diff two connector-definition snapshots and return only the fields that
+ * changed. Keeps audit metadata compact AND highlights exactly which knob
+ * a regression rode in on (e.g. launchConfigTemplate.env going from
+ * { GRAFANA_URL: "{{url}}", … } → {}).
+ *
+ * Skips id/createdAt/updatedAt/scoped relation fields. JSON columns are
+ * shallow-compared via JSON.stringify — good enough to detect changes and
+ * preserve the before/after for a human reviewer.
+ */
+function diffConnector(before: Record<string, unknown> | null, after: Record<string, unknown>): Record<string, { before: unknown; after: unknown }> {
+  const SKIP = new Set(["id", "createdAt", "updatedAt", "globalCredentials"]);
+  const out: Record<string, { before: unknown; after: unknown }> = {};
+  const beforeObj = before ?? {};
+  const allKeys = new Set([...Object.keys(beforeObj), ...Object.keys(after)]);
+  for (const k of allKeys) {
+    if (SKIP.has(k)) continue;
+    const b = (beforeObj as Record<string, unknown>)[k];
+    const a = after[k];
+    if (JSON.stringify(b) !== JSON.stringify(a)) {
+      out[k] = { before: b ?? null, after: a ?? null };
+    }
+  }
+  return out;
+}
 
 const router = Router();
 const mcpServerAny = prisma.mcpServer as any;
@@ -210,6 +237,22 @@ router.post("/", async (req: Request, res: Response) => {
           } as Prisma.InputJsonValue,
         },
       });
+      await writeAuditLog({
+        actorUserId: requesterId,
+        eventType: "MCP_CONNECTOR_CREATED",
+        targetId: server.id,
+        description: `Created MCP connector definition ${server.type} (${server.name})`,
+        metadata: {
+          type: server.type,
+          name: server.name,
+          transport: server.transport,
+          // Full initial snapshot — small enough to fit, useful for "what did
+          // the first version look like" forensics.
+          launchConfigTemplate: server.launchConfigTemplate,
+          httpConfigTemplate: server.httpConfigTemplate,
+          credentialForm: server.credentialForm,
+        },
+      });
       res.status(201).json({ success: true, data: server });
       return;
     }
@@ -218,6 +261,83 @@ router.post("/", async (req: Request, res: Response) => {
     const canEdit = requesterIsAdmin || existingMeta.ownerUserId === requesterId;
     if (!canEdit) {
       res.status(403).json({ success: false, error: "Only connector author or CLAW_ADMIN can edit this definition" });
+      return;
+    }
+
+    // Global-connector hardening: any change to a scope=global row goes
+    // through the admin review queue, regardless of requester role. This
+    // includes CLAW_ADMIN edits — the queue is the single audit-able
+    // surface for global mutations, no exceptions. (Post-ppi-grafana-v2
+    // incident: 2026-05-22.)
+    if (existingMeta.scope === "global") {
+      const proposedFields: Record<string, unknown> = {
+        name: data.name,
+        url: data.url,
+        description: data.description ?? null,
+        transport: effectiveTransport,
+      };
+      if (data.credentialForm)        proposedFields["credentialForm"]        = data.credentialForm;
+      if (data.credentialSchema)      proposedFields["credentialSchema"]      = data.credentialSchema;
+      if (data.launchConfigTemplate)  proposedFields["launchConfigTemplate"]  = data.launchConfigTemplate;
+      if (data.httpConfigTemplate)    proposedFields["httpConfigTemplate"]    = data.httpConfigTemplate;
+      if (data.healthcheckSpec)       proposedFields["healthcheckSpec"]       = data.healthcheckSpec;
+      if (data.writeToolPolicy)       proposedFields["writeToolPolicy"]       = data.writeToolPolicy;
+
+      // Supersede any existing pending request for this connector — one
+      // active proposal per (mcpServerId). Prior `pending` rows flip to
+      // `superseded` so we keep the audit trail without ambiguous state.
+      const prior = await prisma.mcpConnectorEditRequest.findMany({
+        where: { mcpServerId: existing.id, status: "pending" },
+      });
+      for (const p of prior) {
+        await prisma.mcpConnectorEditRequest.update({
+          where: { id: p.id },
+          data: {
+            status: "superseded",
+            reviewedAt: new Date(),
+            reviewNote: `Superseded by newer proposal from ${requesterId}`,
+          },
+        });
+        await writeAuditLog({
+          actorUserId: requesterId,
+          eventType: "MCP_CONNECTOR_EDIT_SUPERSEDED",
+          targetId: p.id,
+          description: `Superseded prior pending edit on ${existing.type}`,
+          metadata: { mcpServerId: existing.id, supersededRequestId: p.id },
+        });
+      }
+
+      const editRequest = await prisma.mcpConnectorEditRequest.create({
+        data: {
+          mcpServerId: existing.id,
+          proposedByUserId: requesterId,
+          proposedFields: proposedFields as Prisma.InputJsonValue,
+          status: "pending",
+        },
+      });
+
+      await writeAuditLog({
+        actorUserId: requesterId,
+        eventType: "MCP_CONNECTOR_EDIT_REQUESTED",
+        targetId: editRequest.id,
+        description: `Proposed edit to global connector ${existing.type}`,
+        metadata: {
+          mcpServerId: existing.id,
+          mcpServerType: existing.type,
+          proposedFields,
+        },
+      });
+
+      // 202 Accepted — request is queued for review, NOT applied. Frontend
+      // should display "Change submitted for admin approval" rather than
+      // the usual "Saved" toast.
+      res.status(202).json({
+        success: true,
+        data: {
+          editRequest: { id: editRequest.id, status: "pending" },
+          message: "Global connector — change submitted for admin review.",
+        },
+      });
       return;
     }
 
@@ -252,6 +372,24 @@ router.post("/", async (req: Request, res: Response) => {
         ...(data.writeToolPolicy ? { writeToolPolicy: data.writeToolPolicy } : {}),
         connectorMeta: mergedMeta as Prisma.InputJsonValue,
       } as any,
+    });
+    // Capture before/after diff. The `existing` snapshot was fetched at line
+    // 198 — predates the update by a few ms, which is what we want. The
+    // metadata.diff is the queryable forensic surface: filter by event +
+    // targetId, inspect diff.launchConfigTemplate.{before,after} to see
+    // exactly what changed and revert if needed.
+    const diff = diffConnector(existing as unknown as Record<string, unknown>, server as Record<string, unknown>);
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "MCP_CONNECTOR_UPDATED",
+      targetId: server.id,
+      description: `Updated MCP connector definition ${server.type} (${Object.keys(diff).join(", ") || "no field changes"})`,
+      metadata: {
+        type: server.type,
+        name: server.name,
+        changedFields: Object.keys(diff),
+        diff,
+      },
     });
     res.status(201).json({ success: true, data: server });
   } catch (err) {
@@ -374,10 +512,207 @@ router.post("/publish-requests/:id/reject", requireClawAdmin, async (req: Reques
   }
 });
 
+// ── Global-connector edit-request queue ──────────────────────────────────
+//
+// Lifecycle for any mutation to a scope=global connector:
+//   submitter (POST /servers) → pending request row
+//   admin reviews              → /edit-requests (admin-only list)
+//   admin approves             → /edit-requests/:id/approve (fields copied to live row)
+//   admin rejects              → /edit-requests/:id/reject  (request closed, live row untouched)
+//   submitter cancels own      → /edit-requests/:id/cancel  (no admin needed)
+
+router.get("/edit-requests", requireClawAdmin, async (_req: Request, res: Response) => {
+  try {
+    const requests = await prisma.mcpConnectorEditRequest.findMany({
+      where: { status: "pending" },
+      include: { mcpServer: { select: { id: true, type: true, name: true, launchConfigTemplate: true, httpConfigTemplate: true, credentialForm: true, transport: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ success: true, data: requests });
+  } catch (err) {
+    console.error("[servers] list edit-requests error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/edit-requests/:id/approve", requireClawAdmin, async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const reviewerId = getRequesterId(req)!;
+    const editRequest = await prisma.mcpConnectorEditRequest.findUnique({
+      where: { id: req.params.id },
+      include: { mcpServer: true },
+    });
+    if (!editRequest) {
+      res.status(404).json({ success: false, error: "Edit request not found" });
+      return;
+    }
+    if (editRequest.status !== "pending") {
+      res.status(400).json({ success: false, error: `Edit request is ${editRequest.status}, not pending` });
+      return;
+    }
+
+    const proposed = editRequest.proposedFields as Record<string, unknown>;
+    const transport = (proposed["transport"] as string) === "http" ? "http" : "stdio";
+
+    // Apply the proposed fields to the live McpServer row. Same shape as
+    // the regular update path, except transport-specific template fields
+    // are mutually exclusive (stdio clears http, http clears stdio).
+    const updateData: Record<string, unknown> = {
+      name: proposed["name"] ?? editRequest.mcpServer.name,
+      url: proposed["url"] ?? editRequest.mcpServer.url,
+      description: proposed["description"] ?? null,
+      transport,
+    };
+    if (proposed["credentialForm"])   updateData["credentialForm"]   = proposed["credentialForm"];
+    if (proposed["credentialSchema"]) updateData["credentialSchema"] = proposed["credentialSchema"];
+    if (transport === "stdio") {
+      updateData["launchConfigTemplate"] = proposed["launchConfigTemplate"] ?? null;
+      updateData["httpConfigTemplate"]   = null;
+    } else {
+      updateData["httpConfigTemplate"]   = proposed["httpConfigTemplate"] ?? null;
+      updateData["launchConfigTemplate"] = null;
+    }
+    if (proposed["healthcheckSpec"]) updateData["healthcheckSpec"] = proposed["healthcheckSpec"];
+    if (proposed["writeToolPolicy"]) updateData["writeToolPolicy"] = proposed["writeToolPolicy"];
+
+    const before = editRequest.mcpServer;
+    const after = await prisma.mcpServer.update({
+      where: { id: editRequest.mcpServerId },
+      data: updateData as Prisma.McpServerUpdateInput,
+    });
+
+    await prisma.mcpConnectorEditRequest.update({
+      where: { id: editRequest.id },
+      data: { status: "approved", reviewedByUserId: reviewerId, reviewedAt: new Date() },
+    });
+
+    const diff = diffConnector(before as unknown as Record<string, unknown>, after as Record<string, unknown>);
+    await writeAuditLog({
+      actorUserId: reviewerId,
+      eventType: "MCP_CONNECTOR_EDIT_APPROVED",
+      targetId: editRequest.id,
+      description: `Approved edit on ${before.type} by ${editRequest.proposedByUserId}`,
+      metadata: {
+        mcpServerId: editRequest.mcpServerId,
+        mcpServerType: before.type,
+        proposedByUserId: editRequest.proposedByUserId,
+        changedFields: Object.keys(diff),
+        diff,
+      },
+    });
+
+    res.json({ success: true, data: { editRequestId: editRequest.id, server: after } });
+  } catch (err) {
+    console.error("[servers] approve edit-request error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/edit-requests/:id/reject", requireClawAdmin, async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const reviewerId = getRequesterId(req)!;
+    const { note } = req.body as { note?: string };
+    const editRequest = await prisma.mcpConnectorEditRequest.findUnique({ where: { id: req.params.id } });
+    if (!editRequest) {
+      res.status(404).json({ success: false, error: "Edit request not found" });
+      return;
+    }
+    if (editRequest.status !== "pending") {
+      res.status(400).json({ success: false, error: `Edit request is ${editRequest.status}, not pending` });
+      return;
+    }
+
+    await prisma.mcpConnectorEditRequest.update({
+      where: { id: editRequest.id },
+      data: { status: "rejected", reviewedByUserId: reviewerId, reviewedAt: new Date(), reviewNote: note ?? null },
+    });
+
+    await writeAuditLog({
+      actorUserId: reviewerId,
+      eventType: "MCP_CONNECTOR_EDIT_REJECTED",
+      targetId: editRequest.id,
+      description: `Rejected edit on connector by ${editRequest.proposedByUserId}`,
+      metadata: {
+        mcpServerId: editRequest.mcpServerId,
+        proposedByUserId: editRequest.proposedByUserId,
+        note: note ?? null,
+      },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[servers] reject edit-request error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/edit-requests/:id/cancel", async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "x-user-id header is required" });
+      return;
+    }
+    const editRequest = await prisma.mcpConnectorEditRequest.findUnique({ where: { id: req.params.id } });
+    if (!editRequest) {
+      res.status(404).json({ success: false, error: "Edit request not found" });
+      return;
+    }
+    if (editRequest.status !== "pending") {
+      res.status(400).json({ success: false, error: `Edit request is ${editRequest.status}, not pending` });
+      return;
+    }
+    // Only the proposer (or an admin) can cancel.
+    const requesterIsAdmin = await isClawAdmin(requesterId);
+    if (!requesterIsAdmin && editRequest.proposedByUserId !== requesterId) {
+      res.status(403).json({ success: false, error: "Only the proposer or CLAW_ADMIN can cancel this request" });
+      return;
+    }
+
+    await prisma.mcpConnectorEditRequest.update({
+      where: { id: editRequest.id },
+      data: { status: "cancelled", reviewedByUserId: requesterId, reviewedAt: new Date() },
+    });
+
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "MCP_CONNECTOR_EDIT_CANCELLED",
+      targetId: editRequest.id,
+      description: `Cancelled own edit request`,
+      metadata: { mcpServerId: editRequest.mcpServerId },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[servers] cancel edit-request error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
   try {
     const id = req.params.id;
+    const requesterId = getRequesterId(req);
+    // Snapshot before delete so the audit row preserves the connector shape
+    // for forensic restore. Without this the row vanishes with no trail.
+    const existing = await prisma.mcpServer.findUnique({ where: { id } });
     await prisma.mcpServer.delete({ where: { id } });
+    if (existing) {
+      await writeAuditLog({
+        ...(requesterId ? { actorUserId: requesterId } : {}),
+        eventType: "MCP_CONNECTOR_DELETED",
+        targetId: existing.id,
+        description: `Deleted MCP connector definition ${existing.type} (${existing.name})`,
+        metadata: {
+          type: existing.type,
+          name: existing.name,
+          transport: existing.transport,
+          launchConfigTemplate: existing.launchConfigTemplate,
+          httpConfigTemplate: existing.httpConfigTemplate,
+          credentialForm: existing.credentialForm,
+        },
+      });
+    }
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Trash2, Link2,
+  ArrowLeft, Trash2, Link2, Brain,
   Save, X, Plus, Settings, Sparkles, Loader2, Upload, Globe,
 } from "lucide-react";
 import {
@@ -14,11 +14,12 @@ import { toolColor } from "../utils";
 import type { Agent, ScheduledJob, ScheduledJobRun } from "../../lib/types";
 import { JobCard, RunCard, StatusBadge } from "./common/JobRunCards";
 import { ChainEditor } from "./common/ChainEditor";
+import { MemoryTab } from "./MemoryTab";
 
 interface Props { userId: string; isAdmin?: boolean; }
 
 // ── tab bar ───────────────────────────────────────────────────────────
-type Tab = "configure" | "jobs" | "runs" | "chain";
+type Tab = "configure" | "jobs" | "runs" | "chain" | "memory";
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick} className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition ${active ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-400 hover:text-zinc-700"}`}>
@@ -379,31 +380,33 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
                   </div>
                 ))}
               </div>
-              {/* subagent skill overrides */}
+              {/* Per-subagent skill picker. Default is NONE; user adds the
+                  specific skills they want to propagate into each subagent.
+                  Empty list = subagent gets no skills (intentional). */}
               {subagents.map((saName) => {
                 if (!availSkills.length) return null;
-                const isOv = saName in saSkills;
-                const active = isOv ? saSkills[saName]! : availSkills.map((s) => s.name);
+                const active = saSkills[saName] ?? [];
                 return (
                   <div key={saName} className="mt-3 rounded-lg border border-zinc-100 bg-zinc-50 p-3">
                     <p className="mb-2 text-xs font-medium text-zinc-600">{saName} — skills</p>
-                    {!isOv && <p className="mb-1 text-xs text-zinc-400">All skills inherited. Remove any to customize.</p>}
+                    {active.length === 0 && (
+                      <p className="mb-1 text-xs text-zinc-400">No skills. Add to propagate into this subagent.</p>
+                    )}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {active.map((n) => (
                         <span key={n} className="inline-flex items-center gap-1 rounded-full bg-zinc-200 px-2.5 py-0.5 text-xs text-zinc-600">
                           {n}
-                          <button onClick={() => { if (!isOv) setSaSkills((p) => ({ ...p, [saName]: availSkills.map((s) => s.name).filter((x) => x !== n) })); else setSaSkills((p) => ({ ...p, [saName]: p[saName]!.filter((x) => x !== n) })); }}><X size={10} /></button>
+                          <button onClick={() => setSaSkills((p) => ({ ...p, [saName]: (p[saName] ?? []).filter((x) => x !== n) }))}><X size={10} /></button>
                         </span>
                       ))}
-                      {isOv && (
-                        <>
-                          <select onChange={(e) => { if (!e.target.value) return; setSaSkills((p) => ({ ...p, [saName]: [...new Set([...(p[saName] ?? []), e.target.value])] })); e.target.value = ""; }} defaultValue="" className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-500 focus:outline-none">
-                            <option value="">+ Skill</option>
-                            {availSkills.filter((s) => !active.includes(s.name)).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-                          </select>
-                          <button onClick={() => setSaSkills((p) => { const n = { ...p }; delete n[saName]; return n; })} className="text-xs text-zinc-400 hover:text-zinc-700">Reset to all</button>
-                        </>
-                      )}
+                      <select
+                        onChange={(e) => { if (!e.target.value) return; setSaSkills((p) => ({ ...p, [saName]: [...new Set([...(p[saName] ?? []), e.target.value])] })); e.target.value = ""; }}
+                        defaultValue=""
+                        className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-500 focus:outline-none"
+                      >
+                        <option value="">+ Skill</option>
+                        {availSkills.filter((s) => !active.includes(s.name)).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
                     </div>
                   </div>
                 );
@@ -636,6 +639,7 @@ export function AgentDetailPageV2({ userId, isAdmin }: Props) {
         <TabBtn active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")}>Scheduled Jobs ({jobs.length})</TabBtn>
         <TabBtn active={activeTab === "runs"} onClick={() => setActiveTab("runs")}>Run History ({runs.length})</TabBtn>
         <TabBtn active={activeTab === "chain"} onClick={() => setActiveTab("chain")}><Link2 size={13} /> Chain</TabBtn>
+        {canEdit && <TabBtn active={activeTab === "memory"} onClick={() => setActiveTab("memory")}><Brain size={13} /> Memory</TabBtn>}
       </div>
 
       {activeTab === "configure" && canEdit && <AgentConfigEditor agent={agent} userId={userId} onSave={loadData} />}
@@ -680,6 +684,10 @@ export function AgentDetailPageV2({ userId, isAdmin }: Props) {
           onSave={async (cfg) => { await setUserChainConfig(agent.slug, userId, cfg); }}
           loadConfig={async () => getUserChainConfig(agent.slug, userId)}
         />
+      )}
+
+      {activeTab === "memory" && canEdit && (
+        <MemoryTab agentSlug={agent.slug} canDelete={canEdit} />
       )}
     </div>
   );

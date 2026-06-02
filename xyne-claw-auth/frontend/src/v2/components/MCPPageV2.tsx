@@ -6,6 +6,7 @@ import {
   deleteConnection,
   checkConnectionHealth,
   listServers,
+  createServer,
   getCredentialFields,
   autoConnectSpaces,
   connectGoogle,
@@ -384,6 +385,11 @@ export function MCPPageV2({ userId }: Props) {
           if (!open) setEditServerId(undefined);
         }}
         onSubmit={handleAddConnection}
+        onCreateServer={async (payload) => {
+          const created = await createServer(payload, userId);
+          await loadConnections();
+          return created;
+        }}
         servers={servers}
         credentialFields={credentialFields}
         editServerId={editServerId}

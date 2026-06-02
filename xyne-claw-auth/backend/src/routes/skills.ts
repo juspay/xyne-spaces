@@ -60,7 +60,11 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     const requesterId = getRequesterId(req);
-    const admin = requesterId ? await isClawAdmin(requesterId) : false;
+    // Note: removed the `isClawAdmin` lookup here. It was only used to
+    // decide create-time scope ("admin → global, everyone else →
+    // personal"). Now everyone gets `personal` at create; admins who
+    // want global can call POST /skills/:slug/promote separately. Saves
+    // one DB query per skill create.
 
     // Derive `name` from slug if not provided (UI no longer asks for it; the
     // worker reads pi-format frontmatter from `content` if present).
@@ -73,7 +77,14 @@ router.post("/", async (req: Request, res: Response) => {
       description: description?.trim() ?? "",
       content: content.trim(),
       source: source?.trim() ?? "user-created",
-      scope: admin ? "global" : "personal",
+      // Always create at personal scope. Previously admins got a silent
+      // auto-promotion to "global" on create — that bypassed the
+      // publish-review flow entirely, so the Publish button in the UI
+      // never appeared for their own skills (it correctly hides for
+      // already-global skills). Admins who want to skip review can
+      // still use POST /skills/:slug/promote after create — one click,
+      // explicit intent, and the UI now matches what non-admins see.
+      scope: "personal",
       ...(requesterId ? { owner: { connect: { id: requesterId } } } : {}),
     });
 
@@ -239,5 +250,154 @@ router.post("/:slug/request", async (req: Request<{ slug: string }>, res: Respon
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
+
+// ── Skill files (directory uploads) ──────────────────────────────────
+//
+// Each Skill row's `content` field is the canonical SKILL.md body. Sibling
+// files (scripts, examples, assets) live in the SkillFile table and are
+// materialized into the session workspace at run start alongside SKILL.md.
+//
+// Upload model:
+//   POST /skills/:slug/files
+//   Body: { files: [{ relativePath, content, contentType? }] }
+//   Semantics: REPLACES the entire SkillFile set for this skill atomically.
+//   "SKILL.md" is rejected — that file is owned by Skill.content.
+//
+// Per-file size cap = 1 MB; total bundle cap = 5 MB. Content is treated as
+// UTF-8 text (the existing `Skill.content` field is text); for binaries
+// upstream should base64-encode and set contentType.
+
+const MAX_FILE_BYTES = 1_000_000;       // 1 MB per file
+const MAX_BUNDLE_BYTES = 5_000_000;     // 5 MB total per skill
+
+router.get("/:slug/files", async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const skill = await skillRepository.findBySlug(req.params.slug);
+    if (!skill) {
+      res.status(404).json({ success: false, error: "Skill not found" });
+      return;
+    }
+    const files = await skillRepository.listFiles(skill.id);
+    res.json({
+      success: true,
+      data: files.map((f) => ({
+        id: f.id,
+        relativePath: f.relativePath,
+        contentType: f.contentType,
+        sizeBytes: f.sizeBytes,
+        createdAt: f.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error("[skills] list files error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.get("/:slug/files/:fileId", async (req: Request<{ slug: string; fileId: string }>, res: Response) => {
+  try {
+    const skill = await skillRepository.findBySlug(req.params.slug);
+    if (!skill) {
+      res.status(404).json({ success: false, error: "Skill not found" });
+      return;
+    }
+    const files = await skillRepository.listFiles(skill.id);
+    const file = files.find((f) => f.id === req.params.fileId);
+    if (!file) {
+      res.status(404).json({ success: false, error: "File not found" });
+      return;
+    }
+    res.json({
+      success: true,
+      data: {
+        id: file.id,
+        relativePath: file.relativePath,
+        content: file.content,
+        contentType: file.contentType,
+        sizeBytes: file.sizeBytes,
+      },
+    });
+  } catch (err) {
+    console.error("[skills] get file error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.put("/:slug/files", async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "x-user-id header is required" });
+      return;
+    }
+    const skill = await skillRepository.findBySlug(req.params.slug);
+    if (!skill) {
+      res.status(404).json({ success: false, error: "Skill not found" });
+      return;
+    }
+    // ACL: owner of a personal skill, OR admin (for any skill).
+    const admin = await isClawAdmin(requesterId);
+    if (!admin) {
+      if (skill.scope !== "personal" || skill.ownerUserId !== requesterId) {
+        res.status(403).json({
+          success: false,
+          error: "Only the skill owner or a CLAW_ADMIN can update files",
+        });
+        return;
+      }
+    }
+
+    const body = req.body as { files?: Array<{ relativePath?: string; content?: string; contentType?: string }> };
+    const rawFiles = Array.isArray(body.files) ? body.files : [];
+
+    // Validate before touching the DB so a bad payload doesn't half-replace.
+    let totalBytes = 0;
+    const sanitized: Array<{ relativePath: string; content: string; contentType?: string }> = [];
+    for (const f of rawFiles) {
+      if (typeof f?.content !== "string") {
+        res.status(400).json({ success: false, error: "each file must have a string `content`" });
+        return;
+      }
+      const bytes = Buffer.byteLength(f.content, "utf8");
+      if (bytes > MAX_FILE_BYTES) {
+        res.status(413).json({ success: false, error: `${f.relativePath ?? "(file)"} exceeds the ${MAX_FILE_BYTES}-byte per-file limit` });
+        return;
+      }
+      totalBytes += bytes;
+      sanitized.push({
+        relativePath: String(f.relativePath ?? ""),
+        content: f.content,
+        ...(f.contentType ? { contentType: String(f.contentType) } : {}),
+      });
+    }
+    if (totalBytes > MAX_BUNDLE_BYTES) {
+      res.status(413).json({ success: false, error: `total bundle exceeds the ${MAX_BUNDLE_BYTES}-byte limit` });
+      return;
+    }
+
+    try {
+      await skillRepository.replaceFiles(skill.id, sanitized);
+    } catch (err) {
+      res.status(400).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+
+    const files = await skillRepository.listFiles(skill.id);
+    res.json({
+      success: true,
+      data: files.map((f) => ({
+        id: f.id,
+        relativePath: f.relativePath,
+        contentType: f.contentType,
+        sizeBytes: f.sizeBytes,
+      })),
+    });
+  } catch (err) {
+    console.error("[skills] replace files error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+void requireClawAdmin;
 
 export { router as skillsRouter };
