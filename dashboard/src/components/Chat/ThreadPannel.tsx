@@ -1293,39 +1293,48 @@ export const ThreadMessages = ({
               value='thread'
               className='flex-1 flex flex-col h-full overflow-hidden data-[state=inactive]:hidden'
             >
-              <ThreadList
-                channelId={derivedChannelId || ''}
-                conversationId={derivedConversationId || ''}
-                threadMessages={messages}
-                messagesWithSeparators={messagesWithSeparators}
-                initialScrollOffset={0}
-                isTicketThread={true}
-                channelScopeType={channel?.scopeType}
-                conversation={conversation}
-                workflowNumberMap={workflowNumberMap}
-                enableCollapsing={previewCardMode}
-                enableJumpFab={!previewCardMode}
-                isMessagesLoaded={isMessagesLoaded}
-                {...(disableAskAI !== undefined && { disableAskAI })}
-                conversationParticipant={conversationParticipant}
-              />
-
-              {/* ChatInput at the bottom - only show if user is a member */}
-              {isUserMember || channel?.isArchived ? (
-                <div className='px-4 pb-4 bg-background'>
-                  <ChatInput
-                    ref={inputRef}
-                    channelId={derivedChannelId}
-                    conversation={conversation ?? undefined}
-                    placeholder='Reply to this thread...'
-                    hasTicket={hasTicketInMessages}
-                  />
+              {isMessagesLoaded && !conversation && !!derivedConversationId ? (
+                <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
+                  <MessageCircle size={48} className='mb-2 opacity-40' />
+                  <p className='text-sm'>This thread is no longer available</p>
                 </div>
               ) : (
-                <JoinChannel
-                  channelId={derivedChannelId}
-                  {...(channel?.name && { channelTitle: channel.name })}
-                />
+                <>
+                  <ThreadList
+                    channelId={derivedChannelId || ''}
+                    conversationId={derivedConversationId || ''}
+                    threadMessages={messages}
+                    messagesWithSeparators={messagesWithSeparators}
+                    initialScrollOffset={0}
+                    isTicketThread={true}
+                    channelScopeType={channel?.scopeType}
+                    conversation={conversation}
+                    workflowNumberMap={workflowNumberMap}
+                    enableCollapsing={previewCardMode}
+                    enableJumpFab={!previewCardMode}
+                    isMessagesLoaded={isMessagesLoaded}
+                    {...(disableAskAI !== undefined && { disableAskAI })}
+                    conversationParticipant={conversationParticipant}
+                  />
+
+                  {/* ChatInput at the bottom - only show if user is a member */}
+                  {isUserMember || channel?.isArchived ? (
+                    <div className='px-4 pb-4 bg-background'>
+                      <ChatInput
+                        ref={inputRef}
+                        channelId={derivedChannelId}
+                        conversation={conversation ?? undefined}
+                        placeholder='Reply to this thread...'
+                        hasTicket={hasTicketInMessages}
+                      />
+                    </div>
+                  ) : (
+                    <JoinChannel
+                      channelId={derivedChannelId}
+                      {...(channel?.name && { channelTitle: channel.name })}
+                    />
+                  )}
+                </>
               )}
             </Tabs.Content>
 
@@ -1723,38 +1732,47 @@ export const ThreadMessages = ({
                 </div>
               </div>
             )}
-            <ThreadList
-              channelId={derivedChannelId || ''}
-              conversationId={derivedConversationId || ''}
-              threadMessages={messages}
-              initialScrollOffset={0}
-              isTicketThread={false}
-              channelScopeType={channel?.scopeType}
-              conversation={conversation}
-              workflowNumberMap={workflowNumberMap}
-              enableCollapsing={previewCardMode}
-              enableJumpFab={!previewCardMode}
-              isMessagesLoaded={isMessagesLoaded}
-              {...(disableAskAI !== undefined && { disableAskAI })}
-              conversationParticipant={conversationParticipant}
-            />
-
-            {/* ChatInput at the bottom - only show if user is a member */}
-            {isUserMember || channel?.isArchived ? (
-              <div className='px-4 pb-4 bg-background'>
-                <ChatInput
-                  ref={inputRef}
-                  channelId={derivedChannelId}
-                  conversation={conversation ?? undefined}
-                  placeholder='Reply to this thread...'
-                  hasTicket={hasTicketInMessages}
-                />
+            {isMessagesLoaded && !conversation && !!derivedConversationId ? (
+              <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
+                <MessageCircle size={48} className='mb-2 opacity-40' />
+                <p className='text-sm'>This thread is no longer available</p>
               </div>
             ) : (
-              <JoinChannel
-                channelId={derivedChannelId}
-                {...(channel?.name && { channelTitle: channel.name })}
-              />
+              <>
+                <ThreadList
+                  channelId={derivedChannelId || ''}
+                  conversationId={derivedConversationId || ''}
+                  threadMessages={messages}
+                  initialScrollOffset={0}
+                  isTicketThread={false}
+                  channelScopeType={channel?.scopeType}
+                  conversation={conversation}
+                  workflowNumberMap={workflowNumberMap}
+                  enableCollapsing={previewCardMode}
+                  enableJumpFab={!previewCardMode}
+                  isMessagesLoaded={isMessagesLoaded}
+                  {...(disableAskAI !== undefined && { disableAskAI })}
+                  conversationParticipant={conversationParticipant}
+                />
+
+                {/* ChatInput at the bottom - only show if user is a member */}
+                {isUserMember || channel?.isArchived ? (
+                  <div className='px-4 pb-4 bg-background'>
+                    <ChatInput
+                      ref={inputRef}
+                      channelId={derivedChannelId}
+                      conversation={conversation ?? undefined}
+                      placeholder='Reply to this thread...'
+                      hasTicket={hasTicketInMessages}
+                    />
+                  </div>
+                ) : (
+                  <JoinChannel
+                    channelId={derivedChannelId}
+                    {...(channel?.name && { channelTitle: channel.name })}
+                  />
+                )}
+              </>
             )}
           </>
         )}

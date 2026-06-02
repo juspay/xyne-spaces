@@ -2472,13 +2472,13 @@ export const mutators = defineMutators({
           const shouldDeleteConversation = otherMessages.length === 0 || isInitialMessageDeleted;
 
           if (shouldDeleteConversation) {
-            // Delete the conversation
-            await tx.mutate.conversations.delete({ conversationId: conversation.conversationId });
-
-            // Clean up the ghost root message if it exists so we don't leave orphaned data
+            // Delete ghost root FIRST, before the conversation (mirrors server-side fix).
             if (isInitialMessageDeleted && otherMessages[0]) {
               await tx.mutate.messages.delete({ messageId: otherMessages[0].messageId });
             }
+
+            // Delete the conversation
+            await tx.mutate.conversations.delete({ conversationId: conversation.conversationId });
           } else {
             // Just a normal reply deletion, update the count
             await tx.mutate.conversations.update({
