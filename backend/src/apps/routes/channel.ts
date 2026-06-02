@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { ChannelController } from '../controllers/channelController';
 import { validateChannelAccessForPost } from '../middelware/channelValidation';
+import { requirePermission } from '@/middleware/requirePermission';
 
 const router = Router();
 const channelController = new ChannelController();
@@ -14,7 +15,7 @@ const OpenDmBodySchema = z.object({
   workspaceId: z.string().min(1).trim(),
 });
 
-router.post('/openDm', async (req: Request, res: Response) => {
+router.post('/openDm', requirePermission('im:write'), async (req: Request, res: Response) => {
   const result = OpenDmBodySchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: 'Validation error', details: result.error.errors });
@@ -31,8 +32,8 @@ router.post('/openDm', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/info', validateChannelAccessForPost, channelController.getChannelByName);
+router.post('/info', requirePermission('channels:read'), validateChannelAccessForPost, channelController.getChannelByName);
 
-router.get('/list', channelController.listChannels);
+router.get('/list', requirePermission('channels:read'), channelController.listChannels);
 
 export default router;

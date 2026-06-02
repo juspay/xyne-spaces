@@ -26,6 +26,7 @@ import {
   type IncomingWebhook,
   type AppCommand,
   type UpsertCommandRequest,
+  type AppPermission,
 } from '../../../services/Apps/appsService';
 import { APPS_PUBLIC_BASE_URL } from '../../../config';
 
@@ -226,6 +227,128 @@ const CommandFormInline = ({
           {saving ? 'Saving…' : 'Save'}
         </Button>
       </div>
+    </div>
+  );
+};
+
+// ─── Permissions section ──────────────────────────────────────────────────────
+
+interface PermissionsSectionProps {
+  appId: string;
+  isInstalled: boolean;
+}
+
+const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): ReactElement => {
+  const [available, setAvailable] = useState<AppPermission[]>([]);
+  // Local selection — always editable regardless of install state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // Always load the full registry
+  useEffect(() => {
+    void appsService
+      .getAvailablePermissions()
+      .then(setAvailable)
+      .catch(() => setAvailable([]));
+  }, []);
+
+  // Pre-fill selection from already-granted permissions
+  useEffect(() => {
+    void appsService
+      .getGrantedPermissions(appId)
+      .then(names => {
+        setSelected(new Set(names));
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, [appId]);
+
+  const handleToggle = (permissionName: string, checked: boolean) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(permissionName);
+      else next.delete(permissionName);
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await appsService.setPermissions(appId, Array.from(selected));
+      toast.success(`Permissions saved (${selected.size} granted)`);
+    } catch (e) {
+      toast.error('Failed to save permissions', {
+        description: e instanceof Error ? e.message : 'Unknown error',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className='space-y-3'>
+      <div className='flex items-center justify-between'>
+        <span className='block text-sm font-medium text-foreground'>Permissions</span>
+        <div className='flex items-center gap-2'>
+          {!isInstalled && (
+            <span className='text-xs text-amber-600 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded'>
+              Install app to apply
+            </span>
+          )}
+          {isInstalled && (
+            <span className='text-xs text-muted-foreground'>
+              {selected.size} / {available.length} granted
+            </span>
+          )}
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            className='h-7 text-xs'
+            onClick={() => void handleSave()}
+            disabled={saving || !loaded}
+          >
+            {saving ? 'Saving…' : 'Save Permissions'}
+          </Button>
+        </div>
+      </div>
+      {!loaded || available.length === 0 ? (
+        <p className='text-xs text-muted-foreground py-2'>Loading permissions…</p>
+      ) : (
+        <div className='border border-border rounded-md divide-y divide-border'>
+          {available.map(perm => {
+            const scope = `${perm.name}:${(perm.type ?? '').toLowerCase()}`;
+            return (
+              <label
+                key={scope}
+                className='flex items-start gap-2.5 cursor-pointer group px-3 py-2'
+              >
+                <input
+                  type='checkbox'
+                  className='mt-0.5 rounded accent-primary'
+                  checked={selected.has(scope)}
+                  disabled={saving}
+                  onChange={e => handleToggle(scope, e.target.checked)}
+                  data-track-category='Apps'
+                  data-track-name='TogglePermission'
+                />
+                <div className='flex-1 min-w-0'>
+                  <span className='text-xs font-mono text-foreground group-hover:text-primary transition-colors'>
+                    {scope}
+                  </span>
+                  {perm.description && (
+                    <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                      {perm.description}
+                    </p>
+                  )}
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -957,6 +1080,11 @@ export const EditAppForm = ({
               ))}
             </div>
           )}
+        </div>
+
+        {/* Permissions */}
+        <div className='border-t border-border pt-4'>
+          <PermissionsSection appId={appId} isInstalled={isAppInstalled} />
         </div>
       </div>
 
