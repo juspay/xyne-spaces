@@ -117,6 +117,8 @@ interface ChatBubbleProps {
   disableAskAI?: boolean;
   searchItemView?: boolean;
   onUserClick?: (userId: string) => void;
+  isPrevActivity?: boolean;
+  isNextActivity?: boolean;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -139,6 +141,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   disableAskAI = false,
   searchItemView = false,
   onUserClick,
+  isPrevActivity = false,
+  isNextActivity = false,
 }) => {
   const { user } = useAuthContext();
   const { copyImage } = useClipboard();
@@ -902,7 +906,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   // Render ticket activity message with special styling
   if (isTicketActivity) {
-    return <TicketActivityMessage message={message} />;
+    return (
+      <TicketActivityMessage
+        message={message}
+        isPrevActivity={isPrevActivity}
+        isNextActivity={isNextActivity}
+      />
+    );
   }
 
   return (
