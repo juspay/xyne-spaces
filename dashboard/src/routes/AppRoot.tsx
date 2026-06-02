@@ -64,7 +64,6 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
 import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
-import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsScreen from './RecordingsScreen/RecordingsScreen';
 import RecordingDetailScreen from './RecordingDetailScreen/RecordingDetailScreen';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
@@ -976,12 +975,6 @@ export const router = createBrowserRouter([
               {
                 path: 'calls',
                 element: <CallHistoryScreen />,
-                children: [
-                  {
-                    path: ':callId/detail',
-                    element: <CallDetailScreen />,
-                  },
-                ],
               },
               {
                 path: 'calls/:callId/:callType',
