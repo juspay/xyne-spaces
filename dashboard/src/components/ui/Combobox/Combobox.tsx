@@ -2,6 +2,38 @@ import { Combobox as BaseCombobox } from '@base-ui/react/combobox';
 import { Search } from 'lucide-react';
 import { ComboboxProps, DropdownListItemType } from './Combobox.types';
 import { forwardRef, useId, useImperativeHandle, useRef } from 'react';
+import { Tooltip } from '../Tooltip/Tooltip';
+
+const ComboboxItemContent = ({ item }: { item: DropdownListItemType }) => {
+  const content = (
+    <div className='flex items-center gap-3 w-full'>
+      {item.leftSlot && (
+        <div className='size-6 flex items-center justify-center shrink-0'>{item.leftSlot}</div>
+      )}
+      <div className='flex flex-col min-w-0 flex-1'>
+        <span className='font-medium truncate text-sm'>{item.label}</span>
+        {item.description && (
+          <span className='text-xs text-muted-foreground truncate'>{item.description}</span>
+        )}
+      </div>
+      {item.rightSlot && <div className='flex items-center shrink-0'>{item.rightSlot}</div>}
+    </div>
+  );
+  return item.tooltip ? (
+    <Tooltip
+      content={item.tooltip}
+      side='top'
+      sideOffset={8}
+      delayDuration={400}
+      className='z-[200]'
+      providerProps={{ disableHoverableContent: true, children: undefined }}
+    >
+      {content}
+    </Tooltip>
+  ) : (
+    content
+  );
+};
 
 export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
   (
@@ -102,24 +134,7 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
                         px-2 mx-1 py-1.5 leading-none
                         data-[highlighted]:bg-accent rounded-md'
                   >
-                    <div className='flex items-center gap-3'>
-                      {item.leftSlot && (
-                        <div className='size-6 flex items-center justify-center shrink-0'>
-                          {item.leftSlot}
-                        </div>
-                      )}
-                      <div className='flex flex-col min-w-0 flex-1'>
-                        <span className='font-medium truncate text-sm'>{item.label}</span>
-                        {item.description && (
-                          <span className='text-xs text-muted-foreground truncate'>
-                            {item.description}
-                          </span>
-                        )}
-                      </div>
-                      {item.rightSlot && (
-                        <div className='flex items-center shrink-0'>{item.rightSlot}</div>
-                      )}
-                    </div>
+                    <ComboboxItemContent item={item} />
                   </BaseCombobox.Item>
                 )}
               </BaseCombobox.List>

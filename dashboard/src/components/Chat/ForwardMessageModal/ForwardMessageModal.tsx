@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Badge } from '../../ui/Badge';
-import { X, Hash, Lock } from 'lucide-react';
+import { X, Hash, Lock, Users } from 'lucide-react';
 import { useUserSearch, useUser, useUsers } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
 import {
@@ -34,8 +34,12 @@ import { InputBox } from '../../ui/InputBox';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { ForwardMessageFormProps, ForwardTarget, SelectionMode } from './ForwardMessageModal.types';
 import { toast } from 'sonner';
-import { getDMParticipantIdsToFetch } from '../ChatDirectory/ChatDirectory.utils';
+import {
+  getDMParticipantIdsToFetch,
+  parseDMParticipantIds,
+} from '../ChatDirectory/ChatDirectory.utils';
 import { Combobox } from '../../ui/Combobox/Combobox';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { queries } from '../../../zero/queries';
@@ -54,7 +58,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   message,
   onCancel,
   onSuccess,
-  initialFocusRef,
 }) => {
   const { isMobile } = usePlatform();
   const [selectedTargets, setSelectedTargets] = useState<ForwardTarget[]>([]);
@@ -64,6 +67,18 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const inputBoxRef = useRef<InputBoxHandle>(null);
   const navigate = useNavigate();
   const zero = useZero();
+
+  // Focus the combobox input *after* the dialog open animation settles. Focusing
+  // it synchronously during open (e.g. via the dialog's auto-focus) gets stolen
+  // by the rich-text InputBox mounting, which blurs the combobox — that blur both
+  // closes the popup (base-ui onOpenChange) and trips onBlur → setIsInitialOpen(false),
+  // wiping out the initial suggestions. Deferring the focus avoids that race.
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      comboboxInputRef.current?.focus();
+    }, 600);
+    return () => clearTimeout(timeout);
+  }, []);
 
   // Query the source conversation to get ticket_md — used as a content fallback
   // for desk-ticket messages whose message.content is stored as '' (email body
@@ -76,15 +91,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     }),
     { enabled: needsConversationQuery },
   );
-
-  // Synchronously assign the combobox input to initialFocusRef so it's
-  // available when Dialog's onOpenAutoFocus fires (which runs before useEffects).
-  const comboboxRefCallback = (node: HTMLInputElement | null): void => {
-    comboboxInputRef.current = node;
-    if (node && initialFocusRef) {
-      initialFocusRef.current = node;
-    }
-  };
 
   // Initialize form with useForm hook
   const form = useForm({
@@ -154,8 +160,17 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         return;
       }
 
-      // Forward to users - create DM with forwarded message
-      const userIds = selectedTargets.map((t: ForwardTarget) => t.id);
+      // Forward to users (or group_dm + additional users) - create DM with forwarded message
+      let userIds: string[];
+      if (firstTarget.type === 'group_dm') {
+        // Combine existing GROUP_DM members + any additionally selected users
+        const additionalUserIds = selectedTargets
+          .filter((t: ForwardTarget) => t.type === 'user')
+          .map((t: ForwardTarget) => t.id);
+        userIds = [...(firstTarget.memberIds ?? []), ...additionalUserIds];
+      } else {
+        userIds = selectedTargets.map((t: ForwardTarget) => t.id);
+      }
 
       // Prepare forwarded message data
       const forwardedMessageData = {
@@ -280,7 +295,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const selectionMode: SelectionMode = useMemo(() => {
     if (selectedTargets.length === 0) return 'none';
     const firstTarget = selectedTargets[0];
-    if (firstTarget && firstTarget.type === 'channel') return 'channel';
+    if (firstTarget?.type === 'channel') return 'channel';
+    if (firstTarget?.type === 'group_dm') return 'group_dm';
     return 'users';
   }, [selectedTargets]);
 
@@ -292,6 +308,19 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         .map((t: ForwardTarget) => t.id),
     );
   }, [selectedTargets]);
+
+  // Total effective member count for the 9-person cap.
+  // In 'group_dm' mode: GROUP_DM members + any additionally selected users.
+  // In 'users' mode: just the selected user targets.
+  const totalMemberCount = useMemo(() => {
+    if (selectionMode === 'group_dm') {
+      const groupDmTarget = selectedTargets.find(t => t.type === 'group_dm');
+      const groupMemberCount = groupDmTarget?.memberIds?.length ?? 0;
+      const additionalUserCount = selectedTargets.filter(t => t.type === 'user').length;
+      return groupMemberCount + additionalUserCount;
+    }
+    return selectedTargets.filter(t => t.type === 'user').length;
+  }, [selectionMode, selectedTargets]);
 
   const handleRemoveTarget = (targetId: string): void => {
     setSelectedTargets((prev: ForwardTarget[]) =>
@@ -310,15 +339,84 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       meta['callId'] !== undefined ||
       /started a call|Call ended|joined the call/i.test(contentStr));
 
+  const getGroupDMParticipants = (channel: { name: string; scopeType: ChannelScopeType }) => {
+    const otherIds = parseDMParticipantIds(channel).filter(id => id !== currentUser?.id);
+    return otherIds.map(id => allUsers.find(u => u.id === id)).filter(Boolean) as {
+      name: string;
+    }[];
+  };
+
+  const getGroupDMLabel = (channel: { name: string; scopeType: ChannelScopeType }): string => {
+    const participants = getGroupDMParticipants(channel);
+    return participants.map(u => u.name).join(', ');
+  };
+
+  const getGroupDMBadgeLabel = (channel: { name: string; scopeType: ChannelScopeType }): string => {
+    const MAX_SHOWN = 3;
+    const participants = getGroupDMParticipants(channel);
+    if (participants.length <= MAX_SHOWN) return participants.map(u => u.name).join(', ');
+    const shown = participants
+      .slice(0, MAX_SHOWN)
+      .map(u => u.name)
+      .join(', ');
+    return `${shown} +${participants.length - MAX_SHOWN} more`;
+  };
+
+  const getGroupDMLeftSlot = (channel: {
+    name: string;
+    scopeType: ChannelScopeType;
+  }): React.ReactNode => {
+    const participants = getGroupDMParticipants(channel);
+    return (
+      <div className='relative'>
+        <Users className='w-3.5 h-3.5 text-muted-foreground' />
+        <span className='absolute -bottom-1 -right-1.5 text-[10px] leading-none font-medium bg-muted text-muted-foreground rounded-full w-3 h-3 flex items-center justify-center'>
+          {participants.length}
+        </span>
+      </div>
+    );
+  };
+
+  const getGroupDMTooltip = (channel: {
+    name: string;
+    scopeType: ChannelScopeType;
+  }): React.ReactNode => {
+    const MAX_SHOWN = 3;
+    const participants = getGroupDMParticipants(channel);
+    if (participants.length <= MAX_SHOWN) return null;
+    return (
+      <div className='max-w-[200px] flex flex-wrap gap-x-1 gap-y-0.5'>
+        {participants.map((u, i) => (
+          <span key={i}>
+            {u.name}
+            {i < participants.length - 1 ? ',' : ''}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   const getChannelIcon = (channelId: string): React.ReactNode => {
     const channel = allChannels.find(c => c.id === channelId);
     const isPrivate = channel?.visibility === ChannelVisibility.PRIVATE;
     return isPrivate ? <Lock className='w-4 h-4' /> : <Hash className='w-4 h-4' />;
   };
 
+  // Label for a user option, marking the current user as "(You)" — forwarding to
+  // yourself is a valid action (creates / reuses the self-DM, a.k.a. notes to self).
+  const getForwardUserLabel = (user: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    displayName?: string | null;
+  }): string => {
+    const displayName = getUserDisplayName(user);
+    return user.id === currentUser?.id ? `${displayName} (You)` : displayName;
+  };
+
   const [inputValue, setInputValue] = useState<string>('');
   const trimmedInputValue = inputValue.trim();
-  const usersSuggestions = useUserSearch(trimmedInputValue, 5);
+  const usersSuggestions = useUserSearch(trimmedInputValue, 20);
   const channelsSuggestions = useChannelSearch(trimmedInputValue, 5);
   const dropdownListItems = useMemo(() => {
     // Show default suggestions on initial modal open with empty input
@@ -335,6 +433,23 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           .slice(0, 5);
 
         recentDMs.forEach(channel => {
+          // Self-DM ("notes to self") — only the current user is a participant.
+          // Surface it just like any other recent DM, labeled "(You)".
+          const allParticipants = parseDMParticipantIds(channel);
+          const isSelfDM = allParticipants.length === 1 && allParticipants[0] === currentUser?.id;
+          if (isSelfDM) {
+            const selfUser = allUsers.find(u => u.id === currentUser?.id);
+            if (selfUser) {
+              defaults.push({
+                leftSlot: <Avatar userId={selfUser.id} size='sm' />,
+                label: getForwardUserLabel(selfUser),
+                description: selfUser.email,
+                value: selfUser.id,
+              });
+            }
+            return;
+          }
+
           const participantIds = getDMParticipantIdsToFetch(channel, currentUser?.id || '');
           const otherUser = allUsers.find(user => participantIds.includes(user.id));
 
@@ -344,6 +459,26 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
               label: getUserDisplayName(otherUser),
               description: otherUser.email,
               value: otherUser.id,
+            });
+          }
+        });
+
+        // Recent GROUP_DMs sorted by lastActivityAt (up to 5)
+        const recentGroupDMs = [...allChannels]
+          .filter(channel => channel.scopeType === ChannelScopeType.GROUP_DM)
+          .sort(
+            (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
+          )
+          .slice(0, 5);
+
+        recentGroupDMs.forEach(channel => {
+          const label = getGroupDMLabel(channel);
+          if (label) {
+            defaults.push({
+              leftSlot: getGroupDMLeftSlot(channel),
+              label,
+              value: channel.id,
+              tooltip: getGroupDMTooltip(channel),
             });
           }
         });
@@ -374,11 +509,24 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       return [];
     }
 
+    // In group_dm mode, also exclude users already in the selected GROUP_DM
+    const groupDmMemberIds =
+      selectionMode === 'group_dm'
+        ? new Set(selectedTargets.find(t => t.type === 'group_dm')?.memberIds ?? [])
+        : new Set<string>();
+
     const suggestedUsers: DropdownListItemType[] = usersSuggestions
-      .filter(currUser => currentUser?.id !== currUser.id && !selectedUserIds.has(currUser.id))
+      .filter(
+        currUser =>
+          // Self is a valid target only as a solo "notes to self" pick. Hide it once
+          // anything else is selected (in a DM/group the current user is implicit).
+          !(currUser.id === currentUser?.id && selectionMode !== 'none') &&
+          !selectedUserIds.has(currUser.id) &&
+          !groupDmMemberIds.has(currUser.id),
+      )
       .map(currUser => ({
         leftSlot: <Avatar userId={currUser.id} size='sm' />,
-        label: getUserDisplayName(currUser),
+        label: getForwardUserLabel(currUser),
         description: currUser.email,
         value: currUser.id,
       }));
@@ -396,19 +544,45 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         value: currChannel.id,
       }));
 
+    const suggestedGroupDMs: DropdownListItemType[] = [...allChannels]
+      .filter(channel => channel.scopeType === ChannelScopeType.GROUP_DM)
+      .sort((a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0))
+      .filter(channel => {
+        const participantIds = parseDMParticipantIds(channel).filter(id => id !== currentUser?.id);
+        const participants = allUsers.filter(u => participantIds.includes(u.id));
+        return participants.some(u =>
+          u.name.toLowerCase().includes(trimmedInputValue.toLowerCase()),
+        );
+      })
+      .slice(0, 5)
+      .map(channel => ({
+        leftSlot: getGroupDMLeftSlot(channel),
+        label: getGroupDMLabel(channel),
+        value: channel.id,
+        tooltip: getGroupDMTooltip(channel),
+      }));
+
     if (selectionMode === 'none') {
-      return [...suggestedUsers, ...suggestedChannels];
+      return [...suggestedUsers, ...suggestedGroupDMs, ...suggestedChannels];
     } else if (selectionMode === 'channel') {
       return suggestedChannels;
+    } else if (selectionMode === 'group_dm') {
+      // Only show individual users — no channels, no group DMs
+      return suggestedUsers;
     }
     return suggestedUsers;
   }, [
     inputValue,
+    trimmedInputValue,
     selectedUserIds,
     isInitialOpen,
     usersSuggestions,
     channelsSuggestions,
     selectionMode,
+    selectedTargets,
+    allChannels,
+    allUsers,
+    currentUser,
   ]);
 
   const onInputValueChangeHandler = (queryString: string) => {
@@ -427,7 +601,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       const newTarget: ForwardTarget = {
         type: 'user',
         id: selectedUser.id,
-        name: getUserDisplayName(selectedUser),
+        name: getForwardUserLabel(selectedUser),
       };
       setSelectedTargets((prev: ForwardTarget[]) => [...prev, newTarget]);
       setInputValue('');
@@ -439,12 +613,25 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     // Check if the selected value is a channel
     const selectedChannel = allChannels.find(c => c.id === selectedValue);
     if (selectedChannel) {
-      const newTarget: ForwardTarget = {
-        type: 'channel',
-        id: selectedChannel.id,
-        name: selectedChannel.name,
-      };
-      setSelectedTargets([newTarget]);
+      if (selectedChannel.scopeType === ChannelScopeType.GROUP_DM) {
+        const memberIds = parseDMParticipantIds(selectedChannel).filter(
+          id => id !== currentUser?.id,
+        );
+        const newTarget: ForwardTarget = {
+          type: 'group_dm',
+          id: selectedChannel.id,
+          name: getGroupDMBadgeLabel(selectedChannel),
+          memberIds,
+        };
+        setSelectedTargets([newTarget]);
+      } else {
+        const newTarget: ForwardTarget = {
+          type: 'channel',
+          id: selectedChannel.id,
+          name: selectedChannel.name,
+        };
+        setSelectedTargets([newTarget]);
+      }
       setInputValue('');
       setIsInitialOpen(false);
       return;
@@ -478,43 +665,60 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       <div className='px-6 py-4 space-y-2'>
         {selectedTargets.length > 0 && (
           <div className='flex flex-wrap gap-2 mb-2'>
-            {selectedTargets.map((target: ForwardTarget) => (
-              <Badge key={target.id} variant='primary' className='flex items-center gap-1.5 pr-1'>
-                {target.type === 'channel' ? (
-                  <span className='flex items-center gap-1'>
-                    {getChannelIcon(target.id)}
+            {selectedTargets.map((target: ForwardTarget) => {
+              const channel = allChannels.find(c => c.id === target.id);
+              const isGroupDM = channel?.scopeType === ChannelScopeType.GROUP_DM;
+              const badgeTooltip = isGroupDM ? getGroupDMTooltip(channel) : undefined;
+              return (
+                <Badge key={target.id} variant='primary' className='flex items-center gap-1.5 pr-1'>
+                  {target.type === 'channel' ? (
+                    <span className='flex items-center gap-1'>
+                      {getChannelIcon(target.id)}
+                      <span className='text-xs'>{target.name}</span>
+                    </span>
+                  ) : target.type === 'group_dm' && badgeTooltip ? (
+                    <Tooltip
+                      content={badgeTooltip}
+                      side='top'
+                      sideOffset={6}
+                      delayDuration={400}
+                      providerProps={{ disableHoverableContent: true, children: undefined }}
+                    >
+                      <span className='text-xs cursor-default'>{target.name}</span>
+                    </Tooltip>
+                  ) : (
                     <span className='text-xs'>{target.name}</span>
-                  </span>
-                ) : (
-                  <span className='text-xs'>{target.name}</span>
-                )}
-                <button
-                  type='button'
-                  onClick={() => handleRemoveTarget(target.id)}
-                  className='rounded-full p-0.5 transition-colors'
-                  aria-label={`Remove ${target.name}`}
-                  data-track-category='FORWARD_MESSAGE_MODAL'
-                  data-track-name='REMOVE_FORWARD_TARGET'
-                  data-track-metadata={JSON.stringify({
-                    targetId: target.id,
-                    targetName: target.name,
-                  })}
-                >
-                  <X className='h-3 w-3' />
-                </button>
-              </Badge>
-            ))}
+                  )}
+                  <button
+                    type='button'
+                    onClick={() => handleRemoveTarget(target.id)}
+                    className='rounded-full p-0.5 transition-colors'
+                    aria-label={`Remove ${target.name}`}
+                    data-track-category='FORWARD_MESSAGE_MODAL'
+                    data-track-name='REMOVE_FORWARD_TARGET'
+                    data-track-metadata={JSON.stringify({
+                      targetId: target.id,
+                      targetName: target.name,
+                    })}
+                  >
+                    <X className='h-3 w-3' />
+                  </button>
+                </Badge>
+              );
+            })}
           </div>
         )}
-        {selectionMode !== 'channel' && (
+        {selectionMode !== 'channel' && totalMemberCount < 9 && (
           <Combobox
-            ref={comboboxRefCallback}
+            ref={comboboxInputRef}
             label='Forward to'
             onInputValueChange={onInputValueChangeHandler}
             onValueChange={onValueChangeHandler}
             queryString={inputValue}
             placeholder={
-              selectionMode === 'users' ? 'Add more users...' : 'Search channels or users...'
+              selectionMode === 'users' || selectionMode === 'group_dm'
+                ? 'Add more users...'
+                : 'Search channels or users...'
             }
             items={dropdownListItems}
             value={null}
@@ -524,6 +728,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             onOpenChange={setComboboxOpen}
             autoHighlight={true}
           />
+        )}
+        {(selectionMode === 'users' || selectionMode === 'group_dm') && totalMemberCount >= 9 && (
+          <p className='text-xs text-muted-foreground mt-1.5'>
+            Maximum 9 recipients reached. Remove someone to add another.
+          </p>
         )}
         {selectionMode === 'channel' && (
           <p className='text-xs text-muted-foreground mt-1.5'>
