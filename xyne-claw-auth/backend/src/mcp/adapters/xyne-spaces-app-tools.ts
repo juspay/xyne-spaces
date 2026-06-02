@@ -1,0 +1,37 @@
+import { fileURLToPath } from "node:url";
+import { resolve, dirname } from "node:path";
+import type { StdioMcpAdapter } from "../types.js";
+
+const SERVER_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../servers/xyne-spaces-app-tools-server.ts",
+);
+
+/**
+ * Adapter for the Xyne Spaces App Tools MCP server.
+ *
+ * Uses the agent's app token (bot credentials) injected via credential field "app_token".
+ * Auto-connected for every user via autoConfigureSpaces in users.ts — the app token is
+ * sourced from the default agent's spacesAppToken and stored per-user at connect time.
+ *
+ * No user approval needed — the bot acts autonomously.
+ */
+export const xyneSpacesAppToolsAdapter: StdioMcpAdapter = {
+  transport: "stdio",
+  type: "xyne-spaces-app-tools",
+  healthCheck: { name: "ping", params: {} },
+  writeTools: [],
+  credentialFields: [],
+  buildCommand(credentials) {
+    const appToken = (credentials["app_token"] as string | undefined) ?? "";
+    const spacesUrl = (credentials["url"] as string | undefined) ?? "";
+    return {
+      cmd: "node",
+      args: ["--import", "tsx/esm", SERVER_PATH],
+      env: {
+        XYNE_SPACES_APP_TOKEN: appToken,
+        XYNE_SPACES_URL: spacesUrl,
+      },
+    };
+  },
+};

@@ -730,7 +730,7 @@ function SessionDetailDrawer({ session, userId, onClose, onSelectRun, onRated }:
     if (!conversationId) { setMessages([]); return; }
     let cancelled = false;
     pollChatMessages(session.agentSlug, conversationId)
-      .then((msgs) => { if (!cancelled) setMessages(msgs); })
+      .then(({ messages: msgs }) => { if (!cancelled) setMessages(msgs); })
       .catch((e) => { if (!cancelled) setFetchErr(e instanceof Error ? e.message : "Failed to load transcript"); });
     return () => { cancelled = true; };
   }, [session.agentSlug, conversationId, session.runs.length]);
@@ -1094,6 +1094,14 @@ function RatingButtons({ run, userId, onRated }: { run: AgentRun; userId: string
 
 
 function RunDetailDrawer({ run, onClose }: { run: AgentRun; onClose: () => void }) {
+  // For runs that originated from a Spaces thread we link back to the source
+  // conversation. Same URL shape used by the session-level OpenSessionButton
+  // above — see Spaces dashboard route `/chat/dir/:channelId/:conversationId`.
+  const spacesThreadUrl =
+    run.triggerSource === "spaces" && run.channelId && run.conversationId
+      ? `${SPACES_APP_URL}/chat/dir/${encodeURIComponent(run.channelId)}/${encodeURIComponent(run.conversationId)}`
+      : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-end bg-black/60" onClick={onClose}>
       <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6" onClick={(e) => e.stopPropagation()}>
@@ -1109,7 +1117,25 @@ function RunDetailDrawer({ run, onClose }: { run: AgentRun; onClose: () => void 
               <span className="text-zinc-500">{formatDuration(run.startedAt, run.completedAt)}</span>
             </p>
           </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200">✕</button>
+          <div className="flex items-center gap-2">
+            {spacesThreadUrl && (
+              <a
+                href={spacesThreadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-300 shadow-sm transition hover:border-zinc-600 hover:bg-zinc-800"
+                title="Open thread in Spaces"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                Open thread
+              </a>
+            )}
+            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200">✕</button>
+          </div>
         </div>
 
         <dl className="space-y-4 text-sm">

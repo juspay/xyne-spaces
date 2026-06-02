@@ -51,7 +51,10 @@ export const askUserQuestion: ToolDefinition = {
     try {
       const res = await fetch(`${authUrl}/api/v1/pending-questions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(context.s2sKey ? { "x-s2s-key": context.s2sKey } : {}),
+        },
         body: JSON.stringify({
           questionId,
           userId: meta["userId"],

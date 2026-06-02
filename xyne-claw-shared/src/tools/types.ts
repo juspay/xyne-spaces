@@ -38,8 +38,24 @@ export interface ToolExecutionContext {
   sessionId?: string;
   /** S2S key for authenticating with the progress endpoint (claw agent only) */
   s2sKey?: string;
+  /**
+   * Per-run HMAC bearer token for authenticating with claw-auth's
+   * /sessions/:sessionId/mcp/* endpoints. Minted by claw-auth at /run
+   * dispatch time and forwarded into the run context. Required by any tool
+   * that calls claw-auth's MCP route directly (currently: pgm). Other tools
+   * call MCP via xyne-claw's mcp.ts wrapper which threads this through
+   * internally — they don't need to read it from the context.
+   */
+  sessionToken?: string;
   /** The tool call ID assigned by the claw framework for this tool execution */
   toolCallId?: string;
+  /**
+   * Terminate the in-flight agent run immediately. Used by terminal tools
+   * (e.g. respond-to-user) that must guarantee the loop stops, regardless of
+   * whether the underlying LLM honors a "STOP" tool result. Wired in claw's
+   * run dispatcher to AbortController.abort().
+   */
+  abortRun?: () => void;
 }
 
 export interface ToolDefinition {

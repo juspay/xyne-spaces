@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
+  <!-- Bot head -->
+  <rect x="8" y="12" width="24" height="18" rx="4" fill="#e4e4e7"/>
+  <!-- Eyes -->
+  <circle cx="15" cy="20" r="3" fill="#6366f1"/>
+  <circle cx="25" cy="20" r="3" fill="#6366f1"/>
+  <!-- Mouth -->
+  <rect x="14" y="25" width="12" height="2" rx="1" fill="#a1a1aa"/>
+  <!-- Antenna -->
+  <line x1="20" y1="12" x2="20" y2="7" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="20" cy="6" r="2" fill="#6366f1"/>
+  <!-- Ears -->
+  <rect x="4" y="17" width="4" height="8" rx="2" fill="#d4d4d8"/>
+  <rect x="32" y="17" width="4" height="8" rx="2" fill="#d4d4d8"/>
+</svg>

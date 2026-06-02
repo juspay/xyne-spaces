@@ -247,6 +247,12 @@ Example message to post:
 PR: <bitbucket link>
 ```
 
+The `spaces-send-message` tool is preferred for cross-channel posting as it handles channel membership automatically:
+- If the bot is already in the target channel: posts directly
+- If the target channel is public: auto-joins and posts
+- If the target channel is private: reports that the bot needs to be added
+- Always confirms the action by replying in the current thread
+
 The `spaces-send-message` tool requires approval (Approve button will appear). This is normal — tell the user to approve it.
 
 ## STEP 10 — REPORT

@@ -80,6 +80,34 @@ export async function writeWorkspaceTextFiles(baseDir: string, files: WorkspaceT
   return written;
 }
 
+export interface WorkspaceBinaryFile {
+  /** Relative path under .context/ (already namespaced — same sanitizer as text). */
+  path: string;
+  data: Buffer;
+}
+
+/**
+ * Write raw binary blobs under .context/ — used to keep the original PDF
+ * bytes alongside the extracted markdown so tools that need the raw file
+ * (fill-pdf-form, inspect-pdf-form) can read it directly. Text path stays
+ * unchanged. Same path-traversal protection as writeWorkspaceTextFiles.
+ */
+export async function writeWorkspaceBinaryFiles(baseDir: string, files: WorkspaceBinaryFile[]): Promise<string[]> {
+  const root = path.resolve(baseDir);
+  const written: string[] = [];
+
+  for (const file of files) {
+    const safeRelative = sanitizeRelativePath(file.path);
+    const destination = path.resolve(root, safeRelative);
+    if (!destination.startsWith(`${root}${path.sep}`)) continue;
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, file.data);
+    written.push(safeRelative);
+  }
+
+  return written;
+}
+
 export async function deleteWorkspace(sessionId: string): Promise<void> {
   const dir = workspacePath(sessionId);
   try {
@@ -161,12 +189,43 @@ async function ensureBareRepoReady(repoUrl: string, bareDir: string): Promise<vo
  * Pre-warm bare repos at startup. Lets us amortize the cold clone away from
  * a user's first request.
  *
- * The default list covers xyne-spaces (the only repo prod doctor sessions
- * currently work against). Override with env `XYNE_PRECLONE_REPOS=url1,url2`
- * if more repos need pre-warming.
+ * The default list is the union of every repo a registered agent might
+ * worktree against. Override with env `XYNE_PRECLONE_REPOS=url1,url2` to
+ * extend at deploy-time without a code change.
  */
-const DEFAULT_PRECLONE_REPOS = [
-  "ssh://git@github.com/example-org/
+const DEFAULT_PRECLONE_REPOS: string[] = [
+];
+
+export async function prewarmConfiguredRepos(): Promise<void> {
+  const fromEnv = (process.env["XYNE_PRECLONE_REPOS"] ?? "").trim();
+  const list = fromEnv
+    ? fromEnv.split(",").map((s) => s.trim()).filter(Boolean)
+    : DEFAULT_PRECLONE_REPOS;
+  if (list.length === 0) return;
+
+  await mkdir(REPO_BASE_DIR, { recursive: true });
+  for (const repoUrl of list) {
+    const bareDir = join(REPO_BASE_DIR, `${repoSlug(repoUrl)}.git`);
+    try {
+      console.log(`[workspace] Prewarming ${repoUrl}`);
+      await ensureBareRepoReady(repoUrl, bareDir);
+      console.log(`[workspace] Prewarmed ${bareDir}`);
+    } catch (err) {
+      console.warn(`[workspace] Prewarm failed for ${repoUrl}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+/**
+ * Ensure a bare clone exists and is up-to-date, then create an isolated
+ * git worktree for this session.
+ *
+ * Layout:
+ *   REPO_BASE_DIR/{slug}.git                        -- persistent bare clone
+ *   REPO_BASE_DIR/{slug}-worktrees/{sessionPrefix}  -- per-session worktree
+ *
+ * Returns the absolute path to the worktree directory.
+ */
 export async function ensureRepoWorktree(repoUrl: string, sessionId: string, agentSlug?: string): Promise<string> {
   await mkdir(REPO_BASE_DIR, { recursive: true });
 

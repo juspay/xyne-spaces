@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
-import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository } from "../repositories/index.js";
+import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -17,6 +17,8 @@ import {
   type ContextSearchType,
 } from "../services/agentChatContextService.js";
 import { appendCitations } from "../lib/citations.js";
+import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { redisService } from "../redis.js";
 
 // Match the SLIDE_JSON_START/END markers emitted by create-ppt / edit-ppt so
 // we can persist the slide JSON on the attachment's metadata for the viewer.
@@ -153,10 +155,29 @@ function extractSpacesUserToken(req: Request): string | undefined {
 function extractSpacesSessionId(req: Request): string | undefined {
   const header = req.headers["x-session-id"];
   if (typeof header === "string" && header.trim()) return header.trim();
-  return getCookieValue(req, "user_session_id");
+  return getCookieValue(req, "xyne_session") ?? getCookieValue(req, "user_session_id");
+}
+
+function extractSpacesWorkspaceId(req: Request): string | undefined {
+  const header = req.headers["x-workspace-id"];
+  if (typeof header === "string" && header.trim()) return header.trim();
+  return getCookieValue(req, "xyne_last_workspace");
 }
 
 async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAuthContext | undefined> {
+  // Prefer the live Spaces DB read when SPACES_DB_URL is configured — the
+  // userMcpConnection cache below goes stale every time Spaces' middleware
+  // refreshes the user's JWT, and that drift is the dominant 401 root cause.
+  const live = await getSpacesAuthForUser(userId, "agent-chat");
+  if (live) {
+    return {
+      token: live.token,
+      baseUrl: CONFIG.spacesInternalUrl,
+      sessionId: live.sessionId,
+      workspaceId: live.workspaceId,
+    };
+  }
+
   try {
     const connection = await prisma.userMcpConnection.findFirst({
       where: { userId, mcpServer: { type: "xyne-spaces" } },
@@ -173,15 +194,18 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
       const tokenRaw = credentials["token"];
       const urlRaw = credentials["url"];
       const sessionIdRaw = credentials["sessionId"];
+      const workspaceIdRaw = credentials["workspaceId"];
 
       const token = typeof tokenRaw === "string" ? tokenRaw.trim() : "";
       if (token) {
-        const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesBackendUrl;
+        const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesInternalUrl;
         const sessionId = typeof sessionIdRaw === "string" && sessionIdRaw.trim() ? sessionIdRaw.trim() : undefined;
+        const workspaceId = typeof workspaceIdRaw === "string" && workspaceIdRaw.trim() ? workspaceIdRaw.trim() : undefined;
         return {
           token,
           baseUrl,
           ...(sessionId ? { sessionId } : {}),
+          ...(workspaceId ? { workspaceId } : {}),
         };
       }
     }
@@ -192,10 +216,12 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
   const token = extractSpacesUserToken(req);
   if (!token) return undefined;
   const sessionId = extractSpacesSessionId(req);
+  const workspaceId = extractSpacesWorkspaceId(req);
   return {
     token,
-    baseUrl: CONFIG.spacesBackendUrl,
+    baseUrl: CONFIG.spacesInternalUrl,
     ...(sessionId ? { sessionId } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
   };
 }
 
@@ -526,43 +552,89 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     });
 
     // Call /run
-    const callbackUrl = `${CONFIG.selfUrl}/claw/api/v1/internal/agent-chat/${slug}/chat/${conversationId}/callback?callbackId=${callbackId}`;
-    const progressUrl = `${CONFIG.selfUrl}/claw/api/v1/internal/agent-chat/${slug}/chat/${conversationId}/progress?callbackId=${callbackId}`;
+    const callbackUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/agent-chat/${slug}/chat/${conversationId}/callback?callbackId=${callbackId}`;
+    const progressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/agent-chat/${slug}/chat/${conversationId}/progress?callbackId=${callbackId}`;
 
-    // Resolve the user's provider + credentials the same way the webhook path
-    // does. Without this, xyne-claw falls back to shared LITELLM with the
-    // default PPT model (kimi-latest) — which the team keys don't have access
-    // to — and create-ppt/edit-ppt fail with 401.
+    // Resolve provider + credentials with the same 3-layer chain as webhook:
+    //   1. user's personal provider (userAgentConfig + userProviderCredentials)
+    //   2. agent-level shared provider (agent.config.provider + agentProviderCredentials)
+    //   3. "spaces" / LiteLLM platform default
     const userAgentConfig = await userAgentConfigRepository.findByUserAndAgent(userId, slug).catch(() => null);
-    const userProvider = userAgentConfig?.provider;
+    const rawPersonalProvider = userAgentConfig?.provider;
+    // "spaces" is the platform-default sentinel, not a real personal credential —
+    // saving it should not override the agent-level providerOrder/credentials.
+    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+      ? rawPersonalProvider
+      : undefined;
+    const agentLevelProvider = (agent.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
+    const rawProviderOrder = (agent.config as Record<string, unknown> | null)?.["providerOrder"];
+    const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "spaces"]);
+    const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
+      ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
+      : [];
+    const userProvider = personalProvider ?? agentLevelProvider;
+
     const allCreds = await userProviderCredentialsRepository.listByUser(userId).catch(() => []);
+    const agentCreds = await agentProviderCredentialsRepository.listByAgent(agent.id).catch(() => []);
     const subagentConfigs = await userSubagentConfigRepository.listByUser(userId).catch(() => []);
     const subagentProviders: Record<string, string> = {};
     for (const s of subagentConfigs) subagentProviders[s.subagentName] = s.provider;
-    const providerConfigs: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string }> = {};
-    for (const row of allCreds) {
-      if (!row.encryptedKey || !row.iv || !row.authTag) continue;
+
+    const buildCfg = (provider: string, row: { encryptedKey: string | null; iv: string | null; authTag: string | null; model: string | null; baseUrl: string | null; authType: string | null; reasoningEffort: string | null }) => {
+      if (!row.encryptedKey || !row.iv || !row.authTag) return null;
       try {
         const decrypted = decrypt(row.encryptedKey, row.iv, row.authTag, CONFIG.encryptionKey);
-        const apiKey = row.provider === "codex" ? extractCodexBearer(decrypted) : decrypted;
+        const apiKey = provider === "codex" ? extractCodexBearer(decrypted) : decrypted;
         const defaultModel =
-          row.provider === "copilot" ? "gpt-4o" :
-          row.provider === "codex" ? "gpt-4.1" :
+          provider === "copilot" ? "gpt-4o" :
+          provider === "codex" ? "gpt-4.1" :
           "claude-sonnet-4-5";
-        providerConfigs[row.provider] = {
+        return {
           apiKey,
           model: row.model ?? defaultModel,
           ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
           ...(row.authType ? { authType: row.authType } : {}),
+          ...(row.reasoningEffort ? { reasoningEffort: row.reasoningEffort } : {}),
         };
       } catch (err) {
-        console.warn(`[agent-chat] failed to decrypt ${row.provider} key:`, err instanceof Error ? err.message : err);
+        console.warn(`[agent-chat] failed to decrypt ${provider} key:`, err instanceof Error ? err.message : err);
+        return null;
       }
+    };
+
+    const providerConfigs: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string; reasoningEffort?: string }> = {};
+    // User-level wins.
+    for (const row of allCreds) {
+      const cfg = buildCfg(row.provider, row);
+      if (cfg) providerConfigs[row.provider] = cfg;
+    }
+    // Agent-level fills in only what the user hasn't configured personally.
+    for (const row of agentCreds) {
+      if (providerConfigs[row.provider]) continue;
+      const cfg = buildCfg(row.provider, row);
+      if (cfg) providerConfigs[row.provider] = cfg;
     }
 
-    const runRes = await fetch(`${CONFIG.selfUrl}/claw/api/v1/run`, {
+    // Resolution: personal user provider always wins. Otherwise providerOrder
+    // (canonical) takes over, with legacy config.provider as fallback for
+    // agents that haven't migrated yet.
+    let resolvedParentProvider = personalProvider;
+    if (!resolvedParentProvider && agentProviderOrder.length > 0) {
+      resolvedParentProvider = agentProviderOrder.find((p) => providerConfigs[p]) ?? agentProviderOrder[0];
+    }
+    if (!resolvedParentProvider && agentLevelProvider) {
+      resolvedParentProvider = agentLevelProvider;
+    }
+    const runtimeProviderOrder: string[] = agentProviderOrder.length > 0
+      ? agentProviderOrder
+      : (resolvedParentProvider ? [resolvedParentProvider] : []);
+
+    const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
       body: JSON.stringify({
         userId,
         userName: user?.name,
@@ -571,7 +643,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId,
         agentSlug: slug,
         __persistedByCaller: true,
-        ...(userProvider ? { provider: userProvider } : {}),
+        ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
+        ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
         ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
         ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
         callbackUrl,
@@ -580,6 +653,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         ...(resolvedContext.contextFiles.length > 0 ? { contextFiles: resolvedContext.contextFiles } : {}),
         ...(attachedContextItems.length > 0 ? { attachedContext: attachedContextItems } : {}),
         ...(hydratedAttachments.length ? { attachments: hydratedAttachments } : {}),
+        // Ship the agent's JSONB config so xyne-claw can enable per-agent
+        // features that read from it: memoryEnabled, toolPermissions,
+        // skillTriggers, promptInjections, custom-tool config values.
+        // Without this, those features silently default to "off" on V2
+        // dashboard chat (same bug existed for webhook + scheduled jobs).
+        ...(agent?.config ? { agentConfig: agent.config as Record<string, unknown> } : {}),
       }),
     });
 
@@ -596,6 +675,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         task: message.trim(),
         conversationId,
       }).catch((e) => console.warn("[agent-chat] AgentRun.start failed:", e instanceof Error ? e.message : e));
+      redisService.getConnection()
+        .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId: runBody.sessionId, agentSlug: slug }))
+        .catch(() => {});
     }
 
     if (!runBody.success) {
@@ -724,7 +806,7 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
       return;
     }
 
-    const cancelRes = await fetch(`${CONFIG.selfUrl}/claw/api/v1/run/${encodeURIComponent(sessionId)}/cancel`, {
+    const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/run/${encodeURIComponent(sessionId)}/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
@@ -796,6 +878,9 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
 
   if (sessionId && toolLabel) {
     agentRunRepository.updateProgress(sessionId, toolLabel).catch(() => {});
+    redisService.getConnection()
+      .publish("cc:events", JSON.stringify({ type: "agent_progress", sessionId, toolLabel }))
+      .catch(() => {});
   }
 });
 
@@ -804,7 +889,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   res.json({ success: true });
 
   const callbackId = req.query["callbackId"] as string | undefined;
-  const { result, status, error, pendingActions, sessionId, toolsUsed, toolInvocations, tokenUsage, attachments } = req.body as {
+  const { result, status, error, pendingActions, sessionId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations } = req.body as {
     result?: string;
     status?: string;
     error?: string;
@@ -814,10 +899,24 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     toolInvocations?: unknown;
     tokenUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     attachments?: CallbackAttachment[];
+    llmCitations?: unknown;
   };
 
+  // Per-agent citation toggle (see webhook.ts for the same pattern). Reads
+  // `config.replyOptions.includeCitations` on the agent row; defaults to
+  // false. Agents that want the "### Citations" block must opt in by
+  // setting replyOptions.includeCitations = true on their config.
+  let includeCitations = false;
+  try {
+    const agentRow = await agentRepository.findBySlug(req.params.slug);
+    const replyOpts = (agentRow?.config as { replyOptions?: { includeCitations?: boolean } } | undefined)?.replyOptions;
+    if (replyOpts && replyOpts.includeCitations === true) includeCitations = true;
+  } catch {
+    // Non-fatal — keep default (no citations).
+  }
+
   const enrichedResult = status === "completed" && result
-    ? appendCitations(result, toolInvocations, { baseUrl: CONFIG.spacesAppUrl })
+    ? appendCitations(result, toolInvocations, { baseUrl: CONFIG.spacesAppUrl, includeCitations }, llmCitations)
     : result;
 
   // Await finalize BEFORE resolving the pending stream. The stream resolution
@@ -838,6 +937,9 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     } catch (err) {
       console.warn("[agent-chat] finalize failed:", err instanceof Error ? err.message : err);
     }
+    redisService.getConnection()
+      .publish("cc:events", JSON.stringify({ type: "agent_done", sessionId, status: finalStatus }))
+      .catch(() => {});
   }
 
   if (callbackId && pendingStreams.has(callbackId)) {
@@ -863,14 +965,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     const userId = getRequesterId(req);
 
     const agentRuns = await agentRunRepository.listByUser(userId || "", { conversationId: req.params.convId });
-    
-    const toolInvocationsByRun = new Map<string, unknown[]>();
-    for (const run of agentRuns) {
-      if (run.toolInvocations && Array.isArray(run.toolInvocations)) {
-        toolInvocationsByRun.set(run.sessionId, run.toolInvocations as unknown[]);
-      }
-    }
-    
+
     // Strip internal GCS paths from attachment metadata before sending to client
     const serialized = messages.map((m) => {
       const attachmentsRaw = (m as unknown as { attachments?: Array<{ id: string; mimeType: string; originalFilename: string; width: number | null; height: number | null }> }).attachments ?? [];
@@ -883,21 +978,62 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       }));
       return { ...m, attachments };
     });
-    
-    // Include tool invocations in the response
-    // Aggregate all tool invocations from all runs in this conversation
-    const allToolInvocations: unknown[] = [];
-    for (const invocations of toolInvocationsByRun.values()) {
-      allToolInvocations.push(...invocations);
+
+    // Pair tool invocations with the assistant message they produced.
+    // ChatMessage has no FK to AgentRun (see schema.prisma:349) — we match by
+    // chronological order: the Nth completed run (sorted by completedAt) goes
+    // under the Nth assistant message (sorted by createdAt). Each completed
+    // run terminates by creating exactly one assistant message (see
+    // routes/run-stream.ts:463, routes/run.ts:538, agent-chat.ts:702), so this
+    // pairing is correct as long as we ignore runs/messages that don't have a
+    // counterpart (failed runs may create an assistant "error" message too —
+    // those still line up since both lists stay 1:1).
+    const assistantMsgs = serialized
+      .filter((m) => m.role === "assistant")
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const runsWithTools = agentRuns
+      .filter((r) => r.completedAt && Array.isArray(r.toolInvocations) && (r.toolInvocations as unknown[]).length > 0)
+      .sort((a, b) => new Date(a.completedAt!).getTime() - new Date(b.completedAt!).getTime());
+
+    const invocationsByMsgId: Record<string, unknown[]> = {};
+    const pairCount = Math.min(assistantMsgs.length, runsWithTools.length);
+    for (let i = 0; i < pairCount; i++) {
+      const msg = assistantMsgs[i]!;
+      const run = runsWithTools[i]!;
+      invocationsByMsgId[msg.id] = run.toolInvocations as unknown[];
     }
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       data: serialized,
-      ...(allToolInvocations.length > 0 && { toolInvocations: allToolInvocations }),
+      ...(Object.keys(invocationsByMsgId).length > 0 && { invocationsByMsgId }),
     });
   } catch (err) {
     console.error("[agent-chat] messages error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// DELETE /agents/:slug/chat/:convId — delete a conversation (all its messages).
+//
+// Scoped to the requesting user — a user can only delete their own messages,
+// so a delete on another user's conversation is a no-op (count: 0). We still
+// return 200 OK in that case so the client doesn't leak information about
+// other users' conversations.
+router.delete("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    // For destructive operations always use the authenticated identity — never
+    // accept a caller-supplied userId override (unlike read routes that follow
+    // the req.query["userId"] pattern for convenience).
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(400).json({ success: false, error: "userId required" });
+      return;
+    }
+    const count = await chatMessageRepository.deleteConversation(userId, req.params.slug, req.params.convId);
+    res.json({ success: true, data: { deleted: count } });
+  } catch (err) {
+    console.error("[agent-chat] delete conversation error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

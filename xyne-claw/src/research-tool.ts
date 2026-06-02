@@ -12,10 +12,9 @@ import {
   AuthStorage,
   SessionManager,
   ModelRegistry,
-  codingTools,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
-import type { ThinkingLevel } from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { LITELLM, AGENT } from "./config.js";
 
 const RESEARCH_SYSTEM_PROMPT = `You are a focused research agent for Xyne Spaces. Your ONLY job is to thoroughly research the given topic using your available Spaces tools and return structured findings.
@@ -81,7 +80,7 @@ export function createResearchTool(opts: ResearchToolOptions): ToolDefinition {
 
       try {
         const authStorage = AuthStorage.create();
-        const modelRegistry = new ModelRegistry(authStorage);
+        const modelRegistry = ModelRegistry.create(authStorage);
 
         // Register LiteLLM provider (same as parent)
         modelRegistry.registerProvider("litellm", {
@@ -109,7 +108,7 @@ export function createResearchTool(opts: ResearchToolOptions): ToolDefinition {
         const { session } = await createAgentSession({
           model,
           thinkingLevel: AGENT.thinkingLevel as ThinkingLevel,
-          tools: codingTools,
+          tools: [],
           sessionManager: SessionManager.inMemory(),
           authStorage,
           modelRegistry,

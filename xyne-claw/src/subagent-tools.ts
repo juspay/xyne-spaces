@@ -9,20 +9,23 @@
 import { Type } from "@sinclair/typebox";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { provisionStdioCommand } from "./mcp-provision.js";
 import {
   createAgentSession,
   AuthStorage,
   SessionManager,
   ModelRegistry,
-  codingTools,
+  DefaultResourceLoader,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
-import type { ThinkingLevel } from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-coding-agent";
+import { workspacePath } from "./workspace.js";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, SERVER } from "./config.js";
 import { SUBAGENT_DEFINITIONS, getSandboxSession, probeSession, REPO_CONFIGS, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type ToolInvocation } from "./agent.js";
 import { takeCitations, recordCitations } from "./citations.js";
+import { writeSessionSkills } from "./session-skills.js";
 
 /**
  * Build a punchy spinner label for any subagent's child-tool call so chat
@@ -131,6 +134,19 @@ function summarizeChildToolCall(toolName: string, args: unknown): string | null 
       context7: "📖",
       pgm: "📋",
       "juspay-internal-tools": "🏦",
+      Attio: "📇",
+      MailerLite: "📧",
+      Miro: "🖼️",
+      Webflow: "🌐",
+      Wix: "🌐",
+      Honeycomb: "🍯",
+      Customer_io: "📧",
+      kibana: "🔎",
+      "ardra-finops": "💰",
+      calendly: "📅",
+      jotform: "📝",
+      docusign: "✍️",
+      egnyte: "📁",
     };
     const icon = serverIcon[server] ?? "🔧";
     const detail = trim(
@@ -194,7 +210,14 @@ async function loadMcpTools(
   args: string[],
   prefix: string,
 ): Promise<{ tools: ToolDefinition[]; client: Client }> {
-  const transport = new StdioClientTransport({ command, args });
+  // Route npx servers through the hardened provisioner: installed once into an
+  // isolated, atomically-published store and launched as `node <entrypoint>` —
+  // never `npx -y` at spawn time, which races on the shared ~/.npm/_npx cache
+  // and rots into `ERR_MODULE_NOT_FOUND` → `MCP error -32000: Connection
+  // closed`. The `npx --no-install` playwright path passes through untouched
+  // (its leading flag means no package spec is parsed); non-npx commands too.
+  const launch = await provisionStdioCommand(command, args);
+  const transport = new StdioClientTransport({ command: launch.command, args: launch.args });
   const client = new Client({ name: "xyne-claw", version: "1.0.0" }, { capabilities: {} });
   await client.connect(transport);
 
@@ -239,12 +262,39 @@ export interface SubagentProviderResolution {
 
 /**
  * Returns (provider, providerConfig) for a subagent, or undefined to fall back to shared LITELLM.
+ *
+ * Special-case: when the parent is on Anthropic OAuth (Pro/Max plan token),
+ * the parent's calls hit plan-billing fine but subagents' inner-LLM calls get
+ * routed to credits by Anthropic — bucket-routing logic we can't see from this
+ * side. With $0 credits, every subagent fails with "out of extra usage".
+ * Bypassing that entirely: when parent is Anthropic OAuth and the user
+ * didn't explicitly pin a subagent provider, return undefined here so the
+ * subagent falls through to shared LiteLLM. Parent keeps using the plan; the
+ * inner-LLM is on LiteLLM (separate billing).
+ *
+ * Override: set XYNE_SUBAGENT_FOLLOW_PARENT=1 to disable this special-case
+ * (e.g. for testing). User can still explicitly pin a subagent via
+ * subagentProviders[def.name] regardless of this gate.
  */
 function resolveProviderForSubagent(
   def: SubagentDefinition,
   resolution: SubagentProviderResolution | undefined,
 ): { provider: string; config: CopilotConfig | ClaudeConfig | CodexConfig } | undefined {
-  const chosen = resolution?.subagentProviders?.[def.name] ?? resolution?.parentProvider;
+  const explicit = resolution?.subagentProviders?.[def.name];
+  const followParent = process.env["XYNE_SUBAGENT_FOLLOW_PARENT"] === "1";
+  const parentIsAnthropicOAuth =
+    resolution?.parentProvider === "claude"
+    && resolution?.providerConfigs?.claude?.authType === "oauth_token";
+
+  // Force LiteLLM when parent is Anthropic OAuth and no explicit subagent
+  // override exists. Avoids the plan→credits spillover that consistently
+  // breaks subagents on this path.
+  if (parentIsAnthropicOAuth && !explicit && !followParent) {
+    console.log(`[${def.name}] parent is Anthropic OAuth — routing subagent inner LLM through LiteLLM (set XYNE_SUBAGENT_FOLLOW_PARENT=1 to disable)`);
+    return undefined;
+  }
+
+  const chosen = explicit ?? resolution?.parentProvider;
   if ((chosen === "copilot" || chosen === "claude" || chosen === "codex") && resolution?.providerConfigs?.[chosen]) {
     const cfg = resolution.providerConfigs[chosen]!;
     const base: CopilotConfig | ClaudeConfig | CodexConfig = {
@@ -285,27 +335,84 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
       try {
         const authStorage = AuthStorage.create();
-        const modelRegistry = new ModelRegistry(authStorage);
+        const modelRegistry = ModelRegistry.create(authStorage);
 
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
         const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig);
         console.log(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? "shared"}`);
 
+        // Materialize skills onto disk so the child session loads them as
+        // proper pi resources (same path the parent takes in agent.ts),
+        // not as inlined markdown in the system prompt. This makes skill
+        // triggers + the skill-resource API available inside the child
+        // model loop. Scope by parent session + this tool call so
+        // concurrent subagent invocations don't stomp on each other.
+        const childSkillScope = `${progressCtx?.parentSessionId ?? "subagent"}-${def.name}-${_toolCallId.slice(0, 8)}`;
+        const childSkillsDir = skills && skills.length > 0
+          ? await writeSessionSkills(childSkillScope, skills)
+          : null;
+
+        // agentDir is required on v0.75 DefaultResourceLoaderOptions under
+        // exactOptionalPropertyTypes. Pi defaults the SDK to ~/.pi/agent.
+        const childResourceLoader = new DefaultResourceLoader({
+          cwd: process.cwd(),
+          agentDir: `${process.env["HOME"] ?? "."}/.pi/agent`,
+          ...(childSkillsDir ? { additionalSkillPaths: [childSkillsDir] } : {}),
+        });
+        await childResourceLoader.reload();
+        if (childSkillsDir) {
+          const loaded = childResourceLoader.getSkills();
+          console.log(`[${def.name}] [skill-debug] child resourceLoader loaded ${loaded.skills.length} skill(s):`,
+            loaded.skills.map((s) => ({ name: s.name, filePath: s.filePath })));
+          if (loaded.diagnostics.length > 0) {
+            console.log(`[${def.name}] [skill-debug] child resourceLoader diagnostics:`, loaded.diagnostics);
+          }
+        }
+
+        const parentSessionId = progressCtx?.parentSessionId;
+        const childWorkingDir = parentSessionId ? workspacePath(parentSessionId) : process.cwd();
+        // Same allowlist-must-include-customTools subtlety as agent.ts —
+        // pi v0.75 treats `tools` as a global allowlist that filters
+        // customTools too. Listing only the 5 built-ins would silently
+        // drop every MCP tool the subagent needs.
+        const subagentCustomNames = (tools ?? []).map((t) => t.name);
         const { session } = await createAgentSession({
           model,
           thinkingLevel: AGENT.thinkingLevel as ThinkingLevel,
-          tools: codingTools,
+          // Subagent gets the same restricted built-in set as the parent
+          // (no bash) PLUS every customTool name so they aren't filtered.
+          tools: ["read", "write", "grep", "find", "ls", ...subagentCustomNames],
+          cwd: childWorkingDir,
           sessionManager: SessionManager.inMemory(),
           authStorage,
           modelRegistry,
           customTools: tools,
+          resourceLoader: childResourceLoader,
         });
 
         const toolsUsed: string[] = [];
         // Track in-flight child tool calls so we can emit full ToolInvocation objects on _end.
         const childInflight = new Map<string, { toolName: string; args: unknown; startedAt: number }>();
+        // Capture any provider error from the inner session so we can return
+        // a real error message to the parent instead of silently falling back
+        // to "(No findings)". Populated from message.errorMessage when the
+        // session emits stopReason="error" (Anthropic 400s, quota, schema, etc.).
+        let providerError: string | null = null;
         session.subscribe((event) => {
+          // Capture provider errors so a failed inner LLM call (Anthropic 400,
+          // quota, schema, auth, etc.) surfaces back to the parent instead of
+          // being masked as "(No findings)". Both message_end and turn_end
+          // carry the same errorMessage; we just keep the latest non-null.
+          try {
+            const e = event as Record<string, unknown>;
+            const msg = (e["message"] as Record<string, unknown> | undefined);
+            if (msg && msg["stopReason"] === "error" && typeof msg["errorMessage"] === "string") {
+              providerError = msg["errorMessage"] as string;
+            }
+          } catch {
+            // ignore
+          }
           if (event.type === "tool_execution_start") {
             console.log(`[${def.name}] Tool: ${event.toolName}`);
             childInflight.set(event.toolCallId, { toolName: event.toolName, args: event.args, startedAt: Date.now() });
@@ -391,11 +498,11 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           }
         });
 
+        // Skills are loaded via the child resourceLoader above (file-based,
+        // same path the parent uses). Do NOT inline them here — duplicating
+        // them in the system prompt was the old approach and bloats every
+        // model call in the child loop.
         let systemPrompt = def.systemPrompt;
-        if (skills && skills.length > 0) {
-          const skillBlock = skills.map((s) => `### Skill: ${s.name}\n${s.content}`).join("\n\n");
-          systemPrompt = `${systemPrompt}\n\n## Injected Skills\n${skillBlock}`;
-        }
 
         // For sandbox subagent: surface every configured repo (workdir, ports,
         // setup steps) so the child LLM knows where things live and what's
@@ -434,6 +541,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           }
         }
 
+        // For sandbox subagent: only mention `upload-pr-screenshot` when it
+        // is actually in the palette (user has a Bitbucket connection).
+        // Without this gate, an agent without Bitbucket connected sees a
+        // prompt block referencing a tool it cannot call.
+        if (def.serverType === "custom:sandbox" && tools.some((t) => /upload-pr-screenshot/.test(t.name))) {
+          systemPrompt += `\n\n## Attaching a screenshot to a Bitbucket PR\nWhen the parent task involves a Bitbucket PR (e.g. "post screenshots on PR #6339"), call \`upload-pr-screenshot\` right after \`sandbox-pw-screenshot\`. Pass \`fileData=<base64 from the [ATTACHMENT:...] block of the screenshot result>\`, plus \`projectKey\`, \`repoSlug\`, \`prId\`, and \`fileName\` (e.g. \`tc1-thread.png\`). Do NOT try to curl the Bitbucket API yourself from \`sandbox-run\` — the sandbox VM has no Bitbucket credentials; \`upload-pr-screenshot\` runs in claw-auth and uses the user's stored token.`;
+        }
+
         // For sandbox subagent: surface any existing live sandbox session
         // so the cold-started child LLM doesn't redo sandbox-repo-setup.
         // Only reuse sessions on a real repo template — agent-workspace
@@ -465,7 +580,29 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const sq = session as unknown as { _agentEventQueue?: Promise<void> };
         if (sq._agentEventQueue) await sq._agentEventQueue;
 
-        let text = session.getLastAssistantText() ?? "(No findings)";
+        // If the inner provider raised an error AND produced no assistant text,
+        // surface that error to the parent instead of pretending the search
+        // came back empty. "(No findings)" was masking real failures (quota,
+        // schema, auth) — the parent agent then treated absence-of-output as
+        // a real negative result and looped retrying.
+        const lastText = session.getLastAssistantText();
+        let text: string;
+        if (lastText) {
+          text = lastText;
+        } else if (providerError !== null) {
+          // Pull out the human-readable bit from Anthropic's `400 {...json...}`
+          // wrapper if present, otherwise pass through the raw error.
+          const raw: string = providerError;
+          const match = /"message"\s*:\s*"([^"]+)"/.exec(raw);
+          const human: string = match && match[1] ? match[1] : raw;
+          console.error(`[${def.name}] Provider error: ${human}`);
+          text = `${def.name} subagent failed before producing any output. Provider error: ${human}`;
+        } else {
+          // Genuinely empty session (no tool calls, no text, no error) —
+          // unusual but possible. Keep the original fallback wording so callers
+          // that special-case "(No findings)" don't regress.
+          text = "(No findings)";
+        }
         session.dispose();
         if (stickyTimer) clearInterval(stickyTimer);
         stickyLabel = null;
@@ -508,6 +645,64 @@ function extractToolName(prefixedName: string): string {
   return idx >= 0 ? prefixedName.slice(idx + 2) : prefixedName;
 }
 
+function customToolSlug(tool: ToolDefinition): string {
+  const meta = tool as ToolDefinition & { slug?: string };
+  return meta.slug ?? tool.name;
+}
+
+function isCustomWriteTool(tool: ToolDefinition): boolean {
+  return (tool as ToolDefinition & { isWriteTool?: boolean }).isWriteTool === true;
+}
+
+/**
+ * Wire-format spec for a user-created subagent, forwarded from xyne-claw-auth
+ * in the `/run` body. Built-in subagents live in SUBAGENT_DEFINITIONS and
+ * never travel this path.
+ */
+export interface CustomSubagentSpec {
+  name: string;
+  description: string;
+  progressLabels: string[];
+  systemPrompt: string;
+  paramName: string;
+  paramDescription: string;
+  tools: { direct?: string[]; custom?: string[] };
+  skills: Array<{ slug: string; name: string; description: string; content: string }>;
+}
+
+/**
+ * Resolve a custom subagent's tools config to the actual ToolDefinition
+ * objects that should populate the child LLM's palette. Pulls direct tools
+ * out of MCP groups (matched by extracted tool name) and custom tools by
+ * slug. Tools the admin didn't select are excluded.
+ */
+function resolveCustomSubagentTools(
+  toolsConfig: { direct?: string[]; custom?: string[] },
+  groups: McpToolGroup[],
+  customTools: ToolDefinition[] | undefined,
+): ToolDefinition[] {
+  const directNames = new Set(toolsConfig.direct ?? []);
+  const customSlugs = new Set(toolsConfig.custom ?? []);
+  const out: ToolDefinition[] = [];
+
+  if (directNames.size > 0) {
+    for (const group of groups) {
+      const writeSet = new Set(group.writeTools.map(String));
+      for (const t of group.tools) {
+        const name = extractToolName(t.name);
+        if (directNames.has(name) && !writeSet.has(name)) out.push(t);
+      }
+    }
+  }
+  if (customSlugs.size > 0 && customTools) {
+    for (const t of customTools) {
+      const slug = customToolSlug(t);
+      if (customSlugs.has(slug) && !isCustomWriteTool(t)) out.push(t);
+    }
+  }
+  return out;
+}
+
 /**
  * Group MCP tool groups into subagent wrappers based on serverType.
  * Also wraps custom tools that match a subagent definition (e.g. custom:pgm).
@@ -526,6 +721,18 @@ export function buildSubagentTools(
   // Used to give the sandbox subagent direct access to playwright MCP without
   // forcing the LLM to bootstrap chromium via sandbox-run on every fresh VM.
   bonusToolsBySubagent?: Record<string, ToolDefinition[]>,
+  // User-created subagents forwarded by xyne-claw-auth from the
+  // subagent_definitions table. Processed AFTER the built-in serverType
+  // matching loop so built-ins always win on name collisions (validation
+  // also prevents this at create time).
+  customSubagents?: CustomSubagentSpec[],
+  // Tool-name SUFFIXES (e.g. ["get_pull_request", "list_pull_requests"]) the
+  // user picked individually in the agent UI. When a tool's name ends with one
+  // of these, it gets hoisted out of its subagent wrapper as a direct tool too
+  // (the parent agent sees it alongside the subagent). The same tool stays
+  // accessible inside the subagent palette, so delegating still works. Empty
+  // / undefined = legacy behavior (everything stays inside the wrapper).
+  directPickSuffixes?: string[],
 ): {
   subagentTools: ToolDefinition[];
   directTools: ToolDefinition[];
@@ -533,6 +740,11 @@ export function buildSubagentTools(
 } {
   const subagentTools: ToolDefinition[] = [];
   const directTools: ToolDefinition[] = [];
+
+  const isDirectPick = (toolName: string): boolean => {
+    if (!directPickSuffixes || directPickSuffixes.length === 0) return false;
+    return directPickSuffixes.some((s) => toolName.endsWith(s));
+  };
 
   for (const group of groups) {
     const def = SUBAGENT_DEFINITIONS.find((d) => d.serverType === group.serverType);
@@ -547,6 +759,15 @@ export function buildSubagentTools(
         const skills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
         const bonus = bonusToolsBySubagent?.[def.name] ?? [];
         subagentTools.push(makeSubagentTool(def, [...readTools, ...bonus], skillTriggers, skills, providerResolution, progressCtx));
+
+        // Hoist user-picked reads into the parent's direct palette too. The
+        // subagent wrapper above already contains them — this just exposes a
+        // second path so the parent agent can call e.g. `bitbucket__get_pull_request`
+        // without going through the `bitbucket` subagent. Picked-as-direct +
+        // picked-as-subagent both work; the parent-level filter in run.ts
+        // decides which path actually surfaces to the model.
+        const hoisted = readTools.filter((t) => isDirectPick(t.name));
+        if (hoisted.length > 0) directTools.push(...hoisted);
       }
       directTools.push(...writeTools);
     } else {
@@ -588,13 +809,77 @@ export function buildSubagentTools(
         // churn (visible as random pods getting reaped under active
         // sessions; xyne-kata DELETE-/sessions/:id → K8s API DELETE).
         const filteredTools = source === "custom:sandbox"
-          ? tools.filter((t) => (t as ToolDefinition & { slug?: string }).slug !== "sandbox-destroy")
+          ? tools.filter((t) => customToolSlug(t) !== "sandbox-destroy")
           : tools;
+        // Custom write tools (e.g. google-sheets-create/append/update) must
+        // remain parent-level approval tools. Do not put them in child LLM
+        // palettes: the child can otherwise queue writes and then speak as if
+        // it completed the whole multi-step write flow after approval.
+        const readTools = filteredTools.filter((t) => !isCustomWriteTool(t));
+        const writeTools = filteredTools.filter(isCustomWriteTool);
         const bonus = bonusToolsBySubagent?.[def.name] ?? [];
-        subagentTools.push(makeSubagentTool(def, [...filteredTools, ...bonus], skillTriggers, customSkills, providerResolution, progressCtx));
+        if (readTools.length > 0 || bonus.length > 0) {
+          subagentTools.push(makeSubagentTool(def, [...readTools, ...bonus], skillTriggers, customSkills, providerResolution, progressCtx));
+        }
+
+        // Same individual-pick hoist as the built-in MCP branch above: any
+        // custom-source tool whose name matches a user-picked suffix also
+        // gets exposed to the parent agent's direct palette. We push into
+        // `directTools` (not `remainingCustomTools`) so the parent-side
+        // filter in run.ts gates these via the SAME `tools.direct` suffix
+        // check that bitbucket/spaces direct picks use — one config knob,
+        // one mental model. The tool stays accessible inside the subagent
+        // wrapper too.
+        const hoisted = readTools.filter((t) => isDirectPick(t.name));
+        if (hoisted.length > 0) directTools.push(...hoisted);
+        remainingCustomTools.push(...writeTools);
       } else {
         remainingCustomTools.push(...tools);
       }
+    }
+  }
+
+  // ── User-created subagents (from xyne-claw-auth's subagent_definitions
+  // table) — resolve each spec's tools config explicitly, build a synthetic
+  // SubagentDefinition, and wrap via the same makeSubagentTool factory the
+  // built-ins use. Skills travel inline on the spec and are passed straight
+  // through to the wrapper (it materializes them as SKILL.md files in the
+  // child session). ─────────────────────────────────────────────────────
+  if (customSubagents && customSubagents.length > 0) {
+    const builtinNames = new Set(SUBAGENT_DEFINITIONS.map((d) => d.name));
+    for (const spec of customSubagents) {
+      if (builtinNames.has(spec.name)) {
+        console.warn(`[buildSubagentTools] Ignoring custom subagent "${spec.name}" — name collides with a built-in (built-in wins)`);
+        continue;
+      }
+      const palette = resolveCustomSubagentTools(spec.tools, groups, customTools);
+      if (palette.length === 0) {
+        console.warn(`[buildSubagentTools] Custom subagent "${spec.name}" resolved to 0 tools — skipping (check its tools config against live MCP groups)`);
+        continue;
+      }
+      const syntheticDef: SubagentDefinition = {
+        name: spec.name,
+        description: spec.description,
+        progressLabels: spec.progressLabels,
+        systemPrompt: spec.systemPrompt,
+        paramName: spec.paramName,
+        paramDescription: spec.paramDescription,
+        // Synthetic serverType — never matched against an MCP group. Kept
+        // distinct from any real serverType so the "find by serverType"
+        // loops above don't accidentally re-process this entry.
+        serverType: `custom-defined:${spec.name}`,
+      };
+      const bonus = bonusToolsBySubagent?.[spec.name] ?? [];
+      subagentTools.push(
+        makeSubagentTool(
+          syntheticDef,
+          [...palette, ...bonus],
+          skillTriggers,
+          spec.skills,
+          providerResolution,
+          progressCtx,
+        ),
+      );
     }
   }
 
@@ -650,9 +935,18 @@ let cachedPlaywrightTools: McpToolGroup | null = null;
 export async function loadPlaywrightTools(): Promise<McpToolGroup | null> {
   if (cachedPlaywrightTools) return cachedPlaywrightTools;
   try {
+    // Use the globally-installed @playwright/mcp from the Dockerfile rather
+    // than `npx -y @playwright/mcp@latest`. The latter:
+    //   - hits the npm registry on every spawn to resolve @latest,
+    //   - writes into the shared /home/claw/.npm/_npx/<hash>/ cache,
+    //   - and has no locking between concurrent spawns, so two parallel
+    //     conversations can race the install and leave the cache half-deleted
+    //     (ENOTEMPTY on rmdir → next spawn sees missing coreBundle.js).
+    // `npx --no-install` resolves the binary from $PATH (where the global
+    // install lives) without ever touching the _npx cache.
     const { tools } = await loadMcpTools(
       "npx",
-      ["-y", "@playwright/mcp@latest", "--headless", "--isolated"],
+      ["--no-install", "@playwright/mcp", "--headless", "--isolated"],
       "playwright",
     );
     cachedPlaywrightTools = { serverType: "playwright", serverName: "playwright", tools, writeTools: [] };

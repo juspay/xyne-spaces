@@ -9,7 +9,24 @@ import { searchEmails, readEmail, createDraft, getAttachment, trashEmail } from 
 import { searchEvents, createEvent, deleteEvent, listCalendars } from "./calendar.js";
 import { searchContacts, listContacts } from "./contacts.js";
 import { listTaskLists, listTasks, createTask, updateTaskStatus, deleteTask } from "./tasks.js";
-import { readDriveFile, searchDriveFiles } from "./drive.js";
+import {
+  readDriveFile,
+  searchDriveFiles,
+  createDriveFolder,
+  uploadDriveFile,
+  shareDriveFile,
+} from "./drive.js";
+import { createSpreadsheetWithValues, updateValues, appendValues } from "./sheets.js";
+import { createDocument, appendToDocument, readDocument, replaceAllText, insertTextAt, deleteRange, replaceRange, updateTextStyle, updateParagraphStyle } from "./docs.js";
+import { type TextStyleUpdate, type ParagraphStyleUpdate } from "./docs.js";
+import { createPresentation, addSlide } from "./slides.js";
+import {
+  createForm,
+  addQuestionsToForm,
+  getForm,
+  type FormQuestion,
+  type FormQuestionType,
+} from "./forms.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -489,5 +506,590 @@ export const googleDriveSearch: ToolDefinition = {
   async execute(args, ctx) {
     const token = getToken(ctx);
     return searchDriveFiles(token, args["query"] as string, (args["maxResults"] as number) ?? 10);
+  },
+};
+
+export const googleDriveCreateFolder: ToolDefinition = {
+  slug: "google-drive-create-folder",
+  name: "Drive Create Folder",
+  description:
+    "Create a folder in Google Drive. Optionally provide parentFolderId to nest inside an existing folder. " +
+    "Returns folder ID and shareable URL.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Folder name" },
+      parentFolderId: { type: "string", description: "Optional Drive folder ID to create inside" },
+    },
+    required: ["name"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return createDriveFolder(token, args["name"] as string, args["parentFolderId"] as string | undefined);
+  },
+};
+
+export const googleDriveUpload: ToolDefinition = {
+  slug: "google-drive-upload",
+  name: "Drive Upload File",
+  description:
+    "Upload a text/CSV/JSON/Markdown file to Google Drive. Provide content as a string. " +
+    "For binary files, use base64 with mimeType prefixed accordingly is NOT supported here — use a text mimeType.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "File name including extension" },
+      content: { type: "string", description: "File content as UTF-8 text" },
+      mimeType: {
+        type: "string",
+        description: "MIME type, e.g. text/plain, text/csv, application/json, text/markdown",
+      },
+      parentFolderId: { type: "string", description: "Optional Drive folder ID to upload into" },
+    },
+    required: ["name", "content", "mimeType"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return uploadDriveFile(
+      token,
+      args["name"] as string,
+      args["content"] as string,
+      args["mimeType"] as string,
+      args["parentFolderId"] as string | undefined,
+    );
+  },
+};
+
+export const googleDriveShare: ToolDefinition = {
+  slug: "google-drive-share",
+  name: "Drive Share File",
+  description:
+    "Share a Drive file/folder. role=reader|commenter|writer; type=user|group|domain|anyone. " +
+    "Provide emailAddress when type is user/group.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      fileId: { type: "string", description: "Drive file or folder ID" },
+      role: { type: "string", description: "reader | commenter | writer" },
+      type: { type: "string", description: "user | group | domain | anyone" },
+      emailAddress: { type: "string", description: "Required when type=user|group" },
+    },
+    required: ["fileId", "role", "type"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return shareDriveFile(
+      token,
+      args["fileId"] as string,
+      args["role"] as "reader" | "commenter" | "writer",
+      args["type"] as "user" | "group" | "domain" | "anyone",
+      args["emailAddress"] as string | undefined,
+    );
+  },
+};
+
+// ─── Sheets Write Tools ─────────────────────────────────────────────────────
+
+export const googleSheetsCreate: ToolDefinition = {
+  slug: "google-sheets-create",
+  name: "Sheets Create",
+  description:
+    "Create a new Google Spreadsheet with the given title. Optionally include initial rows in values " +
+    "to populate the sheet in the same approved action. Returns spreadsheet ID and URL.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Spreadsheet title" },
+      range: { type: "string", description: "Optional A1 range for initial values, default Sheet1!A1" },
+      values: {
+        type: "array",
+        description: "Optional initial rows to write after creating the spreadsheet",
+        items: { type: "array", items: { type: "string" } },
+      },
+    },
+    required: ["title"],
+  },
+  async execute(args, ctx) {
+    return createSpreadsheetWithValues(
+      getToken(ctx),
+      args["title"] as string,
+      args["values"] as string[][] | undefined,
+      (args["range"] as string | undefined) ?? "Sheet1!A1",
+    );
+  },
+};
+
+export const googleSheetsUpdate: ToolDefinition = {
+  slug: "google-sheets-update",
+  name: "Sheets Update",
+  description:
+    "Write rows of values to a sheet range (overwrites). Range is A1 notation, e.g. 'Sheet1!A1'. " +
+    "values is a 2D array of strings/numbers as strings.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      spreadsheetId: { type: "string", description: "Spreadsheet ID" },
+      range: { type: "string", description: "A1 range, e.g. 'Sheet1!A1'" },
+      values: {
+        type: "array",
+        description: "2D array of cell values (rows of strings)",
+        items: { type: "array", items: { type: "string" } },
+      },
+    },
+    required: ["spreadsheetId", "range", "values"],
+  },
+  async execute(args, ctx) {
+    return updateValues(
+      getToken(ctx),
+      args["spreadsheetId"] as string,
+      args["range"] as string,
+      args["values"] as string[][],
+    );
+  },
+};
+
+export const googleSheetsAppend: ToolDefinition = {
+  slug: "google-sheets-append",
+  name: "Sheets Append",
+  description:
+    "Append rows after the last row in a sheet range. Range is A1 notation. " +
+    "values is a 2D array of strings.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      spreadsheetId: { type: "string", description: "Spreadsheet ID" },
+      range: { type: "string", description: "A1 range, e.g. 'Sheet1!A1'" },
+      values: {
+        type: "array",
+        description: "2D array of rows to append",
+        items: { type: "array", items: { type: "string" } },
+      },
+    },
+    required: ["spreadsheetId", "range", "values"],
+  },
+  async execute(args, ctx) {
+    return appendValues(
+      getToken(ctx),
+      args["spreadsheetId"] as string,
+      args["range"] as string,
+      args["values"] as string[][],
+    );
+  },
+};
+
+// ─── Docs Tools ─────────────────────────────────────────────────────────────
+
+export const googleDocsCreate: ToolDefinition = {
+  slug: "google-docs-create",
+  name: "Docs Create",
+  description: "Create a new Google Doc with title and optional body text. Returns document ID and URL.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Document title" },
+      body: { type: "string", description: "Optional initial body text" },
+    },
+    required: ["title"],
+  },
+  async execute(args, ctx) {
+    return createDocument(getToken(ctx), args["title"] as string, args["body"] as string | undefined);
+  },
+};
+
+export const googleDocsAppend: ToolDefinition = {
+  slug: "google-docs-append",
+  name: "Docs Append",
+  description: "Append text to the end of an existing Google Doc. Preserves existing content.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      documentId: { type: "string", description: "Google Doc document ID" },
+      text: { type: "string", description: "Text to append" },
+    },
+    required: ["documentId", "text"],
+  },
+  async execute(args, ctx) {
+    return appendToDocument(getToken(ctx), args["documentId"] as string, args["text"] as string);
+  },
+};
+
+export const googleDocsRead: ToolDefinition = {
+  slug: "google-docs-read",
+  name: "Docs Read",
+  description:
+    "Read a Google Doc's content with index positions and formatting info. " +
+    "Returns text runs with [startIndex-endIndex] ranges. " +
+    "Use this BEFORE google-docs-edit or google-docs-format to discover the correct index positions for your edits.",
+  source: "custom:google",
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      documentId: { type: "string", description: "Google Doc document ID" },
+    },
+    required: ["documentId"],
+  },
+  async execute(args, ctx) {
+    return readDocument(getToken(ctx), args["documentId"] as string);
+  },
+};
+
+export const googleDocsEdit: ToolDefinition = {
+  slug: "google-docs-edit",
+  name: "Docs Edit",
+  description:
+    "Edit text in an existing Google Doc. Supports three modes: " +
+    "'find_replace' — replace all occurrences of a text string (no indices needed); " +
+    "'insert' — insert text at a specific index position; " +
+    "'delete' — delete text between two index positions; " +
+    "'replace_range' — replace text at a specific index range (delete + insert atomically). " +
+    "Use google-docs-read first to discover index positions for insert/delete/replace_range modes.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      documentId: { type: "string", description: "Google Doc document ID" },
+      mode: {
+        type: "string",
+        enum: ["find_replace", "insert", "delete", "replace_range"],
+        description:
+          "Edit mode: 'find_replace' (replace all matching text), 'insert' (insert at index), " +
+          "'delete' (delete a range), 'replace_range' (replace text at a range atomically)",
+      },
+      // find_replace params
+      findText: { type: "string", description: "Text to find (for find_replace mode)" },
+      replaceText: { type: "string", description: "Replacement text (for find_replace and replace_range modes)" },
+      matchCase: { type: "boolean", description: "Case-sensitive match (for find_replace mode, default: true)" },
+      // insert/delete/replace_range params
+      startIndex: { type: "number", description: "Start index position (for insert, delete, replace_range modes)" },
+      endIndex: { type: "number", description: "End index position (for delete and replace_range modes)" },
+      // insert/replace_range params
+      text: { type: "string", description: "Text to insert (for insert and replace_range modes)" },
+    },
+    required: ["documentId", "mode"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    const documentId = args["documentId"] as string;
+    const mode = args["mode"] as string;
+
+    switch (mode) {
+      case "find_replace":
+        if (!args["findText"]) throw new Error("findText is required for find_replace mode");
+        return replaceAllText(
+          token,
+          documentId,
+          args["findText"] as string,
+          (args["replaceText"] as string) ?? "",
+          (args["matchCase"] as boolean) ?? true,
+        );
+
+      case "insert":
+        if (args["startIndex"] == null) throw new Error("startIndex is required for insert mode");
+        if (!args["text"]) throw new Error("text is required for insert mode");
+        return insertTextAt(
+          token,
+          documentId,
+          args["startIndex"] as number,
+          args["text"] as string,
+        );
+
+      case "delete":
+        if (args["startIndex"] == null) throw new Error("startIndex is required for delete mode");
+        if (args["endIndex"] == null) throw new Error("endIndex is required for delete mode");
+        return deleteRange(
+          token,
+          documentId,
+          args["startIndex"] as number,
+          args["endIndex"] as number,
+        );
+
+      case "replace_range":
+        if (args["startIndex"] == null) throw new Error("startIndex is required for replace_range mode");
+        if (args["endIndex"] == null) throw new Error("endIndex is required for replace_range mode");
+        if (!args["text"]) throw new Error("text is required for replace_range mode");
+        return replaceRange(
+          token,
+          documentId,
+          args["startIndex"] as number,
+          args["endIndex"] as number,
+          args["text"] as string,
+        );
+
+      default:
+        throw new Error(`Unknown mode: ${mode}. Use find_replace, insert, delete, or replace_range.`);
+    }
+  },
+};
+
+
+// tool for format the text and paragraph
+export const googleDocsFormat: ToolDefinition = {
+  slug: "google-docs-format",
+  name: "Docs Format",
+  description:
+    "Apply text or paragraph formatting to a range in a Google Doc. " +
+    "Supports bold, italic, underline, strikethrough, font family, font size, text color, " +
+    "heading styles (HEADING_1-6, NORMAL_TEXT), alignment (START, CENTER, END, JUSTIFIED), and spacing. " +
+    "Use google-docs-read first to discover the correct index positions. " +
+    "Formatting does NOT shift indices, so multiple formatting operations on different ranges are safe.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      documentId: { type: "string", description: "Google Doc document ID" },
+      startIndex: { type: "number", description: "Start index of the range to format" },
+      endIndex: { type: "number", description: "End index of the range to format" },
+      // Text style properties
+      bold: { type: "boolean", description: "Set bold formatting" },
+      italic: { type: "boolean", description: "Set italic formatting" },
+      underline: { type: "boolean", description: "Set underline formatting" },
+      strikethrough: { type: "boolean", description: "Set strikethrough formatting" },
+      fontFamily: { type: "string", description: "Font family (e.g. 'Arial', 'Courier New')" },
+      fontSize: { type: "number", description: "Font size in points (e.g. 12, 14, 18)" },
+      // Paragraph style properties
+      namedStyle: {
+        type: "string",
+        description: "Heading style: NORMAL_TEXT, HEADING_1, HEADING_2, HEADING_3, HEADING_4, HEADING_5, HEADING_6, TITLE, SUBTITLE",
+      },
+      alignment: {
+        type: "string",
+        description: "Paragraph alignment: START, CENTER, END, JUSTIFIED",
+      },
+      foregroundColor: {
+        type: "object",
+        description: "Text color as RGB floats (0.0-1.0). e.g. {\"red\": 1.0, \"green\": 0.0, \"blue\": 0.0} for red",
+        properties: {
+          red: { type: "number" },
+          green: { type: "number" },
+          blue: { type: "number" },
+        },
+      },
+    },
+    required: ["documentId", "startIndex", "endIndex"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    const documentId = args["documentId"] as string;
+    const startIndex = args["startIndex"] as number;
+    const endIndex = args["endIndex"] as number;
+
+    // Collect text style properties
+    const hasTextStyle =
+      args["bold"] !== undefined ||
+      args["italic"] !== undefined ||
+      args["underline"] !== undefined ||
+      args["strikethrough"] !== undefined ||
+      args["fontFamily"] !== undefined ||
+      args["fontSize"] !== undefined ||
+      args["foregroundColor"] !== undefined;
+
+    // Collect paragraph style properties
+    const hasParagraphStyle =
+      args["namedStyle"] !== undefined ||
+      args["alignment"] !== undefined;
+
+    if (!hasTextStyle && !hasParagraphStyle) {
+      throw new Error("At least one formatting property must be specified");
+    }
+
+    const results: string[] = [];
+
+    if (hasTextStyle) {
+      const style: TextStyleUpdate = {};
+      if (args["bold"] !== undefined) style.bold = args["bold"] as boolean;
+      if (args["italic"] !== undefined) style.italic = args["italic"] as boolean;
+      if (args["underline"] !== undefined) style.underline = args["underline"] as boolean;
+      if (args["strikethrough"] !== undefined) style.strikethrough = args["strikethrough"] as boolean;
+      if (args["fontFamily"] !== undefined) style.fontFamily = args["fontFamily"] as string;
+      if (args["fontSize"] !== undefined) style.fontSize = args["fontSize"] as number;
+      if (args["foregroundColor"] !== undefined) style.foregroundColor = args["foregroundColor"] as { red?: number; green?: number; blue?: number };
+
+      results.push(await updateTextStyle(token, documentId, startIndex, endIndex, style));
+    }
+
+    if (hasParagraphStyle) {
+      const style: ParagraphStyleUpdate = {};
+      if (args["namedStyle"] !== undefined) style.namedStyleType = args["namedStyle"] as string;
+      if (args["alignment"] !== undefined) style.alignment = args["alignment"] as string;
+
+      results.push(await updateParagraphStyle(token, documentId, startIndex, endIndex, style));
+    }
+
+    return results.join("\n");
+  },
+};
+
+// ─── Slides Tools ───────────────────────────────────────────────────────────
+
+export const googleSlidesCreate: ToolDefinition = {
+  slug: "google-slides-create",
+  name: "Slides Create",
+  description: "Create a new Google Slides presentation with the given title. Returns presentation ID and URL.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: { title: { type: "string", description: "Presentation title" } },
+    required: ["title"],
+  },
+  async execute(args, ctx) {
+    return createPresentation(getToken(ctx), args["title"] as string);
+  },
+};
+
+export const googleSlidesAddSlide: ToolDefinition = {
+  slug: "google-slides-add-slide",
+  name: "Slides Add Slide",
+  description:
+    "Add a new slide to an existing presentation. layout is BLANK | TITLE | TITLE_AND_BODY (default). " +
+    "Provide title and body text where applicable.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      presentationId: { type: "string", description: "Slides presentation ID" },
+      layout: { type: "string", description: "BLANK | TITLE | TITLE_AND_BODY (default TITLE_AND_BODY)" },
+      title: { type: "string", description: "Slide title text" },
+      body: { type: "string", description: "Slide body text" },
+    },
+    required: ["presentationId"],
+  },
+  async execute(args, ctx) {
+    return addSlide(
+      getToken(ctx),
+      args["presentationId"] as string,
+      (args["layout"] as "BLANK" | "TITLE" | "TITLE_AND_BODY" | undefined) ?? "TITLE_AND_BODY",
+      args["title"] as string | undefined,
+      args["body"] as string | undefined,
+    );
+  },
+};
+
+// ─── Forms Tools ────────────────────────────────────────────────────────────
+
+const FORM_QUESTION_SCHEMA = {
+  type: "array",
+  description:
+    "Form questions. Each item: { title: string, type: 'SHORT_ANSWER'|'PARAGRAPH'|'EMAIL'|'DROPDOWN'|'MULTIPLE_CHOICE'|'CHECKBOX', required?: boolean, options?: string[] }",
+  items: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      type: { type: "string" },
+      required: { type: "boolean" },
+      options: { type: "array", items: { type: "string" } },
+    },
+    required: ["title", "type"],
+  },
+} as const;
+
+function normalizeQuestions(raw: unknown): FormQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  const allowed: FormQuestionType[] = ["SHORT_ANSWER", "PARAGRAPH", "EMAIL", "DROPDOWN", "MULTIPLE_CHOICE", "CHECKBOX"];
+  return raw.map((q) => {
+    const r = q as Record<string, unknown>;
+    const type = (r["type"] as FormQuestionType) ?? "SHORT_ANSWER";
+    const out: FormQuestion = {
+      title: String(r["title"] ?? "Untitled"),
+      type: allowed.includes(type) ? type : "SHORT_ANSWER",
+      required: Boolean(r["required"] ?? false),
+    };
+    if (Array.isArray(r["options"])) out.options = r["options"] as string[];
+    return out;
+  });
+}
+
+export const googleFormsCreate: ToolDefinition = {
+  slug: "google-forms-create",
+  name: "Forms Create",
+  description:
+    "Create a Google Form with title and optional questions. Returns form ID, edit URL, and responder URL. " +
+    "Question types: SHORT_ANSWER, PARAGRAPH, EMAIL, DROPDOWN, MULTIPLE_CHOICE, CHECKBOX.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Form title" },
+      questions: FORM_QUESTION_SCHEMA,
+    },
+    required: ["title"],
+  },
+  async execute(args, ctx) {
+    const questions = normalizeQuestions(args["questions"]);
+    return createForm(getToken(ctx), args["title"] as string, questions);
+  },
+};
+
+export const googleFormsAddQuestions: ToolDefinition = {
+  slug: "google-forms-add-questions",
+  name: "Forms Add Questions",
+  description: "Append questions to an existing Google Form.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      formId: { type: "string", description: "Google Form ID" },
+      questions: FORM_QUESTION_SCHEMA,
+    },
+    required: ["formId", "questions"],
+  },
+  async execute(args, ctx) {
+    return addQuestionsToForm(
+      getToken(ctx),
+      args["formId"] as string,
+      normalizeQuestions(args["questions"]),
+    );
+  },
+};
+
+export const googleFormsGet: ToolDefinition = {
+  slug: "google-forms-get",
+  name: "Forms Get",
+  description: "Read a Google Form's title, questions, and responder URL by form ID.",
+  source: "custom:google",
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: { formId: { type: "string", description: "Google Form ID" } },
+    required: ["formId"],
+  },
+  async execute(args, ctx) {
+    return getForm(getToken(ctx), args["formId"] as string);
   },
 };

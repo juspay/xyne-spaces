@@ -1,0 +1,692 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  listAgentMcpConnections,
+  upsertAgentMcpConnection,
+  deleteAgentMcpConnection,
+  listServers,
+  getCredentialFields,
+  listSubagents,
+  forkSubagentForInstance,
+  type AgentMcpConnectionMeta,
+  type SubagentDef,
+} from "../lib/api";
+import type { McpServer, CredentialField } from "../lib/types";
+
+interface Props {
+  agentSlug: string;
+  userId: string;
+  canEdit: boolean;
+}
+
+// Slug constraint, mirrored on the backend (SLUG_RE in routes/agents.ts).
+// Auto-generated from displayName for new instances; user can override.
+const SLUG_FROM_NAME = (name: string): string =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32) || "default";
+
+const SLUG_VALID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/** Identifies a row in editing mode. `slug: null` means "creating a new
+ *  instance of this server type" (allow slug + displayName edits). Editing
+ *  an existing instance has the row's slug here and locks the slug field. */
+interface EditingKey {
+  serverType: string;
+  slug: string | null;
+}
+
+/**
+ * Per-agent MCP credentials, multi-instance.
+ *
+ * Resolution at session time: `agent > user > global`. When the agent has
+ * multiple instances configured for the same server type, each instance is
+ * spawned as its own MCP process and its tools are surfaced under a slug
+ * prefix (e.g. `grafana-prod__query` vs `grafana-staging__query`). The agent
+ * picks which to call by tool name.
+ *
+ * UI: one section per server type. Inside the section, a list of configured
+ * instances and an "Add another" button. Each row has Edit (creds-only
+ * update) and Remove. Creating a new instance also asks for slug +
+ * displayName.
+ *
+ * POST is paste-once (no read-back). Delete tears down a single instance;
+ * other instances on the same server type are unaffected.
+ */
+export function AgentMcpTab({ agentSlug, userId, canEdit }: Props) {
+  const [servers, setServers] = useState<McpServer[]>([]);
+  const [credentialFields, setCredentialFields] = useState<Record<string, CredentialField[]>>({});
+  const [connections, setConnections] = useState<AgentMcpConnectionMeta[]>([]);
+  /** All subagent definitions — read once on mount, used to render the
+   *  "Used by subagents: X, Y" badge per instance and to populate the
+   *  "fork source" dropdown in the fork modal. */
+  const [subagents, setSubagents] = useState<SubagentDef[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<EditingKey | null>(null);
+  const [editingDraft, setEditingDraft] = useState<Record<string, string>>({});
+  /** For new-instance create only — separate so editing an existing instance
+   *  can't accidentally rewrite the slug. */
+  const [newInstanceMeta, setNewInstanceMeta] = useState<{ slug: string; displayName: string }>({
+    slug: "",
+    displayName: "",
+  });
+  const [saving, setSaving] = useState(false);
+  /** Fork modal state. Null when closed; otherwise carries which instance
+   *  we're forking for + the user's source/name picks. */
+  const [forkModal, setForkModal] = useState<ForkModalState | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [srv, fields, conns, subs] = await Promise.all([
+        listServers(userId),
+        getCredentialFields(),
+        listAgentMcpConnections(agentSlug, userId),
+        // listSubagents fails non-fatally — the badge just shows empty.
+        listSubagents().catch(() => [] as SubagentDef[]),
+      ]);
+      setServers(srv.filter((s) => s.enabled));
+      setCredentialFields(fields);
+      setConnections(conns);
+      setSubagents(subs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [agentSlug, userId]);
+
+  useEffect(() => { void reload(); }, [reload]);
+
+  const connectionsByType = useMemo(() => {
+    const m = new Map<string, AgentMcpConnectionMeta[]>();
+    for (const c of connections) {
+      const arr = m.get(c.mcpServerType) ?? [];
+      arr.push(c);
+      m.set(c.mcpServerType, arr);
+    }
+    return m;
+  }, [connections]);
+
+  const startEditInstance = (mcpServerType: string, slug: string) => {
+    setEditing({ serverType: mcpServerType, slug });
+    setEditingDraft({});
+    setNewInstanceMeta({ slug: "", displayName: "" });
+    setSlugDirty(false);
+    setError(null);
+  };
+
+  const startNewInstance = (mcpServerType: string) => {
+    setEditing({ serverType: mcpServerType, slug: null });
+    setEditingDraft({});
+    // Reset slugDirty so the auto-fill-from-name behavior works again, even
+    // if the user previously typed a slug manually then cancelled.
+    setSlugDirty(false);
+    // First instance for this server type: pre-fill slug='default' AND the
+    // display name with the server's stock name. User can save immediately
+    // — single-instance use case stays one-click. Adding ANOTHER instance
+    // means the user is forking; we leave both fields blank to force a
+    // distinct name + slug.
+    const existing = connectionsByType.get(mcpServerType) ?? [];
+    const server = servers.find((s) => s.type === mcpServerType);
+    setNewInstanceMeta(
+      existing.length === 0
+        ? { slug: "default", displayName: server?.name ?? "" }
+        : { slug: "", displayName: "" },
+    );
+    setError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setEditingDraft({});
+    setNewInstanceMeta({ slug: "", displayName: "" });
+    setSlugDirty(false);
+  };
+
+  /** When the user types into displayName for a NEW instance, auto-fill the
+   *  slug if they haven't typed one yet. Once they edit slug manually,
+   *  detach the auto-fill so we don't keep overwriting. */
+  const [slugDirty, setSlugDirty] = useState(false);
+  const onNewDisplayNameChange = (name: string) => {
+    setNewInstanceMeta((m) => ({
+      displayName: name,
+      slug: slugDirty ? m.slug : SLUG_FROM_NAME(name),
+    }));
+  };
+
+  const save = async () => {
+    if (!editing) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const isNew = editing.slug === null;
+      const slug = isNew ? newInstanceMeta.slug.trim() : editing.slug!;
+      if (isNew) {
+        if (!slug) {
+          setError("Slug is required (e.g. 'prod', 'staging').");
+          setSaving(false);
+          return;
+        }
+        if (!SLUG_VALID.test(slug)) {
+          setError("Slug must be lowercase alphanumeric + hyphen, 1-32 chars.");
+          setSaving(false);
+          return;
+        }
+        const existing = connectionsByType.get(editing.serverType) ?? [];
+        if (existing.some((c) => c.slug === slug)) {
+          setError(`An instance with slug "${slug}" already exists for this server. Pick a different slug.`);
+          setSaving(false);
+          return;
+        }
+      }
+      await upsertAgentMcpConnection(
+        agentSlug,
+        userId,
+        editing.serverType,
+        editingDraft,
+        {
+          slug,
+          ...(isNew && newInstanceMeta.displayName.trim()
+            ? { displayName: newInstanceMeta.displayName.trim() }
+            : {}),
+        },
+      );
+      await reload();
+      cancelEdit();
+      setSlugDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Forking ─────────────────────────────────────────────────────────────
+  // The "fork subagent for this MCP instance" workflow lives ENTIRELY on
+  // this tab — picking a source subagent here also pins it to a specific
+  // instance and enables it on this agent in one shot.
+
+  /** Reverse-lookup: subagents that have this instance pinned via
+   *  `mcpInstanceMap[server.type] === instance.slug`. Renders as a "Used by"
+   *  badge per row so admins can see at a glance which subagents will be
+   *  affected if they remove or rotate creds. */
+  const subagentsPinnedTo = useCallback(
+    (serverType: string, slug: string): SubagentDef[] =>
+      subagents.filter((s) => (s.mcpInstanceMap?.[serverType] ?? null) === slug),
+    [subagents],
+  );
+
+  /** Forkable sources = ALL subagents (custom + builtin). Builtin forks are
+   *  supported on the backend; the new custom subagent inherits the builtin's
+   *  prompt + param shape and starts with an empty tools palette that the
+   *  admin can edit. */
+  const forkableSubagents = useMemo(
+    () => subagents,
+    [subagents],
+  );
+
+  const openForkModal = (instance: AgentMcpConnectionMeta) => {
+    const firstSource = forkableSubagents[0]?.name ?? "";
+    setForkModal({
+      instance,
+      sourceName: firstSource,
+      // Auto-suggest "<source>-<instance.slug>", refined as user edits source.
+      newName: firstSource ? `${firstSource}-${instance.slug}` : "",
+      enableOnAgent: true,
+      submitting: false,
+      error: null,
+    });
+  };
+
+  const closeForkModal = () => setForkModal(null);
+
+  const submitFork = async () => {
+    if (!forkModal) return;
+    const { instance, sourceName, newName, enableOnAgent } = forkModal;
+    if (!sourceName || !newName.trim()) {
+      setForkModal((m) => (m ? { ...m, error: "Source subagent and new name are required" } : m));
+      return;
+    }
+    setForkModal((m) => (m ? { ...m, submitting: true, error: null } : m));
+    try {
+      await forkSubagentForInstance(agentSlug, userId, {
+        sourceName,
+        newName: newName.trim(),
+        mcpInstanceMap: { [instance.mcpServerType]: instance.slug },
+        enableOnAgent,
+      });
+      await reload();
+      closeForkModal();
+    } catch (err) {
+      setForkModal((m) =>
+        m ? { ...m, submitting: false, error: err instanceof Error ? err.message : String(err) } : m,
+      );
+    }
+  };
+
+  const remove = async (conn: AgentMcpConnectionMeta) => {
+    if (!confirm(
+      `Remove the ${conn.displayName} instance? Tools prefixed with "${conn.mcpServerType}-${conn.slug}__" will stop working for this agent.`,
+    )) return;
+    try {
+      await deleteAgentMcpConnection(agentSlug, userId, conn.mcpServerType, conn.slug);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  if (loading) {
+    return <div className="py-10 text-center text-sm text-zinc-400">Loading MCP connections…</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 text-xs text-zinc-400">
+        Pin MCP credentials to this agent. Resolution at session time:
+        <span className="ml-1 font-mono text-zinc-300">agent → user → global</span>.
+        You can configure multiple named instances of the same MCP (e.g. two Grafanas with
+        different credentials) — each gets its own tool prefix at runtime.
+        Anyone who can invoke this agent will use these credentials for tool calls — never
+        paste secrets here you wouldn't share with every user of the agent.
+      </div>
+
+      {error && <p className="text-sm text-red-400">{error}</p>}
+
+      <div className="space-y-2">
+        {servers.map((server) => {
+          const instances = connectionsByType.get(server.type) ?? [];
+          const fields = credentialFields[server.type] ?? [];
+          const isCreatingNew = editing?.serverType === server.type && editing?.slug === null;
+          return (
+            <div key={server.id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="font-medium text-zinc-100">{server.name}</span>
+                <span className="font-mono text-[10px] text-zinc-500">{server.type}</span>
+                <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase text-zinc-500">
+                  {instances.length} instance{instances.length === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              {/* Configured instances */}
+              {instances.length > 0 && (
+                <div className="space-y-1.5">
+                  {instances.map((inst) => {
+                    const isEditingThis = editing?.serverType === server.type && editing?.slug === inst.slug;
+                    return (
+                      <div key={inst.id} className="rounded border border-zinc-800 bg-zinc-950 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-zinc-100">{inst.displayName}</span>
+                              <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">{inst.slug}</span>
+                              <span className="rounded bg-emerald-900 px-1.5 py-0.5 text-[10px] uppercase text-emerald-200">connected</span>
+                            </div>
+                            <p className="mt-1 text-[11px] text-zinc-500">
+                              Tool prefix: <span className="font-mono text-zinc-400">{`${server.type}-${inst.slug}__`}</span>
+                              {" · "}Pinned by user {inst.createdByUserId ?? "unknown"}
+                              {" · "}last updated {new Date(inst.updatedAt).toLocaleString()}
+                            </p>
+                            {/* Reverse-lookup: which subagents have THIS
+                                instance pinned via mcpInstanceMap. Lets the
+                                operator see at a glance the blast radius of
+                                removing this instance. */}
+                            {(() => {
+                              const pinned = subagentsPinnedTo(server.type, inst.slug);
+                              if (pinned.length === 0) return null;
+                              return (
+                                <p className="mt-1 text-[11px] text-zinc-500">
+                                  Used by subagents:{" "}
+                                  {pinned.map((s, i) => (
+                                    <span key={s.id ?? s.name}>
+                                      <span className="rounded bg-purple-950 px-1 py-0.5 font-mono text-[10px] text-purple-300">
+                                        {s.name}
+                                      </span>
+                                      {i < pinned.length - 1 ? " " : ""}
+                                    </span>
+                                  ))}
+                                </p>
+                              );
+                            })()}
+                          </div>
+                          {canEdit && !isEditingThis && (
+                            <div className="flex shrink-0 gap-2">
+                              <button
+                                onClick={() => openForkModal(inst)}
+                                disabled={forkableSubagents.length === 0}
+                                title={forkableSubagents.length === 0
+                                  ? "No custom subagents available to fork. Create one in the Subagents admin first."
+                                  : "Fork a subagent pinned to this instance"}
+                                className="rounded border border-purple-800 px-2 py-1 text-xs text-purple-300 hover:bg-purple-950 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                Fork subagent
+                              </button>
+                              <button
+                                onClick={() => startEditInstance(server.type, inst.slug)}
+                                className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+                              >
+                                Update creds
+                              </button>
+                              <button
+                                onClick={() => remove(inst)}
+                                className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {isEditingThis && (
+                          <EditForm
+                            fields={fields}
+                            draft={editingDraft}
+                            setDraft={setEditingDraft}
+                            saving={saving}
+                            onSave={save}
+                            onCancel={cancelEdit}
+                            ctaLabel="Update credentials"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* "Add another" button OR the new-instance form */}
+              {canEdit && !isCreatingNew && (
+                <button
+                  onClick={() => startNewInstance(server.type)}
+                  className="mt-2 rounded border border-dashed border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                >
+                  + {instances.length === 0 ? "Connect" : "Add another"}
+                </button>
+              )}
+
+              {isCreatingNew && (() => {
+                const isFirstInstance = instances.length === 0;
+                return (
+                  <div className="mt-2 rounded border border-purple-700 bg-zinc-950 p-3">
+                    {isFirstInstance && (
+                      <p className="mb-3 text-[11px] text-zinc-500">
+                        Single instance? Just paste the credentials below and save —
+                        the defaults work. Set a custom display name + slug only if you
+                        plan to add a second {server.name} later.
+                      </p>
+                    )}
+                    <div className="space-y-2">
+                      <div>
+                        <label className="mb-1 block text-xs text-zinc-400">
+                          Display name {isFirstInstance && <span className="text-zinc-600">(optional)</span>}
+                        </label>
+                        <input
+                          type="text"
+                          value={newInstanceMeta.displayName}
+                          onChange={(e) => onNewDisplayNameChange(e.target.value)}
+                          placeholder={isFirstInstance ? server.name : `e.g. ${server.name} Prod`}
+                          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-zinc-400">
+                          Slug <span className="text-zinc-600">
+                            ({isFirstInstance ? "leave as 'default' unless you'll fork" : "short id used in tool names"})
+                          </span>
+                        </label>
+                        <input
+                          type="text"
+                          value={newInstanceMeta.slug}
+                          onChange={(e) => {
+                            setSlugDirty(true);
+                            setNewInstanceMeta((m) => ({ ...m, slug: e.target.value }));
+                          }}
+                          placeholder={isFirstInstance ? "default" : "prod"}
+                          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <p className="mt-1 text-[10px] text-zinc-500">
+                          Lowercase alphanumeric + hyphen. Tools will be prefixed{" "}
+                          <span className="font-mono text-zinc-400">{`${server.type}-${newInstanceMeta.slug || "<slug>"}__`}</span>.
+                        </p>
+                      </div>
+                    </div>
+                    <EditForm
+                      fields={fields}
+                      draft={editingDraft}
+                      setDraft={setEditingDraft}
+                      saving={saving}
+                      onSave={save}
+                      onCancel={cancelEdit}
+                      ctaLabel={isFirstInstance ? "Connect" : "Save instance"}
+                    />
+                  </div>
+                );
+              })()}
+            </div>
+          );
+        })}
+      </div>
+
+      {forkModal && (
+        <ForkSubagentModal
+          state={forkModal}
+          setState={setForkModal}
+          sources={forkableSubagents}
+          onSubmit={submitFork}
+          onClose={closeForkModal}
+        />
+      )}
+    </div>
+  );
+}
+
+interface ForkModalState {
+  instance: AgentMcpConnectionMeta;
+  sourceName: string;
+  newName: string;
+  enableOnAgent: boolean;
+  submitting: boolean;
+  error: string | null;
+}
+
+/** Modal for "Fork & connect a subagent to this MCP instance". The subagent
+ *  itself is global, but it's pinned to this specific (serverType, slug)
+ *  combination via `mcpInstanceMap`, and (by default) auto-enabled on the
+ *  current agent. Source selector is restricted to custom subagents — the
+ *  backend rejects builtin sources for now. */
+function ForkSubagentModal({
+  state,
+  setState,
+  sources,
+  onSubmit,
+  onClose,
+}: {
+  state: ForkModalState;
+  setState: React.Dispatch<React.SetStateAction<ForkModalState | null>>;
+  sources: SubagentDef[];
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  const { instance, sourceName, newName, enableOnAgent, submitting, error } = state;
+  /** Auto-update the suggested newName when the source changes — only if the
+   *  user hasn't customised newName beyond the auto-suggest yet (cheap
+   *  heuristic: still matches `<previousSource>-<instanceSlug>`). */
+  const onSourceChange = (next: string) => {
+    setState((m) => {
+      if (!m) return m;
+      const previousAutoSuggest = m.sourceName ? `${m.sourceName}-${m.instance.slug}` : "";
+      const newSuggest = next ? `${next}-${m.instance.slug}` : "";
+      return {
+        ...m,
+        sourceName: next,
+        newName: m.newName === previousAutoSuggest ? newSuggest : m.newName,
+      };
+    });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={submitting ? undefined : onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-lg border border-zinc-700 bg-zinc-950 p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="mb-4 text-base font-semibold text-zinc-100">
+          Fork a subagent for{" "}
+          <span className="font-mono text-purple-300">{instance.displayName}</span>
+        </h3>
+
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">Source subagent</label>
+            {sources.length === 0 ? (
+              <p className="text-xs text-zinc-500">
+                No custom subagents available. Create one from the Subagents admin tab first.
+              </p>
+            ) : (
+              <select
+                value={sourceName}
+                onChange={(e) => onSourceChange(e.target.value)}
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
+              >
+                {sources.map((s) => (
+                  <option key={s.id ?? s.name} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">New subagent name</label>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setState((m) => (m ? { ...m, newName: e.target.value } : m))}
+              placeholder="e.g. grafana-watchdog-prod"
+              className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Auto-suggested from <span className="font-mono">&lt;source&gt;-&lt;instance slug&gt;</span>. Lowercase letters, digits, hyphens.
+            </p>
+          </div>
+
+          <div className="rounded border border-zinc-800 bg-zinc-900 p-3 text-[11px] text-zinc-400">
+            The new subagent will be a copy of <span className="font-mono text-zinc-200">{sourceName || "<source>"}</span> with{" "}
+            <span className="font-mono text-zinc-300">
+              mcpInstanceMap = {`{ ${instance.mcpServerType}: "${instance.slug}" }`}
+            </span>
+            . It will only see tools prefixed{" "}
+            <span className="font-mono text-zinc-300">{`${instance.mcpServerType}-${instance.slug}__`}</span> at runtime.
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={enableOnAgent}
+              onChange={(e) => setState((m) => (m ? { ...m, enableOnAgent: e.target.checked } : m))}
+              className="h-3.5 w-3.5"
+            />
+            Enable on this agent immediately
+          </label>
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="rounded px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={submitting || sources.length === 0 || !sourceName || !newName.trim()}
+            className="rounded bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? "Forking…" : "Fork & Connect"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Inline cred-fields editor. Shared between "create new instance" and
+ *  "update existing instance" — same fields, same save/cancel buttons. */
+function EditForm({
+  fields,
+  draft,
+  setDraft,
+  saving,
+  onSave,
+  onCancel,
+  ctaLabel,
+}: {
+  fields: CredentialField[];
+  draft: Record<string, string>;
+  setDraft: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  saving: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+  ctaLabel: string;
+}) {
+  return (
+    <div className="mt-3">
+      {fields.length === 0 ? (
+        <p className="text-xs text-zinc-500">No credential schema published for this MCP. Skip for now.</p>
+      ) : (
+        <div className="space-y-2">
+          {fields.map((field) => (
+            <div key={field.name}>
+              <label className="mb-1 block text-xs text-zinc-400">
+                {field.label || field.name}
+                {field.optional ? " (optional)" : ""}
+              </label>
+              <input
+                type={field.type === "password" ? "password" : "text"}
+                value={draft[field.name] ?? ""}
+                onChange={(e) => setDraft((d) => ({ ...d, [field.name]: e.target.value }))}
+                placeholder={field.placeholder ?? ""}
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 flex gap-2">
+        <button
+          onClick={onSave}
+          disabled={saving || fields.length === 0}
+          className="rounded bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-900 transition hover:bg-white disabled:opacity-50"
+        >
+          {saving ? "Saving…" : ctaLabel}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          className="rounded px-3 py-1 text-xs text-zinc-400 hover:text-zinc-200"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}

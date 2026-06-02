@@ -5,9 +5,13 @@ import { CONFIG } from "../config.js";
 import { validateCredentials } from "../validation.js";
 import { checkHealth } from "../health.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
+import { evictSession } from "../mcp/runner.js";
 import { syncToolsForServer } from "../tool-sync.js";
+import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 
 const router = Router();
+
+router.use("/:userId", pinUserIdParam);
 
 router.get("/:userId/connections", async (req: Request<{ userId: string }>, res: Response) => {
   try {
@@ -84,7 +88,14 @@ router.post("/:userId/connections", async (req: Request<{ userId: string }>, res
       include: { mcpServer: true },
     });
 
-    // Auto-register tools from this MCP server
+    // Auto-register tools from this MCP server. First evict any cached MCP
+    // child process for this user+server — its env was baked at spawn time
+    // and won't pick up the new credentials we just wrote (token, sessionId,
+    // etc.) without a respawn. Without this, Spaces' x-session-id refresh
+    // path silently breaks because the cached child has the OLD env.
+    await evictSession(userId, serverExists.type).catch((err) => {
+      console.error(`[connections] evictSession failed for ${serverExists.type}:`, err);
+    });
     if (await hasConnectorDefinition(serverExists.type)) {
       syncToolsForServer(userId, serverExists.type, serverExists.name, credentials as Record<string, unknown>).catch((err) => {
         console.error(`[connections] tool sync failed for ${serverExists.type}:`, err);
@@ -115,28 +126,6 @@ router.delete("/:userId/connections/:id", async (req: Request<{ userId: string; 
 
     const connection = await prisma.userMcpConnection.findFirst({
       where: { id, userId },
-    });
-
-    if (!connection) {
-      res.status(404).json({ success: false, error: "Connection not found" });
-      return;
-    }
-
-    await prisma.userMcpConnection.delete({ where: { id } });
-    res.json({ success: true });
-  } catch (err) {
-    console.error("[connections] delete error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-router.get("/:userId/connections/:id/credentials", async (req: Request<{ userId: string; id: string }>, res: Response) => {
-  try {
-    const userId = req.params.userId;
-    const id = req.params.id;
-
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { id, userId },
       include: { mcpServer: true },
     });
 
@@ -145,23 +134,17 @@ router.get("/:userId/connections/:id/credentials", async (req: Request<{ userId:
       return;
     }
 
-    const decrypted = decrypt(
-      connection.encryptedCreds,
-      connection.iv,
-      connection.authTag,
-      CONFIG.encryptionKey,
-    );
+    await prisma.userMcpConnection.delete({ where: { id } });
 
-    res.json({
-      success: true,
-      data: {
-        mcpServerId: connection.mcpServerId,
-        mcpServer: connection.mcpServer,
-        credentials: JSON.parse(decrypted) as Record<string, unknown>,
-      },
+    // Drop any cached MCP client/transport for this (user, serverType) pair so
+    // the next listTools/callTool doesn't hit a stale bearer token.
+    await evictSession(userId, connection.mcpServer.type).catch((err) => {
+      console.error(`[connections] evictSession failed for ${connection.mcpServer.type}:`, err);
     });
+
+    res.json({ success: true });
   } catch (err) {
-    console.error("[connections] credentials error:", err);
+    console.error("[connections] delete error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -253,7 +236,32 @@ router.get("/:userId/connections/:id/health", async (req: Request<{ userId: stri
       return;
     }
 
+    // Calendly is an MCP-based adapter — use the standard MCP health check via checkHealth()
+    // (Do NOT call Calendly REST API directly as MCP OAuth tokens have different scopes)
+
     const result = await checkHealth(userId, connection.mcpServer.type, connection.mcpServer.name, credentials);
+
+    // Auto-sync tools on successful health check. The connection-create path
+    // already fires syncToolsForServer fire-and-forget at L97, but that can
+    // race the MCP child's cold-start (e.g. `npx -y @modelcontextprotocol/server-github`
+    // — observed in prod as "Connection closed" → tools table stays empty,
+    // health check later succeeds because npx has warmed up).
+    //
+    // Re-running sync here closes the gap: the user clicks "Health Check",
+    // sees ✓, and the tool table is guaranteed to reflect what the MCP server
+    // actually exposes. Sync is idempotent (upsert by slug), so this is a
+    // no-op when previous sync already succeeded. Fire-and-forget so the
+    // health-check response isn't delayed.
+    if (result.healthy) {
+      syncToolsForServer(
+        userId,
+        connection.mcpServer.type,
+        connection.mcpServer.name,
+        credentials,
+      ).catch((err) => {
+        console.error(`[connections] post-health tool sync failed for ${connection.mcpServer.type}:`, err);
+      });
+    }
 
     res.json({ success: true, data: result });
   } catch (err) {
@@ -302,8 +310,13 @@ router.post("/:userId/connections/auto-connect-spaces", async (req: Request<{ us
       });
     }
 
-    const credentials: Record<string, string> = { url: CONFIG.spacesBackendUrl, token: spacesToken };
+    const credentials: Record<string, string> = { url: CONFIG.spacesInternalUrl, token: spacesToken };
     if (sessionId) credentials["sessionId"] = sessionId;
+    // workspaceId is required by Spaces' legacy auth.ts middleware: it only
+    // looks at `req.cookies.xyne_session` *after* confirming `workspaceId` is
+    // present (header or `xyne_last_workspace` cookie). Without it the
+    // session-refresh path is skipped entirely → 401 once the JWT expires.
+    if (lastWorkspace) credentials["workspaceId"] = lastWorkspace;
     // TEMP [sid-debug] — remove after verifying
     console.log(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);
     const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
@@ -315,6 +328,14 @@ router.post("/:userId/connections/auto-connect-spaces", async (req: Request<{ us
       include: { mcpServer: true },
     });
 
+    // Evict the cached MCP child so its baked-in env (XYNE_SPACES_SESSION_ID,
+    // XYNE_SPACES_TOKEN) is replaced with the freshly stored creds on the
+    // next mcp/call. Without this, the child keeps its original env forever
+    // and Spaces 401s once the original token expires (sessionId never gets
+    // sent because the child was spawned with an empty/stale one).
+    await evictSession(userId, serverType).catch((err) => {
+      console.error(`[connections] evictSession failed for ${serverType}:`, err);
+    });
     if (await hasConnectorDefinition(serverType)) {
       syncToolsForServer(userId, serverType, server.name, credentials).catch((err) => {
         console.error(`[connections] tool sync failed for ${serverType}:`, err);

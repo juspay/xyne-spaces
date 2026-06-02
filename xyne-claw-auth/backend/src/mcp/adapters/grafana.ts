@@ -85,15 +85,30 @@ export const GRAFANA_CUSTOM_TOOLS: McpToolInfo[] = [
   {
     name: "grafana-query-database",
     description:
-      "Execute read-only SQL against Xyne Spaces PostgreSQL via Grafana datasource proxy. " +
-      "Use for investigating data issues — user counts, channel stats, message counts. SELECT only.",
+      "Execute read-only SQL against any SQL datasource wired into this Grafana instance " +
+      "(PostgreSQL / MySQL / MSSQL / ClickHouse / etc.) via /api/ds/query. " +
+      "Workflow: first call `list_datasources` to discover the UID + type, then pass them here. " +
+      "SELECT (or WITH ... SELECT) only — writes are rejected. For ClickHouse, use ISO timestamps " +
+      "in the SQL itself (Grafana relative ranges aren't honored by all SQL plugins).",
     inputSchema: {
       type: "object",
       properties: {
-        sql: { type: "string", description: 'SQL query (SELECT only). e.g. "SELECT count(*) FROM channels"' },
+        datasourceUid: {
+          type: "string",
+          description:
+            "Datasource UID from list_datasources. Required — never guess; the previous hardcoded " +
+            "Spaces-Postgres default has been removed.",
+        },
+        datasourceType: {
+          type: "string",
+          description:
+            'Grafana datasource type, e.g. "grafana-postgresql-datasource", "mysql", ' +
+            '"grafana-clickhouse-datasource". Get it from list_datasources.',
+        },
+        sql: { type: "string", description: 'SQL query (SELECT or WITH ... SELECT). e.g. "SELECT count(*) FROM channels"' },
         timeRange: { type: "string", description: 'Time range context (default "1h"). e.g. "1h", "6h", "24h"' },
       },
-      required: ["sql"],
+      required: ["datasourceUid", "datasourceType", "sql"],
     },
   },
 ];
@@ -261,18 +276,25 @@ export async function handleGrafanaQueryDatabase(
   const baseUrl = credentials["url"] as string;
   const token = credentials["token"] as string;
 
+  const datasourceUid = params["datasourceUid"] as string | undefined;
+  const datasourceType = params["datasourceType"] as string | undefined;
   const sql = (params["sql"] as string).trim();
   const timeRange = (params["timeRange"] as string) || "1h";
 
-  if (!/^SELECT\b/i.test(sql)) return "Error: Only SELECT queries are allowed.";
-  if (/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE)\b/i.test(sql)) return "Error: Write operations are not allowed.";
+  if (!datasourceUid || !datasourceType) {
+    return "Error: datasourceUid and datasourceType are required. Call list_datasources first to discover them.";
+  }
+  if (!/^(SELECT|WITH)\b/i.test(sql)) return "Error: Only SELECT (or WITH ... SELECT) queries are allowed.";
+  if (/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|ATTACH|DETACH|OPTIMIZE)\b/i.test(sql)) {
+    return "Error: Write/DDL operations are not allowed.";
+  }
 
   const res = await grafanaFetch(baseUrl, token, "/api/ds/query", {
     method: "POST",
     body: JSON.stringify({
       queries: [{
         refId: "A",
-        datasource: { uid: "ff66nac1wz3eoe", type: "grafana-postgresql-datasource" },
+        datasource: { uid: datasourceUid, type: datasourceType },
         rawSql: sql,
         format: "table",
       }],

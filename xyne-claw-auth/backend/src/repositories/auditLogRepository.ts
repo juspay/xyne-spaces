@@ -24,4 +24,12 @@ export const auditLogRepository = {
       take: options?.limit ?? 50,
       skip: options?.offset ?? 0,
     }),
+
+  count: (options?: { eventType?: string | undefined; targetId?: string | undefined }) =>
+    prisma.agentAuditLog.count({
+      where: {
+        ...(options?.eventType ? { eventType: options.eventType as AgentAuditEvent } : {}),
+        ...(options?.targetId ? { targetId: options.targetId } : {}),
+      },
+    }),
 };

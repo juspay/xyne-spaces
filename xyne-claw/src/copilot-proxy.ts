@@ -12,6 +12,17 @@
  *   User-Agent: opencode/<version>
  *   Openai-Intent: conversation-edits
  *   x-initiator: "user" (last msg role=user) | "agent" (tool turns)
+ *
+ * The GitHub OAuth access_token (from device-code flow with read:user scope)
+ * is sent directly as the Bearer — opencode does the same. GitHub's edge
+ * derives session-scoped tokens server-side; we don't run our own
+ * /copilot_internal/v2/token exchange (that endpoint 404s for the OAuth
+ * scopes we have anyway).
+ *
+ * If a request returns 401 with "authentication token is expired", the
+ * user's OAuth token itself has been revoked/expired (e.g. they re-logged in
+ * elsewhere) and they need to re-authenticate. We surface that error rather
+ * than papering over it.
  */
 
 import * as http from "node:http";

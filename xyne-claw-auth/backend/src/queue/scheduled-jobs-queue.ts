@@ -41,6 +41,13 @@ export async function enqueueDelayedJob(
   return job.id!;
 }
 
+// All cron expressions are interpreted in Asia/Kolkata. BullMQ defaults to
+// UTC, which previously made "0 0 * * *" fire at 5:30 AM IST instead of
+// midnight IST — that was the merchant-paglu "schedule didn't execute"
+// incident. Hardcoded because we're a single-team deployment; if multi-tz
+// becomes a real need, lift this to a per-job column on ScheduledJob.
+const SCHEDULER_TZ = "Asia/Kolkata";
+
 export async function enqueueCronJob(
   schedulerId: string,
   data: ScheduledJobData,
@@ -48,7 +55,7 @@ export async function enqueueCronJob(
 ): Promise<string> {
   await getQueue().upsertJobScheduler(
     schedulerId,
-    { pattern: cronExpression },
+    { pattern: cronExpression, tz: SCHEDULER_TZ },
     { name: "cron-run", data },
   );
   return schedulerId;

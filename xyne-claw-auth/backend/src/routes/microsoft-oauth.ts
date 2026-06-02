@@ -12,6 +12,8 @@ import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
+import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
+import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 
 const MICROSOFT_SCOPES = [
   "openid",
@@ -60,6 +62,7 @@ interface MicrosoftTokens {
 }
 
 const router = Router();
+router.use("/:userId", pinUserIdParam);
 
 /**
  * GET /:userId/oauth/microsoft/token
@@ -155,7 +158,7 @@ router.post("/:userId/oauth/microsoft/authorize", async (req: Request<{ userId: 
     authUrl.searchParams.set("scope", MICROSOFT_SCOPES.join(" "));
     authUrl.searchParams.set("response_mode", "query");
     authUrl.searchParams.set("prompt", "consent");
-    authUrl.searchParams.set("state", userId);
+    authUrl.searchParams.set("state", signOAuthState(userId));
 
     res.json({ success: true, data: { authUrl: authUrl.toString() } });
   } catch (err) {
@@ -263,15 +266,15 @@ router.post("/:userId/oauth/microsoft/callback", async (req: Request<{ userId: s
 export const microsoftCallbackRouter = Router();
 
 microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Response) => {
+  const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
+
   try {
-    const { code, state: userId, error: oauthError, error_description } = req.query as {
+    const { code, state, error: oauthError, error_description } = req.query as {
       code?: string;
       state?: string;
       error?: string;
       error_description?: string;
     };
-
-    const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
 
     if (oauthError) {
       console.error(`[microsoft-oauth] OAuth error: ${oauthError} — ${error_description}`);
@@ -279,8 +282,18 @@ microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Res
       return;
     }
 
-    if (!code || !userId) {
+    if (!code || !state) {
       res.redirect(`${frontendUrl}?microsoft_error=missing_code_or_state`);
+      return;
+    }
+
+    let userId: string;
+    try {
+      userId = verifyOAuthState(state).userId;
+    } catch (err) {
+      const reason = err instanceof OAuthStateError ? err.reason : "malformed";
+      console.error(`[microsoft-oauth] state ${reason}`);
+      res.redirect(`${frontendUrl}?microsoft_error=invalid_state`);
       return;
     }
 
@@ -365,7 +378,6 @@ microsoftCallbackRouter.get("/microsoft/callback", async (req: Request, res: Res
     res.redirect(`${frontendUrl}?microsoft_connected=true`);
   } catch (err) {
     console.error("[microsoft-oauth] browser callback error:", err);
-    const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
     res.redirect(`${frontendUrl}?microsoft_error=internal_error`);
   }
 });

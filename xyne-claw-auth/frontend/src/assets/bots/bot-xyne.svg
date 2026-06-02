@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
+  <!-- Bot head -->
+  <rect x="8" y="12" width="24" height="18" rx="4" fill="#101828"/>
+  <!-- Eyes — glowing -->
+  <circle cx="15" cy="20" r="3" fill="#6366f1" opacity="0.9"/>
+  <circle cx="25" cy="20" r="3" fill="#6366f1" opacity="0.9"/>
+  <circle cx="15" cy="20" r="1.5" fill="white"/>
+  <circle cx="25" cy="20" r="1.5" fill="white"/>
+  <!-- Mouth — smile line -->
+  <path d="M14 26 Q20 29 26 26" stroke="#6366f1" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <!-- Antenna -->
+  <line x1="20" y1="12" x2="20" y2="7" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="20" cy="6" r="2" fill="#6366f1"/>
+  <!-- Ears -->
+  <rect x="4" y="17" width="4" height="8" rx="2" fill="#1e293b"/>
+  <rect x="32" y="17" width="4" height="8" rx="2" fill="#1e293b"/>
+</svg>

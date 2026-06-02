@@ -5,6 +5,7 @@ export {
   sandboxPollJob,
   sandboxWriteFile,
   sandboxReadFile,
+  sandboxDeliverFiles,
   sandboxDestroy,
   sandboxRepoSetup,
   SANDBOX_CONFIG_SCHEMA,

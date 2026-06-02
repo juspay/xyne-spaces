@@ -10,6 +10,9 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@base-ui-components/react": "^1.0.0-rc.0",
+    "@dagrejs/dagre": "^3.0.0",
+    "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-alert-dialog": "^1.1.0",
     "@radix-ui/react-dialog": "^1.1.0",
     "@radix-ui/react-label": "^2.1.0",
@@ -17,6 +20,7 @@
     "@radix-ui/react-toast": "^1.2.0",
     "@radix-ui/react-tooltip": "^1.1.0",
     "@tailwindcss/typography": "^0.5.19",
+    "@xyflow/react": "^12.10.2",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "lucide-react": "^0.460.0",

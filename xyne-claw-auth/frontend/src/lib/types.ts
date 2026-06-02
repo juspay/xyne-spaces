@@ -70,13 +70,20 @@ export interface AgentTool {
   readonly id: string;
   readonly toolId: string;
   readonly permission: string;
-  readonly tool: { readonly slug: string; readonly name: string; readonly source: string };
+  readonly tool: { readonly slug: string; readonly name: string; readonly source: string; readonly description?: string };
 }
 
 export interface AgentSkill {
   readonly id: string;
   readonly skillId: string;
   readonly skill: { readonly slug: string; readonly name: string; readonly description: string; readonly content: string };
+}
+
+export interface AgentShare {
+  readonly id: string;
+  readonly userId: string;
+  readonly role: string;
+  readonly user: { readonly id: string; readonly name: string; readonly email: string };
 }
 
 export interface Agent {
@@ -96,8 +103,15 @@ export interface Agent {
   readonly spacesAppToken: string | null;
   readonly tools: AgentTool[];
   readonly skills?: AgentSkill[];
+  readonly shares?: AgentShare[];
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly owner?: {
+    readonly id: string;
+    readonly name: string;
+    readonly email: string;
+    readonly googleId?: string | null;
+  } | null;
 }
 
 export interface ScheduledJob {
@@ -115,6 +129,10 @@ export interface ScheduledJob {
   readonly nextRunAt: string | null;
   readonly lastRunAt: string | null;
   readonly label: string | null;
+  readonly replyMode: "thread" | "channel";
+  /** Override target channel for `replyMode = "channel"`. Null = use the
+   *  originating `channelId`. Settable from the Scheduled Jobs UI. */
+  readonly targetChannelId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

@@ -19,11 +19,82 @@ model User {
   agentConfigs UserAgentConfig[]
   roles        UserRole[]
   sharedAgents AgentShare[]
+  sharedSubagents SubagentShare[]
   skills           Skill[]
   providerCredentials UserProviderCredentials[]
   subagentConfigs     UserSubagentConfig[]
+  createdChainWorkflows AgentChainWorkflow[]    @relation("CreatedChainWorkflows")
+  createdChainBindings  ChannelAgentChainBinding[] @relation("CreatedChainBindings")
+
+  /// Digital Twin opt-in. Pipeline (backfill + daily curator + recall) is fully
+  /// dormant when false — nothing about this user's Spaces data gets read.
+  digitalTwinEnabled       Boolean    @default(false)
+  digitalTwinEnabledAt     DateTime?
+  /// Optional string appended to the end of every Digital Twin reply
+  /// (mention-driven flow). Capped at 500 chars. Empty / null = no suffix.
+  /// Typical use: disclaimer ("— sent via Digital Twin"), contact line,
+  /// or a "may contain mistakes" footer.
+  digitalTwinResponseSuffix String?
+  /// Per-source backfill state. JSON shape:
+  ///   { messages: { from, to, cursor, complete },
+  ///     calls:    { from, to, cursor, complete },
+  ///     canvases: { from, to, cursor, complete } }
+  /// `cursor` walks newest → oldest; `complete=true` set when cursor crosses `from`.
+  /// Restart-resumable: BullMQ jobs re-pick up from cursor on pod restart.
+  digitalTwinBackfillState Json?
+  userMemoryCandidates     UserMemoryCandidate[]
 
   @@map("users")
+}
+
+/// Per-user candidate memories awaiting the user's own review. Grouped into
+/// clusters by `subsystem` so the user can approve-all per cluster.
+///
+/// Privacy contract: only the owning user (req.session.userId === userId) can
+/// read, edit, approve, or delete these rows. No admin elevation. No other
+/// agent reads them — the recall gate on `memory-search` enforces this when
+/// the agent is the Digital Twin (slug=`assistant`) and the user has opted in.
+model UserMemoryCandidate {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Cluster label. One of: "style" | "expertise" | "projects" |
+  /// "relationships" | "preferences" | "decisions" | "context" | "docs"
+  subsystem         String
+
+  /// The memory text the curator emitted, ≤ 1500 chars.
+  text              String
+  /// If the user edited before approving, the edited version goes here; the
+  /// curator's original stays in `text` for audit.
+  editedText        String?
+
+  /// Origin records the curator drew from. JSON shape:
+  ///   [{ type: "message"|"call"|"canvas", id, channelId?, ts }]
+  /// Used to show citations on the review card and to dedupe across windows.
+  sourceRefs        Json
+
+  /// Curator's 0-1 confidence. Used to sort the cluster view top-down and to
+  /// pick "highlights" if we ever shift away from cluster-batched approval.
+  signalScore       Float
+
+  /// "pending" | "approved" | "rejected"
+  status            String   @default("pending")
+  /// Set on approve — the Hindsight memory ID this content was retained as.
+  hindsightMemoryId String?
+
+  /// Which run emitted this candidate. "backfill:<jobId>:<source>:<windowKey>"
+  /// or "daily:<YYYY-MM-DD>:<source>" or "upload:<filename>".
+  source            String
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+
+  @@index([userId, status])
+  @@index([userId, subsystem, status])
+  @@map("user_memory_candidates")
 }
 
 model UserRole {
@@ -53,6 +124,75 @@ model UserAgentConfig {
   @@map("user_agent_configs")
 }
 
+model AgentChainWorkflow {
+  id              String                    @id @default(cuid())
+  name            String
+  definition      Json
+  isPublished     Boolean                   @default(true)
+  /// When true, this workflow has been promoted to "global" by an admin: its
+  /// bindings are opened to all users (userId="*"). Set on approval of a
+  /// WorkflowGlobalRequest.
+  global          Boolean                   @default(false)
+  createdByUserId String
+  createdByUser   User                      @relation("CreatedChainWorkflows", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  bindings        ChannelAgentChainBinding[]
+  globalRequests  WorkflowGlobalRequest[]
+
+  @@index([createdByUserId])
+  @@map("agent_chain_workflows")
+}
+
+/// "Push to global" approval queue. A workflow owner requests that their
+/// workflow be made available to ALL users; an admin reviews in the dashboard
+/// and approves (sets workflow.global=true and rewires its bindings to
+/// userId="*") or rejects. Mirrors the McpConnectorEditRequest flow.
+model WorkflowGlobalRequest {
+  id               String             @id @default(cuid())
+  workflowId       String
+  workflow         AgentChainWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  /// User who requested promotion. Plain id (no FK), mirroring edit-requests.
+  requestedByUserId String
+  /// "pending" | "approved" | "rejected" | "cancelled"
+  status           String             @default("pending")
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  reviewNote       String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([status, createdAt])
+  @@index([workflowId, status])
+  @@map("workflow_global_requests")
+}
+
+model ChannelAgentChainBinding {
+  id              String             @id @default(cuid())
+  channelId       String
+  entryAgentSlug  String
+  // User this binding applies to (the triggering user's id == Spaces user id ==
+  // claw-auth User.id). A binding fires only when THIS user triggers the entry
+  // agent in the channel. The reserved sentinel "*" means channel-wide (any
+  // user) and must be set explicitly; it is never a real cuid so it can't
+  // collide. Legacy rows were backfilled to createdByUserId (scoped to their
+  // creator), NOT "*", on purpose — that is the leak this column fixes.
+  userId          String
+  workflowId      String
+  workflow        AgentChainWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  enabled         Boolean            @default(true)
+  createdByUserId String
+  createdByUser   User               @relation("CreatedChainBindings", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([channelId, entryAgentSlug, userId])
+  @@index([workflowId])
+  @@index([channelId])
+  @@index([userId])
+  @@map("channel_agent_chain_bindings")
+}
+
 model UserProviderCredentials {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -63,6 +203,7 @@ model UserProviderCredentials {
   model        String?
   baseUrl      String?
   authType     String?  /// "api_key" (default) | "oauth_token" — how to send the credential at runtime
+  reasoningEffort String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models (codex gpt-5.x, etc.). Null = service default ("medium").
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -82,6 +223,33 @@ model UserSubagentConfig {
   @@map("user_subagent_configs")
 }
 
+/// Agent-scoped fallback for users who haven't configured a personal provider.
+/// Resolution precedence at dispatch:
+///   1. user's personal provider (UserProviderCredentials)
+///   2. this table (shared key for the agent — e.g. team's Codex sub on Doctor)
+///   3. "spaces" / LiteLLM platform default
+/// Writes gated by AGENT_OWNER or admin. Decrypted key never returned to any
+/// API surface — only ever decrypted in-process at dispatch time.
+model AgentProviderCredentials {
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  provider        String   /// "copilot" | "claude" | "codex" | "openrouter" | ...
+  encryptedKey    String?  @db.Text
+  iv              String?
+  authTag         String?
+  model           String?
+  baseUrl         String?
+  authType        String?  /// "api_key" (default) | "oauth_token"
+  reasoningEffort String?  /// "low" | "medium" | "high" — only meaningful for reasoning-capable models. Null = service default ("medium").
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@id([agentId, provider])
+  @@index([createdByUserId])
+  @@map("agent_provider_credentials")
+}
+
 model Agent {
   id                   String           @id @default(cuid())
   slug                 String           @unique
@@ -99,6 +267,12 @@ model Agent {
   spacesAppId          String?          @unique
   spacesAppUserId      String?
   spacesAppToken       String?  @db.Text
+  /// HMAC-SHA256 secret claw-auth uses to verify Spaces' `X-Xyne-Signature`
+  /// header on inbound webhook calls. Encrypted at rest with the AES-256-GCM
+  /// 3-tuple format (ciphertext:iv:authTag, base64). Same plaintext as
+  /// Spaces' `installed_apps.signingSecret` but stored under claw-auth's
+  /// encryption format. See lib/spaces-app-secret.ts.
+  signingSecret        String?  @db.Text
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   promotedBy           String?
@@ -106,6 +280,8 @@ model Agent {
   tools                AgentTool[]
   skills               AgentSkill[]
   shares               AgentShare[]
+  mcpConnections       AgentMcpConnection[]
+  providerCredentials  AgentProviderCredentials[]
 
   @@map("agents")
 }
@@ -137,6 +313,8 @@ model AgentRun {
   conversationId   String?
   scheduledJobId   String?
   channelId        String?
+  projectId        String?
+  projectName      String?
   result           String?   @db.Text
   error            String?   @db.Text
   toolsUsed        String[]  @default([])
@@ -145,6 +323,18 @@ model AgentRun {
   tokensOut        Int?
   tokensCacheRead  Int?
   tokensCacheWrite Int?
+  /// Wall-clock breakdown from xyne-claw. See `LatencyMetrics` in
+  /// xyne-claw/src/agent.ts. Populated on /webhook/result.
+  totalMs          Int?
+  llmTotalMs       Int?
+  llmDecodeMs      Int?
+  llmWaitMs        Int?
+  llmTurns         Int?
+  llmRetries       Int?
+  ttftMs           Int?
+  tokensPerSec     Int?
+  toolMs           Int?
+  lastRetryReason  String?   @db.Text
   rating           String?   /// "up" | "down"
   ratingComment    String?   @db.Text
   ratedAt          DateTime?
@@ -227,6 +417,24 @@ enum AgentAuditEvent {
   REQUEST_CREATED
   REQUEST_APPROVED
   REQUEST_REJECTED
+  MCP_GLOBAL_FALLBACK_ENABLED
+  MCP_GLOBAL_FALLBACK_DISABLED
+  MCP_GLOBAL_CREDENTIALS_SET
+  MCP_GLOBAL_CREDENTIALS_REMOVED
+  // Connector-definition writes — added after a launchConfigTemplate.env
+  // got silently wiped to {} on a connector form save with no audit trail
+  // (ppi-grafana-v2 incident, 2026-05-22). Capture actor + before/after so
+  // the next mis-save is debuggable in one query.
+  MCP_CONNECTOR_CREATED
+  MCP_CONNECTOR_UPDATED
+  MCP_CONNECTOR_DELETED
+  // Global-connector edit-approval queue (post-incident hardening — direct
+  // edits to scope=global rows are forbidden; all changes flow through here).
+  MCP_CONNECTOR_EDIT_REQUESTED
+  MCP_CONNECTOR_EDIT_APPROVED
+  MCP_CONNECTOR_EDIT_REJECTED
+  MCP_CONNECTOR_EDIT_SUPERSEDED
+  MCP_CONNECTOR_EDIT_CANCELLED
 }
 
 model AgentAuditLog {
@@ -258,8 +466,33 @@ model Skill {
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
   agents       AgentSkill[]
+  subagents    SubagentSkill[]
+  files        SkillFile[]
 
   @@map("skills")
+}
+
+/**
+ * Sibling files that ship alongside a skill's main SKILL.md (which lives in
+ * Skill.content). Materialized into the session workspace under
+ * `data/session-skills/<scope>/<slug>/<relativePath>` so pi's resource
+ * loader sees the whole directory.
+ *
+ * relativePath is always a normalized POSIX path inside the skill dir —
+ * no leading slash, no "..", no absolute paths. Enforced at write time.
+ */
+model SkillFile {
+  id           String   @id @default(cuid())
+  skillId      String
+  skill        Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  relativePath String
+  content      String   @db.Text
+  contentType  String?
+  sizeBytes    Int
+  createdAt    DateTime @default(now())
+
+  @@unique([skillId, relativePath])
+  @@map("skill_files")
 }
 
 model AgentSkill {
@@ -341,14 +574,90 @@ model McpServer {
   healthcheckSpec      Json?
   writeToolPolicy      Json?
   connectorMeta        Json?
+  /// Whether this server type can fall back to admin-managed global
+  /// credentials when a user has no personal connection. Off by default —
+  /// admins must opt-in per server (e.g. enable it for shared infra creds
+  /// like a corporate Bitbucket bot, but never for per-user OAuth like
+  /// google/microsoft/xyne-spaces).
+  allowGlobalFallback Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   connections UserMcpConnection[]
+  agentConnections AgentMcpConnection[]
+  globalCredentials GlobalMcpCredentials?
+  editRequests      McpConnectorEditRequest[]
 
   @@unique([type])
   @@index([enabled])
   @@index([transport])
   @@map("mcp_servers")
+}
+
+/// Pending edit to a `scope=global` McpServer row. Direct edits to global
+/// connectors are forbidden — instead an edit-request is created and a
+/// CLAW_ADMIN reviews/approves before the change touches the live row.
+///
+/// Why: the ppi-grafana-v2 incident on 2026-05-22 (env wiped to `{}` via
+/// a single non-audited save) broke every Twin call for hours. With this
+/// queue, the proposed change sits visible in the admin panel; no live
+/// connector ships with an un-reviewed mutation.
+///
+/// Lifecycle:
+///   pending  → admin approve  → fields copied onto McpServer, row marked approved
+///   pending  → admin reject   → discarded with note
+///   pending  → owner cancel   → discarded by proposer
+/// At most one `pending` request per (mcpServerId) — a new submission while
+/// one is open replaces the previous (the prior row's status flips to
+/// `superseded` so the audit trail is preserved).
+model McpConnectorEditRequest {
+  id            String    @id @default(cuid())
+  mcpServerId   String
+  mcpServer     McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+
+  /// User who proposed the change. Captured via x-user-id at submission time.
+  proposedByUserId String
+  proposedAt       DateTime @default(now())
+
+  /// Full proposed snapshot of the editable McpServer fields. Stored as a
+  /// single JSON blob so adding a new mutable field on McpServer doesn't
+  /// require this model's schema to evolve.
+  /// Shape: { name?, url?, description?, transport?, credentialForm?,
+  ///          credentialSchema?, launchConfigTemplate?, httpConfigTemplate?,
+  ///          healthcheckSpec?, writeToolPolicy?, connectorMeta? }
+  proposedFields Json
+
+  /// "pending" | "approved" | "rejected" | "superseded" | "cancelled"
+  status        String    @default("pending")
+
+  /// Set on approve/reject/supersede.
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  /// Admin's reject note OR system-generated note for supersede/cancel.
+  reviewNote       String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([mcpServerId, status])
+  @@index([status, createdAt])
+  @@map("mcp_connector_edit_requests")
+}
+
+/// Admin-managed global credentials per MCP server. At call time, user-level
+/// credentials take precedence; this row is the fallback when a user hasn't
+/// connected the server personally AND McpServer.allowGlobalFallback=true.
+model GlobalMcpCredentials {
+  id             String    @id @default(cuid())
+  mcpServerId    String    @unique
+  mcpServer      McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  encryptedCreds String
+  iv             String
+  authTag        String
+  setByUserId    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("global_mcp_credentials")
 }
 
 model UserMcpConnection {
@@ -367,6 +676,45 @@ model UserMcpConnection {
   @@map("user_mcp_connections")
 }
 
+/// Agent-scoped MCP credentials. Used when an agent must always reach a
+/// specific instance of an MCP (e.g. hyperswitch-agent → Hyperswitch
+/// Grafana, xyne-agent → Xyne Grafana) regardless of who's invoking it.
+///
+/// Resolution order in loadEffectiveCredentials:
+///   1. agent  — this table, keyed by (agentId, mcpServerId)
+///   2. user   — UserMcpConnection
+///   3. global — GlobalMcpCredentials (when McpServer.allowGlobalFallback)
+///   4. error
+///
+/// Same encryption envelope as UserMcpConnection (AES-GCM, paste-once,
+/// never read back via API). Owner / contributors / admins can update.
+model AgentMcpConnection {
+  id              String    @id @default(cuid())
+  agentId         String
+  agent           Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  mcpServerId     String
+  mcpServer       McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  /// Stable short identifier for this instance, scoped to (agent, server).
+  /// Surfaced in the tool prefix the agent sees (`<serverType>-<slug>__<tool>`)
+  /// and in the DELETE route. Existing single-instance rows are backfilled
+  /// with 'default' by the migration. Allowed chars: lowercase alnum + hyphen.
+  slug            String    @default("default")
+  /// Optional human-readable name shown in the admin UI, e.g. "Grafana Prod".
+  /// Falls back to mcpServer.name when null.
+  displayName     String?
+  encryptedCreds  String
+  iv              String
+  authTag         String
+  /// User who pasted the creds — used in audit logs.
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([agentId, mcpServerId, slug])
+  @@index([agentId])
+  @@map("agent_mcp_connections")
+}
+
 model ScheduledJob {
   id               String    @id @default(cuid())
   userId           String
@@ -375,6 +723,12 @@ model ScheduledJob {
   context          String?   @db.Text
   channelId        String?
   conversationId   String?
+  // Spaces workspace the job was scheduled in. Required by Spaces app API
+  // (postMessage / openDm) when the worker delivers results. Captured from
+  // the `xyne_last_workspace` cookie at job-creation time. Nullable for rows
+  // created before this column existed; those jobs can't deliver to Spaces
+  // and will need to be recreated by the user.
+  workspaceId      String?
   type             String
   delayMs          BigInt?
   cronExpression   String?
@@ -386,6 +740,10 @@ model ScheduledJob {
   nextRunAt        DateTime?
   lastRunAt        DateTime?
   label            String?
+  replyMode        String    @default("thread")
+  // Override channel for `replyMode = "channel"` deliveries. NULL means
+  // "use the originating channelId" so existing rows behave unchanged.
+  targetChannelId  String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   runs             ScheduledJobRun[]
@@ -410,4 +768,203 @@ model ScheduledJobRun {
 
   @@index([scheduledJobId])
   @@map("scheduled_job_runs")
+}
+
+// User-created subagent definitions. Built-in subagents live in code
+// (xyne-claw-shared SUBAGENT_DEFINITIONS) and are not represented here —
+// validation rejects names that collide with built-ins at create time so
+// the runtime resolver can simply prefer built-ins on lookup.
+model SubagentDefinition {
+  id                String   @id @default(cuid())
+  name              String   @unique
+  description       String
+  progressLabels    Json
+  systemPrompt      String   @db.Text
+  paramName         String   @default("question")
+  paramDescription  String
+  // Same JSON shape as Agent.config.tools — parsed by parseToolsConfig
+  // in xyne-claw-shared. Defines which tools the subagent's child LLM
+  // can call.
+  tools             Json
+  enabled           Boolean  @default(true)
+  /// Per-MCP-server instance pin. Companion to AgentMcpConnection.slug —
+  /// lets the subagent restrict itself to ONE agent-pinned MCP instance
+  /// per server type. Example:
+  ///   { "grafana": "prod", "elasticsearch": "logs-cluster" }
+  /// At runtime the runner only spawns the matching agent instance and
+  /// surfaces just that instance's tools (e.g. `grafana-prod__query`).
+  /// NULL or missing keys = inherit all instances of that server type
+  /// from the parent agent (Stance A — today's behavior).
+  mcpInstanceMap    Json?
+  /// Creator / owner. NULL only for legacy or admin-seeded rows. The CRUD
+  /// route fills this with the requester's userId on create and uses it as
+  /// the ACL anchor (owner + shares + admin can edit; everyone reads).
+  createdByUserId   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  skills            SubagentSkill[]
+  shares            SubagentShare[]
+
+  @@map("subagent_definitions")
+}
+
+model SubagentShare {
+  id                    String   @id @default(cuid())
+  subagentDefinitionId  String
+  userId                String
+  /// "EDITOR" by default. Subagents are globally visible to all users so
+  /// a separate VIEWER role is meaningless; shares are strictly about
+  /// granting additional edit rights beyond the owner.
+  role                  String   @default("EDITOR")
+  sharedBy              String?
+  createdAt             DateTime @default(now())
+
+  subagentDefinition SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([subagentDefinitionId, userId])
+  @@map("subagent_shares")
+}
+
+model SubagentSkill {
+  id                    String             @id @default(cuid())
+  subagentDefinitionId  String
+  subagentDefinition    SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
+  skillId               String
+  skill                 Skill              @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([subagentDefinitionId, skillId])
+  @@map("subagent_skills")
+}
+
+
+model PendingMemoryReview {
+  id                 String    @id @default(cuid())
+  agentSlug          String
+  userId             String?   /// null for "shared" scope reviews
+  /// Hindsight memory ID. NULL until the candidate is approved — on approve,
+  /// the curator-distilled content is retained to Hindsight and the returned
+  /// memory id stored here. On reject, stays NULL (Hindsight never sees it).
+  hindsightMemoryId  String?
+  content            String    @db.Text
+  scope              String    /// "shared" | "user"
+  category           String?   /// Set by the curator: "preference" | "fact" | "pattern" | "caution"
+  /// Session that produced this candidate. Used for audit + retain tagging.
+  sessionId          String?
+  /// Subsystem this candidate targets (curator-classified). Subsystem
+  /// taxonomy is discovered from Hindsight tags (subsystem:X), NOT hardcoded.
+  subsystem          String?
+  /// "create" | "update". Determines whether approve retains (+ deletes the
+  /// replaced memory) or only retains.
+  action             String?
+  /// On update: the Hindsight memory ID this candidate will REPLACE on approve.
+  /// On create: NULL.
+  replacesMemoryId   String?
+  /// True when the curator proposed a subsystem name that doesn't yet exist
+  /// in the bank — admin should scrutinize naming before approving.
+  isNewSubsystem     Boolean   @default(false)
+  status             String    @default("pending") /// "pending" | "approved" | "rejected"
+  spacesMessageId    String?   /// Spaces message ID of the approval request (for updates)
+  curatorReasoning   String?   @db.Text /// Why the nightly curator emitted this candidate
+  curatorConfidence  Float?
+  tokensIn           Int?
+  tokensOut          Int?
+  toolCount          Int?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status])
+  @@index([agentSlug])
+  @@index([agentSlug, status])
+  @@map("pending_memory_reviews")
+}
+
+/// One batch-review row per (agent, date). The night after sessions run,
+/// the cron groups the day's transcripts by agentSlug, applies a heuristic
+/// to drop junk sessions, and creates one of these rows per agent. An admin
+/// approves or rejects the whole batch (or cherry-picks specific sessions);
+/// only on approval does the transcript get retained to the memory provider.
+/// This means rejected sessions cost zero LLM extraction tokens.
+model PendingBatchReview {
+  id                    String   @id @default(cuid())
+  agentSlug             String
+  reviewDate            String   /// YYYY-MM-DD — date the sessions ran (UTC)
+  status                String   @default("pending") /// "pending" | "approved" | "rejected" | "partial"
+  /// All session IDs in this batch that passed the heuristic filter
+  /// (i.e., are eligible for human review).
+  sessionIds            String[]
+  /// Subset of sessionIds the admin actually approved. Populated on approve.
+  approvedSessionIds    String[] @default([])
+  /// Session IDs the heuristic skipped (with reasons). JSON shape:
+  /// [{ sessionId, reason }]. Surfaced to admin for transparency.
+  heuristicSkipped      Json?
+  /// Spaces message ID of the approval-digest message (for follow-ups).
+  spacesMessageId       String?
+  /// On approval, the Hindsight memory IDs returned from each retain call.
+  /// JSON shape: { sessionId: [memoryId, ...] }. Used for follow-up audit / rollback.
+  retainedMemoryIds     Json?
+  /// Cached agent's memoryApprovalStrategy at batch creation time, so changing
+  /// the agent config later doesn't break in-flight batches.
+  approvalStrategy      String   @default("HUMAN_ONLY")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([agentSlug, reviewDate])
+  @@index([status])
+  @@index([agentSlug, status])
+  @@map("pending_batch_reviews")
+}
+
+/// One row per recalled memory per session start. Written by the nightly cron
+/// in claw-auth after ingesting xyne-claw's data/recall-hits/<date>.jsonl.
+/// Drives the "hot memories" panel in the agent Memory tab.
+model MemoryRecallHit {
+  id                String   @id @default(cuid())
+  agentSlug         String
+  hindsightMemoryId String
+  userId            String   /// The user whose session triggered the recall
+  sessionId         String
+  scope             String   /// "shared" | "user" — denormalised for fast filtering
+  rank              Int?     /// 1-based position in the recall result list
+  recalledAt        DateTime @default(now())
+
+  @@index([agentSlug, recalledAt])
+  @@index([hindsightMemoryId])
+  @@map("memory_recall_hits")
+}
+
+/// Active `/goal <condition>` autonomous loop for a Spaces conversation.
+///
+/// One UNIQUE row per conversationId (single active goal per thread). Created
+/// when a user types `/goal <condition>` in a Spaces thread; flips to status
+/// = "done" / "cancelled" / "failed" on the terminating event and is kept for
+/// audit. The webhook re-looper reads `runPayload` to refire claw's /run with
+/// the same provider/agent/skills context on each subsequent turn.
+model ActiveGoal {
+  id              String   @id @default(cuid())
+  conversationId  String   @unique          /// Spaces thread id — UNIQUE
+  channelId       String?
+  workspaceId     String?
+  userId          String                    /// User who started the goal
+  agentSlug       String
+  condition       String                    /// Verbatim exit-condition text
+  status          String   @default("active") /// "active" | "done" | "cancelled" | "failed"
+  turnCount       Int      @default(0)      /// Turns completed so far
+  maxTurns        Int      @default(5)      /// Hard cap, enforced by relooper. Default 5: covers worker → audit → 1-2 fix cycles. Longer loops tend to burn LLM cost on judge-driven rabbit holes (e.g. judge falsely flagging missing attachments).
+  lastTurnResult  String?                   /// Most recent worker output (≤ 4KB stored)
+  lastReason      String?                   /// Last boss reason or terminal reason
+  runPayload      Json                      /// Stashed first-turn /run inputs to replay
+  /// Audit-pass state machine — defends against LLM-judge false positives.
+  /// "none"    : default. Judge fires every turn; done→terminate.
+  /// "pending" : judge said done in "none" mode, audit task was fired; the
+  ///             next worker result is the audit response, not a normal turn.
+  /// "done"    : audit already happened (clean or reopened+fixed). Judge's
+  ///             next done vote terminates without re-auditing.
+  auditState      String   @default("none")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status, updatedAt])
+  @@map("active_goals")
 }

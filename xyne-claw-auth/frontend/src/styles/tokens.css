@@ -1,0 +1,413 @@
+/* ================================================================
+   XYNE DESIGN TOKENS
+   3-tier architecture inspired by Polaris & Base design systems
+
+   TIER 1 — PRIMITIVE  (@theme)
+     Raw values with no semantic meaning. Complete color scales
+     that Tailwind turns into utilities: bg-brand-500, text-gray-900.
+     Never reference primitives directly in components.
+
+   TIER 2 — SEMANTIC  (@theme inline)
+     Map primitives to intent. Generates Tailwind utilities with
+     the `xyne-` namespace: bg-xyne-surface, text-xyne-fg-primary,
+     border-xyne-border. Use these in every component.
+
+   TIER 3 — COMPONENT  (:root)
+     Pure CSS variables for component-specific measurements and
+     one-off overrides. Not Tailwind utilities — used via
+     inline styles or CSS classes: var(--comp-btn-radius).
+================================================================ */
+
+
+/* ================================================================
+   TIER 1: PRIMITIVE TOKENS
+   Extend Tailwind's built-in palette with the brand scale.
+   Gray, green, red, yellow, blue come from Tailwind defaults.
+================================================================ */
+
+@theme {
+  /* Brand (orange — Figma primary #FE6D36) */
+  --color-brand-50:  #fff7ed;
+  --color-brand-100: #ffedd5;
+  --color-brand-200: #fed7aa;
+  --color-brand-300: #fdba74;
+  --color-brand-400: #fb923c;
+  --color-brand-500: #fe6d36;
+  --color-brand-600: #ea580c;
+  --color-brand-700: #c2410c;
+  --color-brand-800: #9a3412;
+  --color-brand-900: #7c2d12;
+  --color-brand-950: #431407;
+
+  /* Ink (navy — Figma primary text #101828) */
+  --color-ink-50:  #f0f4f8;
+  --color-ink-100: #d9e2ec;
+  --color-ink-200: #bcccdc;
+  --color-ink-300: #9fb3c8;
+  --color-ink-400: #829ab1;
+  --color-ink-500: #627d98;
+  --color-ink-600: #486581;
+  --color-ink-700: #334e68;
+  --color-ink-800: #243b53;
+  --color-ink-900: #102a43;
+  --color-ink-950: #101828;
+}
+
+
+/* ================================================================
+   TIER 2: SEMANTIC TOKENS
+   Each token maps a primitive to a role/intent.
+   Generates Tailwind utilities prefixed with xyne-:
+     bg-xyne-surface        text-xyne-fg-primary
+     bg-xyne-surface-subtle text-xyne-fg-muted
+     border-xyne-border     bg-xyne-brand
+================================================================ */
+
+@theme {
+
+  /* --- Surfaces --- */
+  /* Use for: page backgrounds, cards, panels */
+  --color-xyne-surface:          #ffffff;     /* main content area */
+  --color-xyne-surface-subtle:   #f5f5f5;     /* sidebar, hover tray */
+  --color-xyne-surface-sunken:   #f3f4f6;     /* inputs, code blocks, inset areas */
+  --color-xyne-surface-emphasis: #101828;     /* inverse/dark surfaces */
+
+  /* --- Foreground (text & icons) ---
+     3-tier text hierarchy:
+       fg-primary    = main body text, headings  (highest contrast)
+       fg-secondary  = secondary labels, supporting text
+       fg-tertiary   = captions, helper text, descriptions  (lowest contrast)
+     Plus role tokens (placeholder, disabled, inverse, link). */
+  --color-xyne-fg-primary:     #101828;       /* primary text */
+  --color-xyne-fg-secondary:   #374151;       /* secondary text */
+  --color-xyne-fg-tertiary:    #7c8698;       /* tertiary / muted text (Figma exact) */
+  --color-xyne-fg-muted:       #7c8698;       /* alias of tertiary — kept for back-compat */
+  --color-xyne-fg-placeholder: #9ca3af;       /* input placeholders */
+  --color-xyne-fg-disabled:    #d1d5db;       /* disabled state */
+  --color-xyne-fg-inverse:     #ffffff;       /* text on dark surfaces */
+  --color-xyne-fg-link:        #0a0a0a;       /* inline links */
+
+  /* --- Borders --- */
+  /* Use border-xyne-border-* utilities */
+  --color-xyne-border-subtle:  #f3f4f6;       /* very light dividers (zinc-100) */
+  --color-xyne-border:         #e5e7eb;       /* default card, input borders (zinc-200) */
+  --color-xyne-border-strong:  #d1d5db;       /* separators, emphasis borders (zinc-300) */
+  --color-xyne-border-focus:   #0a0a0a;       /* focus rings */
+  --color-xyne-border-error:   #ef4444;       /* error state borders */
+
+  /* --- Brand / Action --- */
+  /* Primary interactive color — buttons, links, focus */
+  --color-xyne-brand:          #0a0a0a;       /* primary CTA (neutral-950) */
+  --color-xyne-brand-hover:    #171717;       /* hover state (neutral-900) */
+  --color-xyne-brand-active:   #262626;       /* pressed state (neutral-800) */
+  --color-xyne-brand-subtle:   #f5f5f5;       /* brand-tinted light bg (neutral-100) */
+  --color-xyne-brand-ghost:    #f5f5f5;       /* ghost button hover (neutral-100) */
+
+  /* --- Status: Success --- */
+  --color-xyne-success:        #16a34a;       /* icon, badge dot (Figma exact) */
+  --color-xyne-success-bg:     #f0fdf4;       /* badge/alert background */
+  --color-xyne-success-border: #bbf7d0;       /* badge/alert border */
+  --color-xyne-success-fg:     #15803d;       /* text on success-bg */
+
+  /* --- Status: Error / Danger --- */
+  --color-xyne-error:          #dc2626;       /* icon, badge dot */
+  --color-xyne-error-bg:       #fff1f2;       /* badge/alert background */
+  --color-xyne-error-border:   #fecdd3;       /* badge/alert border */
+  --color-xyne-error-fg:       #b91c1c;       /* text on error-bg */
+
+  /* --- Status: Warning --- */
+  --color-xyne-warning:        #ca8a04;       /* icon, badge dot */
+  --color-xyne-warning-bg:     #fefce8;       /* badge/alert background */
+  --color-xyne-warning-border: #fef08a;       /* badge/alert border */
+  --color-xyne-warning-fg:     #a16207;       /* text on warning-bg */
+
+  /* --- Status: Info --- */
+  --color-xyne-info:           #2563eb;       /* icon, badge dot */
+  --color-xyne-info-bg:        #eff6ff;       /* badge/alert background */
+  --color-xyne-info-border:    #bfdbfe;       /* badge/alert border */
+  --color-xyne-info-fg:        #1d4ed8;       /* text on info-bg */
+
+  /* --- Status: Neutral --- */
+  --color-xyne-neutral:        #6b7280;       /* icon, badge dot */
+  --color-xyne-neutral-bg:     #f3f4f6;       /* badge/alert background */
+  --color-xyne-neutral-border: #e5e7eb;       /* badge/alert border */
+  --color-xyne-neutral-fg:     #374151;       /* text on neutral-bg */
+
+
+  /* --- Spacing (semantic) --- */
+  /* Maps primitive space values to layout roles.
+     Generates Tailwind utilities: px-xyne-page-x, py-xyne-page-y, etc.
+     Use these in components instead of raw Tailwind spacing classes. */
+
+  /* General-purpose semantic spacing steps */
+  --spacing-xyne-2:        8px;     /* p-xyne-2  → tight padding: page body, connector row x, section heading pb */
+  --spacing-xyne-4:        16px;    /* p-xyne-4  → section heading pt */
+
+  /* Page body — outer content area padding */
+  --spacing-xyne-page-x:   32px;    /* px-xyne-page-x   → mcp-page-body, future page bodies */
+  --spacing-xyne-page-y:   24px;    /* py-xyne-page-y   → mcp-page-body, future page bodies */
+
+  /* Page header — header bar padding (all sides) */
+  --spacing-xyne-header:   20px;    /* p-xyne-header    → PageHeader, replaces --comp-page-header-padding */
+
+  /* Row — list/card row padding */
+  --spacing-xyne-row-x:    16px;    /* px-xyne-row-x    → ConnectorRow, toast banners */
+  --spacing-xyne-row-y:    8px;     /* py-xyne-row-y    → ConnectorRow vertical */
+
+  /* Toast — notification banner vertical padding */
+  --spacing-xyne-toast-y:  10px;    /* py-xyne-toast-y  → success/error toast banners */
+}
+
+
+/* ================================================================
+   TIER 3: COMPONENT TOKENS
+   Pure CSS custom properties — no Tailwind utilities generated.
+   Used directly via var() in component classes or inline styles.
+   Naming: --comp-{component}-{property}
+================================================================ */
+
+:root {
+
+  /* ── Layout ─────────────────────────────────────────────── */
+
+  --comp-sidebar-width:      200px;
+  --comp-sidebar-padding:    12px;
+
+  --comp-topbar-height:      56px;
+
+  --comp-page-padding-x:     24px;
+  --comp-page-padding-y:     24px;
+  --comp-page-max-width:     1200px;
+  --comp-page-header-padding: 20px;
+
+  /* ── Typography ──────────────────────────────────────────── */
+
+  --comp-font-sans:  'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --comp-font-mono:  'JetBrains Mono', ui-monospace, 'Courier New', monospace;
+
+  /* label / caption */
+  --comp-text-2xs:  0.625rem;   /* 10px */
+  --comp-text-xs:   0.75rem;    /* 12px */
+  --comp-text-sm:   0.875rem;   /* 14px — default body */
+  --comp-text-base: 1rem;       /* 16px */
+  --comp-text-lg:   1.125rem;   /* 18px */
+  --comp-text-xl:   1.25rem;    /* 20px — section headings */
+  --comp-text-2xl:  1.5rem;     /* 24px — page headings */
+
+  --comp-weight-regular:  400;
+  --comp-weight-medium:   500;
+  --comp-weight-semibold: 600;
+  --comp-weight-bold:     700;
+
+  /* ── Spacing (4px base grid) ─────────────────────────────── */
+
+  --comp-space-1:   4px;
+  --comp-space-2:   8px;
+  --comp-space-3:   12px;
+  --comp-space-4:   16px;
+  --comp-space-5:   20px;
+  --comp-space-6:   24px;
+  --comp-space-8:   32px;
+  --comp-space-10:  40px;
+  --comp-space-12:  48px;
+
+  /* ── Radius ──────────────────────────────────────────────── */
+
+  --comp-radius-xs:   2px;
+  --comp-radius-sm:   4px;
+  --comp-radius-md:   6px;
+  --comp-radius-lg:   8px;    /* default for inputs, buttons, nav items */
+  --comp-radius-xl:   12px;   /* cards, dialogs */
+  --comp-radius-2xl:  16px;   /* large modals */
+  --comp-radius-full: 9999px; /* pills, avatars, badges */
+
+  /* ── Shadows ─────────────────────────────────────────────── */
+
+  --comp-shadow-xs:  0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --comp-shadow-sm:  0 1px 3px 0 rgb(0 0 0 / 0.10), 0 1px 2px -1px rgb(0 0 0 / 0.10);
+  --comp-shadow-md:  0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.10);
+  --comp-shadow-lg:  0 10px 15px -3px rgb(0 0 0 / 0.10), 0 4px 6px -4px rgb(0 0 0 / 0.10);
+  --comp-shadow-xl:  0 20px 25px -5px rgb(0 0 0 / 0.10), 0 8px 10px -6px rgb(0 0 0 / 0.10);
+
+  /* ── Transitions ─────────────────────────────────────────── */
+
+  --comp-duration-fast:   100ms;
+  --comp-duration-normal: 200ms;
+  --comp-duration-slow:   300ms;
+  --comp-ease:            cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Z-index ─────────────────────────────────────────────── */
+
+  --comp-z-base:    0;
+  --comp-z-raised:  10;
+  --comp-z-sticky:  20;
+  --comp-z-modal:   300;
+  /* Tooltip sits ABOVE modal so a hint icon inside a dialog can
+     overlay its own owner. Previously was 200 (below modal at 300)
+     which made tooltips inside modals render hidden behind them.
+     Order: base/raised/sticky → modal → tooltip → toast. */
+  --comp-z-tooltip: 350;
+  --comp-z-toast:   400;
+
+  /* ── Button ──────────────────────────────────────────────── */
+
+  --comp-btn-radius:         var(--comp-radius-lg);
+  --comp-btn-font-size:      var(--comp-text-sm);
+  --comp-btn-font-weight:    var(--comp-weight-medium);
+  --comp-btn-transition:     var(--comp-duration-normal) var(--comp-ease);
+
+  --comp-btn-sm-height:      30px;
+  --comp-btn-sm-px:          var(--comp-space-3);
+  --comp-btn-sm-font-size:   var(--comp-text-xs);
+
+  --comp-btn-md-height:      36px;
+  --comp-btn-md-px:          var(--comp-space-4);
+
+  --comp-btn-lg-height:      44px;
+  --comp-btn-lg-px:          var(--comp-space-5);
+
+  --comp-btn-icon-gap:       var(--comp-space-2);
+
+  /* Focus ring (shared by button, input, etc.) */
+  --comp-focus-ring: 0 0 0 3px rgb(10 10 10 / 0.20);
+
+  /* ── Input / Textarea ────────────────────────────────────── */
+
+  --comp-input-height:       36px;
+  --comp-input-px:           var(--comp-space-3);
+  --comp-input-radius:       var(--comp-radius-lg);
+  --comp-input-font-size:    var(--comp-text-sm);
+  --comp-input-transition:   border-color var(--comp-duration-fast) var(--comp-ease);
+
+  /* ── Card ────────────────────────────────────────────────── */
+
+  --comp-card-radius:        var(--comp-radius-xl);
+  --comp-card-padding:       var(--comp-space-5);
+  --comp-card-shadow:        var(--comp-shadow-sm);
+
+  /* ── Dialog / Modal ──────────────────────────────────────── */
+
+  --comp-dialog-radius:      var(--comp-radius-2xl);
+  --comp-dialog-padding:     var(--comp-space-6);
+  --comp-dialog-max-width:   480px;
+  --comp-dialog-overlay:     rgb(0 0 0 / 0.40);
+
+  /* ── Badge ───────────────────────────────────────────────── */
+
+  --comp-badge-radius:       var(--comp-radius-full);
+  --comp-badge-px:           var(--comp-space-2);
+  --comp-badge-py:           2px;
+  --comp-badge-font-size:    var(--comp-text-xs);
+  --comp-badge-font-weight:  var(--comp-weight-medium);
+
+
+  /* ── Avatar ──────────────────────────────────────────────── */
+
+  --comp-avatar-radius:      var(--comp-radius-full);
+  --comp-avatar-sm:          24px;
+  --comp-avatar-md:          32px;
+  --comp-avatar-lg:          40px;
+  --comp-avatar-font-weight: var(--comp-weight-semibold);
+
+  /* ── Navigation Item ─────────────────────────────────────── */
+
+  --comp-nav-item-height:    36px;
+  --comp-nav-item-px:        10px;
+  --comp-nav-item-radius:    var(--comp-radius-lg);
+  --comp-nav-item-gap:       var(--comp-space-2);
+  --comp-nav-item-icon-size: 16px;
+  --comp-nav-active-shadow:  var(--comp-shadow-sm);
+
+  /* ── Tooltip ─────────────────────────────────────────────── */
+
+  --comp-tooltip-radius:     var(--comp-radius-md);
+  --comp-tooltip-px:         10px;
+  --comp-tooltip-py:         6px;
+  --comp-tooltip-font-size:  var(--comp-text-xs);
+  --comp-tooltip-font-weight: var(--comp-weight-medium);
+
+  /* ── Toast ───────────────────────────────────────────────── */
+
+  --comp-toast-radius:       var(--comp-radius-xl);
+  --comp-toast-shadow:       var(--comp-shadow-lg);
+  --comp-toast-padding:      var(--comp-space-4);
+  --comp-toast-gap:          var(--comp-space-3);
+
+  /* ── Connector Row (MCP page) ────────────────────────────── */
+
+  --comp-connector-row-height:   48px;
+  --comp-connector-icon-size:    32px;
+  --comp-connector-icon-radius:  var(--comp-radius-lg);
+  --comp-connector-row-gap:      var(--comp-space-3);
+  --comp-connector-row-px:       var(--comp-space-4);
+
+  /* ── Divider ─────────────────────────────────────────────── */
+
+  --comp-divider-height:     1px;
+
+  /* ── Workspace Selector ──────────────────────────────────── */
+
+  --comp-workspace-height:   40px;
+  --comp-workspace-radius:   var(--comp-radius-lg);
+  --comp-workspace-px:       var(--comp-space-3);
+}
+
+/* ================================================================
+   DARK MODE OVERRIDES
+   Flip tokens that need to invert in dark theme.
+================================================================ */
+
+
+
+.dark {
+  /* --- Surfaces --- */
+  --color-xyne-surface:          #171717;
+  --color-xyne-surface-subtle:   #0a0a0a;
+  --color-xyne-surface-sunken:   #262626;
+  --color-xyne-surface-emphasis: #fafafa;
+
+  /* --- Foreground --- */
+  --color-xyne-fg-primary:     #fafafa;
+  --color-xyne-fg-secondary:   #d4d4d4;
+  --color-xyne-fg-tertiary:    #a3a3a3;
+  --color-xyne-fg-muted:       #a3a3a3;
+  --color-xyne-fg-placeholder: #737373;
+  --color-xyne-fg-disabled:    #525252;
+  --color-xyne-fg-inverse:     #0a0a0a;
+  --color-xyne-fg-link:        #fafafa;
+
+  /* --- Borders --- */
+  --color-xyne-border-subtle:  #262626;
+  --color-xyne-border:         #404040;
+  --color-xyne-border-strong:  #525252;
+  --color-xyne-border-focus:   #fafafa;
+  --color-xyne-border-error:   #ef4444;
+
+  /* --- Brand / Action --- */
+  --color-xyne-brand:          #fafafa;
+  --color-xyne-brand-hover:    #e5e5e5;
+  --color-xyne-brand-active:   #d4d4d4;
+  --color-xyne-brand-subtle:   #262626;
+  --color-xyne-brand-ghost:    #262626;
+
+  /* --- Status: tone down on dark surfaces --- */
+  --color-xyne-success-bg:     rgb(22 163 74 / 0.15);
+  --color-xyne-success-border: rgb(22 163 74 / 0.30);
+  --color-xyne-success-fg:     #4ade80;
+
+  --color-xyne-error-bg:       rgb(220 38 38 / 0.15);
+  --color-xyne-error-border:   rgb(220 38 38 / 0.30);
+  --color-xyne-error-fg:       #f87171;
+
+  --color-xyne-warning-bg:     rgb(202 138 4 / 0.15);
+  --color-xyne-warning-border: rgb(202 138 4 / 0.30);
+  --color-xyne-warning-fg:     #fcd34d;
+
+  --color-xyne-info-bg:        rgb(37 99 235 / 0.15);
+  --color-xyne-info-border:    rgb(37 99 235 / 0.30);
+  --color-xyne-info-fg:        #60a5fa;
+
+  --color-xyne-neutral-bg:     #262626;
+  --color-xyne-neutral-border: #404040;
+  --color-xyne-neutral-fg:     #d4d4d4;
+}

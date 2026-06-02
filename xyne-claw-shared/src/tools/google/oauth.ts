@@ -4,20 +4,46 @@
  * This module only provides the authenticated fetch wrapper.
  */
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetry(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function getRetryAfterMs(response: Response): number | undefined {
+  const header = response.headers.get("retry-after");
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  return undefined;
+}
+
 /** Make an authenticated Google API call. Throws on non-2xx. */
 export async function googleFetch(
   url: string,
   accessToken: string,
   init?: RequestInit,
 ): Promise<unknown> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      ...(init?.headers as Record<string, string> | undefined),
-    },
-  });
+  let response: Response | undefined;
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    response = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(init?.headers as Record<string, string> | undefined),
+      },
+    });
+    if (response.ok) break;
+    if (attempt >= maxAttempts || !shouldRetry(response.status)) break;
+    const retryAfter = getRetryAfterMs(response);
+    const backoffMs = retryAfter ?? 300 * 2 ** (attempt - 1);
+    await sleep(backoffMs);
+  }
+  if (!response) throw new Error("Google API call failed before receiving a response");
 
   if (!response.ok) {
     const text = await response.text();

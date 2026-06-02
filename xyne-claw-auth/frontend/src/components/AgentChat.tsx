@@ -66,10 +66,21 @@ export function AgentChat({ userId }: Props) {
   const [providerModels, setProviderModels] = useState<Array<{ id: string; name: string }>>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
+  const [showProviderMenu, setShowProviderMenu] = useState(false);
+  const providerMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Auto-resize textarea to fit content, capped at ~8 lines. Re-runs every
+  // keystroke; cheap because we just twiddle inline height.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [input]);
   const [convId, setConvId] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
@@ -175,16 +186,33 @@ export function AgentChat({ userId }: Props) {
     };
   }, []);
 
+  // Close provider menu on outside click or Escape
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!showProviderMenu) return;
+      if (!providerMenuRef.current) return;
+      if (e.target instanceof Node && providerMenuRef.current.contains(e.target)) return;
+      setShowProviderMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setShowProviderMenu(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [showProviderMenu]);
+
   const loadConversation = useCallback(async (id: string) => {
     if (!slug) return;
     setConvId(id);
     setReasoningByMsgId(new Map()); // reasoning is per-session, not persisted in DB
     try {
-      const [msgs, runList] = await Promise.all([
+      const [history, runList] = await Promise.all([
         pollChatMessages(slug, id),
         listRuns(userId, { conversationId: id, agentSlug: slug, limit: 100 }).catch(() => []),
       ]);
-      setMessages(msgs);
+      setMessages(history.messages);
       setRuns(runList);
     } catch {
       setMessages([]);
@@ -669,7 +697,7 @@ export function AgentChat({ userId }: Props) {
     <div className="flex h-[calc(100vh-120px)] flex-col">
       {/* Header: back, agent picker, provider picker */}
       <div className="flex items-center gap-3 border-b border-zinc-800 pb-4">
-        <button onClick={() => navigate("/")} className="text-zinc-400 hover:text-zinc-200">
+        <button onClick={() => navigate("/v1")} className="text-zinc-400 hover:text-zinc-200">
           <ChevronLeft size={20} />
         </button>
         <h2 className="text-lg font-semibold">Chat</h2>
@@ -687,23 +715,44 @@ export function AgentChat({ userId }: Props) {
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="relative flex items-center gap-2">
           <label className="text-xs text-zinc-500">Provider</label>
-          <select
-            value={currentProvider}
-            onChange={(e) => handleProviderChange(e.target.value)}
-            disabled={savingProvider}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none disabled:opacity-50"
-          >
-            {PROVIDERS.map((p) => {
-              const available = !p.needsCreds || Boolean(credByProvider.get(p.id)?.hasApiKey);
-              return (
-                <option key={p.id} value={p.id} disabled={!available}>
-                  {p.label}{p.needsCreds && !available ? " (not configured)" : ""}
-                </option>
-              );
-            })}
-          </select>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowProviderMenu((s) => !s)}
+              disabled={savingProvider}
+              className="flex items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none disabled:opacity-50"
+            >
+              <span>{(PROVIDERS.find((p) => p.id === currentProvider)?.label) ?? currentProvider}</span>
+              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className="ml-1">
+                <path d="M6 8l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            {showProviderMenu && (
+              <div ref={providerMenuRef} className="absolute left-0 z-50 mt-1 w-56 rounded-md border border-zinc-700 bg-zinc-900 shadow-lg">
+                <ul className="max-h-56 overflow-auto">
+                  {PROVIDERS.map((p) => {
+                    const available = !p.needsCreds || Boolean(credByProvider.get(p.id)?.hasApiKey);
+                    return (
+                      <li key={p.id} className="">
+                        <button
+                          type="button"
+                          onClick={() => { if (available) { void handleProviderChange(p.id); setShowProviderMenu(false); } }}
+                          disabled={!available || savingProvider}
+                          className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-zinc-800 ${available ? "text-zinc-200" : "text-zinc-500 opacity-50 italic cursor-default"}`}
+                        >
+                          <span>{p.label}</span>
+                          {!available && <span className="text-xs text-zinc-500">not configured</span>}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
           {savingProvider && <Loader2 size={12} className="animate-spin text-zinc-400" />}
         </div>
 
@@ -766,7 +815,7 @@ export function AgentChat({ userId }: Props) {
         </div>
 
         {/* Chat area */}
-        <div className="flex flex-1 flex-col">
+        <div className="flex flex-1 flex-col min-w-0">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {messages.length === 0 && !waiting && (
@@ -903,7 +952,7 @@ export function AgentChat({ userId }: Props) {
                 </div>
               )}
 
-              <div className="flex gap-2">
+              <div className="flex items-end gap-2">
                 <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" />
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -930,13 +979,22 @@ export function AgentChat({ userId }: Props) {
                     </span>
                   )}
                 </button>
-                <input
+                <textarea
+                  ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                  placeholder="Type a message..."
+                  onKeyDown={(e) => {
+                    // Enter alone → send. Shift/Meta/Ctrl+Enter → newline
+                    // (default browser textarea behavior).
+                    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Type a message... (Shift+Enter for new line)"
                   disabled={waiting}
-                  className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none disabled:opacity-50"
+                  rows={1}
+                  className="max-h-[200px] flex-1 resize-none overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm leading-relaxed text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none disabled:opacity-50"
                   autoFocus
                 />
                 {waiting ? (

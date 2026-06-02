@@ -9,6 +9,10 @@ interface CitationBuildOptions {
   baseUrl: string;
   defaultChannelId?: string;
   maxCitations?: number;
+  /** When false, returns the markdown unchanged. Defaults to true for backward compat.
+   *  Set on an agent's config under `replyOptions.includeCitations` and threaded through
+   *  from webhook.ts / agent-chat.ts based on the agent's preference. */
+  includeCitations?: boolean;
 }
 
 interface InvocationLike {
@@ -21,7 +25,21 @@ interface InvocationLike {
 function isStructuredCitation(v: unknown): v is StructuredCitation {
   if (!v || typeof v !== "object") return false;
   const r = v as Record<string, unknown>;
-  return r["kind"] === "thread" || r["kind"] === "canvas" || r["kind"] === "ticket" || r["kind"] === "external";
+  return (
+    r["kind"] === "thread" ||
+    r["kind"] === "canvas" ||
+    r["kind"] === "ticket" ||
+    r["kind"] === "external"
+  );
+}
+
+function buildTicketUrl(
+  _baseUrl: string,
+  channelId: string,
+  conversationId: string,
+  ticketId: string,
+): string {
+  return `/chat/dir/${encodeURIComponent(channelId)}/${encodeURIComponent(conversationId)}/${encodeURIComponent(ticketId)}`;
 }
 
 function addStructuredCitation(
@@ -31,19 +49,45 @@ function addStructuredCitation(
   c: StructuredCitation,
 ): void {
   if (c.kind === "thread" && c.channelId && c.conversationId) {
-    addThreadCitation(target, seenUrls, baseUrl, c.conversationId, c.channelId, c.label, c.channelName, c.channelType);
+    addThreadCitation(
+      target,
+      seenUrls,
+      baseUrl,
+      c.conversationId,
+      c.channelId,
+      c.label,
+      c.channelName,
+      c.channelType,
+    );
     return;
   }
   if (c.kind === "canvas" && c.viewAccessId) {
-    addCitation(target, seenUrls, c.label ?? `Canvas ${c.viewAccessId}`, buildCanvasUrl(baseUrl, c.viewAccessId));
+    addCitation(
+      target,
+      seenUrls,
+      c.label ?? `Canvas ${c.viewAccessId}`,
+      buildCanvasUrl(baseUrl, c.viewAccessId),
+    );
+    return;
+  }
+  if (c.kind === "ticket" && c.ticketId) {
+    if (c.channelId && c.conversationId) {
+      addCitation(
+        target,
+        seenUrls,
+        c.label ?? `Ticket ${c.ticketId}`,
+        buildTicketUrl(baseUrl, c.channelId, c.conversationId, c.ticketId),
+      );
+    } else {
+      // channel/conversation not available — render as plain text (no link)
+      target.push({ label: c.label ?? `Ticket ${c.ticketId}`, url: "" });
+    }
     return;
   }
   if (c.kind === "external" && c.url) {
     addCitation(target, seenUrls, c.label ?? "Source link", c.url);
     return;
   }
-  // Tickets currently have no direct ticket-page URL — skip silently. Once
-  // Spaces exposes a ticket URL pattern, plumb it here.
 }
 
 const MAX_TEXT_SCAN_CHARS = 120_000;
@@ -61,8 +105,12 @@ function asString(value: unknown): string | undefined {
 }
 
 function normalizeToolName(raw: string): string {
-  const noPrefix = raw.includes("__") ? raw.split("__").slice(1).join("__") : raw;
-  return noPrefix.includes(":") ? noPrefix.split(":").slice(-1)[0] ?? noPrefix : noPrefix;
+  const noPrefix = raw.includes("__")
+    ? raw.split("__").slice(1).join("__")
+    : raw;
+  return noPrefix.includes(":")
+    ? (noPrefix.split(":").slice(-1)[0] ?? noPrefix)
+    : noPrefix;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -77,21 +125,34 @@ function getBaseOrigin(baseUrl: string): string | undefined {
   }
 }
 
-function normalizeSourceUrl(rawUrl: string, baseOrigin?: string): string | undefined {
+function normalizeHttpUrl(rawUrl: string): string | undefined {
   try {
     const parsed = new URL(rawUrl);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
-    if (baseOrigin && parsed.origin !== baseOrigin) return undefined;
-
-    const path = parsed.pathname;
-    const isThreadPath = path.startsWith("/chat/dir/");
-    const isCanvasPath = path.startsWith("/chat/canvas/") || path.startsWith("/canvas/");
-    if (!isThreadPath && !isCanvasPath) return undefined;
-
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return undefined;
     return parsed.toString();
   } catch {
     return undefined;
   }
+}
+
+function normalizeSourceUrl(
+  rawUrl: string,
+  baseOrigin?: string,
+): string | undefined {
+  const normalized = normalizeHttpUrl(rawUrl);
+  if (!normalized) return undefined;
+
+  const parsed = new URL(normalized);
+  if (baseOrigin && parsed.origin !== baseOrigin) return undefined;
+
+  const path = parsed.pathname;
+  const isThreadPath = path.startsWith("/chat/dir/");
+  const isCanvasPath =
+    path.startsWith("/chat/canvas/") || path.startsWith("/canvas/");
+  if (!isThreadPath && !isCanvasPath) return undefined;
+
+  return normalized;
 }
 
 function toText(result: unknown): string {
@@ -129,15 +190,24 @@ function toText(result: unknown): string {
   return "";
 }
 
-function buildThreadUrl(baseUrl: string, channelId: string, conversationId: string): string {
-  return `${normalizeBaseUrl(baseUrl)}/chat/dir/${encodeURIComponent(channelId)}/${encodeURIComponent(conversationId)}`;
+function buildThreadUrl(
+  _baseUrl: string,
+  channelId: string,
+  conversationId: string,
+): string {
+  return `/chat/dir/${encodeURIComponent(channelId)}/${encodeURIComponent(conversationId)}`;
 }
 
-function buildCanvasUrl(baseUrl: string, viewAccessId: string): string {
-  return `${normalizeBaseUrl(baseUrl)}/chat/canvas/${encodeURIComponent(viewAccessId)}`;
+function buildCanvasUrl(_baseUrl: string, viewAccessId: string): string {
+  return `/chat/canvas/${encodeURIComponent(viewAccessId)}`;
 }
 
-function addCitation(target: Citation[], seenUrls: Set<string>, label: string, url: string): void {
+function addCitation(
+  target: Citation[],
+  seenUrls: Set<string>,
+  label: string,
+  url: string,
+): void {
   if (!url || seenUrls.has(url)) return;
   seenUrls.add(url);
   target.push({ label, url });
@@ -157,25 +227,74 @@ function addThreadCitation(
   // Render: "<labelPrefix> in #<channelName> (<TYPE>)" — falls back gracefully
   // when channel info or label is missing. Channel type is normalized to
   // sentence case (DM stays DM; GROUP_DM → "Group DM"; DEFAULT → "Channel").
-  const prefix = labelPrefix && labelPrefix.trim().length > 0 ? labelPrefix.trim() : "";
+  const prefix =
+    labelPrefix && labelPrefix.trim().length > 0 ? labelPrefix.trim() : "";
   const channel = channelName ? `#${channelName}` : "";
   const typeLabel = formatChannelType(channelType);
   let label = prefix;
   if (channel) label = label ? `${label} in ${channel}` : channel;
   if (typeLabel) label = label ? `${label} (${typeLabel})` : typeLabel;
   if (!label) label = "Spaces thread";
-  addCitation(target, seenUrls, label, buildThreadUrl(baseUrl, channelId, conversationId));
+  addCitation(
+    target,
+    seenUrls,
+    label,
+    buildThreadUrl(baseUrl, channelId, conversationId),
+  );
+}
+
+interface KeyPointEntry {
+  point: string;
+  label: string;
+  url: string;
+}
+
+function resolveLlmCitation(
+  baseUrl: string,
+  c: StructuredCitation,
+): { label: string; url: string } | null {
+  if (c.kind === "thread" && c.channelId && c.conversationId) {
+    const label = c.label?.trim() || "Spaces thread";
+    return {
+      label,
+      url: buildThreadUrl(baseUrl, c.channelId, c.conversationId),
+    };
+  }
+  if (c.kind === "canvas" && c.viewAccessId) {
+    return {
+      label: c.label || `Canvas ${c.viewAccessId}`,
+      url: buildCanvasUrl(baseUrl, c.viewAccessId),
+    };
+  }
+  if (c.kind === "ticket" && c.ticketId && c.channelId && c.conversationId) {
+    return {
+      label: c.label || `Ticket ${c.ticketId}`,
+      url: buildTicketUrl(baseUrl, c.channelId, c.conversationId, c.ticketId),
+    };
+  }
+  if (c.kind === "external" && c.url) {
+    const normalizedUrl = normalizeHttpUrl(c.url);
+    if (!normalizedUrl) return null;
+    return { label: c.label || "Source link", url: normalizedUrl };
+  }
+  return null;
 }
 
 function formatChannelType(t: string | undefined): string {
   if (!t) return "";
   switch (t.toUpperCase()) {
-    case "DM": return "DM";
-    case "GROUP_DM": return "Group DM";
-    case "DEFAULT": return "Channel";
-    case "TICKET": return "Ticket Channel";
-    case "DOCUMENT": return "Doc Channel";
-    default: return t;
+    case "DM":
+      return "DM";
+    case "GROUP_DM":
+      return "Group DM";
+    case "DEFAULT":
+      return "Channel";
+    case "TICKET":
+      return "Ticket Channel";
+    case "DOCUMENT":
+      return "Doc Channel";
+    default:
+      return t;
   }
 }
 
@@ -188,9 +307,20 @@ function collectCaptures(line: string, regex: RegExp): string[] {
   return out;
 }
 
-function extractIdsFromLine(line: string): { conversationIds: string[]; channelIds: string[]; ticketId: string | undefined; canvasId: string | undefined } {
-  const conversationIds = collectCaptures(line, /(?:conversationId|ConversationID)\s*[:=]\s*([A-Za-z0-9_-]+)/g);
-  const channelIds = collectCaptures(line, /(?:channelId|ChannelID)\s*[:=]\s*([A-Za-z0-9_-]+)/g);
+function extractIdsFromLine(line: string): {
+  conversationIds: string[];
+  channelIds: string[];
+  ticketId: string | undefined;
+  canvasId: string | undefined;
+} {
+  const conversationIds = collectCaptures(
+    line,
+    /(?:conversationId|ConversationID)\s*[:=]\s*([A-Za-z0-9_-]+)/g,
+  );
+  const channelIds = collectCaptures(
+    line,
+    /(?:channelId|ChannelID)\s*[:=]\s*([A-Za-z0-9_-]+)/g,
+  );
   const ticketId = line.match(/\[([A-Z]+-\d+)\]/)?.[1];
   const canvasId = line.match(/\/chat\/canvas\/([A-Za-z0-9_-]+)/)?.[1];
   return { conversationIds, channelIds, ticketId, canvasId };
@@ -208,17 +338,31 @@ function collectFromText(
   const lines = text.slice(0, MAX_TEXT_SCAN_CHARS).split(/\r?\n/);
 
   for (const line of lines) {
-    const { conversationIds, channelIds, ticketId, canvasId } = extractIdsFromLine(line);
+    const { conversationIds, channelIds, ticketId, canvasId } =
+      extractIdsFromLine(line);
 
-    if (channelIds.length > 0) lastChannelId = channelIds[channelIds.length - 1];
+    if (channelIds.length > 0)
+      lastChannelId = channelIds[channelIds.length - 1];
 
     for (const conversationId of conversationIds) {
       const channelId = channelIds[0] ?? lastChannelId ?? defaultChannelId;
-      addThreadCitation(target, seenUrls, baseUrl, conversationId, channelId, ticketId ? `Ticket ${ticketId}` : undefined);
+      addThreadCitation(
+        target,
+        seenUrls,
+        baseUrl,
+        conversationId,
+        channelId,
+        ticketId ? `Ticket ${ticketId}` : undefined,
+      );
     }
 
     if (canvasId) {
-      addCitation(target, seenUrls, `Canvas ${canvasId}`, buildCanvasUrl(baseUrl, canvasId));
+      addCitation(
+        target,
+        seenUrls,
+        `Canvas ${canvasId}`,
+        buildCanvasUrl(baseUrl, canvasId),
+      );
     }
 
     const urls = collectCaptures(line, /(https?:\/\/[^\s)]+)/g);
@@ -244,64 +388,159 @@ function collectFromInvocation(
   const args = asRecord(invocation.args);
 
   const argConversationId = asString(args?.["conversationId"]);
-  const argChannelId = asString(args?.["channelId"]) ?? asString(args?.["in"]) ?? defaultChannelId;
+  const argChannelId =
+    asString(args?.["channelId"]) ?? asString(args?.["in"]) ?? defaultChannelId;
   const viewAccessId = asString(args?.["viewAccessId"]);
 
   if (argConversationId) {
     const label = toolName ? `${toolName}` : undefined;
-    addThreadCitation(target, seenUrls, baseUrl, argConversationId, argChannelId, label);
+    addThreadCitation(
+      target,
+      seenUrls,
+      baseUrl,
+      argConversationId,
+      argChannelId,
+      label,
+    );
   }
 
   if (viewAccessId) {
-    addCitation(target, seenUrls, `Canvas ${viewAccessId}`, buildCanvasUrl(baseUrl, viewAccessId));
+    addCitation(
+      target,
+      seenUrls,
+      `Canvas ${viewAccessId}`,
+      buildCanvasUrl(baseUrl, viewAccessId),
+    );
   }
 
-  collectFromText(target, seenUrls, toText(invocation.result), baseUrl, baseOrigin, argChannelId ?? defaultChannelId);
+  collectFromText(
+    target,
+    seenUrls,
+    toText(invocation.result),
+    baseUrl,
+    baseOrigin,
+    argChannelId ?? defaultChannelId,
+  );
 }
 
 function hasCitationSection(markdown: string): boolean {
   return /(^|\n)###\s+Citations\b/i.test(markdown);
 }
 
+/** Interface for LLM-provided citations from add_citations tool */
+interface LlmKeyPoint {
+  point: string;
+  citation: StructuredCitation;
+}
+
+function isLlmKeyPoint(v: unknown): v is LlmKeyPoint {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return typeof r["point"] === "string" && isStructuredCitation(r["citation"]);
+}
+
 export function appendCitations(
   markdown: string,
   toolInvocations: unknown,
   options: CitationBuildOptions,
+  llmCitations?: unknown,
 ): string {
-  if (!markdown.trim() || hasCitationSection(markdown)) return markdown;
+  // Legacy regex-based tool-invocation citations are retired. Only LLM-provided
+  // citations from the add_citations tool are used now.
+  const skipLegacyCitations = true;
+  // const skipLegacyCitations = false;
+
+  if (!markdown.trim() || hasCitationSection(markdown)) {
+    return markdown;
+  }
 
   const baseUrl = normalizeBaseUrl(options.baseUrl);
-  if (!baseUrl) return markdown;
+  if (!baseUrl) {
+    return markdown;
+  }
 
   const baseOrigin = getBaseOrigin(baseUrl);
   const citations: Citation[] = [];
   const seenUrls = new Set<string>();
 
-  if (Array.isArray(toolInvocations)) {
+  if (Array.isArray(toolInvocations) && !skipLegacyCitations) {
     // Pass 1: prefer structured citations (Tier 1 propagation). Tools attach
     // these via MCP `_meta.citations` and the worker forwards them on each
     // invocation. Subagents aggregate child citations into their wrapper.
     for (const inv of toolInvocations as InvocationLike[]) {
       if (Array.isArray(inv.citations)) {
         for (const c of inv.citations) {
-          if (isStructuredCitation(c)) addStructuredCitation(citations, seenUrls, baseUrl, c);
+          if (isStructuredCitation(c))
+            addStructuredCitation(citations, seenUrls, baseUrl, c);
         }
       }
     }
     // Pass 2: regex fallback. Catches tools that haven't migrated yet and
     // any IDs the agent itself emitted into a child tool's text result.
     for (const inv of toolInvocations as InvocationLike[]) {
-      collectFromInvocation(citations, seenUrls, inv, baseUrl, baseOrigin, options.defaultChannelId);
+      collectFromInvocation(
+        citations,
+        seenUrls,
+        inv,
+        baseUrl,
+        baseOrigin,
+        options.defaultChannelId,
+      );
+    }
+  }
+
+  // Pass 3: LLM-provided citations from add_citations tool — ALWAYS included.
+  const keyPointEntries: KeyPointEntry[] = [];
+  if (Array.isArray(llmCitations)) {
+    for (const kp of llmCitations as unknown[]) {
+      const r =
+        kp && typeof kp === "object" ? (kp as Record<string, unknown>) : {};
+      const citation = r["citation"];
+      if (isLlmKeyPoint(kp)) {
+        const resolved = resolveLlmCitation(baseUrl, kp.citation);
+        if (resolved) {
+          keyPointEntries.push({
+            point: kp.point,
+            label: resolved.label,
+            url: resolved.url,
+          });
+          if (resolved.url) seenUrls.add(resolved.url);
+        }
+      }
     }
   }
 
   // Final fallback: parse the assistant markdown itself for direct links / IDs.
-  collectFromText(citations, seenUrls, markdown, baseUrl, baseOrigin, options.defaultChannelId);
+  // Skip this when includeCitations is false (legacy mode only).
+  if (!skipLegacyCitations) {
+    collectFromText(
+      citations,
+      seenUrls,
+      markdown,
+      baseUrl,
+      baseOrigin,
+      options.defaultChannelId,
+    );
+  }
 
   const limit = options.maxCitations ?? 8;
   const finalCitations = citations.slice(0, limit);
-  if (finalCitations.length === 0) return markdown;
+  if (finalCitations.length === 0 && keyPointEntries.length === 0) {
+    return markdown;
+  }
 
-  const lines = finalCitations.map((c, idx) => `${idx + 1}. [${c.label}](${c.url})`);
-  return `${markdown.trimEnd()}\n\n### Citations\n${lines.join("\n")}`;
+  let citationBlock = "";
+  if (keyPointEntries.length > 0) {
+    const lines = keyPointEntries.map(
+      (kp, idx) => `${idx + 1}. ${kp.point} ||| [${kp.label}](${kp.url})`,
+    );
+    citationBlock = `<citation>\n${lines.join("\n")}\n</citation>`;
+  } else if (finalCitations.length > 0) {
+    const lines = finalCitations.map((c, idx) =>
+      c.url ? `${idx + 1}. [${c.label}](${c.url})` : `${idx + 1}. ${c.label}`,
+    );
+    citationBlock = `<citation>\n${lines.join("\n")}\n</citation>`;
+  }
+  const appended = `${markdown.trimEnd()}\n\n${citationBlock}`;
+  return appended;
 }

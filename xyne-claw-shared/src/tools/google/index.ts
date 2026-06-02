@@ -17,6 +17,22 @@ export {
   googleTasksDelete,
   googleDriveRead,
   googleDriveSearch,
+  googleDriveCreateFolder,
+  googleDriveUpload,
+  googleDriveShare,
+  googleSheetsCreate,
+  googleSheetsUpdate,
+  googleSheetsAppend,
+  googleDocsCreate,
+  googleDocsAppend,
+  googleDocsRead,
+  googleDocsEdit,
+  googleDocsFormat,
+  googleSlidesCreate,
+  googleSlidesAddSlide,
+  googleFormsCreate,
+  googleFormsAddQuestions,
+  googleFormsGet,
 } from "./tools.js";
 
 export { googleFetch, refreshGoogleToken } from "./oauth.js";

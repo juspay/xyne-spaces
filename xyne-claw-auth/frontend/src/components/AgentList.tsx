@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2, Upload, Globe } from "lucide-react";
+import { Trash2, Globe } from "lucide-react";
 import type { Agent } from "../lib/types";
 import {
   updateAgent,
@@ -12,6 +12,7 @@ import {
   type UserAgentConfig,
   type ProviderCredential,
 } from "../lib/api";
+import { withAdminRequestAlert } from "../lib/admin-request-notice";
 
 interface Props {
   agents: Agent[];
@@ -181,6 +182,21 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
   const myAgents = agents.filter((a) => a.ownerUserId === userId);
   const sharedAgents = agents.filter((a) => a.scope !== "global" && a.ownerUserId !== userId && a.ownerUserId !== null);
 
+  const shareRoleBadge = (agent: Agent) => {
+    const share = agent.shares?.find((s) => s.userId === userId);
+    if (!share) return null;
+    const styles: Record<string, string> = {
+      CONTRIBUTOR: "bg-blue-950 text-blue-400",
+      EDITOR: "bg-purple-950 text-purple-400",
+      VIEWER: "bg-zinc-800 text-zinc-400",
+    };
+    return (
+      <span className={`rounded px-1.5 py-0.5 text-xs ${styles[share.role] ?? "bg-zinc-800 text-zinc-400"}`}>
+        {share.role}
+      </span>
+    );
+  };
+
   const renderAgent = (agent: Agent, canDelete: boolean) => (
         <div
           key={agent.id}
@@ -190,18 +206,12 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
           {/* Action buttons for own agents */}
           {canDelete && (
             <div className="float-right ml-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-              {!agent.spacesAppId && (
-                <button
-                  onClick={() => { submitAgentRequest(agent.slug, userId, "push_to_spaces").then(() => onUpdate()).catch((e) => console.error("[agents] request error:", e)); }}
-                  className="rounded-md p-1.5 text-zinc-600 transition hover:bg-blue-950 hover:text-blue-400"
-                  title="Request: Push to Spaces"
-                >
-                  <Upload size={14} />
-                </button>
-              )}
               {agent.scope !== "global" && (
                 <button
-                  onClick={() => { submitAgentRequest(agent.slug, userId, "push_to_global").then(() => onUpdate()).catch((e) => console.error("[agents] request error:", e)); }}
+                  onClick={async () => {
+                    const ok = await withAdminRequestAlert(() => submitAgentRequest(agent.slug, userId, "push_to_global"));
+                    if (ok !== undefined) onUpdate();
+                  }}
                   className="rounded-md p-1.5 text-zinc-600 transition hover:bg-green-950 hover:text-green-400"
                   title="Request: Push to Global"
                 >
@@ -234,6 +244,12 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
                 <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-500">
                   {agent.scope}
                 </span>
+                {agent.owner && (
+                  <span className="text-xs text-zinc-500">
+                    by {agent.owner.name || agent.owner.email}
+                  </span>
+                )}
+                {shareRoleBadge(agent)}
                 {agent.spacesAppId ? (
                   <span className="rounded bg-green-950 px-1.5 py-0.5 text-xs text-green-400">
                     Spaces App
