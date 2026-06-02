@@ -118,7 +118,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return await this.findMany({ channelId, pinned: true });
   }
 
-  async incrementReplyCount(conversationId: string): Promise<Conversation> {
+  async incrementReplyCount(conversationId: string, skipParticipantUpdate = false): Promise<Conversation> {
     const conversation = await this.findById(conversationId);
     if (!conversation) {
       throw new Error('Conversation not found');
@@ -130,11 +130,15 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       lastActivityAt: now,
     });
 
-    // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
-    await this.db.conversationParticipant.updateMany({
-      where: { conversationId },
-      data: { lastReplyAt: now },
-    });
+    // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2).
+    // Skipped during migration — the value would be the migration run time, not the
+    // historical Slack timestamp, so it is incorrect anyway.
+    if (!skipParticipantUpdate) {
+      await this.db.conversationParticipant.updateMany({
+        where: { conversationId },
+        data: { lastReplyAt: now },
+      });
+    }
 
     return result;
   }
