@@ -132,7 +132,7 @@ export interface TeamIntelligenceTeamSummaryUserInput {
   userId?: string;
   userEmail: string;
   userName: string;
-  teamId?: string | null;
+  teamId: string;
   teamName: string;
   role?: string | null;
   source?: string;
@@ -144,6 +144,7 @@ export interface TeamIntelligenceTeamSummaryUserInput {
 
 export interface TeamIntelligenceTeamSummaryInput {
   reportDate: string;
+  teamId: string;
   teamName: string;
   source?: string;
   users: TeamIntelligenceTeamSummaryUserInput[];
@@ -152,6 +153,7 @@ export interface TeamIntelligenceTeamSummaryInput {
 
 export interface TeamIntelligenceTeamSummaryEvidenceItem {
   reportDate: string;
+  teamId: string;
   teamName: string;
   source: string;
   userId?: string;
@@ -190,6 +192,7 @@ export interface TeamIntelligenceTeamSummaryBullet {
 
 export interface TeamIntelligenceTeamSummaryProvenance {
   reportDate: string;
+  teamId: string;
   teamName: string;
   source: string;
   generatedAt: string;
@@ -206,6 +209,7 @@ export interface TeamIntelligenceTeamSummaryProvenance {
 
 export interface TeamIntelligenceTeamSummaryOutput {
   reportDate: string;
+  teamId: string;
   teamName: string;
   source: string;
   summaryText: string[];
@@ -215,6 +219,7 @@ export interface TeamIntelligenceTeamSummaryOutput {
 
 export interface TeamIntelligenceOrgSummaryBullet {
   bulletId: string;
+  teamId: string;
   teamName: string;
   reportDate: string;
   bulletTitle: string;
@@ -232,7 +237,7 @@ export interface TeamIntelligenceOrgSummaryProvenance {
   source: string;
   generatedAt: string;
   bulletCount: number;
-  teamIndex: Record<string, { bulletCount: number }>;
+  teamIndex: Record<string, { teamName: string; bulletCount: number }>;
   bullets: TeamIntelligenceOrgSummaryBullet[];
 }
 

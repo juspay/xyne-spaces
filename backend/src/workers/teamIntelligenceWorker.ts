@@ -1,5 +1,4 @@
 import Bull from 'bull';
-import { Prisma } from '@prisma/client';
 import {
   TeamIntelligenceBatchStatus,
   TeamIntelligenceUserIngestionStatus,
@@ -12,6 +11,7 @@ import { teamIntelligenceRepository } from '@/team-intelligence/repositories/tea
 import { teamIntelligenceSummaryService } from '@/team-intelligence/services/team-intelligence-summary.service';
 import { teamIntelligenceTeamSummaryService } from '@/team-intelligence/services/team-intelligence-team-summary.service';
 import { teamIntelligenceOrgSummaryService } from '@/team-intelligence/services/team-intelligence-org-summary.service';
+import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
 import type {
   TeamIntelligenceOrgSummaryQueuedJobData,
   TeamIntelligenceQueuedJobData,
@@ -380,20 +380,48 @@ class TeamIntelligenceWorker {
         throw new Error(`User ingestion record not found for id=${userIngestionId}`);
       }
 
+      const [pullRequests, soloCommits] = await Promise.all([
+        teamIntelligenceContentStorageService.hydrateJsonPayload<{
+          pullRequests?: unknown[];
+          soloCommits?: unknown[];
+        }>(
+          null,
+          userIngestion.contentUrl
+        ).then((content) => content?.pullRequests),
+        teamIntelligenceContentStorageService.hydrateJsonPayload<{
+          pullRequests?: unknown[];
+          soloCommits?: unknown[];
+        }>(
+          null,
+          userIngestion.contentUrl
+        ).then((content) => content?.soloCommits),
+      ]);
+
       const generated = await teamIntelligenceSummaryService.generate({
-        pullRequests: userIngestion.pullRequests,
-        soloCommits: userIngestion.soloCommits,
+        pullRequests: pullRequests ?? [],
+        soloCommits: soloCommits ?? [],
         aiUsage: userIngestion.aiUsage,
         userName: userIngestion.userName,
         teamName: userIngestion.teamName,
         reportDate: userIngestion.reportDate,
       });
 
+      const contentPointer = await teamIntelligenceContentStorageService.storeJsonPayload({
+        entityType: 'user-summary',
+        entityId: userIngestion.id,
+        contentType: 'raw-payload',
+        payload: {
+          pullRequests: generated.pullRequests,
+          soloCommits: generated.soloCommits,
+          employeeSummary: generated.employeeSummary,
+          summaryMetadata: generated.summaryMetadata,
+        },
+      });
+
       await teamIntelligenceRepository.updateUserIngestionSummary(userIngestionId, {
-        pullRequests: generated.pullRequests,
-        soloCommits: generated.soloCommits,
-        employeeSummary: generated.employeeSummary as Prisma.InputJsonValue,
-        summaryMetadata: generated.summaryMetadata,
+        contentUrl: contentPointer.contentUrl,
+        contentSize: contentPointer.contentSize,
+        contentChecksum: contentPointer.contentChecksum,
         processingStatus: TeamIntelligenceUserIngestionStatus.COMPLETED,
         completedAt: new Date(),
         failedAt: null,
@@ -438,11 +466,11 @@ class TeamIntelligenceWorker {
   }
 
   private async processTeamSummaryJob(job: Bull.Job<TeamIntelligenceTeamSummaryQueuedJobData>): Promise<void> {
-    const { batchId, teamSummaryId, teamName } = job.data;
+    const { batchId, teamSummaryId, teamId, teamName } = job.data;
     const startedAt = new Date();
 
     logger.info(
-      `[TEAM-INTEL-WORKER] Processing team summary job ${job.id} batchId=${batchId} teamSummaryId=${teamSummaryId} teamName=${teamName}`
+      `[TEAM-INTEL-WORKER] Processing team summary job ${job.id} batchId=${batchId} teamSummaryId=${teamSummaryId} teamId=${teamId ?? 'null'} teamName=${teamName}`
     );
 
     await teamIntelligenceRepository.updateTeamSummaryStatus(teamSummaryId, {
@@ -457,11 +485,14 @@ class TeamIntelligenceWorker {
       if (!teamSummary) {
         throw new Error(`Team summary record not found for id=${teamSummaryId}`);
       }
+      if (!teamSummary.teamId) {
+        throw new Error(`Team summary ${teamSummaryId} is missing teamId`);
+      }
+      const teamId = teamSummary.teamId;
 
       const completedUsers = await teamIntelligenceRepository.findUsersByBatchAndTeam(
         batchId,
-        teamSummary.teamId,
-        teamSummary.teamName,
+        teamId,
         [TeamIntelligenceUserIngestionStatus.COMPLETED]
       );
 
@@ -471,25 +502,43 @@ class TeamIntelligenceWorker {
 
       const generated = await teamIntelligenceTeamSummaryService.generate({
         reportDate: teamSummary.reportDate.toISOString().slice(0, 10),
+        teamId,
         teamName: teamSummary.teamName,
         source: teamSummary.source,
-        users: completedUsers.map((user) => ({
+        users: await Promise.all(completedUsers.map(async (user) => {
+          const userContent = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+            pullRequests?: [];
+            soloCommits?: [];
+          }>(null, user.contentUrl);
+          return ({
           userId: user.id,
           userEmail: user.userEmail,
           userName: user.userName,
-          teamId: user.teamId,
+          teamId,
           teamName: user.teamName ?? teamSummary.teamName,
           source: user.source,
-          pullRequests: user.pullRequests as unknown as [],
-          soloCommits: user.soloCommits as unknown as [],
+          pullRequests: userContent?.pullRequests ?? [],
+          soloCommits: userContent?.soloCommits ?? [],
           aiUsage: user.aiUsage as unknown as null,
+        });
         })),
       });
 
+      const teamContentPointer = await teamIntelligenceContentStorageService.storeJsonPayload({
+        entityType: 'team-summary',
+        entityId: teamSummaryId,
+        contentType: 'summary-text',
+        payload: {
+          summaryText: generated.summaryText,
+          summaryMetadata: generated.summaryMetadata,
+          provenance: generated.provenance,
+        },
+      });
+
       await teamIntelligenceRepository.updateTeamSummaryResult(teamSummaryId, {
-        summaryText: generated.summaryText as Prisma.InputJsonValue,
-        summaryMetadata: generated.summaryMetadata as Prisma.InputJsonValue,
-        provenance: generated.provenance as unknown as Prisma.InputJsonValue,
+        contentUrl: teamContentPointer.contentUrl,
+        contentSize: teamContentPointer.contentSize,
+        contentChecksum: teamContentPointer.contentChecksum,
         totalUsers: teamSummary.totalUsers,
         completedUsers: teamSummary.completedUsers,
         failedUsers: teamSummary.failedUsers,
@@ -500,7 +549,7 @@ class TeamIntelligenceWorker {
       });
 
       logger.info(
-        `[TEAM-INTEL-WORKER] Completed team summary job ${job.id} batchId=${batchId} teamSummaryId=${teamSummaryId} teamName=${teamName}`
+        `[TEAM-INTEL-WORKER] Completed team summary job ${job.id} batchId=${batchId} teamSummaryId=${teamSummaryId} teamId=${teamId} teamName=${teamName}`
       );
 
       await this.triggerOrgSummaryIfReady({
@@ -564,20 +613,40 @@ class TeamIntelligenceWorker {
       const generated = await teamIntelligenceOrgSummaryService.generate({
         reportDate: orgSummary.reportDate.toISOString().slice(0, 10),
         source: orgSummary.source,
-        teamSummaries: completedOnly.map((teamSummary) => ({
-          reportDate: teamSummary.reportDate.toISOString().slice(0, 10),
-          teamName: teamSummary.teamName,
-          source: teamSummary.source,
-          summaryText: teamSummary.summaryText as unknown as string[],
-          summaryMetadata: teamSummary.summaryMetadata as unknown as never,
-          provenance: teamSummary.provenance as unknown as never,
+        teamSummaries: await Promise.all(completedOnly.map(async (teamSummary) => {
+          const teamContent = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+            summaryText?: string[];
+            summaryMetadata?: never;
+            provenance?: never;
+          }>(null, teamSummary.contentUrl);
+
+          return {
+            reportDate: teamSummary.reportDate.toISOString().slice(0, 10),
+            teamId: teamSummary.teamId ?? '',
+            teamName: teamSummary.teamName,
+            source: teamSummary.source,
+            summaryText: teamContent?.summaryText ?? [],
+            summaryMetadata: (teamContent?.summaryMetadata ?? {}) as never,
+            provenance: (teamContent?.provenance ?? { bullets: [] }) as never,
+          };
         })),
       });
 
+      const orgContentPointer = await teamIntelligenceContentStorageService.storeJsonPayload({
+        entityType: 'org-summary',
+        entityId: orgSummaryId,
+        contentType: 'summary-text',
+        payload: {
+          summaryText: generated.summaryText,
+          summaryMetadata: generated.summaryMetadata,
+          provenance: generated.provenance,
+        },
+      });
+
       await teamIntelligenceRepository.updateOrgSummaryResult(orgSummaryId, {
-        summaryText: generated.summaryText as Prisma.InputJsonValue,
-        summaryMetadata: generated.summaryMetadata as Prisma.InputJsonValue,
-        provenance: generated.provenance as unknown as Prisma.InputJsonValue,
+        contentUrl: orgContentPointer.contentUrl,
+        contentSize: orgContentPointer.contentSize,
+        contentChecksum: orgContentPointer.contentChecksum,
         totalTeams: orgSummary.totalTeams,
         completedTeams: orgSummary.completedTeams,
         failedTeams: orgSummary.failedTeams,
@@ -616,14 +685,23 @@ class TeamIntelligenceWorker {
   }): Promise<void> {
     const teamName = input.teamName?.trim() || 'No Team';
     const teamId = input.teamId?.trim() || null;
-    const progress = await teamIntelligenceRepository.getTeamProgress(input.batchId, teamId, teamName);
+    if (!teamId) {
+      logger.warn('[TEAM-INTEL-WORKER] Skipping team summary trigger because teamId is missing', {
+        batchId: input.batchId,
+        teamName,
+        reportDate: input.reportDate.toISOString().slice(0, 10),
+      });
+      return;
+    }
+
+    const progress = await teamIntelligenceRepository.getTeamProgress(input.batchId, teamId);
     const terminalUsers = progress.completedUsers + progress.failedUsers;
 
     if (progress.totalUsers === 0 || terminalUsers !== progress.totalUsers) {
       return;
     }
 
-    let teamSummary = await teamIntelligenceRepository.findTeamSummaryByBatchAndTeam(input.batchId, teamId, teamName);
+    let teamSummary = await teamIntelligenceRepository.findTeamSummaryByBatchAndTeam(input.batchId, teamId);
     if (!teamSummary) {
       teamSummary = await teamIntelligenceRepository.createTeamSummary({
         batchId: input.batchId,
@@ -631,7 +709,7 @@ class TeamIntelligenceWorker {
         source: input.source,
         teamId,
         teamName,
-        idempotencyKey: `team-intelligence-team:${input.batchId}:${teamId ?? 'null'}:${teamName}:${input.reportDate.toISOString().slice(0, 10)}`,
+        idempotencyKey: `team-intelligence-team:${input.batchId}:${teamId}:${input.reportDate.toISOString().slice(0, 10)}`,
         totalUsers: progress.totalUsers,
         completedUsers: progress.completedUsers,
         failedUsers: progress.failedUsers,
@@ -646,6 +724,7 @@ class TeamIntelligenceWorker {
       return;
     } else {
       teamSummary = await teamIntelligenceRepository.updateTeamSummaryStatus(teamSummary.id, {
+        teamName,
         totalUsers: progress.totalUsers,
         completedUsers: progress.completedUsers,
         failedUsers: progress.failedUsers,

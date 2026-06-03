@@ -1522,37 +1522,40 @@ enum TeamIntelligenceBulletCategory {
   @@schema("non_zero")
 }
 
-model TeamIntelligenceIngestionBatch {
-  id              String                         @id @default(cuid())
+model TeamIntelligenceIngestionBatchV2 {
+  id              String                           @id @default(cuid())
   reportDate      DateTime
   source          String
-  idempotencyKey  String                         @unique
-  requestChecksum  String
-  requestPayload  Json
+  idempotencyKey  String                           @unique
+  requestChecksum String
+  requestPayload  Json?
+  contentUrl      String?
+  contentSize     Int?
+  contentChecksum String?
   totalUsers      Int
-  queuedUsers     Int                            @default(0)
-  failedUsers     Int                            @default(0)
-  status          TeamIntelligenceBatchStatus    @default(RECEIVED)
-  receivedAt      DateTime                       @default(now())
+  queuedUsers     Int                              @default(0)
+  failedUsers     Int                              @default(0)
+  status          TeamIntelligenceBatchStatus      @default(RECEIVED)
+  receivedAt      DateTime                         @default(now())
   queuedAt        DateTime?
   completedAt     DateTime?
   errorMessage    String?
-  createdAt       DateTime                       @default(now())
-  updatedAt       DateTime                       @updatedAt
+  createdAt       DateTime                         @default(now())
+  updatedAt       DateTime                         @updatedAt
 
-  users TeamIntelligenceUserIngestion[]
-  teamSummaries TeamIntelligenceTeamSummary[]
-  orgSummary TeamIntelligenceOrgSummary?
+  users         TeamIntelligenceUserIngestionV2[]
+  teamSummaries TeamIntelligenceTeamSummaryV2[]
+  orgSummary    TeamIntelligenceOrgSummaryV2?
 
   @@index([reportDate])
   @@index([source, reportDate])
   @@index([status, receivedAt])
-  @@map("team_intelligence_ingestion_batches")
+  @@map("team_intelligence_ingestion_batches_v2")
   @@schema("non_zero")
 }
 
-model TeamIntelligenceUserIngestion {
-  id               String                              @id @default(cuid())
+model TeamIntelligenceUserIngestionV2 {
+  id               String                                @id @default(cuid())
   batchId          String
   reportDate       DateTime
   source           String
@@ -1560,94 +1563,92 @@ model TeamIntelligenceUserIngestion {
   userName         String
   teamId           String?
   teamName         String?
-  rawPayload       Json
-  pullRequests     Json
-  soloCommits      Json
   aiUsage          Json?
-  employeeSummary  Json?
-  summaryMetadata  Json?
-  processingStatus TeamIntelligenceUserIngestionStatus @default(RECEIVED)
+  contentUrl       String?
+  contentSize      Int?
+  contentChecksum  String?
+  processingStatus TeamIntelligenceUserIngestionStatus   @default(RECEIVED)
   queueJobId       String?
   queuedAt         DateTime?
   startedAt        DateTime?
   completedAt      DateTime?
   failedAt         DateTime?
   errorMessage     String?
-  createdAt        DateTime                            @default(now())
-  updatedAt        DateTime                            @updatedAt
+  createdAt        DateTime                              @default(now())
+  updatedAt        DateTime                              @updatedAt
 
-  batch TeamIntelligenceIngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, userEmail])
   @@index([reportDate, userEmail])
   @@index([batchId, processingStatus])
   @@index([source, reportDate])
-  @@map("team_intelligence_user_ingestions")
+  @@map("team_intelligence_user_ingestions_v2")
   @@schema("non_zero")
 }
 
-model TeamIntelligenceTeamSummary {
-  id              String                      @id @default(cuid())
+model TeamIntelligenceTeamSummaryV2 {
+  id              String                        @id @default(cuid())
   batchId         String
   reportDate      DateTime
   source          String
   teamId          String?
   teamName        String
-  idempotencyKey  String                      @unique
+  idempotencyKey  String                        @unique
   totalUsers      Int
-  completedUsers  Int                         @default(0)
-  failedUsers     Int                         @default(0)
-  summaryText     Json?
-  summaryMetadata Json?
-  provenance      Json?
-  status          TeamIntelligenceBatchStatus @default(RECEIVED)
+  completedUsers  Int                           @default(0)
+  failedUsers     Int                           @default(0)
+  contentUrl      String?
+  contentSize     Int?
+  contentChecksum String?
+  status          TeamIntelligenceBatchStatus   @default(RECEIVED)
   queueJobId      String?
   queuedAt        DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
   failedAt        DateTime?
   errorMessage    String?
-  createdAt       DateTime                    @default(now())
-  updatedAt       DateTime                    @updatedAt
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
 
-  batch TeamIntelligenceIngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
-  @@unique([batchId, teamId, teamName])
-  @@index([reportDate, teamId, teamName])
+  @@unique([batchId, teamId])
+  @@index([reportDate, teamId])
   @@index([batchId, status])
   @@index([source, reportDate])
-  @@map("team_intelligence_team_summaries")
+  @@map("team_intelligence_team_summaries_v2")
   @@schema("non_zero")
 }
 
-model TeamIntelligenceOrgSummary {
-  id              String                      @id @default(cuid())
-  batchId         String                      @unique
+model TeamIntelligenceOrgSummaryV2 {
+  id              String                        @id @default(cuid())
+  batchId         String                        @unique
   reportDate      DateTime
   source          String
-  idempotencyKey  String                      @unique
+  idempotencyKey  String                        @unique
   totalTeams      Int
-  completedTeams  Int                         @default(0)
-  failedTeams     Int                         @default(0)
-  summaryText     Json?
-  summaryMetadata Json?
-  provenance      Json?
-  status          TeamIntelligenceBatchStatus @default(RECEIVED)
+  completedTeams  Int                           @default(0)
+  failedTeams     Int                           @default(0)
+  contentUrl      String?
+  contentSize     Int?
+  contentChecksum String?
+  status          TeamIntelligenceBatchStatus   @default(RECEIVED)
   queueJobId      String?
   queuedAt        DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
   failedAt        DateTime?
   errorMessage    String?
-  createdAt       DateTime                    @default(now())
-  updatedAt       DateTime                    @updatedAt
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
 
-  batch TeamIntelligenceIngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@index([reportDate])
   @@index([source, reportDate])
   @@index([status, createdAt])
-  @@map("team_intelligence_org_summaries")
+  @@map("team_intelligence_org_summaries_v2")
   @@schema("non_zero")
 }
 

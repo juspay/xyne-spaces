@@ -294,9 +294,9 @@ export class App {
     this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
 
     // Team intelligence dashboard routes (JWT auth - called by dashboard)
-    this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, teamIntelligenceDashboardRoutes);
-    this.app.use('/api/team-intelligence-dashboard/team', authMiddleware.authenticate, teamIntelligenceTeamDashboardRoutes);
-    this.app.use('/api/team-intelligence-dashboard/user', authMiddleware.authenticate, teamIntelligenceUserDashboardRoutes);
+    this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);
+    this.app.use('/api/team-intelligence-dashboard/team', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceTeamDashboardRoutes);
+    this.app.use('/api/team-intelligence-dashboard/user', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceUserDashboardRoutes);
 
     // Mettle employee details route (JWT auth - fetch employee information)
     this.app.use('/api/mettle/employee', authMiddleware.authenticate, mettleEmployeeDetailsRoutes);

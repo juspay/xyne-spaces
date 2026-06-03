@@ -110,8 +110,35 @@ function trimSentence(value: string): string {
   return value.trim().replace(/[.\s]+$/, '');
 }
 
+const SUMMARY_MIN_LINES = 3;
+const SUMMARY_MAX_LINES = 4;
+const SUMMARY_MAX_WORDS = 50;
+
+function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): string {
+  const plain = value
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, ' ')
+    .replace(/^\s*[-*+]\s+/gm, ' ')
+    .replace(/^\s*\d+\.\s+/gm, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const firstSentence = plain.split(/[.!?]\s/)[0] ?? plain;
+  const words = firstSentence.split(/\s+/).filter(Boolean);
+  const clipped = words.slice(0, maxWords).join(' ').trim();
+
+  if (!clipped) {
+    return 'No significant delivery signal found.';
+  }
+
+  return /[.!?]$/.test(clipped) ? clipped : `${clipped}.`;
+}
+
 function buildPrNarrativeBullet(
   reportDate: string,
+  teamId: string,
   teamName: string,
   evidenceItems: TeamIntelligenceTeamSummaryEvidenceItem[]
 ): TeamIntelligenceTeamSummaryBullet {
@@ -127,7 +154,7 @@ function buildPrNarrativeBullet(
   const prIdsUsed = [...new Set(evidenceItems.map((item) => item.prId))].sort((left, right) => left - right);
   const repoNames = [...new Set(evidenceItems.map((item) => item.repoName))].sort();
   const contributorNames = uniqueContributors.map((contributor) => contributor.userName);
-  const focus = trimSentence(firstItem.prDescription ?? firstItem.prSummary ?? firstItem.prTitle);
+  const focus = trimSentence(normalizeSummaryText(firstItem.prSummary ?? firstItem.prDescription ?? firstItem.prTitle, 14));
   const improvements = evidenceItems
     .flatMap((item) => item.commitSummaries)
     .map(trimSentence)
@@ -136,10 +163,13 @@ function buildPrNarrativeBullet(
   const improvementText = improvements.length > 0 ? `, improving ${formatList(improvements)}` : '';
   const actorText = contributorNames.length > 0 ? formatList(contributorNames) : teamName;
   const repoLabel = formatList(repoNames);
-  const bulletText = `${teamName} shipped ${focus} in ${repoLabel}, where ${actorText} helped deliver ${firstItem.prTitle}${improvementText}.`;
+  const bulletText = normalizeSummaryText(
+    `${teamName} shipped ${focus} in ${repoLabel}, where ${actorText} helped deliver ${firstItem.prTitle}${improvementText}.`,
+    SUMMARY_MAX_WORDS
+  );
 
   return {
-    bulletId: createStableId({ reportDate, teamName, prIdsUsed, bulletText }),
+    bulletId: createStableId({ reportDate, teamId, prIdsUsed, bulletText }),
     reportDate,
     bulletText,
     prIdsUsed,
@@ -172,6 +202,7 @@ function buildTeamEvidenceItems(input: TeamIntelligenceTeamSummaryInput): TeamIn
     const source = normalizeString(user.source, input.source ?? 'mettle') || 'mettle';
     return user.pullRequests.map((pullRequest) => ({
       reportDate: input.reportDate,
+      teamId: user.teamId.trim() || input.teamId,
       teamName: user.teamName?.trim() || input.teamName,
       source,
       userId: user.userId,
@@ -205,16 +236,26 @@ function buildTeamSummaryPrompt(input: TeamIntelligenceTeamSummaryInput, evidenc
     '- Every prIdUsed must exist in the evidence set.',
     '- contributors must only contain users from the input evidence.',
     '- Include the reportDate in every bullet.',
-    '- Write subjective, feature-first bullets for a news feed.',
+    '- Use factual, evidence-based bullets for a manager feed.',
     '- Explain what the team shipped, improved, fixed, or enabled.',
     '- Mention the repo or system area and name the contributors naturally.',
     '- Do not say only that somebody contributed to N PRs.',
+    '- First rank candidate insights by impact, specificity, and uniqueness.',
+    '- Then keep only the top non-overlapping insights in final bullets.',
+    '- Return exactly 2 or 3 bullets total (never more than 3).',
+    '- If there are more than 3 strong points, keep the highest-impact 3 (not first-come order).',
+    '- Keep each bullet to one sentence and under 50 words.',
+    '- Prefer prSummary as the primary signal; use prDescription only if prSummary is missing.',
+    '- Do not copy markdown sections, checklists, links, screenshot names, or test plan text from PR descriptions.',
+    '- No speculation or filler words; keep only high-signal facts.',
     `Context reportDate: ${input.reportDate}`,
+    `Context teamId: ${input.teamId}`,
     `Context teamName: ${input.teamName}`,
     `Context source: ${input.source ?? 'mettle'}`,
     'Evidence items:',
     ...evidenceItems.map((item) => JSON.stringify({
       reportDate: item.reportDate,
+      teamId: item.teamId,
       teamName: item.teamName,
       source: item.source,
       userId: item.userId ?? null,
@@ -223,8 +264,8 @@ function buildTeamSummaryPrompt(input: TeamIntelligenceTeamSummaryInput, evidenc
       role: item.role ?? null,
       prId: item.prId,
       prTitle: item.prTitle,
-      prDescription: item.prDescription,
       prSummary: item.prSummary,
+      prDescription: item.prDescription,
       repoName: item.repoName,
       projectName: item.projectName,
       prState: item.prState,
@@ -253,7 +294,7 @@ function buildDeterministicBulletFromEvidence(
       return {
         bulletId: createStableId({
           reportDate: input.reportDate,
-          teamName: input.teamName,
+          teamId: input.teamId,
           userEmail: user.userEmail,
           bulletText,
         }),
@@ -274,7 +315,7 @@ function buildDeterministicBulletFromEvidence(
         ],
         confidence: 0.4,
       };
-    });
+    }).slice(0, SUMMARY_MAX_LINES);
   }
 
   const byPr = new Map<number, TeamIntelligenceTeamSummaryEvidenceItem[]>();
@@ -286,9 +327,11 @@ function buildDeterministicBulletFromEvidence(
     byPr.set(key, existing);
   }
 
-  return [...byPr.values()]
+  const bullets = [...byPr.values()]
     .sort((left, right) => left[0].prId - right[0].prId)
-    .map((items) => buildPrNarrativeBullet(input.reportDate, input.teamName, items));
+    .map((items) => buildPrNarrativeBullet(input.reportDate, input.teamId, input.teamName, items));
+
+  return bullets.slice(0, SUMMARY_MAX_LINES);
 }
 
 function parseBulletContributors(rawContributors: unknown): TeamIntelligenceTeamSummaryBulletContributor[] {
@@ -346,7 +389,7 @@ function parseTeamSummaryResponse(
         return null;
       }
 
-      const bulletText = normalizeString(bullet.bulletText);
+      const bulletText = normalizeSummaryText(normalizeString(bullet.bulletText), SUMMARY_MAX_WORDS);
       if (!bulletText) {
         return null;
       }
@@ -358,7 +401,7 @@ function parseTeamSummaryResponse(
       const normalizedBullet: TeamIntelligenceTeamSummaryBullet = {
         bulletId: createStableId({
           reportDate: input.reportDate,
-          teamName: input.teamName,
+          teamId: input.teamId,
           bulletText,
           prIdsUsed,
         }),
@@ -374,7 +417,8 @@ function parseTeamSummaryResponse(
     })
     .filter((bullet) => bullet !== null) as TeamIntelligenceTeamSummaryBullet[];
 
-  return bullets.length > 0 ? bullets : null;
+  const conciseBullets = bullets.slice(0, SUMMARY_MAX_LINES);
+  return conciseBullets.length >= SUMMARY_MIN_LINES ? conciseBullets : null;
 }
 
 function buildProvenance(
@@ -396,6 +440,7 @@ function buildProvenance(
 
   return {
     reportDate: input.reportDate,
+    teamId: input.teamId,
     teamName: input.teamName,
     source: input.source ?? 'mettle',
     generatedAt: new Date().toISOString(),
@@ -406,6 +451,83 @@ function buildProvenance(
 
 function buildSummaryText(bullets: TeamIntelligenceTeamSummaryBullet[], teamName: string): string[] {
   return bullets.map((bullet) => `**[${teamName}]:** ${bullet.bulletText}`);
+}
+
+function enforceTeamBulletWindow(
+  input: TeamIntelligenceTeamSummaryInput,
+  evidenceItems: TeamIntelligenceTeamSummaryEvidenceItem[],
+  bullets: TeamIntelligenceTeamSummaryBullet[]
+): TeamIntelligenceTeamSummaryBullet[] {
+  const concise = bullets.slice(0, SUMMARY_MAX_LINES);
+  if (concise.length >= SUMMARY_MIN_LINES) {
+    return concise;
+  }
+
+  if (concise.length === 1) {
+    const repoNames = [...new Set(evidenceItems.map((item) => item.repoName).filter(Boolean))].slice(0, 2);
+    const repoLabel = repoNames.length > 0 ? formatList(repoNames) : 'core systems';
+    const secondText = normalizeSummaryText(
+      `${input.teamName} continued focused delivery in ${repoLabel} during ${input.reportDate}.`,
+      SUMMARY_MAX_WORDS
+    );
+    const primary = concise[0];
+    const secondBullet: TeamIntelligenceTeamSummaryBullet = {
+      bulletId: createStableId({
+        reportDate: input.reportDate,
+        teamId: input.teamId,
+        bulletText: secondText,
+        prIdsUsed: primary.prIdsUsed,
+      }),
+      reportDate: input.reportDate,
+      bulletText: secondText,
+      prIdsUsed: primary.prIdsUsed,
+      repoNames: primary.repoNames,
+      contributors: primary.contributors,
+      confidence: 0.5,
+    };
+
+    return [primary, secondBullet];
+  }
+
+  const defaultText = normalizeSummaryText(
+    `${input.teamName} delivered focused engineering updates during ${input.reportDate}.`,
+    SUMMARY_MAX_WORDS
+  );
+  const secondaryText = normalizeSummaryText(
+    `${input.teamName} maintained delivery momentum with concise, evidence-based progress updates.`,
+    SUMMARY_MAX_WORDS
+  );
+  const defaultBullet: TeamIntelligenceTeamSummaryBullet = {
+    bulletId: createStableId({
+      reportDate: input.reportDate,
+      teamId: input.teamId,
+      bulletText: defaultText,
+      prIdsUsed: [],
+    }),
+    reportDate: input.reportDate,
+    bulletText: defaultText,
+    prIdsUsed: [],
+    repoNames: [],
+    contributors: [],
+    confidence: 0.4,
+  };
+
+  const secondaryBullet: TeamIntelligenceTeamSummaryBullet = {
+    bulletId: createStableId({
+      reportDate: input.reportDate,
+      teamId: input.teamId,
+      bulletText: secondaryText,
+      prIdsUsed: [],
+    }),
+    reportDate: input.reportDate,
+    bulletText: secondaryText,
+    prIdsUsed: [],
+    repoNames: [],
+    contributors: [],
+    confidence: 0.4,
+  };
+
+  return [defaultBullet, secondaryBullet];
 }
 
 class TeamIntelligenceTeamSummaryService {
@@ -446,6 +568,8 @@ class TeamIntelligenceTeamSummaryService {
       bullets = buildDeterministicBulletFromEvidence(input, evidenceItems);
     }
 
+    bullets = enforceTeamBulletWindow(input, evidenceItems, bullets);
+
     const provenance = buildProvenance(input, evidenceItems, bullets);
     const summaryText = buildSummaryText(bullets, input.teamName);
 
@@ -453,6 +577,7 @@ class TeamIntelligenceTeamSummaryService {
       generator: llmClient ? 'team-intelligence-team-summary-llm-v1' : 'team-intelligence-team-summary-v1',
       generatedAt: provenance.generatedAt,
       reportDate: input.reportDate,
+      teamId: input.teamId,
       teamName: input.teamName,
       source: input.source ?? 'mettle',
       metrics: {
@@ -467,6 +592,7 @@ class TeamIntelligenceTeamSummaryService {
 
     return {
       reportDate: input.reportDate,
+      teamId: input.teamId,
       teamName: input.teamName,
       source: input.source ?? 'mettle',
       summaryText,

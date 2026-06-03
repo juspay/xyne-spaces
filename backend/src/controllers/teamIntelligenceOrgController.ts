@@ -148,6 +148,58 @@ export class TeamIntelligenceOrgController {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
+
+  /**
+   * GET /api/team-intelligence-dashboard/org/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&limit=10
+   *
+   * Response:
+   *   from, to, page, limit, total, totalPages,
+   *   recaps[] - paginated channel recaps across all channels,
+   *   ticketMetrics - counts only (totalCount, solvedCount, todoCount, startedCount, pausedCount, cancelledCount, overdueCount)
+   */
+  getOrgChannelRecaps = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { from, to, page: pageRaw, limit: limitRaw } = req.query as {
+        from?: string;
+        to?: string;
+        page?: string;
+        limit?: string;
+      };
+
+      if (!from || !to) {
+        res.status(400).json({ error: 'Both "from" and "to" query parameters are required' });
+        return;
+      }
+
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+        res.status(400).json({ error: '"from" and "to" must be valid ISO date strings' });
+        return;
+      }
+
+      if (fromDate > toDate) {
+        res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+
+      const page = Math.max(1, Number.parseInt(pageRaw ?? '1', 10) || 1);
+      const limit = Math.min(200, Math.max(1, Number.parseInt(limitRaw ?? '10', 10) || 10));
+
+      const result = await teamIntelligenceOrgRepository.getOrgChannelRecaps({
+        from: fromDate,
+        to: toDate,
+        page,
+        limit,
+      });
+
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error('[TeamIntelligenceOrg] getOrgChannelRecaps error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 }
 
 export const teamIntelligenceOrgController = new TeamIntelligenceOrgController();

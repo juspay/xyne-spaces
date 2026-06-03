@@ -21,6 +21,7 @@ import {
   type CreateTeamIntelligenceUserData,
 } from '../repositories/team-intelligence.repository';
 import { teamIntelligenceQueue } from '../queue';
+import { teamIntelligenceContentStorageService } from './team-intelligence-content-storage.service';
 import {
   Prisma,
   TeamIntelligenceBatchStatus,
@@ -172,14 +173,23 @@ class TeamIntelligenceService {
       return null;
     }
 
+    const hydrated = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+      summaryText?: unknown;
+      summaryMetadata?: unknown;
+      provenance?: unknown;
+    }>(null, orgSummary.contentUrl);
+    const summaryText = hydrated?.summaryText ?? null;
+    const summaryMetadata = hydrated?.summaryMetadata ?? null;
+    const provenance = hydrated?.provenance ?? null;
+
     return {
       id: orgSummary.id,
       batchId: orgSummary.batchId,
       reportDate: orgSummary.reportDate.toISOString().slice(0, 10),
       source: orgSummary.source,
-      summaryText: orgSummary.summaryText,
-      summaryMetadata: orgSummary.summaryMetadata,
-      provenance: orgSummary.provenance,
+      summaryText,
+      summaryMetadata,
+      provenance,
       status: orgSummary.status,
       totalTeams: orgSummary.totalTeams,
       completedTeams: orgSummary.completedTeams,
@@ -232,30 +242,56 @@ class TeamIntelligenceService {
     }
 
     const normalizedUsers = parsedRequest.users.map((user) => this.normalizeUser(user, source));
+    const batchContentPointer = await teamIntelligenceContentStorageService.storeJsonPayload({
+      entityType: 'batch',
+      entityId: idempotencyKey,
+      contentType: 'request-payload',
+      payload: parsedRequest,
+    });
 
     const batchPayload: CreateTeamIntelligenceBatchData = {
       reportDate,
       source,
       idempotencyKey,
       requestChecksum,
-      requestPayload: parsedRequest as unknown as Prisma.InputJsonValue,
+      requestPayload: null,
+      contentUrl: batchContentPointer.contentUrl,
+      contentSize: batchContentPointer.contentSize,
+      contentChecksum: batchContentPointer.contentChecksum,
       totalUsers: normalizedUsers.length,
       status: TeamIntelligenceBatchStatus.RECEIVED,
     };
 
-    const userRows: CreateTeamIntelligenceUserData[] = normalizedUsers.map((user) => ({
-      reportDate,
-      source: user.source,
-      userEmail: user.userEmail,
-      userName: user.userName,
-      teamId: user.teamId,
-      teamName: user.teamName,
-      pullRequests: user.pullRequests as unknown as Prisma.InputJsonValue,
-      soloCommits: user.soloCommits as unknown as Prisma.InputJsonValue,
-      aiUsage: user.aiUsage as Prisma.InputJsonValue | null,
-      processingStatus: TeamIntelligenceUserIngestionStatus.RECEIVED,
-      queueJobId: uuidv4(),
-    }));
+    const userRows: CreateTeamIntelligenceUserData[] = await Promise.all(
+      normalizedUsers.map(async (user, index) => {
+        const userEntityId = `${idempotencyKey}-${user.userEmail}`;
+        const userPayloadPointer = await teamIntelligenceContentStorageService.storeJsonPayload({
+          entityType: 'user',
+          entityId: userEntityId,
+          contentType: 'raw-payload',
+          payload: {
+            rawPayload: parsedRequest.users[index],
+            pullRequests: user.pullRequests,
+            soloCommits: user.soloCommits,
+          },
+        });
+
+        return {
+          reportDate,
+          source: user.source,
+          userEmail: user.userEmail,
+          userName: user.userName,
+          teamId: user.teamId,
+          teamName: user.teamName,
+          aiUsage: user.aiUsage as Prisma.InputJsonValue | null,
+          contentUrl: userPayloadPointer.contentUrl,
+          contentSize: userPayloadPointer.contentSize,
+          contentChecksum: userPayloadPointer.contentChecksum,
+          processingStatus: TeamIntelligenceUserIngestionStatus.RECEIVED,
+          queueJobId: uuidv4(),
+        };
+      })
+    );
 
     const created = await teamIntelligenceRepository.createBatchWithUsers(batchPayload, userRows);
     return await this.enqueueExistingBatch(

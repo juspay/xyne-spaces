@@ -17,35 +17,39 @@ export class MettleTeamMembersController {
 
   getTeamMembers = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { teamName } = req.query;
+      const { teamId } = req.query;
 
-      if (!teamName || typeof teamName !== 'string' || teamName.trim().length === 0) {
+      if (!teamId || typeof teamId !== 'string' || teamId.trim().length === 0) {
         res.status(400).json({
-          error: 'teamName query parameter is required and must be a non-empty string',
+          error: 'teamId query parameter is required and must be a non-empty string',
         });
         return;
       }
 
-      const trimmedTeamName = teamName.trim();
+      const trimmedTeamId = teamId.trim();
 
-      logger.info(`Fetching team members for teamName: ${trimmedTeamName}`);
+      logger.info(`Fetching team members for teamId: ${trimmedTeamId}`);
 
-      const teamMembers = await mettleTeamMembersService.fetchTeamMembersFromMettle(trimmedTeamName);
+      const teamMembers = await mettleTeamMembersService.fetchTeamMembersFromMettle(trimmedTeamId);
 
       res.status(200).json(teamMembers);
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        const status = error.response?.status ?? 500;
+        const upstreamStatus = error.response?.status;
         const data = error.response?.data ?? {
           error: 'Failed to fetch team members from Mettle',
         };
 
         logger.error('[MettleTeamMembersController] Axios error while fetching team members', {
-          status,
+          upstreamStatus,
           data,
         });
 
-        res.status(status).json(data);
+        res.status(502).json({
+          error: 'Failed to fetch team members from Mettle',
+          upstreamStatus,
+          message: data,
+        });
         return;
       }
 

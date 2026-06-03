@@ -8,7 +8,7 @@ const router = Router();
  * These routes fetch team member information from the external Mettle API
  */
 
-// GET /api/mettle/team-members?teamName=Data%20Engineering
+// GET /api/mettle/team-members?teamId=data-engineering
 router.get('/', mettleTeamMembersController.getTeamMembers);
 
 export default router;

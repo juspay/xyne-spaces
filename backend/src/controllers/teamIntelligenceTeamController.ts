@@ -3,25 +3,34 @@ import { logger } from '@/utils/logger';
 import { teamIntelligenceTeamDashboardService } from '@/services/teamIntelligenceTeamDashboardService';
 
 export class TeamIntelligenceTeamController {
+  private parseTeamId(req: Request): { teamId?: string; error?: string } {
+    const { teamId } = req.query as { teamId?: string };
+    const trimmedTeamId = teamId?.trim();
+    if (trimmedTeamId) {
+      return { teamId: trimmedTeamId };
+    }
+
+    return { error: '"teamId" query parameter is required' };
+  }
+
   /**
-   * GET /api/team-intelligence-dashboard/team/bullets?from=YYYY-MM-DD&to=YYYY-MM-DD&teamName=Core%20Platform&page=1&limit=20
+   * GET /api/team-intelligence-dashboard/team/bullets?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123&page=1&limit=20
    *
    * Response:
-   *   from, to, teamName, page, limit, total, totalPages,
+   *   from, to, teamId, teamName, page, limit, total, totalPages,
    *   bullets[] where bullets are flattened provenance bullets for the team.
    */
   getTeamBullets = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, teamName, page: pageRaw, limit: limitRaw } = req.query as {
+      const { from, to, page: pageRaw, limit: limitRaw } = req.query as {
         from?: string;
         to?: string;
-        teamName?: string;
         page?: string;
         limit?: string;
       };
 
-      if (!from || !to || !teamName) {
-        res.status(400).json({ error: '"from", "to", and "teamName" query parameters are required' });
+      if (!from || !to) {
+        res.status(400).json({ error: '"from" and "to" query parameters are required' });
         return;
       }
 
@@ -38,9 +47,9 @@ export class TeamIntelligenceTeamController {
         return;
       }
 
-      const trimmedTeamName = teamName.trim();
-      if (!trimmedTeamName) {
-        res.status(400).json({ error: '"teamName" must not be empty' });
+      const teamQuery = this.parseTeamId(req);
+      if (teamQuery.error || !teamQuery.teamId) {
+        res.status(400).json({ error: '"teamId" query parameter is required' });
         return;
       }
 
@@ -50,7 +59,7 @@ export class TeamIntelligenceTeamController {
       const result = await teamIntelligenceTeamDashboardService.getTeamBullets({
         from: fromDate,
         to: toDate,
-        teamName: trimmedTeamName,
+        teamId: teamQuery.teamId,
         page,
         limit,
       });
@@ -114,21 +123,20 @@ export class TeamIntelligenceTeamController {
   };
 
   /**
-   * GET /api/team-intelligence-dashboard/team/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&teamName=Core%20Platform
+  * GET /api/team-intelligence-dashboard/team/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123
    *
    * Response:
-   *   from, to, teamName, totalPrCount, totalCommitCount, aiUsages
+   *   from, to, teamId, teamName, totalPrCount, totalCommitCount, aiUsages
    */
   getTeamUsageSummary = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, teamName } = req.query as {
+      const { from, to } = req.query as {
         from?: string;
         to?: string;
-        teamName?: string;
       };
 
-      if (!from || !to || !teamName) {
-        res.status(400).json({ error: '"from", "to", and "teamName" query parameters are required' });
+      if (!from || !to) {
+        res.status(400).json({ error: '"from" and "to" query parameters are required' });
         return;
       }
 
@@ -145,21 +153,75 @@ export class TeamIntelligenceTeamController {
         return;
       }
 
-      const trimmedTeamName = teamName.trim();
-      if (!trimmedTeamName) {
-        res.status(400).json({ error: '"teamName" must not be empty' });
+      const teamQuery = this.parseTeamId(req);
+      if (teamQuery.error || !teamQuery.teamId) {
+        res.status(400).json({ error: '"teamId" query parameter is required' });
         return;
       }
 
       const result = await teamIntelligenceTeamDashboardService.getTeamUsageSummary({
         from: fromDate,
         to: toDate,
-        teamName: trimmedTeamName,
+        teamId: teamQuery.teamId,
       });
 
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceTeam] getTeamUsageSummary error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * GET /api/team-intelligence-dashboard/team/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=team-123&page=1&limit=10
+   */
+  getTeamChannelRecaps = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { from, to, page: pageRaw, limit: limitRaw } = req.query as {
+        from?: string;
+        to?: string;
+        page?: string;
+        limit?: string;
+      };
+
+      if (!from || !to) {
+        res.status(400).json({ error: '"from" and "to" query parameters are required' });
+        return;
+      }
+
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+        res.status(400).json({ error: '"from" and "to" must be valid ISO date strings' });
+        return;
+      }
+
+      if (fromDate > toDate) {
+        res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+
+      const teamQuery = this.parseTeamId(req);
+      if (teamQuery.error || !teamQuery.teamId) {
+        res.status(400).json({ error: '"teamId" query parameter is required' });
+        return;
+      }
+
+      const page = Math.max(1, Number.parseInt(pageRaw ?? '1', 10) || 1);
+      const limit = Math.min(200, Math.max(1, Number.parseInt(limitRaw ?? '10', 10) || 10));
+
+      const result = await teamIntelligenceTeamDashboardService.getTeamChannelRecaps({
+        from: fromDate,
+        to: toDate,
+        teamId: teamQuery.teamId,
+        page,
+        limit,
+      });
+
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error('[TeamIntelligenceTeam] getTeamChannelRecaps error', { err });
       res.status(500).json({ error: 'Internal server error' });
     }
   };

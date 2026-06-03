@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
 
 export interface UserDetailsDateRangeFilters {
   from: Date;
@@ -99,6 +100,21 @@ export interface UserOverviewDateRangeResult {
     items: Record<string, unknown>[];
     keyFocusAreas: string[];
   };
+  tickets: Array<{
+    id: string;
+    xyneId: string;
+    title: string;
+    statusV2: string;
+    priority: string;
+    createdBy: string;
+    assignedTo: string | null;
+    stageName: string;
+    boardId: string;
+    projectId: string;
+    createdAt: string;
+    updatedAt: string;
+    closedAt: string | null;
+  }>;
 }
 
 function paginateArray<T>(items: T[], page: number, limit: number): { total: number; totalPages: number; items: T[] } {
@@ -124,7 +140,7 @@ class TeamIntelligenceUserRepository {
     const rangeEnd = new Date(to);
     rangeEnd.setUTCHours(23, 59, 59, 999);
 
-    const ingestions = await db.teamIntelligenceUserIngestion.findMany({
+    const ingestions = await db.teamIntelligenceUserIngestionV2.findMany({
       where: {
         reportDate: { gte: rangeStart, lte: rangeEnd },
         userEmail: {
@@ -137,15 +153,31 @@ class TeamIntelligenceUserRepository {
         userEmail: true,
         teamName: true,
         reportDate: true,
-        pullRequests: true,
-        soloCommits: true,
         aiUsage: true,
-        employeeSummary: true,
-        summaryMetadata: true,
+        contentUrl: true,
       },
     });
 
-    return { ingestions, rangeStart, rangeEnd };
+    const hydratedIngestions = await Promise.all(
+      ingestions.map(async (ingestion) => {
+        const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+          pullRequests?: unknown[];
+          soloCommits?: unknown[];
+          employeeSummary?: unknown[];
+          summaryMetadata?: unknown;
+        }>(null, ingestion.contentUrl);
+
+        return {
+          ...ingestion,
+          pullRequests: Array.isArray(content?.pullRequests) ? content.pullRequests : [],
+          soloCommits: Array.isArray(content?.soloCommits) ? content.soloCommits : [],
+          employeeSummary: Array.isArray(content?.employeeSummary) ? content.employeeSummary : [],
+          summaryMetadata: content?.summaryMetadata ?? null,
+        };
+      })
+    );
+
+    return { ingestions: hydratedIngestions, rangeStart, rangeEnd };
   }
 
   private buildUserAggregateData(ingestions: Array<{
@@ -338,9 +370,74 @@ class TeamIntelligenceUserRepository {
   }
 
   async getUserOverviewByDate(filters: UserOverviewDateRangeFilters): Promise<UserOverviewDateRangeResult> {
-    const { userEmail } = filters;
+    const { userEmail, from, to } = filters;
     const { ingestions, rangeStart, rangeEnd } = await this.getUserIngestions(filters);
     const aggregateData = this.buildUserAggregateData(ingestions);
+
+    // Find user by email to get their ID
+    const user = await db.user.findFirst({
+      where: { email: { equals: userEmail, mode: 'insensitive' } },
+      select: { id: true },
+    });
+
+    // Fetch tickets for this user within the date range
+    let tickets: Array<{
+      id: string;
+      xyneId: string;
+      title: string;
+      statusV2: string;
+      priority: string;
+      createdBy: string;
+      assignedTo: string | null;
+      stageName: string;
+      boardId: string;
+      projectId: string;
+      createdAt: string;
+      updatedAt: string;
+      closedAt: string | null;
+    }> = [];
+
+    if (user) {
+      const ticketRecords = await db.ticket.findMany({
+        where: {
+          OR: [{ createdBy: user.id }, { assignedTo: user.id }],
+          createdAt: { gte: from, lte: to },
+          isArchived: false,
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          statusV2: true,
+          priority: true,
+          createdBy: true,
+          assignedTo: true,
+          stageName: true,
+          boardId: true,
+          projectId: true,
+          createdAt: true,
+          updatedAt: true,
+          closedAt: true,
+        },
+      });
+
+      tickets = ticketRecords.map((t) => ({
+        id: t.id,
+        xyneId: t.xyneId,
+        title: t.title,
+        statusV2: t.statusV2,
+        priority: t.priority,
+        createdBy: t.createdBy,
+        assignedTo: t.assignedTo || null,
+        stageName: t.stageName,
+        boardId: t.boardId,
+        projectId: t.projectId,
+        createdAt: t.createdAt.toISOString(),
+        updatedAt: t.updatedAt.toISOString(),
+        closedAt: t.closedAt ? t.closedAt.toISOString() : null,
+      }));
+    }
 
     return {
       from: rangeStart.toISOString().slice(0, 10),
@@ -353,6 +450,95 @@ class TeamIntelligenceUserRepository {
         items: aggregateData.teamInsights,
         keyFocusAreas: aggregateData.keyFocusAreas,
       },
+      tickets,
+    };
+  }
+
+  async getUserChannelRecapsByDate({
+    from,
+    to,
+    userEmail,
+    page = 1,
+    limit = 10,
+  }: {
+    from: Date;
+    to: Date;
+    userEmail: string;
+    page: number;
+    limit: number;
+  }) {
+    // Find user by email (case-insensitive)
+    const user = await db.user.findFirst({
+      where: {
+        email: {
+          equals: userEmail,
+          mode: 'insensitive',
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!user) {
+      return {
+        from,
+        to,
+        userEmail,
+        page,
+        limit,
+        total: 0,
+        totalPages: 0,
+        recaps: [],
+      };
+    }
+
+    // Get total count for pagination
+    const total = await db.channelRecap.count({
+      where: {
+        userId: user.id,
+        recapDate: {
+          gte: from,
+          lte: to,
+        },
+      },
+    });
+
+    // Calculate total pages
+    const totalPages = Math.ceil(total / limit);
+
+    // Get paginated recaps
+    const recaps = await db.channelRecap.findMany({
+      where: {
+        userId: user.id,
+        recapDate: {
+          gte: from,
+          lte: to,
+        },
+      },
+      orderBy: {
+        recapDate: 'desc',
+      },
+      skip: (page - 1) * limit,
+      take: limit,
+      select: {
+        id: true,
+        channelId: true,
+        recapDate: true,
+        summary: true,
+        userId: true,
+      },
+    });
+
+    return {
+      from,
+      to,
+      userEmail,
+      page,
+      limit,
+      total,
+      totalPages,
+      recaps,
     };
   }
 }

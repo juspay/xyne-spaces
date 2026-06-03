@@ -3,6 +3,9 @@ import { teamIntelligenceUserController } from '@/controllers/teamIntelligenceUs
 
 const router = Router();
 
+// GET /api/team-intelligence-dashboard/user/mettle-extended-info?email=user@example.com
+router.get('/mettle-extended-info', teamIntelligenceUserController.getUserMettleExtendedInfo);
+
 // GET /api/team-intelligence-dashboard/user/details?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com
 router.get('/details', teamIntelligenceUserController.getUserDetails);
 
@@ -11,5 +14,8 @@ router.get('/pull-requests', teamIntelligenceUserController.getUserPullRequests)
 
 // GET /api/team-intelligence-dashboard/user/overview?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com
 router.get('/overview', teamIntelligenceUserController.getUserOverview);
+
+// GET /api/team-intelligence-dashboard/user/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com&page=1&limit=10
+router.get('/channel-recaps', teamIntelligenceUserController.getUserChannelRecaps);
 
 export default router;
