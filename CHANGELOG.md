@@ -1,3 +1,10 @@
+## [1.153.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.152.0...v1.153.0) (2026-06-03)
+
+
+### Features
+
+* automations resource opening ([1b19abd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1b19abd8dafcc21a3e77f123f2bf619446b22818)), closes [#7063](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7063)
+
 ## [1.152.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.151.0...v1.152.0) (2026-06-03)
 
 
