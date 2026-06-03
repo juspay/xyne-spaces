@@ -55,6 +55,8 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
+import { notificationService } from '@/services/notificationService';
+import { NotificationType } from '@prisma/client';
 import { TicketIdService } from './ticketIdService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
@@ -422,6 +424,76 @@ export class EmailService {
     } catch (error) {
       logger.warn('[EmailService] Ticket description enriched but md sync failed', {
         ticketId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  private async notifyAssigneeOfReply(params: {
+    ticketId: string;
+    conversationId: string;
+    channelId: string;
+    workspaceId: string | undefined;
+    emailSubject: string;
+    emailFrom: string;
+    emailId: string;
+  }): Promise<void> {
+    const { ticketId, conversationId, channelId, workspaceId, emailSubject, emailFrom, emailId } =
+      params;
+
+    try {
+      const ticket = await this.prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { assignedTo: true, xyneId: true },
+      });
+      const assignedTo = ticket?.assignedTo;
+      if (!assignedTo) return;
+
+      // Resolve assignedTo to concrete recipient user ids.
+      let recipientIds: string[];
+      if (assignedTo.startsWith('group:')) {
+        const groupId = assignedTo.slice('group:'.length);
+        const group = await repositories.userGroups.findWithMappings(groupId);
+        recipientIds = (group?.userGroupMappings ?? [])
+          .map(m => m.user?.id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      } else {
+        recipientIds = [assignedTo.replace(/^user:/, '')];
+      }
+
+      // Skip the sender: don't notify an assignee about a reply they sent.
+      const senderUser = await this.prisma.user.findFirst({
+        where: { email: emailFrom },
+        select: { id: true },
+      });
+      if (senderUser) {
+        recipientIds = recipientIds.filter(id => id !== senderUser.id);
+      }
+      if (recipientIds.length === 0) {
+        return;
+      }
+
+      const actionUrl = ticket?.xyneId
+        ? `/${workspaceId ?? ''}/support/${channelId}/${ticket.xyneId}`
+        : `/${workspaceId ?? ''}/support/${channelId}`;
+
+      await Promise.all(
+        recipientIds.map(userId =>
+          notificationService.createNotification(userId, {
+            type: NotificationType.EMAIL_REPLY_RECEIVED,
+            title: 'New reply on your ticket',
+            message: `${emailFrom}: ${emailSubject}`,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: { conversationId, emailId, from: emailFrom },
+          }),
+        ),
+      );
+    } catch (error) {
+      logger.error('[EmailService] Failed to notify assignee of reply', {
+        ticketId,
+        conversationId,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
@@ -1224,6 +1296,16 @@ export class EmailService {
               data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
             });
           }
+
+          void this.notifyAssigneeOfReply({
+            ticketId: ticketRow.id,
+            conversationId,
+            channelId: conversation.channelId,
+            workspaceId: channel?.workspaceId,
+            emailSubject,
+            emailFrom,
+            emailId: email.id,
+          });
         }
       }
 

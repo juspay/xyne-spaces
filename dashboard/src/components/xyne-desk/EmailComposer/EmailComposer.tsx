@@ -69,6 +69,7 @@ import {
   makeRecipientKeyDownHandler,
   splitAndValidateEmails,
   type RecipientField,
+  type ComposerEmail,
 } from './recipients';
 import { useComposerResize } from './useComposerResize';
 import { useComposerDragDrop } from './useComposerDragDrop';
@@ -145,6 +146,7 @@ const resolveFeatures = (
 
 interface EmailComposerProps {
   conversationId?: string | null | undefined;
+  emails?: ReadonlyArray<ComposerEmail> | undefined;
   onClose?: () => void;
   onDiscard?: () => void;
   isAIPanelOpen?: boolean;
@@ -174,6 +176,7 @@ interface EmailComposerProps {
 
 export const EmailComposer = ({
   conversationId,
+  emails: propEmails,
   onClose,
   onDiscard,
   isAIPanelOpen: _isAIPanelOpen,
@@ -198,9 +201,7 @@ export const EmailComposer = ({
   const { userID } = useAuthContextValues();
   // One-shot AI helper for the wand button next to the Subject field.
   const subjectAI = useComposeSubjectAI(channelId ?? null);
-  const [emails] = useCachedQuery(
-    queries.getEmailsForTicket({ conversationId: conversationId || '' }),
-  );
+  const emails = propEmails;
   // Use the existing `useChannelConnectedEmail` API for the desk's mailbox
   // address. Contacts still come from the desk-mailbox address book hook.
   const channelConnectedEmail = useChannelConnectedEmail(channelId || null);

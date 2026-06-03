@@ -28,12 +28,17 @@ interface DeskContact {
   email: string;
   name: string | null;
 }
-interface ThreadEmail {
+export interface ThreadEmail {
   from?: string | null;
   to?: ReadonlyArray<string> | null;
   cc?: ReadonlyArray<string> | null;
   bcc?: ReadonlyArray<string> | null;
   replyTo?: ReadonlyArray<string> | null;
+}
+
+export interface ComposerEmail extends ThreadEmail {
+  id: string;
+  createdAt: number;
 }
 
 /**
