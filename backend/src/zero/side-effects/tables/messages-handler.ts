@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, UserType } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, NotificationDeliveryMethod, NotificationType, UserType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
-import type { SideEffectJobConfig } from '../types';
+import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
 import { activityService } from '@/services/activity/activityService';
@@ -1338,9 +1338,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
   async onDelete(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
-    const previousValue = job.previousValue as
-      | { messageId?: string; conversationId?: string; senderId?: string; msgType?: string }
-      | undefined;
+    const previousValue = job.previousValue as MessagePreviousValue | undefined;
     // Emit MESSAGE.DELETED to trigger cleanup of surface links and nudges.
     // We need conversation/channel/project context; fetch what's still available.
     try {
@@ -1381,6 +1379,17 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+
+    if (previousValue?.channelId && previousValue.conversationId && previousValue.msgType !== 'SYSTEM') {
+      await this.sendMessageChangeNotifications(
+        NotificationType.MESSAGE_DELETED,
+        messageId,
+        previousValue.channelId,
+        previousValue.conversationId,
+        previousValue.isThreadReply,
+      );
+    }
+
     const reactions = await db.reaction.findMany({
       where: { messageId },
       select: { reactionId: true },
@@ -1470,6 +1479,87 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         recipientUserIds: filteredRecipients,
         actorId: latestReply.senderId,
         latestReplyMessageId: latestReply.messageId,
+      });
+    }
+  }
+
+  async onUpdate(job: SideEffectJobConfig): Promise<void> {
+    const previousValue = job.previousValue as MessagePreviousValue | undefined;
+    if (!previousValue || previousValue.msgType === 'SYSTEM' || !previousValue.channelId) {
+      return;
+    }
+    const currentMessage = await db.message.findUnique({
+      where: { messageId: previousValue.messageId },
+      select: { isDeleted: true, content: true, edited: true },
+    });
+    if (!currentMessage) return;
+
+    if (!previousValue.isDeleted && currentMessage.isDeleted) {
+      await this.sendMessageChangeNotifications(
+        NotificationType.MESSAGE_DELETED,
+        previousValue.messageId,
+        previousValue.channelId,
+        previousValue.conversationId,
+        previousValue.isThreadReply,
+      );
+    } else if (currentMessage.edited && currentMessage.content !== previousValue.content && !currentMessage.isDeleted) {
+      await this.sendMessageChangeNotifications(
+        NotificationType.MESSAGE_EDITED,
+        previousValue.messageId,
+        previousValue.channelId,
+        previousValue.conversationId,
+        previousValue.isThreadReply,
+        currentMessage.content,
+      );
+    }
+  }
+
+  private async sendMessageChangeNotifications(
+    type: NotificationType,
+    messageId: string,
+    channelId: string,
+    conversationId: string,
+    isThreadReply: boolean,
+    content?: string,
+  ): Promise<void> {
+    try {
+      const recipients = await db.notification.findMany({
+        where: {
+          relatedEntityType: 'message',
+          relatedEntityId: messageId,
+          deliveryMethods: {
+            hasSome: [NotificationDeliveryMethod.IOS, NotificationDeliveryMethod.ANDROID],
+          },
+        },
+        select: { userId: true },
+        distinct: ['userId'],
+      });
+
+      await Promise.allSettled(
+        recipients.map(({ userId }) =>
+          notificationService.createNotification(
+            userId,
+            {
+              title: '',
+              message: '',
+              type,
+              relatedEntityId: messageId,
+              metadata: {
+                channelId,
+                conversationId,
+                messageId,
+                isThreadReply,
+                ...(content !== undefined ? { content: extractPlainTextFromHtml(content) } : {}),
+              },
+            },
+            { sendDesktop: false, sendMobile: true, isSilent: true }
+          )
+        )
+      );
+    } catch (err) {
+      logger.warn(`[MessagesSideEffectHandler] Failed to send ${type} notifications`, {
+        messageId,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
   }

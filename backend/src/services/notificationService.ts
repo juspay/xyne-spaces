@@ -1423,7 +1423,7 @@ class NotificationService {
       message: cleanContent.substring(0, 100) + (cleanContent.length > 100 ? '...' : ''),
       type: NotificationType.DIRECT_MESSAGE,
       relatedEntityType: 'message' as const,
-      relatedEntityId: conversationId,
+      relatedEntityId: messageId,
       actionUrl: `/${workspaceId}/chat/dm/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         senderId,
