@@ -39,6 +39,7 @@ import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '../../utils/classNames';
+import { logger, Event } from '../../utils/logger';
 import Tooltip from '../../components/ui/Tooltip';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
@@ -805,7 +806,7 @@ const SupportScreen = (): ReactElement => {
   }, [isSidebarOpen]);
 
   // Fetch EMAIL channels using hook (from state machine, already loaded)
-  const emailChannels = useEmailChannels();
+  const emailChannels = useEmailChannels(!ticketId);
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
@@ -937,8 +938,10 @@ const SupportScreen = (): ReactElement => {
     [selectedTickets, clearTicketSelection],
   );
 
-  // Get full selected channel for member count and other stats
-  const selectedChannelFull = useVisibleChannel(selectedChannelId ?? '');
+  const selectedChannelFull = useMemo(
+    () => sortedEmailChannels.find(c => c.id === selectedChannelId),
+    [sortedEmailChannels, selectedChannelId],
+  );
 
   const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
 
@@ -1776,7 +1779,7 @@ const SupportScreen = (): ReactElement => {
       </PanelGroup>
 
       {/* Channel Info Modal */}
-      {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+      {isInfoOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
         <ChannelInfoModal
           channelId={selectedChannelId}
           isOpen={isInfoOpen}
@@ -2192,37 +2195,10 @@ const SupportTicketDetail = ({
     }
   }, [conversationId, ticketDraft, setComposerOpen]);
 
-  // Prev / next cursor queries — each returns at most 1 adjacent ticket in the
-  // EMAIL-channel scope ordered by lastEmailAt desc. Served from IVM when
-  // cached, otherwise a tiny server fetch.
   const cursorStart =
     ticket?.id && typeof ticket.lastEmailAt === 'number'
       ? { id: ticket.id, lastEmailAt: ticket.lastEmailAt }
       : null;
-  const [nextPage] = useCachedQuery(
-    queries.supportTicketsPageV3({
-      channelId,
-      isMember,
-      ...ticketFilter,
-      limit: 1,
-      start: cursorStart,
-      dir: 'forward',
-    }),
-    { enabled: !!cursorStart && !!channelId },
-  );
-  const [prevPage] = useCachedQuery(
-    queries.supportTicketsPageV3({
-      channelId,
-      isMember,
-      ...ticketFilter,
-      limit: 1,
-      start: cursorStart,
-      dir: 'backward',
-    }),
-    { enabled: !!cursorStart && !!channelId },
-  );
-  const nextTicket = nextPage?.[0];
-  const prevTicket = prevPage?.[0];
 
   const goToTicket = (t: {
     id: string;
@@ -2242,29 +2218,59 @@ const SupportTicketDetail = ({
     });
   };
 
+  const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
+    if (!cursorStart || !channelId) return;
+    try {
+      const result = (await zero.run(
+        queries.supportTicketsPageV3({
+          channelId,
+          isMember,
+          ...ticketFilter,
+          limit: 1,
+          start: cursorStart,
+          dir,
+        }),
+        { type: 'complete' },
+      )) as Array<{
+        id: string;
+        xyneId?: string | null;
+        channelId?: string | null;
+        conversationId: string;
+        title: string;
+      }>;
+      const target = result?.[0];
+      if (target) goToTicket(target);
+    } catch (err) {
+      logger.error(Event.ZERO_RUN_ERROR, {
+        source: 'SupportTicketDetail.navigateAdjacent',
+        dir,
+        channelId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   // Keyboard shortcuts: j = next, k = previous, e = toggle collapse/expand all.
   useShortcut(
     'j',
     () => {
-      if (nextTicket) goToTicket(nextTicket);
+      void navigateAdjacent('forward');
     },
     {
       scope: 'global',
       description: 'Next ticket',
       category: 'Support',
-      enabled: !!nextTicket,
     },
   );
   useShortcut(
     'k',
     () => {
-      if (prevTicket) goToTicket(prevTicket);
+      void navigateAdjacent('backward');
     },
     {
       scope: 'global',
       description: 'Previous ticket',
       category: 'Support',
-      enabled: !!prevTicket,
     },
   );
   useShortcut(
@@ -2592,9 +2598,8 @@ const SupportTicketDetail = ({
                   >
                     <button
                       type='button'
-                      onClick={() => prevTicket && goToTicket(prevTicket)}
-                      disabled={!prevTicket}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                      onClick={() => void navigateAdjacent('backward')}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                       data-track-category='Support'
                       data-track-name='PrevTicket'
                     >
@@ -2615,9 +2620,8 @@ const SupportTicketDetail = ({
                   >
                     <button
                       type='button'
-                      onClick={() => nextTicket && goToTicket(nextTicket)}
-                      disabled={!nextTicket}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                      onClick={() => void navigateAdjacent('forward')}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                       data-track-category='Support'
                       data-track-name='NextTicket'
                     >
@@ -2879,6 +2883,7 @@ const SupportTicketDetail = ({
               ) : composerOpen ? (
                 <EmailComposer
                   conversationId={conversationId}
+                  emails={ticket?.emails}
                   onClose={() => {
                     setComposerOpen(false);
                     setReplyToEmailId(null);

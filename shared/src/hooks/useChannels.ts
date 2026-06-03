@@ -167,8 +167,8 @@ export const useMigratedChannels = (): Channel[] => {
   }, [channels]);
 };
 
-export const useEmailChannels = (): VisibleChannel[] => {
-  const [emailChannelStatuses] = useQuery(queries.userVisibleEmailChannels());
+export const useEmailChannels = (enabled = true): VisibleChannel[] => {
+  const [emailChannelStatuses] = useQuery(queries.userVisibleEmailChannels(), { enabled });
   const allPublicChannels = useAllChannels();
   return useMemo(() => {
     const byId = new Map<string, VisibleChannel>();
