@@ -140,3 +140,21 @@ export async function dispatchEmailEventForEmailId(emailId: string): Promise<voi
     });
   }
 }
+
+/** Outbound acknowledgment for API-created email tickets (createEmailTicket). */
+export function buildEmailTicketAcknowledgmentBody(_subject: string, body: string): string {
+  const safeBody = body.trim();
+  return [
+    '<p>We have received your request and created a support ticket.</p>',
+    `<p>${escapeHtmlForEmail(safeBody).replace(/\n/g, '<br>')}</p>`,
+    '<p>Our team will follow up on this thread.</p>',
+  ].join('\n');
+}
+
+function escapeHtmlForEmail(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
