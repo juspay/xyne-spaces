@@ -40,6 +40,7 @@ export function usePaginatedRecordings(): UsePaginatedRecordingsReturn {
       type: 'MERGE_RECORDINGS_PAGE',
       page: page as RecordingEntry[],
       hasMore: page.length === FETCH_LIMIT,
+      isFirstPage: true,
     });
   }, [page]);
 
