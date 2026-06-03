@@ -49,6 +49,7 @@ import {
   AlertCircle,
   Zap,
   type LucideIcon,
+  Atom,
 } from 'lucide-react';
 
 import Avatar from '../ui/Avatar/Avatar';
@@ -100,6 +101,11 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/guide', label: 'User Guide', icon: CircleHelp },
   { path: '/workspace-management', label: 'Workspace Management', icon: Settings },
   { path: '/organisations', label: 'Organisations', icon: Building2 },
+  {
+    path: '/team-intelligence',
+    label: 'Team Intelligence',
+    icon: Atom,
+  },
 ];
 
 const mobileNavigationItems = [

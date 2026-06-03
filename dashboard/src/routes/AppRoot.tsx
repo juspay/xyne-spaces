@@ -171,6 +171,10 @@ import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
 import AutomationRunDetailScreen from './AutomationsScreen/AutomationRunDetailScreen';
 import AutomationApprovalsScreen from './AutomationsScreen/AutomationApprovalsScreen';
+import TeamIntelligenceScreen from './TeamIntelligenceScreen/TeamIntelligenceScreen.tsx';
+import TeamIntelligenceOrgScreen from './TeamIntelligenceScreen/TeamIntelligenceOrgScreen.tsx';
+import TeamIntelligenceTeamScreen from './TeamIntelligenceScreen/TeamIntelligenceTeamScreen.tsx';
+import TeamIntelligenceMemberScreen from './TeamIntelligenceScreen/TeamIntelligenceMemberScreen.tsx';
 
 /** Auth-aware call route: authenticated users join via CallPage, others see external lobby  */
 function CallRouteHandler(): ReactElement | null {
@@ -950,6 +954,28 @@ export const router = createBrowserRouter([
                   {
                     path: ':projectId/:boardId/:ticketId',
                     element: <TicketView />,
+                  },
+                ],
+              },
+              {
+                path: 'team-intelligence',
+                element: (
+                  <ResourceProtectedRoute resourceName='TEAM-INTELLIGENCE-DASHBOARD'>
+                    <TeamIntelligenceScreen />
+                  </ResourceProtectedRoute>
+                ),
+                children: [
+                  {
+                    index: true,
+                    element: <TeamIntelligenceOrgScreen />,
+                  },
+                  {
+                    path: 'team/:teamId',
+                    element: <TeamIntelligenceTeamScreen />,
+                  },
+                  {
+                    path: 'member/:memberEmail',
+                    element: <TeamIntelligenceMemberScreen />,
                   },
                 ],
               },
