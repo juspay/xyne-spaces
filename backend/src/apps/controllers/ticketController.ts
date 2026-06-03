@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2 } from '@prisma/client';
+import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -13,8 +13,15 @@ import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '../types';
+import { emailService } from '@/services/emailService';
+import { buildEmailTicketAcknowledgmentBody } from '../core/emailUtils';
+import { extractEmailAddress } from '@/utils/email';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 
 import { resolveChannelId } from '../utils/channelUtils';
+
+const externalSourceRepo = new ExternalSourceRepository();
 
 const prismaClient = DatabaseClient.getInstance();
 
@@ -72,6 +79,18 @@ const UpdateTicketBodySchema = z.object({
   data => !data.eta || new Date(data.eta) > new Date(),
   { message: 'ETA must be a future date', path: ['eta'] }
 );
+
+const CreateEmailTicketBodySchema = z.object({
+  channelId: z.string().min(1, 'channelId is required').trim(),
+  subject: z.string().min(1, 'subject is required').trim(),
+  body: z.string().min(1, 'body is required').trim(),
+  senderEmail: z.string().email('senderEmail must be a valid email').trim(),
+  priority: z.nativeEnum(TicketPriority).optional(),
+  assignedToEmail: z.string().email('Invalid email format').trim().optional(),
+  assignedUserGroupAlias: z.string().trim().optional(),
+  stageName: z.string().trim().optional(),
+  ticketType: z.string().trim().optional(),
+});
 
 export class TicketController {
 
@@ -751,6 +770,341 @@ export class TicketController {
       res.status(200).json({ success: true, ticketId, emailReplyEnabled: true });
     } catch (error) {
       logger.error('[TicketController] Error enabling email send:', error);
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
+   * Create an email-type ticket in Xyne Desk on behalf of an external sender.
+   * Ticket appears as an email thread identical to Gmail-ingested tickets.
+   * POST /api/apps/ticket/createEmailTicket
+   *
+   * Body: { channelId, subject, body, senderEmail }
+   */
+  createEmailTicket = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const bodyResult = CreateEmailTicketBodySchema.safeParse(req.body);
+      if (!bodyResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: bodyResult.error.errors,
+        });
+        return;
+      }
+
+      const {
+        channelId,
+        subject,
+        body,
+        senderEmail,
+        priority,
+        assignedToEmail,
+        assignedUserGroupAlias,
+        stageName,
+        ticketType,
+      } = bodyResult.data;
+
+      const userId = req.user!.id;
+      const workspaceId = req.user!.workspaceId;
+
+      // Resolve recipientEmail using same 3-level priority as outbound reply sender:
+      //   1. EmailChannelPreference.sendAsEmail — admin-configured alias (highest priority)
+      //   2. ExternalSource.displayName — connected mailbox from OAuth integration
+      //   3. Desk owner's user email — last-resort fallback
+      const channelPref = await prismaClient.emailChannelPreference.findUnique({
+        where: { channelId },
+        select: { sendAsEmail: true, ownerUserId: true },
+      });
+      const externalSource = await externalSourceRepo.findByChannelId(channelId);
+      const ownerUser = channelPref?.ownerUserId
+        ? await repositories.users.findById(channelPref.ownerUserId)
+        : null;
+
+      const recipientEmail =
+        channelPref?.sendAsEmail ||
+        extractEmailAddress(externalSource?.displayName ?? '') ||
+        ownerUser?.email;
+
+      if (!recipientEmail) {
+        res.status(503).json({
+          error: 'Channel recipient email is not configured',
+          code: 'MISCONFIGURED',
+        });
+        return;
+      }
+
+      // Resolve assignedToEmail → userId (same as createTicket)
+      let assignedTo: string | undefined;
+      if (assignedToEmail) {
+        const user = await repositories.users.findByEmail(assignedToEmail, workspaceId);
+        if (!user) {
+          res.status(404).json({ error: `User with email ${assignedToEmail} not found`, code: 'USER_NOT_FOUND' });
+          return;
+        }
+        assignedTo = user.id;
+      }
+
+      // Resolve assignedUserGroupAlias → userGroupId (same as createTicket)
+      let userGroupId: string | undefined;
+      if (assignedUserGroupAlias) {
+        const userGroup = await repositories.userGroups.findByAlias(assignedUserGroupAlias, workspaceId);
+        if (!userGroup) {
+          res.status(404).json({ error: `User group with alias ${assignedUserGroupAlias} not found`, code: 'USER_GROUP_NOT_FOUND' });
+          return;
+        }
+        userGroupId = userGroup.id;
+      }
+
+      let pendingFullRoleAssignment = false;
+      let resolvedAssignedTo = assignedTo;
+
+      // Avoid UUID→provider thread ID races with webhooks:
+      // 1) send acknowledgment email first and claim the provider thread immediately,
+      // 2) create the desk ticket with real external IDs,
+      // 3) link ExternalMessage to the Email row.
+      let externalThreadId: string;
+      let externalMessageId: string;
+      let claimedExternalMessageId: string | undefined;
+
+      const mailAdapter = externalSource ? adapterRegistry.getAdapter(externalSource.name) : null;
+      const canSendViaProvider = !!(externalSource && mailAdapter?.sendMailNew);
+
+      if (canSendViaProvider) {
+        const acknowledgmentBody = buildEmailTicketAcknowledgmentBody(subject, body);
+        let sent: { threadId: string; messageId?: string };
+        try {
+          sent = await mailAdapter!.sendMailNew!({
+            encryptedCredentials: externalSource!.credentials,
+            sourceId: externalSource!.id,
+            subject,
+            body: acknowledgmentBody,
+            to: [senderEmail],
+            cc: [],
+            bcc: [],
+            fromEmailAddress: recipientEmail,
+          });
+        } catch (sendErr) {
+          logger.error('[Apps Email Ticket Creation] Failed to send acknowledgment email:', sendErr);
+          res.status(502).json({
+            error: 'Failed to send initial email via provider',
+            code: 'EMAIL_SEND_FAILED',
+          });
+          return;
+        }
+
+        externalThreadId = sent.threadId;
+        externalMessageId = sent.messageId || sent.threadId;
+
+        // Claim thread before ticket creation so Gmail/MS webhooks dedupe instead of
+        // spawning a second ticket while we persist the conversation.
+        try {
+          const claimed = await prismaClient.externalMessage.create({
+            data: {
+              externalSourceId: externalSource!.id,
+              externalId: externalMessageId,
+              externalThreadId,
+              messageId: externalMessageId,
+              direction: MessageDirection.OUTGOING,
+              entityType: ExternalEntityType.EMAIL,
+            },
+          });
+          claimedExternalMessageId = claimed.id;
+        } catch (claimErr) {
+          if (
+            claimErr instanceof Prisma.PrismaClientKnownRequestError &&
+            claimErr.code === 'P2002'
+          ) {
+            res.status(409).json({ error: 'Duplicate ticket', code: 'DUPLICATE' });
+            return;
+          }
+          throw claimErr;
+        }
+      } else {
+        if (externalSource) {
+          logger.warn(
+            `[Apps Email Ticket Creation] Adapter "${externalSource.name}" does not support sendMailNew — using local-only thread ids`,
+          );
+        }
+        const { randomUUID } = await import('crypto');
+        externalThreadId = randomUUID();
+        externalMessageId = externalThreadId;
+      }
+
+      let result: Awaited<ReturnType<typeof emailService.createConversationWithEmail>>;
+      try {
+        result = await emailService.createConversationWithEmail({
+          channelId,
+          userId,
+          emailSubject: subject,
+          emailBody: body,
+          emailFrom: senderEmail,
+          emailTo: [recipientEmail],
+          externalThreadId,
+          externalMessageId,
+          receivedAt: new Date(),
+        });
+      } catch (createErr) {
+        if (claimedExternalMessageId) {
+          await prismaClient.externalMessage
+            .delete({ where: { id: claimedExternalMessageId } })
+            .catch(cleanupErr => {
+              logger.warn('[Apps Email Ticket Creation] Failed to release thread claim after create error', {
+                claimedExternalMessageId,
+                cleanupErr,
+              });
+            });
+        }
+        throw createErr;
+      }
+
+      if (result && 'blocked' in result && result.blocked) {
+        if (claimedExternalMessageId) {
+          await prismaClient.externalMessage
+            .delete({ where: { id: claimedExternalMessageId } })
+            .catch(() => undefined);
+        }
+        res.status(403).json({ error: 'Ticket creation blocked by configuration', code: 'BLOCKED' });
+        return;
+      }
+
+      if (result && 'isDuplicate' in result && result.isDuplicate) {
+        res.status(409).json({ error: 'Duplicate ticket', code: 'DUPLICATE' });
+        return;
+      }
+
+      const { ticket, conversation, email: initialEmail } = result as { ticket: any; conversation: any; email: any };
+
+      if (claimedExternalMessageId) {
+        await prismaClient.externalMessage.update({
+          where: { id: claimedExternalMessageId },
+          data: {
+            entityId: initialEmail.id,
+            messageId: initialEmail.id,
+          },
+        });
+        logger.info(
+          `[Apps Email Ticket Creation] Acknowledgment sent, threadId=${externalThreadId} ticket=${ticket.id}`,
+        );
+      }
+
+      // Check for duplicate tickets and persist references
+      if (ticket?.id) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: ticket.id,
+          ticketCreatedBy: userId,
+          title: subject,
+          description: body,
+          projectId: ticket.projectId,
+          userId,
+        }).catch(error => {
+          logger.error('[Apps Email Ticket Creation] Failed to persist duplicate references for ticket', {
+            ticketId: ticket.id,
+            error,
+          });
+        });
+      }
+
+      // Apply optional fields to the created ticket
+      if (priority !== undefined || resolvedAssignedTo !== undefined || userGroupId !== undefined || stageName !== undefined || ticketType !== undefined) {
+        const ticketUpdate: Record<string, unknown> = {};
+
+        if (priority !== undefined) ticketUpdate.priority = priority;
+        if (resolvedAssignedTo !== undefined) ticketUpdate.assignedTo = resolvedAssignedTo;
+        if (userGroupId !== undefined) ticketUpdate.userGroupId = userGroupId;
+        if (ticketType !== undefined) ticketUpdate.ticketType = ticketType;
+
+        if (stageName !== undefined) {
+          const stage = await prismaClient.stage.findFirst({
+            where: { boardId: ticket.boardId, name: stageName },
+            select: { name: true },
+          });
+          if (!stage) {
+            res.status(400).json({
+              error: `Stage "${stageName}" does not exist on board ${ticket.boardId}`,
+              code: 'STAGE_NOT_FOUND',
+            });
+            return;
+          }
+          ticketUpdate.stageName = stage.name;
+        }
+
+        if (Object.keys(ticketUpdate).length > 0) {
+          const updatedTicket = await prismaClient.ticket.update({
+            where: { id: ticket.id },
+            data: ticketUpdate,
+          });
+          await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+        }
+      }
+
+      // Full role assignment
+      if (userGroupId && !assignedTo) {
+        try {
+          const boardRow = await prismaClient.board.findUnique({
+            where: { id: ticket.boardId },
+            select: { metadata: true },
+          });
+          const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
+
+          if (boardMetadata?.fullRoleAssignment === true) {
+            pendingFullRoleAssignment = true;
+          } else {
+            const assignmentResult = await evaluateAssignmentRule(userGroupId, ticket.boardId, undefined, undefined, ticket.projectId);
+            if (assignmentResult.assignedUserId) {
+              resolvedAssignedTo = assignmentResult.assignedUserId;
+              const updatedTicket = await prismaClient.ticket.update({
+                where: { id: ticket.id },
+                data: { assignedTo: resolvedAssignedTo },
+              });
+              await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+            }
+          }
+        } catch (error) {
+          logger.error('[Apps Email Ticket Creation] Error during auto-assignment:', error);
+        }
+      }
+
+      if (pendingFullRoleAssignment && userGroupId && ticket.id) {
+        try {
+          const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+            ticketId: ticket.id,
+            userGroupId,
+            boardId: ticket.boardId,
+            createdBy: userId,
+            projectId: ticket.projectId,
+          });
+          if (fullRoles.member) {
+            const updatedTicket = await prismaClient.ticket.update({
+              where: { id: ticket.id },
+              data: { assignedTo: fullRoles.member },
+            });
+            await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+          }
+        } catch (error) {
+          logger.error('[Apps Email Ticket Creation] Error during full role assignment:', error);
+        }
+      }
+
+      res.status(201).json({
+        ticketId: ticket?.id,
+        xyneId: ticket?.xyneId,
+        conversationId: conversation?.conversationId,
+      });
+    } catch (error) {
+      logger.error('[TicketController] createEmailTicket error:', error);
+
+      if (error instanceof Error) {
+        if (error.message.includes('not found') || error.message.includes('No stages found')) {
+          res.status(404).json({ error: error.message, code: 'NOT_FOUND' });
+          return;
+        }
+        if (error.message.includes('boardId configured') || error.message.includes('not configured')) {
+          res.status(503).json({ error: error.message, code: 'MISCONFIGURED' });
+          return;
+        }
+      }
+
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }
   };
