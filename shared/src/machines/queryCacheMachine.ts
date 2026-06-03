@@ -72,7 +72,7 @@ export type QueryCacheEvent =
   | { type: 'MERGE_CONVERSATION'; channelId: string; conversation: Conversation }
   | { type: 'MERGE_CALL_HISTORY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
   | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState }
-  | { type: 'MERGE_RECORDINGS_PAGE'; page: RecordingEntry[]; hasMore: boolean }
+  | { type: 'MERGE_RECORDINGS_PAGE'; page: RecordingEntry[]; hasMore: boolean; isFirstPage?: boolean }
   | { type: 'HYDRATE_RECORDINGS'; data: RecordingsState }
   | { type: 'SET_HYDRATED' };
 
@@ -183,8 +183,33 @@ export const queryCacheMachine = setup({
     mergeRecordingsPage: assign({
       recordings: ({ context, event }) => {
         if (event.type !== 'MERGE_RECORDINGS_PAGE') return context.recordings;
+
         const map = new Map(context.recordings.recordings.map(r => [r.id, r]));
+
+        if (event.isFirstPage) {
+          // The live first-page query is the authoritative source for the newest entries.
+          // Remove any accumulated entries that should appear in this range but are absent —
+          // this catches recordings deleted since the last sync (Zero drives the removal).
+          if (event.page.length === 0) {
+            // No recordings at all — clear list.
+            return { recordings: [], hasMore: false };
+          }
+          const oldestInPage = event.page[event.page.length - 1];
+          const pageIds = new Set(event.page.map(r => r.id));
+          // Drop existing entries in the first-page range that the live query no longer returns.
+          for (const [id, rec] of map) {
+            if (
+              (rec.startedAt > oldestInPage.startedAt ||
+                (rec.startedAt === oldestInPage.startedAt && rec.id >= oldestInPage.id)) &&
+              !pageIds.has(id)
+            ) {
+              map.delete(id);
+            }
+          }
+        }
+
         for (const rec of event.page) map.set(rec.id, rec);
+
         const recordings = [...map.values()].sort(
           (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
         );

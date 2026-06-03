@@ -1,6 +1,6 @@
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
-import { AttachmentEntityType, CallOrigin, CallType } from '@prisma/client';
+import { AttachmentEntityType, CallOrigin, CallType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage, createSystemMessage } from '@framework';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -1563,10 +1563,19 @@ Output ONLY the processed transcript, nothing else.`;
         // Save summary and title to call record.
         // Skip title update for HEADLESS recordings to preserve user-provided title.
         // Only set title from AI if the call doesn't already have one (scheduled calls have a pre-set title).
-        await repositories.calls.update(call.id, {
-          aiSummary: summary,
-          ...(title && !call.title ? { title } : {}),
-        });
+        try {
+          await repositories.calls.update(call.id, {
+            aiSummary: summary,
+            ...(title && !call.title ? { title } : {}),
+          });
+        } catch (updateErr) {
+          // P2025: call was deleted while summary was being generated — ignore gracefully
+          if (updateErr instanceof Prisma.PrismaClientKnownRequestError && updateErr.code === 'P2025') {
+            logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
+            return;
+          }
+          throw updateErr;
+        }
         logger.info(`[${callId}] call_record_updated | fields_updated=aiSummary`);
 
         // Update the call system message with the title (if generated)
