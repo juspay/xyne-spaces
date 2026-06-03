@@ -549,17 +549,17 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 {canvas.userRepo}
               </span>
             ) : (
-              <span className='flex items-center gap-1'>
+              <span
+                className='flex items-center'
+                aria-label={
+                  canvas.visibility === CanvasVisibility.PUBLIC ? 'Public canvas' : 'Private canvas'
+                }
+                title={canvas.visibility === CanvasVisibility.PUBLIC ? 'Public' : 'Private'}
+              >
                 {canvas.visibility === CanvasVisibility.PUBLIC ? (
-                  <>
-                    <Globe className='w-3.5 h-3.5 text-green-500' strokeWidth={2.5} />
-                    <span className='text-green-600'>Public</span>
-                  </>
+                  <Globe className='w-3.5 h-3.5 text-green-500' strokeWidth={2.5} />
                 ) : (
-                  <>
-                    <Lock className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2.5} />
-                    <span>Private</span>
-                  </>
+                  <Lock className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2.5} />
                 )}
               </span>
             )}

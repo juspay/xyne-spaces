@@ -79,17 +79,17 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             <div className='text-xs text-muted-foreground truncate'>{createdDateText}</div>
           </div>
           {!isQuartoDoc && (
-            <span className='ml-3 flex items-center gap-1 text-xs text-muted-foreground shrink-0'>
+            <span
+              className='ml-3 flex items-center text-xs text-muted-foreground shrink-0'
+              aria-label={
+                canvas.visibility === CanvasVisibility.PUBLIC ? 'Public canvas' : 'Private canvas'
+              }
+              title={canvas.visibility === CanvasVisibility.PUBLIC ? 'Public' : 'Private'}
+            >
               {canvas.visibility === CanvasVisibility.PUBLIC ? (
-                <>
-                  <Globe className='w-3 h-3 text-green-500' />
-                  Public
-                </>
+                <Globe className='w-3 h-3 text-green-500' />
               ) : (
-                <>
-                  <Lock className='w-3 h-3' />
-                  Private
-                </>
+                <Lock className='w-3 h-3' />
               )}
             </span>
           )}
