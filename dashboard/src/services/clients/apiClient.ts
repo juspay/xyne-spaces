@@ -266,10 +266,21 @@ apiConfig.interceptors.response.use(
       // console.error('🌐 [AUTH] Network error - backend server may be down:', error);
     }
 
-    // Create a custom error with status code preservation for important HTTP codes
-    const createErrorWithStatus = (message: string, status: number) => {
-      const errorWithStatus = new Error(message) as Error & { status?: number };
+    // Create a custom error with status code preservation for important HTTP codes.
+    // Also attaches the original response body when present so downstream callers
+    // that need structured info (e.g. previewService reads `code` + `message`
+    // separately to drive UI badges) can still recover it. Without this, the
+    // interceptor was silently turning every API error into a bare Error and
+    // hiding the real diagnosis behind a one-line message string.
+    const createErrorWithStatus = (message: string, status: number, responseData?: unknown) => {
+      const errorWithStatus = new Error(message) as Error & {
+        status?: number;
+        responseData?: unknown;
+      };
       errorWithStatus.status = status;
+      if (responseData !== undefined) {
+        errorWithStatus.responseData = responseData;
+      }
       return errorWithStatus;
     };
 
@@ -286,17 +297,25 @@ apiConfig.interceptors.response.use(
       if (error.response.data) {
         const data = error.response.data as {
           error?: string | { message?: string; code?: string };
+          message?: string;
           errors?: { message?: string }[];
         };
 
         if (typeof data.error === 'string') {
-          return Promise.reject(createErrorWithStatus(data.error, status));
+          // Backends standardized on { error: "<code>", message: "<text>" }.
+          // Prefer the user-facing `message` so toasts / tile bodies show
+          // the diagnosis ("type mismatch in JOIN ON clause"), not the
+          // category code ("ServerError"). Fall back to the code when no
+          // message is supplied (older endpoints, generic 500s).
+          const userMsg =
+            typeof data.message === 'string' && data.message ? data.message : data.error;
+          return Promise.reject(createErrorWithStatus(userMsg, status, data));
         }
         if (typeof data.error === 'object' && data.error?.message) {
-          return Promise.reject(createErrorWithStatus(data.error.message, status));
+          return Promise.reject(createErrorWithStatus(data.error.message, status, data));
         }
         if (Array.isArray(data.errors) && data.errors[0]?.message) {
-          return Promise.reject(createErrorWithStatus(data.errors[0].message, status));
+          return Promise.reject(createErrorWithStatus(data.errors[0].message, status, data));
         }
       }
 

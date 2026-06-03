@@ -8,3 +8,6 @@ export { getWorkflowIcon } from './WorkflowIcons';
 export { TicketPriorityIcon } from './TicketPriorityIcon';
 export { TicketStatusIcon } from './TicketStatusIcon';
 export { SubTicketCountIcon } from './SubTicketCountIcon';
+export { PostgresIcon } from './PostgresIcon';
+export { ClickhouseIcon } from './ClickhouseIcon';
+export { XyneSpacesIcon } from './XyneSpacesIcon';

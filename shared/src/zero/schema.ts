@@ -389,6 +389,9 @@ export enum QueryVisualizationType {
   FUNNEL = 'FUNNEL',
   HEATMAP = 'HEATMAP',
   DATA_TABLE = 'DATA_TABLE',
+  AREA_CHART = 'AREA_CHART',
+  KPI_COMPARE = 'KPI_COMPARE',
+  SCATTER_CHART = 'SCATTER_CHART',
 }
 
 // @ts-ignore TS1294
@@ -458,6 +461,19 @@ export enum CanvasVisibility {
 
 // @ts-ignore TS1294
 export enum CanvasRole {
+  OWNER = 'OWNER',
+  EDITOR = 'EDITOR',
+  VIEWER = 'VIEWER',
+}
+
+// @ts-ignore TS1294
+export enum DashboardVisibility {
+  PUBLIC = 'PUBLIC',
+  PRIVATE = 'PRIVATE',
+}
+
+// @ts-ignore TS1294
+export enum DashboardRole {
   OWNER = 'OWNER',
   EDITOR = 'EDITOR',
   VIEWER = 'VIEWER',
@@ -1961,10 +1977,24 @@ export const ticketStageRequestTable = table('ticket_stage_requests')
 export const dashboardTable = table('dashboards')
   .columns({
     id: string(),
+    workspaceId: string(),
     name: string(),
     description: string().optional(),
     createdBy: string(),
+    visibility: enumeration<DashboardVisibility>(),
+    config: string(),
     createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const dashboardParticipantTable = table('dashboard_participants')
+  .columns({
+    id: string(),
+    dashboardId: string(),
+    userId: string(),
+    role: enumeration<DashboardRole>(),
+    joinedAt: number(),
     updatedAt: number(),
   })
   .primaryKey('id');
@@ -1972,11 +2002,14 @@ export const dashboardTable = table('dashboards')
 export const queryTable = table('queries')
   .columns({
     id: string(),
-    title: string(),
+    title: string().optional(),
+    queryType: string(), // 'internal' | 'external' — discriminates v1 entity query vs v2 dashboard tile (QueryPlan)
     queryJson: json(),
     entityType: enumeration<FormEntityType>().optional(),
     targetEntity: string().optional(),
     visualType: enumeration<QueryVisualizationType>().optional(),
+    position: string(), // PositionSchema {x,y,w,h} — external/tile only
+    config: string(), // per-tile config {timeColumn?,...}
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -3828,10 +3861,26 @@ export const ticketStageRequestTableRelationships = relationships(ticketStageReq
 }));
 
 export const dashboardTableRelationships = relationships(dashboardTable, ({ many }) => ({
+  participants: many({
+    sourceField: ['id'],
+    destField: ['dashboardId'],
+    destSchema: dashboardParticipantTable,
+  }),
+  // A dashboard's tiles are now `queries` rows (queryType='external') linked
+  // one-to-many through dashboard_queries_mapping. The same mapping also
+  // carries the legacy QueryBuilder saved queries (queryType='internal').
   queryMappings: many({
     sourceField: ['id'],
     destField: ['dashboardId'],
     destSchema: dashboardQueryMappingTable,
+  }),
+}));
+
+export const dashboardParticipantTableRelationships = relationships(dashboardParticipantTable, ({ one }) => ({
+  dashboard: one({
+    sourceField: ['dashboardId'],
+    destField: ['id'],
+    destSchema: dashboardTable,
   }),
 }));
 
@@ -4102,6 +4151,7 @@ export const schema = createSchema({
     stageApproversTable,
     ticketStageRequestTable,
     dashboardTable,
+    dashboardParticipantTable,
     queryTable,
     dashboardQueryMappingTable,
     merchantTable,
@@ -4207,6 +4257,7 @@ export const schema = createSchema({
     formEntityValuesTableRelationships,
     ticketStageRequestTableRelationships,
     dashboardTableRelationships,
+    dashboardParticipantTableRelationships,
     queryTableRelationships,
     dashboardQueryMappingTableRelationships,
     merchantTableRelationships,

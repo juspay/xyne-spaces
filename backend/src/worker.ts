@@ -24,6 +24,7 @@ import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
 import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
+import { dataSourceIngestionWorker } from '@/workers/dataSourceIngestionWorker';
 import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
@@ -218,6 +219,12 @@ class WorkerService {
         await documentIngestionWorker.start();
       }
 
+      const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
+      if (dataSourceIngestionWorkerEnabled) {
+        logger.info('Starting data source ingestion worker...');
+        await dataSourceIngestionWorker.start();
+      }
+
       const delayedMessageWorkerEnabled = appConfig.enableDelayedMessageWorker;
       if (delayedMessageWorkerEnabled) {
         logger.info('Starting delayed message worker...');
@@ -340,6 +347,11 @@ class WorkerService {
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {
         await documentIngestionWorker.shutdown();
+      }
+
+      const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
+      if (dataSourceIngestionWorkerEnabled) {
+        await dataSourceIngestionWorker.shutdown();
       }
 
       const delayedMessageWorkerEnabled = appConfig.enableDelayedMessageWorker;

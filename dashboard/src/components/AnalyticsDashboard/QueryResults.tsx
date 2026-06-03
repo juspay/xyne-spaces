@@ -194,7 +194,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
             return {
               queryId: r.queryId,
               mappingId: mapping?.id ?? r.mappingId,
-              queryTitle: query.title,
+              queryTitle: query.title ?? '',
               isLoading: r.isLoading,
               data: r.data,
               error: r.error,
@@ -211,7 +211,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
           return {
             queryId: q.id,
             mappingId: mapping?.id ?? '',
-            queryTitle: q.title,
+            queryTitle: q.title ?? '',
             isLoading: true,
             data: null,
             error: null,
@@ -407,7 +407,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                                   if (query)
                                     onEditQuery({
                                       id: query.id,
-                                      title: query.title,
+                                      title: query.title ?? '',
                                       queryJson: query.queryJson,
                                       visualType: query.visualType,
                                     });

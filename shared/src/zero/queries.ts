@@ -2491,6 +2491,106 @@ export const queries = defineQueries({
         .one();
     },
   ),
+  getDashboardByIdV2: defineQuery(
+    z.object({ dashboardId: z.string() }),
+    ({ args: { dashboardId } }) => {
+      return zql.dashboards
+        .where('id', dashboardId)
+        .related('queryMappings', mapping =>
+          mapping.related('query', q => q.where('queryType', 'internal')),
+        )
+        .one();
+    },
+  ),
+  getDashboard: defineQuery(
+    z.object({ dashboardId: z.string() }),
+    ({ args: { dashboardId } }) => {
+      return zql.dashboards
+        .where('id', dashboardId)
+        .related('participants')
+        .related('queryMappings', mapping =>
+          mapping.related('query', q => q.where('queryType', 'external')),
+        )
+        .one();
+    },
+  ),
+  myDashboards: defineQuery(
+    z.object({
+      limit: z.number().int().positive().max(1000).optional(),
+      cursor: z.object({ id: z.string(), updatedAt: z.number() }).nullable().optional(),
+    }),
+    ({ ctx, args }) => {
+      let query = zql.dashboards
+        .where('createdBy', ctx.userID)
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+      if (args?.cursor) {
+        query = query.start(
+          { updatedAt: args.cursor.updatedAt, id: args.cursor.id },
+          { inclusive: false },
+        );
+      }
+      return query.limit(args?.limit ?? 50);
+    },
+  ),
+  sharedDashboards: defineQuery(
+    z.object({
+      limit: z.number().int().positive().max(1000).optional(),
+      cursor: z.object({ id: z.string(), updatedAt: z.number() }).nullable().optional(),
+      isParticipant: z.literal(true).default(true),
+    }),
+    ({ ctx, args }) => {
+      let query = zql.dashboards
+        .where('createdBy', '!=', ctx.userID)
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+      if (args?.cursor) {
+        query = query.start(
+          { updatedAt: args.cursor.updatedAt, id: args.cursor.id },
+          { inclusive: false },
+        );
+      }
+      return query.limit(args?.limit ?? 50);
+    },
+  ),
+  allDashboards: defineQuery(
+    z.object({
+      limit: z.number().int().positive().max(1000).optional(),
+      cursor: z.object({ id: z.string(), updatedAt: z.number() }).nullable().optional(),
+    }),
+    ({ args }) => {
+      let query = zql.dashboards
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+      if (args?.cursor) {
+        query = query.start(
+          { updatedAt: args.cursor.updatedAt, id: args.cursor.id },
+          { inclusive: false },
+        );
+      }
+      return query.limit(args?.limit ?? 50);
+    },
+  ),
+  dashboardParticipants: defineQuery(
+    z.object({
+      dashboardId: z.string(),
+      limit: z.number().int().positive().max(1000).optional(),
+      cursor: z.object({ id: z.string(), updatedAt: z.number() }).nullable().optional(),
+    }),
+    ({ args }) => {
+      let query = zql.dashboard_participants
+        .where('dashboardId', args.dashboardId)
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+      if (args.cursor) {
+        query = query.start(
+          { updatedAt: args.cursor.updatedAt, id: args.cursor.id },
+          { inclusive: false },
+        );
+      }
+      return query.limit(args.limit ?? 50);
+    },
+  ),
 
   // Custom Emoji Queries
   getAllCustomEmojis: defineQuery(() => {
