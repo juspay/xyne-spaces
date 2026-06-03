@@ -1441,6 +1441,16 @@ export class EmailService {
 
     const conversation = await this.conversationRepository.findById(params.conversationId);
     if (!conversation) throw new Error(`Conversation not found: ${params.conversationId}`);
+
+    // Check if email sending is disabled for this ticket (e.g., during Auto RCA generation)
+    const ticket = await client.ticket.findFirst({
+      where: { conversationId: params.conversationId },
+      select: { id: true, emailReplyEnabled: true },
+    });
+    if (ticket && ticket.emailReplyEnabled === false) {
+      logger.warn(`[emailService.sendReplyOnConversation] Email sending blocked for ticket ${ticket.id} - emailReplyEnabled is false`);
+      throw new Error(`Email sending is temporarily disabled for this ticket. An automated process is in progress.`);
+    }
     const externalSource = await new ExternalSourceRepository().findByChannelId(conversation.channelId);
     if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
     const emails = await this.emailRepository.findByConversationId(params.conversationId);

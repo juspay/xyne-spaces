@@ -125,6 +125,33 @@ export class EmailController {
         return res.status(403).json({ error: 'Not a member of this channel' });
       }
 
+      // Check if email reply is disabled for this ticket (e.g., during Auto RCA generation)
+      try {
+        const ticket = await db.ticket.findFirst({
+          where: { conversationId },
+          select: { id: true, emailReplyEnabled: true },
+        });
+        if (ticket && ticket.emailReplyEnabled === false) {
+          logger.warn('[EmailController] Reply blocked: emailReplyEnabled is false', {
+            userId,
+            ticketId: ticket.id,
+            conversationId,
+          });
+          return res.status(403).json({
+            error: 'email_reply_disabled',
+            message: 'Email sending is temporarily disabled for this ticket. An automated process is in progress.',
+          });
+        }
+        // If no ticket found, allow reply (this is a conversation without a ticket)
+      } catch (lockCheckError) {
+        // On any error, fail-open - NEVER block email replies due to lock check errors
+        logger.warn('[EmailController] Email reply check failed, allowing reply (fail-open)', {
+          userId,
+          conversationId,
+          error: lockCheckError instanceof Error ? lockCheckError.message : 'Unknown error',
+        });
+      }
+
       // 2. Fetch initial email (first email in conversation by createdAt)
       const emails = await this.emailRepo.findByConversationId(conversationId);
       if (emails.length === 0) {

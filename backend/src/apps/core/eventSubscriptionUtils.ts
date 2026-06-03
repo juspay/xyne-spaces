@@ -93,3 +93,39 @@ export async function handleEventSubscriptionsForUsers(
     });
 }
 
+/**
+ * Emit an event to all apps installed in a workspace.
+ * Apps filter on their side based on eventType and payload fields.
+ * 
+ * @param workspaceId - The workspace ID to find installed apps
+ * @param event - The event to emit (includes eventType, payload, timestamp)
+ * @param options - Optional: excludeUserId to exclude a specific user (e.g., sender)
+ */
+export async function emitEventToWorkspaceApps(
+    workspaceId: string,
+    event: BaseAppEvent,
+    options?: { excludeUserId?: string }
+): Promise<void> {
+    try {
+        const installedApps = await installedAppsRepository.findByWorkspaceId(workspaceId);
+        
+        let appUserIds = installedApps.map(app => app.userId);
+        
+        if (options?.excludeUserId) {
+            appUserIds = appUserIds.filter(id => id !== options.excludeUserId);
+        }
+        
+        if (appUserIds.length === 0) {
+            logger.debug(`[emitEventToWorkspaceApps] No apps to notify for ${event.eventType} in workspace ${workspaceId}`);
+            return;
+        }
+        
+        await handleEventSubscriptionsForUsers(event, appUserIds);
+        
+        logger.info(`[emitEventToWorkspaceApps] Emitted ${event.eventType} to ${appUserIds.length} apps`);
+    } catch (error) {
+        logger.error(`[emitEventToWorkspaceApps] Failed to emit ${event.eventType}:`, error);
+        // Don't throw - event emission failures should not break the main flow
+    }
+}
+

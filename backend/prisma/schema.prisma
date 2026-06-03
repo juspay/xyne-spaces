@@ -458,6 +458,7 @@ model Ticket {
   aiCategory           String?           // Top-level category from AI classification (indexed for querying)
   aiSubCategory        String?           // Sub-category from AI classification
   aiPriority           String?           // Priority detected by AI (LOW, MEDIUM, HIGH, CRITICAL)
+  emailReplyEnabled    Boolean           @default(true) // Whether email replies are enabled for this ticket
 
   // Relations
   createdByUser      User                   @relation("TicketCreatedBy", fields: [createdBy], references: [id])

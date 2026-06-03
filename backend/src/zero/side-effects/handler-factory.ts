@@ -18,6 +18,7 @@ import { ChannelsSideEffectHandler } from './tables/channels-handler';
 import { EmailReadsSideEffectHandler } from './tables/email-reads-handler';
 import { ChannelUserStatusSideEffectHandler } from './tables/channel-user-status-handler';
 import { ConversationParticipantsSideEffectHandler } from './tables/conversation-participants-handler';
+import { FormEntityValuesSideEffectHandler } from './tables/form-entity-values-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -59,6 +60,8 @@ export class SideEffectHandlerFactory {
         return new ChannelUserStatusSideEffectHandler(ctx);
       case 'conversation_participants':
         return new ConversationParticipantsSideEffectHandler(ctx);
+      case 'form_entity_values':
+        return new FormEntityValuesSideEffectHandler(ctx);
 
       default:
         return new BaseSideEffectHandler(ctx);
