@@ -117,11 +117,12 @@ export class ExternalSourceRepository {
   }
 
   /**
-   * Find external source by workspace ID
+   * Find active email external source (Google/Microsoft) for a workspace.
    */
-  async findByWorkspaceId(workspaceId: string) {
-    return await this.db.externalSource.findUnique({
-      where: { workspaceId }
+  async findEmailSourceByWorkspaceId(workspaceId: string) {
+    return await this.db.externalSource.findFirst({
+      where: { workspaceId, sourceType: { in: ['google', 'microsoft'] }, isActive: true },
+      orderBy: { createdAt: 'desc' },
     });
   }
 }

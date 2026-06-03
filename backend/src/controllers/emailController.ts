@@ -61,7 +61,7 @@ export class EmailController {
     }
     const preference = await this.emailChannelPreferenceRepo.findByChannelId(channelId);
     if (preference?.deskType === DeskType.DL && preference.workspaceId) {
-      const wsSource = await this.externalSourceRepo.findByWorkspaceId(preference.workspaceId);
+      const wsSource = await this.externalSourceRepo.findEmailSourceByWorkspaceId(preference.workspaceId);
       return wsSource;
     }
     logger.warn(`[EmailController] No external source found for channel`, { channelId });

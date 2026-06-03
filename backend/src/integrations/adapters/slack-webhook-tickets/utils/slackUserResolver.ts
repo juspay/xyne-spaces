@@ -73,10 +73,18 @@ export function extractAllSlackIds(text: string, isUser: boolean): string[] {
   return [...new Set(ids)];
 }
 
-export function extractAllSlackChannelIds(text: string): string[] {
-  const matches = text.matchAll(/<#([^>|]+)(?:\|[^>]*)?>/g);
-  const ids = Array.from(matches, (match) => match[1]);
-  return [...new Set(ids)];
+export function extractAllSlackChannelIds(text: string): { id: string; name?: string }[] {
+  const matches = text.matchAll(/<#([^>|]+)(?:\|([^>]*))?>/g);
+  const seen = new Set<string>();
+  const results: { id: string; name?: string }[] = [];
+  for (const match of matches) {
+    const id = match[1];
+    if (!seen.has(id)) {
+      seen.add(id);
+      results.push({ id, name: match[2] || undefined });
+    }
+  }
+  return results;
 }
 
 export async function fetchSlackUserInfo(
@@ -112,6 +120,29 @@ export async function fetchSlackUserInfo(
       slackUserId,
       ...errorDetails,
     });
+    return null;
+  }
+}
+
+async function fetchSlackChannelInfo(
+  channelId: string,
+  botOauthToken: string
+): Promise<{ id: string; name: string; isPrivate: boolean } | null> {
+  try {
+    const client = new WebClient(botOauthToken);
+    const result = await client.conversations.info({ channel: channelId });
+    if (!result.ok || !result.channel) {
+      logger.warn('[fetchSlackChannelInfo] Failed to fetch channel info', { channelId, error: result.error });
+      return null;
+    }
+    const ch = result.channel as { id: string; name?: string; is_private?: boolean };
+    return {
+      id: ch.id,
+      name: ch.name || channelId,
+      isPrivate: ch.is_private === true,
+    };
+  } catch (error) {
+    logger.error('[fetchSlackChannelInfo] Error fetching Slack channel info', { channelId, error });
     return null;
   }
 }
@@ -356,10 +387,19 @@ export async function resolveSlackMentions(
       }
     }
   }
-  for (const channelId of channelIds) {
+  for (const { id: channelId, name: slackChannelName } of channelIds) {
     const channel = await channelRepo.findById(channelId);
     if (channel) {
       text = replaceSlackChannelMention(text, channelId, buildChannelMentionSpan(channel, quote));
+    } else if (slackChannelName) {
+      text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(slackChannelName)}</span>`);
+    } else if (botOauthToken) {
+      const slackChannel = await fetchSlackChannelInfo(channelId, botOauthToken);
+      if (slackChannel) {
+        text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(slackChannel.name)}</span>`);
+      } else {
+        text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(channelId)}</span>`);
+      }
     } else {
       text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(channelId)}</span>`);
     }

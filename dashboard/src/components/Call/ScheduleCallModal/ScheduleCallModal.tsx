@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useEffect, useState, useRef } from 'react'
 import { RRule } from 'rrule';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
-import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
@@ -274,8 +274,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   // Filter for DEFAULT public channels only (not DMs, not EMAIL/Desk channels)
   const channels = useMemo(() => {
     return allVisibleChannels.filter(
-      channel =>
-        channel.scopeType === ChannelScopeType.DEFAULT && channel.type !== ChannelType.EMAIL,
+      channel => channel.scopeType === ChannelScopeType.DEFAULT && !isDeskChannelType(channel.type),
     );
   }, [allVisibleChannels]);
 

@@ -6,7 +6,7 @@ import {
   useAllVisibleChannels,
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
-import { ChannelType } from '@xyne/shared';
+import { isDeskChannelType, ChannelType } from '@xyne/shared';
 import {
   groupChannelsByScope,
   isDMChannel,
@@ -209,7 +209,7 @@ const GlobalCommandMenu = ({
 
     // groupChannelsByScope excludes EMAIL channels (they live in Desk, not chat sidebar).
     // Re-include them so the search `in:` picker can scope to desk channels.
-    const emailChannels = visibleChannels.filter(c => c.type === ChannelType.EMAIL);
+    const emailChannels = visibleChannels.filter(c => isDeskChannelType(c.type));
 
     const sortByActivity = (list: typeof visibleChannels) =>
       [...list].sort(

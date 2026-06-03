@@ -24,13 +24,17 @@ export interface CreateChannelRequest {
   visibility?: 'PUBLIC' | 'PRIVATE';
   projectId: string;
   participants?: string[];
-  type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT';
+  type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK';
   assigneeUserGroupId?: string;
-  deskType?: 'EMAIL' | 'DL';
+  deskType?: 'EMAIL' | 'DL' | 'SLACK';
   dlEmail?: string;
+  slackChannelId?: string;
 }
 
-export type EmailDeskOpts = { deskType: 'EMAIL' } | { deskType: 'DL'; dlEmail: string };
+export type EmailDeskOpts =
+  | { deskType: 'EMAIL' }
+  | { deskType: 'DL'; dlEmail: string }
+  | { deskType: 'SLACK'; slackChannelId: string };
 
 export interface CreateChannelResponse {
   success: boolean;
@@ -106,7 +110,7 @@ export class ChannelService {
 
   async createChannel(
     formData: CreateChannelFormData,
-    channelType: 'DEFAULT' | 'EMAIL' | 'SUPPORT' = 'DEFAULT',
+    channelType: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' = 'DEFAULT',
     emailDeskOpts?: EmailDeskOpts,
   ): Promise<CreateChannelResponse> {
     const requestData: CreateChannelRequest = {
@@ -121,6 +125,11 @@ export class ChannelService {
         emailDeskOpts && {
           deskType: emailDeskOpts.deskType,
           ...(emailDeskOpts.deskType === 'DL' && { dlEmail: emailDeskOpts.dlEmail }),
+        }),
+      ...(channelType === 'SLACK' &&
+        emailDeskOpts &&
+        emailDeskOpts.deskType === 'SLACK' && {
+          slackChannelId: emailDeskOpts.slackChannelId,
         }),
     };
 

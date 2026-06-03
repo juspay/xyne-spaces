@@ -33,7 +33,7 @@ import {
   GitMerge,
   Mail,
 } from 'lucide-react';
-import { ChannelVisibility, EmailType } from '@xyne/shared';
+import { ChannelVisibility, ChannelType, EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -94,6 +94,7 @@ import {
 } from '../../services/XyneAI/XyneAISessionsService';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
+import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { useEmailDraft } from '../../hooks/useEmailDraft';
 import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
@@ -952,7 +953,7 @@ const SupportScreen = (): ReactElement => {
   const createChannelMutation = useMutation({
     mutationFn: async (
       data: CreateChannelFormData & {
-        channelType?: 'EMAIL' | undefined;
+        channelType?: 'EMAIL' | 'SLACK' | undefined;
         emailDeskOpts?: EmailDeskOpts;
       },
     ) => {
@@ -978,14 +979,28 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK';
       dlEmail?: string;
+      slackChannelId?: string;
     },
   ) => {
-    const { connector, deskType, dlEmail, ...rest } = data;
+    const { connector, deskType, dlEmail, slackChannelId, ...rest } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
+
+    if (deskType === 'SLACK') {
+      if (!slackChannelId) {
+        toast.error('Please select a Slack channel');
+        return;
+      }
+      createChannelMutation.mutate({
+        ...rest,
+        channelType: 'SLACK',
+        emailDeskOpts: { deskType: 'SLACK', slackChannelId },
+      });
+      return;
+    }
 
     if (deskType === 'DL') {
       if (!dlEmail) {
@@ -1774,11 +1789,11 @@ const SupportScreen = (): ReactElement => {
       <Dialog
         open={showCreateChannelModal}
         onOpenChange={setShowCreateChannelModal}
-        title='Create Email Channel'
+        title='Create Desk Channel'
       >
         <div className='p-4'>
           <AddChannelForm
-            title='Create Email Channel'
+            title='Create Desk Channel'
             hideVisibility={false}
             requireConnector={true}
             onSubmit={data => handleCreateEmailChannel(data)}
@@ -2832,28 +2847,36 @@ const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  <EmailThread
-                    collapseState={emailCollapseState}
-                    ticketId={ticket?.id}
-                    lastEmailAt={ticket?.lastEmailAt}
-                    emailReads={
-                      ticket?.emailReads as
-                        | Array<{ userId: string; lastReadEmailAt: number }>
-                        | undefined
-                    }
-                    onReplyToEmail={(emailId, mode) => {
-                      clearStoredRecipients(conversationId);
-                      setReplyToEmailId(emailId);
-                      setReplyMode(mode);
-                      setComposerOpen(true);
-                    }}
-                    deskEmail={deskEmail}
-                  />
+                  {channel?.type === ChannelType.SLACK ? (
+                    <SlackThread emails={emails} />
+                  ) : (
+                    <EmailThread
+                      collapseState={emailCollapseState}
+                      ticketId={ticket?.id}
+                      lastEmailAt={ticket?.lastEmailAt}
+                      emailReads={
+                        ticket?.emailReads as
+                          | Array<{ userId: string; lastReadEmailAt: number }>
+                          | undefined
+                      }
+                      onReplyToEmail={(emailId, mode) => {
+                        clearStoredRecipients(conversationId);
+                        setReplyToEmailId(emailId);
+                        setReplyMode(mode);
+                        setComposerOpen(true);
+                      }}
+                      deskEmail={deskEmail}
+                    />
+                  )}
                 </div>
               )}
             </div>
             <div className='sticky bottom-0 w-full flex-shrink-0 bg-background'>
-              {composerOpen ? (
+              {channel?.type === ChannelType.SLACK ? (
+                conversationId ? (
+                  <SlackComposer conversationId={conversationId} />
+                ) : null
+              ) : composerOpen ? (
                 <EmailComposer
                   conversationId={conversationId}
                   onClose={() => {

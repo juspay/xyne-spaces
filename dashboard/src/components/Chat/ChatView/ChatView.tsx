@@ -15,7 +15,7 @@ import CanvasScreen from '../../Canvas/CanvasScreen';
 import { ChannelSummary, ThreadSummary } from '../Summary';
 import { ThreadMessages } from '../ThreadPannel';
 import { useZero } from '../../../hooks/useZero';
-import { ChannelScopeType, ChannelType } from '@xyne/shared';
+import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
 import {
@@ -128,7 +128,7 @@ const ChatView = (): ReactElement => {
   // Save the current channelId as the last visited channel
   useEffect(() => {
     if (!channelId || !channel) return;
-    if (channel.type === ChannelType.EMAIL) return;
+    if (isDeskChannelType(channel.type)) return;
     setLastVisitedChannel(channelId, workspaceId ?? '');
   }, [channelId, channel]);
 
@@ -194,7 +194,7 @@ const ChatView = (): ReactElement => {
     void navigate('/chat', { replace: true });
   }
 
-  if (channel?.type === ChannelType.EMAIL && channelId && workspaceId) {
+  if (isDeskChannelType(channel?.type) && channelId && workspaceId) {
     return <Navigate to={`/${workspaceId}/support/${channelId}`} replace />;
   }
 

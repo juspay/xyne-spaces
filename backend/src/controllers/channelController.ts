@@ -7,7 +7,7 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType } from '@prisma/client';
+import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType, EmailMergeMode } from '@prisma/client';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
@@ -30,6 +30,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
 
 export class ChannelController {
@@ -667,6 +668,7 @@ export class ChannelController {
         assigneeUserGroupId,
         deskType,
         dlEmail,
+        slackChannelId,
       }: {
         scopeType: ChannelScopeType;
         scopeId?: string;
@@ -675,10 +677,11 @@ export class ChannelController {
         visibility?: ChannelVisibility;
         projectId: string;
         participants?: string[];
-        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT';
+        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK';
         assigneeUserGroupId?: string;
         deskType?: DeskType;
         dlEmail?: string;
+        slackChannelId?: string;
       } = req.body;
 
       const userId = req.user!.id;
@@ -737,8 +740,8 @@ export class ChannelController {
             return;
           }
           const workspaceId = req.user!.workspaceId!;
-          const sharedSource = await db.externalSource.findUnique({
-            where: { workspaceId },
+          const sharedSource = await db.externalSource.findFirst({
+            where: { workspaceId, sourceType: { in: ['google', 'microsoft'] }, isActive: true },
             select: { displayName: true, isActive: true },
           });
           if (!sharedSource) {
@@ -772,6 +775,30 @@ export class ChannelController {
             res.status(409).json({ error: 'A desk already exists for this DL' });
             return;
           }
+        }
+      }
+
+      // SLACK channels — slackChannelId is required, workspace must have Slack connected.
+      if (channelType === 'SLACK') {
+        if (!slackChannelId) {
+          res.status(400).json({ error: 'slackChannelId is required for SLACK channels' });
+          return;
+        }
+        const slackWorkspaceSource = await db.externalSource.findFirst({
+          where: { workspaceId: req.user!.workspaceId!, sourceType: 'slack', isActive: true },
+        });
+        if (!slackWorkspaceSource) {
+          res.status(503).json({ error: 'Slack is not connected for this workspace. Please connect Slack first.' });
+          return;
+        }
+        const sourceName = `slack-desk-${slackChannelId}`;
+        const existingSource = await db.externalSource.findUnique({
+          where: { name: sourceName },
+          select: { id: true, isActive: true },
+        });
+        if (existingSource?.isActive) {
+          res.status(409).json({ error: 'A desk already exists for this Slack channel' });
+          return;
         }
       }
 
@@ -930,6 +957,83 @@ export class ChannelController {
           }
           logger.error('Failed to create EmailChannelPreference:', error);
           // Don't fail the entire channel creation if preference fails
+        }
+      }
+
+      // Save EmailChannelPreference + ExternalSource for SLACK channels
+      if (channelType === 'SLACK' && slackChannelId) {
+        try {
+          const firstBoard = await db.board.findFirst({
+            where: { projectId: channel.projectId },
+            orderBy: { createdAt: 'asc' },
+            select: { id: true },
+          });
+          if (!firstBoard) {
+            await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
+            res.status(409).json({ error: 'Project has no boards configured — cannot create Slack desk' });
+            return;
+          }
+
+          await this.emailChannelPreferenceRepository.create({
+            channelId: channel.id,
+            ownerUserId: userId,
+            deskType: DeskType.SLACK,
+            boardId: firstBoard.id,
+            emailMergeMode: EmailMergeMode.DISABLED,
+            ...(assigneeUserGroupId && { assigneeUserGroupId }),
+          });
+
+          const sourceName = `slack-desk-${slackChannelId}`;
+          // Read bot token from workspace-level Slack source
+          const slackWorkspaceSource = await db.externalSource.findFirst({
+            where: { workspaceId: req.user!.workspaceId!, sourceType: 'slack', isActive: true },
+          });
+          if (!slackWorkspaceSource) {
+            await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
+            res.status(503).json({ error: 'Slack is not connected for this workspace' });
+            return;
+          }
+          const slackCreds = JSON.parse(decrypt(slackWorkspaceSource.credentials));
+          const credentials = encrypt(JSON.stringify({
+            signingSecret: slackCreds.signingSecret,
+            botOauthToken: slackCreds.botOauthToken,
+          }));
+
+          // Reactivate existing or create new ExternalSource
+          const existingSource = await db.externalSource.findUnique({
+            where: { name: sourceName },
+            select: { id: true },
+          });
+
+          if (existingSource) {
+            await db.externalSource.update({
+              where: { id: existingSource.id },
+              data: { isActive: true, credentials, channelId: channel.id, displayName: name! },
+            });
+          } else {
+            await db.externalSource.create({
+              data: {
+                name: sourceName,
+                sourceType: 'slack-desk',
+                displayName: name!,
+                channelId: channel.id,
+                credentials,
+                isActive: true,
+              },
+            });
+          }
+        } catch (error) {
+          logger.error('Failed to create Slack desk resources, rolling back channel', error);
+          await db.channel.delete({ where: { id: channel.id } }).catch(err => {
+            logger.error(`Channel rollback failed for ${channel.id}`, err);
+          });
+          const code = (error as { code?: string })?.code;
+          if (code === 'P2002') {
+            res.status(409).json({ error: 'A desk with this Slack channel already exists' });
+          } else {
+            res.status(500).json({ error: 'Failed to create Slack desk' });
+          }
+          return;
         }
       }
 

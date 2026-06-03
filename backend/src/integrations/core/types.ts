@@ -15,6 +15,7 @@ export type { RefetchOptions, RefetchResult };
 export enum ExternalSourcePlatform {
   ZOHO = 'zoho',
   SLACK = 'slack',
+  SLACK_DESK = 'slack-desk',
   MICROSOFT = 'microsoft',
   GOOGLE = 'google',
 }

@@ -11,7 +11,8 @@ import { ConversationRepository } from '../../database/repositories/conversation
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '../../database/repositories/emailChannelPreferenceRepository';
-import { ExternalSource, ExternalMessage, ChannelType, ExternalEntityType, EmailType } from '@prisma/client';
+import { ExternalSource, ExternalMessage, ExternalEntityType, EmailType } from '@prisma/client';
+import { isDeskChannelType } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
 import { emailService } from '../../services/emailService';
@@ -119,13 +120,13 @@ export class ExternalSourceCore {
     if (!channel) {
       throw new Error(`Channel ${source.channelId} not found`);
     }
-    const isEmailChannel = channel.type === ChannelType.EMAIL;
+    const isDeskChannel = isDeskChannelType(channel.type);
 
     if (normalizedData.metadata.isReply) {
       const existingThread = await this.externalMessageRepo.findByThreadId(
         source.id,
         normalizedData.externalThreadId,
-        isEmailChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
+        isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
       );
 
       if (!existingThread) {
@@ -180,8 +181,8 @@ export class ExternalSourceCore {
       normalizedData.externalId
     );
 
-    if (existingExtMsg && isEmailChannel) {
-      // in case of duplicate entry, for email flow, donot add any updates
+    if (existingExtMsg && isDeskChannel) {
+      // in case of duplicate entry, for desk flow (email/slack), donot add any updates
       return {
         success: true,
         conversationId: "",
@@ -191,7 +192,7 @@ export class ExternalSourceCore {
       }
     }
 
-    if (existingExtMsg && !isEmailChannel) {
+    if (existingExtMsg && !isDeskChannel) {
       logger.info(`Duplicate message detected for ${normalizedData.externalId}`);
       return await this.handleUpdate(source, normalizedData, existingExtMsg, downloadedAttachments);
     }
@@ -201,7 +202,7 @@ export class ExternalSourceCore {
       source,
       normalizedData,
       downloadedAttachments,
-      isEmailChannel
+      isDeskChannel
     );
 
     if (blocked) {
@@ -218,9 +219,9 @@ export class ExternalSourceCore {
       };
     }
 
-    const resolvedEntityId = isEmailChannel ? email?.id : message?.messageId ;
+    const resolvedEntityId = isDeskChannel ? email?.id : message?.messageId ;
 
-    if (!conversation || (!isEmailChannel && !message) || (isEmailChannel && !email) || !resolvedEntityId) {
+    if (!conversation || (!isDeskChannel && !message) || (isDeskChannel && !email) || !resolvedEntityId) {
       throw new Error('Failed to create or find conversation');
     }
 
@@ -233,7 +234,7 @@ export class ExternalSourceCore {
       externalThreadId: normalizedData.externalThreadId,
       entityId: resolvedEntityId,
       direction: 'INCOMING',
-      entityType: isEmailChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
+      entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
     });
 
     // Call adapter's postprocess hook if available (adapter decides when to process)
@@ -299,7 +300,7 @@ export class ExternalSourceCore {
     source: ExternalSource,
     normalizedData: NormalizedData,
     downloadedAttachments: DownloadedAttachment[],
-    isEmailChannel: boolean
+    isDeskChannel: boolean
   ) {
 
     if (!source.channelId) {
@@ -311,12 +312,12 @@ export class ExternalSourceCore {
     const existingExtMsg = await this.externalMessageRepo.findByThreadId(
       source.id,
       normalizedData.externalThreadId,
-      isEmailChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
+      isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
     );
 
     if (existingExtMsg) {
       let conversationid: string = "";
-      if (isEmailChannel) {
+      if (isDeskChannel) {
         if (existingExtMsg.entityId) {
           const emailMessage = await this.emailRepo.findById(existingExtMsg.entityId);
           conversationid = emailMessage?.conversationId || "";
@@ -338,7 +339,7 @@ export class ExternalSourceCore {
       const uploadedFiles = AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
       logger.info(`Converted to ${uploadedFiles.length} uploaded files`);
 
-      if (isEmailChannel) {
+      if (isDeskChannel) {
         if (!normalizedData.emailData?.to || !normalizedData?.emailData.from ) {
           throw new Error(
             'Missing required email fields in normalizedData. Required: subject, body, to, from'
@@ -378,7 +379,7 @@ export class ExternalSourceCore {
       }
     }
 
-    if (isEmailChannel && !existingExtMsg && normalizedData.emailData) {
+    if (isDeskChannel && !existingExtMsg && normalizedData.emailData) {
       const threadEmail = await this.emailRepo.findFirstByThreadAndChannel(
         normalizedData.externalThreadId,
         source.channelId,
@@ -417,7 +418,9 @@ export class ExternalSourceCore {
 
     // For email channels, check Vespa for duplicate conversation
     // This handles cases where tickets were created manually (not via Zoho)
-    if (isEmailChannel && !existingExtMsg && normalizedData.emailData) {
+    // Vespa duplicate detection only for email channels (not Slack — no subject-based merging)
+    const isSlackSource = normalizedData.metadata.source === 'slack';
+    if (isDeskChannel && !isSlackSource && !existingExtMsg && normalizedData.emailData) {
       logger.info(`[EMAIL_DUPLICATE_CHECK] Checking Vespa for duplicate email`, {
         channelId: source.channelId,
         emailFrom: normalizedData.emailData.from,
@@ -493,8 +496,8 @@ export class ExternalSourceCore {
     const uploadedFiles = AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
     logger.info(`Converted to ${uploadedFiles.length} uploaded files for new conversation`);
 
-    if (isEmailChannel) {
-      if (!normalizedData.emailData || !normalizedData.emailData.to || !normalizedData.emailData.from ) {
+    if (isDeskChannel) {
+      if (!normalizedData.emailData || !normalizedData.emailData.from ) {
         throw new Error(
           'Missing required email fields in normalizedData. Required: subject, body, to, from'
         );
@@ -515,7 +518,7 @@ export class ExternalSourceCore {
         userId,
         emailSubject: normalizedData.emailData.subject || "",
         emailBody: normalizedData.content,
-        emailTo: normalizedData.emailData.to,
+        emailTo: normalizedData.emailData.to || [],
         emailFrom: normalizedData.emailData.from,
         emailCc: normalizedData.emailData.cc,
         emailBcc: normalizedData.emailData.bcc,

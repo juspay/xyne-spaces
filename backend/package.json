@@ -36,8 +36,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:push": "prisma db push",
-    "db:studio": "prisma studio",
+    "db:push": "dotenv -e .env.local -- sh -c 'prisma db push'",
+    "db:studio": "dotenv -e .env.local -- sh -c 'prisma studio'",
     "db:seed": "ts-node prisma/seed.ts",
     "prepare": "husky"
   },

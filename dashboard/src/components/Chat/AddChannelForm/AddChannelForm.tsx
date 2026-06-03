@@ -26,17 +26,26 @@ import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/works
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
 type ConnectorType = 'google' | 'microsoft' | null;
-type DeskType = 'EMAIL' | 'DL';
+type DeskType = 'EMAIL' | 'DL' | 'SLACK';
 type Visibility = 'public' | 'private';
+
+interface SlackChannel {
+  id: string;
+  name: string;
+  is_private: boolean;
+  num_members: number;
+  alreadyConnected: boolean;
+}
 
 interface AddChannelFormProps {
   mode?: ChannelFormMode;
   onSubmit: (
     data: ChannelFormData & {
       connector?: ConnectorType;
-      channelType?: 'EMAIL' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | undefined;
       deskType?: DeskType;
       dlEmail?: string;
+      slackChannelId?: string;
     },
   ) => void;
   onCancel: () => void;
@@ -61,8 +70,21 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [selectedConnector, setSelectedConnector] = useState<ConnectorType>(null);
   const [deskType, setDeskType] = useState<DeskType>('EMAIL');
   const [dlEmailInput, setDlEmailInput] = useState<string>('');
+  const [selectedSlackChannelId, setSelectedSlackChannelId] = useState<string>('');
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
+
+  const { data: slackChannelsData, isLoading: isLoadingSlackChannels } = useQuery({
+    queryKey: ['slack-desk-channels'],
+    queryFn: async () => {
+      const { apiInstance } = await import('../../../services/clients/apiClient');
+      const res = await apiInstance.get<{ channels: SlackChannel[] }>(
+        '/integrations/slack-desk/channels',
+      );
+      return res.data.channels;
+    },
+    enabled: requireConnector && deskType === 'SLACK',
+  });
 
   const { data: workspaceMailbox } = useQuery({
     queryKey: ['workspace-shared-mailbox-status'],
@@ -142,6 +164,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))
         )
           return;
+        if (deskType === 'SLACK' && !selectedSlackChannelId) return;
       }
       if (mode === 'promote') {
         const promoteData: PromoteGroupDmRequest = {
@@ -155,7 +178,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         }
         onSubmit?.(promoteData);
       } else if (requireConnector) {
-        if (deskType === 'DL') {
+        if (deskType === 'SLACK') {
+          onSubmit?.({
+            ...value,
+            connector: null,
+            channelType: 'SLACK',
+            deskType: 'SLACK',
+            slackChannelId: selectedSlackChannelId,
+            assigneeUserGroupId: value.assigneeUserGroupId,
+          });
+        } else if (deskType === 'DL') {
           onSubmit?.({
             ...value,
             connector: null,
@@ -192,6 +224,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     (requireConnector &&
       deskType === 'DL' &&
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
+    (requireConnector && deskType === 'SLACK' && !selectedSlackChannelId) ||
     duplicateCheck?.isDuplicate === true;
 
   // Auto-select first project if none selected
@@ -314,6 +347,27 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 Route a DL through the shared mailbox
               </div>
             </button>
+            <button
+              type='button'
+              onClick={() => {
+                setDeskType('SLACK');
+                setSelectedConnector(null);
+                setDlEmailInput('');
+              }}
+              className={cn(
+                'flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all text-left',
+                deskType === 'SLACK'
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border text-foreground hover:border-muted-foreground/50',
+              )}
+              data-track-category='ADD_CHANNEL_FORM'
+              data-track-name='SELECT_DESK_TYPE_SLACK'
+            >
+              <div>Slack channel</div>
+              <div className='text-xs font-normal text-muted-foreground mt-0.5'>
+                Connect a Slack channel to create tickets from messages
+              </div>
+            </button>
           </div>
         </div>
       )}
@@ -363,6 +417,66 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                   </div>
                 </div>
               </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Slack Channel Selection */}
+      {requireConnector && deskType === 'SLACK' && (
+        <div className='space-y-2'>
+          <label htmlFor='slack-channel-select' className='text-sm font-medium text-foreground'>
+            Slack Channel <span className='text-muted-foreground'>*</span>
+          </label>
+          {isLoadingSlackChannels ? (
+            <div className='flex items-center gap-2 py-3 text-sm text-muted-foreground'>
+              <div className='h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent' />
+              Loading Slack channels...
+            </div>
+          ) : !slackChannelsData?.length ? (
+            <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
+              <AlertCircle
+                size={16}
+                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+              />
+              <div className='text-sm text-foreground'>
+                <div className='font-medium'>No Slack channels found</div>
+                <div className='text-xs text-muted-foreground mt-1'>
+                  The Xyne bot is not a member of any channels. Invite it to a channel first using{' '}
+                  <span className='font-mono'>/invite @XyneBot</span> in Slack.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Select value={selectedSlackChannelId} onValueChange={setSelectedSlackChannelId}>
+                <SelectTrigger id='slack-channel-select' className='w-full'>
+                  <SelectValue placeholder='Select a Slack channel' />
+                </SelectTrigger>
+                <SelectContent>
+                  {slackChannelsData
+                    .filter(ch => !ch.alreadyConnected)
+                    .map(ch => (
+                      <SelectItem key={ch.id} value={ch.id}>
+                        <span className='mr-1 text-muted-foreground'>
+                          {ch.is_private ? '\uD83D\uDD12' : '#'}
+                        </span>
+                        {ch.name}
+                        <span className='ml-2 text-xs text-muted-foreground'>
+                          ({ch.num_members} members)
+                        </span>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {slackChannelsData.some(ch => ch.alreadyConnected) && (
+                <p className='text-xs text-muted-foreground'>
+                  Already connected channels are hidden from this list.
+                </p>
+              )}
+              <p className='text-xs text-muted-foreground'>
+                Don&apos;t see your channel? Invite the Xyne bot to it first in Slack.
+              </p>
             </>
           )}
         </div>

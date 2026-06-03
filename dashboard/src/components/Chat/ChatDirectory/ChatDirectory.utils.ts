@@ -1,4 +1,4 @@
-import { ChannelScopeType, ChannelType, ChannelUserStatus } from '@xyne/shared';
+import { ChannelScopeType, ChannelUserStatus, isDeskChannelType } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
 
 // Optimized function to group channels by scope type (single pass)
@@ -17,7 +17,7 @@ export const groupChannelsByScope = (
     // EMAIL channels live in Xyne Desk, not in the chat directory.
     // TODO: filter this out at the source by excluding EMAIL-type channels in the
     // `visibleChannels` query itself, so the client never receives them here.
-    if (channel.type === ChannelType.EMAIL) {
+    if (isDeskChannelType(channel.type)) {
       continue;
     }
 

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { EmailMergeMode, AutoDraftMode } from '@xyne/shared';
+import { EmailMergeMode, AutoDraftMode, ChannelType } from '@xyne/shared';
 import { Button } from '../../ui/Button/Button';
 import { InboxSettings } from './InboxSettings';
+import { EmailDeskSettings } from './EmailDeskSettings';
 import { DeskIntegrationCard } from '../DeskIntegrationCard/DeskIntegrationCard';
 import { ClassificationSettings } from '../ClassificationSettings/ClassificationSettings';
 import { PrioritySettings } from '../PrioritySettings';
@@ -25,9 +26,10 @@ interface InboxSettingsPanelProps {
  * form draft state, the save/cancel/default-cc flows, the panel header,
  * and the composite settings body.
  *
- * Extracted from `SupportScreen` so `useEmailChannelPreference` is only
- * subscribed while this panel is mounted (when settings is open). On the
- * bare list view the query no longer runs from here.
+ * Renders generic settings (owner, assignee, auto AI draft, classification,
+ * priority) for all desk types, then provider-specific sections based on
+ * channel type — e.g. email desks get send-as alias, default CC, merge
+ * mode, integration card, and signature editor.
  */
 export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
   channelId,
@@ -38,6 +40,9 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
   const updateEmailChannelPreference = useUpdateEmailChannelPreference();
   const selectedChannelForSettings = useVisibleChannel(channelId ?? '');
   const allUserGroups = useUserGroups();
+
+  const channelType = selectedChannelForSettings?.type;
+  const isEmail = channelType === ChannelType.EMAIL;
 
   // Current values from the channel preference.
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
@@ -84,7 +89,7 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
     setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
   }, [currentInboxAutoDraftMode]);
 
-  const canEditSendAsEmail =
+  const canManage =
     !!userID &&
     !!selectedChannelForSettings &&
     (selectedChannelForSettings.createdBy === userID || currentInboxOwnerUserId === userID);
@@ -93,9 +98,11 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
     !!channelId &&
     (draftInboxOwnerUserId !== currentInboxOwnerUserId ||
       draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId ||
-      (canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail) ||
-      draftInboxEmailMergeMode !== currentInboxEmailMergeMode ||
-      draftInboxAutoDraftMode !== currentInboxAutoDraftMode);
+      draftInboxAutoDraftMode !== currentInboxAutoDraftMode ||
+      (isEmail &&
+        canManage &&
+        (draftInboxSendAsEmail !== currentInboxSendAsEmail ||
+          draftInboxEmailMergeMode !== currentInboxEmailMergeMode)));
 
   const handleSaveInboxSettings = useCallback(async () => {
     if (!channelId) {
@@ -111,10 +118,10 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
         ...(draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId
           ? { assigneeUserGroupId: draftInboxAssigneeUserGroupId }
           : {}),
-        ...(canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail
+        ...(isEmail && canManage && draftInboxSendAsEmail !== currentInboxSendAsEmail
           ? { sendAsEmail: draftInboxSendAsEmail }
           : {}),
-        ...(draftInboxEmailMergeMode !== currentInboxEmailMergeMode
+        ...(isEmail && draftInboxEmailMergeMode !== currentInboxEmailMergeMode
           ? { emailMergeMode: draftInboxEmailMergeMode }
           : {}),
         ...(draftInboxAutoDraftMode !== currentInboxAutoDraftMode
@@ -133,11 +140,12 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
     }
   }, [
     channelId,
+    isEmail,
     draftInboxOwnerUserId,
     currentInboxOwnerUserId,
     draftInboxAssigneeUserGroupId,
     currentInboxAssigneeUserGroupId,
-    canEditSendAsEmail,
+    canManage,
     draftInboxSendAsEmail,
     currentInboxSendAsEmail,
     draftInboxEmailMergeMode,
@@ -220,36 +228,51 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
       <div className='p-4 space-y-6'>
         {channelId && (
           <>
+            {/* Generic settings — all desk types */}
             <InboxSettings
               ownerUserId={draftInboxOwnerUserId}
               onOwnerChange={setDraftInboxOwnerUserId}
               assigneeUserGroupId={draftInboxAssigneeUserGroupId}
               onAssigneeChange={setDraftInboxAssigneeUserGroupId}
-              sendAsEmail={draftInboxSendAsEmail}
-              onSendAsEmailChange={setDraftInboxSendAsEmail}
-              canEditSendAsEmail={canEditSendAsEmail}
-              defaultCc={currentInboxDefaultCc}
-              onSaveDefaultCc={value => void handleSaveDefaultCc(value)}
-              isSavingDefaultCc={isSavingDefaultCc}
-              emailMergeMode={draftInboxEmailMergeMode}
-              onEmailMergeModeChange={setDraftInboxEmailMergeMode}
               autoDraftMode={draftInboxAutoDraftMode}
               onAutoDraftModeChange={setDraftInboxAutoDraftMode}
               disabled={isSavingInboxSettings}
             />
-            <div className='border-t border-border' />
-            <DeskIntegrationCard channelId={channelId} canManage={canEditSendAsEmail} />
+
+            {/* Email-specific settings */}
+            {isEmail && (
+              <>
+                <div className='border-t border-border' />
+                <EmailDeskSettings
+                  sendAsEmail={draftInboxSendAsEmail}
+                  onSendAsEmailChange={setDraftInboxSendAsEmail}
+                  canEditSendAsEmail={canManage}
+                  defaultCc={currentInboxDefaultCc}
+                  onSaveDefaultCc={value => void handleSaveDefaultCc(value)}
+                  isSavingDefaultCc={isSavingDefaultCc}
+                  emailMergeMode={draftInboxEmailMergeMode}
+                  onEmailMergeModeChange={setDraftInboxEmailMergeMode}
+                  disabled={isSavingInboxSettings}
+                />
+                <div className='border-t border-border' />
+                <DeskIntegrationCard channelId={channelId} canManage={canManage} />
+              </>
+            )}
+
+            {/* Generic settings — all desk types */}
             <ClassificationSettings
               channelId={channelId}
               userGroups={allUserGroups.map(g => ({ id: g.id, name: g.name }))}
-              canManage={canEditSendAsEmail}
+              canManage={canManage}
             />
             <div className='border-t border-border' />
-            <PrioritySettings channelId={channelId} canManage={canEditSendAsEmail} />
+            <PrioritySettings channelId={channelId} canManage={canManage} />
             <div className='border-t border-border' />
           </>
         )}
-        <SignatureEditor />
+
+        {/* Email signature — only for email desks */}
+        {isEmail && <SignatureEditor />}
       </div>
     </div>
   );

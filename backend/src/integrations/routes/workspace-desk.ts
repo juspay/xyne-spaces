@@ -37,8 +37,8 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId;
-      const source = await db.externalSource.findUnique({
-        where: { workspaceId },
+      const source = await db.externalSource.findFirst({
+        where: { workspaceId, sourceType: { in: ['google', 'microsoft'] } },
         select: { displayName: true, sourceType: true, isActive: true },
       });
       const body: SharedMailboxStatus = {
@@ -74,8 +74,8 @@ router.post(
     }
 
     try {
-      const source = await db.externalSource.findUnique({
-        where: { workspaceId },
+      const source = await db.externalSource.findFirst({
+        where: { workspaceId, sourceType: { in: ['google', 'microsoft'] } },
         select: { id: true, sourceType: true, displayName: true, credentials: true },
       });
       if (!source) {

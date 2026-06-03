@@ -98,7 +98,8 @@ enum EmailMergeMode {
 
 enum DeskType {
   EMAIL
-  DL 
+  DL
+  SLACK
   @@schema("public")
 }
 
@@ -223,6 +224,7 @@ enum ChannelType {
   DEFAULT
   EMAIL
   SUPPORT
+  SLACK
   @@schema("public")
 }
 
@@ -1124,6 +1126,7 @@ model User {
   incomingWebhooksCreated   AppIncomingWebhook[]     @relation("AppIncomingWebhookCreatedBy")
   incomingWebhooksRevoked   AppIncomingWebhook[]     @relation("AppIncomingWebhookRevokedBy")
   orgMember                 OrgMember?              @relation(fields: [orgMemberId], references: [memberId])
+  externalTokens            UserExternalToken[]
 
   @@unique([providerUserId, workspaceId])
   @@unique([email, workspaceId])
@@ -2410,6 +2413,28 @@ model Activity {
   @@schema("public")
 }
 
+// Per-user OAuth tokens for external providers (Slack send-as-user, etc.)
+model UserExternalToken {
+  id              String    @id @default(cuid())
+  userId          String
+  provider        String                    // "slack", "google", "microsoft", etc.
+  providerUserId  String?                   // External ID (e.g. Slack "U0123ABCDEF")
+  encryptedToken  String                    // AES-256-CBC encrypted OAuth token
+  refreshToken    String?                   // Encrypted refresh token (for providers that need it)
+  expiresAt       DateTime?                 // Token expiry (null = never expires, e.g. Slack)
+  connectedAt     DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, provider])
+  @@index([provider])
+  @@index([userId])
+  @@map("user_external_tokens")
+  @@schema("non_zero")
+}
+
 // External Source Integration Models
 model ExternalSource {
   id              String   @id @default(cuid())
@@ -2417,7 +2442,7 @@ model ExternalSource {
   sourceType      String                    // "zoho", "slack", "jira", etc. - flexible string
   displayName     String                    // "Zoho (Euler Team)"
   channelId       String?                   // Target channel for messages (legacy/optional)
-  workspaceId     String?  @unique
+  workspaceId     String?
   boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
   ownerUserId     String?                   // @deprecated - Use EmailChannelPreference table instead. Owner for user-scoped integrations like Gmail search
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
@@ -2426,6 +2451,7 @@ model ExternalSource {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@unique([workspaceId, sourceType])
   @@index([boardId])
   @@index([ownerUserId])
   @@index([channelId])

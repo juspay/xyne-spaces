@@ -7,7 +7,7 @@
 import { NavigateFunction } from 'react-router-dom';
 import { DisplaySearchResult } from '../types/search';
 import { channelService } from '../services/Chat/channelService';
-import { ChannelScopeType, ChannelType } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, isDeskChannelType } from '@xyne/shared';
 import { toast } from 'sonner';
 import { browserPanelActor } from '../machines/browserPanelMachine';
 import { xyneAIActor } from '../machines/xyneAIMachine';
@@ -223,7 +223,7 @@ export const navigateToTicket = (
   const channel = channelData?.find(c => c.id === channelId);
 
   // If EMAIL channel (Support/Desk ticket) AND has xyneId → Support view
-  if (channel?.type === ChannelType.EMAIL && xyneId) {
+  if (isDeskChannelType(channel?.type) && xyneId) {
     void navigate(`/support/${channelId}/${xyneId}`, {
       state: { conversationId, ticketId },
     });

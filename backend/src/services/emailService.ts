@@ -41,7 +41,7 @@ import { PrismaClient, EmailMergeMode } from '@prisma/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
-import { BaseTicketType, type BoardMetadata } from '@xyne/shared';
+import { BaseTicketType, type BoardMetadata, isDeskChannelType } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
 import { workflowManager, WorkflowType } from '@/workflows';
@@ -695,13 +695,13 @@ export class EmailService {
       throw new Error('Channel not found');
     }
 
-    // If channel type is not EMAIL, set it to EMAIL
-    if (channel.type !== ChannelType.EMAIL) {
+    // If channel type is not a desk type, set it to EMAIL
+    if (!isDeskChannelType(channel.type)) {
       await this.channelRepository.update(channelId, {
         type: ChannelType.EMAIL,
       });
     }
-    
+
     // Step 0: Superposition guard — bail out before creating anything
     if (sourceName) {
       try {
@@ -1094,9 +1094,9 @@ export class EmailService {
         throw new Error('Conversation not found');
       }
 
-      // Get channel and check if type is EMAIL, if not set it to EMAIL
+      // Get channel and check if type is a desk type, if not set it to EMAIL
       const channel = await this.channelRepository.findById(conversation.channelId);
-      if (channel && channel.type !== ChannelType.EMAIL) {
+      if (channel && !isDeskChannelType(channel.type)) {
         await this.channelRepository.update(conversation.channelId, {
           type: ChannelType.EMAIL,
         });
@@ -1253,8 +1253,8 @@ export class EmailService {
       throw new Error('Channel not found');
     }
 
-    // If channel type is not EMAIL, set it to EMAIL
-    if (channel.type !== ChannelType.EMAIL) {
+    // If channel type is not a desk type, set it to EMAIL
+    if (!isDeskChannelType(channel.type)) {
       await this.channelRepository.update(channelId, {
         type: ChannelType.EMAIL,
       });
