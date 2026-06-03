@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
 
 export interface OrgSummaryDateRangeFilters {
   from: Date;
@@ -42,6 +43,7 @@ export interface OrgTeamsDateRangeFilters {
 }
 
 export interface OrgTeamAggregate {
+  teamId: string;
   teamName: string;
   summaryText: string[];
   prCount: number;
@@ -133,18 +135,21 @@ class TeamIntelligenceOrgRepository {
     toEndOfDay.setUTCHours(23, 59, 59, 999);
 
     const [orgSummaries, userIngestions] = await Promise.all([
-      db.teamIntelligenceOrgSummary.findMany({
+      db.teamIntelligenceOrgSummaryV2.findMany({
         where: {
           reportDate: { gte: from, lte: toEndOfDay },
         },
         orderBy: { reportDate: 'desc' },
+        select: {
+          contentUrl: true,
+        },
       }),
-      db.teamIntelligenceUserIngestion.findMany({
+      db.teamIntelligenceUserIngestionV2.findMany({
         where: {
           reportDate: { gte: from, lte: toEndOfDay },
         },
         select: {
-          pullRequests: true,
+          contentUrl: true,
           aiUsage: true,
         },
       }),
@@ -154,7 +159,10 @@ class TeamIntelligenceOrgRepository {
     const prMerged: string[] = [];
 
     for (const org of orgSummaries) {
-      const summaries = org.summaryText as unknown;
+      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+        summaryText?: unknown[];
+      }>(null, org.contentUrl);
+      const summaries = content?.summaryText as unknown;
       if (Array.isArray(summaries)) {
         for (const summary of summaries) {
           if (typeof summary === 'string' && summary.trim()) {
@@ -173,7 +181,10 @@ class TeamIntelligenceOrgRepository {
     };
 
     for (const user of userIngestions) {
-      const prs = user.pullRequests as Array<{
+      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+        pullRequests?: unknown[];
+      }>(null, user.contentUrl);
+      const prs = (content?.pullRequests ?? []) as Array<{
         prState?: string;
         prSummary?: string;
         prTitle?: string;
@@ -228,20 +239,23 @@ class TeamIntelligenceOrgRepository {
     const rangeEnd = new Date(to);
     rangeEnd.setUTCHours(23, 59, 59, 999);
 
-    const orgSummaries = await db.teamIntelligenceOrgSummary.findMany({
+    const orgSummaries = await db.teamIntelligenceOrgSummaryV2.findMany({
       where: {
         reportDate: { gte: rangeStart, lte: rangeEnd },
       },
       orderBy: [{ reportDate: 'desc' }, { createdAt: 'desc' }],
       select: {
-        provenance: true,
+        contentUrl: true,
       },
     });
 
     const allBullets: Record<string, unknown>[] = [];
 
     for (const orgSummary of orgSummaries) {
-      const provenance = orgSummary.provenance as Record<string, unknown> | null;
+      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+        provenance?: Record<string, unknown>;
+      }>(null, orgSummary.contentUrl);
+      const provenance = content?.provenance ?? null;
       const bullets = provenance?.bullets;
 
       if (!Array.isArray(bullets)) {
@@ -299,54 +313,64 @@ class TeamIntelligenceOrgRepository {
     rangeEnd.setUTCHours(23, 59, 59, 999);
 
     const [teamSummaries, userIngestions] = await Promise.all([
-      db.teamIntelligenceTeamSummary.findMany({
+      db.teamIntelligenceTeamSummaryV2.findMany({
         where: {
           reportDate: { gte: rangeStart, lte: rangeEnd },
         },
         orderBy: [{ teamName: 'asc' }, { reportDate: 'asc' }],
         select: {
+          teamId: true,
           teamName: true,
-          summaryText: true,
+          contentUrl: true,
         },
       }),
-      db.teamIntelligenceUserIngestion.findMany({
+      db.teamIntelligenceUserIngestionV2.findMany({
         where: {
           reportDate: { gte: rangeStart, lte: rangeEnd },
         },
         orderBy: [{ teamName: 'asc' }, { userEmail: 'asc' }],
         select: {
+          teamId: true,
           teamName: true,
-          pullRequests: true,
+          contentUrl: true,
         },
       }),
     ]);
 
     const aggregateMap = new Map<string, OrgTeamAggregate>();
 
-    const getOrCreateTeam = (teamName: string): OrgTeamAggregate => {
-      const existing = aggregateMap.get(teamName);
+    const getOrCreateTeam = (teamId: string, teamName: string): OrgTeamAggregate => {
+      const existing = aggregateMap.get(teamId);
       if (existing) {
+        if (teamName) {
+          existing.teamName = teamName;
+        }
         return existing;
       }
 
       const created: OrgTeamAggregate = {
+        teamId,
         teamName,
         summaryText: [],
         prCount: 0,
         commitCount: 0,
       };
-      aggregateMap.set(teamName, created);
+      aggregateMap.set(teamId, created);
       return created;
     };
 
     for (const teamSummary of teamSummaries) {
+      const teamId = typeof teamSummary.teamId === 'string' ? teamSummary.teamId.trim() : '';
       const teamName = teamSummary.teamName.trim();
-      if (!teamName) {
+      if (!teamId) {
         continue;
       }
 
-      const aggregate = getOrCreateTeam(teamName);
-      const summaries = teamSummary.summaryText as unknown;
+      const aggregate = getOrCreateTeam(teamId, teamName || 'No Team');
+      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+        summaryText?: unknown[];
+      }>(null, teamSummary.contentUrl);
+      const summaries = content?.summaryText as unknown;
       if (Array.isArray(summaries)) {
         for (const summary of summaries) {
           if (typeof summary === 'string' && summary.trim()) {
@@ -357,14 +381,18 @@ class TeamIntelligenceOrgRepository {
     }
 
     for (const user of userIngestions) {
+      const teamId = typeof user.teamId === 'string' ? user.teamId.trim() : '';
       const teamName = typeof user.teamName === 'string' ? user.teamName.trim() : '';
-      if (!teamName) {
+      if (!teamId) {
         continue;
       }
 
-      const aggregate = getOrCreateTeam(teamName);
-      const prs = Array.isArray(user.pullRequests)
-        ? (user.pullRequests as Array<{
+      const aggregate = getOrCreateTeam(teamId, teamName || 'No Team');
+      const content = await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+        pullRequests?: unknown[];
+      }>(null, user.contentUrl);
+      const prs = Array.isArray(content?.pullRequests)
+        ? (content.pullRequests as Array<{
             commits?: Array<Record<string, unknown>>;
           }>)
         : [];
@@ -383,6 +411,92 @@ class TeamIntelligenceOrgRepository {
       from: rangeStart.toISOString().slice(0, 10),
       to: rangeEnd.toISOString().slice(0, 10),
       teams,
+    };
+  }
+
+  async getOrgChannelRecaps({
+    from,
+    to,
+    page,
+    limit,
+  }: {
+    from: Date;
+    to: Date;
+    page: number;
+    limit: number;
+  }) {
+    const rangeStart = new Date(from);
+    rangeStart.setUTCHours(0, 0, 0, 0);
+
+    const rangeEnd = new Date(to);
+    rangeEnd.setUTCHours(23, 59, 59, 999);
+
+    const now = new Date();
+
+    const [total, recaps, channels, ticketRecords] = await Promise.all([
+      db.channelRecap.count({
+        where: {
+          recapDate: { gte: rangeStart, lte: rangeEnd },
+        },
+      }),
+      db.channelRecap.findMany({
+        where: {
+          recapDate: { gte: rangeStart, lte: rangeEnd },
+        },
+        orderBy: [{ recapDate: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          channelId: true,
+          recapDate: true,
+          summary: true,
+          userId: true,
+        },
+      }),
+      db.channel.findMany({
+        select: { id: true, name: true },
+      }),
+      db.ticket.findMany({
+        where: {
+          createdAt: { gte: rangeStart, lte: rangeEnd },
+        },
+        select: { statusV2: true, eta: true },
+      }),
+    ]);
+
+    const channelNameById = new Map(channels.map((c) => [c.id, c.name]));
+
+    const ticketMetrics = {
+      totalCount: ticketRecords.length,
+      solvedCount: ticketRecords.filter((t) => t.statusV2 === 'COMPLETED').length,
+      todoCount: ticketRecords.filter((t) => t.statusV2 === 'TODO').length,
+      startedCount: ticketRecords.filter((t) => t.statusV2 === 'STARTED').length,
+      pausedCount: ticketRecords.filter((t) => t.statusV2 === 'PAUSED').length,
+      cancelledCount: ticketRecords.filter((t) => t.statusV2 === 'CANCELLED').length,
+      overdueCount: ticketRecords.filter(
+        (t) =>
+          t.eta !== null &&
+          t.eta < now &&
+          (t.statusV2 === 'TODO' || t.statusV2 === 'STARTED' || t.statusV2 === 'PAUSED'),
+      ).length,
+    };
+
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+
+    return {
+      from: rangeStart.toISOString().slice(0, 10),
+      to: rangeEnd.toISOString().slice(0, 10),
+      page,
+      limit,
+      total,
+      totalPages,
+      recaps: recaps.map((recap) => ({
+        ...recap,
+        recapDate: recap.recapDate.toISOString().slice(0, 10),
+        channelName: channelNameById.get(recap.channelId) ?? recap.channelId,
+      })),
+      ticketMetrics,
     };
   }
 }

@@ -2,10 +2,10 @@ import {
   Prisma,
   PrismaClient,
   TeamIntelligenceBatchStatus,
-  TeamIntelligenceIngestionBatch,
-  TeamIntelligenceOrgSummary,
-  TeamIntelligenceTeamSummary,
-  TeamIntelligenceUserIngestion,
+  TeamIntelligenceIngestionBatchV2,
+  TeamIntelligenceOrgSummaryV2,
+  TeamIntelligenceTeamSummaryV2,
+  TeamIntelligenceUserIngestionV2,
   TeamIntelligenceUserIngestionStatus,
 } from '@prisma/client';
 import { db } from '@/database/client';
@@ -15,7 +15,10 @@ export interface CreateTeamIntelligenceBatchData {
   source: string;
   idempotencyKey: string;
   requestChecksum: string;
-  requestPayload: Prisma.InputJsonValue;
+  requestPayload: Prisma.InputJsonValue | null;
+  contentUrl: string | null;
+  contentSize: number | null;
+  contentChecksum: string | null;
   totalUsers: number;
   status: TeamIntelligenceBatchStatus;
 }
@@ -27,16 +30,17 @@ export interface CreateTeamIntelligenceUserData {
   userName: string;
   teamId: string | null;
   teamName: string | null;
-  pullRequests: Prisma.InputJsonValue;
-  soloCommits: Prisma.InputJsonValue;
   aiUsage: Prisma.InputJsonValue | null;
+  contentUrl: string | null;
+  contentSize: number | null;
+  contentChecksum: string | null;
   processingStatus: TeamIntelligenceUserIngestionStatus;
   queueJobId: string;
 }
 
 export interface TeamIntelligenceBatchWithUsers {
-  batch: TeamIntelligenceIngestionBatch;
-  users: TeamIntelligenceUserIngestion[];
+  batch: TeamIntelligenceIngestionBatchV2;
+  users: TeamIntelligenceUserIngestionV2[];
 }
 
 export interface TeamIntelligenceBatchProgress {
@@ -51,7 +55,7 @@ export interface CreateTeamIntelligenceTeamSummaryData {
   batchId: string;
   reportDate: Date;
   source: string;
-  teamId?: string | null;
+  teamId: string;
   teamName: string;
   idempotencyKey: string;
   totalUsers: number;
@@ -99,7 +103,7 @@ class TeamIntelligenceRepository {
   async findBatchWithUsersByIdempotencyKey(
     idempotencyKey: string
   ): Promise<TeamIntelligenceBatchWithUsers | null> {
-    const batch = await this.prisma.teamIntelligenceIngestionBatch.findUnique({
+    const batch = await this.prisma.teamIntelligenceIngestionBatchV2.findUnique({
       where: { idempotencyKey },
       include: {
         users: {
@@ -124,16 +128,18 @@ class TeamIntelligenceRepository {
     usersData: CreateTeamIntelligenceUserData[]
   ): Promise<TeamIntelligenceBatchWithUsers> {
     return await this.prisma.$transaction(async (transaction) => {
-      const batch = await transaction.teamIntelligenceIngestionBatch.create({
-        data: batchData,
+      const batch = await transaction.teamIntelligenceIngestionBatchV2.create({
+        data: {
+          ...batchData,
+          requestPayload: batchData.requestPayload ?? Prisma.JsonNull,
+        },
       });
 
       const users = await Promise.all(
         usersData.map((userData) =>
-          transaction.teamIntelligenceUserIngestion.create({
+          transaction.teamIntelligenceUserIngestionV2.create({
             data: {
               ...userData,
-              rawPayload: {},
               aiUsage: userData.aiUsage ?? Prisma.JsonNull,
               batchId: batch.id,
             },
@@ -155,8 +161,8 @@ class TeamIntelligenceRepository {
       completedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceIngestionBatch> {
-    return await this.prisma.teamIntelligenceIngestionBatch.update({
+  ): Promise<TeamIntelligenceIngestionBatchV2> {
+    return await this.prisma.teamIntelligenceIngestionBatchV2.update({
       where: { id: batchId },
       data,
     });
@@ -172,8 +178,8 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceUserIngestion> {
-    return await this.prisma.teamIntelligenceUserIngestion.update({
+  ): Promise<TeamIntelligenceUserIngestionV2> {
+    return await this.prisma.teamIntelligenceUserIngestionV2.update({
       where: { id: userIngestionId },
       data,
     });
@@ -194,7 +200,7 @@ class TeamIntelligenceRepository {
       return 0;
     }
 
-    const result = await this.prisma.teamIntelligenceUserIngestion.updateMany({
+    const result = await this.prisma.teamIntelligenceUserIngestionV2.updateMany({
       where: { id: { in: userIngestionIds } },
       data,
     });
@@ -202,16 +208,16 @@ class TeamIntelligenceRepository {
     return result.count;
   }
 
-  async findUserIngestionById(userIngestionId: string): Promise<TeamIntelligenceUserIngestion | null> {
-    return await this.prisma.teamIntelligenceUserIngestion.findUnique({
+  async findUserIngestionById(userIngestionId: string): Promise<TeamIntelligenceUserIngestionV2 | null> {
+    return await this.prisma.teamIntelligenceUserIngestionV2.findUnique({
       where: { id: userIngestionId },
     });
   }
 
   async findUsersByStatuses(
     statuses: TeamIntelligenceUserIngestionStatus[]
-  ): Promise<TeamIntelligenceUserIngestion[]> {
-    return await this.prisma.teamIntelligenceUserIngestion.findMany({
+  ): Promise<TeamIntelligenceUserIngestionV2[]> {
+    return await this.prisma.teamIntelligenceUserIngestionV2.findMany({
       where: {
         processingStatus: { in: statuses },
       },
@@ -221,15 +227,13 @@ class TeamIntelligenceRepository {
 
   async findUsersByBatchAndTeam(
     batchId: string,
-    teamId: string | null,
-    teamName: string,
+    teamId: string,
     statuses?: TeamIntelligenceUserIngestionStatus[]
-  ): Promise<TeamIntelligenceUserIngestion[]> {
-    return await this.prisma.teamIntelligenceUserIngestion.findMany({
+  ): Promise<TeamIntelligenceUserIngestionV2[]> {
+    return await this.prisma.teamIntelligenceUserIngestionV2.findMany({
       where: {
         batchId,
         teamId,
-        teamName,
         ...(statuses ? { processingStatus: { in: statuses } } : {}),
       },
       orderBy: [{ userEmail: 'asc' }],
@@ -239,17 +243,16 @@ class TeamIntelligenceRepository {
   async updateUserIngestionSummary(
     userIngestionId: string,
     data: {
-      pullRequests: Prisma.InputJsonValue;
-      soloCommits: Prisma.InputJsonValue;
-      employeeSummary: Prisma.InputJsonValue;
-      summaryMetadata: Prisma.InputJsonValue;
+      contentUrl?: string | null;
+      contentSize?: number | null;
+      contentChecksum?: string | null;
       processingStatus: TeamIntelligenceUserIngestionStatus;
       completedAt?: Date | null;
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceUserIngestion> {
-    return await this.prisma.teamIntelligenceUserIngestion.update({
+  ): Promise<TeamIntelligenceUserIngestionV2> {
+    return await this.prisma.teamIntelligenceUserIngestionV2.update({
       where: { id: userIngestionId },
       data,
     });
@@ -257,26 +260,24 @@ class TeamIntelligenceRepository {
 
   async findTeamSummaryByBatchAndTeam(
     batchId: string,
-    teamId: string | null,
-    teamName: string
-  ): Promise<TeamIntelligenceTeamSummary | null> {
-    return await this.prisma.teamIntelligenceTeamSummary.findFirst({
+    teamId: string
+  ): Promise<TeamIntelligenceTeamSummaryV2 | null> {
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findFirst({
       where: {
         batchId,
         teamId,
-        teamName,
       },
     });
   }
 
-  async findTeamSummaryById(teamSummaryId: string): Promise<TeamIntelligenceTeamSummary | null> {
-    return await this.prisma.teamIntelligenceTeamSummary.findUnique({
+  async findTeamSummaryById(teamSummaryId: string): Promise<TeamIntelligenceTeamSummaryV2 | null> {
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findUnique({
       where: { id: teamSummaryId },
     });
   }
 
-  async findTeamSummariesByBatchId(batchId: string): Promise<TeamIntelligenceTeamSummary[]> {
-    return await this.prisma.teamIntelligenceTeamSummary.findMany({
+  async findTeamSummariesByBatchId(batchId: string): Promise<TeamIntelligenceTeamSummaryV2[]> {
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findMany({
       where: { batchId },
       orderBy: [{ teamName: 'asc' }],
     });
@@ -284,8 +285,8 @@ class TeamIntelligenceRepository {
 
   async findTeamSummariesByStatuses(
     statuses: TeamIntelligenceBatchStatus[]
-  ): Promise<TeamIntelligenceTeamSummary[]> {
-    return await this.prisma.teamIntelligenceTeamSummary.findMany({
+  ): Promise<TeamIntelligenceTeamSummaryV2[]> {
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findMany({
       where: {
         status: { in: statuses },
       },
@@ -295,8 +296,8 @@ class TeamIntelligenceRepository {
 
   async createTeamSummary(
     data: CreateTeamIntelligenceTeamSummaryData
-  ): Promise<TeamIntelligenceTeamSummary> {
-    return await this.prisma.teamIntelligenceTeamSummary.create({
+  ): Promise<TeamIntelligenceTeamSummaryV2> {
+    return await this.prisma.teamIntelligenceTeamSummaryV2.create({
       data,
     });
   }
@@ -304,6 +305,7 @@ class TeamIntelligenceRepository {
   async updateTeamSummaryStatus(
     teamSummaryId: string,
     data: Partial<{
+      teamName: string;
       totalUsers: number;
       completedUsers: number;
       failedUsers: number;
@@ -315,8 +317,8 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceTeamSummary> {
-    return await this.prisma.teamIntelligenceTeamSummary.update({
+  ): Promise<TeamIntelligenceTeamSummaryV2> {
+    return await this.prisma.teamIntelligenceTeamSummaryV2.update({
       where: { id: teamSummaryId },
       data,
     });
@@ -341,7 +343,7 @@ class TeamIntelligenceRepository {
       return 0;
     }
 
-    const result = await this.prisma.teamIntelligenceTeamSummary.updateMany({
+    const result = await this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
       where: { id: { in: teamSummaryIds } },
       data,
     });
@@ -352,9 +354,9 @@ class TeamIntelligenceRepository {
   async updateTeamSummaryResult(
     teamSummaryId: string,
     data: {
-      summaryText: Prisma.InputJsonValue;
-      summaryMetadata: Prisma.InputJsonValue;
-      provenance: Prisma.InputJsonValue;
+      contentUrl?: string | null;
+      contentSize?: number | null;
+      contentChecksum?: string | null;
       totalUsers: number;
       completedUsers: number;
       failedUsers: number;
@@ -363,29 +365,29 @@ class TeamIntelligenceRepository {
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceTeamSummary> {
-    return await this.prisma.teamIntelligenceTeamSummary.update({
+  ): Promise<TeamIntelligenceTeamSummaryV2> {
+    return await this.prisma.teamIntelligenceTeamSummaryV2.update({
       where: { id: teamSummaryId },
       data,
     });
   }
 
-  async findOrgSummaryByBatchId(batchId: string): Promise<TeamIntelligenceOrgSummary | null> {
-    return await this.prisma.teamIntelligenceOrgSummary.findUnique({
+  async findOrgSummaryByBatchId(batchId: string): Promise<TeamIntelligenceOrgSummaryV2 | null> {
+    return await this.prisma.teamIntelligenceOrgSummaryV2.findUnique({
       where: { batchId },
     });
   }
 
-  async findOrgSummaryById(orgSummaryId: string): Promise<TeamIntelligenceOrgSummary | null> {
-    return await this.prisma.teamIntelligenceOrgSummary.findUnique({
+  async findOrgSummaryById(orgSummaryId: string): Promise<TeamIntelligenceOrgSummaryV2 | null> {
+    return await this.prisma.teamIntelligenceOrgSummaryV2.findUnique({
       where: { id: orgSummaryId },
     });
   }
 
   async findOrgSummariesByStatuses(
     statuses: TeamIntelligenceBatchStatus[]
-  ): Promise<TeamIntelligenceOrgSummary[]> {
-    return await this.prisma.teamIntelligenceOrgSummary.findMany({
+  ): Promise<TeamIntelligenceOrgSummaryV2[]> {
+    return await this.prisma.teamIntelligenceOrgSummaryV2.findMany({
       where: {
         status: { in: statuses },
       },
@@ -393,8 +395,8 @@ class TeamIntelligenceRepository {
     });
   }
 
-  async createOrgSummary(data: CreateTeamIntelligenceOrgSummaryData): Promise<TeamIntelligenceOrgSummary> {
-    return await this.prisma.teamIntelligenceOrgSummary.create({
+  async createOrgSummary(data: CreateTeamIntelligenceOrgSummaryData): Promise<TeamIntelligenceOrgSummaryV2> {
+    return await this.prisma.teamIntelligenceOrgSummaryV2.create({
       data,
     });
   }
@@ -413,8 +415,8 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceOrgSummary> {
-    return await this.prisma.teamIntelligenceOrgSummary.update({
+  ): Promise<TeamIntelligenceOrgSummaryV2> {
+    return await this.prisma.teamIntelligenceOrgSummaryV2.update({
       where: { id: orgSummaryId },
       data,
     });
@@ -439,7 +441,7 @@ class TeamIntelligenceRepository {
       return 0;
     }
 
-    const result = await this.prisma.teamIntelligenceOrgSummary.updateMany({
+    const result = await this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
       where: { id: { in: orgSummaryIds } },
       data,
     });
@@ -450,9 +452,9 @@ class TeamIntelligenceRepository {
   async updateOrgSummaryResult(
     orgSummaryId: string,
     data: {
-      summaryText: Prisma.InputJsonValue;
-      summaryMetadata: Prisma.InputJsonValue;
-      provenance: Prisma.InputJsonValue;
+      contentUrl?: string | null;
+      contentSize?: number | null;
+      contentChecksum?: string | null;
       totalTeams: number;
       completedTeams: number;
       failedTeams: number;
@@ -461,31 +463,29 @@ class TeamIntelligenceRepository {
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceOrgSummary> {
-    return await this.prisma.teamIntelligenceOrgSummary.update({
+  ): Promise<TeamIntelligenceOrgSummaryV2> {
+    return await this.prisma.teamIntelligenceOrgSummaryV2.update({
       where: { id: orgSummaryId },
       data,
     });
   }
 
-  async getTeamProgress(batchId: string, teamId: string | null, teamName: string): Promise<TeamIntelligenceTeamProgress> {
+  async getTeamProgress(batchId: string, teamId: string): Promise<TeamIntelligenceTeamProgress> {
     const [totalUsers, completedUsers, failedUsers] = await this.prisma.$transaction([
-      this.prisma.teamIntelligenceUserIngestion.count({
-        where: { batchId, teamId, teamName },
+      this.prisma.teamIntelligenceUserIngestionV2.count({
+        where: { batchId, teamId },
       }),
-      this.prisma.teamIntelligenceUserIngestion.count({
+      this.prisma.teamIntelligenceUserIngestionV2.count({
         where: {
           batchId,
           teamId,
-          teamName,
           processingStatus: TeamIntelligenceUserIngestionStatus.COMPLETED,
         },
       }),
-      this.prisma.teamIntelligenceUserIngestion.count({
+      this.prisma.teamIntelligenceUserIngestionV2.count({
         where: {
           batchId,
           teamId,
-          teamName,
           processingStatus: TeamIntelligenceUserIngestionStatus.FAILED,
         },
       }),
@@ -506,26 +506,26 @@ class TeamIntelligenceRepository {
       processingUsers,
       queuedUsers,
     ] = await this.prisma.$transaction([
-      this.prisma.teamIntelligenceUserIngestion.count({ where: { batchId } }),
-      this.prisma.teamIntelligenceUserIngestion.count({
+      this.prisma.teamIntelligenceUserIngestionV2.count({ where: { batchId } }),
+      this.prisma.teamIntelligenceUserIngestionV2.count({
         where: {
           batchId,
           processingStatus: TeamIntelligenceUserIngestionStatus.COMPLETED,
         },
       }),
-      this.prisma.teamIntelligenceUserIngestion.count({
+      this.prisma.teamIntelligenceUserIngestionV2.count({
         where: {
           batchId,
           processingStatus: TeamIntelligenceUserIngestionStatus.FAILED,
         },
       }),
-      this.prisma.teamIntelligenceUserIngestion.count({
+      this.prisma.teamIntelligenceUserIngestionV2.count({
         where: {
           batchId,
           processingStatus: TeamIntelligenceUserIngestionStatus.PROCESSING,
         },
       }),
-      this.prisma.teamIntelligenceUserIngestion.count({
+      this.prisma.teamIntelligenceUserIngestionV2.count({
         where: {
           batchId,
           processingStatus: TeamIntelligenceUserIngestionStatus.QUEUED,
@@ -544,16 +544,16 @@ class TeamIntelligenceRepository {
 
   async getOrgProgress(batchId: string): Promise<TeamIntelligenceOrgProgress> {
     const [totalTeams, completedTeams, failedTeams] = await this.prisma.$transaction([
-      this.prisma.teamIntelligenceTeamSummary.count({
+      this.prisma.teamIntelligenceTeamSummaryV2.count({
         where: { batchId },
       }),
-      this.prisma.teamIntelligenceTeamSummary.count({
+      this.prisma.teamIntelligenceTeamSummaryV2.count({
         where: {
           batchId,
           status: TeamIntelligenceBatchStatus.COMPLETED,
         },
       }),
-      this.prisma.teamIntelligenceTeamSummary.count({
+      this.prisma.teamIntelligenceTeamSummaryV2.count({
         where: {
           batchId,
           status: TeamIntelligenceBatchStatus.FAILED,

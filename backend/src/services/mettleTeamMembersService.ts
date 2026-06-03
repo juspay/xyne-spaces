@@ -18,7 +18,7 @@ class MettleTeamMembersService {
     this.token = appConfig.mettleToken;
   }
 
-  async fetchTeamMembersFromMettle(teamName: string): Promise<MettleTeamMembersResponse> {
+  async fetchTeamMembersFromMettle(teamId: string): Promise<MettleTeamMembersResponse> {
     if (!this.token) {
       throw new Error('Mettle API token is not set in config');
     }
@@ -27,16 +27,16 @@ class MettleTeamMembersService {
       throw new Error('Mettle API base URL is not set in config');
     }
 
-    const normalizedTeamName = teamName.trim();
-    if (!normalizedTeamName) {
-      throw new Error('teamName is required');
+    const normalizedTeamId = teamId.trim();
+    if (!normalizedTeamId) {
+      throw new Error('teamId is required');
     }
 
-    const url = `${this.baseUrl}/api/external/team/members?teamName=${encodeURIComponent(normalizedTeamName)}`;
+    const url = `${this.baseUrl}/api/external/team/members?teamId=${encodeURIComponent(normalizedTeamId)}`;
 
     try {
       logger.info('[MettleTeamMembers] Fetching team members from Mettle', {
-        teamName: normalizedTeamName,
+        teamId: normalizedTeamId,
         url,
       });
 
@@ -50,14 +50,14 @@ class MettleTeamMembersService {
       });
 
       logger.info('[MettleTeamMembers] Successfully fetched team members from Mettle', {
-        teamName: normalizedTeamName,
+        teamId: normalizedTeamId,
         employeeCount: response.data.active_employee_count ?? response.data.employee_list?.length ?? 0,
       });
 
       return response.data;
     } catch (error) {
       logger.error('[MettleTeamMembers] Failed to fetch team members from Mettle', {
-        teamName: normalizedTeamName,
+        teamId: normalizedTeamId,
         error,
       });
       throw error;

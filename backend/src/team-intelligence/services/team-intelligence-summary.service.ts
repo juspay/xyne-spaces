@@ -71,6 +71,30 @@ function summarizeDiff(diff: TeamIntelligenceDiffInput | undefined): string {
   return `Changed ${filesChanged} file(s) with ${additions} additions and ${deletions} deletions.`;
 }
 
+const SUMMARY_MIN_LINES = 3;
+const SUMMARY_MAX_LINES = 4;
+const SUMMARY_MAX_WORDS = 50;
+
+function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): string {
+  if (!value) {
+    return '';
+  }
+
+  const text = value
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*\-\[\]`*_~]|\d+\./g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const firstSentence = text.split(/[.!?\n]/).find(Boolean) || text;
+  const words = firstSentence.split(/\s+/).filter(Boolean).slice(0, maxWords);
+  const concise = words.join(' ').replace(/[.,;:]+$/, '').trim();
+
+  return concise ? `${concise}.`.replace(/\.\./g, '.') : '';
+}
+
 function summarizePullRequest(pr: TeamIntelligencePullRequestInput): string {
   const prState = pr.prState?.trim() || 'updated';
   const repoName = pr.repoName?.trim() || 'unknown-repository';
@@ -82,13 +106,13 @@ function summarizePullRequest(pr: TeamIntelligencePullRequestInput): string {
   const additions = toFiniteNumber(diffRecord.additions);
   const deletions = toFiniteNumber(diffRecord.deletions);
 
-  const description = typeof pr.prDescription === 'string' && pr.prDescription.trim()
-    ? ` Focus: ${pr.prDescription.trim()}`
-    : '';
+  // Robustly extract a concise summary from prDescription or prSummary or prTitle
+  const rawDesc = pr.prDescription?.trim() || pr.prSummary?.trim() || pr.prTitle;
+  const conciseDesc = normalizeSummaryText(rawDesc);
 
   return [
-    `Implemented ${pr.prTitle} in ${projectName}/${repoName}.`,
-    `${prState === 'merged' ? 'The change shipped' : 'The change progressed'} through ${commitCount} commit(s) and ${filesChanged} touched file(s) (${additions}+/${deletions}-).${description}`,
+    `Implemented ${conciseDesc} in ${projectName}/${repoName}.`,
+    `${prState === 'merged' ? 'The change shipped' : 'The change progressed'} through ${commitCount} commit(s) and ${filesChanged} touched file(s) (${additions}+/${deletions}-).`
   ].join(' ');
 }
 
@@ -157,7 +181,10 @@ function buildSubjectiveEmployeeSummary(input: {
     ? `${input.userName} focused ${input.teamName ? `${input.teamName} work` : 'their work'} on ${formatList(repoNames)} and related platform changes during this reporting window.`
     : null;
 
-  return [...prBullets, ...(soloBullet ? [soloBullet] : []), ...(scopeBullet ? [scopeBullet] : [])].slice(0, 4);
+  return [...prBullets, ...(soloBullet ? [soloBullet] : []), ...(scopeBullet ? [scopeBullet] : [])]
+    .map((line) => normalizeSummaryText(line, SUMMARY_MAX_WORDS))
+    .filter(Boolean)
+    .slice(0, SUMMARY_MAX_LINES);
 }
 
 function extractEmployeeBullets(rawText: string): string[] {
@@ -170,19 +197,67 @@ function extractEmployeeBullets(rawText: string): string[] {
     const parsed = JSON.parse(trimmed);
     if (Array.isArray(parsed)) {
       return parsed
-        .map((item) => (typeof item === 'string' ? item.trim() : ''))
-        .filter(Boolean);
+        .map((item) => (typeof item === 'string' ? normalizeSummaryText(item, SUMMARY_MAX_WORDS) : ''))
+        .filter(Boolean)
+        .slice(0, SUMMARY_MAX_LINES);
     }
   } catch {
-    // Fall through to plain-text bullet parsing.
+    // Fall through to plain-text parsing.
   }
 
-  return trimmed
+  const bulletLines = trimmed
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => /^(-|\*|•|\d+\.)\s+/.test(line))
     .map((line) => line.replace(/^(-|\*|•|\d+\.)\s+/, '').trim())
+    .map((line) => normalizeSummaryText(line, SUMMARY_MAX_WORDS))
     .filter(Boolean);
+
+  if (bulletLines.length > 0) {
+    return bulletLines.slice(0, SUMMARY_MAX_LINES);
+  }
+
+  return trimmed
+    .split(/[\n.!?]+/)
+    .map((line) => normalizeSummaryText(line, SUMMARY_MAX_WORDS))
+    .filter(Boolean)
+    .slice(0, SUMMARY_MAX_LINES);
+}
+
+function enforceEmployeeSummaryWindow(input: {
+  userName: string;
+  teamName: string | null;
+  reportDate: Date;
+}, lines: string[]): string[] {
+  const concise = lines
+    .map((line) => normalizeSummaryText(line, SUMMARY_MAX_WORDS))
+    .filter(Boolean)
+    .slice(0, SUMMARY_MAX_LINES);
+
+  if (concise.length >= SUMMARY_MIN_LINES) {
+    return concise;
+  }
+
+  if (concise.length === 1) {
+    return [
+      concise[0],
+      normalizeSummaryText(
+        `${input.userName} sustained delivery momentum for ${input.teamName ?? 'the team'} on ${input.reportDate.toISOString().slice(0, 10)}.`,
+        SUMMARY_MAX_WORDS
+      ),
+    ];
+  }
+
+  return [
+    normalizeSummaryText(
+      `${input.userName} delivered focused engineering progress for ${input.teamName ?? 'the team'}.`,
+      SUMMARY_MAX_WORDS
+    ),
+    normalizeSummaryText(
+      `Work remained concise, outcome-oriented, and aligned to priorities on ${input.reportDate.toISOString().slice(0, 10)}.`,
+      SUMMARY_MAX_WORDS
+    ),
+  ];
 }
 
 function formatAiUsage(aiUsage: TeamIntelligenceAiUsageInput | null): string {
@@ -257,7 +332,7 @@ class TeamIntelligenceSummaryService {
             const commitSummary = llmClient
               ? (await llmGenerate(
                   llmClient,
-                  `Summarize this git commit for an engineering manager in one sentence.\nContext PR: ${pr.prTitle}\nCommit message: "${commit.commitMessage}"\nKeep it specific and outcome-focused. Respond with only one sentence.`,
+                  `Summarize this git commit for an engineering manager.\nContext PR: ${pr.prTitle}\nCommit message: "${commit.commitMessage}"\nReturn exactly one sentence under 50 words, factual and outcome-focused. Respond with only that sentence.`,
                 )) ?? fallback
               : (existingSummary || fallback);
             return { ...commit, commitSummary };
@@ -269,7 +344,7 @@ class TeamIntelligenceSummaryService {
         const diffSummary = llmClient
           ? (await llmGenerate(
               llmClient,
-              `Summarize this code diff for a manager. Files changed: ${toFiniteNumber(diffRecord.filesChanged)}, additions: ${toFiniteNumber(diffRecord.additions)}, deletions: ${toFiniteNumber(diffRecord.deletions)}.\nPR title: "${pr.prTitle}".\nWrite one concise sentence describing what changed. Respond with only the summary sentence.`,
+              `Summarize this code diff for a manager. Files changed: ${toFiniteNumber(diffRecord.filesChanged)}, additions: ${toFiniteNumber(diffRecord.additions)}, deletions: ${toFiniteNumber(diffRecord.deletions)}.\nPR title: "${pr.prTitle}".\nReturn exactly one factual sentence under 50 words. Respond with only the sentence.`,
             )) ?? fallbackDiffSummary
           : fallbackDiffSummary;
 
@@ -287,7 +362,7 @@ class TeamIntelligenceSummaryService {
         const prSummary = llmClient
           ? (await llmGenerate(
               llmClient,
-              `Summarize this pull request for a manager in 2 short sentences.\nTitle: "${pr.prTitle}"\nState: ${pr.prState}\nRepo: ${pr.repoName}\nDescription: ${pr.prDescription ?? 'N/A'}\nDiff: ${diffSummary}\nCommit highlights:\n${commitHighlights || '- No commits listed'}\nEmphasize what changed and why it matters. Respond with only the summary text.`,
+              `Summarize this pull request for a manager in one concise line.\nTitle: "${pr.prTitle}"\nState: ${pr.prState}\nRepo: ${pr.repoName}\nDescription (may contain noisy markdown/checklists): ${pr.prDescription ?? 'N/A'}\nDiff: ${diffSummary}\nCommit highlights:\n${commitHighlights || '- No commits listed'}\nRequirements:\n- Use factual, evidence-based wording only.\n- Prioritize concrete implementation changes and impact.\n- Return exactly one sentence under 50 words.\n- Do not copy markdown headings, checklist items, links, screenshots, or testing sections.\n- If description is verbose, extract only the top concrete change.\n- No speculation or filler.\nRespond with only plain summary text.`,
             )) ?? fallbackPrSummary
           : fallbackPrSummary;
 
@@ -302,7 +377,7 @@ class TeamIntelligenceSummaryService {
         const commitSummary = llmClient
           ? (await llmGenerate(
               llmClient,
-              `Summarize this direct (non-PR) commit for a manager in one sentence.\nCommit message: "${commit.commitMessage}"\nHighlight practical impact. Respond with only one sentence.`,
+              `Summarize this direct (non-PR) commit for a manager.\nCommit message: "${commit.commitMessage}"\nReturn exactly one sentence under 50 words, highlighting practical impact. Respond with only that sentence.`,
             )) ?? fallback
           : (existingSummary || fallback);
         return { ...commit, commitSummary };
@@ -346,7 +421,7 @@ class TeamIntelligenceSummaryService {
     if (llmClient) {
       const llmText = await llmGenerate(
         llmClient,
-        `Create a manager-ready employee summary as a JSON array of 3-4 bullet strings.\nEmployee: ${input.userName}\nTeam: ${input.teamName ?? 'No Team'}\nDate: ${input.reportDate.toISOString().slice(0, 10)}\n\nPull Requests:\n${prBullets || 'None'}\n\nDirect Commits:\n${commitBullets || 'None'}\n\nAI Usage: ${formatAiUsage(aiUsage)}\n\nRequirements:\n- Write subjective, feature-first bullets for a news feed.\n- Say what the engineer implemented, improved, fixed, or enabled.\n- Mention repo or system area when available.\n- Avoid PR counts, token counts, and generic status lines unless there is no other signal.\n- Do not include markdown bullets, just JSON array strings.\nRespond with valid JSON only.`,
+        `Create a manager-ready employee summary as a JSON array of 2-3 bullet strings.\nEmployee: ${input.userName}\nTeam: ${input.teamName ?? 'No Team'}\nDate: ${input.reportDate.toISOString().slice(0, 10)}\n\nPull Requests:\n${prBullets || 'None'}\n\nDirect Commits:\n${commitBullets || 'None'}\n\nAI Usage: ${formatAiUsage(aiUsage)}\n\nSelection strategy (must follow):\n1) Build candidate insights from PR and commit evidence.\n2) Score candidates by impact, specificity, and uniqueness.\n3) Keep top non-overlapping insights only.\n4) If there are more than 3 strong insights, keep the highest-impact 3 (not the first 3).\n\nRequirements:\n- Use factual, evidence-based bullets (not narrative or promotional style).\n- Say exactly what the engineer implemented, improved, fixed, or enabled.\n- Mention repo or system area when available.\n- Keep each bullet to one sentence and under 50 words.\n- Return exactly 2 or 3 bullets only.\n- Prefer concrete delivery outcomes over broad activity statements.\n- Avoid PR counts, token counts, and generic status lines unless there is no other signal.\n- Do not include markdown bullets, just JSON array strings.\nRespond with valid JSON only.`,
       );
       if (llmText) {
         const parsedBullets = extractEmployeeBullets(llmText);
@@ -355,6 +430,15 @@ class TeamIntelligenceSummaryService {
         }
       }
     }
+
+    employeeSummary = enforceEmployeeSummaryWindow(
+      {
+        userName: input.userName,
+        teamName: input.teamName,
+        reportDate: input.reportDate,
+      },
+      employeeSummary
+    );
 
     const summaryMetadata: Prisma.InputJsonValue = {
       generator: llmClient ? 'team-intelligence-llm-summary-v1' : 'team-intelligence-summary-v1',

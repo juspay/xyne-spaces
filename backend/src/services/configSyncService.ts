@@ -180,6 +180,23 @@ export class ConfigSyncService {
         logger.info('USER-GROUPS resource already exists');
       }
 
+      const teamIntelligenceDashboardResource = await prisma.resource.findUnique({
+        where: { name: 'TEAM-INTELLIGENCE-DASHBOARD' }
+      });
+
+      if (!teamIntelligenceDashboardResource) {
+        logger.info('Creating TEAM-INTELLIGENCE-DASHBOARD resource');
+        await prisma.resource.create({
+          data: {
+            name: 'TEAM-INTELLIGENCE-DASHBOARD',
+            description: 'Access Team Intelligence dashboard org/team/user endpoints'
+          }
+        });
+        logger.info('Successfully created TEAM-INTELLIGENCE-DASHBOARD resource');
+      } else {
+        logger.info('TEAM-INTELLIGENCE-DASHBOARD resource already exists');
+      }
+
       // Log final group distribution (only for this workspace)
       const groups = await prisma.userGroup.findMany({
         where: { workspaceId }

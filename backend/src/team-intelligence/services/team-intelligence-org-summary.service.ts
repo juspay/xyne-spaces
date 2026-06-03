@@ -10,6 +10,7 @@ import type {
 } from '../types';
 
 interface RawOrgSummaryBullet {
+  teamId?: unknown;
   teamName?: unknown;
   bulletTitle?: unknown;
   bulletText?: unknown;
@@ -137,6 +138,32 @@ function buildBulletTitle(bulletText: string): string {
   return concise || 'Team Update';
 }
 
+const SUMMARY_MIN_LINES = 3;
+const SUMMARY_MAX_LINES = 4;
+const SUMMARY_MAX_WORDS = 50;
+
+function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): string {
+  const plain = value
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, ' ')
+    .replace(/^\s*[-*+]\s+/gm, ' ')
+    .replace(/^\s*\d+\.\s+/gm, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const firstSentence = plain.split(/[.!?]\s/)[0] ?? plain;
+  const words = firstSentence.split(/\s+/).filter(Boolean);
+  const clipped = words.slice(0, maxWords).join(' ').trim();
+
+  if (!clipped) {
+    return 'No significant delivery signal found.';
+  }
+
+  return /[.!?]$/.test(clipped) ? clipped : `${clipped}.`;
+}
+
 async function llmRewriteBullets(
   llmClient: LLMClient,
   reportDate: string,
@@ -151,13 +178,19 @@ async function llmRewriteBullets(
     '- Keep all bulletId values exactly the same as input.',
     '- bulletTitle must be concise: 3-8 words.',
     '- bulletText must be descriptive: one sentence with concrete delivery details.',
+    '- bulletText must stay under 50 words.',
     '- bulletTitle must not be the same as bulletText.',
+    '- Preserve the highest-impact signal from each input bullet while compressing.',
+    '- If a detail must be dropped, drop lower-impact context first.',
     '- Keep factual meaning aligned to the input evidence.',
+    '- Remove extra nuance and keep only the top outcome.',
+    '- No speculation or filler words.',
     `Context reportDate: ${reportDate}`,
     `Context source: ${source}`,
     'Input bullets:',
     ...bullets.map((bullet) => JSON.stringify({
       bulletId: bullet.bulletId,
+      teamId: bullet.teamId,
       teamName: bullet.teamName,
       bulletTitle: bullet.bulletTitle,
       bulletText: bullet.bulletText,
@@ -208,26 +241,29 @@ async function llmRewriteBullets(
       return bullet;
     }
 
+    const normalizedText = normalizeSummaryText(rewritten.bulletText, SUMMARY_MAX_WORDS);
+
     return {
       ...bullet,
       bulletTitle: rewritten.bulletTitle,
-      bulletText: rewritten.bulletText,
-      bulletCat: normalizeBulletCategory(bullet.bulletCat, rewritten.bulletText),
+      bulletText: normalizedText,
+      bulletCat: normalizeBulletCategory(bullet.bulletCat, normalizedText),
     };
   });
 }
 
 function buildDeterministicBullets(input: TeamIntelligenceOrgSummaryInput): TeamIntelligenceOrgSummaryBullet[] {
-  return input.teamSummaries.flatMap((teamSummary) => {
+  const bullets: TeamIntelligenceOrgSummaryBullet[] = input.teamSummaries.flatMap((teamSummary): TeamIntelligenceOrgSummaryBullet[] => {
     const teamBullets = teamSummary.provenance.bullets ?? [];
     if (teamBullets.length > 0) {
       return teamBullets.map((bullet) => ({
-        bulletId: `${teamSummary.teamName}:${bullet.bulletId}`,
+        bulletId: `${teamSummary.teamId}:${bullet.bulletId}`,
+        teamId: teamSummary.teamId,
         teamName: teamSummary.teamName,
         reportDate: bullet.reportDate,
-        bulletTitle: buildBulletTitle(bullet.bulletText),
-        bulletText: bullet.bulletText,
-        bulletCat: inferBulletCategory(bullet.bulletText),
+        bulletTitle: buildBulletTitle(normalizeSummaryText(bullet.bulletText, SUMMARY_MAX_WORDS)),
+        bulletText: normalizeSummaryText(bullet.bulletText, SUMMARY_MAX_WORDS),
+        bulletCat: inferBulletCategory(normalizeSummaryText(bullet.bulletText, SUMMARY_MAX_WORDS)),
         sourceTeamBulletIds: [bullet.bulletId],
         prIdsUsed: bullet.prIdsUsed,
         repoNames: bullet.repoNames,
@@ -237,12 +273,13 @@ function buildDeterministicBullets(input: TeamIntelligenceOrgSummaryInput): Team
     }
 
     return [{
-      bulletId: `${teamSummary.teamName}:no-signal`,
+      bulletId: `${teamSummary.teamId}:no-signal`,
+      teamId: teamSummary.teamId,
       teamName: teamSummary.teamName,
       reportDate: input.reportDate,
       bulletTitle: `${teamSummary.teamName} had no PR-linked signal`,
       bulletText: 'No PR-linked delivery signal was recorded for this reporting date.',
-      bulletCat: 'milestone',
+      bulletCat: 'milestone' as const,
       sourceTeamBulletIds: [],
       prIdsUsed: [],
       repoNames: [],
@@ -250,6 +287,8 @@ function buildDeterministicBullets(input: TeamIntelligenceOrgSummaryInput): Team
       confidence: 0.3,
     }];
   });
+
+  return bullets.slice(0, SUMMARY_MAX_LINES);
 }
 
 function buildSummaryText(bullets: TeamIntelligenceOrgSummaryBullet[]): string[] {
@@ -260,6 +299,7 @@ function buildPrompt(input: TeamIntelligenceOrgSummaryInput): string {
   const teamLines = input.teamSummaries.map((teamSummary) => {
     const bullets = (teamSummary.provenance.bullets ?? []).map((bullet) => JSON.stringify({
       bulletId: bullet.bulletId,
+      teamId: teamSummary.teamId,
       teamName: teamSummary.teamName,
       bulletText: bullet.bulletText,
       prIdsUsed: bullet.prIdsUsed,
@@ -272,17 +312,24 @@ function buildPrompt(input: TeamIntelligenceOrgSummaryInput): string {
   return [
     'You are writing an org-level engineering summary for managers.',
     'Return STRICT JSON only with this shape:',
-    '{ "reportDate": "YYYY-MM-DD", "bullets": [ { "teamName": "string", "bulletTitle": "string", "bulletText": "string", "bulletCat": "shipped|achievement|collaboration|learning|recognition|learned|helped|milestone", "sourceTeamBulletIds": ["bullet-id"], "confidence": 0.0 } ] }',
+    '{ "reportDate": "YYYY-MM-DD", "bullets": [ { "teamId": "string", "teamName": "string", "bulletTitle": "string", "bulletText": "string", "bulletCat": "shipped|achievement|collaboration|learning|recognition|learned|helped|milestone", "sourceTeamBulletIds": ["bullet-id"], "confidence": 0.0 } ] }',
     'Rules:',
     '- Each bullet must reference sourceTeamBulletIds from the input evidence.',
-    '- teamName must match the source bullet team name.',
+    '- teamId must match the source bullet team id.',
+    '- teamName should match the source team display name.',
     '- bulletTitle must be a short headline (3-8 words).',
     '- bulletTitle must not repeat bulletText.',
     '- bulletText must be descriptive and concrete (not just a short label).',
+    '- Return exactly 2 or 3 bullets total (never more than 3).',
+    '- bulletText must be one sentence under 50 words.',
     '- bulletCat must be one of: shipped, achievement, collaboration, learning, recognition, learned, helped, milestone.',
-    '- Write subjective, feature-first bullets suitable for a news feed.',
+    '- Use factual, evidence-based bullets for a manager feed.',
     '- Say what the team shipped, improved, fixed, or enabled.',
-    '- Include at least one bullet for every team represented in input.',
+    '- First rank candidate insights by impact, specificity, and uniqueness.',
+    '- Then keep only top non-overlapping insights in final bullets.',
+    '- Keep output concise and only include the most important points per team.',
+    '- If there are more than 3 strong points, keep the highest-impact 3 (not first-come order).',
+    '- No speculation or filler words.',
     `Report date: ${input.reportDate}`,
     `Source: ${input.source}`,
     'Team summary bullets:',
@@ -291,10 +338,10 @@ function buildPrompt(input: TeamIntelligenceOrgSummaryInput): string {
 }
 
 function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: string): TeamIntelligenceOrgSummaryBullet[] | null {
-  const teamBulletIndex = new Map<string, { teamName: string; bullet: TeamIntelligenceTeamSummaryBullet }>();
+  const teamBulletIndex = new Map<string, { teamId: string; teamName: string; bullet: TeamIntelligenceTeamSummaryBullet }>();
   for (const teamSummary of input.teamSummaries) {
     for (const bullet of teamSummary.provenance.bullets ?? []) {
-      teamBulletIndex.set(bullet.bulletId, { teamName: teamSummary.teamName, bullet });
+      teamBulletIndex.set(bullet.bulletId, { teamId: teamSummary.teamId, teamName: teamSummary.teamName, bullet });
     }
   }
 
@@ -311,14 +358,15 @@ function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: st
   }
 
   const bullets = asArray<RawOrgSummaryBullet>(parsed.bullets).map((rawBullet) => {
+    const teamId = normalizeString(rawBullet.teamId);
     const teamName = normalizeString(rawBullet.teamName);
-    const bulletText = normalizeString(rawBullet.bulletText);
+    const bulletText = normalizeSummaryText(normalizeString(rawBullet.bulletText), SUMMARY_MAX_WORDS);
     const bulletTitleRaw = normalizeString(rawBullet.bulletTitle);
     const sourceTeamBulletIds = asArray<unknown>(rawBullet.sourceTeamBulletIds)
       .map((value) => normalizeString(value))
       .filter(Boolean);
 
-    if (!teamName || !bulletText || sourceTeamBulletIds.length === 0) {
+    if (!teamId || !teamName || !bulletText || sourceTeamBulletIds.length === 0) {
       return null;
     }
 
@@ -330,13 +378,14 @@ function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: st
       return null;
     }
 
-    if (sourceBullets.some((sourceBullet) => sourceBullet.teamName !== teamName)) {
+    if (sourceBullets.some((sourceBullet) => sourceBullet.teamId !== teamId)) {
       return null;
     }
 
     const title = bulletTitleRaw || buildBulletTitle(bulletText);
     return {
-      bulletId: `${teamName}:${sourceTeamBulletIds.join('|')}`,
+      bulletId: `${teamId}:${sourceTeamBulletIds.join('|')}`,
+      teamId,
       teamName,
       reportDate: input.reportDate,
       bulletTitle: isTitleTooSimilarToText(title, bulletText) ? buildBulletTitle(bulletText) : title,
@@ -352,12 +401,63 @@ function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: st
     } satisfies TeamIntelligenceOrgSummaryBullet;
   }).filter((bullet) => bullet !== null) as TeamIntelligenceOrgSummaryBullet[];
 
-  const representedTeams = new Set(bullets.map((bullet) => bullet.teamName));
-  if (bullets.length === 0 || input.teamSummaries.some((teamSummary) => !representedTeams.has(teamSummary.teamName))) {
+  const conciseBullets = bullets.slice(0, SUMMARY_MAX_LINES);
+  if (conciseBullets.length < SUMMARY_MIN_LINES) {
     return null;
   }
 
-  return bullets;
+  return conciseBullets;
+}
+
+function enforceOrgBulletWindow(input: TeamIntelligenceOrgSummaryInput, bullets: TeamIntelligenceOrgSummaryBullet[]): TeamIntelligenceOrgSummaryBullet[] {
+  const concise = bullets.slice(0, SUMMARY_MAX_LINES);
+  if (concise.length >= SUMMARY_MIN_LINES) {
+    return concise;
+  }
+
+  if (concise.length === 1) {
+    const primary = concise[0];
+    const secondText = normalizeSummaryText(
+      `${input.source} teams maintained focused delivery progress on ${input.reportDate}.`,
+      SUMMARY_MAX_WORDS
+    );
+    const secondBullet: TeamIntelligenceOrgSummaryBullet = {
+      ...primary,
+      bulletId: `${primary.teamId}:${primary.sourceTeamBulletIds.join('|')}:context`,
+      bulletTitle: buildBulletTitle(secondText),
+      bulletText: secondText,
+      bulletCat: normalizeBulletCategory(primary.bulletCat, secondText),
+    };
+
+    return [primary, secondBullet];
+  }
+
+  const fallbackTeam = input.teamSummaries[0];
+  const defaultText = normalizeSummaryText(
+    `${fallbackTeam?.teamName ?? 'Org'} delivered focused engineering progress on ${input.reportDate}.`,
+    SUMMARY_MAX_WORDS
+  );
+  const defaultBullet: TeamIntelligenceOrgSummaryBullet = {
+    bulletId: `${fallbackTeam?.teamId ?? 'org'}:fallback`,
+    teamId: fallbackTeam?.teamId ?? 'org',
+    teamName: fallbackTeam?.teamName ?? 'Org',
+    reportDate: input.reportDate,
+    bulletTitle: buildBulletTitle(defaultText),
+    bulletText: defaultText,
+    bulletCat: 'milestone',
+    sourceTeamBulletIds: [],
+    prIdsUsed: [],
+    repoNames: [],
+    contributors: [],
+    confidence: 0.3,
+  };
+
+  const secondBullet: TeamIntelligenceOrgSummaryBullet = {
+    ...defaultBullet,
+    bulletId: `${defaultBullet.teamId}:fallback-context`,
+  };
+
+  return [defaultBullet, secondBullet];
 }
 
 class TeamIntelligenceOrgSummaryService {
@@ -400,12 +500,15 @@ class TeamIntelligenceOrgSummaryService {
       }
     }
 
+    bullets = enforceOrgBulletWindow(input, bullets);
+
     const summaryText = buildSummaryText(bullets);
 
     const generatedAt = new Date().toISOString();
-    const teamIndex = input.teamSummaries.reduce<Record<string, { bulletCount: number }>>((accumulator, teamSummary) => {
-      accumulator[teamSummary.teamName] = {
-        bulletCount: bullets.filter((bullet) => bullet.teamName === teamSummary.teamName).length,
+    const teamIndex = input.teamSummaries.reduce<Record<string, { teamName: string; bulletCount: number }>>((accumulator, teamSummary) => {
+      accumulator[teamSummary.teamId] = {
+        teamName: teamSummary.teamName,
+        bulletCount: bullets.filter((bullet) => bullet.teamId === teamSummary.teamId).length,
       };
       return accumulator;
     }, {});
