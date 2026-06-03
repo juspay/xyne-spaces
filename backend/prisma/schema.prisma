@@ -2645,6 +2645,8 @@ enum NotificationType {
   EMAIL_FETCH_COMPLETED
   EMAIL_FETCH_FAILED
   CANVAS_SHARED
+  MESSAGE_DELETED
+  MESSAGE_EDITED
   @@schema("public")
 }
 

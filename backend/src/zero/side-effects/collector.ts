@@ -40,14 +40,21 @@ export async function collectSideEffectJobs(
     }
   }
 
-  if (operation === 'delete' && table === 'messages') {
+  if ((operation === 'delete' || operation === 'update') && table === 'messages') {
     const message = await tx.run(zql.messages.where('messageId', entityId).one());
     if (message) {
+      const conversation = message.conversationId
+        ? await tx.run(zql.conversations.where('conversationId', message.conversationId).one())
+        : null;
       previousValue = {
         messageId: message.messageId,
         conversationId: message.conversationId,
         senderId: message.senderId,
         msgType: message.msgType,
+        content: message.content,
+        isDeleted: message.isDeleted,
+        channelId: conversation?.channelId ?? undefined,
+        isThreadReply: !!conversation && conversation.initialMessageId !== message.messageId,
       };
     }
   }

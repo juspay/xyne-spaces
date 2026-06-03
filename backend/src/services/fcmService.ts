@@ -543,7 +543,7 @@ class FcmPushService {
   }
 
   private async dispatchToFcm(token: string, payload: FcmNotificationPayload, platform?: string, appVersion?: string): Promise<void> {
-    const isSilent = payload.type === 'THREAD_READ' || payload.type === 'CHANNEL_READ';
+    const isSilent = payload.type === 'THREAD_READ' || payload.type === 'CHANNEL_READ' || payload.type === 'MESSAGE_DELETED' || payload.type === 'MESSAGE_EDITED';
     if (config.env === 'development' && platform === 'ios') {
       await sendLocalIosPush(payload, this.buildDataPayload(payload, isSilent));
       return;
@@ -636,21 +636,43 @@ class FcmPushService {
     headers: Record<string, string>;
     payload: { aps: Record<string, unknown> };
   } {
+    const threadId = this.getApnsThreadId(payload);
+
     return {
       headers: {
-        'apns-priority': '10',
+        // iOS requires `apns-push-type` for APNs (iOS 13+). Without it,
+        // background (silent) pushes may be dropped.
+        'apns-push-type': isSilent ? 'background' : 'alert',
+        // For silent/background pushes Apple expects low priority.
+        ...(isSilent ? { 'apns-priority': '5' } : { 'apns-priority': '10' }),
       },
       payload: {
-        aps: isSilent ? { 'content-available': 1 } : {
-          alert: {
-            title: payload.title,
-            body: payload.message,
-          },
-          sound: 'default',
-          'mutable-content': 1,
-        },
+        aps: isSilent
+          ? {
+              'content-available': 1,
+              ...(threadId ? { 'thread-id': threadId } : {}),
+            }
+          : {
+              alert: {
+                title: payload.title,
+                body: payload.message,
+              },
+              sound: 'default',
+              'mutable-content': 1,
+              ...(threadId ? { 'thread-id': threadId } : {}),
+            },
       },
     };
+  }
+
+  private getApnsThreadId(payload: FcmNotificationPayload): string | undefined {
+    const metadata = payload.metadata ?? {};
+    const isThreadReply = payload.type === 'THREAD_REPLY' || metadata.isThreadReply === true;
+    const value = isThreadReply
+      ? metadata.conversationId
+      : metadata.channelId;
+
+    return typeof value === 'string' && value.trim() ? value : undefined;
   }
 
   private composeStoredToken(platform: string | undefined, token: string): string {
