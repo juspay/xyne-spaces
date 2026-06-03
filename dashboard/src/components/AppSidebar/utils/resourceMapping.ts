@@ -19,4 +19,5 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/organisations': 'ORGANIZATIONS',
   '/inspector': 'INSPECTOR',
   '/automations': 'AUTOMATIONS',
+  '/team-intelligence': 'TEAM-INTELLIGENCE-DASHBOARD',
 };
