@@ -945,6 +945,7 @@ export function AutomationBuilder({
               const isLast = index === config.steps.length - 1;
               const variableSources = buildVariableSources(
                 triggerSchema,
+                config.trigger.config,
                 config.steps,
                 stepSchemaCache,
                 index,
