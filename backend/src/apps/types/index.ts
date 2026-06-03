@@ -28,6 +28,7 @@ export enum AppEventType {
     DM = 'DIRECT_MESSAGE',
     USER_MENTIONED = 'USER_MENTIONED',
     EMAIL = 'EMAIL',
+    ADDITIONAL_FORM_FIELD_UPDATED = 'ADDITIONAL_FORM_FIELD_UPDATED',
 }
 
 export enum ContentFormat {
@@ -113,11 +114,29 @@ export interface EmailEventPayload {
 }
 
 /**
+ * Payload type for ADDITIONAL_FORM_FIELD_UPDATED events
+ * Fired when any additional form field on a ticket is updated.
+ * Apps can filter by fieldName to handle specific fields (e.g., "Merchant ID").
+ */
+export interface AdditionalFormFieldUpdatedPayload {
+    ticketId: string;
+    conversationId: string;
+    channelId: string;
+    boardId: string;
+    boardName: string;
+    fieldName: string;
+    fieldValue: string;
+    previousValue?: string;
+    updatedBy: string;
+    workspaceId: string;
+}
+
+/**
  * Base app event type with dynamic, event-specific payload
  */
 export interface BaseAppEvent {
     eventType: AppEventType;
-    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload | EmailEventPayload;
+    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload | EmailEventPayload | AdditionalFormFieldUpdatedPayload;
     timestamp: string; // ISO timestamp
 }
 

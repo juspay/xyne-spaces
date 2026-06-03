@@ -11,6 +11,8 @@ import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
+import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '../types';
 
 import { resolveChannelId } from '../utils/channelUtils';
 
@@ -513,6 +515,243 @@ export class TicketController {
         error: 'Internal server error',
         code: 'INTERNAL_ERROR',
       });
+    }
+  };
+
+  /**
+   * Update a form field value on a ticket
+   * POST /api/apps/ticket/updateFormField
+   * 
+   * This is a generic endpoint for apps to update custom form fields on tickets.
+   * Used by external systems (like Genius) to update field values.
+   */
+  updateFormField = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId, fieldName, fieldValue, channelId, channelName, conversationId, sessionId: _sessionId } = req.body;
+
+      // Validate required fields
+      if (!ticketId || typeof ticketId !== 'string') {
+        res.status(400).json({ error: 'ticketId is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+      if (!fieldName || typeof fieldName !== 'string') {
+        res.status(400).json({ error: 'fieldName is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+      if (fieldValue === undefined || fieldValue === null) {
+        res.status(400).json({ error: 'fieldValue is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+      if (!channelId && !channelName && !conversationId) {
+        res.status(400).json({ error: 'Either channelId, channelName, or conversationId is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      logger.info(`[TicketController] Updating form field: ${fieldName} on ticket ${ticketId}`);
+
+      // Fetch ticket to get board context and conversation
+      const ticket = await prismaClient.ticket.findUnique({
+        where: { id: ticketId },
+        select: { id: true, boardId: true, conversationId: true, workspaceId: true },
+      });
+
+      if (!ticket) {
+        res.status(404).json({ error: `Ticket ${ticketId} not found`, code: 'TICKET_NOT_FOUND' });
+        return;
+      }
+
+      // Get form mapping for this board
+      const formMapping = await prismaClient.formContextMapping.findFirst({
+        where: { contextId: ticket.boardId, contextType: 'BOARD', entityType: 'TICKET' },
+        select: { formId: true },
+      });
+
+      if (!formMapping) {
+        res.status(404).json({ error: 'No form configured for board', code: 'FORM_NOT_FOUND' });
+        return;
+      }
+
+      // Get the field by name
+      const field = await prismaClient.formFields.findFirst({
+        where: { formId: formMapping.formId, fieldName: fieldName },
+        select: { id: true },
+      });
+
+      if (!field) {
+        res.status(404).json({ error: `Field "${fieldName}" not found`, code: 'FIELD_NOT_FOUND' });
+        return;
+      }
+
+      const timestamp = new Date();
+      const stringValue = String(fieldValue);
+
+      // Upsert the form entity value
+      const existing = await prismaClient.formEntityValues.findFirst({
+        where: { entityId: ticketId, entityType: 'TICKET', fieldId: field.id },
+      });
+
+      if (existing) {
+        await prismaClient.formEntityValues.update({
+          where: { id: existing.id },
+          data: { fieldValue: stringValue, actualFieldValue: stringValue, updatedAt: timestamp },
+        });
+      } else {
+        await prismaClient.formEntityValues.create({
+          data: {
+            id: `fev_${ticketId}_${field.id}_${Date.now()}`,
+            entityId: ticketId,
+            entityType: 'TICKET',
+            formId: formMapping.formId,
+            fieldId: field.id,
+            fieldValue: stringValue,
+            actualFieldValue: stringValue,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        });
+      }
+
+      logger.info(`[TicketController] Form field "${fieldName}" updated to "${stringValue}" on ticket ${ticketId}`);
+
+      // Emit ADDITIONAL_FORM_FIELD_UPDATED event to all apps in the workspace
+      // Apps (like Genius) filter by fieldName and boardName to handle specific cases
+      try {
+        const board = await prismaClient.board.findUnique({
+          where: { id: ticket.boardId },
+          select: { id: true, name: true },
+        });
+
+        const conversation = ticket.conversationId
+          ? await prismaClient.conversation.findUnique({
+              where: { conversationId: ticket.conversationId },
+              select: { channelId: true },
+            })
+          : null;
+
+        if (board) {
+          const payload: AdditionalFormFieldUpdatedPayload = {
+            ticketId,
+            conversationId: ticket.conversationId || '',
+            channelId: conversation?.channelId || '',
+            boardId: ticket.boardId,
+            boardName: board.name,
+            fieldName,
+            fieldValue: stringValue,
+            previousValue: existing?.fieldValue || undefined,
+            updatedBy: req.user!.id,
+            workspaceId: ticket.workspaceId,
+          };
+
+          const event: BaseAppEvent = {
+            eventType: AppEventType.ADDITIONAL_FORM_FIELD_UPDATED,
+            payload,
+            timestamp: new Date().toISOString(),
+          };
+
+          // Fire and forget - don't block the response
+          void emitEventToWorkspaceApps(ticket.workspaceId, event);
+          
+          logger.info(`[TicketController] Emitted ADDITIONAL_FORM_FIELD_UPDATED for field "${fieldName}" on ticket ${ticketId}`);
+        }
+      } catch (eventError) {
+        // Don't fail the request if event emission fails
+        logger.error('[TicketController] Error emitting form field update event:', eventError);
+      }
+
+      res.status(200).json({ success: true, fieldName, ticketId });
+    } catch (error) {
+      logger.error('[TicketController] Error updating form field:', error);
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
+   * Disable email sending for a ticket
+   * POST /api/apps/ticket/disableEmailSend
+   */
+  disableEmailSend = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId, channelId, channelName, conversationId } = req.body;
+
+      if (!ticketId || typeof ticketId !== 'string') {
+        res.status(400).json({ error: 'ticketId is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+      if (!channelId && !channelName && !conversationId) {
+        res.status(400).json({ error: 'Either channelId, channelName, or conversationId is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      logger.info(`[TicketController] Disabling email reply for ticket ${ticketId}`);
+
+      // Fetch ticket to verify it exists
+      const ticket = await prismaClient.ticket.findUnique({
+        where: { id: ticketId },
+        select: { id: true, workspaceId: true },
+      });
+
+      if (!ticket) {
+        res.status(404).json({ error: `Ticket ${ticketId} not found`, code: 'TICKET_NOT_FOUND' });
+        return;
+      }
+
+      // Update ticket emailReplyEnabled column
+      await prismaClient.ticket.update({
+        where: { id: ticketId },
+        data: { emailReplyEnabled: false },
+      });
+
+      logger.info(`[TicketController] Disabled email reply for ticket ${ticketId}`);
+
+      res.status(200).json({ success: true, ticketId, emailReplyEnabled: false });
+    } catch (error) {
+      logger.error('[TicketController] Error disabling email send:', error);
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
+   * Enable email sending for a ticket
+   * POST /api/apps/ticket/enableEmailSend
+   */
+  enableEmailSend = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId, channelId, channelName, conversationId } = req.body;
+
+      if (!ticketId || typeof ticketId !== 'string') {
+        res.status(400).json({ error: 'ticketId is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+      if (!channelId && !channelName && !conversationId) {
+        res.status(400).json({ error: 'Either channelId, channelName, or conversationId is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      logger.info(`[TicketController] Enabling email reply for ticket ${ticketId}`);
+
+      // Fetch ticket to verify it exists
+      const ticket = await prismaClient.ticket.findUnique({
+        where: { id: ticketId },
+        select: { id: true, workspaceId: true },
+      });
+
+      if (!ticket) {
+        res.status(404).json({ error: `Ticket ${ticketId} not found`, code: 'TICKET_NOT_FOUND' });
+        return;
+      }
+
+      // Update ticket emailReplyEnabled column
+      await prismaClient.ticket.update({
+        where: { id: ticketId },
+        data: { emailReplyEnabled: true },
+      });
+
+      logger.info(`[TicketController] Enabled email reply for ticket ${ticketId}`);
+
+      res.status(200).json({ success: true, ticketId, emailReplyEnabled: true });
+    } catch (error) {
+      logger.error('[TicketController] Error enabling email send:', error);
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }
   };
 }

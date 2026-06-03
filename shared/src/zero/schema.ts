@@ -838,6 +838,7 @@ export const ticketTable = table('tickets')
     aiSubCategory: string().optional(),
     aiPriority: string().optional(),
     firstRespondedAt: number().optional(),
+    emailReplyEnabled: boolean(),
   })
   .primaryKey('id');
 

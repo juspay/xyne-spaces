@@ -126,6 +126,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   email_reads: ['insert', 'update'],
   channel_user_status: ['update'],
   conversation_participants: ['update'],
+  form_entity_values: ['insert', 'update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

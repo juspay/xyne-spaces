@@ -66,4 +66,25 @@ export class InstalledAppsRepository extends BaseRepository<
       },
     });
   }
+
+  /**
+   * Find all installed apps for a workspace (through user relation)
+   * @param workspaceId - Workspace ID to search for
+   * @returns Array of installed apps in the workspace
+   */
+  async findByWorkspaceId(workspaceId: string) {
+    return this.db.installedApps.findMany({
+      where: {
+        user: {
+          workspaceId,
+        },
+      },
+      select: {
+        id: true,
+        appId: true,
+        userId: true,
+        webhookUrl: true,
+      },
+    });
+  }
 }
