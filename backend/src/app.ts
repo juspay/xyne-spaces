@@ -100,6 +100,7 @@ import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
 import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
+import dashboardWorkspaceIdBackfillRoutes from '@/routes/dashboardWorkspaceIdBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
@@ -107,6 +108,7 @@ import productInsightsRoutes from '@/routes/productInsights';
 import ysweetRoutes from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
+import { dashboardRouter } from '@/routes/dynamicDashboard';
 import pythonQueryRoutes from '@/routes/pythonQuery';
 import formsRoutes from '@/routes/forms';
 import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
@@ -359,6 +361,8 @@ export class App {
     this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
     this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
     this.app.use('/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
+    this.app.use('/migrate/api/admin/dashboard-workspace-id-backfill', dashboardWorkspaceIdBackfillRoutes);
+    this.app.use('/api/admin/dashboard-workspace-id-backfill', dashboardWorkspaceIdBackfillRoutes);
     // Product insights recluster route (admin-only)
     this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
     this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
@@ -504,6 +508,8 @@ export class App {
 
     // Canvas file upload routes (auth required)
     this.app.use('/api/canvas', authMiddleware.authenticate, canvasRoutes);
+
+    this.app.use('/api/dashboard', authMiddleware.authenticate, dashboardRouter);
 
     // Custom emoji routes (auth required)
     this.app.use('/api/emojis', authMiddleware.authenticate, emojiRoutes);
@@ -833,6 +839,10 @@ export class App {
 
     logger.info('Initializing document ingest queue (producer)...');
     await documentIngestQueue.initialize();
+
+    logger.info('Initializing data source ingest queue (producer)...');
+    const { dataSourceIngestQueue } = await import('@/queues/dataSourceIngestQueue');
+    await dataSourceIngestQueue.initialize();
 
     logger.info('Initializing delayed message queue (producer)...');
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');

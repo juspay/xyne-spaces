@@ -1,0 +1,418 @@
+import { QueryVisualizationType } from '@xyne/shared';
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Lightbulb,
+  MoreVertical,
+  Pencil,
+  Trash2,
+} from 'lucide-react';
+import { Component as ReactComponent, ReactElement, ReactNode, useCallback, useState } from 'react';
+import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
+import { useAuth } from '../../../hooks/useAuth';
+import { useComponentData } from '../../../hooks/useComponentData';
+import { useResolvedComponentData } from '../../../hooks/useResolvedComponentData';
+import { useZero } from '../../../hooks/useZero';
+import type {
+  ComponentRuntimeConfig,
+  DashboardRuntimeContext,
+} from '../../../services/DynamicDashboard/planResolver';
+import { formatQueryError } from '../../../utils/queryErrorFormatter';
+import { mutators } from '../../../zero/mutators';
+import { Button } from '../../ui/Button';
+import { Dialog } from '../../ui/Dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
+import { getRendererForType } from './renderers';
+import { formatFetchError, isVisualType, untitledFor } from './utils';
+
+export interface ComponentTileData {
+  id: string;
+  visualType: QueryVisualizationType;
+  title?: string | null;
+  data?: unknown;
+  updatedAt?: number | undefined;
+  error?: string | null;
+  loading?: boolean;
+  storedPlan?: Record<string, unknown> | undefined;
+  componentConfig?: ComponentRuntimeConfig | undefined;
+  dashboardId?: string | undefined;
+  position?: string | undefined;
+}
+
+interface ComponentTileProps {
+  component: ComponentTileData;
+  runtimeContext?: DashboardRuntimeContext | null;
+  autoRefreshMs?: number | null;
+  onEdit?: (componentId: string) => void;
+}
+
+const ComponentTile = ({
+  component,
+  runtimeContext,
+  autoRefreshMs,
+  onEdit,
+}: ComponentTileProps): ReactElement => {
+  const z = useZero();
+  const { user } = useAuth();
+  const visualType: QueryVisualizationType | null = isVisualType(component.visualType)
+    ? component.visualType
+    : null;
+  const renderable = visualType !== null && getRendererForType(visualType) !== undefined;
+
+  const hasContext =
+    !!runtimeContext &&
+    (!!runtimeContext.timeRange ||
+      (!!runtimeContext.variables && Object.keys(runtimeContext.variables).length > 0));
+
+  const canResolveLocally = hasContext && !!component.storedPlan && renderable;
+
+  const cachedFetchEnabled =
+    !component.loading &&
+    !component.error &&
+    !canResolveLocally &&
+    (component.data === undefined || component.data === null);
+
+  const cachedQuery = useComponentData(
+    cachedFetchEnabled ? component.id : '',
+    component.updatedAt,
+    autoRefreshMs ?? null,
+  );
+
+  const resolvedQuery = useResolvedComponentData({
+    componentId: component.id,
+    visualType: visualType ?? QueryVisualizationType.BAR_CHART,
+    storedPlan: component.storedPlan ?? {},
+    componentConfig: component.componentConfig,
+    runtimeContext,
+    updatedAt: component.updatedAt,
+    autoRefreshMs: autoRefreshMs ?? null,
+    enabled: canResolveLocally,
+  });
+
+  const query = canResolveLocally ? resolvedQuery : cachedQuery;
+  const fetchEnabled = cachedFetchEnabled || canResolveLocally;
+
+  const isPersisted = fetchEnabled && Boolean(component.id);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    if (!z) return;
+    try {
+      const result = z.mutate(mutators.dashboardComponent.delete({ id: component.id }));
+      const res = await result.server;
+      if (res.type === 'error') {
+        toast.error('Failed to delete component', {
+          description: res.error instanceof Error ? res.error.message : 'Unknown error',
+        });
+        return;
+      }
+      toast.success('Component deleted');
+    } catch (e) {
+      toast.error('Failed to delete component', {
+        description: e instanceof Error ? e.message : 'Unknown error',
+      });
+    } finally {
+      setDeleteOpen(false);
+    }
+  }, [z, component.id]);
+
+  const handleDuplicate = useCallback(async () => {
+    if (!z || !user?.id || visualType === null) return;
+    if (!component.dashboardId) {
+      toast.error('Failed to duplicate component', {
+        description: 'Parent dashboard id is missing from this tile',
+      });
+      return;
+    }
+    try {
+      const newId = uuidv4();
+      const sourcePos = (() => {
+        try {
+          return JSON.parse(component.position ?? '{}') as {
+            x?: unknown;
+            y?: unknown;
+            w?: unknown;
+            h?: unknown;
+          };
+        } catch {
+          return {} as { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
+        }
+      })();
+      const pos = {
+        x: typeof sourcePos.x === 'number' ? sourcePos.x : 0,
+        y:
+          typeof sourcePos.y === 'number'
+            ? sourcePos.y + (typeof sourcePos.h === 'number' ? sourcePos.h : 2)
+            : 0,
+        w: typeof sourcePos.w === 'number' ? sourcePos.w : 6,
+        h: typeof sourcePos.h === 'number' ? sourcePos.h : 4,
+      };
+      const result = z.mutate(
+        mutators.dashboardComponent.create({
+          id: newId,
+          dashboardId: component.dashboardId,
+          visualType,
+          title: component.title ? `${component.title} (copy)` : undefined,
+          queryJson: component.storedPlan ?? {},
+          position: JSON.stringify(pos),
+          createdBy: user.id,
+          mappingId: uuidv4(),
+          timestamp: Date.now(),
+        }),
+      );
+      const res = await result.server;
+      if (res.type === 'error') {
+        toast.error('Failed to duplicate component', {
+          description: res.error instanceof Error ? res.error.message : 'Unknown error',
+        });
+        return;
+      }
+      toast.success('Component duplicated');
+    } catch (e) {
+      toast.error('Failed to duplicate component', {
+        description: e instanceof Error ? e.message : 'Unknown error',
+      });
+    }
+  }, [z, user, component, visualType]);
+
+  return (
+    <div className='group/tile flex flex-col h-full bg-white border border-xyne-gray-200 rounded-lg shadow-[0px_2px_1px_0px_rgba(5,5,6,0.05)] overflow-hidden'>
+      <div className='dashboard-grid-drag-handle flex items-center justify-between gap-2 pl-4 pr-2 pt-3 pb-0.5 cursor-move select-none'>
+        <h3 className='text-[13px] leading-[18px] font-medium text-xyne-gray-900 truncate'>
+          {component.title || untitledFor(visualType)}
+        </h3>
+        {isPersisted ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className='shrink-0 p-1 rounded-md text-xyne-gray-500 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 hover:bg-xyne-gray-100 transition-opacity'
+                aria-label='Component menu'
+                data-track-category='DYNAMIC_DASHBOARD'
+                data-track-name='Open_Component_Menu'
+              >
+                <MoreVertical size={16} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end'>
+              {onEdit && (
+                <DropdownMenuItem
+                  onClick={() => onEdit(component.id)}
+                  data-track-category='DYNAMIC_DASHBOARD'
+                  data-track-name='Edit_Component'
+                >
+                  <Pencil size={14} className='mr-2' />
+                  Edit
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                onClick={() => {
+                  void handleDuplicate();
+                }}
+                data-track-category='DYNAMIC_DASHBOARD'
+                data-track-name='Duplicate_Component'
+              >
+                <Copy size={14} className='mr-2' />
+                Duplicate
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDeleteOpen(true)} className='text-rose-600'>
+                <Trash2 size={14} className='mr-2' />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <button
+            className='shrink-0 p-1 text-xyne-gray-500 opacity-0 cursor-not-allowed rounded-md'
+            aria-label='Component menu'
+            disabled
+          >
+            <MoreVertical size={16} />
+          </button>
+        )}
+      </div>
+      <div className='flex-1 min-h-0 px-2 pb-3 flex flex-col overflow-hidden'>
+        <TileBodyErrorBoundary>
+          {component.error ? (
+            <ErrorState message={component.error} />
+          ) : !renderable ? (
+            <ErrorState message={`Unknown component type "${String(component.visualType)}"`} />
+          ) : component.loading ? (
+            <LoadingState />
+          ) : !fetchEnabled ? (
+            renderBody(visualType, component.data, component.title)
+          ) : query.isLoading ? (
+            <LoadingState />
+          ) : query.isError ? (
+            <ErrorState message={formatFetchError(query.error)} />
+          ) : query.data ? (
+            renderBody(visualType, query.data.data, component.title)
+          ) : (
+            <LoadingState />
+          )}
+        </TileBodyErrorBoundary>
+      </div>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={open => !open && setDeleteOpen(false)}
+        title='Delete Component'
+      >
+        <div className='p-6'>
+          <p className='text-muted-foreground mb-6'>
+            Delete this component? The underlying QueryPlan is removed too — this can&apos;t be
+            undone.
+          </p>
+          <div className='flex justify-end gap-3'>
+            <Button
+              variant='secondary'
+              onClick={() => setDeleteOpen(false)}
+              data-track-category='DYNAMIC_DASHBOARD'
+              data-track-name='Cancel_Delete_Component'
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
+              onClick={() => {
+                void handleDelete();
+              }}
+              data-track-category='DYNAMIC_DASHBOARD'
+              data-track-name='Confirm_Delete_Component'
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </div>
+  );
+};
+
+function renderBody(
+  visualType: QueryVisualizationType | null,
+  data: unknown,
+  title?: string | null,
+): ReactElement {
+  const Renderer = visualType ? getRendererForType(visualType) : undefined;
+  if (!Renderer) {
+    return <ErrorState message={`Unknown component type "${String(visualType)}"`} />;
+  }
+  return <Renderer data={data} {...(title ? { title } : {})} />;
+}
+
+function ErrorState({ message }: { message: string }): ReactElement {
+  const formatted = formatQueryError(message);
+  const [showRaw, setShowRaw] = useState(false);
+  const wasFormatted = formatted.summary !== message;
+  return (
+    <div className='flex-1 min-h-0 w-full relative overflow-hidden'>
+      <div className='absolute inset-0 overflow-y-auto'>
+        <div className='flex flex-col items-center justify-center py-6 px-5 text-center'>
+          <div className='flex items-center justify-center w-10 h-10 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-500 mb-3'>
+            <AlertCircle className='w-5 h-5' />
+          </div>
+          <h3 className='text-sm font-semibold text-foreground mb-1.5'>{formatted.title}</h3>
+          <p className='text-xs text-muted-foreground max-w-md leading-relaxed'>
+            {formatted.summary}
+          </p>
+        </div>
+
+        {formatted.details && formatted.details.length > 0 && (
+          <div className='mx-5 mb-3 rounded-md border border-border bg-muted/30 overflow-hidden'>
+            {formatted.details.map((d, i) => (
+              <div
+                key={i}
+                className={`flex items-center justify-between px-3 py-2 text-xs ${
+                  i < formatted.details!.length - 1 ? 'border-b border-border/60' : ''
+                }`}
+              >
+                <span className='font-mono text-foreground/85 truncate mr-3'>{d.label}</span>
+                <span className='inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-background border border-border text-muted-foreground shrink-0'>
+                  {d.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {formatted.suggestion && (
+          <div className='mx-5 mb-3 flex items-start gap-2 text-xs text-foreground/80 bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/40 rounded-md px-3 py-2'>
+            <Lightbulb className='w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500' />
+            <span className='leading-relaxed'>{formatted.suggestion}</span>
+          </div>
+        )}
+
+        {wasFormatted && (
+          <div className='mx-5 mb-3'>
+            <button
+              type='button'
+              onClick={() => setShowRaw(s => !s)}
+              className='inline-flex items-center gap-1 text-[11px] text-muted-foreground/80 hover:text-foreground transition-colors'
+              data-track-category='DYNAMIC_DASHBOARD'
+              data-track-name='Toggle_Tile_Raw_Error'
+            >
+              {showRaw ? <ChevronDown className='w-3 h-3' /> : <ChevronRight className='w-3 h-3' />}
+              Technical details
+            </button>
+            {showRaw && (
+              <pre className='mt-2 text-[10px] font-mono text-muted-foreground whitespace-pre-wrap break-words bg-muted/40 rounded-md p-2.5 max-h-40 overflow-y-auto border border-border/60'>
+                {formatted.raw}
+              </pre>
+            )}
+          </div>
+        )}
+
+        {!wasFormatted && (
+          <pre className='mx-5 mb-3 text-[11px] font-mono text-muted-foreground whitespace-pre-wrap break-words bg-muted/40 rounded-md p-2.5 max-h-40 overflow-y-auto border border-border/60'>
+            {formatted.raw}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+class TileBodyErrorBoundary extends ReactComponent<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  override state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error): { error: Error } {
+    return { error };
+  }
+  override componentDidCatch(error: Error): void {
+    if (typeof console !== 'undefined' && console.error) {
+      console.error('[ComponentTile] render error', error);
+    }
+  }
+  override render(): ReactNode {
+    if (this.state.error) {
+      return <ErrorState message={`Render error: ${this.state.error.message}`} />;
+    }
+    return this.props.children;
+  }
+}
+
+function LoadingState(): ReactElement {
+  return (
+    <div className='flex flex-col gap-3 h-full p-4'>
+      <div className='h-6 w-1/3 rounded bg-muted animate-pulse' />
+      <div className='flex-1 rounded bg-muted/60 animate-pulse' />
+      <div className='flex gap-2'>
+        <div className='h-2.5 w-12 rounded bg-muted animate-pulse' />
+        <div className='h-2.5 w-12 rounded bg-muted animate-pulse' />
+        <div className='h-2.5 w-12 rounded bg-muted animate-pulse' />
+      </div>
+    </div>
+  );
+}
+
+export default ComponentTile;

@@ -40,6 +40,7 @@ import {
   ShieldUser,
   Brain,
   Sparkles,
+  LayoutDashboard,
   ArrowRightLeft,
   AppWindow,
   SearchCode,
@@ -82,6 +83,7 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/knowledge-base', label: 'Knowledge Base', icon: BookOpen },
   { path: '/memory', label: 'Context', icon: Brain },
   { path: '/analytics', label: 'Analytics', icon: ChartSpline },
+  { path: '/dashboards', label: 'Dashboards', icon: LayoutDashboard },
   { path: '/projects', label: 'Projects Board', icon: FolderKanban },
   { path: '/user-groups', label: 'User Groups', icon: UsersIcon },
   { path: '/listProjects', label: 'List Projects', icon: Folder },
@@ -130,6 +132,11 @@ const mobileNavigationItems = [
     path: '/chat/canvas',
     label: 'Canvas',
     icon: FileText,
+  },
+  {
+    path: '/dashboards',
+    label: 'Dashboards',
+    icon: LayoutDashboard,
   },
   {
     path: '/recorder',

@@ -18,6 +18,7 @@
  */
 
 import { superpositionClient, type SuperpositionContext } from '@/services/superpositionClient';
+import { config as envConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 // ============================================================================
@@ -38,6 +39,8 @@ const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
+const DEFAULT_DASHBOARD_AI_MODEL = envConfig.DASHBOARD_AI_MODEL ?? 'glm-latest';
+const DEFAULT_DATA_SOURCE_INGEST_TABLE_LIMIT = envConfig.dataSource.ingestTableLimit;
 const DEFAULT_EMAIL_QUICK_REWRITE_MODEL = 'glm-flash-experimental';
 
 // Nudge agents defaults
@@ -83,6 +86,9 @@ const CAC_KEYS = {
   nudgeRelatedTicketModel: 'nudge_related_ticket_model_name',
   nudgeRelatedMessageModel: 'nudge_related_message_model_name',
   classificationModel: 'email_classification_model_name',
+  dashboardAiModel: 'dashboard_ai_model_name',
+  // Dashboard data source
+  dataSourceIngestTableLimit: 'data_source_ingest_table_limit',
   emailQuickRewriteModel: 'email_quick_rewrite_model_name',
   // Xyne AI per-tool soft token budgets
   xyneAiToolBudgetSearchRelevantContent: 'xyne_ai_tool_budget_search_relevant_content',
@@ -130,6 +136,9 @@ export class AgentsConfig {
   // Email quick rewrite config
   public readonly emailQuickRewriteModelName: string;
 
+  // Dashboard AI config
+  public readonly dashboardAiModelName: string;
+
   // Xyne AI per-tool soft token budgets
   public readonly xyneAiToolBudgetSearchRelevantContent: number;
   public readonly xyneAiToolBudgetFetchChannelMessages: number;
@@ -141,6 +150,9 @@ export class AgentsConfig {
   // Xyne AI session-history compaction thresholds
   public readonly xyneAiHistoryCompactionTrigger: number;
   public readonly xyneAiHistoryCompactionTarget: number;
+
+  // Dashboard data-source ingest cap (UI + API + LLM prompt)
+  public readonly dataSourceIngestTableLimit: number;
 
   private constructor(
     xyneAiTracingEnabled: boolean,
@@ -157,6 +169,7 @@ export class AgentsConfig {
     nudgeRelatedTicketModelName: string,
     nudgeRelatedMessageModelName: string,
     classificationModelName: string,
+    dashboardAiModelName: string,
     emailQuickRewriteModelName: string,
     xyneAiToolBudgetSearchRelevantContent: number,
     xyneAiToolBudgetFetchChannelMessages: number,
@@ -166,6 +179,7 @@ export class AgentsConfig {
     xyneAiToolBudgetSearchFiles: number,
     xyneAiHistoryCompactionTrigger: number,
     xyneAiHistoryCompactionTarget: number,
+    dataSourceIngestTableLimit: number,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -181,6 +195,7 @@ export class AgentsConfig {
     this.nudgeRelatedTicketModelName = nudgeRelatedTicketModelName;
     this.nudgeRelatedMessageModelName = nudgeRelatedMessageModelName;
     this.classificationModelName = classificationModelName;
+    this.dashboardAiModelName = dashboardAiModelName;
     this.emailQuickRewriteModelName = emailQuickRewriteModelName;
     this.xyneAiToolBudgetSearchRelevantContent = xyneAiToolBudgetSearchRelevantContent;
     this.xyneAiToolBudgetFetchChannelMessages = xyneAiToolBudgetFetchChannelMessages;
@@ -190,6 +205,7 @@ export class AgentsConfig {
     this.xyneAiToolBudgetSearchFiles = xyneAiToolBudgetSearchFiles;
     this.xyneAiHistoryCompactionTrigger = xyneAiHistoryCompactionTrigger;
     this.xyneAiHistoryCompactionTarget = xyneAiHistoryCompactionTarget;
+    this.dataSourceIngestTableLimit = dataSourceIngestTableLimit;
   }
 
   /**
@@ -243,6 +259,7 @@ export class AgentsConfig {
       const nudgeRelatedTicketModelName = getValue<string>(CAC_KEYS.nudgeRelatedTicketModel, DEFAULT_NUDGE_RELATED_TICKET_MODEL);
       const nudgeRelatedMessageModelName = getValue<string>(CAC_KEYS.nudgeRelatedMessageModel, DEFAULT_NUDGE_RELATED_MESSAGE_MODEL);
       const classificationModelName = getValue<string>(CAC_KEYS.classificationModel, DEFAULT_CLASSIFICATION_MODEL);
+      const dashboardAiModelName = getValue<string>(CAC_KEYS.dashboardAiModel, DEFAULT_DASHBOARD_AI_MODEL);
       const emailQuickRewriteModelName = getValue<string>(CAC_KEYS.emailQuickRewriteModel, DEFAULT_EMAIL_QUICK_REWRITE_MODEL);
 
       // Extract Xyne AI tool budget values
@@ -256,6 +273,9 @@ export class AgentsConfig {
       // Extract Xyne AI history compaction thresholds
       const xyneAiHistoryCompactionTrigger = getValue<number>(CAC_KEYS.xyneAiHistoryCompactionTrigger, DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER);
       const xyneAiHistoryCompactionTarget = getValue<number>(CAC_KEYS.xyneAiHistoryCompactionTarget, DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET);
+
+      // Extract dashboard data-source ingest cap
+      const dataSourceIngestTableLimit = getValue<number>(CAC_KEYS.dataSourceIngestTableLimit, DEFAULT_DATA_SOURCE_INGEST_TABLE_LIMIT);
 
       // Check which values were actually fetched from CAC vs using defaults
       const fromCAC: string[] = [];
@@ -347,6 +367,12 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.classificationModel);
       }
 
+      if (CAC_KEYS.dashboardAiModel in allConfigs) {
+        fromCAC.push(CAC_KEYS.dashboardAiModel);
+      } else {
+        usingDefaults.push(CAC_KEYS.dashboardAiModel);
+      }
+
       if (CAC_KEYS.xyneAiToolBudgetSearchRelevantContent in allConfigs) {
         fromCAC.push(CAC_KEYS.xyneAiToolBudgetSearchRelevantContent);
       } else {
@@ -395,7 +421,13 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.xyneAiHistoryCompactionTarget);
       }
 
-      const totalKeys = 22;
+      if (CAC_KEYS.dataSourceIngestTableLimit in allConfigs) {
+        fromCAC.push(CAC_KEYS.dataSourceIngestTableLimit);
+      } else {
+        usingDefaults.push(CAC_KEYS.dataSourceIngestTableLimit);
+      }
+
+      const totalKeys = 24;
       if (usingDefaults.length === totalKeys) {
         logger.debug('[Agents Config] All configs using DEFAULTS (not configured in CAC)', {
           xyneAiTracingEnabled: `${xyneAiTracingEnabled} (default)`,
@@ -469,6 +501,7 @@ export class AgentsConfig {
         nudgeRelatedTicketModelName,
         nudgeRelatedMessageModelName,
         classificationModelName,
+        dashboardAiModelName,
         emailQuickRewriteModelName,
         xyneAiToolBudgetSearchRelevantContent,
         xyneAiToolBudgetFetchChannelMessages,
@@ -478,6 +511,7 @@ export class AgentsConfig {
         xyneAiToolBudgetSearchFiles,
         xyneAiHistoryCompactionTrigger,
         xyneAiHistoryCompactionTarget,
+        dataSourceIngestTableLimit,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -497,6 +531,7 @@ export class AgentsConfig {
         DEFAULT_NUDGE_RELATED_TICKET_MODEL,
         DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
         DEFAULT_CLASSIFICATION_MODEL,
+        DEFAULT_DASHBOARD_AI_MODEL,
         DEFAULT_EMAIL_QUICK_REWRITE_MODEL,
         DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT,
         DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_CHANNEL_MESSAGES,
@@ -506,6 +541,7 @@ export class AgentsConfig {
         DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_FILES,
         DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER,
         DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET,
+        DEFAULT_DATA_SOURCE_INGEST_TABLE_LIMIT,
       );
     }
   }
@@ -526,6 +562,7 @@ export class AgentsConfig {
       DEFAULT_NUDGE_RELATED_TICKET_MODEL,
       DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
       DEFAULT_CLASSIFICATION_MODEL,
+      DEFAULT_DASHBOARD_AI_MODEL,
       DEFAULT_EMAIL_QUICK_REWRITE_MODEL,
       DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT,
       DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_CHANNEL_MESSAGES,
@@ -535,6 +572,7 @@ export class AgentsConfig {
       DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_FILES,
       DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER,
       DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET,
+      DEFAULT_DATA_SOURCE_INGEST_TABLE_LIMIT,
     );
   }
 }

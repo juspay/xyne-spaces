@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
+import { VirtuosoGrid } from 'react-virtuoso';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
@@ -20,7 +21,16 @@ export const DashboardCreation: React.FC = () => {
   const { isMobile } = usePlatform();
   const [formData, setFormData] = useState({ name: '', description: '' });
 
-  const [dashboards] = useCachedQuery(queries.getAllDashboards());
+  // Growing-limit window — the grid virtualizes (only visible cards render)
+  // and grows the limit when the user scrolls to the bottom. One live
+  // reactive query, no manual cursor accumulation.
+  const PAGE_SIZE = 50;
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [dashboards] = useCachedQuery(queries.allDashboards({ limit }));
+  const dashboardList = (dashboards ?? []) as DashboardType[];
+  const handleEndReached = useCallback(() => {
+    if (dashboardList.length >= limit) setLimit(l => l + PAGE_SIZE);
+  }, [dashboardList.length, limit]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -49,8 +59,6 @@ export const DashboardCreation: React.FC = () => {
   const handleDeleteDashboard = (dashboardId: string): void => {
     void zero.mutate(mutators.dashboard.delete({ id: dashboardId }));
   };
-
-  const dashboardList = dashboards || [];
 
   return (
     <div className='flex h-full bg-background md:rounded-2xl shadow-sm overflow-hidden'>
@@ -106,7 +114,7 @@ export const DashboardCreation: React.FC = () => {
       </div>
 
       {/* Right Panel - Dashboards List */}
-      <div className='flex-1 overflow-auto p-6'>
+      <div className='flex-1 min-h-0 flex flex-col p-6'>
         {dashboardList.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-64 text-center'>
             <div className='bg-muted p-4 rounded-full mb-4'>
@@ -118,7 +126,7 @@ export const DashboardCreation: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className='space-y-4'>
+          <>
             <h3 className='text-md font-medium text-foreground mb-3 flex items-center gap-2'>
               <span className='w-2 h-2 bg-blue-500 rounded-full' />
               All Dashboards
@@ -126,51 +134,54 @@ export const DashboardCreation: React.FC = () => {
                 ({dashboardList.length} dashboard{dashboardList.length !== 1 ? 's' : ''})
               </span>
             </h3>
-            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
-              {dashboardList.map(dashboard => (
-                <div
-                  key={dashboard.id}
-                  className='p-4 bg-muted rounded-lg hover:bg-muted transition-colors'
-                >
-                  <div className='flex items-start justify-between mb-2'>
+            <div className='flex-1 min-h-0'>
+              <VirtuosoGrid
+                style={{ height: '100%' }}
+                data={dashboardList}
+                endReached={handleEndReached}
+                listClassName='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'
+                itemContent={(_index, dashboard) => (
+                  <div className='p-4 bg-muted rounded-lg hover:bg-muted transition-colors'>
+                    <div className='flex items-start justify-between mb-2'>
+                      <button
+                        onClick={() => handleSelectDashboard(dashboard)}
+                        className='flex-1 text-left'
+                        data-track-category='Dashboards'
+                        data-track-name='SelectDashboard'
+                        data-track-metadata={JSON.stringify({
+                          dashboardId: dashboard.id,
+                          dashboardName: dashboard.name,
+                        })}
+                      >
+                        <h3 className='text-md font-medium text-foreground'>{dashboard.name}</h3>
+                      </button>
+                      <button
+                        onClick={() => void handleDeleteDashboard(dashboard.id)}
+                        className='p-1 text-muted-foreground hover:text-red-500'
+                        data-track-category='Dashboards'
+                        data-track-name='DeleteDashboard'
+                        data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
+                      >
+                        <Trash2 className='w-4 h-4' />
+                      </button>
+                    </div>
+                    <p className='text-sm text-muted-foreground mb-3'>
+                      {dashboard.description || 'No description'}
+                    </p>
                     <button
                       onClick={() => handleSelectDashboard(dashboard)}
-                      className='flex-1 text-left'
+                      className='text-sm text-blue-600 hover:text-blue-800'
                       data-track-category='Dashboards'
-                      data-track-name='SelectDashboard'
-                      data-track-metadata={JSON.stringify({
-                        dashboardId: dashboard.id,
-                        dashboardName: dashboard.name,
-                      })}
-                    >
-                      <h3 className='text-md font-medium text-foreground'>{dashboard.name}</h3>
-                    </button>
-                    <button
-                      onClick={() => void handleDeleteDashboard(dashboard.id)}
-                      className='p-1 text-muted-foreground hover:text-red-500'
-                      data-track-category='Dashboards'
-                      data-track-name='DeleteDashboard'
+                      data-track-name='OpenDashboard'
                       data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
                     >
-                      <Trash2 className='w-4 h-4' />
+                      Open Dashboard →
                     </button>
                   </div>
-                  <p className='text-sm text-muted-foreground mb-3'>
-                    {dashboard.description || 'No description'}
-                  </p>
-                  <button
-                    onClick={() => handleSelectDashboard(dashboard)}
-                    className='text-sm text-blue-600 hover:text-blue-800'
-                    data-track-category='Dashboards'
-                    data-track-name='OpenDashboard'
-                    data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
-                  >
-                    Open Dashboard →
-                  </button>
-                </div>
-              ))}
+                )}
+              />
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>

@@ -285,3 +285,34 @@ export type SubTicketWithRelations = SubTicket & {
 export type TicketSubTicketMapping = Prisma.TicketSubTicketMappingGetPayload<{}>;
 export type CreateTicketSubTicketMappingInput = Prisma.TicketSubTicketMappingCreateInput;
 export type UpdateTicketSubTicketMappingInput = Prisma.TicketSubTicketMappingUpdateInput;
+
+// Dynamic Dashboard / Data Sources
+export type DataSource = Prisma.DataSourceGetPayload<{}>;
+// `UncheckedCreateInput` lets callers pass the `dataSourceId` / `tableId` /
+// foreign-key fields directly as strings rather than via the nested
+// `connect: { id }` shape — friendlier for service code that already has IDs.
+export type CreateDataSourceInput = Prisma.DataSourceUncheckedCreateInput;
+export type UpdateDataSourceInput = Prisma.DataSourceUncheckedUpdateInput;
+
+export type DataSourceTable = Prisma.DataSourceTableGetPayload<{}>;
+export type CreateDataSourceTableInput = Prisma.DataSourceTableUncheckedCreateInput;
+export type UpdateDataSourceTableInput = Prisma.DataSourceTableUncheckedUpdateInput;
+
+export type DataSourceColumn = Prisma.DataSourceColumnGetPayload<{}>;
+export type CreateDataSourceColumnInput = Prisma.DataSourceColumnUncheckedCreateInput;
+export type UpdateDataSourceColumnInput = Prisma.DataSourceColumnUncheckedUpdateInput;
+
+export type DataSourceRelationship = Prisma.DataSourceRelationshipGetPayload<{}>;
+export type CreateDataSourceRelationshipInput = Prisma.DataSourceRelationshipUncheckedCreateInput;
+export type UpdateDataSourceRelationshipInput = Prisma.DataSourceRelationshipUncheckedUpdateInput;
+
+// Dynamic Dashboard / Dashboards
+export type Dashboard = Prisma.DashboardGetPayload<{}>;
+export type CreateDashboardInput = Prisma.DashboardUncheckedCreateInput;
+export type UpdateDashboardInput = Prisma.DashboardUncheckedUpdateInput;
+// Dashboard tiles were unified into the Query model (queryType='external');
+// the DashboardComponent model no longer exists.
+
+export type DashboardActivity = Prisma.DashboardActivityGetPayload<{}>;
+export type CreateDashboardActivityInput = Prisma.DashboardActivityUncheckedCreateInput;
+export type UpdateDashboardActivityInput = Prisma.DashboardActivityUncheckedUpdateInput;

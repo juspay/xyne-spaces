@@ -148,6 +148,7 @@ import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
 import NoOrganizationAccessScreen from './NoOrganizationAccessScreen/NoOrganizationAccessScreen';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryDashboardScreen from '../components/AnalyticsDashboard/QueryDashboardScreen';
+import { DynamicDashboardPanel, DynamicDashboardScreen } from '../components/DynamicDashboard';
 import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
@@ -1015,6 +1016,21 @@ export const router = createBrowserRouter([
                     <QueryDashboardScreen />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                path: 'dashboards',
+                element: (
+                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                    <DynamicDashboardPanel />
+                  </ResourceProtectedRoute>
+                ),
+                children: [
+                  { index: true, element: null },
+                  {
+                    path: ':dashboardId',
+                    element: <DynamicDashboardScreen />,
+                  },
+                ],
               },
               {
                 path: 'support',

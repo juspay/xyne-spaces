@@ -143,6 +143,17 @@ const envSchema = Joi.object({
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
   LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
+  // Dynamic Dashboard tunables
+  DASHBOARD_AI_REQUEST_TIMEOUT_MS: Joi.number().default(180000),
+  DASHBOARD_AI_SSE_PING_INTERVAL_MS: Joi.number().default(20000),
+  DASHBOARD_AI_MODEL: Joi.string().default(''),
+  DASHBOARD_AI_TEMPERATURE: Joi.number().default(0.2),
+  DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT: Joi.number().default(20),
+  DASHBOARD_QUERY_CACHE_TTL_SEC: Joi.number().default(60),
+  DASHBOARD_QUERY_CACHE_MAX_VALUE_BYTES: Joi.number().default(2 * 1024 * 1024),
+  DASHBOARD_PG_STATEMENT_TIMEOUT_MS: Joi.number().default(60000),
+  DASHBOARD_PG_CONNECTION_TIMEOUT_MS: Joi.number().default(10000),
+  DASHBOARD_CH_REQUEST_TIMEOUT_MS: Joi.number().default(65000),
   LANGFUSE_SECRET_KEY: Joi.string().allow('').default(''),
   LANGFUSE_PUBLIC_KEY: Joi.string().allow('').default(''),
   LANGFUSE_BASE_URL: Joi.string().allow('').default(''),
@@ -284,6 +295,11 @@ const envSchema = Joi.object({
   DOCLING_TIMEOUT_MS: Joi.number().default(240000),
   DOCLING_HEALTH_CACHE_TTL_MS: Joi.number().default(30000),
   DOCLING_DO_OCR: Joi.boolean().default(true),
+  REDIS_HOST: Joi.string().default(''),
+  REDIS_PORT: Joi.number().integer().min(1).max(65535).default(6379),
+  REDIS_PASSWORD: Joi.string().allow('').default(''),
+  REDIS_TLS: Joi.boolean().default(false),
+  DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -454,6 +470,17 @@ export const config = {
     askAiApiKey: envVars.ASK_AI_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
     imageGenerationEndpoint: envVars.IMAGE_GENERATION_ENDPOINT,
     imageGenerationModel: envVars.IMAGE_GENERATION_MODEL,
+  },
+  dashboard: {
+    aiRequestTimeoutMs: envVars.DASHBOARD_AI_REQUEST_TIMEOUT_MS,
+    aiSsePingIntervalMs: envVars.DASHBOARD_AI_SSE_PING_INTERVAL_MS,
+    aiTemperature: envVars.DASHBOARD_AI_TEMPERATURE,
+    aiTopValuesInlineLimit: envVars.DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT,
+    queryCacheTtlSec: envVars.DASHBOARD_QUERY_CACHE_TTL_SEC,
+    queryCacheMaxValueBytes: envVars.DASHBOARD_QUERY_CACHE_MAX_VALUE_BYTES,
+    pgStatementTimeoutMs: envVars.DASHBOARD_PG_STATEMENT_TIMEOUT_MS,
+    pgConnectionTimeoutMs: envVars.DASHBOARD_PG_CONNECTION_TIMEOUT_MS,
+    chRequestTimeoutMs: envVars.DASHBOARD_CH_REQUEST_TIMEOUT_MS,
   },
   productInsights: {
     recluster: {
@@ -632,4 +659,14 @@ export const config = {
     healthCacheTtlMs: envVars.DOCLING_HEALTH_CACHE_TTL_MS as number,
     doOcr: envVars.DOCLING_DO_OCR as boolean,
   },
+  redis: {
+    host: envVars.REDIS_HOST as string,
+    port: envVars.REDIS_PORT as number,
+    password: envVars.REDIS_PASSWORD as string,
+    tls: envVars.REDIS_TLS as boolean,
+  },
+  dataSource: {
+    ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
+  },
+  DASHBOARD_AI_MODEL: envVars.DASHBOARD_AI_MODEL as string,
 };

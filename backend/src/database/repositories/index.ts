@@ -58,6 +58,11 @@ export { ScheduledCallRepository } from './scheduledCallRepository';
 export { WorkspaceRepository } from './workspaces';
 export { CallMessageRepository } from './callMessageRepository';
 export { OrgMemberRepository } from './orgMember';
+export { DataSourceRepository } from './dataSources';
+export { DataSourceTableRepository } from './dataSourceTables';
+export { DataSourceColumnRepository } from './dataSourceColumns';
+export { DataSourceRelationshipRepository } from './dataSourceRelationships';
+export { DashboardActivityRepository } from './dashboardActivity';
 
 // Import statements for the container
 import { AgentRepository } from './agents';
@@ -108,6 +113,11 @@ import { ScheduledCallRepository } from './scheduledCallRepository';
 import { WorkspaceRepository } from './workspaces';
 import { CallMessageRepository } from './callMessageRepository';
 import { OrgMemberRepository } from './orgMember';
+import { DataSourceRepository } from './dataSources';
+import { DataSourceTableRepository } from './dataSourceTables';
+import { DataSourceColumnRepository } from './dataSourceColumns';
+import { DataSourceRelationshipRepository } from './dataSourceRelationships';
+import { DashboardActivityRepository } from './dashboardActivity';
 
 // Repository container for dependency injection
 export class RepositoryContainer {
@@ -158,6 +168,11 @@ export class RepositoryContainer {
   public workspaces: WorkspaceRepository;
   public callMessages: CallMessageRepository;
   public orgMembers: OrgMemberRepository;
+  public dataSources: DataSourceRepository;
+  public dataSourceTables: DataSourceTableRepository;
+  public dataSourceColumns: DataSourceColumnRepository;
+  public dataSourceRelationships: DataSourceRelationshipRepository;
+  public dashboardActivity: DashboardActivityRepository;
 
   private constructor() {
     this.agents = new AgentRepository();
@@ -205,6 +220,11 @@ export class RepositoryContainer {
     this.workspaces = new WorkspaceRepository();
     this.callMessages = new CallMessageRepository();
     this.orgMembers = new OrgMemberRepository();
+    this.dataSources = new DataSourceRepository();
+    this.dataSourceTables = new DataSourceTableRepository();
+    this.dataSourceColumns = new DataSourceColumnRepository();
+    this.dataSourceRelationships = new DataSourceRelationshipRepository();
+    this.dashboardActivity = new DashboardActivityRepository();
   }
 
   static getInstance(): RepositoryContainer {

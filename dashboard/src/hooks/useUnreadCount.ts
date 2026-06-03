@@ -18,7 +18,7 @@ export const useAllUnreadCount = (): UnreadCounts => {
 
     // Build DM channel set from visible channels
     const dmChannelIds = new Set<string>();
-    for (const channel of visibleChannels) {
+    for (const channel of visibleChannels ?? []) {
       if (
         channel.scopeType === ChannelScopeType.DM ||
         channel.scopeType === ChannelScopeType.GROUP_DM
@@ -29,7 +29,7 @@ export const useAllUnreadCount = (): UnreadCounts => {
 
     // For non-DM channels: derive count from unread activities grouped by channelId
     // Thread activities are excluded — only channel-level activities count for channel badges
-    for (const activity of unreadActivities) {
+    for (const activity of unreadActivities ?? []) {
       if (!activity.channelId) continue;
       if (dmChannelIds.has(activity.channelId)) continue;
       if (activity.isThreadActivity === true) continue;

@@ -67,6 +67,9 @@ import {
   getCanvasFolderNameConflictMessage,
   rethrowCanvasFolderNameConflict,
   resolveCanvasHierarchy,
+  DashboardVisibility,
+  DashboardRole,
+  parseDashboardConfig,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
@@ -4321,7 +4324,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
                   // Update ConversationParticipant.lastReadAt to track when user last read this thread
-          let participant = await tx.run(
+          const participant = await tx.run(
             zql.conversation_participants
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
@@ -4400,7 +4403,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       markMissedCallsAsRead: defineMutator(
         z.object({}),
         async ({ tx, ctx, }) => {
-          let query = zql.activities
+          const query = zql.activities
             .where('userId', ctx.userID)
             .where('actorAction', 'missed_call')
             .where('isRead', false);
@@ -8535,11 +8538,277 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           await tx.mutate.dashboards.upsert({
             id: id,
+            workspaceId: existingDashboard?.workspaceId ?? authData.workspaceId,
             name: name.trim(),
             description: description?.trim(),
             createdBy: existingDashboard?.createdBy ?? createdBy,
+            visibility: existingDashboard?.visibility ?? DashboardVisibility.PRIVATE,
+            config: existingDashboard?.config ?? '{}',
             updatedAt: now,
             createdAt: existingDashboard?.createdAt ?? now,
+          });
+        },
+      ),
+      upsertV2: defineMutator(
+        z.object({
+          id: z.string(),
+          workspaceId: z.string().optional(),
+          name: z.string(),
+          description: z.string().optional(),
+          createdBy: z.string(),
+          visibility: z.nativeEnum(DashboardVisibility).optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, workspaceId, name, description, createdBy, visibility, timestamp } }) => {
+          const now = timestamp;
+
+          const existingDashboard = await tx.run(zql.dashboards.where('id', id).one())
+          const resolvedWorkspaceId = existingDashboard?.workspaceId ?? workspaceId ?? authData.workspaceId;
+
+          const trimmedName = name.trim();
+          if (!existingDashboard || trimmedName !== existingDashboard.name) {
+            const clash = await tx.run(
+              zql.dashboards
+                .where('workspaceId', resolvedWorkspaceId)
+                .where('name', trimmedName)
+                .one(),
+            );
+            if (clash && clash.id !== id) {
+              throw new Error(
+                `A dashboard named "${trimmedName}" already exists in this workspace.`,
+              );
+            }
+          }
+
+          await tx.mutate.dashboards.upsert({
+            id: id,
+            workspaceId: resolvedWorkspaceId,
+            name: trimmedName,
+            description: description?.trim(),
+            createdBy: existingDashboard?.createdBy ?? createdBy,
+            visibility: existingDashboard?.visibility ?? visibility ?? DashboardVisibility.PRIVATE,
+            config: existingDashboard?.config ?? '{}',
+            updatedAt: now,
+            createdAt: existingDashboard?.createdAt ?? now,
+          });
+        },
+      ),
+      // Canvas-mirror create. Inserts the dashboard row AND the OWNER
+      // participant row in the same Zero transaction.
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          workspaceId: z.string(),
+          name: z.string(),
+          description: z.string().optional(),
+          visibility: z.nativeEnum(DashboardVisibility).optional(),
+          timestamp: z.number(),
+          participantId: z.string(),
+        }),
+        async ({
+          tx,
+          ctx,
+          args: {
+            id,
+            workspaceId,
+            name,
+            description,
+            visibility,
+            timestamp,
+            participantId,
+          },
+        }) => {
+          const now = timestamp;
+          const trimmedName = name.trim();
+
+          const clash = await tx.run(
+            zql.dashboards.where('workspaceId', workspaceId).where('name', trimmedName).one(),
+          );
+          if (clash) {
+            throw new Error(
+              `A dashboard named "${trimmedName}" already exists in this workspace.`,
+            );
+          }
+
+          await tx.mutate.dashboards.insert({
+            id,
+            workspaceId,
+            name: trimmedName,
+            description: description?.trim(),
+            createdBy: ctx.userID,
+            visibility: visibility || DashboardVisibility.PRIVATE,
+            config: '{}',
+            createdAt: now,
+            updatedAt: now,
+          });
+          await tx.mutate.dashboard_participants.insert({
+            id: participantId,
+            dashboardId: id,
+            userId: ctx.userID,
+            role: DashboardRole.OWNER,
+            joinedAt: now,
+            updatedAt: now,
+          });
+        },
+      ),
+      // dashboard + participant + all components inserted in one tx.
+      createWithComponents: defineMutator(
+        z.object({
+          id: z.string(),
+          workspaceId: z.string(),
+          name: z.string(),
+          description: z.string().optional(),
+          visibility: z.nativeEnum(DashboardVisibility).optional(),
+          timestamp: z.number(),
+          participantId: z.string(),
+          components: z.array(
+            z.object({
+              id: z.string(),
+              visualType: z.nativeEnum(QueryVisualizationType),
+              title: z.string().optional(),
+              queryJson: z.any(),
+              position: z.string(),
+              config: z.string().optional(),
+              mappingId: z.string(),
+            }),
+          ),
+        }),
+        async ({
+          tx,
+          ctx,
+          args: {
+            id,
+            workspaceId,
+            name,
+            description,
+            visibility,
+            timestamp,
+            participantId,
+            components,
+          },
+        }) => {
+          const now = timestamp;
+          const trimmedName = name.trim();
+
+          const clash = await tx.run(
+            zql.dashboards.where('workspaceId', workspaceId).where('name', trimmedName).one(),
+          );
+          if (clash) {
+            throw new Error(
+              `A dashboard named "${trimmedName}" already exists in this workspace.`,
+            );
+          }
+
+          await tx.mutate.dashboards.insert({
+            id,
+            workspaceId,
+            name: trimmedName,
+            description: description?.trim(),
+            createdBy: ctx.userID,
+            visibility: visibility || DashboardVisibility.PRIVATE,
+            config: '{}',
+            createdAt: now,
+            updatedAt: now,
+          });
+          await tx.mutate.dashboard_participants.insert({
+            id: participantId,
+            dashboardId: id,
+            userId: ctx.userID,
+            role: DashboardRole.OWNER,
+            joinedAt: now,
+            updatedAt: now,
+          });
+          for (let i = 0; i < components.length; i++) {
+            const c = components[i]!;
+            await tx.mutate.queries.insert({
+              id: c.id,
+              title: c.title ?? null,
+              queryType: 'external',
+              queryJson: c.queryJson as ReadonlyJSONValue,
+              entityType: null,
+              targetEntity: null,
+              visualType: c.visualType,
+              position: c.position,
+              config: c.config ?? '{}',
+              createdBy: ctx.userID,
+              createdAt: now,
+              updatedAt: now,
+            });
+            await tx.mutate.dashboard_queries_mapping.insert({
+              id: c.mappingId,
+              dashboardId: id,
+              queryId: c.id,
+              sequence: i,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(500).optional(),
+          visibility: z.nativeEnum(DashboardVisibility).optional(),
+          config: z.string().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { id, name, description, visibility, config, timestamp } }) => {
+          const dashboard = await tx.run(zql.dashboards.where('id', id).one());
+          if (!dashboard) {
+            throw new Error('Dashboard not found');
+          }
+          const participant = await tx.run(
+            zql.dashboard_participants
+              .where('dashboardId', id)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          const isOwner =
+            dashboard.createdBy === ctx.userID ||
+            (participant && participant.role === DashboardRole.OWNER);
+          const isEditor = participant && participant.role === DashboardRole.EDITOR;
+          if (!isOwner && !isEditor) {
+            throw new Error('You do not have permission to edit this dashboard');
+          }
+          if (!isOwner && (name !== undefined || visibility !== undefined)) {
+            throw new Error('Only dashboard owners can rename or change visibility');
+          }
+
+          // Pre-check the (workspaceId, name) unique constraint so we can
+          // surface a friendly message instead of the raw Postgres
+          // "duplicate key value violates unique constraint
+          // dashboards_workspaceId_name_key" string. There is still a tiny
+          // race between this read and the write; the DB constraint is the
+          // backstop.
+          if (name !== undefined) {
+            const trimmedName = name.trim();
+            if (trimmedName !== dashboard.name) {
+              const clash = await tx.run(
+                zql.dashboards
+                  .where('workspaceId', dashboard.workspaceId)
+                  .where('name', trimmedName)
+                  .one(),
+              );
+              if (clash && clash.id !== id) {
+                throw new Error(
+                  `A dashboard named "${trimmedName}" already exists in this workspace.`,
+                );
+              }
+            }
+          }
+
+          if (config !== undefined) {
+            parseDashboardConfig(config);
+          }
+          await tx.mutate.dashboards.update({
+            id,
+            updatedAt: timestamp,
+            ...(name !== undefined && { name: name.trim() }),
+            ...(description !== undefined && { description: description?.trim() }),
+            ...(visibility !== undefined && { visibility }),
+            ...(config !== undefined && { config }),
           });
         },
       ),
@@ -8554,6 +8823,282 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.queries.delete({ id: mapping.queryId });
           }
           await tx.mutate.dashboards.delete({ id });
+        },
+      ),
+      deleteV2: defineMutator(
+        z.object({ id: z.string() }),
+        async ({ tx, ctx, args: { id } }) => {
+          const dashboard = await tx.run(zql.dashboards.where('id', id).one());
+          if (!dashboard) {
+            throw new Error('Dashboard not found');
+          }
+          const requestingParticipant = await tx.run(
+            zql.dashboard_participants
+              .where('dashboardId', id)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          const isOwner =
+            dashboard.createdBy === ctx.userID ||
+            (requestingParticipant && requestingParticipant.role === DashboardRole.OWNER);
+          if (!isOwner) {
+            throw new Error('Only dashboard owners can delete the dashboard');
+          }
+          // App-side cascade (relationMode = "prisma" — no DB FKs).
+          // App-side cascade: delete every mapped query (both internal
+          // QueryBuilder saved queries AND external dashboard tiles live in
+          // `queries` and link via dashboard_queries_mapping) plus the mappings.
+          const mappings = await tx.run(zql.dashboard_queries_mapping.where('dashboardId', id));
+          for (const mapping of mappings) {
+            await tx.mutate.dashboard_queries_mapping.delete({ id: mapping.id });
+            await tx.mutate.queries.delete({ id: mapping.queryId });
+          }
+          const participants = await tx.run(zql.dashboard_participants.where('dashboardId', id));
+          for (const participant of participants) {
+            await tx.mutate.dashboard_participants.delete({ id: participant.id });
+          }
+          await tx.mutate.dashboards.delete({ id });
+        },
+      ),
+      addParticipants: defineMutator(
+        z.object({
+          dashboardId: z.string(),
+          participants: z.array(z.object({
+            userId: z.string(),
+            participantId: z.string(),
+            role: z.nativeEnum(DashboardRole),
+          })),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { dashboardId, participants, timestamp } }) => {
+          const dashboard = await tx.run(zql.dashboards.where('id', dashboardId).one());
+          if (!dashboard) {
+            throw new Error("Dashboard doesn't exist");
+          }
+          const requestingUserParticipant = await tx.run(
+            zql.dashboard_participants
+              .where('dashboardId', dashboardId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          const isOwner =
+            dashboard.createdBy === ctx.userID ||
+            (requestingUserParticipant && requestingUserParticipant.role === DashboardRole.OWNER);
+          const isEditor =
+            requestingUserParticipant && requestingUserParticipant.role === DashboardRole.EDITOR;
+          if (!isOwner && !isEditor) {
+            throw new Error('Only dashboard owners or editors can add participants');
+          }
+          if (isEditor && participants.some(p => p.role === DashboardRole.OWNER)) {
+            throw new Error('Editors cannot grant owner role');
+          }
+
+          const now = timestamp;
+          for (const p of participants) {
+            const user = await tx.run(zql.users.where('id', p.userId).one());
+            if (!user) {
+              continue;
+            }
+            const existingParticipant = await tx.run(
+              zql.dashboard_participants
+                .where('dashboardId', dashboardId)
+                .where('userId', p.userId)
+                .one(),
+            );
+            if (existingParticipant) {
+              continue;
+            }
+            await tx.mutate.dashboard_participants.insert({
+              id: p.participantId,
+              dashboardId,
+              userId: p.userId,
+              role: p.role,
+              joinedAt: now,
+              updatedAt: now,
+            });
+          }
+        },
+      ),
+      removeParticipant: defineMutator(
+        z.object({ dashboardId: z.string(), userId: z.string() }),
+        async ({ tx, ctx, args: { dashboardId, userId } }) => {
+          const dashboard = await tx.run(zql.dashboards.where('id', dashboardId).one());
+          if (!dashboard) {
+            throw new Error("Dashboard doesn't exist");
+          }
+          const requestingUserParticipant = await tx.run(
+            zql.dashboard_participants
+              .where('dashboardId', dashboardId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          const isOwner =
+            dashboard.createdBy === ctx.userID ||
+            (requestingUserParticipant && requestingUserParticipant.role === DashboardRole.OWNER);
+          const isEditor =
+            requestingUserParticipant && requestingUserParticipant.role === DashboardRole.EDITOR;
+          if (!isOwner && !isEditor) {
+            throw new Error('Only dashboard owners or editors can remove participants');
+          }
+          const targetParticipant = await tx.run(
+            zql.dashboard_participants
+              .where('dashboardId', dashboardId)
+              .where('userId', userId)
+              .one(),
+          );
+          if (!targetParticipant) {
+            throw new Error('User is not a participant');
+          }
+          if (userId === ctx.userID && dashboard.createdBy === ctx.userID) {
+            throw new Error('Dashboard creator cannot be removed');
+          }
+          if (isEditor && targetParticipant.role === DashboardRole.OWNER) {
+            throw new Error('Editors cannot remove owners');
+          }
+          await tx.mutate.dashboard_participants.delete({ id: targetParticipant.id });
+        },
+      ),
+      updateParticipantRole: defineMutator(
+        z.object({
+          dashboardId: z.string(),
+          userId: z.string(),
+          role: z.nativeEnum(DashboardRole),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { dashboardId, userId, role, timestamp } }) => {
+          const dashboard = await tx.run(zql.dashboards.where('id', dashboardId).one());
+          if (!dashboard) {
+            throw new Error("Dashboard doesn't exist");
+          }
+          const requestingUserParticipant = await tx.run(
+            zql.dashboard_participants
+              .where('dashboardId', dashboardId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          const isOwner =
+            dashboard.createdBy === ctx.userID ||
+            (requestingUserParticipant && requestingUserParticipant.role === DashboardRole.OWNER);
+          const isEditor =
+            requestingUserParticipant && requestingUserParticipant.role === DashboardRole.EDITOR;
+          if (!isOwner && !isEditor) {
+            throw new Error('Only dashboard owners or editors can update participant roles');
+          }
+          const targetParticipant = await tx.run(
+            zql.dashboard_participants
+              .where('dashboardId', dashboardId)
+              .where('userId', userId)
+              .one(),
+          );
+          if (!targetParticipant) {
+            throw new Error('User is not a participant');
+          }
+          if (isEditor && role === DashboardRole.OWNER) {
+            throw new Error('Editors cannot grant owner role');
+          }
+          if (isEditor && targetParticipant.role === DashboardRole.OWNER) {
+            throw new Error('Editors cannot modify owner roles');
+          }
+          if (userId === dashboard.createdBy) {
+            throw new Error("Cannot change dashboard creator's role");
+          }
+          await tx.mutate.dashboard_participants.update({
+            id: targetParticipant.id,
+            role,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+    },
+    // Dashboard tiles unified into `queries` (queryType='external'), linked to
+    // a dashboard one-to-many via dashboard_queries_mapping.
+    dashboardComponent: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          dashboardId: z.string(),
+          visualType: z.nativeEnum(QueryVisualizationType),
+          title: z.string().optional(),
+          queryJson: z.any(),
+          position: z.string(),
+          config: z.string().optional(),
+          createdBy: z.string(),
+          mappingId: z.string(),
+          sequence: z.number().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, dashboardId, visualType, title, queryJson, position, config, createdBy, mappingId, sequence, timestamp } }) => {
+          const now = timestamp;
+          await tx.mutate.queries.insert({
+            id,
+            title: title ?? null,
+            queryType: 'external',
+            queryJson: queryJson as ReadonlyJSONValue,
+            entityType: null,
+            targetEntity: null,
+            visualType,
+            position,
+            config: config ?? '{}',
+            createdBy,
+            createdAt: now,
+            updatedAt: now,
+          });
+          await tx.mutate.dashboard_queries_mapping.insert({
+            id: mappingId,
+            dashboardId,
+            queryId: id,
+            sequence: sequence ?? 0,
+            createdAt: now,
+            updatedAt: now,
+          });
+        },
+      ),
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          visualType: z.nativeEnum(QueryVisualizationType).optional(),
+          title: z.string().optional(),
+          queryJson: z.any().optional(),
+          position: z.string().optional(),
+          config: z.string().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, visualType, title, queryJson, position, config, timestamp } }) => {
+          await tx.mutate.queries.update({
+            id,
+            updatedAt: timestamp,
+            ...(visualType !== undefined && { visualType }),
+            ...(title !== undefined && { title }),
+            ...(queryJson !== undefined && { queryJson: queryJson as ReadonlyJSONValue }),
+            ...(position !== undefined && { position }),
+            ...(config !== undefined && { config }),
+          });
+        },
+      ),
+      // batched position update from drag/resize.
+      updatePositions: defineMutator(
+        z.object({
+          updates: z.array(z.object({ id: z.string(), position: z.string() })),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { updates, timestamp } }) => {
+          for (const u of updates) {
+            await tx.mutate.queries.update({
+              id: u.id,
+              position: u.position,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      delete: defineMutator(
+        z.object({ id: z.string() }),
+        async ({ tx, args: { id } }) => {
+          const mappings = await tx.run(zql.dashboard_queries_mapping.where('queryId', id));
+          for (const m of mappings) {
+            await tx.mutate.dashboard_queries_mapping.delete({ id: m.id });
+          }
+          await tx.mutate.queries.delete({ id });
         },
       ),
     },
@@ -8968,10 +9513,75 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.queries.upsert({
             id: id,
             title: title.trim(),
+            queryType: existingQuery?.queryType ?? 'internal',
             queryJson,
             entityType: entityType ?? null,
             targetEntity: targetEntity ?? null,
             visualType: visualType ? (visualType as QueryVisualizationType) : null,
+            position: existingQuery?.position ?? '{}',
+            config: existingQuery?.config ?? '{}',
+            createdBy: existingQuery?.createdBy ?? createdBy,
+            updatedAt: now,
+            createdAt: existingQuery?.createdAt ?? now,
+          });
+
+          // If dashboardId is provided, create the mapping
+          if (dashboardId) {
+            // Check for duplicate mapping
+            const duplicate = await tx.run(
+              zql.dashboard_queries_mapping
+                .where('dashboardId', dashboardId)
+                .where('queryId', id)
+                .one(),
+            );
+            if (!duplicate) {
+              const newMappingId = mappingId;
+              if (!newMappingId) {
+                throw new Error('mappingId is required when creating a new dashboard query mapping');
+              }
+              const existingMappings = await tx.run(
+                zql.dashboard_queries_mapping.where('dashboardId', dashboardId),
+              );
+              await tx.mutate.dashboard_queries_mapping.insert({
+                id: newMappingId,
+                dashboardId,
+                queryId: id,
+                sequence: existingMappings.length,
+                createdAt: now,
+                updatedAt: now,
+              });
+            }
+          }
+        },
+      ),
+      upsertV2: defineMutator(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          queryJson: z.any(),
+          entityType: z.nativeEnum(FormEntityType).optional(),
+          targetEntity: z.string().optional(),
+          visualType: z.string().optional(),
+          dashboardId: z.string().optional(),
+          createdBy: z.string(),
+          timestamp: z.number(),
+          mappingId: z.string().optional(),
+        }),
+        async ({ tx, args: { id, title, queryJson, entityType, targetEntity, visualType, dashboardId, createdBy, timestamp, mappingId } }) => {
+          const now = timestamp;
+
+          const existingQuery = await tx.run(zql.queries.where('id', id).one())
+
+          await tx.mutate.queries.upsert({
+            id: id,
+            title: title.trim(),
+            queryType: 'internal',
+            queryJson,
+            entityType: entityType ?? null,
+            targetEntity: targetEntity ?? null,
+            visualType: visualType ? (visualType as QueryVisualizationType) : null,
+            position: existingQuery?.position ?? '{}',
+            config: existingQuery?.config ?? '{}',
             createdBy: existingQuery?.createdBy ?? createdBy,
             updatedAt: now,
             createdAt: existingQuery?.createdAt ?? now,
@@ -9007,6 +9617,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       delete: defineMutator(
+        z.object({
+          id: z.string(),
+        }),
+        async ({ tx, args: { id } }) => {
+          const mappings = await tx.run(zql.dashboard_queries_mapping.where('queryId', id));
+          for (const mapping of mappings) {
+            await tx.mutate.dashboard_queries_mapping.delete({ id: mapping.id });
+          }
+          await tx.mutate.queries.delete({ id });
+        },
+      ),
+      deleteV2: defineMutator(
         z.object({
           id: z.string(),
         }),

@@ -1,41 +1,41 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ChevronLeft, Save, Plus, X, BarChart3 } from 'lucide-react';
-import { EntityMultiSelector } from '../ui/EntitySelector/EntityMultiSelector';
-import { EntitySelector } from '../ui/EntitySelector/EntitySelector';
+import { ArrowLeft, BarChart3, ChevronLeft, Plus, Save, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { useZero } from '../../hooks/useZero';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
-import { mutators } from '../../zero/mutators';
-import { apiInstance } from '../../services/clients/apiClient';
-import { Button } from '../ui/Button';
 import { useAuth } from '../../hooks/useAuth';
-import Input from '../ui/Input/Input';
-import QueryResults, { type DashboardWithQueries } from './QueryResults';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useZero } from '../../hooks/useZero';
 import {
   buildFieldsConfig,
   FieldConfig,
+  filterGroupToLogicalFilter,
   LogicalFilter,
   logicalFilterToFilterGroup,
-  filterGroupToLogicalFilter,
 } from '../../routes/QueryBuilderScreen/QueryBuilderScreen.utils';
-import {
-  VisualizationSelector,
-  getVisualizationConstraints,
-} from '../QueryBuilderComponents/VisualizationSelector';
-import { QueryVisualizationType } from '../QueryVisualizations/types';
-import { FilterRuleBuilder } from '../QueryBuilderComponents/FilterRuleBuilder';
+import { apiInstance } from '../../services/clients/apiClient';
 import type { FilterGroup } from '../../utils/queryBuilder';
-import { QueryVisualization } from '../QueryVisualizations/QueryVisualization';
-import { getPieChartPreview } from '../QueryVisualizations/PieChart';
-import { getDonutChartPreview } from '../QueryVisualizations/DonutChart';
+import { mutators } from '../../zero/mutators';
+import { queries } from '../../zero/queries';
+import { FilterRuleBuilder } from '../QueryBuilderComponents/FilterRuleBuilder';
+import {
+  getVisualizationConstraints,
+  VisualizationSelector,
+} from '../QueryBuilderComponents/VisualizationSelector';
 import { getBarChartPreview } from '../QueryVisualizations/BarChart';
-import { getLineChartPreview } from '../QueryVisualizations/LineChart';
+import { getDataTablePreview } from '../QueryVisualizations/DataTable';
+import { getDonutChartPreview } from '../QueryVisualizations/DonutChart';
 import { getFunnelPreview } from '../QueryVisualizations/Funnel';
 import { getHeatmapPreview } from '../QueryVisualizations/Heatmap';
 import { getKPIPreview } from '../QueryVisualizations/KPICard';
-import { getDataTablePreview } from '../QueryVisualizations/DataTable';
+import { getLineChartPreview } from '../QueryVisualizations/LineChart';
+import { getPieChartPreview } from '../QueryVisualizations/PieChart';
+import { QueryVisualization } from '../QueryVisualizations/QueryVisualization';
+import { QueryVisualizationType } from '../QueryVisualizations/types';
+import { Button } from '../ui/Button';
+import { EntityMultiSelector } from '../ui/EntitySelector/EntityMultiSelector';
+import { EntitySelector } from '../ui/EntitySelector/EntitySelector';
+import Input from '../ui/Input/Input';
+import QueryResults, { type DashboardWithQueries } from './QueryResults';
 
 interface FieldInfo {
   name: string;
@@ -83,7 +83,7 @@ export const QueryDashboardScreen: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const [currentDashboard] = useCachedQuery(
-    queries.getDashboardById({ dashboardId: dashboardId || '' }),
+    queries.getDashboardByIdV2({ dashboardId: dashboardId || '' }),
     { enabled: !!dashboardId },
   );
 

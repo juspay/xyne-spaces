@@ -87,6 +87,21 @@ interface BrowserContext {
   timestamp: number;
 }
 
+// Module-level stable empty arrays. Used as destructure defaults below so
+// callers that omit these optional list props don't get a freshly allocated
+// `[]` each render — that would change the prop's identity every render
+// and cause useEffect deps like `[selectionInfos]` / `[nonDMChannels, …]`
+// to fire on every render, blowing up downstream consumers with infinite
+// setState→render loops.
+const EMPTY_SELECTION_INFOS: SelectionInfo[] = [];
+const EMPTY_CHANNELS: SelectedChannel[] = [];
+const EMPTY_NON_DM_CHANNELS: VisibleChannel[] = [];
+const EMPTY_TICKETS: SelectedTicket[] = [];
+const EMPTY_CANVASES: SelectedCanvas[] = [];
+const EMPTY_TRANSCRIPTS: SelectedTranscript[] = [];
+const EMPTY_RECORDINGS: SelectedRecording[] = [];
+const EMPTY_ACTIVITIES: UserActivity[] = [];
+
 export interface XyneAIInputBoxProps {
   channelId?: string | null;
   channelName?: string;
@@ -163,7 +178,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       scopeType: _scopeType,
       threadInfo,
       canvasInfo,
-      selectionInfos = [],
+      selectionInfos = EMPTY_SELECTION_INFOS,
       inputValue,
       onInputChange,
       onSubmit,
@@ -172,22 +187,22 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onSelectionInfosChange,
       onAttachmentsChange,
       onBrowserContextChange,
-      selectedChannels = [],
+      selectedChannels = EMPTY_CHANNELS,
       onRemoveChannel,
       onAddChannel,
-      nonDMChannels = [],
+      nonDMChannels = EMPTY_NON_DM_CHANNELS,
       onOpenContextModal,
       onCloseContextModal,
       isContextModalOpen = false,
-      selectedTickets = [],
+      selectedTickets = EMPTY_TICKETS,
       onRemoveTicket,
-      selectedCanvases = [],
+      selectedCanvases = EMPTY_CANVASES,
       onRemoveCanvas,
-      selectedTranscripts = [],
+      selectedTranscripts = EMPTY_TRANSCRIPTS,
       onRemoveTranscript,
-      selectedRecordings = [],
+      selectedRecordings = EMPTY_RECORDINGS,
       onRemoveRecording,
-      selectedActivities = [],
+      selectedActivities = EMPTY_ACTIVITIES,
       onActivitiesChange,
       isStreaming = false,
       onAbort,

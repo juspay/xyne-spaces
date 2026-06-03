@@ -74,11 +74,17 @@ export enum TicketReferenceRelation {
   LINKED = "LINKED",
   DUPLICATE_CONFIRMED = "DUPLICATE_CONFIRMED",
   DUPLICATE_POSSIBLE = "DUPLICATE_POSSIBLE",
+  MERGED_INTO = "MERGED_INTO",
 }
 
 export enum EmailMergeMode {
   DISABLED = "DISABLED",
   ENABLED = "ENABLED",
+}
+
+export enum DeskType {
+  EMAIL = "EMAIL",
+  DL = "DL",
 }
 
 export enum UserResponsibility {
@@ -104,6 +110,9 @@ export enum QueryVisualizationType {
   FUNNEL = "FUNNEL",
   HEATMAP = "HEATMAP",
   DATA_TABLE = "DATA_TABLE",
+  AREA_CHART = "AREA_CHART",
+  KPI_COMPARE = "KPI_COMPARE",
+  SCATTER_CHART = "SCATTER_CHART",
 }
 
 export enum EntityType {
@@ -121,6 +130,7 @@ export enum ActivityType {
   DESCRIPTION = "DESCRIPTION",
   STATUS = "STATUS",
   ASSIGNED_TO = "ASSIGNED_TO",
+  TICKET_TYPE = "TICKET_TYPE",
   PRIORITY = "PRIORITY",
   ETA = "ETA",
   STAGE_ETA = "STAGE_ETA",
@@ -141,6 +151,8 @@ export enum ActivityType {
   STAGE_CHANGE_APPROVED = "STAGE_CHANGE_APPROVED",
   STAGE_CHANGE_REJECTED = "STAGE_CHANGE_REJECTED",
   IS_ARCHIVED = "IS_ARCHIVED",
+  MERGED = "MERGED",
+  UNMERGED = "UNMERGED",
 }
 
 export enum AttachmentEntityType {
@@ -261,6 +273,7 @@ export enum MeetingStatus {
   ACCEPTED = "ACCEPTED",
   DECLINED = "DECLINED",
   MAYBE = "MAYBE",
+  HIDDEN = "HIDDEN",
 }
 
 export enum RecurringCallSeriesStatus {
@@ -480,6 +493,7 @@ export enum NotificationType {
   CALL_UPDATED = "CALL_UPDATED",
   EMAIL_FETCH_COMPLETED = "EMAIL_FETCH_COMPLETED",
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
+  CANVAS_SHARED = "CANVAS_SHARED",
 }
 
 export enum NotificationStatus {
@@ -690,6 +704,22 @@ export enum DelayedMessageStatus {
   SENT = "SENT",
   FAILED = "FAILED",
   CANCELLED = "CANCELLED",
+}
+
+export enum DashboardVisibility {
+  PUBLIC = "PUBLIC",
+  PRIVATE = "PRIVATE",
+}
+
+export enum DashboardRole {
+  OWNER = "OWNER",
+  EDITOR = "EDITOR",
+  VIEWER = "VIEWER",
+}
+
+export enum QueryType {
+  internal = "internal",
+  external = "external",
 }
 
 // Define tables
@@ -1115,6 +1145,7 @@ export const userPreferenceTable = table("user_preferences")
     askai_custom_instruction: string().optional(),
     channelSortOrder: enumeration<ChannelSortOrder>(),
     enterSendsMessage: boolean(),
+    allowThreadBroadcastMentions: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1654,6 +1685,7 @@ export const emailTable = table("emails")
     from: string(),
     cc: json<string[]>(),
     bcc: json<string[]>(),
+    replyTo: json<string[]>(),
     conversationId: string(),
     channelId: string(),
     externalThreadId: string(),
@@ -1717,6 +1749,9 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     priorityClassificationPrompt: string().optional(),
     priorityClassificationThreshold: number(),
     autoDraftMode: enumeration<AutoDraftMode>(),
+    deskType: enumeration<DeskType>(),
+    dlEmail: string().optional(),
+    workspaceId: string().optional(),
   })
   .primaryKey("channelId");
 
@@ -1854,6 +1889,7 @@ export const activityTable = table("activities")
     classificationConfidence: number().optional(),
     classificationJobType: enumeration<ActivityClassificationJobType>().optional(),
     isRead: boolean(),
+    isThreadActivity: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
     conversationSeenCutoffAt: number().optional(),
@@ -1867,6 +1903,7 @@ export const externalSourceTable = table("external_sources")
     sourceType: string(),
     displayName: string(),
     channelId: string().optional(),
+    workspaceId: string().optional(),
     boardId: string().optional(),
     ownerUserId: string().optional(),
     credentials: string(),
@@ -2249,42 +2286,6 @@ export const formEntityValuesTable = table("form_entity_values")
   })
   .primaryKey("id");
 
-export const dashboardTable = table("dashboards")
-  .columns({
-    id: string(),
-    name: string(),
-    description: string().optional(),
-    createdBy: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
-export const queryTable = table("queries")
-  .columns({
-    id: string(),
-    title: string(),
-    queryJson: json(),
-    entityType: enumeration<FormEntityType>().optional(),
-    targetEntity: string().optional(),
-    visualType: enumeration<QueryVisualizationType>().optional(),
-    createdBy: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
-export const dashboardQueryMappingTable = table("dashboard_queries_mapping")
-  .columns({
-    id: string(),
-    dashboardId: string(),
-    queryId: string(),
-    sequence: number(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
 export const merchantTable = table("merchants")
   .columns({
     id: string(),
@@ -2627,6 +2628,131 @@ export const delayedMessageTable = table("delayed_messages")
     status: enumeration<DelayedMessageStatus>(),
     failureReason: string().optional(),
     sentAt: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dataSourceTable = table("data_sources")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    name: string(),
+    description: string().optional(),
+    sourceType: string(),
+    credentials: string(),
+    healthStatus: string(),
+    ingestionStatus: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dataSourceTableTable = table("data_source_tables")
+  .columns({
+    id: string(),
+    dataSourceId: string(),
+    schemaName: string(),
+    tableName: string(),
+    rowCountEstimate: number().optional(),
+    description: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dataSourceColumnTable = table("data_source_columns")
+  .columns({
+    id: string(),
+    tableId: string(),
+    columnName: string(),
+    pkPosition: number().optional(),
+    dataTypeNative: string(),
+    dataTypeCanonical: string(),
+    cardinality: string().optional(),
+    isNullable: boolean(),
+    isPrimaryKey: boolean(),
+    description: string().optional(),
+    displayUnit: string().optional(),
+    summary: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dataSourceRelationshipTable = table("data_source_relationships")
+  .columns({
+    id: string(),
+    dataSourceId: string(),
+    fromColumnId: string(),
+    toColumnId: string(),
+    cardinality: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dashboardTable = table("dashboards")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    name: string(),
+    description: string().optional(),
+    createdBy: string(),
+    visibility: enumeration<DashboardVisibility>(),
+    config: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dashboardParticipantTable = table("dashboard_participants")
+  .columns({
+    id: string(),
+    dashboardId: string(),
+    userId: string(),
+    role: enumeration<DashboardRole>(),
+    joinedAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dashboardActivityTable = table("dashboard_activity")
+  .columns({
+    id: string(),
+    entityType: string(),
+    entityId: string(),
+    eventType: string(),
+    actorUserId: string().optional(),
+    details: string().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const queryTable = table("queries")
+  .columns({
+    id: string(),
+    title: string().optional(),
+    queryType: enumeration<QueryType>(),
+    queryJson: json(),
+    entityType: enumeration<FormEntityType>().optional(),
+    targetEntity: string().optional(),
+    visualType: enumeration<QueryVisualizationType>().optional(),
+    position: string(),
+    config: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dashboardQueryMappingTable = table("dashboard_queries_mapping")
+  .columns({
+    id: string(),
+    dashboardId: string(),
+    queryId: string(),
+    sequence: number(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3928,6 +4054,110 @@ export const savedUserConfigurationValueTableRelationships = relationships(saved
   })
 }));
 
+export const dataSourceTableRelationships = relationships(dataSourceTable, ({ many }) => ({
+  tables: many({
+    sourceField: ["id"],
+    destField: ["dataSourceId"],
+    destSchema: dataSourceTableTable,
+  }),
+  relationships: many({
+    sourceField: ["id"],
+    destField: ["dataSourceId"],
+    destSchema: dataSourceRelationshipTable,
+  })
+}));
+
+export const dataSourceTableTableRelationships = relationships(dataSourceTableTable, ({ one, many }) => ({
+  dataSource: one({
+    sourceField: ["dataSourceId"],
+    destField: ["id"],
+    destSchema: dataSourceTable,
+  }),
+  columns: many({
+    sourceField: ["id"],
+    destField: ["tableId"],
+    destSchema: dataSourceColumnTable,
+  })
+}));
+
+export const dataSourceColumnTableRelationships = relationships(dataSourceColumnTable, ({ one, many }) => ({
+  table: one({
+    sourceField: ["tableId"],
+    destField: ["id"],
+    destSchema: dataSourceTableTable,
+  }),
+  relationshipsFrom: many({
+    sourceField: ["id"],
+    destField: ["fromColumnId"],
+    destSchema: dataSourceRelationshipTable,
+  }),
+  relationshipsTo: many({
+    sourceField: ["id"],
+    destField: ["toColumnId"],
+    destSchema: dataSourceRelationshipTable,
+  })
+}));
+
+export const dataSourceRelationshipTableRelationships = relationships(dataSourceRelationshipTable, ({ one }) => ({
+  dataSource: one({
+    sourceField: ["dataSourceId"],
+    destField: ["id"],
+    destSchema: dataSourceTable,
+  }),
+  fromColumn: one({
+    sourceField: ["fromColumnId"],
+    destField: ["id"],
+    destSchema: dataSourceColumnTable,
+  }),
+  toColumn: one({
+    sourceField: ["toColumnId"],
+    destField: ["id"],
+    destSchema: dataSourceColumnTable,
+  })
+}));
+
+export const dashboardTableRelationships = relationships(dashboardTable, ({ many }) => ({
+  participants: many({
+    sourceField: ["id"],
+    destField: ["dashboardId"],
+    destSchema: dashboardParticipantTable,
+  }),
+  queryMappings: many({
+    sourceField: ["id"],
+    destField: ["dashboardId"],
+    destSchema: dashboardQueryMappingTable,
+  })
+}));
+
+export const dashboardParticipantTableRelationships = relationships(dashboardParticipantTable, ({ one }) => ({
+  dashboard: one({
+    sourceField: ["dashboardId"],
+    destField: ["id"],
+    destSchema: dashboardTable,
+  })
+}));
+
+export const queryTableRelationships = relationships(queryTable, ({ many }) => ({
+  dashboardMappings: many({
+    sourceField: ["id"],
+    destField: ["queryId"],
+    destSchema: dashboardQueryMappingTable,
+  })
+}));
+
+export const dashboardQueryMappingTableRelationships = relationships(dashboardQueryMappingTable, ({ one }) => ({
+  dashboard: one({
+    sourceField: ["dashboardId"],
+    destField: ["id"],
+    destSchema: dashboardTable,
+  }),
+  query: one({
+    sourceField: ["queryId"],
+    destField: ["id"],
+    destSchema: queryTable,
+  })
+}));
+
 // Define schema
 
 export const schema = createSchema(
@@ -4032,9 +4262,6 @@ export const schema = createSchema(
       formContextMappingTable,
       formFieldsTable,
       formEntityValuesTable,
-      dashboardTable,
-      queryTable,
-      dashboardQueryMappingTable,
       merchantTable,
       draftMessageTable,
       userActivityEventTable,
@@ -4062,6 +4289,15 @@ export const schema = createSchema(
       savedUserConfigurationTable,
       savedUserConfigurationValueTable,
       delayedMessageTable,
+      dataSourceTable,
+      dataSourceTableTable,
+      dataSourceColumnTable,
+      dataSourceRelationshipTable,
+      dashboardTable,
+      dashboardParticipantTable,
+      dashboardActivityTable,
+      queryTable,
+      dashboardQueryMappingTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -4135,6 +4371,14 @@ export const schema = createSchema(
       appCommandTableRelationships,
       savedUserConfigurationTableRelationships,
       savedUserConfigurationValueTableRelationships,
+      dataSourceTableRelationships,
+      dataSourceTableTableRelationships,
+      dataSourceColumnTableRelationships,
+      dataSourceRelationshipTableRelationships,
+      dashboardTableRelationships,
+      dashboardParticipantTableRelationships,
+      queryTableRelationships,
+      dashboardQueryMappingTableRelationships,
     ],
   }
 );
@@ -4240,9 +4484,6 @@ export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
 export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
-export type Dashboard = Row<typeof schema.tables.dashboards>;
-export type Query = Row<typeof schema.tables.queries>;
-export type dashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
 export type Merchant = Row<typeof schema.tables.merchants>;
 export type DraftMessage = Row<typeof schema.tables.draft_messages>;
 export type UserActivityEvent = Row<typeof schema.tables.user_activity_events>;
@@ -4270,3 +4511,12 @@ export type AppCommand = Row<typeof schema.tables.app_commands>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
+export type DataSource = Row<typeof schema.tables.data_sources>;
+export type DataSourceTable = Row<typeof schema.tables.data_source_tables>;
+export type DataSourceColumn = Row<typeof schema.tables.data_source_columns>;
+export type DataSourceRelationship = Row<typeof schema.tables.data_source_relationships>;
+export type Dashboard = Row<typeof schema.tables.dashboards>;
+export type DashboardParticipant = Row<typeof schema.tables.dashboard_participants>;
+export type DashboardActivity = Row<typeof schema.tables.dashboard_activity>;
+export type Query = Row<typeof schema.tables.queries>;
+export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;

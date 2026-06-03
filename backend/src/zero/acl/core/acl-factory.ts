@@ -6,6 +6,10 @@ import { CallsACL } from '../tables/calls-acl';
 import { CanvasFoldersACL } from '../tables/canvas-folders-acl';
 import { CanvasParticipantsACL } from '../tables/canvas-participants-acl';
 import { CanvasesACL } from '../tables/canvases-acl';
+import { DashboardsACL } from '../tables/dashboards-acl';
+import { DashboardParticipantsACL } from '../tables/dashboard-participants-acl';
+import { DashboardQueriesMappingACL } from '../tables/dashboard-queries-mapping-acl';
+import { QueriesACL } from '../tables/queries-acl';
 import { ChannelParticipantsACL } from '../tables/channel-participants-acl';
 import { ChannelStatsACL } from '../tables/channel-stats-acl';
 import { ChannelsACL } from '../tables/channels-acl';
@@ -107,6 +111,14 @@ export class ACLFactory {
         return new CanvasParticipantsACL(ctx);
       case 'canvases':
         return new CanvasesACL(ctx);
+      case 'dashboards':
+        return new DashboardsACL(ctx);
+      case 'dashboard_participants':
+        return new DashboardParticipantsACL(ctx);
+      case 'dashboard_queries_mapping':
+        return new DashboardQueriesMappingACL(ctx);
+      case 'queries':
+        return new QueriesACL(ctx);
       case 'channel_participants':
         return new ChannelParticipantsACL(ctx);
       case 'channel_stats':
