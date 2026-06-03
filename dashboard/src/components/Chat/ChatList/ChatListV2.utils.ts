@@ -46,7 +46,7 @@ const VIDEO_MAX_HEIGHT_MOBILE = 260;
 const VIDEO_MIN_WIDTH = 200;
 
 // Feature-area heights
-const TICKET_BUBBLE_HEIGHT = 153; // BotBubble card
+const TICKET_BUBBLE_HEIGHT = 48; // BotBubble compact conversation strip (single row)
 const LINK_PREVIEW_HEIGHT = 80; // LinkPreview card
 const THREAD_INDICATOR_HEIGHT = 28; // "N replies" bar
 const REACTIONS_HEIGHT = 28; // emoji pill row
