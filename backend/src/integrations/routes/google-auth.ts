@@ -13,21 +13,9 @@ import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
-import { config as appConfig } from '@/config/env';
 import { EmailMergeMode, WorkspaceRole, DeskType } from '@prisma/client';
-
-function resolveFrontendUrl(req?: Request): string {
-  if (req) {
-    const originalHost = req.headers['x-original-host'];
-    if (originalHost && typeof originalHost === 'string') {
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-      return `${protocol}://${originalHost}`;
-    }
-  }
-  const url = appConfig.frontendUrl;
-  if (!url) throw new Error('FRONTEND_URL config is required');
-  return url.trim();
-}
+import { config as appConfig } from '@/config/env';
+import { getFrontendUrl } from './urlHelpers';
 
 const TAG = '[GoogleAuth]';
 const router = express.Router();
@@ -80,11 +68,6 @@ async function getOAuthState(state: string): Promise<OAuthStateValue | null> {
 async function deleteOAuthState(state: string): Promise<void> {
   await redisService.del(`${OAUTH_STATE_KEY_PREFIX}${state}`);
 }
-
-export function getFrontendUrl(req: Request): string {
-  return resolveFrontendUrl(req);
-}
-
 
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -233,7 +216,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
       return;
     }
 
-    const existing = await db.externalSource.findUnique({ where: { workspaceId } });
+    const existing = await db.externalSource.findFirst({ where: { workspaceId, sourceType: ExternalSourcePlatform.GOOGLE } });
     if (existing?.isActive) {
       res.status(409).json({
         error: 'Workspace already has a shared desk email configured',
@@ -303,7 +286,7 @@ router.post('/auth/start', async (req: Request, res: Response): Promise<void> =>
 
 // GET /api/integrations/google/auth/callback
 router.get('/auth/callback', async (req: Request, res: Response): Promise<void> => {
-  const frontendUrl = resolveFrontendUrl(req);
+  const frontendUrl = getFrontendUrl(req);
   const { code, state, error } = req.query;
   const stateData = state ? await getOAuthState(state as string) : null;
   const platform = stateData?.platform;
@@ -450,7 +433,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
       // Pre-checks before any network calls — avoids orphaning a Gmail watch /
       // Pub/Sub subscription if a write would fail anyway.
-      const existingForWorkspace = await db.externalSource.findUnique({ where: { workspaceId } });
+      const existingForWorkspace = await db.externalSource.findFirst({ where: { workspaceId, sourceType: ExternalSourcePlatform.GOOGLE } });
       if (existingForWorkspace?.isActive) {
         redirectError(res, frontendUrl, 'workspace_mailbox_already_exists', stateData.platform, workspaceId);
         return;

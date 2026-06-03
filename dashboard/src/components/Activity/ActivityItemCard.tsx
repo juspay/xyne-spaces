@@ -5,7 +5,7 @@ import {
   activitySkipMarkAsReadThreadRef,
   activitySkipMarkAsReadChannelRef,
 } from './activitySkipMarkAsRead';
-import { Activity, ChannelType } from '@xyne/shared';
+import { Activity, ChannelType, isDeskChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 
 /** Ref-based context: when current=true, ActivityItemCard appends ?nofocus=1 to navigation. */
@@ -101,7 +101,7 @@ export const ActivityItemCard = ({
       return;
     }
 
-    const isDeskChannel = channel?.type === ChannelType.EMAIL;
+    const isDeskChannel = isDeskChannelType(channel?.type);
     const path = isDeskChannel
       ? (supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
       : targetPath;
@@ -274,7 +274,7 @@ export const ActivityItemCard = ({
           <div className='flex items-center gap-1 flex-shrink-0 ml-auto sm:ml-2'>
             {activity.isRead &&
               !['reacted', 'removed'].includes(activity.actorAction) &&
-              channel?.type !== ChannelType.EMAIL &&
+              !isDeskChannelType(channel?.type) &&
               channel?.type !== ChannelType.SUPPORT && (
                 <Tooltip content='Mark as unread' delayDuration={0} side='top'>
                   <div

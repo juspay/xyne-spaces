@@ -37,7 +37,7 @@ import {
   createOAuth2Client as createGoogleOAuth2Client,
   setOAuthState as setGoogleOAuthState,
 } from './google-auth';
-import { getBackendUrl } from './microsoft-desk-auth';
+import { getBackendUrl } from './urlHelpers';
 import { MICROSOFT_OAUTH_SCOPES } from '@/services/microsoftDeskService';
 
 const TAG = '[DeskIntegration]';

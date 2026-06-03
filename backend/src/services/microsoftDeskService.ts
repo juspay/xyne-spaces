@@ -361,8 +361,8 @@ export class MicrosoftDeskService {
     const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
 
     const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
-    const existingForWorkspace = await db.externalSource.findUnique({
-      where: { workspaceId: channelData.workspaceId },
+    const existingForWorkspace = await db.externalSource.findFirst({
+      where: { workspaceId: channelData.workspaceId, sourceType: 'microsoft' },
     });
 
     // Only reject if an active source with this name exists on a different workspace.

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 import { Hash, Lock, MessageSquare, CornerUpRight } from 'lucide-react';
 import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
@@ -85,7 +85,7 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
     // the workspace prefix.
     // SupportScreen expects :ticketId to be the xyneId (e.g. XYNE-123),
     // not the internal CUID — use conversation.ticket.xyneId.
-    if (channel?.type === ChannelType.EMAIL) {
+    if (isDeskChannelType(channel?.type)) {
       const xyneId = originalConversation?.ticket?.xyneId;
       const path = xyneId
         ? `/support/${originalChannelId}/${xyneId}`

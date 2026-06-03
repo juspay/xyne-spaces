@@ -14,27 +14,10 @@ import {
 import { encrypt } from '../../services/encryptionService';
 import { db } from '../../database/client';
 import { logger } from '../../utils/logger';
-import { config as appConfig } from '../../config/env';
 import { WorkspaceRole } from '@prisma/client';
+import { getFrontendUrl, getBackendUrl } from './urlHelpers';
 
 const router = Router();
-
-function getFrontendUrl(): string {
-  const url = appConfig.frontendUrl;
-  if (!url) throw new Error('FRONTEND_URL config is required');
-  return url.trim();
-}
-
-export function getBackendUrl(req: Request): string {
-  const originalHost = req.headers['x-original-host'];
-  if (originalHost && typeof originalHost === 'string') {
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-    return `${protocol}://${originalHost}`;
-  }
-  const url = process.env.BACKEND_URL;
-  if (!url) throw new Error('BACKEND_URL environment variable is required');
-  return url.trim();
-}
 
 function getPublicUrl(req: Request): string {
   return getBackendUrl(req);
@@ -162,7 +145,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
       return;
     }
 
-    const existing = await db.externalSource.findUnique({ where: { workspaceId } });
+    const existing = await db.externalSource.findFirst({ where: { workspaceId, sourceType: 'microsoft' } });
     if (existing?.isActive) {
       res.status(409).json({
         error: 'Workspace already has a shared desk email configured',

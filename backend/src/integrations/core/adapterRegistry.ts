@@ -51,14 +51,24 @@ class AdapterRegistry {
 
   /**
    * Extract platform name from sourceName and map to enum
-   * Examples: "zoho-euler" → ExternalSourcePlatform.ZOHO, "slack-eng" → ExternalSourcePlatform.SLACK
+   * Examples: "zoho-euler" → ExternalSourcePlatform.ZOHO, "slack-eng" → ExternalSourcePlatform.SLACK,
+   * "slack-desk-C123" → ExternalSourcePlatform.SLACK_DESK
+   *
+   * Tries two-segment platform names first to support compound platforms like "slack-desk".
    *
    * @param sourceName - Full source name
    * @returns Platform enum value
    * @throws Error if platform not recognized
    */
   private extractPlatform(sourceName: string): ExternalSourcePlatform {
-    const platformStr = sourceName.split('-')[0].toLowerCase();
+    const parts = sourceName.split('-');
+    // Try two-segment platform first (e.g., "slack-desk" or "slack-desk-C123")
+    if (parts.length >= 2) {
+      const twoSegment = `${parts[0]}-${parts[1]}`.toLowerCase();
+      const platform = this.tryMapStringToPlatform(twoSegment);
+      if (platform) return platform;
+    }
+    const platformStr = parts[0].toLowerCase();
     return this.mapStringToPlatform(platformStr);
   }
 
@@ -69,19 +79,23 @@ class AdapterRegistry {
    * @returns Platform enum value
    * @throws Error if platform not recognized
    */
-  private mapStringToPlatform(platformStr: string): ExternalSourcePlatform {
-    const mapping: Record<string, ExternalSourcePlatform> = {
-      zoho: ExternalSourcePlatform.ZOHO,
-      slack: ExternalSourcePlatform.SLACK,
-      microsoft: ExternalSourcePlatform.MICROSOFT,
-      google: ExternalSourcePlatform.GOOGLE,
-    };
+  private static readonly PLATFORM_MAPPING: Record<string, ExternalSourcePlatform> = {
+    zoho: ExternalSourcePlatform.ZOHO,
+    slack: ExternalSourcePlatform.SLACK,
+    'slack-desk': ExternalSourcePlatform.SLACK_DESK,
+    microsoft: ExternalSourcePlatform.MICROSOFT,
+    google: ExternalSourcePlatform.GOOGLE,
+  };
 
-    const platform = mapping[platformStr];
+  private tryMapStringToPlatform(platformStr: string): ExternalSourcePlatform | undefined {
+    return AdapterRegistry.PLATFORM_MAPPING[platformStr];
+  }
+
+  private mapStringToPlatform(platformStr: string): ExternalSourcePlatform {
+    const platform = this.tryMapStringToPlatform(platformStr);
     if (!platform) {
       throw new Error(`Unknown platform: ${platformStr}`);
     }
-
     return platform;
   }
 }

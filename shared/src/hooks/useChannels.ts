@@ -5,7 +5,8 @@ import type { Conversation, VisibleChannel } from '../machines/stateMachine.js';
 import { queryCacheActor } from '../machines/queryCacheMachine.js';
 import { searchChannels as _searchChannels } from '../utils/search.js';
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
-import { ChannelScopeType, ChannelType, ChannelVisibility } from '../zero/schema.js';
+import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
+import { isDeskChannelType } from '../utils/channel.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
 import type { QueryResultType } from '@rocicorp/zero';
@@ -177,7 +178,7 @@ export const useEmailChannels = (): VisibleChannel[] => {
     }
     for (const channel of allPublicChannels) {
       if (channel.visibility === ChannelVisibility.PRIVATE) continue;
-      if (channel.type === ChannelType.EMAIL && !byId.has(channel.id)) {
+      if (isDeskChannelType(channel.type) && !byId.has(channel.id)) {
         byId.set(channel.id, channel as unknown as VisibleChannel);
       }
     }

@@ -20,10 +20,6 @@ export class EmailRepository {
     externalMessageId: string;
     createdAt?: Date;
   }): Promise<Email> {
-    if (!data.to || data.to.length === 0) {
-      throw new Error('At least one recipient is required');
-    }
-
     const email = await this.db.email.upsert({
       where: { externalMessageId: data.externalMessageId },
       update: {},

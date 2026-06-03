@@ -147,7 +147,7 @@ router.post(
           select: { deskType: true, dlEmail: true, workspaceId: true },
         });
         if (pref?.deskType === DeskType.DL && pref.workspaceId && pref.dlEmail) {
-          source = await db.externalSource.findUnique({ where: { workspaceId: pref.workspaceId } });
+          source = await db.externalSource.findFirst({ where: { workspaceId: pref.workspaceId, sourceType: { in: ['google', 'microsoft'] }, isActive: true } });
           if (source?.isActive) {
             targetChannelId = channelId;
             dlEmail = pref.dlEmail;

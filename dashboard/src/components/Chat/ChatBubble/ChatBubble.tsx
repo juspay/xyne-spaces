@@ -23,6 +23,7 @@ import {
   ChannelScopeType,
   parseForwardedMessageXml,
   parsePreviewMd,
+  isDeskChannelType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
@@ -872,7 +873,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     !isSystemMessage &&
     !isMessageDeleted &&
     !isTicketCreationMessage &&
-    channel?.type !== ChannelType.EMAIL &&
+    !isDeskChannelType(channel?.type) &&
     channel?.type !== ChannelType.SUPPORT &&
     (context === 'channel' || context === 'thread');
 

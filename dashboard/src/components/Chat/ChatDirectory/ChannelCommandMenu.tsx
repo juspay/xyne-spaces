@@ -23,7 +23,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
-import { Channel, ChannelVisibility, ChannelType } from '@xyne/shared';
+import { Channel, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -644,7 +644,7 @@ const ChannelCommandMenu = ({
     // Filter to only regular channels (no DMs), then scope by active tab
     const regularChannels = allChannels.filter(({ channel }) => {
       if (isDMChannel(channel.scopeType)) return false;
-      if (activeTab === TabType.DESK) return channel.type === ChannelType.EMAIL;
+      if (activeTab === TabType.DESK) return isDeskChannelType(channel.type);
       return true;
     });
 
