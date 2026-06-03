@@ -1,4 +1,4 @@
-import { ReactElement, useState, useRef, useCallback } from 'react';
+import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
 import { FileText, Plus, ArrowLeft, Info, Loader2, List, FolderTree } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
@@ -25,9 +25,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { openQuartoDoc } from '../openQuartoDoc';
-
-type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
-type ViewMode = 'list' | 'grouped';
+import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 
 const CanvasPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
@@ -39,13 +37,34 @@ const CanvasPanel = (): ReactElement => {
   const isOnIndexRoute = usePath() === '/chat/canvas';
 
   const canvasPanelRef = useRef<ImperativePanelHandle>(null);
-  const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
-  const [viewMode, setViewMode] = useState<ViewMode>('grouped');
+  const {
+    filter: activeFilter,
+    setFilter: setActiveFilter,
+    viewMode,
+    setViewMode,
+    lastCanvasId,
+    setLastCanvasId,
+  } = usePersistedCanvasPreferences();
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
+
+  // Remember which canvas was last opened
+  useEffect(() => {
+    if (selectedCanvasId && selectedCanvasId !== 'new' && selectedCanvasId !== lastCanvasId) {
+      setLastCanvasId(selectedCanvasId);
+    }
+  }, [selectedCanvasId, lastCanvasId, setLastCanvasId]);
+
+  // Restore last opened canvas when landing on the canvas index
+  useEffect(() => {
+    if (isOnIndexRoute && lastCanvasId) {
+      void navigate(`/chat/canvas/${lastCanvasId}`, { replace: true });
+    }
+  }, [isOnIndexRoute, lastCanvasId, navigate]);
+
   const isQuartoDocsListView = viewMode === 'list' && activeFilter === 'quarto_docs';
 
   const handleCreateCanvas = useCallback(async () => {
