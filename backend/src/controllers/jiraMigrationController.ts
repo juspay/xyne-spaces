@@ -424,7 +424,16 @@ export class JiraMigrationController {
 
       const updatedChannel = await db.channel.findUnique({
         where: { id: channelId },
-        select: { id: true, projectId: true, isMigrated: true, updatedAt: true, name: true },
+        select: { id: true, projectId: true, isMigrated: true, updatedAt: true, name: true, project: { select: { name: true } } },
+      });
+
+      logger.info('analytics_event', {
+        event: 'channel_migrated',
+        timestamp: new Date().toISOString(),
+        channelId,
+        channelName: updatedChannel?.name ?? null,
+        channelProjectName: updatedChannel?.project?.name ?? null,
+        sourceType: 'jira',
       });
 
       res.json({ success: true, data: { updatedCount: result.count, channel: updatedChannel } });

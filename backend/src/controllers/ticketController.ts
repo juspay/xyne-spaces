@@ -1039,6 +1039,12 @@ export class TicketController {
         }).catch(err => logger.error('[Ticket Creation] Non-FRA TicketsSideEffectHandler error:', err));
       }
 
+      logger.info('analytics_event', {
+        event: 'ticket_created',
+        timestamp: new Date().toISOString(),
+        userId: ticket.createdBy,
+      });
+
       ticketDuplicateService.persistDuplicateReferences({
         ticketId: ticket.id,
         ticketCreatedBy: ticket.createdBy,
