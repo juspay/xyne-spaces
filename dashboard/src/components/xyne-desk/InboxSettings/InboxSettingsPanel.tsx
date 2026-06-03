@@ -14,6 +14,7 @@ import {
   useEmailChannelPreference,
   useUpdateEmailChannelPreference,
 } from '../../../hooks/useEmailChannelPreference';
+import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
 
 interface InboxSettingsPanelProps {
   channelId: string | null;
@@ -40,6 +41,7 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
   const updateEmailChannelPreference = useUpdateEmailChannelPreference();
   const selectedChannelForSettings = useVisibleChannel(channelId ?? '');
   const allUserGroups = useUserGroups();
+  const clawAgents = useChannelClawAgents(channelId);
 
   const channelType = selectedChannelForSettings?.type;
   const isEmail = channelType === ChannelType.EMAIL;
@@ -53,6 +55,8 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
     emailChannelPreference?.emailMergeMode ?? EmailMergeMode.ENABLED;
   const currentInboxAutoDraftMode: AutoDraftMode =
     emailChannelPreference?.autoDraftMode ?? AutoDraftMode.OFF;
+  const currentInboxAutoDraftAgentSlug: string | null =
+    emailChannelPreference?.autoDraftAgentSlug ?? null;
 
   // Form drafts — committed on Save, reverted on Cancel.
   const [draftInboxOwnerUserId, setDraftInboxOwnerUserId] = useState<string | null>(
@@ -69,6 +73,9 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
   );
   const [draftInboxAutoDraftMode, setDraftInboxAutoDraftMode] =
     useState<AutoDraftMode>(currentInboxAutoDraftMode);
+  const [draftInboxAutoDraftAgentSlug, setDraftInboxAutoDraftAgentSlug] = useState<string | null>(
+    currentInboxAutoDraftAgentSlug,
+  );
   const [isSavingInboxSettings, setIsSavingInboxSettings] = useState(false);
   const [isSavingDefaultCc, setIsSavingDefaultCc] = useState(false);
 
@@ -88,6 +95,9 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
   useEffect(() => {
     setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
   }, [currentInboxAutoDraftMode]);
+  useEffect(() => {
+    setDraftInboxAutoDraftAgentSlug(currentInboxAutoDraftAgentSlug);
+  }, [currentInboxAutoDraftAgentSlug]);
 
   const canManage =
     !!userID &&
@@ -99,6 +109,7 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
     (draftInboxOwnerUserId !== currentInboxOwnerUserId ||
       draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId ||
       draftInboxAutoDraftMode !== currentInboxAutoDraftMode ||
+      draftInboxAutoDraftAgentSlug !== currentInboxAutoDraftAgentSlug ||
       (isEmail &&
         canManage &&
         (draftInboxSendAsEmail !== currentInboxSendAsEmail ||
@@ -127,6 +138,9 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
         ...(draftInboxAutoDraftMode !== currentInboxAutoDraftMode
           ? { autoDraftMode: draftInboxAutoDraftMode }
           : {}),
+        ...(draftInboxAutoDraftAgentSlug !== currentInboxAutoDraftAgentSlug
+          ? { autoDraftAgentSlug: draftInboxAutoDraftAgentSlug }
+          : {}),
       });
     } catch (error) {
       setDraftInboxOwnerUserId(currentInboxOwnerUserId);
@@ -134,6 +148,7 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
       setDraftInboxSendAsEmail(currentInboxSendAsEmail);
       setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
       setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
+      setDraftInboxAutoDraftAgentSlug(currentInboxAutoDraftAgentSlug);
       console.error('Failed to update email channel preference:', error);
     } finally {
       setIsSavingInboxSettings(false);
@@ -152,6 +167,8 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
     currentInboxEmailMergeMode,
     draftInboxAutoDraftMode,
     currentInboxAutoDraftMode,
+    draftInboxAutoDraftAgentSlug,
+    currentInboxAutoDraftAgentSlug,
     updateEmailChannelPreference,
   ]);
 
@@ -161,12 +178,14 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
     setDraftInboxSendAsEmail(currentInboxSendAsEmail);
     setDraftInboxEmailMergeMode(currentInboxEmailMergeMode);
     setDraftInboxAutoDraftMode(currentInboxAutoDraftMode);
+    setDraftInboxAutoDraftAgentSlug(currentInboxAutoDraftAgentSlug);
   }, [
     currentInboxOwnerUserId,
     currentInboxAssigneeUserGroupId,
     currentInboxSendAsEmail,
     currentInboxEmailMergeMode,
     currentInboxAutoDraftMode,
+    currentInboxAutoDraftAgentSlug,
   ]);
 
   const handleSaveDefaultCc = useCallback(
@@ -236,6 +255,9 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
               onAssigneeChange={setDraftInboxAssigneeUserGroupId}
               autoDraftMode={draftInboxAutoDraftMode}
               onAutoDraftModeChange={setDraftInboxAutoDraftMode}
+              autoDraftAgentSlug={draftInboxAutoDraftAgentSlug}
+              onAutoDraftAgentChange={setDraftInboxAutoDraftAgentSlug}
+              clawAgents={clawAgents}
               disabled={isSavingInboxSettings}
             />
 

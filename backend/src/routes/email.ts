@@ -77,5 +77,12 @@ router.get(
   emailController.listContacts,
 );
 
+// List Claw agents added to this channel (for the auto-draft agent picker)
+router.get(
+  '/:channelId/claw-agents',
+  authMiddleware.authenticate,
+  emailController.listClawAgents,
+);
+
 
 export default router;

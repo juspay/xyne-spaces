@@ -1868,6 +1868,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     priorityClassificationPrompt: string().optional(),
     priorityClassificationThreshold: number(),
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
+    autoDraftAgentSlug: string().optional(),
   })
   .primaryKey('channelId');
 

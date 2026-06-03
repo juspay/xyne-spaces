@@ -125,6 +125,7 @@ import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import automationSeriesIdBackfillRoutes from '@/routes/automationSeriesIdBackfill';
 import jenkinsRoutes from '@/routes/jenkins';
@@ -465,6 +466,11 @@ export class App {
       '/api/internal/automations/claw-callback/:executionId/:stepName',
       validateS2SKey,
       handleClawCallback,
+    );
+    this.app.post(
+      '/api/internal/email/autodraft-callback/:conversationId/:channelId',
+      validateS2SKey,
+      handleAutoDraftCallback,
     );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)

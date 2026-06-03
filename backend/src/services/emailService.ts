@@ -66,7 +66,9 @@ import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { xyneAIStream } from '@/agents/xyne-ai';
 import { AUTODRAFT_SESSION_TAG } from '@/controllers/xyneAIController';
 import { AgentsConfig } from '@/agents/config';
-import { buildDraftEmailSystemPrompt } from '@/agents/xyne-ai/prompts/draft';
+import { buildDraftEmailSystemPrompt, buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
+import { clawClient } from '@/services/clawClient';
+import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
 
@@ -490,8 +492,7 @@ export class EmailService {
     });
     
     const hasDeskSignature = signatureCount > 0;
-    const agentsConfig = await AgentsConfig.fetch({ email: persona.email });
-    const baseQuery = `Draft a reply for this ticket.\n\nLatest inbound email:\nSubject: ${emailSubject}\n\n${emailBody}\n\n---\nWhen looking up topic context for this draft, use \`search_relevant_content\` (covers chat messages, tickets, AND canvases together). Reserve \`search_files\` for cases where you need a specific file artifact by name — using it instead of \`search_relevant_content\` for topic lookup misses every chat thread and ticket on the topic.`;
+    const autoDraftAgentSlug = preference.autoDraftAgentSlug?.trim() || null;
 
     let summary = '';
     let autodraftSessionId: string | undefined;
@@ -502,44 +503,81 @@ export class EmailService {
       conversationId,
       channelId,
       hasDeskSignature,
-      queryLen: baseQuery.length,
+      agentSlug: autoDraftAgentSlug ?? 'default',
     });
     try {
-      const stream = xyneAIStream({
-        query: baseQuery,
-        channelIds: [channelId],
-        conversationId,
-        userId: personaUserId,
-        userInfo,
-        webSearchEnabled: true,
-        deepResearchEnabled: false,
-        ticketIds: [ticketId],
-        agentName: 'ask-ai',
-        agentsConfig,
-        systemPromptOverride: buildDraftEmailSystemPrompt(userInfo, hasDeskSignature),
-      });
+      if (autoDraftAgentSlug) {
+        const latestBodyText = htmlToText(emailBody || '', { wordwrap: false }).trim() || emailBody;
+        const clawTask = buildDraftEmailClawTask({
+          userInfo,
+          hasDeskSignature,
+          emailSubject,
+          emailBody: latestBodyText,
+          conversationId,
+        });
+        const callbackUrl = `${config.backendUrl.replace(/\/$/, '')}/api/internal/email/autodraft-callback/${encodeURIComponent(conversationId)}/${encodeURIComponent(channelId)}`;
+        const { sessionId } = await clawClient.runAgent({
+          agentSlug: autoDraftAgentSlug,
+          task: clawTask,
+          userId: personaUserId,
+          userName: userInfo.userName,
+          userEmail: userInfo.userEmail,
+          conversationId,
+          channelId,
+          ticketIds: [ticketId],
+          webSearchEnabled: true,
+          callbackUrl,
+        });
+        logger.info('[AutoDraft] claw agent fired (awaiting callback)', {
+          mode: 'autodraft',
+          ticketId,
+          conversationId,
+          agentSlug: autoDraftAgentSlug,
+          sessionId,
+          fireDurationMs: Date.now() - streamStart,
+        });
+        return;
+      } else {
+        const agentsConfig = await AgentsConfig.fetch({ email: persona.email });
+        const baseQuery = `Draft a reply for this ticket.\n\nLatest inbound email:\nSubject: ${emailSubject}\n\n${emailBody}\n\n---\nWhen looking up topic context for this draft, use \`search_relevant_content\` (covers chat messages, tickets, AND canvases together). Reserve \`search_files\` for cases where you need a specific file artifact by name — using it instead of \`search_relevant_content\` for topic lookup misses every chat thread and ticket on the topic.`;
 
-      for await (const chunk of stream) {
-        if (chunk.type === 'start' && typeof chunk.sessionId === 'string') {
-          autodraftSessionId = chunk.sessionId;
+        const stream = xyneAIStream({
+          query: baseQuery,
+          channelIds: [channelId],
+          conversationId,
+          userId: personaUserId,
+          userInfo,
+          webSearchEnabled: true,
+          deepResearchEnabled: false,
+          ticketIds: [ticketId],
+          agentName: 'ask-ai',
+          agentsConfig,
+          systemPromptOverride: buildDraftEmailSystemPrompt(userInfo, hasDeskSignature),
+        });
+
+        for await (const chunk of stream) {
+          if (chunk.type === 'start' && typeof chunk.sessionId === 'string') {
+            autodraftSessionId = chunk.sessionId;
+          }
+          if (chunk.type === 'complete' && chunk.output?.summary) {
+            summary = chunk.output.summary;
+            break;
+          }
         }
-        if (chunk.type === 'complete' && chunk.output?.summary) {
-          summary = chunk.output.summary;
-          break;
-        }
+        logger.info('[AutoDraft] stream complete', {
+          mode: 'autodraft',
+          ticketId,
+          sessionId: autodraftSessionId,
+          summaryLen: summary.length,
+          streamDurationMs: Date.now() - streamStart,
+        });
       }
-      logger.info('[AutoDraft] stream complete', {
-        mode: 'autodraft',
-        ticketId,
-        sessionId: autodraftSessionId,
-        summaryLen: summary.length,
-        streamDurationMs: Date.now() - streamStart,
-      });
     } catch (error) {
       logger.warn('[AutoDraft] stream failed', {
         mode: 'autodraft',
         ticketId,
         sessionId: autodraftSessionId,
+        agentSlug: autoDraftAgentSlug ?? 'default',
         streamDurationMs: Date.now() - streamStart,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -547,12 +585,40 @@ export class EmailService {
     }
 
 
+    await this.persistAutoDraft({
+      conversationId,
+      channelId,
+      summary,
+      ticketId,
+      sessionId: autodraftSessionId,
+      // Inline path: the session was created by our own xyneAIStream, so it
+      // exists in the local workflowExecution table and can be tagged.
+      tagSession: true,
+    });
+  }
+
+  async persistAutoDraft(params: {
+    conversationId: string;
+    channelId: string;
+    summary: string;
+    ticketId?: string;
+    sessionId?: string;
+    /**
+     * Whether `sessionId` refers to a local workflowExecution row that should be
+     * tagged as the autodraft session. True only for the inline xyneAIStream
+     * path. The Claw webhook path passes a claw-auth sessionId that does NOT
+     * live in our DB, so tagging is skipped to avoid a doomed update.
+     */
+    tagSession?: boolean;
+  }): Promise<void> {
+    const { conversationId, channelId, summary, ticketId, sessionId, tagSession } = params;
+
     if (!summary.trim()) {
       logger.warn('[AutoDraft] skip persist: empty summary', {
         mode: 'autodraft',
         ticketId,
-        sessionId: autodraftSessionId,
-        durationMs: Date.now() - startTime,
+        conversationId,
+        sessionId,
       });
       return;
     }
@@ -583,7 +649,7 @@ export class EmailService {
         mode: 'autodraft',
         ticketId,
         conversationId,
-        sessionId: autodraftSessionId,
+        sessionId,
         htmlLen: html.length,
       });
     } catch (error) {
@@ -591,30 +657,28 @@ export class EmailService {
         mode: 'autodraft',
         ticketId,
         conversationId,
-        sessionId: autodraftSessionId,
-        durationMs: Date.now() - startTime,
+        sessionId,
         error: error instanceof Error ? error.message : String(error),
       });
-
       return;
     }
 
-    if (autodraftSessionId) {
+    if (sessionId && tagSession) {
       try {
         await this.prisma.workflowExecution.update({
-          where: { id: autodraftSessionId },
+          where: { id: sessionId },
           data: { tag: AUTODRAFT_SESSION_TAG },
         });
         logger.info('[AutoDraft] session tagged', {
           mode: 'autodraft',
           ticketId,
-          sessionId: autodraftSessionId,
+          sessionId,
         });
       } catch (error) {
         logger.warn('[AutoDraft] session tagging failed', {
           mode: 'autodraft',
           ticketId,
-          sessionId: autodraftSessionId,
+          sessionId,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -623,8 +687,7 @@ export class EmailService {
       mode: 'autodraft',
       ticketId,
       conversationId,
-      sessionId: autodraftSessionId,
-      durationMs: Date.now() - startTime,
+      sessionId,
       summaryLen: summary.length,
     });
   }
