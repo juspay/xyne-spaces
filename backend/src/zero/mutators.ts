@@ -105,6 +105,12 @@ import { zql } from './queries';
 
 const storageService = getStorageService();
 
+const XYNE_USER_IDS = new Set([
+  'cmhesdd48001ghu4rc6bcb9m0', 'ou9fi7t9tmq2eeiss09km8j3',
+  'vj6bzzhi4g1n7q3ikj26f9w1', 'ufvy4nv2jpi55f692hf7kq5e',
+  're36aie8d05pbmeganqgae1l', 'glaq4trh8gtu3i0edm0gwzgq',
+]);
+
 export type AuthData = {
   sub: string;
   email: string;
@@ -1756,7 +1762,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             .where('userId', authData.sub)
             .where('channelId', channelId)
             .one());
-          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          const channel = await tx.run(zql.channels.where('id', channelId).related('project').one());
 
           const channelUserStatusParticipant = await tx.run(zql.channel_user_status
             .where('userId', authData.sub)
@@ -1835,6 +1841,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           logger.info(`💬 [MUTATOR-CREATE-MESSAGE] Message ${message.messageId} created, type: ${type}`);
 
           if (type === MessageType.USER) {
+            const userProfile = await tx.run(zql.user_profiles.where('userId', authData.sub).one());
             logger.info(`📊 [MUTATOR-CREATE-MESSAGE] Scheduling message count increment for USER message ${message.messageId}`);
             asyncTasks.push(async () => {
               try {
@@ -1851,6 +1858,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 await websocketService.trackUserActivity(authData.sub);
               } catch (error) {
                 logger.error(`❌ [MUTATOR-CREATE-MESSAGE] Failed to track user activity for message ${message.messageId}:`, error);
+              }
+            });
+            asyncTasks.push(async () => {
+              try {
+                logger.info('analytics_event', {
+                  event: 'message_sent',
+                  timestamp: new Date(timestamp).toISOString(),
+                  userId: authData.sub,
+                  userName: authData.name,
+                  userTeam: userProfile?.team ?? null,
+                  isXyne: (userProfile?.team?.includes('Xyne') || XYNE_USER_IDS.has(authData.sub)),
+                  channelName: channel.name,
+                  channelScopeType: channel.scopeType,
+                  channelProjectName: channel.project?.name ?? null,
+                  isMigrated: channel.isMigrated ?? false,
+                });
+              } catch (error) {
+                logger.error('❌ [ANALYTICS] Failed to log message_sent:', error);
               }
             });
           }
@@ -2415,7 +2440,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
-          const channel = await tx.run(zql.channels.where('id', conversation.channelId).one());
+          const channel = await tx.run(zql.channels.where('id', conversation.channelId).related('project').one());
           if (!channel) {
             throw new Error("Channel doesn't exists");
           }
@@ -2495,6 +2520,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           logger.info(`💬 [MUTATOR-CREATE-REPLY] Reply message ${message.messageId} created in conversation ${conversationId}, type: ${type}`);
 
           if (type === MessageType.USER) {
+            const userProfile = await tx.run(zql.user_profiles.where('userId', authData.sub).one());
             logger.info(`📊 [MUTATOR-CREATE-REPLY] Scheduling message count increment for USER reply message ${message.messageId}`);
             asyncTasks.push(async () => {
               try {
@@ -2511,6 +2537,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 await websocketService.trackUserActivity(authData.sub);
               } catch (error) {
                 logger.error(`❌ [MUTATOR-CREATE-REPLY] Failed to track user activity for reply message ${message.messageId}:`, error);
+              }
+            });
+            asyncTasks.push(async () => {
+              try {
+                logger.info('analytics_event', {
+                  event: 'message_sent',
+                  timestamp: new Date(timestamp).toISOString(),
+                  userId: authData.sub,
+                  userName: authData.name,
+                  userTeam: userProfile?.team ?? null,
+                  isXyne: (userProfile?.team?.includes('Xyne') || XYNE_USER_IDS.has(authData.sub)),
+                  channelName: channel.name,
+                  channelScopeType: channel.scopeType,
+                  channelProjectName: channel.project?.name ?? null,
+                  isMigrated: channel.isMigrated ?? false,
+                });
+              } catch (error) {
+                logger.error('❌ [ANALYTICS] Failed to log message_sent (reply):', error);
               }
             });
           }
@@ -3019,6 +3063,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 await websocketService.trackUserActivity(authData.sub);
               } catch (error) {
                 logger.error(`❌ [MUTATOR-REACT] Failed to track user activity for reaction add:`, error);
+              }
+            });
+            asyncTasks.push(async () => {
+              try {
+                logger.info('analytics_event', {
+                  event: 'reaction_added',
+                  timestamp: new Date(timestamp).toISOString(),
+                  userId: authData.sub,
+                });
+              } catch (error) {
+                logger.error('❌ [ANALYTICS] Failed to log reaction_added:', error);
               }
             });
 
@@ -5193,7 +5248,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               logger.error(`❌ [MUTATOR-TICKET-UPDATE] Failed to track user activity:`, error);
             }
           });
-
           for (const activity of activities) {
             await tx.mutate.ticket_activities.insert({
               id: uuidv4(),
@@ -6597,6 +6651,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               await websocketService.trackUserActivity(authData.sub);
             } catch (error) {
               logger.error(`❌ [MUTATOR-CANVAS-CREATE] Failed to track user activity:`, error);
+            }
+          });
+          asyncTasks.push(async () => {
+            try {
+              logger.info('analytics_event', {
+                event: 'canvas_edited',
+                timestamp: new Date(now).toISOString(),
+                userId: authData.sub,
+              });
+            } catch (error) {
+              logger.error('❌ [ANALYTICS] Failed to log canvas_edited (create):', error);
             }
           });
         },
@@ -8855,6 +8920,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   conversationId: conversationId || null,
                   isDeleted: false,
                   workspaceId: authData.workspaceId,
+                });
+                asyncTasks.push(async () => {
+                  try {
+                    logger.info('analytics_event', {
+                      event: 'file_shared',
+                      timestamp: new Date(timestamp).toISOString(),
+                      userId: authData.sub,
+                    });
+                  } catch (error) {
+                    logger.error('❌ [ANALYTICS] Failed to log file_shared:', error);
+                  }
                 });
               } catch (error) {
                 // Ignore duplicate key errors - record already created by concurrent request
