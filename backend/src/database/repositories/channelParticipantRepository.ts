@@ -1,5 +1,5 @@
 import { BaseRepository } from './base';
-import { ChannelParticipant, ChannelRole, ChannelScopeType, NotificationLevel } from '@prisma/client';
+import { ChannelParticipant, ChannelRole, ChannelScopeType, NotificationLevel, UserType } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
 
 function getDefaultNotificationLevel(scopeType?: ChannelScopeType | null): NotificationLevel {
@@ -279,6 +279,21 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       userEmail: u.email,
       userPicture: u.picture,
     }));
+  }
+
+  async getBotAppParticipantUserIds(channelId: string): Promise<string[]> {
+    const participants = await this.db.channelParticipant.findMany({
+      where: { channelId },
+      select: { userId: true },
+    });
+    if (participants.length === 0) return [];
+
+    const userIds = participants.map(p => p.userId);
+    const botUsers = await this.db.user.findMany({
+      where: { id: { in: userIds }, userType: { in: [UserType.BOT, UserType.APP] } },
+      select: { id: true },
+    });
+    return botUsers.map(u => u.id);
   }
 
   async getUserChannels(userId: string): Promise<ChannelParticipant[]> {

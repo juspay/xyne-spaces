@@ -130,6 +130,7 @@ export const Event = {
   MESSAGE_FORWARDED: "message_forwarded",
   MESSAGE_FORWARD_FAILED: "message_forward_failed",
   DESK_CONNECTED_EMAIL_FETCH_FAILED: "desk_connected_email_fetch_failed",
+  DESK_CLAW_AGENTS_FETCH_FAILED: "desk_claw_agents_fetch_failed",
   DESK_AI_DRAFT_SESSIONS_FETCH_FAILED: "desk_ai_draft_sessions_fetch_failed",
   DESK_AI_DRAFT_STREAM_FAILED: "desk_ai_draft_stream_failed",
   BROWSER_LINK_CLICK: "browser_link_click",

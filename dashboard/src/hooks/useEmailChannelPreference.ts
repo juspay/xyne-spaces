@@ -32,6 +32,7 @@ export function useUpdateEmailChannelPreference() {
       defaultCc,
       emailMergeMode,
       autoDraftMode,
+      autoDraftAgentSlug,
     }: {
       channelId: string;
       ownerUserId?: string;
@@ -40,6 +41,7 @@ export function useUpdateEmailChannelPreference() {
       defaultCc?: string | null;
       emailMergeMode?: EmailMergeMode;
       autoDraftMode?: AutoDraftMode;
+      autoDraftAgentSlug?: string | null;
     }): Promise<void> => {
       zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -50,6 +52,9 @@ export function useUpdateEmailChannelPreference() {
           ...(defaultCc !== undefined ? { defaultCc } : {}),
           ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
           ...(autoDraftMode !== undefined ? { autoDraftMode } : {}),
+          ...(autoDraftAgentSlug !== undefined
+            ? { autoDraftAgentSlug: autoDraftAgentSlug || null }
+            : {}),
         }),
       );
       return Promise.resolve();

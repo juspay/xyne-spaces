@@ -11374,6 +11374,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           defaultCc: z.string().optional().nullable(),
           emailMergeMode: z.nativeEnum(EmailMergeMode).optional(),
           autoDraftMode: z.nativeEnum(AutoDraftMode).optional(),
+          autoDraftAgentSlug: z.string().optional().nullable(),
         }),
         async ({
           tx,
@@ -11385,6 +11386,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             defaultCc,
             emailMergeMode,
             autoDraftMode,
+            autoDraftAgentSlug,
           },
         }) => {
           const existing = await tx.run(
@@ -11399,6 +11401,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ...(defaultCc !== undefined ? { defaultCc } : {}),
               ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
               ...(autoDraftMode !== undefined ? { autoDraftMode } : {}),
+              ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
             });
           } else {
             await tx.mutate.email_channel_preferences.insert({
@@ -11414,6 +11417,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               defaultCc: defaultCc ?? null,
               emailMergeMode: emailMergeMode ?? EmailMergeMode.ENABLED,
               autoDraftMode: autoDraftMode ?? AutoDraftMode.OFF,
+              autoDraftAgentSlug: autoDraftAgentSlug ?? null,
               priorityClassificationEnabled: false,
               priorityClassificationPrompt: null,
               priorityClassificationThreshold: 0.5,

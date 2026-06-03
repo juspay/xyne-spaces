@@ -17,6 +17,7 @@ import { UserRepository } from '@/database/repositories/users';
 import { logger } from '@/utils/logger';
 import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma, DeskType } from '@prisma/client';
 import { db } from '@/database/client';
+import { clawClient } from '@/services/clawClient';
 import { ZohoService } from '@/services/zohoService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { GoogleService } from '@/services/googleService';
@@ -582,6 +583,41 @@ export class EmailController {
         status: error?.response?.status,
       });
       return res.status(500).json({ error: 'Failed to list desk contacts' });
+    }
+  };
+
+  listClawAgents = async (req: Request, res: Response) => {
+    try {
+      const { channelId } = req.params;
+      if (!channelId) return res.status(400).json({ error: 'channelId required' });
+
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+      const isMember = await this.channelParticipantRepo.isParticipant(channelId, userId);
+      if (!isMember) {
+        return res.status(403).json({ error: 'Not a member of this channel' });
+      }
+
+      const participantUserIds = new Set(
+        await this.channelParticipantRepo.getBotAppParticipantUserIds(channelId),
+      );
+      if (participantUserIds.size === 0) {
+        return res.json({ agents: [] });
+      }
+
+      const allAgents = await clawClient.listAgents();
+      const agents = allAgents
+        .filter(a => a.spacesAppUserId && participantUserIds.has(a.spacesAppUserId))
+        .map(a => ({ slug: a.slug, name: a.name, color: a.color }));
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ agents });
+    } catch (error: any) {
+      logger.error('[EmailController] listClawAgents error:', {
+        message: error?.message,
+        status: error?.response?.status,
+      });
+      return res.status(502).json({ error: 'Failed to list channel claw agents' });
     }
   };
 
