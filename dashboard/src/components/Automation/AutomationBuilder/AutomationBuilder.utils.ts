@@ -19,6 +19,7 @@ export function emptyConfig(): AutomationConfig {
 
 export function buildVariableSources(
   triggerSchema: TriggerSchema | null,
+  triggerConfig: Record<string, unknown>,
   steps: AutomationStepConfig[],
   schemaCache: Record<string, StepSchema | undefined>,
   upToIndex: number,
@@ -32,7 +33,10 @@ export function buildVariableSources(
       sublabel: triggerSchema.name,
       groupKey: 'trigger',
       groupLabel: `Trigger — ${triggerSchema.name}`,
-      schema: triggerSchema.outputSchema,
+      schema:
+        triggerSchema.type === 'WEBHOOK'
+          ? buildWebhookTriggerOutputSchema(triggerConfig)
+          : triggerSchema.outputSchema,
     });
   }
 
@@ -86,6 +90,39 @@ function buildOutputSchemaFromRunAgentConfig(
   return {
     type: 'object',
     properties,
+    additionalProperties: true,
+  };
+}
+
+type JsonSchemaT = import('../Automation.types').JsonSchema;
+
+function jsonSchemaFromDeclared(declaredRaw: unknown): JsonSchemaT {
+  const declared =
+    declaredRaw && typeof declaredRaw === 'object' && !Array.isArray(declaredRaw)
+      ? (declaredRaw as Record<string, unknown>)
+      : {};
+  const properties: Record<string, JsonSchemaT> = {};
+  for (const [key, value] of Object.entries(declared)) {
+    if (typeof value === 'string') {
+      const t = value === 'secret' ? 'string' : value;
+      properties[key] = { type: t as 'string' | 'number' | 'boolean' | 'object' | 'array' };
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      properties[key] = jsonSchemaFromDeclared(value);
+    }
+  }
+  return { type: 'object', properties, additionalProperties: true };
+}
+
+/** Build the webhook trigger's output schema from its body/header schemas. */
+function buildWebhookTriggerOutputSchema(triggerConfig: Record<string, unknown>): JsonSchemaT {
+  const cfg = triggerConfig as { bodySchema?: unknown; headerSchema?: unknown };
+  return {
+    type: 'object',
+    properties: {
+      body: jsonSchemaFromDeclared(cfg.bodySchema),
+      headers: jsonSchemaFromDeclared(cfg.headerSchema),
+      receivedAt: { type: 'string' },
+    },
     additionalProperties: true,
   };
 }

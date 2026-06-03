@@ -282,15 +282,6 @@ const AppSidebar = (): ReactElement => {
               p.resourceName === resourceName &&
               (p.accessType === 'ADMIN' || p.accessType === 'WRITE'),
           );
-        } else if (resourceName === 'AUTOMATIONS') {
-          // Tiered: READ surfaces the list (read-only), WRITE adds proposals/
-          // activation, ADMIN adds approve/reject/disable. Any tier shows the
-          // sidebar entry — per-action gates live in the screens.
-          hasAccess = permissions.some(
-            p =>
-              p.resourceName === resourceName &&
-              (p.accessType === 'ADMIN' || p.accessType === 'WRITE' || p.accessType === 'READ'),
-          );
         } else {
           hasAccess = permissions.some(
             p => p.resourceName === resourceName && p.accessType === 'ADMIN',
