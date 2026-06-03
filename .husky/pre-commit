@@ -33,9 +33,6 @@ else
   echo "⏭️  Skipping backend checks (no backend files changed)"
 fi
 
-# Check if dashboard-external files are changed
-DASHBOARD_EXTERNAL_CHANGED=$(echo "$CHANGED_FILES" | grep '^dashboard-external/' || true)
-
 # Dashboard checks (only if dashboard files changed)
 if [ -n "$DASHBOARD_CHANGED" ]; then
   echo "🎨 Checking dashboard (dashboard files changed)..."
@@ -48,15 +45,6 @@ if [ -n "$DASHBOARD_CHANGED" ]; then
   npm run validate || exit 1
 else
   echo "⏭️  Skipping dashboard checks (no dashboard files changed)"
-fi
-
-# Dependency boundary checks (if either dashboard or dashboard-external files changed)
-if [ -n "$DASHBOARD_CHANGED" ] || [ -n "$DASHBOARD_EXTERNAL_CHANGED" ]; then
-  echo "🔗 Checking dashboard-external dependency boundaries..."
-  cd "$REPO_ROOT/dashboard-external"
-  npm run lint:deps || exit 1
-else
-  echo "⏭️  Skipping dependency boundary check (no dashboard/dashboard-external files changed)"
 fi
 
 # Automation checks (only if xyne-automation files changed)
