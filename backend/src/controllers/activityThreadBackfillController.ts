@@ -109,16 +109,16 @@ export class ActivityThreadBackfillController {
       try {
         if (!options.dryRun) {
           if (threadIds.length > 0) {
-            await db.activity.updateMany({
-              where: { id: { in: threadIds } },
-              data: { isThreadActivity: true },
-            });
+            await db.$executeRaw`
+              UPDATE activities
+              SET "isThreadActivity" = true
+              WHERE id = ANY(${threadIds}::text[])`;
           }
           if (channelIds.length > 0) {
-            await db.activity.updateMany({
-              where: { id: { in: channelIds } },
-              data: { isThreadActivity: false },
-            });
+            await db.$executeRaw`
+              UPDATE activities
+              SET "isThreadActivity" = false
+              WHERE id = ANY(${channelIds}::text[])`;
           }
         }
         summary.updated += threadIds.length + channelIds.length;
