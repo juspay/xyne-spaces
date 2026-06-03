@@ -1,6 +1,11 @@
 import type { Room } from 'livekit-client';
-import { ConnectionState, Track } from 'livekit-client';
+import { ConnectionQuality, ConnectionState, Track } from 'livekit-client';
+import { WifiLow } from 'lucide-react';
 import { useCallback, useEffect, useState, useMemo } from 'react';
+import {
+  useParticipantNetworkQuality,
+  useNetworkQualityToast,
+} from '../hooks/useParticipantNetworkQuality';
 import { useSelector } from '@xstate/react';
 import { CallOrigin } from '@xyne/shared';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
@@ -132,6 +137,9 @@ export function FullCallView({
   // UI state
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
+  // Track local participant's network quality
+  const networkQuality = useParticipantNetworkQuality(room?.localParticipant ?? null);
+  const showQualityToast = useNetworkQualityToast(networkQuality);
 
   // Reactions
   const { reactions, sendReaction } = useReactions(room);
@@ -231,6 +239,24 @@ export function FullCallView({
     >
       {/* Floating reactions overlay */}
       <ReactionsOverlay reactions={reactions} />
+
+      {/* Network quality toast — floats top-center, auto-dismisses after 5s */}
+      {showQualityToast && (
+        <div
+          className={cn(
+            'fixed top-4 left-1/2 -translate-x-1/2 z-[70] flex items-center gap-2 px-3 py-2 rounded-full text-xs font-semibold text-white shadow-lg pointer-events-none animate-in slide-in-from-top-2 duration-300',
+            networkQuality === ConnectionQuality.Lost ? 'bg-red-600' : 'bg-amber-500',
+          )}
+          role='alert'
+          aria-live='polite'
+        >
+          <WifiLow className='h-3.5 w-3.5 shrink-0' />
+          {networkQuality === ConnectionQuality.Lost
+            ? 'Connection lost — trying to reconnect…'
+            : 'Your connection is unstable'}
+        </div>
+      )}
+
       {/* Connection Status Indicators Bar */}
       <div className='flex justify-between items-center px-4 py-3'>
         <div className='flex items-center gap-2'>

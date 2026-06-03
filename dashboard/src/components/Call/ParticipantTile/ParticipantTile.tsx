@@ -1,5 +1,7 @@
-import { Track } from 'livekit-client';
+import { ConnectionQuality, Track } from 'livekit-client';
+import { useParticipantNetworkQuality } from '../hooks/useParticipantNetworkQuality';
 import { MicOff, Monitor } from 'lucide-react';
+import { SignalBars } from '../components/SignalBars';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
 import { getAvatarColors } from '../ParticipantAvatar/avatarColors';
@@ -60,6 +62,9 @@ export function ParticipantTile({
 
   // Use LiveKit's built-in hook for speaking detection - uses observables internally
   const isSpeaking = useIsSpeaking(participant.participant);
+
+  // Track per-participant network quality
+  const networkQuality = useParticipantNetworkQuality(participant.participant);
 
   // Determine avatar and background colors
   const colors = getAvatarColors(participant.identity);
@@ -218,6 +223,25 @@ export function ParticipantTile({
           {requestedAiController
             ? `Requested control from ${aiController?.name}`
             : `Acquired by ${aiController?.name}`}
+        </div>
+      )}
+
+      {/* Network quality indicator */}
+      {(networkQuality === ConnectionQuality.Poor || networkQuality === ConnectionQuality.Lost) && (
+        <div
+          className={cn(
+            'absolute rounded-full visual-regression-hide',
+            compact ? 'bottom-0.5 right-0.5 p-0.5' : 'bottom-1 right-1 sm:bottom-2 sm:right-2 p-1',
+            networkQuality === ConnectionQuality.Lost
+              ? 'bg-black/40 text-red-400'
+              : 'bg-black/40 text-amber-400',
+          )}
+          title={networkQuality === ConnectionQuality.Lost ? 'Connection lost' : 'Poor connection'}
+        >
+          <SignalBars
+            activeColor={networkQuality === ConnectionQuality.Lost ? '#f87171' : '#fbbf24'}
+            className={cn(compact ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5')}
+          />
         </div>
       )}
 
