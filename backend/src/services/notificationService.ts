@@ -883,7 +883,7 @@ class NotificationService {
           userId,
           data.type,
           data.title,
-          data.message,
+          (data.metadata?.scopeType !== 'DM' && data.metadata?.senderName) ? `${data.metadata.senderName}: ${data.message}` : data.message,
           {
             ...data.metadata,
             relatedEntityType: data.relatedEntityType,
@@ -1333,7 +1333,7 @@ class NotificationService {
     const conversationData = await fetchConversationForNotification(conversationId);
 
     const notificationData = {
-      title: isDMChannel ? `New reply in #${channelName}` : `New reply from #${channelName}`,
+      title: isDMChannel ? `New reply from ${senderName}` : `New reply in #${channelName}`,
       message: `${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
       type: NotificationType.THREAD_REPLY,
       relatedEntityType: 'message' as const,
@@ -1419,7 +1419,7 @@ class NotificationService {
     const conversationData = await fetchConversationForNotification(conversationId);
 
     const notificationData = {
-      title: channelName ? `${channelName}` : `New Message from ${senderName}`,
+      title: scopeType === 'DM' ? `${senderName}` : (channelName ? `${channelName}` : `New Message from ${senderName}`),
       message: cleanContent.substring(0, 100) + (cleanContent.length > 100 ? '...' : ''),
       type: NotificationType.DIRECT_MESSAGE,
       relatedEntityType: 'message' as const,
