@@ -1,3 +1,14 @@
+## [1.151.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.150.0...v1.151.0) (2026-06-03)
+
+
+### Features
+
+* add logs for Grafana dashboard ([7d0302f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7d0302f22ef6da27c97fbe79e57894d5be04cbfb)), closes [#6903](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6903)
+* added network quality indication ([370f557](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/370f557c1566db2d93326c2c46ee866e34f0ae0d)), closes [#6976](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6976)
+* external trigger in automations validation ([31a74a3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/31a74a313cd87c4420c75d0058c6acc34334fa27)), closes [#7011](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7011)
+* fixed notification title for dm ([7af3984](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7af398492b78efd82c69f153866f37857c87c6e8))
+* team intelligence org and team and individual level summary and ticket generation using LLM client and existing recap module with routing changes from teamName to teamId ([d730ab4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d730ab4095d7143f43949a76b7b7d669d0e6b7d1)), closes [#6756](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6756)
+
 ## [1.150.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.149.0...v1.150.0) (2026-06-02)
 
 
