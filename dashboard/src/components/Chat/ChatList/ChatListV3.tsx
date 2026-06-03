@@ -131,6 +131,7 @@ function isSameConversationList(a: Conversation[], b: Conversation[]): boolean {
 function reconcileConversationWindow(
   current: Conversation[],
   incomingWindow: Conversation[],
+  lowerBound?: number,
 ): Conversation[] {
   if (incomingWindow.length === 0) return current;
 
@@ -143,7 +144,12 @@ function reconcileConversationWindow(
   if (fromMessage && tillMessage) {
     let insideWindow = false;
     for (const conv of current) {
-      if (fromMessage.conversationId === conv.conversationId) {
+      if (
+        !insideWindow &&
+        (lowerBound !== undefined
+          ? conv.createdAt >= lowerBound
+          : fromMessage.conversationId === conv.conversationId)
+      ) {
         insideWindow = true;
       }
 
@@ -526,13 +532,17 @@ const ChatListV3: React.FC<ChatListProps> = ({
       (a, b) => a.createdAt - b.createdAt,
     );
 
-    setConversationsState(prev => {
-      const merged = reconcileConversationWindow(prev, sortedCutoffConversations);
-      if (isSameConversationList(prev, merged)) {
-        return prev;
-      }
-
-      const prevOldestCreatedAt = prev[0]?.createdAt;
+    // Compute the reconciled list eagerly so we can update the ref synchronously.
+    // This ensures any effect in the same React batch (e.g. latestConversations) that
+    // reads conversationsRef.current gets the post-deletion value, not the stale one.
+    const currentConvs = conversationsRef.current;
+    const merged = reconcileConversationWindow(
+      currentConvs,
+      sortedCutoffConversations,
+      cutoffAnchor?.createdAt,
+    );
+    if (!isSameConversationList(currentConvs, merged)) {
+      const prevOldestCreatedAt = currentConvs[0]?.createdAt;
       const newPrependedCount = prevOldestCreatedAt
         ? sortedCutoffConversations.filter(item => item.createdAt < prevOldestCreatedAt).length
         : 0;
@@ -540,8 +550,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
       if (newPrependedCount > 0) {
         setFirstItemIndex(index => index - newPrependedCount);
       }
-      return merged;
-    });
+      conversationsRef.current = merged;
+      setConversationsState(merged);
+    }
   }, [
     shouldUseCutoffQuery,
     cutoffConversations,
@@ -782,7 +793,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
         tillMessage = tillMessage.createdAt > tempMessage.createdAt ? tillMessage : tempMessage;
         let flag = 0;
         for (const conv of conversations) {
-          if (fromMessage?.conversationId === conv.conversationId) {
+          if (flag === 0 && conv.createdAt >= fromMessage.createdAt) {
             flag = 1;
           }
           if (
@@ -791,8 +802,8 @@ const ChatListV3: React.FC<ChatListProps> = ({
           ) {
             itemsToDelete.push(conv);
           }
-          if (tillMessage.conversationId === conv.conversationId) {
-            flag = inViewAnchor === null ? 1 : 0;
+          if (conv.createdAt > (inViewAnchor?.createdAt ?? tillMessage.createdAt)) {
+            flag = 0;
           }
         }
       } else {
