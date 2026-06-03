@@ -1315,7 +1315,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   ${emojiSizeClass}
                 `}
                 />
-                {!content &&
+                {!editor?.getText().length &&
                   !isInCodeBlock &&
                   !editor?.isActive('bulletList') &&
                   !editor?.isActive('orderedList') &&
