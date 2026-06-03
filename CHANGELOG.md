@@ -1,3 +1,28 @@
+## [1.152.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.151.0...v1.152.0) (2026-06-03)
+
+
+### Features
+
+* add claw agent as the default one to generate autodraft ([476e11f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/476e11f7d034119561915fade98189e8f7d8428a)), closes [#6994](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6994)
+* delete-notification-on-app-edit-and-delete ([a303301](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a303301c0596c7c15dc82ffa9de225df23c18b5a)), closes [#7015](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7015)
+* implement dynamic dashboard ([1580c91](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1580c91aacf57841ab0cf0a50779a58b763dd232)), closes [#6393](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6393) [#32](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/32)
+* move db:push + sequence migration into backend-migrate init container so backend healthcheck window stays free of schema-apply work ([79a4fc4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/79a4fc445e480ef05edb0c173b8a24e9e757432d)), closes [#6736](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6736)
+* Persist canvas filter, view mode, and last opened canvas ([7806e6c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7806e6c1b99aa492b3766e69887eb81e3ceb0f17)), closes [#6966](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6966)
+* slack to desk ([6b950b9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6b950b9abb8e5fe013781c4221a289d4a84d6f77)), closes [#7005](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7005)
+* xyne desk fixes ([46227d7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/46227d76dc56922d4d0f8bed2474298868b9e395)), closes [#6964](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6964)
+
+
+### Bug Fixes
+
+* deleteRecording fix to remove deleted recordings from MERGE_RECORDINGS_PAGE action ([0c2bad0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0c2bad0ae9b62d3b8f0199286bfcfa2273bf4199))
+* Feature/email type ticket support ([48ef0fd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/48ef0fdf8dc225879994ed2858a76061eaf2f438)), closes [#7020](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7020)
+* fix height estimate for ticket ui ([f7d47d6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f7d47d6ceb8c77efb8c32cbe048d36c535b4dbd4))
+* fixing first message deletion in live subscribed window ([567c236](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/567c236ca6eeef2d7f6de4e86b19e2aa10a6ccba))
+* Hide Calendar Calls ([a58ea4d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a58ea4d264df1ab538ea82ad0b99d4ee682d05d1)), closes [#7021](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7021)
+* hide placeholder on whitespace input ([9a16a1d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9a16a1d3a10dfae5f8863baacb2684842b6a47ac)), closes [#7035](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7035)
+* removing dependency-cruiser ([ee0f1d0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ee0f1d0979eaaba65c4de8925bdc5896e478078c)), closes [#7042](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7042)
+* use $executeRaw in backfill to avoid Prisma [@updated](https://ssh.bitbucket.juspay.net/updated)At bump ([4fd4231](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4fd423138fb97d9850b3005964688e8905dc95cb)), closes [#7030](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7030)
+
 ## [1.151.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.150.0...v1.151.0) (2026-06-03)
 
 
