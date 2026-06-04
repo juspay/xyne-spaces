@@ -1,3 +1,4 @@
+import { withProfiler } from '../../../utils/withProfiler';
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1336,4 +1337,4 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 };
 
-export default ChatListV3;
+export default withProfiler(ChatListV3, 'ChatListV3');

@@ -6,6 +6,7 @@ import React, {
   useRef,
   useImperativeHandle,
 } from 'react';
+import { withProfilerRef } from '../../../utils/withProfiler';
 import { useZeroWithFallback as useZero } from '../../../hooks/useZeroWithFallback';
 import { toast } from 'sonner';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
@@ -95,7 +96,7 @@ interface ChatInputProps {
   isForwardedContent?: boolean;
 }
 
-export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
+const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
   (
     {
       autoFocus = null,
@@ -959,4 +960,9 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
   },
 );
 
-ChatInput.displayName = 'ChatInput';
+ChatInputInner.displayName = 'ChatInput';
+
+export const ChatInput = withProfilerRef<ChatInputProps, InputBoxHandle>(
+  ChatInputInner,
+  'ChatInput',
+);
