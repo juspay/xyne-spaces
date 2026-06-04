@@ -12,14 +12,15 @@ export interface MeetLinkMetadata {
   meetUrl: string;
   xyneTicketId: string;
   threadId: string;
-  zohoTicketId: string;
+  workspaceId: string;
+  zohoTicketId?: string;
   notificationUrl?: string;
 }
 
 export interface SamMeetMetaDataPayload {
   xyneTicketId: string;
   threadId: string;
-  zohoTicketId: string;
+  zohoTicketId?: string;
   notificationUrl: string;
 }
 
@@ -73,10 +74,11 @@ export function extractMeetLinks(body: string): { meetCode: string; meetUrl: str
 
 /**
  * Generate the notification URL for SAM service callback
- * Format: ${BACKEND_URL}/api/meet/callback?xyneTicketId=...&threadId=...&meetCode=...
+ * Format: ${BACKEND_URL}/api/meet/callback?xyneTicketId=...&workspaceId=...&threadId=...&meetCode=...
  */
 export function generateNotificationUrl(
   xyneTicketId: string,
+  workspaceId: string,
   threadId: string,
   meetCode: string
 ): string | null {
@@ -87,6 +89,7 @@ export function generateNotificationUrl(
   }
   const params = new URLSearchParams({
     xyneTicketId,
+    workspaceId,
     threadId,
     meetCode,
   });
@@ -137,9 +140,10 @@ async function withRetry<T>(
 export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise<boolean> {
   const endpoint = `${config.sam.baseUrl}/sam/s2s/meet/${metadata.meetCode}/meta`;
 
-  // Generate notification URL with query params for callback identification
+  // Generate notification URL with query params for callback identification (including workspaceId)
   const notificationUrl = generateNotificationUrl(
     metadata.xyneTicketId,
+    metadata.workspaceId,
     metadata.threadId,
     metadata.meetCode
   );
@@ -155,7 +159,7 @@ export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise
     data: {
       xyneTicketId: metadata.xyneTicketId,
       threadId: metadata.threadId,
-      zohoTicketId: metadata.zohoTicketId,
+      ...(metadata.zohoTicketId && { zohoTicketId: metadata.zohoTicketId }),
       notificationUrl: notificationUrl,
     },
   };
@@ -224,12 +228,15 @@ export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise
 /**
  * Process email body for meet links and send to SAM
  * Called after email/ticket creation
+ * @param workspaceId - Workspace ID for the callback URL
+ * @param zohoTicketId - Optional Zoho ticket ID. If not provided, the field is omitted from the SAM payload.
  */
 export async function processMeetLinksFromEmail(
   emailBody: string,
   xyneTicketId: string,
+  workspaceId: string,
   threadId: string,
-  zohoTicketId: string
+  zohoTicketId?: string
 ): Promise<{ processed: number; meetCodes: string[] }> {
   const meetLinks = extractMeetLinks(emailBody);
 
@@ -242,6 +249,7 @@ export async function processMeetLinksFromEmail(
     count: meetLinks.length,
     meetCodes: meetLinks.map(l => l.meetCode),
     xyneTicketId,
+    workspaceId,
   });
 
   // Process meet links in parallel for better performance
@@ -251,6 +259,7 @@ export async function processMeetLinksFromEmail(
         meetCode: meetLink.meetCode,
         meetUrl: meetLink.meetUrl,
         xyneTicketId,
+        workspaceId,
         threadId,
         zohoTicketId,
       })

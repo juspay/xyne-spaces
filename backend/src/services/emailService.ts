@@ -1125,8 +1125,6 @@ export class EmailService {
       await this.messageRepository.create(messageDataSys, true);
     }
 
-    // Push Vespa job for mail indexing (Desk search). `email` is created
-    // inside the conversation+email+ticket transaction earlier in this method.
     this.pushVespaJobForMail(email.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for mail ${email.id}:`, error);
     });
@@ -1137,24 +1135,19 @@ export class EmailService {
     // Process Google Meet links from email body and send to SAM 
     try {
       const zohoTicketId = ticketMetadata?.ticketId as string | undefined;
-      if (!zohoTicketId) {
-        logger.warn('[EmailService] No Zoho ticketId found in metadata, skipping meet link processing', {
+      const meetResult = await processMeetLinksFromEmail(
+        emailBody,
+        ticket.xyneId,
+        channel.workspaceId,
+        externalThreadId,
+        zohoTicketId
+      );
+      if (meetResult.processed > 0) {
+        logger.info('[EmailService] Processed Google Meet links', {
           xyneTicketId: ticket.xyneId,
-          externalThreadId,
+          meetCodes: meetResult.meetCodes,
+          hasZohoTicketId: !!zohoTicketId,
         });
-      } else {
-        const meetResult = await processMeetLinksFromEmail(
-          emailBody,
-          ticket.xyneId,
-          externalThreadId,
-          zohoTicketId
-        );
-        if (meetResult.processed > 0) {
-          logger.info('[EmailService] Processed Google Meet links', {
-            xyneTicketId: ticket.xyneId,
-            meetCodes: meetResult.meetCodes,
-          });
-        }
       }
     } catch (error) {
       // Don't fail email processing if meet link extraction fails
@@ -1328,33 +1321,27 @@ export class EmailService {
 
       // Process Google Meet links from reply email body and send to SAM service
       try {
-        // Get ticket associated with this conversation to get xyneTicketId and zohoTicketId
+        // Get ticket associated with this conversation to get xyneTicketId, workspaceId, and zohoTicketId
         const ticket = await repositories.tickets.findByConversationIdForMeet(conversationId);
 
-        if (ticket?.xyneId) {
-          // Extract zohoTicketId from ticket metadata
+        if (ticket?.xyneId && ticket?.workspaceId) {
+          // Extract zohoTicketId from ticket metadata (optional)
           const ticketMetadata = ticket.metadata as Record<string, unknown> | null;
           const zohoTicketId = ticketMetadata?.ticketId as string | undefined;
           
-          if (!zohoTicketId) {
-            logger.warn('[EmailService] No Zoho ticketId found in ticket metadata, skipping meet link processing for reply', {
+          const meetResult = await processMeetLinksFromEmail(
+            emailBody,
+            ticket.xyneId,
+            ticket.workspaceId,
+            externalThreadId,
+            zohoTicketId
+          );
+          if (meetResult.processed > 0) {
+            logger.info('[EmailService] Processed Google Meet links from reply', {
               xyneTicketId: ticket.xyneId,
-              externalThreadId,
-              conversationId,
+              meetCodes: meetResult.meetCodes,
+              hasZohoTicketId: !!zohoTicketId,
             });
-          } else {
-            const meetResult = await processMeetLinksFromEmail(
-              emailBody,
-              ticket.xyneId,
-              externalThreadId,
-              zohoTicketId
-            );
-            if (meetResult.processed > 0) {
-              logger.info('[EmailService] Processed Google Meet links from reply', {
-                xyneTicketId: ticket.xyneId,
-                meetCodes: meetResult.meetCodes,
-              });
-            }
           }
         }
       } catch (error) {
@@ -2109,6 +2096,36 @@ export class EmailService {
       }
     }
 
+    // Process Google Meet links from email bodies and send to SAM
+    if (txResult.ticketXyneId && channel.workspaceId) {
+      const zohoTicketId = ticketMetadata?.ticketId as string | undefined;
+      for (const e of insertedEmails) {
+        try {
+          const meetResult = await processMeetLinksFromEmail(
+            e.body,
+            txResult.ticketXyneId,
+            channel.workspaceId,
+            externalThreadId,
+            zohoTicketId
+          );
+          if (meetResult.processed > 0) {
+            logger.info('[EmailService] Processed Google Meet links from ingestEmailThread', {
+              xyneTicketId: txResult.ticketXyneId,
+              meetCodes: meetResult.meetCodes,
+              emailId: e.id,
+              hasZohoTicketId: !!zohoTicketId,
+            });
+          }
+        } catch (error) {
+          // Don't fail email processing if meet link extraction fails
+          logger.error('[EmailService] Failed to process meet links from ingestEmailThread', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            emailId: e.id,
+            xyneTicketId: txResult.ticketXyneId,
+          });
+        }
+      }
+    }
 
     return {
       conversationId: txResult.conversationId,
