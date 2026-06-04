@@ -43,7 +43,9 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   // ==================== STATE ====================
   const [internalOpen, setInternalOpen] = useState(false);
   const [searchValue, setSearchValue] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
   const open = isOpen ?? internalOpen;
   // ==================== COMPUTED VALUES ====================
@@ -98,14 +100,27 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   };
 
   /**
-   * Reset search value when popover closes
+   * Reset search value and highlight when popover closes
    */
   useEffect(() => {
     if (!open) {
       setSearchValue('');
       onSearchChange?.('');
+      setHighlightedIndex(-1);
     }
   }, [open]);
+
+  // Reset highlight when filtered options change (e.g. on search)
+  useEffect(() => {
+    setHighlightedIndex(-1);
+  }, [filteredOptions]);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedIndex < 0 || !listRef.current) return;
+    const item = listRef.current.children[highlightedIndex] as HTMLElement;
+    item?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedIndex]);
 
   // ==================== RENDER HELPER (DEFAULT) ====================
 
@@ -323,6 +338,22 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                     setSearchValue(e.target.value);
                     onSearchChange?.(e.target.value);
                   }}
+                  onKeyDown={e => {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setHighlightedIndex(i => Math.min(i + 1, filteredOptions.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setHighlightedIndex(i => Math.max(i - 1, 0));
+                    } else if (e.key === 'Enter' && highlightedIndex >= 0) {
+                      e.preventDefault();
+                      const opt = filteredOptions[highlightedIndex];
+                      if (opt && !opt.disabled) handleSelect(opt.value);
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      handleOpenChange(false);
+                    }
+                  }}
                   className='w-full pl-7 pr-3 rounded-md text-sm ring-none outline-none bg-transparent text-foreground placeholder:text-muted-foreground'
                 />
               </div>
@@ -341,6 +372,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             ) : filteredOptions.length > 0 ? (
               // Options list
               <ul
+                ref={listRef}
                 role='listbox'
                 data-testid={testId ? `${testId}-options` : undefined}
                 className='p-1 space-y-1'
@@ -370,8 +402,9 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                     </button>
                   </li>
                 )}
-                {filteredOptions.map(option => {
+                {filteredOptions.map((option, index) => {
                   const isSelected = selectedValue === option.value;
+                  const isHighlighted = index === highlightedIndex;
                   return (
                     <li role='option' aria-selected={isSelected} key={option.value}>
                       <button
@@ -380,7 +413,9 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                         className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left ${
                           option.disabled
                             ? 'cursor-not-allowed opacity-50 text-muted-foreground'
-                            : 'cursor-pointer text-foreground hover:bg-accent'
+                            : isHighlighted
+                              ? 'cursor-pointer text-foreground bg-accent'
+                              : 'cursor-pointer text-foreground hover:bg-accent'
                         }`}
                         onClick={() => !option.disabled && handleSelect(option.value)}
                         onKeyDown={(e): void => {
