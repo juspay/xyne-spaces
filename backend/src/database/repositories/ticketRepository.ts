@@ -614,7 +614,7 @@ export class TicketRepository {
   async findByConversationIdForMeet(conversationId: string) {
     return await prisma.ticket.findFirst({
       where: { conversationId },
-      select: { xyneId: true, metadata: true },
+      select: { xyneId: true, workspaceId: true, metadata: true },
     });
   }
 
