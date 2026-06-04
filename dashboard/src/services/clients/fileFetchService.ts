@@ -18,7 +18,7 @@ const resolveUrl = (source: string): string => {
   if (source.startsWith('http') || source.startsWith('/')) {
     return source;
   }
-  return `/attachments/${source}/download`;
+  return `/attachments/${source}/stream`;
 };
 
 /**

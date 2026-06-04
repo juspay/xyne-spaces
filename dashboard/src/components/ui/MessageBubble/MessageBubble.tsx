@@ -168,7 +168,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
     const allRefs: AttachmentRef[] = orderedAttachments.map(att => ({
       attachmentId: att.id,
       fileName: att.originalFilename,
-      fileUrl: `/attachments/${att.id}/download`,
+      fileUrl: `/attachments/${att.id}/stream`,
       mimeType: att.mimetype,
       fileSize: att.size,
       thumbnailUrl: att.thumbnailUrl,

@@ -411,7 +411,7 @@ export function createCreatePptTool(): Tool<
         const isLocalDev = (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') && config.gcs.fakeGcsHost;
         const downloadUrl = isLocalDev
           ? `http://${config.gcs.fakeGcsHost}/download/storage/v1/b/${config.gcs.bucketName}/o/${encodeURIComponent(gcsResult.path)}?alt=media`
-          : `/api/attachments/${attachment.id}/download`;
+          : `/api/attachments/${attachment.id}/stream`;
 
         // Return structured data for slide viewer
         return JSON.stringify({

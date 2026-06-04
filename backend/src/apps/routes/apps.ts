@@ -63,7 +63,7 @@ router.use("/channel", authenticateApp, channelRoutes);
 router.use("/chat", authenticateApp, chatRoutes);
 
 // File routes
-router.use("/files", uploadMultiple, authenticateApp, fileRoutes);
+router.use('/files', authenticateApp, uploadMultiple, fileRoutes);
 
 // Ticket routes
 router.use("/ticket", authenticateApp, ticketRoutes);

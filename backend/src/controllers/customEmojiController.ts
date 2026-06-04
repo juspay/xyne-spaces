@@ -6,6 +6,7 @@ import {
   CustomEmojiWithRelations,
 } from '../database/repositories/customEmojiRepository';
 import { getStorageService } from '../services/storage';
+import { cleanupProxiedFile } from '../utils/attachmentUtils';
 
 const storageService = getStorageService();
 
@@ -53,6 +54,12 @@ export class CustomEmojiController {
 
       // Validate user
       if (!userId) {
+        await cleanupProxiedFile(file, {
+          logPrefix: 'CUSTOM-EMOJI',
+          successMessage: 'Cleaned up proxied emoji upload after failed request',
+          failureMessage: 'Failed to clean up proxied emoji upload after failed request',
+          storage: storageService,
+        });
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
@@ -65,20 +72,25 @@ export class CustomEmojiController {
 
       // Validate file type (only images allowed for emojis)
       if (!file.mimetype.startsWith('image/')) {
+        await cleanupProxiedFile(file, {
+          logPrefix: 'CUSTOM-EMOJI',
+          successMessage: 'Cleaned up proxied emoji upload after failed request',
+          failureMessage: 'Failed to clean up proxied emoji upload after failed request',
+          storage: storageService,
+        });
         res.status(400).json({ error: 'Only image files are allowed for emojis' });
-        return;
-      }
-
-      // Validate file size (max 256KB for emojis)
-      const maxSize = 256 * 1024;
-      if (file.size > maxSize) {
-        res.status(400).json({ error: 'Emoji image must be less than 256KB' });
         return;
       }
 
       // Validate emoji name format (alphanumeric and underscores only, no colons)
       const sanitizedName = name.replace(/:/g, '').trim();
       if (!sanitizedName || sanitizedName.length > 50) {
+        await cleanupProxiedFile(file, {
+          logPrefix: 'CUSTOM-EMOJI',
+          successMessage: 'Cleaned up proxied emoji upload after failed request',
+          failureMessage: 'Failed to clean up proxied emoji upload after failed request',
+          storage: storageService,
+        });
         res.status(400).json({
           error: 'Invalid emoji name. Must be 1-50 characters (letters, numbers, underscores)',
         });
@@ -88,30 +100,46 @@ export class CustomEmojiController {
       // Check if emoji with this name already exists
       const existingEmoji = await this.customEmojiRepository.findByName(sanitizedName);
       if (existingEmoji) {
+        await cleanupProxiedFile(file, {
+          logPrefix: 'CUSTOM-EMOJI',
+          successMessage: 'Cleaned up proxied emoji upload after failed request',
+          failureMessage: 'Failed to clean up proxied emoji upload after failed request',
+          storage: storageService,
+        });
         res.status(409).json({ error: 'An emoji with this name already exists' });
         return;
       }
 
-      logger.info('Uploading emoji file to GCS', {
+      logger.info('Processing streamed emoji upload', {
         fileName: file.originalname,
         fileSize: file.size,
         mimeType: file.mimetype,
       });
 
-      // Upload file to GCS
-      const uploadResult = await storageService.uploadFile(file.buffer, {
-        filename: file.originalname,
-        contentType: file.mimetype,
-        scopeType: 'emojis',
-        scopeId: sanitizedName,
-      });
+      // uploadSingle uses streamingStorage._handleFile -> storageService.uploadStream.
+      // The file is expected to already be in object storage at this point.
+      const emojiStoragePath = typeof file.path === 'string' ? file.path : '';
+      if (!emojiStoragePath.startsWith('attachments/')) {
+        logger.error('Expected streamed storage path is missing on uploaded emoji file', {
+          fileName: file.originalname,
+          hasPath: Boolean(file.path),
+        });
+        await cleanupProxiedFile(file, {
+          logPrefix: 'CUSTOM-EMOJI',
+          successMessage: 'Cleaned up proxied emoji upload after failed request',
+          failureMessage: 'Failed to clean up proxied emoji upload after failed request',
+          storage: storageService,
+        });
+        res.status(500).json({ error: 'Failed to stream emoji file to storage' });
+        return;
+      }
 
-      logger.info('Emoji file uploaded to GCS', { gcsPath: uploadResult.path });
+      logger.info('Emoji file already streamed to storage', { gcsPath: emojiStoragePath });
 
       // Create the custom emoji
       const emojiData: CreateCustomEmojiInput = {
         name: sanitizedName,
-        url: uploadResult.path,
+        url: emojiStoragePath,
         createdBy: userId,
       };
 
@@ -125,6 +153,12 @@ export class CustomEmojiController {
 
       logger.info(`Custom emoji created: ${sanitizedName} by user ${userId}`);
     } catch (error: any) {
+      await cleanupProxiedFile((req as Express.Request & { file?: Express.Multer.File }).file, {
+        logPrefix: 'CUSTOM-EMOJI',
+        successMessage: 'Cleaned up proxied emoji upload after failed request',
+        failureMessage: 'Failed to clean up proxied emoji upload after failed request',
+        storage: storageService,
+      });
       logger.error('Error creating custom emoji:', error);
       if (error.code === 'P2002') {
         res.status(409).json({ error: 'An emoji with this name already exists' });

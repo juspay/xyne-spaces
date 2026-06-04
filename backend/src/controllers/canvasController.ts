@@ -13,6 +13,7 @@ import { activityService } from '../services/activity/activityService.js';
 import { DatabaseClient } from '@/database/client';
 import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
+import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { ActivityClassification } from '@prisma/client';
 import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
@@ -107,13 +108,16 @@ export class CanvasController {
     try {
       const { canvasId, width, height } = req.body;
       const userId = req.user?.id;
+      const file = req.file;
 
       if (!userId) {
+        await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(403).json({ error: 'Unauthorized - user not authenticated' });
         return;
       }
 
       if (!canvasId) {
+        await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(400).json({ error: 'Canvas ID is required' });
         return;
       }
@@ -125,11 +129,10 @@ export class CanvasController {
         logger.warn(`[CANVAS-UPLOAD] Permission denied for user ${userId} on canvas ${canvasId}`, {
           error: error instanceof Error ? error.message : 'Unknown error'
         });
+        await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(403).json({ error: 'Permission denied' });
         return;
       }
-
-      const file = req.file;
 
       if (!file) {
         res.status(400).json({ error: 'No file provided' });
@@ -153,6 +156,7 @@ export class CanvasController {
 
       if (!uploadResults || uploadResults.length === 0) {
         logger.error('[CANVAS-UPLOAD] The file upload service did not return a valid result for file:', { fileName: file.originalname });
+        await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
         return;
       }
@@ -203,6 +207,7 @@ export class CanvasController {
         thumbnailUrl: attachment.thumbnailUrl,
       });
     } catch (error) {
+      await cleanupProxiedFile(req.file, { logPrefix: 'CANVAS-UPLOAD' });
       logger.error('[CANVAS-UPLOAD] Error uploading file:', error);
       res.status(500).json({
         error: 'Failed to upload file',

@@ -1,16 +1,30 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import multer from 'multer';
 import { AttachmentController } from '../controllers/attachmentController';
 import { config } from '../config/env';
+import { uploadMultiple } from '../middleware/upload';
 
 const router = Router();
 const attachmentController = new AttachmentController();
-const upload = multer({
-  limits: {
-    fileSize: 1024 * 1024 * 1024,
-    files: 20,
-  },
-});
+
+const normalizeOrigin = (value: string): string => value.replace(/\/+$/, '');
+
+const resolveRequestOrigin = (req: Request): string | null => {
+  const rawOrigin = req.headers.origin;
+  if (typeof rawOrigin === 'string' && rawOrigin.length > 0) {
+    return normalizeOrigin(rawOrigin);
+  }
+
+  const rawReferer = req.headers.referer;
+  if (typeof rawReferer !== 'string' || rawReferer.length === 0) {
+    return null;
+  }
+
+  try {
+    return normalizeOrigin(new URL(rawReferer).origin);
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Middleware to set cross-origin headers for media streaming.
@@ -21,13 +35,16 @@ const setCrossOriginHeaders = (
   res: Response,
   next: NextFunction
 ): void => {
-  const origin = req.headers.referer;
-  const allowedOrigins = config.cors.allowedMediaOrigins;
-  // Check if origin is in allowed list
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('cross-origin-resource-policy', 'cross-origin');
+  const requestOrigin = resolveRequestOrigin(req);
+  const allowedOrigins = new Set(
+    config.cors.allowedMediaOrigins.map((origin: string) => normalizeOrigin(origin))
+  );
+
+  if (requestOrigin && allowedOrigins.has(requestOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
   }
   next();
 };
@@ -52,7 +69,7 @@ router.get('/attachments/file', attachmentController.downloadByPath.bind(attachm
 // Upload attachments for an entity (e.g., IMPACT)
 router.post(
   '/attachments/upload',
-  upload.fields([{ name: 'files', maxCount: 10 }]),
+  uploadMultiple,
   attachmentController.uploadAttachments.bind(attachmentController),
 );
 

@@ -92,7 +92,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
                 />
               </label>
             </div>
-            <p className='text-xs text-muted-foreground'>Max file size: 500KB</p>
+            <p className='text-xs text-muted-foreground'>Max file size: 256KB</p>
           </div>
 
           {/* Name */}

@@ -9,7 +9,7 @@ const canvasController = new CanvasController(messageAttachmentRepository);
 
 router.post(
   '/upload',
-  uploadSingle,
+  uploadSingle(),
   canvasController.uploadFile
 );
 

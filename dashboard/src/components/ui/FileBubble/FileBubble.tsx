@@ -41,7 +41,7 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
     const attachmentRef: AttachmentRef = {
       attachmentId: attachment.id,
       fileName: attachment.originalFilename,
-      fileUrl: `/attachments/${attachment.id}/download`,
+      fileUrl: `/attachments/${attachment.id}/stream`,
       mimeType: attachment.mimetype,
       fileSize: attachment.size,
       thumbnailUrl: attachment.thumbnailUrl,
