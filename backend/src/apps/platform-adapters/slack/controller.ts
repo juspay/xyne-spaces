@@ -5,6 +5,10 @@ import { MessageType } from "@xyne/shared";
 import type { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
+import { logger } from "@/utils/logger";
+import { config } from "@/config/env";
+import { outageAlertService } from "@/services/outageAlertService";
+import { extractMentionsFromContent } from "@/utils/mentionUtils";
 import {
 	findOrCreateConversation,
 	getChannelHistory,
@@ -340,6 +344,54 @@ export class SlackController {
 			parsed.data.username,
 		);
 		res.status(200).json(slackResponse);
+
+		// Outage Alert Verification - Process async after responding
+		if (config.outageVerification.channelId && channelId === config.outageVerification.channelId && result.conversationId) {
+			void (async () => {
+				try {
+					const alertText = args.content || parsed.data.text || "";
+					const verificationResult = await outageAlertService.processOutageAlert(
+						alertText,
+						result.conversationId,
+					);
+
+					if (!verificationResult.uploadedFile) return;
+
+					const mentions = await extractMentionsFromContent(alertText);
+
+					const escapeHtml = (str: string): string =>
+						str.replace(/&/g, "&amp;")
+							.replace(/</g, "&lt;")
+							.replace(/>/g, "&gt;")
+							.replace(/"/g, "&quot;")
+							.replace(/'/g, "&#039;");
+
+					const reportMessage = mentions.length
+						? `${mentions
+								.map((m) => {
+									const escapedUsername = escapeHtml(m.username);
+									return `<span class="chat-input-mention" data-mention="" data-mention-type="user" data-user-id="${m.userId}" data-username="${escapedUsername}">@${escapedUsername}</span>`;
+								})
+								.join(" ")} False Outage Report`
+						: "False Outage Report";
+
+					await findOrCreateConversation(
+						channelId,
+						context.userId,
+						reportMessage,
+						false,
+						result.conversationId,
+						[verificationResult.uploadedFile],
+						MessageType.BOT,
+						{},
+					);
+
+					logger.info("[SLACK-POST-MESSAGE] False outage report posted", { sessionId: verificationResult.sessionId });
+				} catch (err) {
+					logger.error("[SLACK-POST-MESSAGE] Outage alert processing failed", { err });
+				}
+			})();
+		}
 	});
 
 	chatUpdate = wrapSlackHandler(async (req: Request, res: Response) => {
