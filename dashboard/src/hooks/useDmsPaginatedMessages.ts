@@ -293,15 +293,20 @@ export const useDmsPaginatedMessages = (
   );
 
   // ── Derived values ────────────────────────────────────────────────────────────
+  const visibleIds = useMemo(() => new Set(visibleChannels.map(c => c.id)), [visibleChannels]);
   const channels = useMemo<DmChannel[]>(
     () =>
       rows
-        .filter(s => s.channel !== null)
+        .filter(
+          s =>
+            s.channel &&
+            ((s.channel.conversations?.length ?? 0) > 0 || visibleIds.has(s.channelId)),
+        )
         .map(s => ({
           ...s.channel!,
           channelStats: { lastActivityAt: s.lastActivityAt, participantCount: s.participantCount },
         })),
-    [rows],
+    [rows, visibleIds],
   );
 
   const messagesMap = useMemo(() => {
