@@ -10,6 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { joinTextblockBackward } from '@tiptap/pm/commands';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
 const VoiceShimmerMark = Mark.create({
@@ -275,7 +276,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [attachedCanvas, setAttachedCanvas] = useState<Canvas | null>(null);
     const [isCanvasAttachmentModalOpen, setIsCanvasAttachmentModalOpen] = useState(false);
 
-    const { isMobile } = usePlatform();
+    const { isMobile, isMac } = usePlatform();
+    const cmdKey = isMac ? '⌘' : 'Ctrl';
 
     const hasSendableContent = React.useMemo(
       () => !!content || allAttachments.length > 0 || !!attachedCanvas,
@@ -609,62 +611,77 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           // Check if screen width is below 500px
           const isMobile = window.innerWidth < 500;
 
-          // Shift+Enter / Cmd+Enter: new line (default) OR send message (when enterSendsMessage is false)
-          if (event.key === 'Enter' && (event.shiftKey || event.metaKey)) {
-            if (!enterSendsMessage && !isMobile && !disableEnterToSend) {
-              const mentionState = mentionPluginKey.getState(view.state);
-              const channelMentionState = channelMentionPluginKey.getState(view.state);
-              const commandState = commandPluginKey.getState(view.state);
-              const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
-              if (
-                (mentionState?.isOpen && mentionState.items.length > 0) ||
-                (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-                (commandState?.isOpen && commandState.items.length > 0) ||
-                (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
-              ) {
-                return false;
-              }
-              if (
-                editor?.isActive('bulletList') ||
-                editor?.isActive('orderedList') ||
-                editor?.isActive('codeBlock') ||
-                editor?.isActive('blockquote')
-              ) {
-                return false;
-              }
-              event.preventDefault();
-              void handleSend();
-              return true;
-            }
+          const isPopupOpen = (): boolean => {
+            const mentionState = mentionPluginKey.getState(view.state);
+            const channelMentionState = channelMentionPluginKey.getState(view.state);
+            const commandState = commandPluginKey.getState(view.state);
+            const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
+            return Boolean(
+              (mentionState?.isOpen && mentionState.items.length > 0) ||
+              (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
+              (commandState?.isOpen && commandState.items.length > 0) ||
+              (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0),
+            );
+          };
+
+          // Cmd+Enter (Mac) / Ctrl+Enter (Win/Linux) → always send, regardless of
+          // preference or content type (Slack-like).
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
+            if (isPopupOpen()) return false;
+            if (disableEnterToSend) return false;
             event.preventDefault();
-            if (editor?.isActive('blockquote')) {
-              editor.chain().focus().splitBlock().lift('blockquote').run();
-            } else if (editor?.isActive('bulletList') || editor?.isActive('orderedList')) {
-              // For lists, exit the list on a new line (similar to pressing Enter twice)
-              editor?.chain().focus().splitListItem('listItem').liftListItem('listItem').run();
-              return true;
-            } else {
-              editor?.chain().focus().splitBlock().run();
-            }
+            void handleSend();
             return true;
           }
 
-          // Handle backspace to prevent unwanted list item lifting
+          // Shift+Enter or Option/Alt+Enter → always insert a new line (Slack also treats
+          // Option+Enter as a newline shortcut). In a list, override Tiptap's hard-break
+          // default with splitListItem so users can build multi-bullet messages.
+          // In a code block, StarterKit's default is exitCode (escapes the block) — override
+          // with a literal newline so the cursor stays inside.
+          if (event.key === 'Enter' && (event.shiftKey || event.altKey) && !event.metaKey) {
+            if (isPopupOpen()) return false;
+            if (editor?.isActive('bulletList') || editor?.isActive('orderedList')) {
+              event.preventDefault();
+              editor?.chain().focus().splitListItem('listItem').run();
+              return true;
+            }
+            if (editor?.isActive('codeBlock')) {
+              event.preventDefault();
+              editor?.chain().focus().insertContent('\n').run();
+              return true;
+            }
+            return false;
+          }
+
+          // Backspace at the start of a list item: lift one level (Slack-like).
+          // Nested item → parent list depth; top-level item → escape the list entirely.
           if (
             event.key === 'Backspace' &&
             (editor?.isActive('bulletList') || editor?.isActive('orderedList'))
           ) {
-            const { state } = view;
-            const { selection } = state;
-            const { $from } = selection;
+            const { selection } = view.state;
+            const { $from, empty } = selection;
 
-            // Check if cursor is at the start of a list item
-            if ($from.parentOffset === 0) {
-              // Check if we're not at the first list item
-              const listItemPos = $from.before($from.depth);
-              if (listItemPos > 0) {
-                return false;
-              }
+            if (empty && $from.parentOffset === 0) {
+              event.preventDefault();
+              editor?.chain().focus().liftListItem('listItem').run();
+              return true;
+            }
+          }
+
+          // Shift+Backspace outside a list → behave exactly like plain Backspace.
+          // Tiptap's keymap only binds Backspace without Shift, so the Shift
+          // variant otherwise falls through to the browser.
+          if (
+            event.key === 'Backspace' &&
+            event.shiftKey &&
+            !editor?.isActive('bulletList') &&
+            !editor?.isActive('orderedList')
+          ) {
+            if (joinTextblockBackward(view.state, view.dispatch, view)) {
+              event.preventDefault();
+              return true;
             }
           }
 
@@ -687,44 +704,36 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             return true;
           }
 
-          // Enter key WITHOUT Shift/Cmd: Send message or new line depending on preference
-          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey) {
-            const mentionState = mentionPluginKey.getState(view.state);
-            const channelMentionState = channelMentionPluginKey.getState(view.state);
-            const commandState = commandPluginKey.getState(view.state);
-            const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
+          // Plain Enter → send (submit mode) or default newline (newline mode).
+          // Applies uniformly across plain text, lists, code blocks, and blockquotes.
+          // Exception (Slack-like): on an empty list item, Enter exits the list entirely
+          // regardless of preference, so users can break out of a bullet sequence.
+          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.altKey) {
+            if (isPopupOpen()) return false;
 
-            // If any menu is open, let it handle the Enter key
-            if (
-              (mentionState?.isOpen && mentionState.items.length > 0) ||
-              (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-              (commandState?.isOpen && commandState.items.length > 0) ||
-              (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
-            ) {
-              return false;
+            if (editor?.isActive('bulletList') || editor?.isActive('orderedList')) {
+              const { $from } = view.state.selection;
+              let listItemDepth: number | null = null;
+              let listItemCount = 0;
+              for (let d = $from.depth; d > 0; d--) {
+                if ($from.node(d).type.name === 'listItem') {
+                  if (listItemDepth === null) listItemDepth = d;
+                  listItemCount++;
+                }
+              }
+              if (listItemDepth !== null && $from.node(listItemDepth).textContent.length === 0) {
+                event.preventDefault();
+                let chain = editor.chain().focus();
+                for (let i = 0; i < listItemCount; i++) {
+                  chain = chain.liftListItem('listItem');
+                }
+                chain.run();
+                return true;
+              }
             }
 
-            // If in special formatting context, allow default behavior
-            if (
-              editor?.isActive('bulletList') ||
-              editor?.isActive('orderedList') ||
-              editor?.isActive('codeBlock') ||
-              editor?.isActive('blockquote')
-            ) {
-              return false;
-            }
-
-            // On mobile or when Enter-to-send is disabled, create new line
-            if (isMobile || disableEnterToSend) {
-              return false;
-            }
-
-            // When enterSendsMessage is false, Enter creates a new line
-            if (!enterSendsMessage) {
-              return false;
-            }
-
-            // On desktop with enterSendsMessage enabled: Send the message
+            if (isMobile || disableEnterToSend) return false;
+            if (!enterSendsMessage) return false;
             event.preventDefault();
             void handleSend();
             return true;
@@ -1802,8 +1811,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               data-track-category='CHAT_INPUT'
               data-track-name='OpenMessagingPreferences'
             >
-              <span className='font-semibold'>Shift / ⌘ + Return</span>{' '}
-              {enterSendsMessage ? 'to add a new line' : 'to send'}
+              {enterSendsMessage ? (
+                <>
+                  <span className='font-semibold'>Shift + Return</span> to add a new line
+                </>
+              ) : (
+                <>
+                  <span className='font-semibold'>Return</span> to add a new line,{' '}
+                  <span className='font-semibold'>{cmdKey} + Return</span> to send
+                </>
+              )}
             </button>
           )}
         </div>
