@@ -973,7 +973,7 @@ export class SlackController {
 				return;
 			}
 
-			await findOrCreateConversation(
+			const conversationResult = await findOrCreateConversation(
 				channelId,
 				userId,
 				initial_comment ?? "",
@@ -983,11 +983,26 @@ export class SlackController {
 				MessageType.BOT,
 			);
 
+			const dbAttachments =
+				await repositories.messageAttachments.findByMessageId(
+					conversationResult.messageId,
+				);
+
+			// Match by file URL to avoid index-based race conditions
+			const dbAttachmentByUrl = new Map(
+				dbAttachments.map((a) => [a.url, a.id]),
+			);
+
+			const responseFilesWithDbIds = responseFiles.map((f) => ({
+				...f,
+				id: dbAttachmentByUrl.get(f.url_private) ?? undefined,
+			}));
+
 			for (const key of redisKeys) {
 				await redisService.del(key);
 			}
 
-			res.status(200).json({ ok: true, files: responseFiles });
+			res.status(200).json({ ok: true, files: responseFilesWithDbIds });
 		},
 	);
 }

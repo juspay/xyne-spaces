@@ -33,6 +33,8 @@ export const initializeRegistry = async (): Promise<void> => {
     { ColumnNode },
     { CardNode },
     { DividerNode },
+    { ImageNode },
+    { TableNode },
   ] = await Promise.all([
     import('./TextNode'),
     import('./HeadingNode'),
@@ -46,6 +48,8 @@ export const initializeRegistry = async (): Promise<void> => {
     import('./ContainerNodes'),
     import('./ContainerNodes'),
     import('./DividerNode'),
+    import('./ImageNode'),
+    import('./TableNode'),
   ]);
 
   NodeRegistry.register('text', TextNode);
@@ -60,4 +64,6 @@ export const initializeRegistry = async (): Promise<void> => {
   NodeRegistry.register('column', ColumnNode);
   NodeRegistry.register('card', CardNode);
   NodeRegistry.register('divider', DividerNode);
+  NodeRegistry.register('image', ImageNode);
+  NodeRegistry.register('table', TableNode);
 };

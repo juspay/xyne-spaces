@@ -36,6 +36,8 @@ import type {
   SlackButtonElement,
   SlackImageElement,
   SlackTextObject,
+  SlackTableBlock,
+  SlackMarkdownBlock,
 } from './slackBlockKitTypes';
 
 // ============================================================================
@@ -86,6 +88,45 @@ function collectAllSlackUserIds(input: BlockKitInput): string[] {
         });
       } else if (block.type === 'header') {
         fromText(block.text.text);
+      }
+    }
+  };
+
+  if (input.text) fromText(input.text);
+  if (input.blocks) fromBlocks(input.blocks);
+  if (input.attachments) {
+    for (const att of input.attachments) {
+      if (att.pretext) fromText(att.pretext);
+      if (att.text) fromText(att.text);
+      if (att.fields) att.fields.forEach(f => f.value != null && fromText(f.value));
+      if (att.blocks) fromBlocks(att.blocks);
+    }
+  }
+
+  return [...ids];
+}
+
+function collectAllSlackGroupIds(input: BlockKitInput): string[] {
+  const ids = new Set<string>();
+  const groupRegex = /<!subteam\^([A-Za-z0-9]+)(?:\|[^>]*)?>/g;
+
+  const fromText = (text: string) => {
+    for (const m of text.matchAll(groupRegex)) ids.add(m[1]);
+  };
+
+  const fromBlocks = (blocks: SlackBlock[]) => {
+    for (const block of blocks) {
+      if (block.type === 'section') {
+        const s = block as SlackSectionBlock;
+        if (s.text) fromText(s.text.text);
+        if (s.fields) s.fields.forEach(f => fromText(f.text));
+      } else if (block.type === 'context') {
+        (block as SlackContextBlock).elements.forEach(el => {
+          if ('text' in el) fromText((el as SlackTextObject).text);
+        });
+      } else if (block.type === 'markdown') {
+        const mdBlock = block as { type: 'markdown'; text?: string };
+        if (mdBlock.text) fromText(mdBlock.text);
       }
     }
   };
@@ -170,18 +211,26 @@ export async function convertBlockKitToFlowJSON(
   // If botToken is not provided we skip resolution and fall back to passing the
   // raw Slack ID; the dashboard MentionRenderer will show an unresolved mention.
   let slackToXyneMap: Map<string, string> | undefined;
+  let slackToXyneGroupMap: Map<string, string> | undefined;
   if (botToken) {
-    const slackUserIds = collectAllSlackUserIds({
-      text: plainText ?? rawText,
-      blocks,
-      attachments: resolvedAttachments,
-    });
+    const blockKitInput = { text: plainText ?? rawText, blocks, attachments: resolvedAttachments };
+    const slackUserIds = collectAllSlackUserIds(blockKitInput);
     if (slackUserIds.length > 0) {
       const resolved = await resolveSlackIds(slackUserIds, botToken, 'user', workspaceId);
       if (resolved) {
         slackToXyneMap = new Map<string, string>();
         for (const [slackId, entry] of resolved) {
           if (entry.dbId) slackToXyneMap.set(slackId, entry.dbId);
+        }
+      }
+    }
+    const slackGroupIds = collectAllSlackGroupIds(blockKitInput);
+    if (slackGroupIds.length > 0) {
+      const resolvedGroups = await resolveSlackIds(slackGroupIds, botToken, 'group', workspaceId);
+      if (resolvedGroups) {
+        slackToXyneGroupMap = new Map<string, string>();
+        for (const [slackId, entry] of resolvedGroups) {
+          if (entry.dbId) slackToXyneGroupMap.set(slackId, entry.dbId);
         }
       }
     }
@@ -192,29 +241,27 @@ export async function convertBlockKitToFlowJSON(
   // Prepend plain text — render whenever present, whether it accompanies
   // modern blocks, legacy attachments, or both.
   if (plainText) {
-    components.push(mrkdwnToFlowComponent(plainText, slackToXyneMap));
+    components.push(mrkdwnToFlowComponent(plainText, slackToXyneMap, slackToXyneGroupMap));
   }
 
   // Convert modern blocks
   for (const block of blocks ?? []) {
-    const component = slackBlockToFlowComponent(block, slackToXyneMap);
+    const component = slackBlockToFlowComponent(block, slackToXyneMap, slackToXyneGroupMap);
     if (component) components.push(component);
   }
 
   // Convert legacy attachments → bordered stripe components
   for (const attachment of resolvedAttachments ?? []) {
-    const card = slackAttachmentToFlowComponent(attachment, slackToXyneMap);
+    const card = slackAttachmentToFlowComponent(attachment, slackToXyneMap, slackToXyneGroupMap);
     if (card) components.push(card);
   }
 
   if (!components.length) return null;
 
-  // When there are only modern blocks (no attachments), wrap them in a
-  // default-colour stripe so the layout is always a single bordered container.
-  const finalComponents: FlowComponent[] =
-    !resolvedAttachments?.length && components.length
-      ? [withColorStripe(components, resolveAttachmentColor(undefined))]
-      : components;
+  // Top-level blocks render directly — no card, no border (matches Slack behaviour).
+  // Attachments already wrap themselves in a bordered stripe inside
+  // slackAttachmentToFlowComponent, so no additional wrapping is needed here.
+  const finalComponents: FlowComponent[] = components;
 
   return {
     version: '2.0',
@@ -248,14 +295,18 @@ export async function convertBlockKitToFlowJSON(
  * Other mrkdwn markers (*bold*, _italic_, `code`, <url|label>) are kept as-is;
  * the TextNode inline parser handles them at render time on the frontend.
  */
-function normalizeSlackMentions(text: string, slackToXyneMap?: Map<string, string>): string {
+function normalizeSlackMentions(text: string, slackToXyneMap?: Map<string, string>, slackToXyneGroupMap?: Map<string, string>): string {
   return text
     .replace(/<@([A-Za-z0-9]+)(?:\|[^>]*)?>/g, (_, slackId) => {
       const xyneId = slackToXyneMap?.get(slackId);
       return `<userid:${xyneId ?? slackId}>`;
     })
+    .replace(/<!subteam\^([A-Za-z0-9]+)(?:\|[^>]*)?>/g, (_, slackGroupId) => {
+      const xyneGroupId = slackToXyneGroupMap?.get(slackGroupId);
+      return `<groupid:${xyneGroupId ?? slackGroupId}>`;
+    })
     .replace(/<#([A-Za-z0-9]+)(?:\|[^>]*)?>/g, (_, id) => `<channelid:${id}>`)
-    .replace(/<!([a-z]+)(?:\|[^>]*)?>/g,       (_, name) => `<broadcast:${name}>`);
+    .replace(/<!([a-z]+)(?:\|[^>]*)?>/g,        (_, name) => `<broadcast:${name}>`);
 }
 
 /**
@@ -267,10 +318,11 @@ function normalizeSlackMentions(text: string, slackToXyneMap?: Map<string, strin
 export function mrkdwnToFlowComponent(
   textObj: SlackTextObject | string,
   slackToXyneMap?: Map<string, string>,
+  slackToXyneGroupMap?: Map<string, string>,
 ): FlowComponent {
   const raw      = typeof textObj === 'string' ? textObj : textObj.text;
   const isMrkdwn = typeof textObj === 'string' || textObj.type === 'mrkdwn';
-  const content  = isMrkdwn ? normalizeSlackMentions(raw, slackToXyneMap) : raw;
+  const content  = isMrkdwn ? normalizeSlackMentions(raw, slackToXyneMap, slackToXyneGroupMap) : raw;
   if (isMrkdwn) {
     const structuredComponent = mrkdwnWithBlocksToFlowComponent(content);
     if (structuredComponent) return structuredComponent;
@@ -278,7 +330,53 @@ export function mrkdwnToFlowComponent(
   return { id: crypto.randomUUID(), type: 'text', props: { content } };
 }
 
+function parseMarkdownTable(content: string): FlowComponent | null {
+  const lines = content.trim().split('\n').map(l => l.trim()).filter(Boolean);
+  // Need at least: header row + separator row + one data row
+  if (lines.length < 3) return null;
+  // Separator row must consist only of |, -, :, and spaces
+  if (!/^\|?[\s|:\-]+\|?$/.test(lines[1])) return null;
+
+  const parseRow = (line: string): string[] =>
+    line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+
+  const sepCells = parseRow(lines[1]);
+  const columnAlignments = sepCells.map((cell): 'left' | 'center' | 'right' => {
+    if (cell.startsWith(':') && cell.endsWith(':')) return 'center';
+    if (cell.endsWith(':')) return 'right';
+    return 'left';
+  });
+
+  const rows = [parseRow(lines[0]), ...lines.slice(2).map(parseRow)];
+  return {
+    id: crypto.randomUUID(),
+    type: 'table',
+    props: { rows, hasHeader: true, columnAlignments },
+  };
+}
+
 function mrkdwnWithBlocksToFlowComponent(content: string): FlowComponent | null {
+  // Check for GFM markdown table (may be preceded by other text lines)
+  const trimmed = content.trim();
+  const lines = trimmed.split('\n');
+  const tableLineIndex = lines.findIndex(l => /^\|.+\|/.test(l.trim()));
+  if (tableLineIndex !== -1) {
+    const tableContent = lines.slice(tableLineIndex).join('\n').trim();
+    const table = parseMarkdownTable(tableContent);
+    if (table) {
+      const preText = lines.slice(0, tableLineIndex).join('\n').trim();
+      if (!preText) return table;
+      return {
+        id: crypto.randomUUID(),
+        type: 'column',
+        children: [
+          { id: crypto.randomUUID(), type: 'text', props: { content: preText } },
+          table,
+        ],
+      };
+    }
+  }
+
   if (!/(^|\n)(```|>\s?.+|\s*[-*•]\s+.+|\s*\d+\.\s+.+)/m.test(content)) return null;
 
   const textComponent = (text: string): FlowComponent => ({
@@ -360,6 +458,7 @@ function withChatQuoteStyle(children: FlowComponent[]): FlowComponent {
 export function slackBlockToFlowComponent(
   block: SlackBlock,
   slackToXyneMap?: Map<string, string>,
+  slackToXyneGroupMap?: Map<string, string>,
 ): FlowComponent | null {
   switch (block.type) {
     case 'header':
@@ -372,12 +471,48 @@ export function slackBlockToFlowComponent(
     case 'divider':
       return { id: crypto.randomUUID(), type: 'divider' };
 
+    case 'table': {
+      const tableBlock = block as SlackTableBlock;
+      if (!tableBlock.rows?.length) return null;
+
+      const rows: string[][] = tableBlock.rows.map(row =>
+        row.map(cell => {
+          if (cell.type === 'raw_text') return cell.text ?? '';
+          if (cell.type === 'rich_text' && Array.isArray(cell.elements)) {
+            return (cell.elements as Array<{ type?: string; elements?: Array<{ type?: string; text?: string; url?: string; name?: string }> }>)
+              .flatMap(section => section.elements ?? [])
+              .map(el => {
+                // Emit mrkdwn tokens so TableNode's inline parser renders them correctly
+                if (el.type === 'link' && el.url) return `<${el.url}|${el.text ?? el.url}>`;
+                if (el.type === 'emoji' && el.name) return `:${el.name}:`;
+                return el.text ?? '';
+              })
+              .join('');
+          }
+          return '';
+        }),
+      );
+
+      const columnAlignments = tableBlock.column_settings
+        ?.map(s => (s?.align ?? 'left') as 'left' | 'center' | 'right');
+
+      return {
+        id: crypto.randomUUID(),
+        type: 'table',
+        props: { rows, hasHeader: false, columnAlignments },
+      };
+    }
+
     case 'image': {
       const imgBlock = block as SlackImageBlock;
+      const xyneFileId = imgBlock.slack_file?.id ?? imgBlock.xyne_file_id;
+      const src = xyneFileId
+        ? `/api/attachments/${xyneFileId}/download`
+        : imgBlock.image_url;
       const imageComponent: FlowComponent = {
         id: crypto.randomUUID(),
         type: 'image',
-        props: { src: imgBlock.image_url, alt: imgBlock.alt_text },
+        props: { src, alt: imgBlock.alt_text, ...(xyneFileId && { xyne_file_id: xyneFileId }) },
       };
       if (imgBlock.title) {
         return {
@@ -397,12 +532,12 @@ export function slackBlockToFlowComponent(
       const sectionChildren: FlowComponent[] = [];
 
       if (sectionBlock.text) {
-        sectionChildren.push(mrkdwnToFlowComponent(sectionBlock.text, slackToXyneMap));
+        sectionChildren.push(mrkdwnToFlowComponent(sectionBlock.text, slackToXyneMap, slackToXyneGroupMap));
       }
 
       if (sectionBlock.fields?.length) {
         const fieldComponents: FlowComponent[] = sectionBlock.fields.map(
-          (field): FlowComponent => mrkdwnToFlowComponent(field, slackToXyneMap),
+          (field): FlowComponent => mrkdwnToFlowComponent(field, slackToXyneMap, slackToXyneGroupMap),
         );
         sectionChildren.push({
           id: crypto.randomUUID(),
@@ -449,7 +584,7 @@ export function slackBlockToFlowComponent(
         .filter((el): el is SlackTextObject => !('image_url' in el));
       if (!textSegments.length) return null;
       // Render each context text element parsed through mrkdwn, then collect into a row
-      const parsed = textSegments.map((el) => mrkdwnToFlowComponent(el, slackToXyneMap));
+      const parsed = textSegments.map((el) => mrkdwnToFlowComponent(el, slackToXyneMap, slackToXyneGroupMap));
       return {
         id: crypto.randomUUID(),
         type: 'row',
@@ -460,10 +595,19 @@ export function slackBlockToFlowComponent(
 
     case 'rich_text': {
       const richTextBlock = block as SlackRichTextBlock;
-      const children = richTextBlockToComponents(richTextBlock, slackToXyneMap);
+      const children = richTextBlockToComponents(richTextBlock, slackToXyneMap, slackToXyneGroupMap);
       if (!children.length) return null;
       if (children.length === 1) return children[0];
       return { id: crypto.randomUUID(), type: 'column', children };
+    }
+
+    case 'markdown': {
+      // Non-standard but used by some Slack apps — treat `text` as mrkdwn.
+      // This also covers GFM markdown tables (| A | B |\n|---|---|\n| 1 | 2 |)
+      // which parseMarkdownTable inside mrkdwnToFlowComponent will detect.
+      const mdBlock = block as SlackMarkdownBlock;
+      if (!mdBlock.text) return null;
+      return mrkdwnToFlowComponent(mdBlock.text, slackToXyneMap, slackToXyneGroupMap);
     }
 
     default:
@@ -503,11 +647,12 @@ export function slackBlockElementToFlowComponent(element: SlackBlockElement): Fl
 export function slackAttachmentToFlowComponent(
   attachment: SlackAttachment,
   slackToXyneMap?: Map<string, string>,
+  slackToXyneGroupMap?: Map<string, string>,
 ): FlowComponent | null {
   const children: FlowComponent[] = [];
 
   if (attachment.pretext) {
-    children.push(mrkdwnToFlowComponent(attachment.pretext, slackToXyneMap));
+    children.push(mrkdwnToFlowComponent(attachment.pretext, slackToXyneMap, slackToXyneGroupMap));
   }
 
   if (attachment.author_name) {
@@ -537,11 +682,11 @@ export function slackAttachmentToFlowComponent(
   // Modern blocks inside the attachment take priority over legacy text
   if (attachment.blocks?.length) {
     for (const block of attachment.blocks) {
-      const component = slackBlockToFlowComponent(block, slackToXyneMap);
+      const component = slackBlockToFlowComponent(block, slackToXyneMap, slackToXyneGroupMap);
       if (component) children.push(component);
     }
   } else if (attachment.text) {
-    children.push(mrkdwnToFlowComponent(attachment.text, slackToXyneMap));
+    children.push(mrkdwnToFlowComponent(attachment.text, slackToXyneMap, slackToXyneGroupMap));
   }
 
   // Key-value fields — each field value is parsed through mrkdwn
@@ -552,7 +697,7 @@ export function slackAttachmentToFlowComponent(
         type: 'column',
         children: [
           { id: crypto.randomUUID(), type: 'text', props: { content: field.title, bold: true } },
-          mrkdwnToFlowComponent(field.value ?? '', slackToXyneMap),
+          mrkdwnToFlowComponent(field.value ?? '', slackToXyneMap, slackToXyneGroupMap),
         ],
       }),
     );
@@ -577,10 +722,23 @@ export function slackAttachmentToFlowComponent(
 
   if (!children.length) return null;
 
-  const color = resolveAttachmentColor(attachment.color);
+  // Only add a left colour stripe when the attachment explicitly sets a color.
+  // Attachments without color get a plain subtle border — NO left bar (matches Slack).
+  if (attachment.color) {
+    const color = resolveAttachmentColor(attachment.color);
+    return withColorStripe(children, color);
+  }
 
-  // Single container with left colour stripe — no extra card wrapper
-  return withColorStripe(children, color);
+  return {
+    id: crypto.randomUUID(),
+    type: 'column',
+    style: {
+      border: '1px solid var(--border, #e5e7eb)',
+      borderRadius: '4px',
+      padding: '8px 12px',
+    },
+    children,
+  };
 }
 
 // ============================================================================
@@ -594,20 +752,22 @@ export function slackAttachmentToFlowComponent(
 function richTextBlockToComponents(
   block: SlackRichTextBlock,
   slackToXyneMap?: Map<string, string>,
+  slackToXyneGroupMap?: Map<string, string>,
 ): FlowComponent[] {
   return block.elements
-    .map(el => richTextBlockElementToComponent(el, slackToXyneMap))
+    .map(el => richTextBlockElementToComponent(el, slackToXyneMap, slackToXyneGroupMap))
     .filter((c): c is FlowComponent => c !== null);
 }
 
 function richTextBlockElementToComponent(
   el: SlackRichTextBlockElement,
   slackToXyneMap?: Map<string, string>,
+  slackToXyneGroupMap?: Map<string, string>,
 ): FlowComponent | null {
   switch (el.type) {
     case 'rich_text_section': {
       const parts = el.elements
-        .map(e => richTextInlineToComponent(e, slackToXyneMap))
+        .map(e => richTextInlineToComponent(e, slackToXyneMap, slackToXyneGroupMap))
         .filter(Boolean) as FlowComponent[];
       if (!parts.length) return null;
       if (parts.length === 1) return parts[0];
@@ -632,7 +792,7 @@ function richTextBlockElementToComponent(
       };
     }
     case 'rich_text_quote': {
-      const parts = el.elements.map(e => richTextInlineToComponent(e, slackToXyneMap)).filter(Boolean) as FlowComponent[];
+      const parts = el.elements.map(e => richTextInlineToComponent(e, slackToXyneMap, slackToXyneGroupMap)).filter(Boolean) as FlowComponent[];
       if (!parts.length) return null;
       return withChatQuoteStyle(parts);
     }
@@ -644,6 +804,7 @@ function richTextBlockElementToComponent(
 function richTextInlineToComponent(
   el: SlackRichTextInlineElement,
   slackToXyneMap?: Map<string, string>,
+  slackToXyneGroupMap?: Map<string, string>,
 ): FlowComponent | null {
   switch (el.type) {
     case 'text': {
@@ -675,8 +836,10 @@ function richTextInlineToComponent(
       return { id: crypto.randomUUID(), type: 'text', props: { content: `<channelid:${el.channel_id}>` } };
     case 'broadcast':
       return { id: crypto.randomUUID(), type: 'text', props: { content: `<broadcast:${el.range}>` } };
-    case 'usergroup':
-      return { id: crypto.randomUUID(), type: 'text', props: { content: `@${el.usergroup_id}` } };
+    case 'usergroup': {
+      const xyneGroupId = slackToXyneGroupMap?.get(el.usergroup_id) ?? el.usergroup_id;
+      return { id: crypto.randomUUID(), type: 'text', props: { content: `<groupid:${xyneGroupId}>` } };
+    }
     default:
       return null;
   }

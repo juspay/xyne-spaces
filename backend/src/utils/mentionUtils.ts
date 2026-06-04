@@ -62,10 +62,9 @@ export async function extractMentionsFromContent(content: string): Promise<Extra
     }
   }
 
-  // Method 1: Extract from HTML span elements with data attributes
-  // Handles TipTap format (class="chat-input-mention") and
-  // BlockKit-parsed format (data-mention data-mention-type='user') with single or double quotes
-  const spanTagRegex = /<span\b[^>]*(?:class="[^"]*chat-input-mention[^"]*"|data-mention(?:\s|>))[^>]*>(?:@[^<]*)?<\/span>|<span\b[^>]*\bdata-user-id=["'][^"']+["'][^>]*>(?:@[^<]*)?<\/span>/gi;
+  // Method 1: Extract from HTML span elements with data-user-id attribute
+  // Matches both TipTap format (double quotes) and BlockKit-parsed format (single quotes)
+  const spanTagRegex = /<span\b[^>]*\bdata-user-id=["'][^"']+["'][^>]*>(?:[^<]*)<\/span>/gi;
   let spanMatch;
 
   while ((spanMatch = spanTagRegex.exec(content)) !== null) {
@@ -187,17 +186,31 @@ export async function extractGroupMentionsFromContent(
   const groupMentions: ExtractedGroupMention[] = [];
   const processedGroupIds = new Set<string>(); // Prevent duplicates
 
-  // Method 1: Extract from HTML span elements with group data attributes
-  // First, find all span tags with the group mention class
-  const spanTagRegex = /<span[^>]*class="[^"]*chat-input-group-mention[^"]*"[^>]*>@[^<]+<\/span>/gi;
+  // Method 0: Extract mrkdwn token format <groupid:ID:alias> used in FlowJSON text components.
+  // Mirrors the <userid:ID> handling in extractMentionsFromContent.
+  const mrkdwnGroupTokenRegex = /<groupid:([\w-]+)(?::([^>]+))?>/g;
+  let mrkdwnGroupMatch: RegExpExecArray | null;
+  while ((mrkdwnGroupMatch = mrkdwnGroupTokenRegex.exec(content)) !== null) {
+    const groupId = mrkdwnGroupMatch[1];
+    const groupAlias = mrkdwnGroupMatch[2] ?? groupId;
+    if (!processedGroupIds.has(groupId)) {
+      processedGroupIds.add(groupId);
+      groupMentions.push({ groupId, groupName: groupAlias });
+    }
+  }
+
+  // Method 1: Extract from HTML span elements with data-group-id attribute
+  // Matches both TipTap format (double quotes, class="chat-input-group-mention")
+  // and BlockKit-parsed format (single quotes, data-mention data-mention-type='group')
+  const spanTagRegex = /<span\b[^>]*\bdata-group-id=["'][^"']+["'][^>]*>(?:[^<]*)<\/span>/gi;
   let spanMatch;
 
   while ((spanMatch = spanTagRegex.exec(content)) !== null) {
     const spanTag = spanMatch[0];
     
-    const groupIdMatch = spanTag.match(/data-group-id="([^"]+)"/i);
-    const groupNameMatch = spanTag.match(/data-group-name="([^"]+)"/i);
-    const memberCountMatch = spanTag.match(/data-member-count="([^"]*)"/i);
+    const groupIdMatch = spanTag.match(/data-group-id=["']([^"']+)["']/i);
+    const groupNameMatch = spanTag.match(/data-group-name=["']([^"']+)["']/i);
+    const memberCountMatch = spanTag.match(/data-member-count=["']([^"']*)["']/i);
 
     if (!groupIdMatch || !groupNameMatch) {
       logger.warn(`⚠️ [GROUP-MENTION-HTML] Skipping span tag missing required attributes: ${spanTag.substring(0, 100)}`);

@@ -21,7 +21,8 @@ export type FlowComponentType =
   | 'card'
   | 'divider'
   | 'image'
-  | 'link';
+  | 'link'
+  | 'table';
 
 export interface FlowComponent {
   id: string;
