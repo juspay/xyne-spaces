@@ -13,6 +13,7 @@ export interface CanvasListGroupedProps {
   excludeCallGeneratedCanvases?: boolean;
   showStarredOnly?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
+  searchQuery?: string;
 }
 
 export interface FolderGroup {
@@ -53,6 +54,20 @@ export function sortByName<T>(items: T[], getName: (item: T) => string): T[] {
 
 export function sortCanvases(canvases: Canvas[]): Canvas[] {
   return sortByName(canvases, canvas => canvas.title || 'Untitled');
+}
+
+export function matchesGroupedCanvasSearch(
+  value: string | null | undefined,
+  query: string,
+): boolean {
+  return Boolean(value?.toLowerCase().includes(query));
+}
+
+export function canvasMatchesGroupedSearch(canvas: Canvas, query: string): boolean {
+  return (
+    matchesGroupedCanvasSearch(canvas.title, query) ||
+    matchesGroupedCanvasSearch(canvas.userRepo, query)
+  );
 }
 
 export function getChannelDisplayName(

@@ -26,6 +26,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   excludeCallGeneratedCanvases = true,
   showStarredOnly = false,
   onToggleStar,
+  searchQuery = '',
 }) => {
   const z = useZero();
   const navigate = useNavigate();
@@ -42,6 +43,8 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   const initializedProjectIdsRef = useRef<Set<string>>(new Set());
   const initializedChannelIdsRef = useRef<Set<string>>(new Set());
   const initializedFolderIdsRef = useRef<Set<string>>(new Set());
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const isSearchActive = normalizedSearchQuery.length > 0;
 
   const {
     usersById: activeUsersById,
@@ -53,11 +56,13 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     loadedChannelIds: lazyChannelIds,
     loadedFolderIds: lazyFolderIds,
     isEmpty: activeIsEmpty,
+    isLoading: activeIsLoading,
   } = useCanvasListGroupedData({
     currentUserId,
     collapsedProjects,
     excludeCallGeneratedCanvases,
     showStarredOnly,
+    forceExpandProjects: isSearchActive,
   });
 
   const showArchivedChannelCreateError = useCallback((entity: 'canvas' | 'folder'): void => {
@@ -565,6 +570,8 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           onCancelRenameFolder={handleCancelRenameFolder}
           onDeleteFolder={handleDeleteFolder}
           onRegisterFolderIds={registerCollapsedFolderIds}
+          searchQuery={normalizedSearchQuery}
+          isSearchLoading={isSearchActive && activeIsLoading}
         />
       </div>
 

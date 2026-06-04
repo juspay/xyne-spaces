@@ -25,6 +25,7 @@ interface UseCanvasListGroupedDataParams {
   collapsedProjects: ReadonlySet<string>;
   excludeCallGeneratedCanvases: boolean;
   showStarredOnly: boolean;
+  forceExpandProjects?: boolean;
 }
 
 interface UseCanvasListGroupedDataResult {
@@ -37,6 +38,7 @@ interface UseCanvasListGroupedDataResult {
   loadedChannelIds: string[];
   loadedFolderIds: string[];
   isEmpty: boolean;
+  isLoading: boolean;
   hierarchyMeta: CanvasHierarchyMeta;
 }
 
@@ -49,6 +51,7 @@ export function useCanvasListGroupedData({
   collapsedProjects,
   excludeCallGeneratedCanvases,
   showStarredOnly,
+  forceExpandProjects = false,
 }: UseCanvasListGroupedDataParams): UseCanvasListGroupedDataResult {
   const allUsers = useUsers();
   const allVisibleChannels = useAllVisibleChannels();
@@ -58,7 +61,9 @@ export function useCanvasListGroupedData({
   );
   const visibleProjects = useVisibleProjects();
 
-  const [adminParticipationsResult] = useCachedQuery(queries.myChannelParticipations({}));
+  const [adminParticipationsResult, adminParticipationsDetails] = useCachedQuery(
+    queries.myChannelParticipations({}),
+  );
   const adminChannelIds = useMemo(
     () =>
       new Set(
@@ -79,8 +84,10 @@ export function useCanvasListGroupedData({
     [allVisibleChannels, projectIds],
   );
 
-  const [personalFoldersResult] = useCachedQuery(queries.personalCanvasFolders());
-  const [personalCanvasesResult] = useCachedQuery(
+  const [personalFoldersResult, personalFoldersDetails] = useCachedQuery(
+    queries.personalCanvasFolders(),
+  );
+  const [personalCanvasesResult, personalCanvasesDetails] = useCachedQuery(
     queries.hierarchyCanvases({
       scope: 'personal_root',
     }),
@@ -105,8 +112,11 @@ export function useCanvasListGroupedData({
     [excludeCallGeneratedCanvases, personalCanvasesResult, showStarredOnly],
   );
   const expandedProjectIds = useMemo(
-    () => projectIds.filter(projectId => !collapsedProjects.has(projectId)),
-    [collapsedProjects, projectIds],
+    () =>
+      forceExpandProjects
+        ? projectIds
+        : projectIds.filter(projectId => !collapsedProjects.has(projectId)),
+    [collapsedProjects, forceExpandProjects, projectIds],
   );
   const projectChannels = useMemo(
     () => allProjectChannels.filter(channel => expandedProjectIds.includes(channel.projectId)),
@@ -155,6 +165,10 @@ export function useCanvasListGroupedData({
     lazySections.projects.length === 0 &&
     groupedData.personalFolderGroups.length === 0 &&
     groupedData.personalCanvases.length === 0;
+  const isLoading =
+    adminParticipationsDetails.type !== 'complete' ||
+    personalFoldersDetails.type !== 'complete' ||
+    personalCanvasesDetails.type !== 'complete';
 
   return {
     usersById,
@@ -166,6 +180,7 @@ export function useCanvasListGroupedData({
     loadedChannelIds,
     loadedFolderIds,
     isEmpty,
+    isLoading,
     hierarchyMeta,
   };
 }

@@ -1,6 +1,16 @@
 import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
-import { FileText, Plus, ArrowLeft, Info, Loader2, List, FolderTree, Star } from 'lucide-react';
+import {
+  FileText,
+  Plus,
+  ArrowLeft,
+  Info,
+  Loader2,
+  List,
+  FolderTree,
+  Search,
+  Star,
+} from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
@@ -11,6 +21,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { Button } from '../../ui/Button';
 import { Switch } from '../../ui/Switch';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import Input from '../../ui/Input';
 import { PublishDocsModal } from '../QuartoInstructionsModal/QuartoInstructionsModal';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
@@ -23,6 +34,7 @@ import {
 } from 'react-resizable-panels';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { openQuartoDoc } from '../openQuartoDoc';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
@@ -50,6 +62,10 @@ const CanvasPanel = (): ReactElement => {
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
   const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [groupedSearchQuery, setGroupedSearchQuery] = useState('');
+  const debouncedGroupedSearchQuery = useDebouncedValue(groupedSearchQuery, 300);
+  const effectiveGroupedSearchQuery =
+    debouncedGroupedSearchQuery.trim().length >= 2 ? debouncedGroupedSearchQuery : '';
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
 
   // Remember which canvas was last opened
@@ -227,11 +243,14 @@ const CanvasPanel = (): ReactElement => {
               delayDuration={300}
             >
               <button
+                type='button'
                 className={`flex items-center justify-center rounded-md border p-1.5 transition-colors ${
                   showStarredOnly
                     ? 'border-amber-200 bg-amber-50 text-amber-600'
                     : 'border-border text-muted-foreground hover:bg-accent'
                 }`}
+                aria-label={showStarredOnly ? 'Show all items' : 'Show starred only'}
+                title={showStarredOnly ? 'Show all items' : 'Show starred only'}
                 onClick={() => setShowStarredOnly(prev => !prev)}
                 data-track-category='CANVAS'
                 data-track-name='TOGGLE_STARRED_CANVAS_FILTER'
@@ -263,6 +282,7 @@ const CanvasPanel = (): ReactElement => {
             )}
             <div className='flex items-center border border-border rounded-md'>
               <button
+                type='button'
                 className={`p-1.5 rounded-l-md transition-colors ${
                   viewMode === 'grouped'
                     ? 'bg-accent text-foreground'
@@ -277,6 +297,7 @@ const CanvasPanel = (): ReactElement => {
                 <FolderTree size={16} />
               </button>
               <button
+                type='button'
                 className={`p-1.5 rounded-r-md transition-colors ${
                   viewMode === 'list'
                     ? 'bg-accent text-foreground'
@@ -321,6 +342,21 @@ const CanvasPanel = (): ReactElement => {
             )}
           </div>
         </div>
+        {viewMode === 'grouped' && (
+          <div className='relative'>
+            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
+            <Input
+              type='text'
+              value={groupedSearchQuery}
+              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                setGroupedSearchQuery(event.target.value)
+              }
+              placeholder='Search canvases'
+              className='pl-9 w-full'
+              data-testid='canvas-grouped-search-input'
+            />
+          </div>
+        )}
       </div>
 
       {/* Canvas List */}
@@ -337,6 +373,7 @@ const CanvasPanel = (): ReactElement => {
             excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
             showStarredOnly={showStarredOnly}
             onToggleStar={handleToggleStar}
+            searchQuery={effectiveGroupedSearchQuery}
           />
         ) : (
           <CanvasList
