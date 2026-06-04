@@ -11,6 +11,7 @@ import {
   BookMarked,
   ExternalLink,
   Check,
+  Star,
 } from 'lucide-react';
 import { CanvasListProps, Canvas, CanvasParticipant } from '../Canvas.types';
 import { CanvasRole, CanvasVisibility, DocType } from '@xyne/shared';
@@ -39,7 +40,12 @@ import { useCachedQuery } from '@xyne/shared/hooks';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShortcut } from '../../../shortcuts';
 import { openQuartoDoc } from '../openQuartoDoc';
-import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
+import { toast } from 'sonner';
+import {
+  filterExcludedCallGeneratedCanvases,
+  filterStarredCanvases,
+  withStarredCanvasState,
+} from '../canvasFilters';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 type CanvasCursor = { id: string; updatedAt: number };
@@ -53,6 +59,55 @@ const getNullableCanvasCursorKey = (cursor: CanvasCursor | null): string =>
 
 const sortCanvasItems = (items: Canvas[]): Canvas[] =>
   [...items].sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id));
+
+const updateOptimisticStarState = (
+  canvas: Canvas,
+  canvasId: string,
+  userId: string | undefined,
+  isStarred: boolean,
+): Canvas => {
+  if (canvas.id !== canvasId) {
+    return canvas;
+  }
+
+  if (!userId) {
+    return {
+      ...canvas,
+      isStarred,
+    };
+  }
+
+  const now = Date.now();
+  const userStatuses = canvas.userStatuses ?? [];
+  const existingStatus = userStatuses.find(status => status.userId === userId);
+  const nextUserStatuses = existingStatus
+    ? userStatuses.map(status =>
+        status.userId === userId
+          ? {
+              ...status,
+              isStarred,
+              updatedAt: now,
+            }
+          : status,
+      )
+    : [
+        ...userStatuses,
+        {
+          id: `optimistic-${canvasId}-${userId}`,
+          canvasId,
+          userId,
+          isStarred,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ];
+
+  return {
+    ...canvas,
+    isStarred,
+    userStatuses: nextUserStatuses,
+  };
+};
 
 const CreatorName: React.FC<{ userId: string; isCurrentUser: boolean }> = ({
   userId,
@@ -169,6 +224,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   paginated = false,
   channelId,
   excludeCallGeneratedCanvases = true,
+  showStarredOnly = false,
+  onToggleStar,
 }) => {
   const navigate = useNavigate();
   const shareableOrigin = useShareableOrigin();
@@ -192,6 +249,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const isQuartoDocs = activeFilter === 'quarto_docs';
 
   const rawItems = canvasItems;
+  const itemsWithStarState = useMemo(() => withStarredCanvasState(rawItems), [rawItems]);
   const nextCursor = useMemo(() => {
     const lastItem = rawItems[rawItems.length - 1];
     return lastItem ? { id: lastItem.id, updatedAt: lastItem.updatedAt } : null;
@@ -275,7 +333,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const filteredCanvases = useMemo(() => {
     // If showing Quarto docs filter, return Quarto docs when that filter is active
     if (isQuartoDocs) {
-      let filtered = rawItems;
+      let filtered = filterStarredCanvases(itemsWithStarState, showStarredOnly);
       if (searchQuery) {
         filtered = filtered.filter(
           canvas =>
@@ -286,7 +344,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       return filtered;
     }
 
-    let filtered = filterExcludedCallGeneratedCanvases(rawItems, excludeCallGeneratedCanvases);
+    let filtered = filterExcludedCallGeneratedCanvases(
+      itemsWithStarState,
+      excludeCallGeneratedCanvases,
+    );
+    filtered = filterStarredCanvases(filtered, showStarredOnly);
 
     if (activeFilter === 'created_by_me' && currentUserId) {
       filtered = filtered.filter(canvas => canvas.createdBy === currentUserId);
@@ -303,9 +365,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     activeFilter,
     currentUserId,
     excludeCallGeneratedCanvases,
+    itemsWithStarState,
     isQuartoDocs,
-    rawItems,
     searchQuery,
+    showStarredOnly,
   ]);
 
   // j/k keyboard navigation through canvas list
@@ -457,6 +520,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     const isQuartoDoc = canvas.docType === DocType.Quarto;
 
     const isSelected = selectedCanvasId === canvas.id;
+    const canToggleStar = !!onToggleStar;
 
     return (
       <div
@@ -571,6 +635,40 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             <div className='flex-shrink-0 w-5 h-5 rounded-full bg-primary flex items-center justify-center'>
               <Check className='w-3 h-3 text-primary-foreground' strokeWidth={3} />
             </div>
+          )}
+          {canToggleStar && (
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                const nextIsStarred = !canvas.isStarred;
+                setCanvasItems(items =>
+                  items.map(item =>
+                    updateOptimisticStarState(item, canvas.id, currentUserId, nextIsStarred),
+                  ),
+                );
+                toast.success(nextIsStarred ? 'Added to starred' : 'Removed from starred');
+                onToggleStar?.(canvas);
+              }}
+              className='p-1.5 rounded hover:bg-accent'
+              title={
+                canvas.isStarred
+                  ? `Unstar ${isQuartoDoc ? 'doc' : 'canvas'}`
+                  : `Star ${isQuartoDoc ? 'doc' : 'canvas'}`
+              }
+              data-track-category='CANVAS'
+              data-track-name='TOGGLE_CANVAS_STAR'
+              data-track-metadata={JSON.stringify({
+                canvasId: canvas.id,
+                isStarred: canvas.isStarred,
+              })}
+            >
+              <Star
+                className={`w-4 h-4 ${
+                  canvas.isStarred ? 'fill-yellow-400 text-yellow-500' : 'text-muted-foreground'
+                }`}
+                strokeWidth={2.2}
+              />
+            </button>
           )}
           {!isQuartoDoc && (
             <button
@@ -692,8 +790,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       )}
 
       <div className='px-4 md:px-6 py-4 border-b border-border'>
-        <div className='flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0'>
-          <div className='flex items-center gap-2'>
+        <div className='flex flex-col gap-1 sm:flex-row sm:items-center'>
+          <div className='flex  items-center gap-2'>
             <button
               onClick={() => setActiveFilter('all')}
               className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
@@ -767,12 +865,26 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           <div className='flex flex-col items-center justify-center h-full text-center py-16'>
             <FileText className='w-16 h-16 text-muted-foreground mb-4' />
             <h3 className='text-lg font-medium text-foreground mb-2'>
-              {searchQuery ? 'No canvases found' : 'No docs yet'}
+              {searchQuery
+                ? 'No canvases found'
+                : isQuartoDocs
+                  ? showStarredOnly
+                    ? 'No starred docs yet'
+                    : 'No docs yet'
+                  : showStarredOnly
+                    ? 'No starred canvases yet'
+                    : 'No canvases yet'}
             </h3>
             <p className='text-muted-foreground text-sm'>
               {searchQuery
                 ? 'Try adjusting your search'
-                : 'Publish your first doc from the Xyne Code extension'}
+                : isQuartoDocs
+                  ? showStarredOnly
+                    ? 'Star a doc to see it here.'
+                    : 'Publish your first doc from the Xyne Code extension'
+                  : showStarredOnly
+                    ? 'Star a canvas to see it here.'
+                    : 'Create your first canvas to get started'}
             </p>
           </div>
         ) : (

@@ -24,6 +24,8 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   isPersonalSectionCollapsed,
   onSetPersonalSectionCollapsed,
   excludeCallGeneratedCanvases = true,
+  showStarredOnly = false,
+  onToggleStar,
 }) => {
   const z = useZero();
   const navigate = useNavigate();
@@ -55,6 +57,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     currentUserId,
     collapsedProjects,
     excludeCallGeneratedCanvases,
+    showStarredOnly,
   });
 
   const showArchivedChannelCreateError = useCallback((entity: 'canvas' | 'folder'): void => {
@@ -550,6 +553,8 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           onDelete={onDelete}
           onDuplicate={onDuplicate}
           onSetPersonalSectionCollapsed={onSetPersonalSectionCollapsed}
+          showStarredOnly={showStarredOnly}
+          onToggleStar={onToggleStar}
           onCreatePersonalCanvas={handleCreatePersonalCanvas}
           onCreateCanvasInProject={handleCreateCanvasInProject}
           onCreateFolder={handleCreateFolder}

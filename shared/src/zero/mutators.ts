@@ -5067,6 +5067,58 @@ export const mutators = defineMutators({
       },
     ),
   },
+  canvasUserStatus: {
+    toggleStarred: defineMutator(
+      z.object({
+        id: z.string(),
+        canvasId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, canvasId, timestamp } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        const participant = await tx.run(
+          zql.canvas_participants.where('canvasId', canvasId).where('userId', ctx.userID).one(),
+        );
+        const hasAccess =
+          canvas.createdBy === ctx.userID ||
+          !!participant ||
+          canvas.visibility === CanvasVisibility.PUBLIC;
+
+        if (!hasAccess) {
+          throw new Error('You do not have access to this canvas');
+        }
+
+        const existingStatus = await tx.run(
+          zql.canvas_user_status
+            .where('canvasId', canvasId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+
+        if (existingStatus) {
+          await tx.mutate.canvas_user_status.update({
+            id: existingStatus.id,
+            isStarred: !existingStatus.isStarred,
+            updatedAt: timestamp,
+          });
+          return;
+        }
+
+        await tx.mutate.canvas_user_status.insert({
+          id,
+          canvasId,
+          userId: ctx.userID,
+          isStarred: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
   canvasFolder: {
     create: defineMutator(
       z.object({

@@ -1113,6 +1113,7 @@ model User {
   userGroupMappings         UserGroupMapping[]
   channelParticipations     ChannelParticipant[]   @relation("ChannelParticipantUser")
   channelUserStatuses       ChannelUserStatus[]    @relation("ChannelUserStatusUser")
+  canvasUserStatuses        CanvasUserStatus[]     @relation("CanvasUserStatusUser")
   sentMessages              Message[]              @relation("MessageSender")
   createdConversations      Conversation[]         @relation("ConversationCreatedBy")
   createdChannels           Channel[]              @relation("ChannelCreatedBy")
@@ -2919,6 +2920,7 @@ model Canvas {
 
   // Relations
   participants CanvasParticipant[]
+  userStatuses CanvasUserStatus[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
   // Quarto Doc fields - when docType is Quarto
@@ -2968,6 +2970,25 @@ model CanvasParticipant {
   @@index([userGroupId])
   @@index([channelId])
   @@map("canvas_participants")
+  @@schema("public")
+}
+
+model CanvasUserStatus {
+  id        String    @id @default(cuid())
+  canvasId   String
+  userId     String
+  isStarred  Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime?
+
+  canvas Canvas @relation(fields: [canvasId], references: [id])
+  user   User   @relation("CanvasUserStatusUser", fields: [userId], references: [id])
+
+  @@unique([canvasId, userId])
+  @@index([canvasId])
+  @@index([userId])
+  @@index([userId, isStarred])
+  @@map("canvas_user_status")
   @@schema("public")
 }
 

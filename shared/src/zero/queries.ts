@@ -63,6 +63,9 @@ const applyCanvasVisibilityQueryFilter = (
     ),
   );
 
+const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
+  query.related('userStatuses', (status: any) => status.where('userId', userId));
+
 
 export const queries = defineQueries({
   channelConversations: defineQuery(
@@ -1525,7 +1528,10 @@ export const queries = defineQueries({
         query = query.where('docType', DocType.Canvas);
       }
 
-      return applyCanvasVisibilityQueryFilter(query, ctx.userID).orderBy('updatedAt', 'desc');
+      return includeCurrentUserCanvasStatus(
+        applyCanvasVisibilityQueryFilter(query, ctx.userID).orderBy('updatedAt', 'desc'),
+        ctx.userID,
+      );
     },
   ),
   channelCanvasesPaginated: defineQuery(
@@ -1563,7 +1569,7 @@ export const queries = defineQueries({
         );
       }
 
-      return query.limit(limit).related('participants');
+      return includeCurrentUserCanvasStatus(query.limit(limit).related('participants'), ctx.userID);
     },
   ),
 
@@ -1573,7 +1579,7 @@ export const queries = defineQueries({
       limit: z.number(),
       start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
     }),
-    ({ args: { channelId, limit, start } }) => {
+    ({ ctx, args: { channelId, limit, start } }) => {
       let query = zql.canvases
         .where('channelId', channelId)
         .where('docType', DocType.Quarto)
@@ -1584,7 +1590,10 @@ export const queries = defineQueries({
         query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
       }
 
-      return query.limit(limit).related('participants').related('channel');
+      return includeCurrentUserCanvasStatus(
+        query.limit(limit).related('participants').related('channel'),
+        ctx.userID,
+      );
     },
   ),
 
@@ -1754,12 +1763,15 @@ export const queries = defineQueries({
         query = query.where('folderId', 'IS', null);
       }
 
-      return applyCanvasVisibilityQueryFilter(
-        query,
+      return includeCurrentUserCanvasStatus(
+        applyCanvasVisibilityQueryFilter(
+          query,
+          ctx.userID,
+          undefined,
+          resolvedScope !== 'personal_root',
+        ).orderBy('updatedAt', 'desc'),
         ctx.userID,
-        undefined,
-        resolvedScope !== 'personal_root',
-      ).orderBy('updatedAt', 'desc');
+      );
     },
   ),
 
@@ -1832,9 +1844,7 @@ export const queries = defineQueries({
         );
       }
 
-      return query
-        .limit(args.limit)
-        .related('participants');
+      return includeCurrentUserCanvasStatus(query.limit(args.limit).related('participants'), ctx.userID);
     },
   ),
   // Query for user's Quarto docs
@@ -1876,9 +1886,7 @@ export const queries = defineQueries({
         );
       }
 
-      return query
-        .limit(args.limit)
-        .related('participants');
+      return includeCurrentUserCanvasStatus(query.limit(args.limit).related('participants'), ctx.userID);
     },
   ),
   // Query for all user groups with member counts

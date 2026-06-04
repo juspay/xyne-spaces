@@ -97,6 +97,7 @@ export interface Canvas {
   visibility: CanvasVisibility;
   isTemplate: boolean;
   isCollaborative?: boolean;
+  isStarred?: boolean;
   lastEditedBy?: string;
   lastEditedAt?: number;
   createdAt: number;
@@ -115,6 +116,16 @@ export interface Canvas {
   folder?: CanvasFolder | null;
   channel?: CanvasChannel | null;
   project?: CanvasProject | null;
+  userStatuses?: CanvasUserStatus[];
+}
+
+export interface CanvasUserStatus {
+  id: string;
+  canvasId: string;
+  userId: string;
+  isStarred: boolean;
+  createdAt: number;
+  updatedAt?: number;
 }
 
 export interface CanvasParticipant {
@@ -140,6 +151,8 @@ export interface CanvasListProps {
   paginated?: boolean;
   channelId?: string;
   excludeCallGeneratedCanvases?: boolean;
+  showStarredOnly?: boolean;
+  onToggleStar?: (canvas: Canvas) => void;
 }
 
 export interface CanvasHeaderProps {

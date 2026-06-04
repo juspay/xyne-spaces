@@ -11,6 +11,8 @@ export interface CanvasListGroupedProps {
   isPersonalSectionCollapsed: boolean;
   onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
   excludeCallGeneratedCanvases?: boolean;
+  showStarredOnly?: boolean;
+  onToggleStar?: (canvas: Canvas) => void;
 }
 
 export interface FolderGroup {

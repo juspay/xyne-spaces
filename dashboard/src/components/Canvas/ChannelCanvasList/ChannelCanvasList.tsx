@@ -14,6 +14,7 @@ import { Dialog } from '../../ui/Dialog';
 import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasRow } from '../CanvasRow';
 import { getDisplayedCanvases } from '../canvasListFilters';
+import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 
@@ -40,6 +41,8 @@ interface ChannelCanvasListProps {
   onDelete?: (id: string) => void;
   onCreateCanvasInFolder?: (folder: CanvasFolder) => void;
   isCreatingCanvas?: boolean;
+  showStarredOnly?: boolean;
+  onToggleStar?: (canvas: Canvas) => void;
 }
 
 function sortByName<T>(items: T[], getName: (item: T) => string): T[] {
@@ -58,21 +61,36 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   onDelete,
   onCreateCanvasInFolder,
   isCreatingCanvas = false,
+  showStarredOnly = false,
+  onToggleStar,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [deletingCanvas, setDeletingCanvas] = useState<Canvas | null>(null);
 
+  const canvasesWithStarState = useMemo(() => withStarredCanvasState(canvases), [canvases]);
+  const quartoDocsWithStarState = useMemo(() => withStarredCanvasState(quartoDocs), [quartoDocs]);
+
   const displayedCanvases = useMemo(
     () =>
-      getDisplayedCanvases({
-        canvases,
-        quartoDocs,
-        activeFilter,
-        currentUserId,
-        searchQuery,
-      }),
-    [activeFilter, canvases, currentUserId, quartoDocs, searchQuery],
+      filterStarredCanvases(
+        getDisplayedCanvases({
+          canvases: canvasesWithStarState,
+          quartoDocs: quartoDocsWithStarState,
+          activeFilter,
+          currentUserId,
+          searchQuery,
+        }),
+        showStarredOnly,
+      ),
+    [
+      activeFilter,
+      canvasesWithStarState,
+      currentUserId,
+      quartoDocsWithStarState,
+      searchQuery,
+      showStarredOnly,
+    ],
   );
 
   const displayedFolders = useMemo(() => {
@@ -99,15 +117,15 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
     }
 
     return {
-      folderGroups: sortByName(Array.from(groups.values()), group => group.folder.name).map(
-        group => ({
+      folderGroups: sortByName(Array.from(groups.values()), group => group.folder.name)
+        .map(group => ({
           ...group,
           canvases: sortByName(group.canvases, canvas => canvas.title || 'Untitled'),
-        }),
-      ),
+        }))
+        .filter(group => !showStarredOnly || group.canvases.length > 0),
       rootCanvases: sortByName(root, canvas => canvas.title || 'Untitled'),
     };
-  }, [displayedCanvases, displayedFolders]);
+  }, [activeFilter, displayedCanvases, displayedFolders, showStarredOnly]);
 
   const isEmpty =
     activeFilter === 'quarto_docs'
@@ -198,11 +216,17 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                 {searchQuery
                   ? 'No canvases found'
                   : activeFilter === 'quarto_docs'
-                    ? 'No docs yet'
+                    ? showStarredOnly
+                      ? 'No starred docs yet'
+                      : 'No docs yet'
                     : 'No canvases yet'}
               </h3>
               <p className='text-muted-foreground text-sm'>
-                {searchQuery ? 'Try a different search' : 'Create your first canvas to get started'}
+                {searchQuery
+                  ? 'Try a different search'
+                  : activeFilter === 'quarto_docs' && showStarredOnly
+                    ? 'Star a doc to see it here.'
+                    : 'Create your first canvas to get started'}
               </p>
             </div>
           ) : activeFilter === 'quarto_docs' || searchQuery.trim() ? (
@@ -217,6 +241,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                   currentUserId={currentUserId}
                   quartoDocIcon='bookmark'
                   trackNames={channelCanvasRowTrackNames}
+                  onToggleStar={onToggleStar}
                   onDelete={
                     onDelete
                       ? (id): void => {
@@ -280,6 +305,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                           currentUserId={currentUserId}
                           quartoDocIcon='bookmark'
                           trackNames={channelCanvasRowTrackNames}
+                          onToggleStar={onToggleStar}
                           onDelete={
                             onDelete
                               ? (id): void => {
@@ -307,6 +333,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                   currentUserId={currentUserId}
                   quartoDocIcon='bookmark'
                   trackNames={channelCanvasRowTrackNames}
+                  onToggleStar={onToggleStar}
                   onDelete={
                     onDelete
                       ? (id): void => {

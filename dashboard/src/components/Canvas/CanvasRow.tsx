@@ -7,6 +7,7 @@ import {
   Lock,
   MoreHorizontal,
   Share2,
+  Star,
   Trash2,
 } from 'lucide-react';
 import { CanvasRole, CanvasVisibility, DocType } from '@xyne/shared';
@@ -36,6 +37,7 @@ export interface CanvasRowProps {
   indentClassName?: string | undefined;
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
+  onToggleStar?: ((canvas: Canvas) => void) | undefined;
   trackNames: CanvasRowTrackNames;
   quartoDocIcon?: 'bookmark' | 'file';
 }
@@ -48,6 +50,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   indentClassName = 'pl-2',
   onDelete,
   onDuplicate,
+  onToggleStar,
   trackNames,
   quartoDocIcon = 'file',
 }) => {
@@ -56,6 +59,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
   const isQuartoDoc = canvas.docType === DocType.Quarto;
+  const canToggleStar = !!onToggleStar;
   const createdDateText = `Created ${formatDate(canvas.createdAt)}`;
 
   return (
@@ -94,6 +98,29 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             </span>
           )}
         </button>
+
+        {canToggleStar && (
+          <button
+            className='p-1 hover:bg-accent rounded transition-colors'
+            onClick={event => {
+              event.stopPropagation();
+              onToggleStar?.(canvas);
+            }}
+            title={
+              canvas.isStarred
+                ? `Unstar ${isQuartoDoc ? 'doc' : 'canvas'}`
+                : `Star ${isQuartoDoc ? 'doc' : 'canvas'}`
+            }
+            data-track-category='CANVAS'
+            data-track-name='TOGGLE_CANVAS_STAR'
+          >
+            <Star
+              className={`w-4 h-4 ${
+                canvas.isStarred ? 'fill-yellow-400 text-yellow-500' : 'text-muted-foreground'
+              }`}
+            />
+          </button>
+        )}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

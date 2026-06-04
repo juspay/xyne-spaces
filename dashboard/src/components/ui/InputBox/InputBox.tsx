@@ -1055,6 +1055,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           createdBy: '',
           visibility: CanvasVisibility.PRIVATE,
           isTemplate: false,
+          isStarred: false,
           createdAt: now,
           updatedAt: now,
         };
