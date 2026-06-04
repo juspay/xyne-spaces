@@ -87,8 +87,9 @@ class OutageAlertService {
    * Expected format: "Data Range: YYYY-MM-DD HH:MM:SS - YYYY-MM-DD HH:MM:SS"
    */
   private extractDatesFromText(text: string): { startTime: string; endTime: string } | null {
+    // Handles: YYYY-MM-DD, YYYY-MM-DD HH:MM, YYYY-MM-DD HH:MM:SS, YYYY-MM-DDTHH:MM:SS
     const dateRangeRegex =
-      /Data Range:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[^-\n]+?)\s*-\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[^\n]*?)(?:\n|$)/i;
+      /Data Range:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T\s][0-9]{2}:[0-9]{2}(?::[0-9]{2})?)?)\s*-\s*([0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T\s][0-9]{2}:[0-9]{2}(?::[0-9]{2})?)?)/i;
     const match = text.match(dateRangeRegex);
 
     if (match?.[1] && match[2]) {
