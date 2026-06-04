@@ -5,13 +5,22 @@ import { GlassStar } from '../../../icons/xyne-ai';
 interface XyneAISuggestionsProps {
   queries: string[];
   onSuggestionClick: (query: string) => void;
+  hideSuggestions?: boolean;
+  /** When a non-default agent is selected, show "What can you do?" instead */
+  selectedAgentSlug?: string | null;
 }
 
 export const XyneAISuggestions = ({
   queries,
   onSuggestionClick,
+  hideSuggestions = false,
+  selectedAgentSlug,
 }: XyneAISuggestionsProps): ReactElement => {
   const { isMobile } = usePlatform();
+
+  // For non-default agents (selectedAgentSlug !== null), show a single "What can you do?" suggestion
+  const isCustomAgent = selectedAgentSlug !== null && selectedAgentSlug !== undefined;
+  const displayQueries = isCustomAgent ? ['What can you do?'] : queries;
 
   return (
     <div className='flex flex-col items-center justify-center h-full px-4'>
@@ -28,20 +37,22 @@ export const XyneAISuggestions = ({
       </h2>
 
       {/* Suggestion Pills */}
-      <div className='flex flex-wrap justify-center gap-2 max-w-md'>
-        {queries.map((query, index) => (
-          <button
-            key={index}
-            onClick={() => onSuggestionClick(query)}
-            className="px-[12px] py-[6px] rounded-full border border-border hover:border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-[12px] leading-[22px] font-['Inter']"
-            data-track-category='XyneAI'
-            data-track-name='SELECT_SUGGESTION'
-            data-track-metadata={JSON.stringify({ suggestion: query })}
-          >
-            {query}
-          </button>
-        ))}
-      </div>
+      {!hideSuggestions && (
+        <div className='flex flex-wrap justify-center gap-2 max-w-md'>
+          {displayQueries.map((query, index) => (
+            <button
+              key={index}
+              onClick={() => onSuggestionClick(query)}
+              className="px-[12px] py-[6px] rounded-full border border-border hover:border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-[12px] leading-[22px] font-['Inter']"
+              data-track-category='XyneAI'
+              data-track-name='SELECT_SUGGESTION'
+              data-track-metadata={JSON.stringify({ suggestion: query })}
+            >
+              {query}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

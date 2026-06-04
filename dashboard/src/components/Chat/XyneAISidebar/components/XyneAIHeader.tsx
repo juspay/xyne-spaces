@@ -1,8 +1,10 @@
 import { ReactElement, useState } from 'react';
-import { Settings, Activity, Brain, SquarePen, X } from 'lucide-react';
+import { Settings, Activity, Brain, SquarePen, X, Info } from 'lucide-react';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { ChatHistory } from '../../../icons/xyne-ai';
 import { SettingsModal } from './SettingsModal';
+import { AgentInfoModal } from './AgentInfoModal';
+import type { AccessibleClawAgent } from '../../../../services/clawAgentListService';
 
 interface XyneAIHeaderProps {
   onNewChat: () => void;
@@ -15,6 +17,7 @@ interface XyneAIHeaderProps {
   hideMemoriesAndActivity?: boolean;
   hideTitle?: boolean;
   hideHistory?: boolean;
+  selectedAgent?: AccessibleClawAgent | null;
 }
 
 export const XyneAIHeader = ({
@@ -28,8 +31,10 @@ export const XyneAIHeader = ({
   hideMemoriesAndActivity = false,
   hideTitle = false,
   hideHistory = false,
+  selectedAgent,
 }: XyneAIHeaderProps): ReactElement => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isAgentInfoModalOpen, setIsAgentInfoModalOpen] = useState(false);
   const mwebActionPillClass =
     'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0';
 
@@ -45,7 +50,7 @@ export const XyneAIHeader = ({
     return (
       <>
         <div className='h-14 mt-[14px] px-4 flex items-center justify-between gap-2 self-stretch'>
-          {/* Left: New Chat Icon + Title */}
+          {/* Left: New Chat Icon + Title + Agent Info */}
           <div className='flex items-center gap-2'>
             <button
               onClick={onNewChat}
@@ -59,6 +64,18 @@ export const XyneAIHeader = ({
             <div className='text-muted-foreground text-base font-medium'>
               {!hideTitle && (hideMemoriesAndActivity ? title : 'New chat')}
             </div>
+            {/* Agent Info Icon - only show when an agent is selected */}
+            {selectedAgent && (
+              <button
+                onClick={() => setIsAgentInfoModalOpen(true)}
+                className='p-1 rounded-md hover:bg-accent transition-colors text-muted-foreground'
+                title={`About ${selectedAgent.name}`}
+                data-track-category='XYNE_AI'
+                data-track-name='OpenAgentInfoMobile'
+              >
+                <Info size={14} />
+              </button>
+            )}
           </div>
 
           {/* Right: Settings, User Activity, Chat History, and Close Icons */}
@@ -119,6 +136,13 @@ export const XyneAIHeader = ({
 
         {/* Settings Modal */}
         <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} />
+
+        {/* Agent Info Modal */}
+        <AgentInfoModal
+          isOpen={isAgentInfoModalOpen}
+          onClose={() => setIsAgentInfoModalOpen(false)}
+          agent={selectedAgent ?? null}
+        />
       </>
     );
   }
@@ -126,8 +150,22 @@ export const XyneAIHeader = ({
   return (
     <>
       <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-border'>
-        <div className="text-foreground text-base font-semibold font-['Inter']">
-          {!hideTitle && title}
+        <div className='flex items-center gap-2'>
+          <span className="text-foreground text-base font-semibold font-['Inter']">
+            {!hideTitle && title}
+          </span>
+          {/* Agent Info Icon - only show when an agent is selected */}
+          {selectedAgent && (
+            <button
+              onClick={() => setIsAgentInfoModalOpen(true)}
+              className='p-1 rounded-md hover:bg-accent transition-colors text-muted-foreground hover:text-foreground'
+              title={`About ${selectedAgent.name}`}
+              data-track-category='XYNE_AI'
+              data-track-name='OpenAgentInfo'
+            >
+              <Info size={14} />
+            </button>
+          )}
         </div>
         <div className='flex items-center gap-2'>
           {/* New Chat Icon */}
@@ -200,6 +238,13 @@ export const XyneAIHeader = ({
 
       {/* Settings Modal */}
       <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} />
+
+      {/* Agent Info Modal */}
+      <AgentInfoModal
+        isOpen={isAgentInfoModalOpen}
+        onClose={() => setIsAgentInfoModalOpen(false)}
+        agent={selectedAgent ?? null}
+      />
     </>
   );
 };

@@ -7,6 +7,8 @@ import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { XyneStarred, XyneUnstarred, XyneRename, XyneDelete } from '../../../icons/xyne-ai';
 import { formatRelativeTime } from '../../../../utils/dateUtils';
+import { AgentSelector } from './AgentSelector';
+import type { AgentOption } from './AgentSelector';
 
 interface ConversationHistoryProps {
   conversations: ConversationHistoryType[];
@@ -18,6 +20,10 @@ interface ConversationHistoryProps {
   onToggleStar: (conversation: ConversationHistoryType) => Promise<void>;
   onDeleteConversation: (conversation: ConversationHistoryType) => Promise<void>;
   onRenameConversation: (conversation: ConversationHistoryType, newName: string) => Promise<void>;
+  selectedAgentSlug?: string | null;
+  agents?: AgentOption[];
+  onSelectAgent?: (slug: string | null) => void;
+  selectedAgentColor?: string | null;
 }
 
 // Helper function to group conversations by date
@@ -69,6 +75,10 @@ export const ConversationHistory = ({
   onToggleStar,
   onDeleteConversation,
   onRenameConversation,
+  selectedAgentSlug,
+  agents,
+  onSelectAgent,
+  selectedAgentColor,
 }: ConversationHistoryProps): ReactElement => {
   const { isMobile } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,7 +106,17 @@ export const ConversationHistory = ({
   };
 
   return (
-    <div className='flex-1 overflow-hidden flex flex-col bg-background h-full rounded-xl'>
+    <div
+      className='flex-1 overflow-hidden flex flex-col bg-background h-full rounded-xl border'
+      style={{
+        ...(selectedAgentColor
+          ? {
+              boxShadow: `inset 0 0 120px -20px ${selectedAgentColor}30`,
+              borderColor: selectedAgentColor,
+            }
+          : {}),
+      }}
+    >
       {/* Header */}
       <div className='p-4 flex items-center justify-between gap-2 self-stretch border-border flex-shrink-0'>
         {isSearchExpanded ? (
@@ -161,6 +181,14 @@ export const ConversationHistory = ({
               <span className="text-foreground text-base font-semibold font-['Inter']">Chats</span>
             </div>
             <div className='flex items-center gap-2'>
+              {agents && agents.length > 0 && onSelectAgent && (
+                <AgentSelector
+                  selectedAgentSlug={selectedAgentSlug ?? null}
+                  agents={agents}
+                  onSelect={onSelectAgent}
+                  compact={true}
+                />
+              )}
               <button
                 onClick={() => setIsSearchExpanded(true)}
                 className={

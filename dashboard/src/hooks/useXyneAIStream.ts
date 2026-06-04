@@ -33,6 +33,8 @@ interface UseXyneAIStreamParams {
   callIds?: string[];
   attachedContext?: AttachedContextItem[];
   activities?: UserActivity[]; // User activities to include as context
+  /** Selected claw agent slug. If set, the query is routed to that agent instead of Ask AI. */
+  agentSlug?: string | null;
 }
 
 /**
@@ -88,6 +90,7 @@ export const useXyneAIStream = ({
   callIds,
   attachedContext,
   activities,
+  agentSlug,
 }: UseXyneAIStreamParams) => {
   const currentStreamIdRef = useRef<string | null>(null);
 
@@ -297,6 +300,7 @@ export const useXyneAIStream = ({
           canvasIds,
           callIds,
           attachedContext: combinedAttachedContext,
+          agentSlug: agentSlug ?? undefined,
         },
         allMessages,
       );
@@ -322,6 +326,7 @@ export const useXyneAIStream = ({
       attachedContext,
       activities,
       streamSessionKey,
+      agentSlug,
     ],
   );
 

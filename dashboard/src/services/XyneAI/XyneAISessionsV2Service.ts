@@ -57,9 +57,16 @@ interface ClawMessagesResponse {
 /**
  * Fetch all conversations for the current user from claw.
  * Maps claw format to the existing ConversationHistoryType.
+ * @param agentSlug - Optional agent slug to filter conversations per-agent.
  */
-export async function fetchV2Conversations(): Promise<ConversationHistoryType[]> {
-  const response = await apiInstance.get<ClawConversationListResponse>('/xyne-ai/v2/conversations');
+export async function fetchV2Conversations(
+  agentSlug?: string | null,
+): Promise<ConversationHistoryType[]> {
+  const url =
+    agentSlug && agentSlug !== 'ask-ai'
+      ? `/xyne-ai/v2/conversations?agentSlug=${encodeURIComponent(agentSlug)}`
+      : '/xyne-ai/v2/conversations';
+  const response = await apiInstance.get<ClawConversationListResponse>(url);
 
   if (!response.data.success || !response.data.data) {
     return [];
@@ -80,11 +87,17 @@ export async function fetchV2Conversations(): Promise<ConversationHistoryType[]>
 /**
  * Fetch messages for a specific conversation from claw.
  * Maps claw message format to the frontend Message type.
+ * @param agentSlug - Optional agent slug to fetch messages for a specific agent.
  */
-export async function fetchV2ConversationMessages(conversationId: string): Promise<Message[]> {
-  const response = await apiInstance.get<ClawMessagesResponse>(
-    `/xyne-ai/v2/conversations/${conversationId}/messages`,
-  );
+export async function fetchV2ConversationMessages(
+  conversationId: string,
+  agentSlug?: string | null,
+): Promise<Message[]> {
+  const url =
+    agentSlug && agentSlug !== 'ask-ai'
+      ? `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(agentSlug)}`
+      : `/xyne-ai/v2/conversations/${conversationId}/messages`;
+  const response = await apiInstance.get<ClawMessagesResponse>(url);
 
   if (!response.data.success || !response.data.data) {
     return [];

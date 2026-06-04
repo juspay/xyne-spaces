@@ -45,6 +45,8 @@ import { toast } from 'sonner';
 import { VoiceInput } from '../../../ui/InputBox/VoiceInput';
 import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
+import { AgentSelector } from './AgentSelector';
+import type { AgentOption } from './AgentSelector';
 import {
   ChannelMentionExtension,
   channelMentionPluginKey,
@@ -148,6 +150,9 @@ export interface XyneAIInputBoxProps {
   onCreateCanvasToggle?: () => void;
   onUserTagsChange?: (userTags: Record<string, UserTag>) => void;
   isOnboarding?: boolean;
+  selectedAgentSlug?: string | null;
+  agents?: AgentOption[];
+  onSelectAgent?: (slug: string | null) => void;
 }
 
 // Interface for the XyneAIInputBox imperative API (matches InputBoxHandle pattern)
@@ -216,6 +221,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onCreateCanvasToggle,
       onUserTagsChange,
       isOnboarding = false,
+      selectedAgentSlug = null,
+      agents = [],
+      onSelectAgent,
     },
     ref,
   ): ReactElement => {
@@ -1752,6 +1760,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     >
                       <File className='w-4 h-4' />
                     </button>
+                  )}
+                  {/* Agent selector */}
+                  {onSelectAgent && (
+                    <div className='flex items-center'>
+                      <AgentSelector
+                        selectedAgentSlug={selectedAgentSlug}
+                        agents={agents}
+                        onSelect={onSelectAgent}
+                        compact={true}
+                        disabled={isStreaming}
+                      />
+                    </div>
                   )}
                 </div>
 
