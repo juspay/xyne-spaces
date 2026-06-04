@@ -6,9 +6,6 @@ export async function handleUnreadCount(
     channelParticipants: Array<{ userId: string }>,
     senderId?: string
   ): Promise<void> {
-    // For non-DM channels, unread count is derived from activities on the frontend
-    if (!isDMChannel) return;
-
     const recipientIds = senderId ? channelParticipants.map(p => p.userId).filter(id => id !== senderId) : channelParticipants.map(p => p.userId);
     const channelStats = await db.channelStats.findUnique({
       where: { channelId },
@@ -21,25 +18,66 @@ export async function handleUnreadCount(
       select: { userId: true, lastViewedAt: true, unreadCount: true }
     });
 
-    await Promise.all(
-      statuses.map(async (status) => {
-        if (!status.lastViewedAt || channelStats?.lastActivityAt > status.lastViewedAt) {
-          const whereClause: { channelId: string; createdAt?: { gt: Date } } = {
-            channelId
-          };
-          if (status.lastViewedAt) {
-            whereClause.createdAt = { gt: status.lastViewedAt };
+    if (isDMChannel) {
+      await Promise.all(
+        statuses.map(async (status) => {
+          if (!status.lastViewedAt || channelStats?.lastActivityAt > status.lastViewedAt) {
+            const whereClause: { channelId: string; createdAt?: { gt: Date } } = {
+              channelId
+            };
+            if (status.lastViewedAt) {
+              whereClause.createdAt = { gt: status.lastViewedAt };
+            }
+            const unreadCount = await db.conversation.count({
+              where: whereClause
+            });
+            if (unreadCount !== status.unreadCount) {
+              await db.channelUserStatus.update({
+                where: { channelId_userId: { channelId, userId: status.userId } },
+                data: { unreadCount, updatedAt: new Date() }
+              });
+            }
           }
-          const unreadCount = await db.conversation.count({
-            where: whereClause
+        })
+      );
+    } else {
+      await Promise.all(
+        statuses.map(async (status) => {
+          const activities = await db.activity.findMany({
+            where: {
+              userId: status.userId,
+              channelId,
+              isRead: false,
+              actionSource: 'message',
+            },
+            select: {
+              id: true,
+              actionSourceId: true
+            }
           });
-          if (unreadCount !== status.unreadCount) {
+
+          const messageIds = activities.map(a => a.actionSourceId);
+
+          let unreadActivitiesCount = 0;
+          if (messageIds.length > 0) {
+            for (const messageId of messageIds) {
+              const conversation = await db.conversation.findFirst({
+                where: { initialMessageId: messageId },
+                select: { conversationId: true }
+              });
+              if (conversation) {
+                unreadActivitiesCount++;
+              }
+            }
+          }
+
+          if (unreadActivitiesCount !== status.unreadCount) {
             await db.channelUserStatus.update({
               where: { channelId_userId: { channelId, userId: status.userId } },
-              data: { unreadCount, updatedAt: new Date() }
+              data: { unreadCount: unreadActivitiesCount, updatedAt: new Date() }
             });
           }
-        }
-      })
-    );
+        })
+      );
+    }
   }
