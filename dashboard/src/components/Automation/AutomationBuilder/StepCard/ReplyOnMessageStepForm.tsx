@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { VariableRefField } from '../SchemaForm/VariableRefField';
+import { EntityVariableField } from '../SchemaForm/EntityVariableField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
 import { SendMessageRichTextField } from '../SchemaForm/SendMessageRichTextField';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
@@ -7,6 +8,7 @@ import type { ValidationIssue } from '../../Automation.types';
 
 interface ReplyOnMessageConfigShape {
   conversationId?: string;
+  senderId?: string;
   content?: string;
 }
 
@@ -52,6 +54,20 @@ export function ReplyOnMessageStepForm({
           variableSources={variableSources}
           targetEntityKind={EntityKind.CONVERSATION}
           placeholder='Pick a conversation'
+        />
+      </FieldRow>
+
+      <FieldRow
+        label='Send as'
+        error={issuesAt.get('senderId')}
+        description='Who the reply is posted as. Leave empty to post as the automations bot.'
+      >
+        <EntityVariableField
+          value={cfg.senderId}
+          onChange={next => setField('senderId', next)}
+          variableSources={variableSources}
+          entityKind={EntityKind.USER}
+          placeholder='Pick a user (defaults to the automations bot)'
         />
       </FieldRow>
 

@@ -274,6 +274,9 @@ export class App {
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+    this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
+
     this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
 
     // Commit analysis routes (auth and ACL required)
@@ -545,10 +548,6 @@ export class App {
 
     // Scheduled messages routes (auth required)
     this.app.use('/api/scheduled-messages', authMiddleware.authenticate, scheduledMessageRoutes);
-
-    // Public inbound webhook trigger for automations — authenticated per-request
-    // by the encrypted per-series secret, so no JWT/ACL middleware here.
-    this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
     // Automations routes (auth required, no ACL — matches /api/calls)
     this.app.use('/api/automations', authMiddleware.authenticate, automationRoutes);

@@ -12,8 +12,52 @@ import type { ValidationIssue, ValidationResult } from '../types/validation';
 import type { TriggerRegistry } from '../triggers/trigger-registry';
 import type { StepRegistry } from '../steps/step-registry';
 import { collectRefs } from '../util/variable-ref';
+import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+function declaredLeafToZod(type: string): z.ZodTypeAny {
+  switch (type) {
+    case 'number':
+      return z.number();
+    case 'boolean':
+      return z.boolean();
+    case 'array':
+      return z.array(z.unknown());
+    case 'object':
+      return z.record(z.unknown());
+    case 'secret':
+    case 'string':
+    default:
+      return z.string();
+  }
+}
+
+function declaredToZod(declaredRaw: unknown): z.ZodTypeAny {
+  if (!declaredRaw || typeof declaredRaw !== 'object' || Array.isArray(declaredRaw)) {
+    return z.record(z.unknown());
+  }
+  const shape: Record<string, z.ZodTypeAny> = {};
+  for (const [key, value] of Object.entries(declaredRaw as Record<string, unknown>)) {
+    if (typeof value === 'string') {
+      shape[key] = declaredLeafToZod(value);
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      shape[key] = declaredToZod(value);
+    }
+  }
+  return z.object(shape).passthrough();
+}
+
+function buildWebhookTriggerOutputSchema(triggerConfig: unknown): z.ZodTypeAny {
+  const cfg = (triggerConfig ?? {}) as { bodySchema?: unknown; headerSchema?: unknown };
+  return z
+    .object({
+      body: declaredToZod(cfg.bodySchema),
+      headers: declaredToZod(cfg.headerSchema),
+      receivedAt: z.string(),
+    })
+    .passthrough();
+}
 
 function walkSchemaPath(schema: z.ZodTypeAny, segments: string[]): z.ZodTypeAny | null {
   if (segments.some(s => FORBIDDEN_KEYS.has(s))) return null;
@@ -31,8 +75,18 @@ function walkSchemaPath(schema: z.ZodTypeAny, segments: string[]): z.ZodTypeAny 
 
     if (current instanceof z.ZodObject) {
       const next = (current.shape as Record<string, z.ZodTypeAny>)[segment];
-      if (!next) return null;
-      current = next;
+      if (next) {
+        current = next;
+      } else {
+        const def = current._def as { unknownKeys?: string; catchall?: z.ZodTypeAny };
+        if (def.unknownKeys === 'passthrough') {
+          current = z.unknown();
+        } else if (def.catchall && !(def.catchall instanceof z.ZodNever)) {
+          current = def.catchall;
+        } else {
+          return null;
+        }
+      }
     } else if (current instanceof z.ZodArray) {
       if (/^\d+$/.test(segment) || segment === '*') {
         current = (current as z.ZodArray<z.ZodTypeAny>)._def.type;
@@ -163,7 +217,12 @@ export class ConfigValidator {
             });
           }
         }
-        outputSchemas.set('trigger', triggerImpl.outputSchema);
+        outputSchemas.set(
+          'trigger',
+          triggerImpl.type === WEBHOOK_EVENT
+            ? buildWebhookTriggerOutputSchema(config.trigger.config)
+            : triggerImpl.outputSchema,
+        );
       }
     }
 
