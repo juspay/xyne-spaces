@@ -48,6 +48,7 @@ interface ClawMessagesResponse {
   success: boolean;
   data: ClawChatMessage[];
   toolInvocations?: unknown[];
+  invocationsByMsgId?: Record<string, unknown[]>;
 }
 
 // ============================================================================
@@ -113,10 +114,23 @@ export async function fetchV2ConversationMessages(
     startedAt?: string;
     isError?: boolean;
     citations?: ToolInvocation['citations'];
+    parentToolCallId?: string;
+    subagentName?: string;
   }>;
 
-  // Chain messages sequentially by setting parentId
-  // Each message's parent is the previous message in the array
+  // Map tool invocations from the response onto assistant messages.
+  // The claw-auth messages endpoint returns invocationsByMsgId — a
+  // Record<assistantMessageId, ToolInvocation[]> that pairs tool calls
+  // with the assistant response they produced (by chronological order).
+  // When that mapping is absent we fall back to the old time-window heuristic.
+
+  // Pair tool invocations with the assistant message they produced.
+  // The claw-auth /messages endpoint returns invocationsByMsgId — a
+  // Record<assistantMessageId, ToolInvocation[]> — when available.
+  // Otherwise we fall back to time-window heuristics.
+  const invocationsByMsgId =
+    (response.data.invocationsByMsgId as Record<string, ToolInvocation[]> | undefined) || undefined;
+
   const mappedMessages = response.data.data.map((msg, index, arr) => {
     const isUser = msg.role === 'user';
 
@@ -126,39 +140,58 @@ export async function fetchV2ConversationMessages(
     // For assistant messages, find tool invocations that were started just before this message was created
     // Tool invocations should be associated with the assistant response they helped generate
     let msgToolInvocations: ToolInvocation[] = [];
-    if (!isUser && allToolInvocations.length > 0) {
-      const msgCreatedAt = new Date(msg.createdAt).getTime();
+    if (!isUser) {
+      if (invocationsByMsgId && msg.id in invocationsByMsgId) {
+        // claw-auth already paired them for us
+        msgToolInvocations = (invocationsByMsgId[msg.id] ?? []).map(inv => ({
+          toolName: inv.toolName,
+          args: inv.args,
+          status: inv.status,
+          durationMs: inv.durationMs,
+          toolCallId: inv.toolCallId ?? `call-${Math.random().toString(36).slice(2)}`,
+          ...(inv.result !== undefined && { result: inv.result }),
+          ...(inv.isError !== undefined && { isError: inv.isError }),
+          ...(inv.citations !== undefined && { citations: inv.citations }),
+          ...(inv.parentToolCallId !== undefined && { parentToolCallId: inv.parentToolCallId }),
+          ...(inv.subagentName !== undefined && { subagentName: inv.subagentName }),
+        }));
+      } else if (allToolInvocations.length > 0) {
+        const msgCreatedAt = new Date(msg.createdAt).getTime();
 
-      // Find tool invocations that were started before this message was created
-      // and after the previous user message (if any)
-      const prevUserMsg = arr
-        .slice(0, index)
-        .reverse()
-        .find(m => m.role === 'user');
-      const prevUserTime = prevUserMsg ? new Date(prevUserMsg.createdAt).getTime() : 0;
+        // Find tool invocations that were started before this message was created
+        // and after the previous user message (if any)
+        const prevUserMsg = arr
+          .slice(0, index)
+          .reverse()
+          .find(m => m.role === 'user');
+        const prevUserTime = prevUserMsg ? new Date(prevUserMsg.createdAt).getTime() : 0;
 
-      msgToolInvocations = allToolInvocations
-        .filter(inv => {
-          const toolStartedAt = inv.startedAt ? new Date(inv.startedAt).getTime() : 0;
-          // Tool was started after the previous user message and before this assistant message
-          return toolStartedAt > prevUserTime && toolStartedAt <= msgCreatedAt;
-        })
-        .map(inv => {
-          const baseInvocation: ToolInvocation = {
-            toolName: inv.toolName,
-            args: inv.args,
-            status: inv.status,
-            durationMs: inv.durationMs,
-            toolCallId: inv.toolCallId ?? `call-${Math.random().toString(36).slice(2)}`,
-          };
+        msgToolInvocations = allToolInvocations
+          .filter(inv => {
+            const toolStartedAt = inv.startedAt ? new Date(inv.startedAt).getTime() : 0;
+            // Tool was started after the previous user message and before this assistant message
+            return toolStartedAt > prevUserTime && toolStartedAt <= msgCreatedAt;
+          })
+          .map(inv => {
+            const baseInvocation: ToolInvocation = {
+              toolName: inv.toolName,
+              args: inv.args,
+              status: inv.status,
+              durationMs: inv.durationMs,
+              toolCallId: inv.toolCallId ?? `call-${Math.random().toString(36).slice(2)}`,
+            };
 
-          // Only add optional properties if they exist
-          if (inv.result !== undefined) baseInvocation.result = inv.result;
-          if (inv.isError !== undefined) baseInvocation.isError = inv.isError;
-          if (inv.citations !== undefined) baseInvocation.citations = inv.citations;
+            // Only add optional properties if they exist
+            if (inv.result !== undefined) baseInvocation.result = inv.result;
+            if (inv.isError !== undefined) baseInvocation.isError = inv.isError;
+            if (inv.citations !== undefined) baseInvocation.citations = inv.citations;
+            if (inv.parentToolCallId !== undefined)
+              baseInvocation.parentToolCallId = inv.parentToolCallId;
+            if (inv.subagentName !== undefined) baseInvocation.subagentName = inv.subagentName;
 
-          return baseInvocation;
-        });
+            return baseInvocation;
+          });
+      }
     }
 
     const mappedMessage: Message = {

@@ -186,6 +186,12 @@ export interface InlineCitation {
 function sanitizeCitationUrl(url: string): string {
   const trimmed = url.trim();
   if (!trimmed) return '';
+  // Accept relative URLs from xyne-claw (thread / canvas links)
+  if (trimmed.startsWith('/')) {
+    // Only allow well-formed relative paths (may contain %-encoded chars)
+    if (/^\/[a-zA-Z0-9_/.\-=%]+$/.test(trimmed)) return trimmed;
+    return '';
+  }
   try {
     const parsed = new URL(trimmed);
     return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? trimmed : '';
