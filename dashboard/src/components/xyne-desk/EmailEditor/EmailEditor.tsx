@@ -256,7 +256,7 @@ export const EmailEditor = ({
         },
         link: false,
       }),
-      LinkExtension.configure({ openOnClick: false }),
+      LinkExtension.extend({ inclusive: false }).configure({ openOnClick: false }),
       Placeholder.configure({ placeholder }),
       InlineImage.configure({
         inline: true,
