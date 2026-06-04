@@ -17,6 +17,8 @@ export interface TicketFilters {
   created?: boolean; // filter to show only tickets created by current user
   stages?: string[];
   ticketTypes?: string[];
+  aiCategory?: string[]; // AI classification categories (e.g. "Mandate", "Refund")
+  hasAiDraft?: boolean; // filter to show only tickets with AI-generated email drafts
   // Dynamic form fields: fieldId -> filter value
   // For SELECT fields: string array of selected values
   // For DATE fields: { start?: number, end?: number }
