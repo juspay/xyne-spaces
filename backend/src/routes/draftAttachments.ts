@@ -1,18 +1,10 @@
 import { Router } from 'express';
-import multer from 'multer';
 import { DraftAttachmentController } from '../controllers/draftAttachmentController';
 import { authMiddleware } from '../middleware/auth';
+import { uploadMultiple } from '../middleware/upload';
 
 const router = Router();
 const draftAttachmentController = new DraftAttachmentController();
-
-// Configure multer for handling multipart/form-data (multiple files with thumbnails)
-const upload = multer({
-  limits: {
-    fileSize: 1024 * 1024 * 1024, // 1GB max file size per file
-    files: 20, // Maximum 20 files total (supports multiple files + thumbnails)
-  },
-});
 
 /**
  * POST /api/drafts/attachments/upload
@@ -39,10 +31,7 @@ const upload = multer({
 router.post(
   '/attachments/upload',
   authMiddleware.authenticate,
-  upload.fields([
-    { name: 'files', maxCount: 10 },  // Up to 10 files per request
-    { name: 'thumbnails', maxCount: 10 },  // Up to 10 thumbnails
-  ]),
+  uploadMultiple,
   draftAttachmentController.uploadDraftAttachment.bind(draftAttachmentController)
 );
 

@@ -1,5 +1,4 @@
 import { storageService } from './storage/index.js';
-import { fileValidationService } from './fileValidationService.js';
 import { logger } from '../utils/logger';
 
 export interface UploadedFileResult {
@@ -21,6 +20,13 @@ interface FileMetadata {
   width?: number; // Width in pixels (from frontend)
   height?: number; // Height in pixels (from frontend)
   duration?: number; // Duration in seconds (for videos, from frontend)
+}
+
+function getExistingStoragePath(file: Express.Multer.File): string | undefined {
+  if (typeof file.path === 'string' && file.path.startsWith('attachments/')) {
+    return file.path;
+  }
+  return undefined;
 }
 
 /**
@@ -47,38 +53,38 @@ export async function uploadFiles(
 
   const uploadPromises = files.map(async (file, fileIndex): Promise<UploadedFileResult> => {
     try {
-      // Validate file using the validation service
-      const validationResult = await fileValidationService.validateFile({
-        buffer: file.buffer,
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-        size: file.size,
-      });
+      const existingStoragePath = getExistingStoragePath(file);
+      let filePath = existingStoragePath;
+      let fileSize = file.size;
 
-      if (!validationResult.isValid) {
-        throw new Error(`File validation failed for ${file.originalname}: ${validationResult.errors.join(', ')}`);
+      if (!filePath) {
+        if (!file.buffer || file.buffer.length === 0) {
+          throw new Error(`No file content found for ${file.originalname}`);
+        }
+
+        const storageResult = await storageService.uploadFile(file.buffer, {
+          filename: file.originalname,
+          contentType: file.mimetype || 'application/octet-stream',
+          metadata: {
+            originalName: file.originalname,
+            uploadedAt: new Date().toISOString(),
+          },
+          scopeType: 'CONVERSATION',
+          scopeId: 'temp',
+        });
+
+        filePath = storageResult.path;
+        fileSize = storageResult.size;
       }
 
-      // Log validation warnings
-      if (validationResult.warnings.length > 0) {
-        logger.warn(`File validation warnings for ${file.originalname}:`, validationResult.warnings);
+      if (!filePath) {
+        throw new Error(`Storage path missing after upload for ${file.originalname}`);
       }
-
-      // Upload to GCS
-      const gcsResult = await storageService.uploadFile(file.buffer, {
-        filename: validationResult.sanitizedFilename || file.originalname,
-        contentType: file.mimetype,
-        metadata: {
-          originalName: file.originalname,
-          uploadedAt: new Date().toISOString(),
-        },
-        scopeType: 'CONVERSATION',
-        scopeId: 'temp', // Will be updated by caller
-      });
 
       // Handle thumbnail for video and document files (frontend-generated)
       let thumbnailUrl: string | undefined;
-      const isVideo = file.mimetype.startsWith('video/');
+      const fileMimeType = file.mimetype || 'application/octet-stream';
+      const isVideo = fileMimeType.startsWith('video/');
       const isDocument = [
         'application/pdf',
         'application/msword',
@@ -87,7 +93,7 @@ export async function uploadFiles(
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'text/csv',
         'text/comma-separated-values',
-      ].includes(file.mimetype);
+      ].includes(fileMimeType);
       if ((isVideo || isDocument) && metadataMap.size > 0 && thumbnailFiles) {
         // Get metadata for this file using O(1) map lookup
         const metadata = metadataMap.get(fileIndex);
@@ -100,25 +106,31 @@ export async function uploadFiles(
             try {
               logger.info(`Using frontend-generated thumbnail (index ${metadata.thumbnailIndex}) for video: ${file.originalname}`);
 
-              // Generate thumbnail filename: strip original extension and append _thumb.jpg
-              const thumbnailFilename = gcsResult.path.replace(/\.[^/.]+$/, '') + '_thumb.jpg';
+              const existingThumbnailPath = getExistingStoragePath(frontendThumbnail);
+              if (existingThumbnailPath) {
+                thumbnailUrl = existingThumbnailPath;
+              } else if (frontendThumbnail.buffer && frontendThumbnail.buffer.length > 0) {
+                const thumbnailFilename = `${file.originalname}_thumb.jpg`;
+                const thumbnailUpload = await storageService.uploadFile(frontendThumbnail.buffer, {
+                  filename: thumbnailFilename,
+                  contentType: frontendThumbnail.mimetype || 'image/jpeg',
+                  metadata: {
+                    originalName: file.originalname,
+                    uploadedAt: new Date().toISOString(),
+                    isThumbnail: 'true',
+                    originalFile: filePath,
+                  },
+                  scopeType: 'CONVERSATION',
+                  scopeId: 'temp',
+                });
+                thumbnailUrl = thumbnailUpload.path;
+              } else {
+                logger.warn(`Thumbnail file has no stream/buffer for ${file.originalname}`);
+              }
 
-              // Upload frontend-generated thumbnail to GCS
-              const thumbnailGcsResult = await storageService.uploadFile(frontendThumbnail.buffer, {
-                filename: thumbnailFilename,
-                contentType: 'image/jpeg',
-                metadata: {
-                  originalName: file.originalname,
-                  uploadedAt: new Date().toISOString(),
-                  isThumbnail: 'true',
-                  originalFile: gcsResult.path,
-                },
-                scopeType: 'CONVERSATION',
-                scopeId: 'temp', // Will be updated by caller
-              });
-
-              thumbnailUrl = thumbnailGcsResult.path;
-              logger.info(`Frontend thumbnail uploaded successfully: ${thumbnailUrl}`);
+              if (thumbnailUrl) {
+                logger.info(`Frontend thumbnail uploaded successfully: ${thumbnailUrl}`);
+              }
             } catch (error) {
               logger.error(`Failed to upload frontend thumbnail for ${file.originalname}:`, error);
               // Continue without thumbnail
@@ -139,20 +151,19 @@ export async function uploadFiles(
       const height = metadata?.height;
       
       const uploadedFile: UploadedFileResult = {
-        originalName: validationResult.sanitizedFilename || file.originalname,
-        fileName: validationResult.sanitizedFilename || file.originalname,
-        fileSize: gcsResult.size,
-        mimeType: file.mimetype,
-        fileUrl: gcsResult.path,
+        originalName: file.originalname,
+        fileName: file.originalname,
+        fileSize: fileSize || file.size,
+        mimeType: fileMimeType,
+        fileUrl: filePath,
         thumbnailUrl,
         width,
         height,
         metadata: {
           uploadedAt: new Date().toISOString(),
           originalSize: file.size,
-          gcsPath: gcsResult.path,
-          sanitized: validationResult.sanitizedFilename !== file.originalname,
-          validationWarnings: validationResult.warnings,
+          gcsPath: filePath,
+          proxied: !!existingStoragePath,
           ...(thumbnailUrl && { thumbnailGenerated: true }),
           ...(metadata?.duration && { duration: metadata.duration }),
         }

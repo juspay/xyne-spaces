@@ -9,6 +9,11 @@ export class GCSAdapter implements StorageService {
     return { filename: r.filename, path: r.gcsPath, size: r.size };
   }
 
+  async uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult> {
+    const r = await this.gcs.uploadStream(stream, options);
+    return { filename: r.filename, path: r.gcsPath, size: r.size };
+  }
+
   async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> }): Promise<UploadResult> {
     // Merge cacheControl into metadata so GCS picks it up as a first-class header
     const gcsOptions = {

@@ -139,6 +139,77 @@ export class GCSService {
   }
 
   /**
+   * Upload a readable stream directly to GCS without buffering entire file in memory.
+   */
+  async uploadStream(
+    stream: NodeJS.ReadableStream,
+    options: GCSUploadOptions
+  ): Promise<GCSUploadResult> {
+    try {
+      if (!stream) {
+        throw new Error('File stream is required');
+      }
+
+      if (!options.filename) {
+        throw new Error('Filename is required');
+      }
+
+      if (!options.contentType) {
+        throw new Error('Content type is required');
+      }
+
+      const filePath = this.generateFilePath(options);
+      const file = this.bucket.file(filePath);
+      let totalBytes = 0;
+
+      logger.info(`Streaming file upload to GCS: ${filePath}`, {
+        filename: options.filename,
+        contentType: options.contentType,
+        scopeType: options.scopeType,
+        scopeId: options.scopeId,
+      });
+
+      stream.on('data', (chunk: Buffer | string) => {
+        totalBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      });
+
+      const writeStream = file.createWriteStream({
+        metadata: {
+          contentType: options.contentType,
+          cacheControl: 'public, max-age=31536000',
+          ...options.metadata,
+        },
+        resumable: true,
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        stream
+          .pipe(writeStream)
+          .on('finish', resolve)
+          .on('error', reject);
+      });
+
+      logger.info(`Stream upload completed in GCS: ${filePath}`, {
+        size: totalBytes,
+      });
+
+      return {
+        filename: filePath,
+        gcsPath: filePath,
+        size: totalBytes,
+      };
+    } catch (error) {
+      logger.error('Failed to stream upload to GCS:', error);
+
+      if (error instanceof Error) {
+        throw new Error(`GCS stream upload failed: ${error.message}`);
+      }
+
+      throw new Error('GCS stream upload failed: Unknown error');
+    }
+  }
+
+  /**
    * Upload file buffer to GCS at an exact path without any modifications
    * Use this when you need full control over the file path
    */

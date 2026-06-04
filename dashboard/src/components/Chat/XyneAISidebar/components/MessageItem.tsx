@@ -1024,7 +1024,7 @@ export const MessageItem = React.memo(
                               }
                             })();
 
-                            // API paths (e.g. /api/attachments/.../download) should bypass React Router
+                            // API paths (e.g. /api/attachments/.../stream) should bypass React Router
                             const isApiPath = href?.startsWith('/api/');
 
                             if (isExternal) {

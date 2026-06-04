@@ -1,5 +1,4 @@
 import { storageService } from './storage/index';
-import { fileValidationService } from './fileValidationService';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { decrypt } from './encryptionService';
@@ -273,26 +272,9 @@ export class ExternalAttachmentService {
       const baseName = path.basename(fileName, path.extname(fileName));
       const uniqueFileName = `${baseName}-${uuidv4().substring(0, 8)}${fileExtension}`;
 
-      // Validate file
-      const validationResult = await fileValidationService.validateFile({
-        buffer,
-        originalName: fileName,
-        mimeType: finalMimeType,
-        size: buffer.length
-      });
-
-      if (!validationResult.isValid) {
-        throw new Error(`File validation failed: ${validationResult.errors.join(', ')}`);
-      }
-
-      // Log validation warnings
-      if (validationResult.warnings.length > 0) {
-        logger.warn(`File validation warnings for ${fileName}:`, validationResult.warnings);
-      }
-
       // Upload to storage
       const gcsResult = await storageService.uploadFile(buffer, {
-        filename: validationResult.sanitizedFilename || uniqueFileName,
+        filename: uniqueFileName,
         contentType: finalMimeType,
         metadata: {
           originalName: fileName,

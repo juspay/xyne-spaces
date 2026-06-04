@@ -1,6 +1,5 @@
 import {
   S3Client,
-  PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -10,8 +9,10 @@ import {
   CopyObjectCommand,
   type S3ClientConfig,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createWriteStream } from 'fs';
+import { PassThrough } from 'stream';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 import { config } from '../../config/env';
@@ -53,7 +54,52 @@ export class S3StorageService implements StorageService {
     if (!options.contentType) throw new Error('Content type is required');
 
     const filePath = generateFilePath(options);
-    return this.putObject(buffer, filePath, options.contentType, options.metadata, 'public, max-age=31536000');
+    logger.info(`Uploading to S3 via multipart stream: ${filePath}`, {
+      contentType: options.contentType,
+      size: buffer.length,
+    });
+
+    await this.uploadBody(
+      Readable.from(buffer),
+      filePath,
+      options.contentType,
+      options.metadata,
+      'public, max-age=31536000'
+    );
+
+    logger.info(`File uploaded to S3: ${filePath}`);
+    return { filename: filePath, path: filePath, size: buffer.length };
+  }
+
+  async uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult> {
+    if (!stream) throw new Error('File stream is empty or invalid');
+    if (!(stream instanceof Readable)) throw new Error('File stream must be a Node.js Readable stream');
+    if (!options.filename) throw new Error('Filename is required');
+    if (!options.contentType) throw new Error('Content type is required');
+
+    const filePath = generateFilePath(options);
+    let size = 0;
+    const countingStream = new PassThrough();
+    countingStream.on('data', (chunk: Buffer | string) => {
+      size += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+    });
+    stream.on('error', (error) => countingStream.destroy(error));
+
+    logger.info(`Streaming upload to S3: ${filePath}`, {
+      contentType: options.contentType,
+    });
+
+    stream.pipe(countingStream);
+    await this.uploadBody(
+      countingStream,
+      filePath,
+      options.contentType,
+      options.metadata,
+      'public, max-age=31536000'
+    );
+
+    logger.info(`Stream uploaded to S3: ${filePath}`, { size });
+    return { filename: filePath, path: filePath, size };
   }
 
   async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> }): Promise<UploadResult> {
@@ -61,7 +107,21 @@ export class S3StorageService implements StorageService {
     if (!options.path) throw new Error('Path is required');
     if (!options.contentType) throw new Error('Content type is required');
 
-    return this.putObject(buffer, options.path, options.contentType, options.metadata, options.cacheControl);
+    logger.info(`Uploading to S3 via multipart stream: ${options.path}`, {
+      contentType: options.contentType,
+      size: buffer.length,
+    });
+
+    await this.uploadBody(
+      Readable.from(buffer),
+      options.path,
+      options.contentType,
+      options.metadata,
+      options.cacheControl
+    );
+
+    logger.info(`File uploaded to S3: ${options.path}`);
+    return { filename: options.path, path: options.path, size: buffer.length };
   }
 
   async deleteFile(filename: string): Promise<DeleteResult> {
@@ -236,25 +296,37 @@ export class S3StorageService implements StorageService {
     return `s3://${this.bucketName}/${path}`;
   }
 
-  private async putObject(buffer: Buffer, filePath: string, contentType: string, metadata?: Record<string, string>, cacheControl: string = 'public, max-age=31536000'): Promise<UploadResult> {
-    logger.info(`Uploading to S3: ${filePath}`, { contentType, size: buffer.length });
-
+  private sanitizeMetadata(metadata?: Record<string, string>): Record<string, string> | undefined {
     // S3 metadata is sent as HTTP headers — only ASCII is allowed.
-    // Strip non-ASCII characters to avoid signature mismatches.
-    const safeMetadata = metadata
+    return metadata
       ? Object.fromEntries(Object.entries(metadata).map(([k, v]) => [k, v.replace(/[^\x20-\x7E]/g, '_')]))
       : undefined;
+  }
 
-    await this.client.send(new PutObjectCommand({
-      Bucket: this.bucketName,
-      Key: filePath,
-      Body: buffer,
-      ContentType: contentType,
-      CacheControl: cacheControl,
-      Metadata: safeMetadata,
-    }));
+  private async uploadBody(
+    body: Readable,
+    filePath: string,
+    contentType: string,
+    metadata?: Record<string, string>,
+    cacheControl: string = 'public, max-age=31536000'
+  ): Promise<void> {
+    const upload = new Upload({
+      client: this.client,
+      params: {
+        Bucket: this.bucketName,
+        Key: filePath,
+        Body: body,
+        ContentType: contentType,
+        CacheControl: cacheControl,
+        Metadata: this.sanitizeMetadata(metadata),
+      },
+      // Keep multipart upload memory low for large streaming uploads:
+      // in-flight buffered bytes ~= queueSize * partSize.
+      queueSize: 2,
+      partSize: 5 * 1024 * 1024,
+      leavePartsOnError: false,
+    });
 
-    logger.info(`File uploaded to S3: ${filePath}`);
-    return { filename: filePath, path: filePath, size: buffer.length };
+    await upload.done();
   }
 }

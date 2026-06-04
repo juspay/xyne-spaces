@@ -3,14 +3,12 @@
  *
  * Handles uploading attachments to GCS for Xyne AI sessions
  * - Converts base64 to Buffer
- * - Validates files
  * - Uploads to GCS bucket (xyne-spaces-chat-documents) under /attachments/ASKAI/ path
  * - Caches base64 in Redis for fast retrieval (6h TTL)
  * - Returns metadata for database storage
  */
 
 import { getStorageService } from './storage/index.js';
-import { fileValidationService } from './fileValidationService.js';
 import { redisService } from './redisService.js';
 import { logger } from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -30,7 +28,7 @@ export interface XyneAIAttachmentMetadata {
   attachment_id: string;  // Unique ID for this attachment
   url: string;            // GCS path (e.g., "attachments/ASKAI/session_abc/2026/02/...")
   mime_type: string;      // MIME type (e.g., "image/png")
-  file_name: string;      // Sanitized filename
+  file_name: string;      // Original filename
   size: number;           // File size in bytes
 }
 
@@ -69,28 +67,11 @@ export async function uploadXyneAIAttachment(
     // 2. Convert base64 to Buffer
     const buffer = Buffer.from(data, 'base64');
 
-    // 3. Validate file
-    const validationResult = await fileValidationService.validateFile({
-      buffer,
-      originalName: filename || 'attachment',
-      mimeType: mime_type,
-      size: buffer.length,
-    });
+    const resolvedFilename = filename || 'attachment';
 
-    if (!validationResult.isValid) {
-      throw new Error(`File validation failed: ${validationResult.errors.join(', ')}`);
-    }
-
-    // Log validation warnings if any
-    if (validationResult.warnings.length > 0) {
-      logger.warn(`[XyneAI] [${sessionId}] File validation warnings:`, validationResult.warnings);
-    }
-
-    const sanitizedFilename = validationResult.sanitizedFilename || filename || 'attachment';
-
-    // 4. Upload to storage (attachments/ASKAI/)
+    // 3. Upload to storage (attachments/ASKAI/)
     const gcsResult = await askaiStorageService.uploadFile(buffer, {
-      filename: sanitizedFilename,
+      filename: resolvedFilename,
       contentType: mime_type,
       metadata: {
         originalName: filename || 'attachment',
@@ -102,18 +83,18 @@ export async function uploadXyneAIAttachment(
       scopeId: sessionId,
     });
 
-    // 5. Generate attachment ID and metadata
+    // 4. Generate attachment ID and metadata
     const metadata: XyneAIAttachmentMetadata = {
       attachment_id: uuidv4(),
       url: gcsResult.path,
       mime_type,
-      file_name: sanitizedFilename,
+      file_name: resolvedFilename,
       size: gcsResult.size,
     };
 
     logger.info(`[XyneAI] [${sessionId}] Successfully uploaded attachment to GCS: ${gcsResult.path}`);
 
-    // 6. Cache attachment in Redis for fast retrieval (non-blocking)
+    // 5. Cache attachment in Redis for fast retrieval (non-blocking)
     try {
       const cacheKey = `${REDIS_CACHE_PREFIX}${metadata.attachment_id}`;
       await redisService.set(cacheKey, data, CACHE_TTL_SECONDS);

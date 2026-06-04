@@ -27,6 +27,7 @@ export interface FileMetadata {
 
 export interface StorageService {
   uploadFile(buffer: Buffer, options: UploadOptions): Promise<UploadResult>;
+  uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult>;
   uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> }): Promise<UploadResult>;
   deleteFile(filename: string): Promise<DeleteResult>;
   generateSignedUrl(filename: string, expirationHours?: number): Promise<string>;

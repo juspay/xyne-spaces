@@ -39,7 +39,7 @@ router.get(
 router.get('/:emojiId', customEmojiController.getCustomEmojiById);
 // Create emoji with file upload - upload middleware must come before auth
 // Note: auth is applied at app.ts level
-router.post('/', uploadSingle, customEmojiController.createCustomEmoji);
+router.post('/', uploadSingle({ maxBytes: 256 * 1024 }), customEmojiController.createCustomEmoji);
 router.delete('/:emojiId', customEmojiController.deleteCustomEmoji);
 
 export default router;
