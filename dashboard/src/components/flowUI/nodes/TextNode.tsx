@@ -10,6 +10,19 @@ import {
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { useChannel } from '../../../hooks/useChannels';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { useUserGroupById } from '../../../hooks/useUserGroup';
+
+/** Resolves group alias/name from zero store so display name is always correct,
+ *  regardless of whether the token had an alias embedded. */
+const FlowGroupMention: React.FC<{ groupId: string; tokenName: string; tokenAlias: string }> = ({
+  groupId,
+  tokenName,
+  tokenAlias,
+}) => {
+  const group = useUserGroupById(groupId);
+  const displayName = group?.alias || group?.name || tokenAlias || tokenName;
+  return <GroupMentionRenderer groupId={groupId} groupName={displayName} alias={displayName} />;
+};
 
 // ---------------------------------------------------------------------------
 // Inline content parser
@@ -297,11 +310,11 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
       }
       case 'group':
         return (
-          <GroupMentionRenderer
+          <FlowGroupMention
             key={key}
             groupId={part.value}
-            groupName={part.name}
-            alias={part.alias}
+            tokenName={part.name}
+            tokenAlias={part.alias}
           />
         );
       case 'bold':

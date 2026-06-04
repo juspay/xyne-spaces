@@ -204,9 +204,12 @@ export class SlackBlockKitParser {
     const titleHtml = block.title
       ? `<div style="font-weight: 600; margin-bottom: 0.5rem;">${this.formatText(block.title)}</div>`
       : '';
+    const src = block.slack_file?.id
+      ? `/api/attachments/${block.slack_file.id}/download`
+      : block.image_url;
     return `<div class="image-block" style="${STYLES.blockMargin}">
       ${titleHtml}
-      ${this.createImg(block.image_url, block.alt_text, STYLES.image)}
+      ${this.createImg(src, block.alt_text, STYLES.image)}
     </div>`;
   }
 

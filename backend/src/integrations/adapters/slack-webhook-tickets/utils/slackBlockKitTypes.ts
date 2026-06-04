@@ -13,7 +13,10 @@ export interface SlackTextObject {
   emoji?: boolean;
   verbatim?: boolean;
 }
-
+export interface SlackFileObject {
+  id?: string;
+  url?: string;
+}
 // ========== Block Elements ==========
 
 export interface SlackImageElement {
@@ -50,6 +53,8 @@ export interface SlackImageBlock {
   image_url: string;
   alt_text: string;
   title?: SlackTextObject;
+  slack_file?: SlackFileObject; // Custom extension for files uploaded via Slack API, containing xyne_file_id for retrieval
+  xyne_file_id?: string; // DB CUID from filesCompleteUploadExternal response
 }
 
 export interface SlackActionsBlock {
@@ -132,6 +137,27 @@ export interface SlackRichTextBlock {
 }
 
 // ========== Combined Block Types ==========
+export interface SlackTableColumnSetting {
+  align?: 'left' | 'center' | 'right';
+  is_wrapped?: boolean;
+}
+
+export type SlackTableCell =
+  | { type: 'raw_text'; text: string }
+  | { type: 'rich_text'; elements: SlackRichTextBlockElement[] };
+
+export interface SlackTableBlock {
+  type: 'table';
+  block_id?: string;
+  rows: SlackTableCell[][];             // required — array of rows, each row is an array of cells
+  column_settings?: Array<SlackTableColumnSetting | null>;
+}
+
+export interface SlackMarkdownBlock {
+  type: 'markdown';
+  block_id?: string;
+  text: string;                         // standard markdown-formatted text
+}
 
 export type SlackBlock =
   | SlackSectionBlock
@@ -140,7 +166,9 @@ export type SlackBlock =
   | SlackActionsBlock
   | SlackContextBlock
   | SlackHeaderBlock
-  | SlackRichTextBlock;
+  | SlackRichTextBlock
+  | SlackTableBlock
+  | SlackMarkdownBlock;
 
 // ========== Attachment Types ==========
 

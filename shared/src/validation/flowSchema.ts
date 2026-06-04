@@ -210,11 +210,12 @@ export const dividerComponentSchema = baseComponentSchema.extend({
 export const imageComponentSchema = baseComponentSchema.extend({
   type: z.literal('image'),
   props: z.object({
-    src: z.string().url(),
+    src: z.string().min(1),
     alt: z.string().optional(),
     width: z.union([z.string(), z.number()]).optional(),
     height: z.union([z.string(), z.number()]).optional(),
     objectFit: z.enum(['cover', 'contain', 'fill']).optional(),
+    xyne_file_id: z.string().optional(),
   }).strict().optional(),
 });
 
@@ -225,6 +226,15 @@ export const linkComponentSchema = baseComponentSchema.extend({
     label: z.string(),
     external: z.boolean().optional(),
     underline: z.boolean().optional(),
+  }).strict(),
+});
+
+export const tableComponentSchema = baseComponentSchema.extend({
+  type: z.literal('table'),
+  props: z.object({
+    rows: z.array(z.array(z.string())),
+    hasHeader: z.boolean().optional(),
+    columnAlignments: z.array(z.enum(['left', 'center', 'right'])).optional(),
   }).strict(),
 });
 
@@ -243,6 +253,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     dividerComponentSchema,
     imageComponentSchema,
     linkComponentSchema,
+    tableComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),
