@@ -26,7 +26,11 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import type { CanvasUser, FolderGroup, ProjectGroup } from './CanvasListGrouped.utils';
 import { getChannelDisplayName } from './CanvasListGrouped.utils';
-import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
+import {
+  filterExcludedCallGeneratedCanvases,
+  filterStarredCanvases,
+  withStarredCanvasState,
+} from '../canvasFilters';
 
 const groupedCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Grouped',
@@ -51,9 +55,11 @@ interface FolderGroupSectionProps {
   setRenamingFolderName: React.Dispatch<React.SetStateAction<string>>;
   isCreatingCanvas: boolean;
   excludeCallGeneratedCanvases: boolean;
+  showStarredOnly: boolean;
   onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
+  onToggleStar?: ((canvas: Canvas) => void) | undefined;
   onToggleFolder: (folderId: string) => void;
   onCreateCanvasInFolder: (folder: CanvasFolder) => void | Promise<void>;
   onStartRenameFolder: (folder: CanvasFolder) => void;
@@ -75,9 +81,11 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   setRenamingFolderName,
   isCreatingCanvas,
   excludeCallGeneratedCanvases,
+  showStarredOnly,
   onSelect,
   onDelete,
   onDuplicate,
+  onToggleStar,
   onToggleFolder,
   onCreateCanvasInFolder,
   onStartRenameFolder,
@@ -103,11 +111,22 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   );
   const folderCanvases = useMemo(
     () =>
-      filterExcludedCallGeneratedCanvases(
-        toArray<Canvas>(isProjectFolder ? projectFolderCanvases : genericFolderCanvases),
-        excludeCallGeneratedCanvases,
+      filterStarredCanvases(
+        filterExcludedCallGeneratedCanvases(
+          withStarredCanvasState(
+            toArray<Canvas>(isProjectFolder ? projectFolderCanvases : genericFolderCanvases),
+          ),
+          excludeCallGeneratedCanvases,
+        ),
+        showStarredOnly,
       ),
-    [excludeCallGeneratedCanvases, genericFolderCanvases, isProjectFolder, projectFolderCanvases],
+    [
+      excludeCallGeneratedCanvases,
+      genericFolderCanvases,
+      isProjectFolder,
+      projectFolderCanvases,
+      showStarredOnly,
+    ],
   );
   const isRenaming = renamingFolderId === folderGroup.folder.id;
   const isProjectDefaultFolder =
@@ -235,6 +254,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             trackNames={groupedCanvasRowTrackNames}
             onDelete={onDelete}
             onDuplicate={onDuplicate}
+            onToggleStar={onToggleStar}
           />
         ))}
     </div>
@@ -288,6 +308,8 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   onDeleteFolder,
   onRegisterFolderIds,
   excludeCallGeneratedCanvases,
+  showStarredOnly,
+  onToggleStar,
 }) => {
   const isCollapsed = collapsedChannels.has(channelGroup.channel.id);
   const channelName = getChannelDisplayName(channelGroup.channel, currentUserId, usersById);
@@ -306,11 +328,14 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   );
   const channelRootCanvases = useMemo(
     () =>
-      filterExcludedCallGeneratedCanvases(
-        toArray<Canvas>(channelRootCanvasesResult),
-        excludeCallGeneratedCanvases,
+      filterStarredCanvases(
+        filterExcludedCallGeneratedCanvases(
+          withStarredCanvasState(toArray<Canvas>(channelRootCanvasesResult)),
+          excludeCallGeneratedCanvases,
+        ),
+        showStarredOnly,
       ),
-    [channelRootCanvasesResult, excludeCallGeneratedCanvases],
+    [channelRootCanvasesResult, excludeCallGeneratedCanvases, showStarredOnly],
   );
   const channelFolders = useMemo(
     () => toArray<CanvasFolder>(channelFoldersResult),
@@ -371,9 +396,11 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
               excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+              showStarredOnly={showStarredOnly}
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
+              onToggleStar={onToggleStar}
               onToggleFolder={onToggleFolder}
               onCreateCanvasInFolder={onCreateCanvasInFolder}
               onStartRenameFolder={onStartRenameFolder}
@@ -393,6 +420,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
               trackNames={groupedCanvasRowTrackNames}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
+              onToggleStar={onToggleStar}
             />
           ))}
         </div>
@@ -430,6 +458,8 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   onDeleteFolder,
   onRegisterFolderIds,
   excludeCallGeneratedCanvases,
+  showStarredOnly,
+  onToggleStar,
 }) => {
   const isProjectCollapsed = collapsedProjects.has(group.project.id);
   const [projectFoldersResult] = useCachedQuery(
@@ -443,8 +473,15 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
     [projectFoldersResult],
   );
   const projectRootCanvases = useMemo(
-    () => filterExcludedCallGeneratedCanvases(group.rootCanvases, excludeCallGeneratedCanvases),
-    [excludeCallGeneratedCanvases, group.rootCanvases],
+    () =>
+      filterStarredCanvases(
+        filterExcludedCallGeneratedCanvases(
+          withStarredCanvasState(group.rootCanvases),
+          excludeCallGeneratedCanvases,
+        ),
+        showStarredOnly,
+      ),
+    [excludeCallGeneratedCanvases, group.rootCanvases, showStarredOnly],
   );
 
   useEffect(() => {
@@ -521,9 +558,11 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
               excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+              showStarredOnly={showStarredOnly}
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
+              onToggleStar={onToggleStar}
               onToggleChannel={onToggleChannel}
               onToggleFolder={onToggleFolder}
               onOpenChannelCreateDialog={onOpenChannelCreateDialog}
@@ -551,9 +590,11 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
               excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+              showStarredOnly={showStarredOnly}
               onSelect={onSelect}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
+              onToggleStar={onToggleStar}
               onToggleFolder={onToggleFolder}
               onCreateCanvasInFolder={onCreateCanvasInFolder}
               onStartRenameFolder={onStartRenameFolder}
@@ -574,6 +615,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               trackNames={groupedCanvasRowTrackNames}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
+              onToggleStar={onToggleStar}
             />
           ))}
         </div>
@@ -594,6 +636,7 @@ export interface CanvasListGroupedContentProps {
   adminChannelIds: ReadonlySet<string>;
   isPersonalSectionCollapsed: boolean;
   excludeCallGeneratedCanvases: boolean;
+  showStarredOnly: boolean;
   collapsedProjects: ReadonlySet<string>;
   collapsedChannels: ReadonlySet<string>;
   collapsedFolders: ReadonlySet<string>;
@@ -606,6 +649,7 @@ export interface CanvasListGroupedContentProps {
   onToggleFolder: (folderId: string) => void;
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
+  onToggleStar?: ((canvas: Canvas) => void) | undefined;
   onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
   onCreatePersonalCanvas: () => void | Promise<void>;
   onCreateCanvasInProject: (
@@ -634,6 +678,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   adminChannelIds,
   isPersonalSectionCollapsed,
   excludeCallGeneratedCanvases,
+  showStarredOnly,
   collapsedProjects,
   collapsedChannels,
   collapsedFolders,
@@ -646,6 +691,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   onToggleFolder,
   onDelete,
   onDuplicate,
+  onToggleStar,
   onSetPersonalSectionCollapsed,
   onCreatePersonalCanvas,
   onCreateCanvasInProject,
@@ -658,10 +704,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   onDeleteFolder,
   onRegisterFolderIds,
 }) => {
-  const visiblePersonalCanvases = useMemo(
-    () => filterExcludedCallGeneratedCanvases(personalCanvases, excludeCallGeneratedCanvases),
-    [excludeCallGeneratedCanvases, personalCanvases],
-  );
+  const visiblePersonalCanvases = personalCanvases;
 
   if (isEmpty) {
     return (
@@ -748,9 +791,11 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 setRenamingFolderName={setRenamingFolderName}
                 isCreatingCanvas={isCreatingCanvas}
                 excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+                showStarredOnly={showStarredOnly}
                 onSelect={onSelect}
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
+                onToggleStar={onToggleStar}
                 onToggleFolder={onToggleFolder}
                 onCreateCanvasInFolder={onCreateCanvasInFolder}
                 onStartRenameFolder={onStartRenameFolder}
@@ -770,6 +815,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 trackNames={groupedCanvasRowTrackNames}
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
+                onToggleStar={onToggleStar}
               />
             ))}
             {personalFolderGroups.length === 0 && visiblePersonalCanvases.length === 0 && (
@@ -812,6 +858,8 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
           onDeleteFolder={onDeleteFolder}
           onRegisterFolderIds={onRegisterFolderIds}
           excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+          showStarredOnly={showStarredOnly}
+          onToggleStar={onToggleStar}
         />
       ))}
     </div>

@@ -1,6 +1,6 @@
 import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
-import { FileText, Plus, ArrowLeft, Info, Loader2, List, FolderTree } from 'lucide-react';
+import { FileText, Plus, ArrowLeft, Info, Loader2, List, FolderTree, Star } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
@@ -49,6 +49,7 @@ const CanvasPanel = (): ReactElement => {
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
+  const [showStarredOnly, setShowStarredOnly] = useState(false);
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
 
   // Remember which canvas was last opened
@@ -135,6 +136,25 @@ const CanvasPanel = (): ReactElement => {
     [z],
   );
 
+  const handleToggleStar = useCallback(
+    (canvas: Canvas) => {
+      try {
+        z.mutate(
+          mutators.canvasUserStatus.toggleStarred({
+            id: uuidv4(),
+            canvasId: canvas.id,
+            timestamp: Date.now(),
+          }),
+        );
+      } catch {
+        toast.error('Error', {
+          description: 'Failed to update starred canvas. Please try again.',
+        });
+      }
+    },
+    [z],
+  );
+
   const handleCreateQuartoDoc = useCallback((): void => {
     setShowPublishModal(true);
   }, []);
@@ -201,22 +221,45 @@ const CanvasPanel = (): ReactElement => {
             <h2 className='text-lg font-semibold text-foreground'>Canvases</h2>
           </div>
           <div className='flex items-center gap-3'>
-            {!isQuartoDocsListView && (
-              <Tooltip
-                content={
-                  excludeCallGeneratedCanvases ? 'Show system generated' : 'Hide system generated'
-                }
-                side='bottom'
-                delayDuration={300}
+            <Tooltip
+              content={showStarredOnly ? 'Show all items' : 'Show starred only'}
+              side='bottom'
+              delayDuration={300}
+            >
+              <button
+                className={`flex items-center justify-center rounded-md border p-1.5 transition-colors ${
+                  showStarredOnly
+                    ? 'border-amber-200 bg-amber-50 text-amber-600'
+                    : 'border-border text-muted-foreground hover:bg-accent'
+                }`}
+                onClick={() => setShowStarredOnly(prev => !prev)}
+                data-track-category='CANVAS'
+                data-track-name='TOGGLE_STARRED_CANVAS_FILTER'
               >
-                <div>
-                  <Switch
-                    id='exclude-call-generated-canvases'
-                    checked={!excludeCallGeneratedCanvases}
-                    onCheckedChange={checked => setExcludeCallGeneratedCanvases(!checked)}
-                  />
-                </div>
-              </Tooltip>
+                <Star
+                  size={16}
+                  className={showStarredOnly ? 'fill-amber-400 text-amber-500' : undefined}
+                />
+              </button>
+            </Tooltip>
+            {!isQuartoDocsListView && (
+              <>
+                <Tooltip
+                  content={
+                    excludeCallGeneratedCanvases ? 'Show system generated' : 'Hide system generated'
+                  }
+                  side='bottom'
+                  delayDuration={300}
+                >
+                  <div>
+                    <Switch
+                      id='exclude-call-generated-canvases'
+                      checked={!excludeCallGeneratedCanvases}
+                      onCheckedChange={checked => setExcludeCallGeneratedCanvases(!checked)}
+                    />
+                  </div>
+                </Tooltip>
+              </>
             )}
             <div className='flex items-center border border-border rounded-md'>
               <button
@@ -292,6 +335,8 @@ const CanvasPanel = (): ReactElement => {
             isPersonalSectionCollapsed={isPersonalSectionCollapsed}
             onSetPersonalSectionCollapsed={setIsPersonalSectionCollapsed}
             excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+            showStarredOnly={showStarredOnly}
+            onToggleStar={handleToggleStar}
           />
         ) : (
           <CanvasList
@@ -304,6 +349,8 @@ const CanvasPanel = (): ReactElement => {
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
             excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+            showStarredOnly={showStarredOnly}
+            onToggleStar={handleToggleStar}
             {...(selectedCanvasId ? { selectedCanvasId } : {})}
           />
         )}

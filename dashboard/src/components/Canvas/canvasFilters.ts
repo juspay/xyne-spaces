@@ -38,3 +38,18 @@ export function filterExcludedCallGeneratedCanvases(
 
   return canvases.filter(canvas => !isExcludedCallGeneratedCanvas(canvas));
 }
+
+export function filterStarredCanvases(canvases: Canvas[], showStarredOnly: boolean): Canvas[] {
+  if (!showStarredOnly) {
+    return canvases;
+  }
+
+  return canvases.filter(canvas => canvas.isStarred);
+}
+
+export function withStarredCanvasState(canvases: Canvas[]): Canvas[] {
+  return canvases.map(canvas => ({
+    ...canvas,
+    isStarred: canvas.userStatuses?.some(status => status.isStarred) ?? canvas.isStarred ?? false,
+  }));
+}

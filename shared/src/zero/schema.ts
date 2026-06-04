@@ -1746,6 +1746,17 @@ export const canvasParticipantTable = table('canvas_participants')
   })
   .primaryKey('id');
 
+export const canvasUserStatusTable = table('canvas_user_status' /* CanvasUserStatus */)
+  .columns({
+    id: string(),
+    canvasId: string(),
+    userId: string(),
+    isStarred: boolean(),
+    createdAt: number(),
+    updatedAt: number().optional(),
+  })
+  .primaryKey('id');
+
 export const bookmarkTable = table('bookmarks')
   .columns({
     id: string(),
@@ -3501,6 +3512,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ['canvasId'],
     destSchema: canvasParticipantTable,
   }),
+  userStatuses: many({
+    sourceField: ['id'],
+    destField: ['canvasId'],
+    destSchema: canvasUserStatusTable,
+  }),
   channelParticipants: many({
     sourceField: ['channelId'],
     destField: ['channelId'],
@@ -3550,6 +3566,22 @@ export const canvasParticipantTableRelationships = relationships(canvasParticipa
     destSchema: channelTable,
   }),
 }));
+
+export const canvasUserStatusTableRelationships = relationships(
+  canvasUserStatusTable,
+  ({ one }) => ({
+    canvas: one({
+      sourceField: ['canvasId'],
+      destField: ['id'],
+      destSchema: canvasTable,
+    }),
+    user: one({
+      sourceField: ['userId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+  }),
+);
 
 export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
   workflowExecution: one({
@@ -4139,6 +4171,7 @@ export const schema = createSchema({
     canvasFolderTable,
     canvasTable,
     canvasParticipantTable,
+    canvasUserStatusTable,
     bookmarkTable,
     linkTable,
     linkAccessTable,
@@ -4240,6 +4273,7 @@ export const schema = createSchema({
     canvasFolderTableRelationships,
     canvasTableRelationships,
     canvasParticipantTableRelationships,
+    canvasUserStatusTableRelationships,
     pullRequestsTableRelationships,
     organizationTableRelationships,
     orgMemberTableRelationships,
@@ -4352,6 +4386,7 @@ export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
+export type CanvasUserStatus = Row<typeof schema.tables.canvas_user_status>;
 export type Bookmark = Row<typeof schema.tables.bookmarks>;
 export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;

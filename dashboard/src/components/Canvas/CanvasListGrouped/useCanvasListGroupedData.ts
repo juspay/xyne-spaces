@@ -14,12 +14,17 @@ import {
   buildGroupedCanvasSections,
   type CanvasHierarchySections,
 } from './CanvasListGrouped.utils';
-import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
+import {
+  filterExcludedCallGeneratedCanvases,
+  filterStarredCanvases,
+  withStarredCanvasState,
+} from '../canvasFilters';
 
 interface UseCanvasListGroupedDataParams {
   currentUserId?: string | undefined;
   collapsedProjects: ReadonlySet<string>;
   excludeCallGeneratedCanvases: boolean;
+  showStarredOnly: boolean;
 }
 
 interface UseCanvasListGroupedDataResult {
@@ -43,6 +48,7 @@ export function useCanvasListGroupedData({
   currentUserId,
   collapsedProjects,
   excludeCallGeneratedCanvases,
+  showStarredOnly,
 }: UseCanvasListGroupedDataParams): UseCanvasListGroupedDataResult {
   const allUsers = useUsers();
   const allVisibleChannels = useAllVisibleChannels();
@@ -75,7 +81,9 @@ export function useCanvasListGroupedData({
 
   const [personalFoldersResult] = useCachedQuery(queries.personalCanvasFolders());
   const [personalCanvasesResult] = useCachedQuery(
-    queries.hierarchyCanvases({ scope: 'personal_root' }),
+    queries.hierarchyCanvases({
+      scope: 'personal_root',
+    }),
     {
       enabled: true,
     },
@@ -87,11 +95,14 @@ export function useCanvasListGroupedData({
   const lazyPersonalFolders = useMemo(() => personalFolders, [personalFolders]);
   const lazyPersonalCanvases = useMemo(
     () =>
-      filterExcludedCallGeneratedCanvases(
-        toArray<Canvas>(personalCanvasesResult),
-        excludeCallGeneratedCanvases,
+      filterStarredCanvases(
+        filterExcludedCallGeneratedCanvases(
+          withStarredCanvasState(toArray<Canvas>(personalCanvasesResult)),
+          excludeCallGeneratedCanvases,
+        ),
+        showStarredOnly,
       ),
-    [excludeCallGeneratedCanvases, personalCanvasesResult],
+    [excludeCallGeneratedCanvases, personalCanvasesResult, showStarredOnly],
   );
   const expandedProjectIds = useMemo(
     () => projectIds.filter(projectId => !collapsedProjects.has(projectId)),

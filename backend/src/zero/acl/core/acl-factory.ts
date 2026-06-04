@@ -5,6 +5,7 @@ import { CallParticipantsACL } from '../tables/call-participants-acl';
 import { CallsACL } from '../tables/calls-acl';
 import { CanvasFoldersACL } from '../tables/canvas-folders-acl';
 import { CanvasParticipantsACL } from '../tables/canvas-participants-acl';
+import { CanvasUserStatusACL } from '../tables/canvas-user-status-acl';
 import { CanvasesACL } from '../tables/canvases-acl';
 import { DashboardsACL } from '../tables/dashboards-acl';
 import { DashboardParticipantsACL } from '../tables/dashboard-participants-acl';
@@ -109,6 +110,8 @@ export class ACLFactory {
         return new CanvasFoldersACL(ctx);
       case 'canvas_participants':
         return new CanvasParticipantsACL(ctx);
+      case 'canvas_user_status':
+        return new CanvasUserStatusACL(ctx);
       case 'canvases':
         return new CanvasesACL(ctx);
       case 'dashboards':

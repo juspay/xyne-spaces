@@ -11,6 +11,7 @@ export { CallParticipantsACL } from './call-participants-acl';
 export { CallsACL } from './calls-acl';
 export { CanvasFoldersACL } from './canvas-folders-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';
+export { CanvasUserStatusACL } from './canvas-user-status-acl';
 export { CanvasesACL } from './canvases-acl';
 export { DashboardsACL } from './dashboards-acl';
 export { DashboardParticipantsACL } from './dashboard-participants-acl';
