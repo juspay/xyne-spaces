@@ -29,6 +29,44 @@ interface CanvasRowTrackNames {
   actionsMenu: string;
 }
 
+export const HighlightedText: React.FC<{ text: string; query?: string | undefined }> = ({
+  text,
+  query,
+}) => {
+  const normalizedQuery = query?.trim().toLowerCase();
+  if (!normalizedQuery) return <>{text}</>;
+
+  const parts: React.ReactNode[] = [];
+  const lowerText = text.toLowerCase();
+  let cursor = 0;
+  let matchIndex = lowerText.indexOf(normalizedQuery);
+
+  while (matchIndex !== -1) {
+    if (matchIndex > cursor) {
+      parts.push(text.slice(cursor, matchIndex));
+    }
+
+    const matchEnd = matchIndex + normalizedQuery.length;
+    parts.push(
+      <mark
+        key={`${matchIndex}-${matchEnd}`}
+        className='rounded bg-yellow-100 px-0.5 text-foreground'
+      >
+        {text.slice(matchIndex, matchEnd)}
+      </mark>,
+    );
+
+    cursor = matchEnd;
+    matchIndex = lowerText.indexOf(normalizedQuery, cursor);
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+
+  return <>{parts}</>;
+};
+
 export interface CanvasRowProps {
   canvas: Canvas;
   onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
@@ -40,6 +78,7 @@ export interface CanvasRowProps {
   onToggleStar?: ((canvas: Canvas) => void) | undefined;
   trackNames: CanvasRowTrackNames;
   quartoDocIcon?: 'bookmark' | 'file';
+  highlightQuery?: string | undefined;
 }
 
 export const CanvasRow: React.FC<CanvasRowProps> = ({
@@ -53,6 +92,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   onToggleStar,
   trackNames,
   quartoDocIcon = 'file',
+  highlightQuery,
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
   const isSelected = selectedCanvasId === canvas.id;
@@ -79,7 +119,9 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             <FileText className='w-4 h-4 text-muted-foreground shrink-0' />
           )}
           <div className='min-w-0 flex-1'>
-            <div className='text-sm truncate'>{canvas.title || 'Untitled'}</div>
+            <div className='text-sm truncate'>
+              <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />
+            </div>
             <div className='text-xs text-muted-foreground truncate'>{createdDateText}</div>
           </div>
           {!isQuartoDoc && (

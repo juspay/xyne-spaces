@@ -21,16 +21,20 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import Input from '../../ui/Input';
-import { CanvasRow } from '../CanvasRow';
+import { CanvasRow, HighlightedText } from '../CanvasRow';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import type { CanvasUser, FolderGroup, ProjectGroup } from './CanvasListGrouped.utils';
-import { getChannelDisplayName } from './CanvasListGrouped.utils';
 import {
   filterExcludedCallGeneratedCanvases,
   filterStarredCanvases,
   withStarredCanvasState,
 } from '../canvasFilters';
+import {
+  canvasMatchesGroupedSearch,
+  getChannelDisplayName,
+  matchesGroupedCanvasSearch,
+} from './CanvasListGrouped.utils';
 
 const groupedCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Grouped',
@@ -41,6 +45,15 @@ const groupedCanvasRowTrackNames = {
 function toArray<T>(value: unknown): T[] {
   return (value as T[] | undefined) ?? [];
 }
+
+const SearchLoadingRow: React.FC<{ indentClassName?: string }> = ({ indentClassName = 'pl-2' }) => (
+  <div
+    className={`flex items-center gap-2 ${indentClassName} pr-2 py-2 text-sm text-muted-foreground`}
+  >
+    <div className='animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600' />
+    <span>Searching...</span>
+  </div>
+);
 
 interface FolderGroupSectionProps {
   folderGroup: FolderGroup;
@@ -66,6 +79,7 @@ interface FolderGroupSectionProps {
   onConfirmRenameFolder: (folder: CanvasFolder) => void;
   onCancelRenameFolder: () => void;
   onDeleteFolder: (folder: CanvasFolder, canvasCount: number) => void;
+  searchQuery: string;
 }
 
 const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
@@ -92,23 +106,30 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   onConfirmRenameFolder,
   onCancelRenameFolder,
   onDeleteFolder,
+  searchQuery,
 }) => {
-  const isCollapsed = collapsedFolders.has(folderGroup.folder.id);
+  const isSearchActive = searchQuery.length > 0;
+  const isCollapsed = !isSearchActive && collapsedFolders.has(folderGroup.folder.id);
   const isProjectFolder = !!folderGroup.folder.projectId && !folderGroup.folder.channelId;
-  const [projectFolderCanvases] = useCachedQuery(
+  const [projectFolderCanvases, projectFolderCanvasesDetails] = useCachedQuery(
     queries.projectFolderCanvases({
       folderId: folderGroup.folder.id,
       projectId: folderGroup.folder.projectId ?? '',
     }),
     { enabled: !isCollapsed && isProjectFolder },
   );
-  const [genericFolderCanvases] = useCachedQuery(
+  const [genericFolderCanvases, genericFolderCanvasesDetails] = useCachedQuery(
     queries.hierarchyCanvases({
       scope: 'folder',
       folderId: folderGroup.folder.id,
     }),
     { enabled: !isCollapsed && !isProjectFolder },
   );
+  const isFolderLoading =
+    isSearchActive &&
+    (isProjectFolder
+      ? projectFolderCanvasesDetails.type !== 'complete'
+      : genericFolderCanvasesDetails.type !== 'complete');
   const folderCanvases = useMemo(
     () =>
       filterStarredCanvases(
@@ -128,6 +149,16 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
       showStarredOnly,
     ],
   );
+  const folderNameMatches = matchesGroupedCanvasSearch(folderGroup.folder.name, searchQuery);
+  const visibleFolderCanvases = useMemo(
+    () =>
+      isSearchActive
+        ? folderCanvases.filter(
+            canvas => folderNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
+          )
+        : folderCanvases,
+    [folderCanvases, folderNameMatches, isSearchActive, searchQuery],
+  );
   const isRenaming = renamingFolderId === folderGroup.folder.id;
   const isProjectDefaultFolder =
     !!folderGroup.folder.projectId &&
@@ -140,6 +171,15 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
     !!currentUserId &&
     (folderGroup.folder.createdBy === currentUserId ||
       (!!folderGroup.folder.channelId && adminChannelIds.has(folderGroup.folder.channelId)));
+
+  if (
+    isSearchActive &&
+    !isFolderLoading &&
+    !folderNameMatches &&
+    visibleFolderCanvases.length === 0
+  ) {
+    return null;
+  }
 
   return (
     <div key={folderGroup.folder.id}>
@@ -186,10 +226,14 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
           <button
             className='ml-1 min-w-0 flex-1 text-left'
             onClick={() => onToggleFolder(folderGroup.folder.id)}
+            aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${folderGroup.folder.name}`}
+            title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_CANVAS_FOLDER'
           >
-            <span className='block text-sm truncate'>{folderGroup.folder.name}</span>
+            <span className='block text-sm truncate'>
+              <HighlightedText text={folderGroup.folder.name} query={searchQuery} />
+            </span>
           </button>
         )}
         <button
@@ -242,8 +286,11 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
           </DropdownMenu>
         )}
       </div>
+      {!isCollapsed && isFolderLoading && (
+        <SearchLoadingRow indentClassName={canvasIndentClassName} />
+      )}
       {!isCollapsed &&
-        folderCanvases.map(canvas => (
+        visibleFolderCanvases.map(canvas => (
           <CanvasRow
             key={canvas.id}
             canvas={canvas}
@@ -255,6 +302,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             onDelete={onDelete}
             onDuplicate={onDuplicate}
             onToggleStar={onToggleStar}
+            highlightQuery={searchQuery}
           />
         ))}
     </div>
@@ -267,6 +315,7 @@ interface ProjectSectionProps extends Omit<
   | 'personalFolderGroups'
   | 'personalCanvases'
   | 'isEmpty'
+  | 'isSearchLoading'
   | 'isPersonalSectionCollapsed'
   | 'onSetPersonalSectionCollapsed'
   | 'onCreatePersonalCanvas'
@@ -281,6 +330,7 @@ interface ChannelSectionProps extends Omit<
   channelGroup: ProjectGroup['channels'][number];
   onRegisterFolderIds: (folderIds: readonly string[]) => void;
   excludeCallGeneratedCanvases: boolean;
+  searchQuery: string;
 }
 
 const ChannelSection: React.FC<ChannelSectionProps> = ({
@@ -310,8 +360,10 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   excludeCallGeneratedCanvases,
   showStarredOnly,
   onToggleStar,
+  searchQuery,
 }) => {
-  const isCollapsed = collapsedChannels.has(channelGroup.channel.id);
+  const isSearchActive = searchQuery.length > 0;
+  const isCollapsed = !isSearchActive && collapsedChannels.has(channelGroup.channel.id);
   const channelName = getChannelDisplayName(channelGroup.channel, currentUserId, usersById);
   const [channelFoldersResult] = useCachedQuery(
     queries.channelCanvasFolders({
@@ -337,10 +389,29 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
       ),
     [channelRootCanvasesResult, excludeCallGeneratedCanvases, showStarredOnly],
   );
+  const channelNameMatches = matchesGroupedCanvasSearch(channelName, searchQuery);
+  const visibleChannelRootCanvases = useMemo(
+    () =>
+      isSearchActive
+        ? channelRootCanvases.filter(
+            canvas => channelNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
+          )
+        : channelRootCanvases,
+    [channelNameMatches, channelRootCanvases, isSearchActive, searchQuery],
+  );
   const channelFolders = useMemo(
     () => toArray<CanvasFolder>(channelFoldersResult),
     [channelFoldersResult],
   );
+  const hasMatchingChannelFolder = useMemo(
+    () => channelFolders.some(folder => matchesGroupedCanvasSearch(folder.name, searchQuery)),
+    [channelFolders, searchQuery],
+  );
+  const showChannelHeader =
+    !isSearchActive ||
+    channelNameMatches ||
+    visibleChannelRootCanvases.length > 0 ||
+    hasMatchingChannelFolder;
 
   useEffect(() => {
     if (channelFolders.length === 0) return;
@@ -349,36 +420,40 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
 
   return (
     <div key={channelGroup.channel.id}>
-      <div className='flex items-center group'>
-        <button
-          className='flex min-w-0 flex-1 items-center gap-2 pl-6 pr-3 py-1.5 hover:bg-accent rounded-md text-left'
-          onClick={() => onToggleChannel(channelGroup.channel.id)}
-          data-track-category='CANVAS'
-          data-track-name='TOGGLE_CANVAS_CHANNEL'
-        >
-          {isCollapsed ? (
-            <ChevronRight className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
-          ) : (
-            <ChevronDown className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
-          )}
-          <Hash className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
-          <span className='text-sm truncate'>{channelName}</span>
-        </button>
-        <button
-          className='p-1 opacity-0 group-hover:opacity-100 hover:bg-accent rounded transition-all disabled:opacity-40'
-          onClick={() => onOpenChannelCreateDialog(channelGroup.channel, channelFolders)}
-          disabled={isCreatingCanvas || !!channelGroup.channel.isArchived}
-          title={
-            channelGroup.channel.isArchived
-              ? 'Archived channels cannot create canvases or folders'
-              : 'Create canvas in channel'
-          }
-          data-track-category='CANVAS'
-          data-track-name='OPEN_CHANNEL_CANVAS_CREATE'
-        >
-          <Plus className='w-4 h-4 text-muted-foreground' />
-        </button>
-      </div>
+      {showChannelHeader && (
+        <div className='flex items-center group'>
+          <button
+            className='flex min-w-0 flex-1 items-center gap-2 pl-6 pr-3 py-1.5 hover:bg-accent rounded-md text-left'
+            onClick={() => onToggleChannel(channelGroup.channel.id)}
+            data-track-category='CANVAS'
+            data-track-name='TOGGLE_CANVAS_CHANNEL'
+          >
+            {isCollapsed ? (
+              <ChevronRight className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
+            ) : (
+              <ChevronDown className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
+            )}
+            <Hash className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
+            <span className='text-sm truncate'>
+              <HighlightedText text={channelName} query={searchQuery} />
+            </span>
+          </button>
+          <button
+            className='p-1 opacity-0 group-hover:opacity-100 hover:bg-accent rounded transition-all disabled:opacity-40'
+            onClick={() => onOpenChannelCreateDialog(channelGroup.channel, channelFolders)}
+            disabled={isCreatingCanvas || !!channelGroup.channel.isArchived}
+            title={
+              channelGroup.channel.isArchived
+                ? 'Archived channels cannot create canvases or folders'
+                : 'Create canvas in channel'
+            }
+            data-track-category='CANVAS'
+            data-track-name='OPEN_CHANNEL_CANVAS_CREATE'
+          >
+            <Plus className='w-4 h-4 text-muted-foreground' />
+          </button>
+        </div>
+      )}
       {!isCollapsed && (
         <div className='space-y-0.5'>
           {channelFolders.map(folder => (
@@ -407,9 +482,10 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
               onConfirmRenameFolder={onConfirmRenameFolder}
               onCancelRenameFolder={onCancelRenameFolder}
               onDeleteFolder={onDeleteFolder}
+              searchQuery={searchQuery}
             />
           ))}
-          {channelRootCanvases.map(canvas => (
+          {visibleChannelRootCanvases.map(canvas => (
             <CanvasRow
               key={canvas.id}
               canvas={canvas}
@@ -421,6 +497,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onToggleStar={onToggleStar}
+              highlightQuery={searchQuery}
             />
           ))}
         </div>
@@ -460,8 +537,10 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   excludeCallGeneratedCanvases,
   showStarredOnly,
   onToggleStar,
+  searchQuery,
 }) => {
-  const isProjectCollapsed = collapsedProjects.has(group.project.id);
+  const isSearchActive = searchQuery.length > 0;
+  const isProjectCollapsed = !isSearchActive && collapsedProjects.has(group.project.id);
   const [projectFoldersResult] = useCachedQuery(
     queries.projectCanvasFolders({
       projectId: group.project.id,
@@ -483,62 +562,98 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
       ),
     [excludeCallGeneratedCanvases, group.rootCanvases, showStarredOnly],
   );
+  const projectNameMatches = matchesGroupedCanvasSearch(group.project.name, searchQuery);
+  const visibleProjectRootCanvases = useMemo(
+    () =>
+      isSearchActive
+        ? projectRootCanvases.filter(
+            canvas => projectNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
+          )
+        : projectRootCanvases,
+    [isSearchActive, projectNameMatches, projectRootCanvases, searchQuery],
+  );
 
   useEffect(() => {
     if (projectFolders.length === 0) return;
     onRegisterFolderIds(projectFolders.map(folder => folder.id));
   }, [onRegisterFolderIds, projectFolders]);
 
+  const hasMatchingProjectFolder = useMemo(
+    () => projectFolders.some(folder => matchesGroupedCanvasSearch(folder.name, searchQuery)),
+    [projectFolders, searchQuery],
+  );
+  const hasMatchingChannel = useMemo(
+    () =>
+      group.channels.some(channel => {
+        const channelName = getChannelDisplayName(channel.channel, currentUserId, usersById);
+        return matchesGroupedCanvasSearch(channelName, searchQuery);
+      }),
+    [currentUserId, group.channels, searchQuery, usersById],
+  );
+  const showProjectHeader =
+    !isSearchActive ||
+    projectNameMatches ||
+    visibleProjectRootCanvases.length > 0 ||
+    hasMatchingProjectFolder ||
+    hasMatchingChannel;
+
   return (
-    <section key={group.project.id} className='border-b border-border pb-1 last:border-b-0'>
-      <div className='flex items-center group'>
-        <button
-          className='flex min-w-0 flex-1 items-center gap-2 px-3 py-2 hover:bg-accent rounded-md text-left'
-          onClick={() => onToggleProject(group.project.id)}
-          data-track-category='CANVAS'
-          data-track-name='TOGGLE_CANVAS_PROJECT'
-        >
-          {isProjectCollapsed ? (
-            <ChevronRight className='w-4 h-4 text-muted-foreground shrink-0' />
-          ) : (
-            <ChevronDown className='w-4 h-4 text-muted-foreground shrink-0' />
-          )}
-          <FolderOpen className='w-4 h-4 text-amber-500 shrink-0' />
-          <span className='font-semibold text-sm truncate'>{group.project.name}</span>
-        </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              className='p-1 opacity-0 group-hover:opacity-100 hover:bg-accent rounded transition-all disabled:opacity-40'
-              onClick={event => event.stopPropagation()}
-              title='Create canvas or folder'
-              disabled={isCreatingCanvas}
-              data-track-category='CANVAS'
-              data-track-name='OPEN_PROJECT_CANVAS_CREATE'
-            >
-              <Plus className='w-4 h-4 text-muted-foreground' />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align='end' className='w-44'>
-            <DropdownMenuItem
-              onClick={() => void onCreateCanvasInProject(group.project, projectFolders)}
-              data-track-category='CANVAS'
-              data-track-name='CREATE_PROJECT_CANVAS'
-            >
-              <FileText className='w-4 h-4 mr-2' />
-              Create canvas
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => onCreateFolder(group.project.id, projectFolders)}
-              data-track-category='CANVAS'
-              data-track-name='CREATE_CANVAS_FOLDER'
-            >
-              <Folder className='w-4 h-4 mr-2 text-amber-500' />
-              Create folder
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+    <section
+      key={group.project.id}
+      className={showProjectHeader ? 'border-b border-border pb-1 last:border-b-0' : ''}
+    >
+      {showProjectHeader && (
+        <div className='flex items-center group'>
+          <button
+            className='flex min-w-0 flex-1 items-center gap-2 px-3 py-2 hover:bg-accent rounded-md text-left'
+            onClick={() => onToggleProject(group.project.id)}
+            data-track-category='CANVAS'
+            data-track-name='TOGGLE_CANVAS_PROJECT'
+          >
+            {isProjectCollapsed ? (
+              <ChevronRight className='w-4 h-4 text-muted-foreground shrink-0' />
+            ) : (
+              <ChevronDown className='w-4 h-4 text-muted-foreground shrink-0' />
+            )}
+            <FolderOpen className='w-4 h-4 text-amber-500 shrink-0' />
+            <span className='font-semibold text-sm truncate'>
+              <HighlightedText text={group.project.name} query={searchQuery} />
+            </span>
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className='p-1 opacity-0 group-hover:opacity-100 hover:bg-accent rounded transition-all disabled:opacity-40'
+                onClick={event => event.stopPropagation()}
+                title='Create canvas or folder'
+                disabled={isCreatingCanvas}
+                data-track-category='CANVAS'
+                data-track-name='OPEN_PROJECT_CANVAS_CREATE'
+              >
+                <Plus className='w-4 h-4 text-muted-foreground' />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end' className='w-44'>
+              <DropdownMenuItem
+                onClick={() => void onCreateCanvasInProject(group.project, projectFolders)}
+                data-track-category='CANVAS'
+                data-track-name='CREATE_PROJECT_CANVAS'
+              >
+                <FileText className='w-4 h-4 mr-2' />
+                Create canvas
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onCreateFolder(group.project.id, projectFolders)}
+                data-track-category='CANVAS'
+                data-track-name='CREATE_CANVAS_FOLDER'
+              >
+                <Folder className='w-4 h-4 mr-2 text-amber-500' />
+                Create folder
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
 
       {!isProjectCollapsed && (
         <div className='space-y-0.5'>
@@ -572,6 +687,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               onCancelRenameFolder={onCancelRenameFolder}
               onDeleteFolder={onDeleteFolder}
               onRegisterFolderIds={onRegisterFolderIds}
+              searchQuery={searchQuery}
             />
           ))}
 
@@ -601,10 +717,11 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               onConfirmRenameFolder={onConfirmRenameFolder}
               onCancelRenameFolder={onCancelRenameFolder}
               onDeleteFolder={onDeleteFolder}
+              searchQuery={searchQuery}
             />
           ))}
 
-          {projectRootCanvases.map(canvas => (
+          {visibleProjectRootCanvases.map(canvas => (
             <CanvasRow
               key={canvas.id}
               canvas={canvas}
@@ -616,6 +733,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onToggleStar={onToggleStar}
+              highlightQuery={searchQuery}
             />
           ))}
         </div>
@@ -664,6 +782,8 @@ export interface CanvasListGroupedContentProps {
   onCancelRenameFolder: () => void;
   onDeleteFolder: (folder: CanvasFolder, canvasCount: number) => void;
   onRegisterFolderIds: (folderIds: readonly string[]) => void;
+  searchQuery: string;
+  isSearchLoading: boolean;
 }
 
 export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> = ({
@@ -703,8 +823,20 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   onCancelRenameFolder,
   onDeleteFolder,
   onRegisterFolderIds,
+  searchQuery,
+  isSearchLoading,
 }) => {
-  const visiblePersonalCanvases = personalCanvases;
+  const isSearchActive = searchQuery.length > 0;
+  const visiblePersonalCanvases = useMemo(() => {
+    const filtered = filterExcludedCallGeneratedCanvases(
+      personalCanvases,
+      excludeCallGeneratedCanvases,
+    );
+
+    return isSearchActive
+      ? filtered.filter(canvas => canvasMatchesGroupedSearch(canvas, searchQuery))
+      : filtered;
+  }, [excludeCallGeneratedCanvases, isSearchActive, personalCanvases, searchQuery]);
 
   if (isEmpty) {
     return (
@@ -720,6 +852,13 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
 
   return (
     <div className='p-2 space-y-1'>
+      {isSearchLoading && (
+        <div className='flex items-center justify-center gap-2 px-3 py-3 text-sm text-muted-foreground'>
+          <div className='animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600' />
+          <span>Searching...</span>
+        </div>
+      )}
+
       <section className='border-b border-border pb-1'>
         <div className='flex items-center group'>
           <button
@@ -774,7 +913,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {!isPersonalSectionCollapsed && (
+        {(!isPersonalSectionCollapsed || isSearchActive) && (
           <>
             {personalFolderGroups.map(folderGroup => (
               <FolderGroupSection
@@ -802,6 +941,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 onConfirmRenameFolder={onConfirmRenameFolder}
                 onCancelRenameFolder={onCancelRenameFolder}
                 onDeleteFolder={onDeleteFolder}
+                searchQuery={searchQuery}
               />
             ))}
             {visiblePersonalCanvases.map(canvas => (
@@ -816,6 +956,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 onDelete={onDelete}
                 onDuplicate={onDuplicate}
                 onToggleStar={onToggleStar}
+                highlightQuery={searchQuery}
               />
             ))}
             {personalFolderGroups.length === 0 && visiblePersonalCanvases.length === 0 && (
@@ -860,6 +1001,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
           excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
           showStarredOnly={showStarredOnly}
           onToggleStar={onToggleStar}
+          searchQuery={searchQuery}
         />
       ))}
     </div>
