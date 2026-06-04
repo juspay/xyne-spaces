@@ -33,6 +33,8 @@ interface TicketListViewProps {
     assignedTo?: string[] | undefined;
     priority?: TicketPriority[] | undefined;
     stageName?: string[] | undefined;
+    aiCategory?: string[] | undefined;
+    hasAiDraft?: boolean | undefined;
   };
   onTicketClick: (ticket: SupportTicketRow) => void;
   isMember: boolean;
@@ -78,7 +80,7 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const zero = useZero();
 
-    const { channelId, assignedTo, priority, stageName } = filter;
+    const { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft } = filter;
 
     const [firstPage, firstPageDetails] = useCachedQuery(
       queries.supportTicketsPageV3({
@@ -87,6 +89,8 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
         assignedTo,
         priority,
         stageName,
+        aiCategory,
+        hasAiDraft,
         limit: PAGE_SIZE,
         start: null,
         dir: 'forward',
@@ -106,8 +110,10 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
           a: assignedTo ?? null,
           p: priority ?? null,
           s: stageName ?? null,
+          ac: aiCategory ?? null,
+          ad: hasAiDraft ?? null,
         }),
-      [channelId, assignedTo, priority, stageName],
+      [channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft],
     );
 
     useEffect(() => {
@@ -171,6 +177,8 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
             assignedTo,
             priority,
             stageName,
+            aiCategory,
+            hasAiDraft,
             limit: PAGE_SIZE,
             start: { id: last.id, lastEmailAt: last.lastEmailAt },
             dir: 'forward',
@@ -196,6 +204,8 @@ export const TicketListView = React.forwardRef<TicketListViewHandle, TicketListV
       assignedTo,
       priority,
       stageName,
+      aiCategory,
+      hasAiDraft,
     ]);
 
     useImperativeHandle(

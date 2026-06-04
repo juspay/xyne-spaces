@@ -32,6 +32,10 @@ import {
   Search,
   GitMerge,
   Mail,
+  User,
+  ListFilter,
+  BarChart4Icon,
+  Circle,
 } from 'lucide-react';
 import { ChannelVisibility, ChannelType, EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
@@ -57,8 +61,13 @@ import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
-import { UserSubmenu } from '../../components/Tickets/TicketFilters/Submenus/UserSubmenu/UserSubmenu';
-import { PrioritySubmenu } from '../../components/Tickets/TicketFilters/Submenus/PrioritySubmenu/PrioritySubmenu';
+import {
+  PrioritySubmenu,
+  UserSubmenu,
+  AICategorySubmenu,
+} from '../../components/Tickets/TicketFilters/Submenus';
+import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
+import { Switch } from '../../components/ui/Switch';
 import { StageFilterPopup } from '../../components/Tickets/TicketFilters/Submenus/StagesSubmenu/StageFilterPopup';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
@@ -480,7 +489,6 @@ const SupportScreen = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
   const { isMobile } = usePlatform();
-  const [showMyTicketsOnly, setShowMyTicketsOnly] = useState(false);
   // Channel selection is sourced strictly from the URL path (/support/:channelId).
   // A bare /support visit renders the empty state prompting the user to pick one.
   const selectedChannelId = channelIdParam ?? null;
@@ -508,36 +516,113 @@ const SupportScreen = (): ReactElement => {
     const saved = localStorage.getItem('support-sidebar-open');
     return saved ? saved === 'true' : true;
   });
-  const [selectedPriorities, setSelectedPriorities] = useState<TicketPriority[]>([]);
-  const [selectedStages, setSelectedStages] = useState<string[]>([]);
-  const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
-  const [assigneeFilterOpen, setAssigneeFilterOpen] = useState(false);
-  const [priorityFilterOpen, setPriorityFilterOpen] = useState(false);
-  const [stageFilterOpen, setStageFilterOpen] = useState(false);
+  const [filters, setFilters] = useState<TicketFilters>({});
   // Build the filter args once — reused by both the kanban query and the list view.
   // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
   const ticketFilter = useMemo(
     () => ({
       assignedTo:
-        selectedAssignees.length > 0 ? selectedAssignees : showMyTicketsOnly ? [userID] : undefined,
-      priority: selectedPriorities.length > 0 ? selectedPriorities : undefined,
-      stageName: selectedStages.length > 0 ? selectedStages : undefined,
+        filters.assignee && filters.assignee.length > 0
+          ? filters.assignee
+          : filters.assigned
+            ? [userID]
+            : undefined,
+      priority: filters.priority && filters.priority.length > 0 ? filters.priority : undefined,
+      stageName: filters.stages && filters.stages.length > 0 ? filters.stages : undefined,
+      aiCategory:
+        filters.aiCategory && filters.aiCategory.length > 0 ? filters.aiCategory : undefined,
+      hasAiDraft: filters.hasAiDraft === true ? true : undefined,
     }),
-    [selectedAssignees, selectedPriorities, selectedStages, showMyTicketsOnly, userID],
+    [filters, userID],
   );
 
-  const hasActiveFilters =
-    showMyTicketsOnly ||
-    selectedPriorities.length > 0 ||
-    selectedStages.length > 0 ||
-    selectedAssignees.length > 0;
+  const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
 
-  const clearAllFilters = useCallback(() => {
-    setShowMyTicketsOnly(false);
-    setSelectedPriorities([]);
-    setSelectedStages([]);
-    setSelectedAssignees([]);
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  useEffect(() => {
+    if (!moreFiltersOpen) {
+      setActiveSubmenu(null);
+    }
+  }, [moreFiltersOpen]);
+
+  const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
+  const hasMoreFiltersActive = !!(
+    filters.assigned ||
+    filters.hasAiDraft === true ||
+    (filters.priority && filters.priority.length > 0) ||
+    (filters.stages && filters.stages.length > 0) ||
+    (filters.aiCategory && filters.aiCategory.length > 0)
+  );
+  const hasAnyFilterActive = hasAssigneeFilter || hasMoreFiltersActive;
+
+  const handleFilterChange = useCallback(
+    (key: keyof TicketFilters, value: unknown): void => {
+      setFilters(prev => {
+        const newFilters = { ...prev, [key]: value };
+        // Remove undefined/empty values
+        Object.keys(newFilters).forEach((filterKey: string) => {
+          const k = filterKey as keyof TicketFilters;
+          const filterValue = newFilters[k];
+          if (
+            filterValue === undefined ||
+            filterValue === null ||
+            (Array.isArray(filterValue) && filterValue.length === 0)
+          ) {
+            delete newFilters[k];
+          }
+        });
+        return newFilters;
+      });
+    },
+    [setFilters],
+  );
+
+  const handleMenuItemClick = useCallback((category: string): void => {
+    setActiveSubmenu(prev => (prev === category ? null : category));
   }, []);
+
+  const filterMenuItems = [
+    { id: 'priority', label: 'Priority', icon: BarChart4Icon },
+    { id: 'stages', label: 'Stages', icon: Circle },
+    { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
+  ] as const;
+
+  const renderSubmenu = useCallback((): ReactElement | null => {
+    if (!activeSubmenu) return null;
+    switch (activeSubmenu) {
+      case 'priority':
+        return (
+          <PrioritySubmenu
+            selectedPriorities={filters.priority || []}
+            onChange={(priorities: TicketPriority[]) => handleFilterChange('priority', priorities)}
+            availablePriorities={availablePriorities}
+          />
+        );
+      case 'stages':
+        return (
+          <StageFilterPopup
+            boardId={channelBoardId}
+            selectedStages={filters.stages || []}
+            onChange={(stages: string[]) => handleFilterChange('stages', stages)}
+          />
+        );
+      case 'aiCategory':
+        return (
+          <AICategorySubmenu
+            selectedCategories={filters.aiCategory || []}
+            onChange={(categories: string[]) => handleFilterChange('aiCategory', categories)}
+            channelId={selectedChannelId}
+          />
+        );
+      default:
+        return null;
+    }
+  }, [activeSubmenu, filters, handleFilterChange, availablePriorities]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () =>
@@ -700,7 +785,10 @@ const SupportScreen = (): ReactElement => {
 
   // Reset stage filter when channel changes (different channels may have different stages)
   useEffect(() => {
-    setSelectedStages([]);
+    setFilters(prev => {
+      const { stages: _, ...rest } = prev;
+      return rest;
+    });
   }, [selectedChannelId]);
 
   const deeplinkConversationId = searchParams.get('conversationId');
@@ -1254,336 +1342,386 @@ const SupportScreen = (): ReactElement => {
         {!ticketId && (
           <Panel defaultSize={84} minSize={75} order={2}>
             <div className='h-full flex flex-col'>
-              <div className='flex-shrink-0 relative h-14 px-4 border-b border-border flex items-center justify-between'>
+              <div className='flex-shrink-0 relative border-b border-border'>
                 <div
                   className={cn(
-                    'flex items-center justify-between w-full gap-2 transition-opacity duration-150',
+                    'flex flex-col w-full transition-opacity duration-150',
                     selectedTicketIds.size > 0 && 'opacity-0 pointer-events-none',
                   )}
                 >
-                  <div className='flex items-center gap-2 font-semibold min-w-0 flex-1'>
-                    {!isSidebarOpen && (
-                      <button
-                        onClick={() => setIsSidebarOpen(true)}
-                        className='p-1.5 rounded hover:bg-muted text-muted-foreground transition-colors mr-1'
-                        title='Open Channels'
-                        data-track-category='Support'
-                        data-track-name='OpenChannelsSidebar'
-                      >
-                        <ChevronRight size={16} />
-                      </button>
-                    )}
-                    {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? (
-                      <button
-                        onClick={() => {
-                          setInfoDefaultTab('about');
-                          setIsInfoOpen(true);
-                        }}
-                        className='text-base font-semibold hover:underline tracking-[-0.17px] flex items-center gap-1 truncate'
-                        data-track-category='Support'
-                        data-track-name='OpenChannelInfo'
-                      >
-                        {selectedChannelName}
-                      </button>
-                    ) : (
-                      <span className='truncate'>{selectedChannelName}</span>
-                    )}
-                  </div>
-                  <div className='flex items-center gap-2'>
-                    {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                      <Tooltip content='Search emails' side='bottom'>
+                  <div className='flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4 min-w-0'>
+                    <div className='flex items-center gap-2 font-semibold min-w-0 flex-1'>
+                      {!isSidebarOpen && (
                         <button
-                          onClick={() => invokeShortcut('mod+f')}
-                          className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
+                          onClick={() => setIsSidebarOpen(true)}
+                          className='p-1.5 rounded hover:bg-muted text-muted-foreground transition-colors mr-1'
+                          title='Open Channels'
                           data-track-category='Support'
-                          data-track-name='OpenDeskSearch'
-                          data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          data-track-name='OpenChannelsSidebar'
                         >
-                          <Search size={16} />
-                        </button>
-                      </Tooltip>
-                    )}
-                    {isSelectedChannelJoined && (
-                      <>
-                        <button
-                          onClick={() => setShowMyTicketsOnly(!showMyTicketsOnly)}
-                          className={cn(
-                            'inline-flex items-center h-8 px-3 py-2 text-sm font-medium whitespace-nowrap rounded-md border border-input shadow-xs transition-[color,box-shadow] outline-none',
-                            showMyTicketsOnly
-                              ? 'text-primary bg-border'
-                              : 'bg-transparent text-muted-foreground hover:text-foreground',
-                          )}
-                          data-track-category='Support'
-                          data-track-name='ToggleMyTickets'
-                          data-track-metadata={JSON.stringify({
-                            showMyTicketsOnly: !showMyTicketsOnly,
-                          })}
-                        >
-                          My Tickets
-                        </button>
-
-                        {/* Priority Filter — dropdown with multi-select submenu */}
-                        <Popover.Root
-                          open={priorityFilterOpen}
-                          onOpenChange={setPriorityFilterOpen}
-                        >
-                          <Popover.Trigger asChild>
-                            <button
-                              type='button'
-                              className={cn(
-                                'inline-flex items-center justify-between gap-2 w-[130px] h-8 px-3 text-sm font-medium rounded-md border border-input shadow-xs whitespace-nowrap transition-[color,box-shadow] outline-none',
-                                selectedPriorities.length > 0
-                                  ? 'text-primary bg-border'
-                                  : 'bg-transparent text-foreground hover:text-foreground',
-                              )}
-                            >
-                              <span className='truncate'>
-                                {selectedPriorities.length > 0
-                                  ? `${selectedPriorities.length} selected`
-                                  : 'Priority'}
-                              </span>
-                              <ChevronDown
-                                className={cn(
-                                  'w-4 h-4 opacity-50 shrink-0 transition-transform',
-                                  priorityFilterOpen && 'rotate-180',
-                                )}
-                              />
-                            </button>
-                          </Popover.Trigger>
-                          <Popover.Content
-                            side='bottom'
-                            align='start'
-                            sideOffset={6}
-                            className='z-[60]'
-                          >
-                            <PrioritySubmenu
-                              selectedPriorities={selectedPriorities}
-                              onChange={setSelectedPriorities}
-                            />
-                          </Popover.Content>
-                        </Popover.Root>
-
-                        {/* Stage Filter — dropdown with searchable multi-select */}
-                        <Popover.Root open={stageFilterOpen} onOpenChange={setStageFilterOpen}>
-                          <Popover.Trigger asChild>
-                            <button
-                              type='button'
-                              className={cn(
-                                'inline-flex items-center justify-between gap-2 w-[130px] h-8 px-3 text-sm font-medium rounded-md border border-input shadow-xs whitespace-nowrap transition-[color,box-shadow] outline-none',
-                                selectedStages.length > 0
-                                  ? 'text-primary bg-border'
-                                  : 'bg-transparent text-foreground hover:text-foreground',
-                              )}
-                            >
-                              <span className='truncate'>
-                                {selectedStages.length > 0
-                                  ? `${selectedStages.length} selected`
-                                  : 'Stage'}
-                              </span>
-                              <ChevronDown
-                                className={cn(
-                                  'w-4 h-4 opacity-50 shrink-0 transition-transform',
-                                  stageFilterOpen && 'rotate-180',
-                                )}
-                              />
-                            </button>
-                          </Popover.Trigger>
-                          <Popover.Content
-                            side='bottom'
-                            align='start'
-                            sideOffset={6}
-                            className='z-[60]'
-                          >
-                            <StageFilterPopup
-                              boardId={channelBoardId}
-                              selectedStages={selectedStages}
-                              onChange={setSelectedStages}
-                            />
-                          </Popover.Content>
-                        </Popover.Root>
-
-                        {/* Assignee Filter — dropdown with searchable user list */}
-                        <Popover.Root
-                          open={assigneeFilterOpen}
-                          onOpenChange={setAssigneeFilterOpen}
-                        >
-                          <Popover.Trigger asChild>
-                            <button
-                              type='button'
-                              className={cn(
-                                'inline-flex items-center justify-between gap-2 w-[150px] h-8 px-3 text-sm font-medium rounded-md border border-input shadow-xs whitespace-nowrap transition-[color,box-shadow] outline-none',
-                                selectedAssignees.length > 0
-                                  ? 'text-primary bg-border'
-                                  : 'bg-transparent text-foreground hover:text-foreground',
-                              )}
-                            >
-                              <span className='truncate'>
-                                {selectedAssignees.length > 0
-                                  ? `${selectedAssignees.length} assignee${selectedAssignees.length > 1 ? 's' : ''}`
-                                  : 'Assignee'}
-                              </span>
-                              <ChevronDown
-                                className={cn(
-                                  'w-4 h-4 opacity-50 shrink-0 transition-transform',
-                                  assigneeFilterOpen && 'rotate-180',
-                                )}
-                              />
-                            </button>
-                          </Popover.Trigger>
-                          <Popover.Content
-                            side='bottom'
-                            align='start'
-                            sideOffset={6}
-                            className='z-[60]'
-                          >
-                            <UserSubmenu
-                              selectedUsers={selectedAssignees}
-                              onChange={setSelectedAssignees}
-                              label='Assignee'
-                            />
-                          </Popover.Content>
-                        </Popover.Root>
-
-                        {hasActiveFilters && (
-                          <Tooltip side='bottom' content='Clear all filters'>
-                            <button
-                              type='button'
-                              onClick={clearAllFilters}
-                              className='inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                              data-track-category='Support'
-                              data-track-name='ClearAllFilters'
-                            >
-                              <X size={16} />
-                            </button>
-                          </Tooltip>
-                        )}
-                      </>
-                    )}
-                    {selectedChannelId &&
-                      selectedChannelId !== ALL_CHANNELS_ID &&
-                      selectedChannelFull && (
-                        <button
-                          onClick={() => {
-                            setInfoDefaultTab('members');
-                            setIsInfoOpen(true);
-                          }}
-                          className='inline-flex items-center gap-2 h-8 px-3 py-2 text-sm font-medium whitespace-nowrap rounded-md border border-input shadow-xs transition-[color,box-shadow] outline-none text-muted-foreground hover:text-foreground bg-transparent'
-                          data-track-category='Support'
-                          data-track-name='ViewMembers'
-                          data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                          title='View members'
-                        >
-                          <Users2 size={16} />
-                          <span>{selectedChannelFull.channelStats?.participantCount ?? 0}</span>
+                          <ChevronRight size={16} />
                         </button>
                       )}
-                    {/* Compose new email — visible only on a joined email channel */}
-                    {isSelectedChannelJoined && selectedChannelId && (
-                      <Tooltip content='Compose new email' side='bottom'>
+                      <Hash size={14} className='text-muted-foreground shrink-0' />
+                      {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? (
                         <button
-                          onClick={() => openNewCompose(selectedChannelId)}
-                          className='inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-input shadow-xs text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          onClick={() => {
+                            setInfoDefaultTab('about');
+                            setIsInfoOpen(true);
+                          }}
+                          className='text-base font-semibold hover:underline tracking-[-0.17px] flex items-center gap-1 truncate'
                           data-track-category='Support'
-                          data-track-name='OpenComposeEmail'
-                          data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          data-track-name='OpenChannelInfo'
                         >
-                          <Pencil size={14} />
-                          <span>Compose</span>
+                          {selectedChannelName}
                         </button>
-                      </Tooltip>
-                    )}
-                    {/* View Toggle */}
-                    <div className='flex items-center border border-border rounded-lg overflow-hidden'>
-                      <button
-                        onClick={() => setViewMode('kanban')}
-                        className={cn(
-                          'p-1.5 transition-colors',
-                          viewMode === 'kanban'
-                            ? 'bg-muted text-foreground'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                        )}
-                        title='Kanban View'
-                        data-track-category='Support'
-                        data-track-name='SetKanbanView'
-                      >
-                        <LayoutGrid size={16} />
-                      </button>
-                      <button
-                        onClick={() => setViewMode('list')}
-                        className={cn(
-                          'p-1.5 transition-colors',
-                          viewMode === 'list'
-                            ? 'bg-muted text-foreground'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                        )}
-                        title='List View'
-                        data-track-category='Support'
-                        data-track-name='SetListView'
-                      >
-                        <List size={16} />
-                      </button>
+                      ) : (
+                        <span className='truncate'>{selectedChannelName}</span>
+                      )}
                     </div>
-                    {canRefetch && isSelectedChannelJoined && (
-                      <Tooltip
-                        content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
-                        side='bottom'
-                      >
-                        <button
-                          onClick={() => setShowRefetchDialog(true)}
-                          disabled={isRefetching}
-                          className={cn(
-                            'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
-                            isRefetching && 'opacity-60 cursor-not-allowed',
-                          )}
-                          data-track-category='Support'
-                          data-track-name='RefetchExternalSource'
-                          data-track-metadata={JSON.stringify({ channelId: refetchChannelId })}
+                    <div className='flex items-center gap-2 shrink-0'>
+                      {selectedChannelId &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
+                        selectedChannelFull && (
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                            onClick={() => {
+                              setInfoDefaultTab('members');
+                              setIsInfoOpen(true);
+                            }}
+                            data-track-category='Support'
+                            data-track-name='ViewMembers'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            title='View members'
+                          >
+                            <Users2 size={16} />
+                            <span>{selectedChannelFull.channelStats?.participantCount ?? 0}</span>
+                          </Button>
+                        )}
+                      {canRefetch && isSelectedChannelJoined && (
+                        <Tooltip
+                          content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
+                          side='bottom'
                         >
-                          <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
+                          <button
+                            onClick={() => setShowRefetchDialog(true)}
+                            disabled={isRefetching}
+                            className={cn(
+                              'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
+                              isRefetching && 'opacity-60 cursor-not-allowed',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='RefetchExternalSource'
+                            data-track-metadata={JSON.stringify({ channelId: refetchChannelId })}
+                          >
+                            <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
+                          </button>
+                        </Tooltip>
+                      )}
+                      {isSelectedChannelJoined && (
+                        <button
+                          onClick={() => {
+                            if (isSettingsOpen) {
+                              void navigate(-1);
+                            } else {
+                              const base = selectedChannelId
+                                ? `${supportBase}/${selectedChannelId}`
+                                : supportBase;
+                              void navigate(`${base}?settings=open`);
+                            }
+                          }}
+                          className={cn(
+                            'p-1.5 rounded transition-colors',
+                            isSettingsOpen
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                          )}
+                          title='Inbox settings'
+                          data-track-category='Support'
+                          data-track-name='ToggleInboxSettings'
+                        >
+                          <Settings size={16} />
                         </button>
-                      </Tooltip>
-                    )}
-                    {isSelectedChannelJoined && (
-                      <button
-                        onClick={() => {
-                          if (isSettingsOpen) {
-                            void navigate(-1);
-                          } else {
-                            const base = selectedChannelId
+                      )}
+                    </div>
+                  </div>
+                  <div className='flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'>
+                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                      {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                        <Tooltip content='Search emails' side='bottom'>
+                          <button
+                            onClick={() => invokeShortcut('mod+f')}
+                            className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
+                            data-track-category='Support'
+                            data-track-name='OpenDeskSearch'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <Search size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
+                      {isSelectedChannelJoined && (
+                        <>
+                          <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
+                            <Popover.Trigger asChild>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <User className='w-3 h-3 p-px font-medium' />
+                                  <span className='font-medium'>Assignee</span>
+                                  {hasAssigneeFilter && (
+                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
+                                  )}
+                                  <ChevronDown
+                                    className={cn(
+                                      'w-3 h-3 ml-1 transition-transform',
+                                      assigneeOpen && 'rotate-180',
+                                    )}
+                                  />
+                                </div>
+                              </Button>
+                            </Popover.Trigger>
+                            <Popover.Content
+                              side='bottom'
+                              align='start'
+                              sideOffset={6}
+                              className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
+                            >
+                              <UserSubmenu
+                                key='assignee-popover-submenu'
+                                selectedUsers={filters.assignee || []}
+                                onChange={(users: string[]) =>
+                                  handleFilterChange('assignee', users)
+                                }
+                                label='Assignee'
+                              />
+                            </Popover.Content>
+                          </Popover.Root>
+
+                          <Popover.Root open={moreFiltersOpen} onOpenChange={setMoreFiltersOpen}>
+                            <Popover.Trigger asChild>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className={cn(
+                                  hasMoreFiltersActive ? 'border-border' : '',
+                                  'rounded-[10px] border-border hover:bg-muted text-muted-foreground',
+                                )}
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <ListFilter className='w-3 h-3 font-medium' />
+                                  <span className='font-medium'>More Filters</span>
+                                  {hasMoreFiltersActive && (
+                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
+                                  )}
+                                </div>
+                              </Button>
+                            </Popover.Trigger>
+
+                            <Popover.Content
+                              side='bottom'
+                              align='start'
+                              sideOffset={6}
+                              className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
+                              onInteractOutside={e => {
+                                const target = e.target;
+                                if (
+                                  target instanceof Element &&
+                                  target.closest('[data-filter-submenu="true"]')
+                                ) {
+                                  e.preventDefault();
+                                } else {
+                                  setActiveSubmenu(null);
+                                }
+                              }}
+                            >
+                              <div className='px-4 py-3 flex flex-col gap-3 border-b border-border'>
+                                <div
+                                  data-track-category='Support'
+                                  data-track-name='ToggleMyTickets'
+                                  data-track-metadata={JSON.stringify({
+                                    assigned: !filters.assigned,
+                                  })}
+                                >
+                                  <Switch
+                                    checked={!!filters.assigned}
+                                    onCheckedChange={checked =>
+                                      handleFilterChange('assigned', checked ? true : undefined)
+                                    }
+                                    label='My tickets'
+                                    aria-label='My tickets'
+                                  />
+                                </div>
+                                <div
+                                  data-track-category='Support'
+                                  data-track-name='ToggleHasAiDraft'
+                                  data-track-metadata={JSON.stringify({
+                                    hasAiDraft: filters.hasAiDraft !== true,
+                                  })}
+                                >
+                                  <Switch
+                                    checked={filters.hasAiDraft === true}
+                                    onCheckedChange={checked =>
+                                      handleFilterChange('hasAiDraft', checked ? true : undefined)
+                                    }
+                                    label='AI draft'
+                                    aria-label='Has AI draft'
+                                  />
+                                </div>
+                              </div>
+                              <div className='py-1'>
+                                {filterMenuItems.map(item => {
+                                  const Icon = item.icon;
+                                  const isActive = activeSubmenu === item.id;
+                                  const isFilterActive =
+                                    (item.id === 'priority' &&
+                                      !!(filters.priority && filters.priority.length > 0)) ||
+                                    (item.id === 'stages' &&
+                                      !!(filters.stages && filters.stages.length > 0)) ||
+                                    (item.id === 'aiCategory' &&
+                                      !!(filters.aiCategory && filters.aiCategory.length > 0));
+                                  const menuButton = (
+                                    <button
+                                      ref={el => {
+                                        menuItemRefs.current[item.id] = el;
+                                      }}
+                                      onClick={() => {
+                                        handleMenuItemClick(item.id);
+                                      }}
+                                      className={cn(
+                                        'w-full flex items-center justify-between px-4 py-2 text-sm',
+                                        isActive ? 'bg-muted font-medium' : '',
+                                        'hover:bg-muted',
+                                      )}
+                                      data-track-category='Support'
+                                      data-track-name='OpenFilterSubmenu'
+                                      data-track-metadata={JSON.stringify({
+                                        filterId: item.id,
+                                        filterLabel: item.label,
+                                      })}
+                                    >
+                                      <div className='flex items-center gap-3'>
+                                        <Icon className='w-4 h-4' />
+                                        <span>{item.label}</span>
+                                        {isFilterActive && (
+                                          <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
+                                        )}
+                                      </div>
+                                      <ChevronRight className='w-4 h-4 text-muted-foreground' />
+                                    </button>
+                                  );
+                                  return (
+                                    <React.Fragment key={item.id}>{menuButton}</React.Fragment>
+                                  );
+                                })}
+                              </div>
+                            </Popover.Content>
+                            {activeSubmenu && menuItemRefs.current[activeSubmenu] && (
+                              <div
+                                ref={submenuRef}
+                                data-filter-submenu='true'
+                                className='fixed z-[60]'
+                                style={{
+                                  left:
+                                    (menuItemRefs.current[activeSubmenu]?.getBoundingClientRect()
+                                      .right || 0) + 4,
+                                  top:
+                                    menuItemRefs.current[activeSubmenu]?.getBoundingClientRect()
+                                      .top || 0,
+                                }}
+                              >
+                                {renderSubmenu()}
+                              </div>
+                            )}
+                          </Popover.Root>
+
+                          {hasAnyFilterActive && (
+                            <Button
+                              variant='outline'
+                              size='sm'
+                              className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                              onClick={() => setFilters({})}
+                            >
+                              <div className='flex items-center gap-1.5'>
+                                <X className='w-3 h-3' />
+                                <span className='font-medium'>Clear</span>
+                              </div>
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <div className='flex items-center gap-2 shrink-0'>
+                      {/* View Toggle */}
+                      <div className='flex items-center border border-border rounded-lg overflow-hidden'>
+                        <button
+                          onClick={() => setViewMode('kanban')}
+                          className={cn(
+                            'p-1.5 transition-colors',
+                            viewMode === 'kanban'
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                          )}
+                          title='Kanban View'
+                          data-track-category='Support'
+                          data-track-name='SetKanbanView'
+                        >
+                          <LayoutGrid size={16} />
+                        </button>
+                        <button
+                          onClick={() => setViewMode('list')}
+                          className={cn(
+                            'p-1.5 transition-colors',
+                            viewMode === 'list'
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                          )}
+                          title='List View'
+                          data-track-category='Support'
+                          data-track-name='SetListView'
+                        >
+                          <List size={16} />
+                        </button>
+                      </div>
+                      {/* Compose new email — visible only on a joined email channel */}
+                      {isSelectedChannelJoined && selectedChannelId && (
+                        <Tooltip content='Compose new email' side='bottom'>
+                          <Button
+                            variant='default'
+                            size='sm'
+                            className='rounded-[10px] bg-[#6276BE]/80 hover:bg-[#6276BE]'
+                            onClick={() => openNewCompose(selectedChannelId)}
+                            data-track-category='Support'
+                            data-track-name='OpenComposeEmail'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <Pencil size={14} />
+                            <span>Compose</span>
+                          </Button>
+                        </Tooltip>
+                      )}
+                      {ticketId && (
+                        <Button
+                          size='sm'
+                          variant='ghost'
+                          onClick={() => {
+                            const back = selectedChannelId
                               ? `${supportBase}/${selectedChannelId}`
                               : supportBase;
-                            void navigate(`${base}?settings=open`);
-                          }
-                        }}
-                        className={cn(
-                          'p-1.5 rounded transition-colors',
-                          isSettingsOpen
-                            ? 'bg-muted text-foreground'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                        )}
-                        title='Inbox settings'
-                        data-track-category='Support'
-                        data-track-name='ToggleInboxSettings'
-                      >
-                        <Settings size={16} />
-                      </button>
-                    )}
-                    {ticketId && (
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        onClick={() => {
-                          const back = selectedChannelId
-                            ? `${supportBase}/${selectedChannelId}`
-                            : supportBase;
-                          void navigate(back);
-                        }}
-                        data-track-category='Support'
-                        data-track-name='CloseTicketPanel'
-                      >
-                        <PanelRight size={16} />
-                      </Button>
-                    )}
+                            void navigate(back);
+                          }}
+                          data-track-category='Support'
+                          data-track-name='CloseTicketPanel'
+                        >
+                          <PanelRight size={16} />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div
@@ -1913,6 +2051,8 @@ type SupportTicketDetailProps = {
     assignedTo: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
+    aiCategory: string[] | undefined;
+    hasAiDraft: boolean | undefined;
   };
   isMember: boolean;
 };

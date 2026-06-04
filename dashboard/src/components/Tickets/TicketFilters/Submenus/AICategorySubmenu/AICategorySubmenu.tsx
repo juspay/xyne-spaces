@@ -1,0 +1,151 @@
+import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { Search, Check } from 'lucide-react';
+import { queries } from '../../../../../zero/queries';
+import { useCachedQuery } from '../../../../../hooks/useCachedQuery';
+import { usePlatform } from '../../../../../hooks/usePlatform';
+import Input from '../../../../ui/Input/Input';
+
+const ALL_CHANNELS_ID = 'all';
+
+interface AICategorySubmenuProps {
+  selectedCategories: string[];
+  onChange: (categories: string[]) => void;
+  channelId: string | null;
+}
+
+export const AICategorySubmenu = ({
+  selectedCategories,
+  onChange,
+  channelId,
+}: AICategorySubmenuProps): ReactElement => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
+
+  useEffect(() => {
+    if (isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isMobile]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchTerm(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const [classificationMappings] = useCachedQuery(
+    queries.getClassificationMappings({ channelId: channelId ?? '' }),
+    {
+      enabled: !!channelId && channelId !== ALL_CHANNELS_ID,
+    },
+  );
+
+  const availableCategories = useMemo(() => {
+    const fromMappings = [
+      ...new Set(
+        (classificationMappings ?? []).map(m => m.category).filter((c): c is string => Boolean(c)),
+      ),
+    ];
+    if (fromMappings.length === 0) return [];
+    if (!fromMappings.includes('Other')) {
+      fromMappings.push('Other');
+    }
+    return fromMappings;
+  }, [classificationMappings]);
+
+  const filteredCategories = useMemo(() => {
+    if (!availableCategories || availableCategories.length === 0) return [];
+
+    let list = [...availableCategories];
+
+    if (searchTerm.trim()) {
+      const lower = searchTerm.toLowerCase();
+      list = list.filter(category => category.toLowerCase().includes(lower));
+    }
+
+    const selectedSet = new Set(selectedCategories);
+    return list.sort((a, b) => {
+      const aSel = selectedSet.has(a) ? 1 : 0;
+      const bSel = selectedSet.has(b) ? 1 : 0;
+      return bSel - aSel;
+    });
+  }, [availableCategories, searchTerm, selectedCategories]);
+
+  const handleToggle = (category: string): void => {
+    const isSelected = selectedCategories.includes(category);
+    if (isSelected) {
+      onChange(selectedCategories.filter(c => c !== category));
+    } else {
+      onChange([...selectedCategories, category]);
+    }
+  };
+
+  return (
+    <div className='w-80 border border-border flex flex-col rounded-lg shadow-lg bg-background overflow-hidden'>
+      <div className='p-3 border-b sticky top-0 bg-background z-10'>
+        <div className='relative'>
+          <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
+          <Input
+            ref={searchInputRef}
+            type='text'
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder='Search categories...'
+            className='pl-9 h-9'
+          />
+        </div>
+      </div>
+      <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
+        {availableCategories.length === 0 ? (
+          <div className='p-8 text-center text-sm text-muted-foreground'>
+            No categories available
+          </div>
+        ) : filteredCategories.length > 0 ? (
+          <div className='space-y-0.5'>
+            {filteredCategories.map(category => {
+              const isSelected = selectedCategories.includes(category);
+
+              return (
+                <button
+                  key={category}
+                  onClick={() => handleToggle(category)}
+                  type='button'
+                  className={`
+                    w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-none
+                    ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+                    focus-visible:ring-2 focus-visible:ring-ring
+                  `}
+                  data-track-category='Tickets'
+                  data-track-name='ToggleAICategoryFilter'
+                  data-track-metadata={JSON.stringify({ category, selected: !isSelected })}
+                  data-testid={`ai-category-filter-${category.toLowerCase()}`}
+                >
+                  <div className='flex items-center gap-2'>
+                    <div className='w-2 h-2 rounded-full bg-blue-500' />
+                    <span className='text-sm font-medium truncate'>{category}</span>
+                  </div>
+                  {isSelected && (
+                    <Check className='w-4 h-4 text-primary shrink-0' aria-hidden='true' />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className='p-8 text-center text-sm text-muted-foreground'>No categories found</div>
+        )}
+      </div>
+      {selectedCategories.length > 0 && (
+        <div className='p-3 border-t bg-muted'>
+          <div className='text-xs text-muted-foreground'>
+            {selectedCategories.length} categor{selectedCategories.length !== 1 ? 'ies' : 'y'}{' '}
+            selected
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

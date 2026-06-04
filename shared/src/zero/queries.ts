@@ -605,8 +605,10 @@ export const queries = defineQueries({
       assignedTo: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
+      aiCategory: z.array(z.string()).optional(),
+      hasAiDraft: z.boolean().optional(),
     }),
-    ({ args: { channelId, merchantMid, assignedTo, priority, stageName } }) => {
+    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
@@ -623,6 +625,16 @@ export const queries = defineQueries({
 
       if (stageName && stageName.length > 0) {
         query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
+      }
+
+      if (aiCategory && aiCategory.length > 0) {
+        query = query.where(({ or, cmp }) => or(...aiCategory.map((c) => cmp('aiCategory', c))));
+      }
+
+      if (hasAiDraft) {
+        query = query.where(({ exists }) =>
+          exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
+        );
       }
 
       return query
@@ -844,11 +856,13 @@ export const queries = defineQueries({
       assignedTo: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
+      aiCategory: z.array(z.string()).optional(),
+      hasAiDraft: z.boolean().optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (assignedTo && assignedTo.length > 0) {
@@ -861,6 +875,16 @@ export const queries = defineQueries({
 
       if (stageName && stageName.length > 0) {
         query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
+      }
+
+      if (aiCategory && aiCategory.length > 0) {
+        query = query.where(({ or, cmp }) => or(...aiCategory.map((c) => cmp('aiCategory', c))));
+      }
+
+      if (hasAiDraft) {
+        query = query.where(({ exists }) =>
+          exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
+        );
       }
 
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';
