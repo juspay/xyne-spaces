@@ -1,11 +1,14 @@
 import { useMemo } from 'react';
 import { ConfigChannelField } from '../SchemaForm/ConfigChannelField';
+import { EntityVariableField } from '../SchemaForm/EntityVariableField';
+import { EntityKind } from '../SchemaForm/SchemaForm.utils';
 import { SendMessageRichTextField } from '../SchemaForm/SendMessageRichTextField';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
 
 interface SendMessageConfigShape {
   channelId?: string;
+  senderId?: string;
   content?: string;
 }
 
@@ -55,6 +58,20 @@ export function SendMessageStepForm({
           onChange={next => setField('channelId', next)}
           variableSources={variableSources}
           mode='both'
+        />
+      </FieldRow>
+
+      <FieldRow
+        label='Send as'
+        error={issuesAt.get('senderId')}
+        description='Who the message is posted as. Leave empty to post as the automations bot.'
+      >
+        <EntityVariableField
+          value={cfg.senderId}
+          onChange={next => setField('senderId', next)}
+          variableSources={variableSources}
+          entityKind={EntityKind.USER}
+          placeholder='Pick a user (defaults to the automations bot)'
         />
       </FieldRow>
 

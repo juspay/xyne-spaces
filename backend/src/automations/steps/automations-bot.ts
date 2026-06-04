@@ -1,4 +1,5 @@
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
+import { botCatalog } from '@/bots/unified';
 
 const AUTOMATIONS_BOT_ID = 'automations';
 const cachedBotUserIdByWorkspace = new Map<string, string>();
@@ -10,7 +11,14 @@ const cachedBotUserIdByWorkspace = new Map<string, string>();
 export async function getAutomationsBotUserId(workspaceId: string): Promise<string> {
   const cached = cachedBotUserIdByWorkspace.get(workspaceId);
   if (cached) return cached;
-  const bot = await unifiedBotUserService.getBotByBotId(AUTOMATIONS_BOT_ID, workspaceId);
+
+  let bot = await unifiedBotUserService.getBotByBotId(AUTOMATIONS_BOT_ID, workspaceId);
+  if (!bot) {
+    const definition = botCatalog.getById(AUTOMATIONS_BOT_ID)?.definition;
+    if (definition) {
+      bot = await unifiedBotUserService.ensureBotUserExists(definition, workspaceId);
+    }
+  }
   if (!bot) {
     throw new Error(
       `[automations] System bot "${AUTOMATIONS_BOT_ID}" not found in workspace ${workspaceId}. Make sure '@/bots/implementations/automations-bot/automations-bot.js' is imported in the bot registry.`,
