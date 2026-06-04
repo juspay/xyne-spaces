@@ -45,6 +45,7 @@ export interface WorkerStartStreamMessage {
       draftMode?: boolean;
       version?: 'v1' | 'v2';
       disableTools?: boolean;
+      agentSlug?: string;
     };
   };
 }
@@ -155,6 +156,7 @@ async function executeStream(
         ...(requestBody.draftMode && { draft_mode: true }),
         ...(requestBody.version && { version: requestBody.version }),
         ...(requestBody.disableTools && { disable_tools: true }),
+        ...(requestBody.agentSlug && { agentSlug: requestBody.agentSlug }),
         /* eslint-enable @typescript-eslint/naming-convention */
       }),
       signal: abortController.signal,

@@ -20,6 +20,7 @@ interface UseDeskAIDraftOptions {
   ticketId?: string | null;
   mode?: 'reply' | 'compose';
   headers?: DeskAIDraftHeaders;
+  agentSlug?: string;
 }
 
 export type AIRefineQuickAction = 'polish' | 'formalise' | 'elaborate' | 'shorten';
@@ -113,6 +114,7 @@ export function useDeskAIDraft({
   ticketId,
   mode = 'reply',
   headers,
+  agentSlug = 'ask-ai',
 }: UseDeskAIDraftOptions): UseDeskAIDraftReturn {
   const [draftContent, setDraftContent] = useState('');
   const [draftSources, setDraftSources] = useState<DraftSource[]>([]);
@@ -284,6 +286,7 @@ export function useDeskAIDraft({
             suppressCompletionToast: true,
             draftMode: true,
             ...(options?.disableTools && { disableTools: true }),
+            agentSlug,
           },
           [
             ...prior,
@@ -313,7 +316,7 @@ export function useDeskAIDraft({
         setIsStreaming(false);
       }
     },
-    [threadId, channelId, conversationId, ticketId, isComposeMode],
+    [threadId, channelId, conversationId, ticketId, isComposeMode, agentSlug],
   );
 
   const basePrompt =

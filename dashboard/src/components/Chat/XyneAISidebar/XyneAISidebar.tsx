@@ -57,6 +57,8 @@ import { UserActivityPanel } from './components/UserActivityPanel';
 import { MemoriesPanel } from './components/MemoriesPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
+import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
 import {
   xyneAIActor,
   type ThreadInfo,
@@ -359,9 +361,30 @@ const XyneAISidebar = ({
   });
 
   const { askAIVersion } = useAskAIVersion();
-  const isV2 = askAIVersion === 'v2';
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
+
+  // Global agent selector state (sidebar scope)
+  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
+  const { data: accessibleAgents = [] } = useQuery({
+    queryKey: ['accessible-claw-agents'],
+    queryFn: fetchAccessibleClawAgents,
+    staleTime: 60_000,
+  });
+
+  // isV2 is true when the global config is v2 OR when a non-ask-ai claw agent is selected.
+  // Selecting a claw agent forces v2 backend for queries, sessions, and messages.
+  const isV2 = askAIVersion === 'v2' || selectedAgentSlug !== null;
+  // When selectedAgentSlug is null (Ask AI default), look for 'ask-ai' agent in v2 mode
+  const selectedAgent = selectedAgentSlug
+    ? (accessibleAgents.find(a => a.slug === selectedAgentSlug) ?? null)
+    : isV2
+      ? (accessibleAgents.find(a => a.slug === 'ask-ai') ?? null)
+      : null;
+  // Don't apply color effect for Ask AI (default agent) - only for custom claw agents
+  const selectedAgentColor =
+    selectedAgent && selectedAgent.slug !== 'ask-ai' ? selectedAgent.color : null;
+  const selectedAgentName = selectedAgent?.name ?? null;
 
   // Auto-enable web search when browser context is provided (and user has access)
   // Web search stays enabled for the session to allow follow-up questions
@@ -405,6 +428,7 @@ const XyneAISidebar = ({
       transcripts: selectedTranscripts,
       recordings: selectedRecordings,
     }),
+    agentSlug: selectedAgentSlug,
   });
 
   // Start fresh chat when startFreshChat flag is set
@@ -471,7 +495,7 @@ const XyneAISidebar = ({
   } = useSessionMutations();
 
   // v2 sessions hooks (used when v2 is enabled)
-  const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList();
+  const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList(selectedAgentSlug);
   const { invalidateSessions: _invalidateV2Sessions } = useV2SessionInvalidator();
 
   // Sync sessions list to local state for the ConversationHistory component
@@ -565,7 +589,10 @@ const XyneAISidebar = ({
             return;
           }
 
-          const clawMessages = await fetchV2ConversationMessages(mostRecentConv.sessionId);
+          const clawMessages = await fetchV2ConversationMessages(
+            mostRecentConv.sessionId,
+            selectedAgentSlug,
+          );
           const messagesWithoutStreaming: Message[] = clawMessages.map(msg => ({
             ...msg,
             isStreaming: false,
@@ -797,7 +824,10 @@ const XyneAISidebar = ({
       }
 
       if (isV2) {
-        const clawMessages = await fetchV2ConversationMessages(conversation.sessionId);
+        const clawMessages = await fetchV2ConversationMessages(
+          conversation.sessionId,
+          selectedAgentSlug,
+        );
         const messagesWithoutStreaming: Message[] = clawMessages.map(msg => ({
           ...msg,
           isStreaming: false,
@@ -938,6 +968,35 @@ const XyneAISidebar = ({
 
     processedSelectionKeysRef.current.clear();
   }, []);
+
+  // When user selects a different agent from the global selector,
+  // reset to a fresh conversation scoped to that agent.
+  const handleSelectAgent = useCallback(
+    (slug: string | null): void => {
+      if (slug === selectedAgentSlug) return;
+      setSelectedAgentSlug(slug);
+      handleNewChat();
+    },
+    [selectedAgentSlug, setSelectedAgentSlug, handleNewChat],
+  );
+
+  // When user selects an agent from the history page, stay on history
+  // and refresh the conversation list for that agent.
+  const handleSelectAgentFromHistory = useCallback(
+    (slug: string | null): void => {
+      if (slug === selectedAgentSlug) return;
+      setSelectedAgentSlug(slug);
+      // Clear active conversation but stay on history page
+      setConversationId('');
+      setMessages([]);
+      setBranchSelections({});
+      setStreamThreadKey(newStreamSlotKey());
+      usesDraftStreamKeyRef.current = true;
+      // Refresh sessions list for the new agent
+      void refetchV2Sessions();
+    },
+    [selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions],
+  );
 
   const handleLoadConversationRef = useRef(handleLoadConversation);
   handleLoadConversationRef.current = handleLoadConversation;
@@ -1481,7 +1540,7 @@ const XyneAISidebar = ({
     <div
       ref={dragAndDropAreaRef}
       className={cn(
-        'w-full bg-background flex flex-col min-h-0 relative',
+        'w-full bg-background flex flex-col min-h-0 relative border',
         isFullscreen
           ? isMobile
             ? 'min-h-full pb-[calc(6rem+env(safe-area-inset-bottom))]'
@@ -1490,6 +1549,14 @@ const XyneAISidebar = ({
             ? 'h-[95vh] pb-4'
             : 'h-full rounded-xl',
       )}
+      style={{
+        ...(selectedAgentColor
+          ? {
+              boxShadow: `inset 0 0 120px -20px ${selectedAgentColor}30`,
+              borderColor: selectedAgentColor,
+            }
+          : {}),
+      }}
     >
       {/* Drag and Drop Overlay */}
       {isDragging && (
@@ -1521,6 +1588,10 @@ const XyneAISidebar = ({
           onToggleStar={handleToggleStar}
           onDeleteConversation={handleDeleteConversation}
           onRenameConversation={handleRenameConversation}
+          selectedAgentSlug={selectedAgentSlug}
+          agents={accessibleAgents}
+          onSelectAgent={handleSelectAgentFromHistory}
+          selectedAgentColor={selectedAgentColor}
         />
       ) : showUserActivityPanel ? (
         <UserActivityPanel
@@ -1536,29 +1607,32 @@ const XyneAISidebar = ({
           {aiOnboarding.isActive ? (
             <XyneAIOnboardingHeader onClose={completeOnboarding} />
           ) : isFullscreen && messages.length === 0 ? null : (
-            <XyneAIHeader
-              onNewChat={handleNewChat}
-              onShowHistory={() => setShowHistorySidebar(true)}
-              onShowUserActivity={() => setShowUserActivityPanel(true)}
-              onShowMemories={() => setShowMemoriesPanel(true)}
-              isMobile={isMobile}
-              {...(isFullscreen
-                ? {
-                    title: 'Xyne AI',
-                    hideMemoriesAndActivity: true,
-                    hideTitle: true,
-                    hideHistory: true,
-                  }
-                : {})}
-              {...(onClose !== undefined
-                ? {
-                    onClose: () => {
-                      abortCurrentRequest();
-                      onClose();
-                    },
-                  }
-                : {})}
-            />
+            <>
+              <XyneAIHeader
+                onNewChat={handleNewChat}
+                onShowHistory={() => setShowHistorySidebar(true)}
+                onShowUserActivity={() => setShowUserActivityPanel(true)}
+                onShowMemories={() => setShowMemoriesPanel(true)}
+                isMobile={isMobile}
+                title={isFullscreen ? 'Xyne AI' : selectedAgentName || 'Ask AI'}
+                selectedAgent={selectedAgent}
+                {...(isFullscreen
+                  ? {
+                      hideMemoriesAndActivity: true,
+                      hideTitle: true,
+                      hideHistory: true,
+                    }
+                  : {})}
+                {...(onClose !== undefined
+                  ? {
+                      onClose: () => {
+                        abortCurrentRequest();
+                        onClose();
+                      },
+                    }
+                  : {})}
+              />
+            </>
           )}
 
           {hasBackgroundStreamingElsewhere ? (
@@ -1599,6 +1673,9 @@ const XyneAISidebar = ({
                         showChannelTag={false}
                         isStreaming={false}
                         contextPanelPosition='top'
+                        selectedAgentSlug={selectedAgentSlug}
+                        agents={accessibleAgents}
+                        onSelectAgent={handleSelectAgent}
                         {...sharedInputSectionProps}
                       />
                     }
@@ -1635,6 +1712,7 @@ const XyneAISidebar = ({
                 <XyneAISuggestions
                   queries={suggestionQueries}
                   onSuggestionClick={handleSuggestionClick}
+                  selectedAgentSlug={selectedAgentSlug}
                 />
               )
             ) : (
@@ -1788,6 +1866,9 @@ const XyneAISidebar = ({
                   showChannelTag={true}
                   isStreaming={isActiveSessionStreaming}
                   contextPanelPosition='bottom'
+                  selectedAgentSlug={selectedAgentSlug}
+                  agents={accessibleAgents}
+                  onSelectAgent={handleSelectAgent}
                   {...sharedInputSectionProps}
                 />
               </div>

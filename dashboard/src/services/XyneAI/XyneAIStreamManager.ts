@@ -88,6 +88,7 @@ export interface StreamRequest {
   draftMode?: boolean | undefined;
   version?: 'v1' | 'v2' | undefined;
   disableTools?: boolean | undefined;
+  agentSlug?: string | undefined;
 }
 
 type StreamSubscriber = (state: StreamState) => void;
@@ -884,6 +885,7 @@ class XyneAIStreamManager {
           ...(request.draftMode && { draftMode: true }),
           ...(request.version && { version: request.version }),
           ...(request.disableTools && { disableTools: true }),
+          ...(request.agentSlug && { agentSlug: request.agentSlug }),
         },
       },
     };

@@ -17,9 +17,13 @@ export class XyneAIControllerFactory {
   query = async (req: Request, res: Response): Promise<void> => {
     const requestVersion = req.body?.version as 'v1' | 'v2' | undefined;
     const version = requestVersion || config.askAI.version;
-    logger.info(`[XyneAI] Routing query to version: ${version} (request override: ${requestVersion || 'none'})`);
+    const agentSlug = req.body?.agentSlug || req.body?.agent_slug || 'ask-ai';
+    logger.info(`[XyneAI] Routing query to version: ${version} (request override: ${requestVersion || 'none'}, agentSlug: ${agentSlug})`);
 
-    if (version === 'v2') {
+    // If v1 is selected but a non-ask-ai claw agent is chosen, route to v2 (unified claw)
+    const useV2 = version === 'v2' || agentSlug !== 'ask-ai';
+
+    if (useV2) {
       return xyneAIControllerV2.query(req, res);
     } else {
       return xyneAIController.query(req, res);
@@ -164,7 +168,8 @@ export class XyneAIControllerFactory {
    * Approve or decline a pending write action (human-in-the-loop)
    */
   handleActionApproval = async (req: Request, res: Response): Promise<void> => {
-    if (config.askAI.version !== 'v2') {
+    const agentSlug = (req.body?.agentSlug || req.body?.agent_slug) as string | undefined;
+    if (config.askAI.version !== 'v2' && !agentSlug) {
       res.status(404).json({ error: 'v2 endpoints not enabled' });
       return;
     }
@@ -176,7 +181,8 @@ export class XyneAIControllerFactory {
    * List user's AI conversations from claw (v2 only)
    */
   listConversations = async (req: Request, res: Response): Promise<void> => {
-    if (config.askAI.version !== 'v2') {
+    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug) as string | undefined;
+    if (config.askAI.version !== 'v2' && !agentSlug) {
       res.status(404).json({ error: 'v2 endpoints not enabled' });
       return;
     }
@@ -188,7 +194,8 @@ export class XyneAIControllerFactory {
    * Get conversation messages from claw (v2 only)
    */
   getConversationMessages = async (req: Request, res: Response): Promise<void> => {
-    if (config.askAI.version !== 'v2') {
+    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug || req.body?.agentSlug || req.body?.agent_slug) as string | undefined;
+    if (config.askAI.version !== 'v2' && !agentSlug) {
       res.status(404).json({ error: 'v2 endpoints not enabled' });
       return;
     }
@@ -199,11 +206,20 @@ export class XyneAIControllerFactory {
    * Download attachment from claw - v2 only
    */
   downloadAttachment = async (req: Request, res: Response): Promise<void> => {
-    if (config.askAI.version !== 'v2') {
+    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug || req.body?.agentSlug || req.body?.agent_slug) as string | undefined;
+    if (config.askAI.version !== 'v2' && !agentSlug) {
       res.status(404).json({ error: 'v2 endpoints not enabled' });
       return;
     }
     return xyneAIControllerV2.downloadAttachment(req, res);
+  };
+
+  /**
+   * GET /api/xyne-ai/agents
+   * List all claw agents accessible to the current user.
+   */
+  listAccessibleAgents = async (req: Request, res: Response): Promise<void> => {
+    return xyneAIControllerV2.listAccessibleAgents(req, res);
   };
 }
 
