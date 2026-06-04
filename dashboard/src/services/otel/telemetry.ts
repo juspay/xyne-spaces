@@ -56,6 +56,17 @@ export function initializeTelemetry(): void {
 
     // Set as global meter provider
     metrics.setGlobalMeterProvider(meterProvider);
+
+    // Register performance observers
+    import('./perfMetrics')
+      .then(({ registerMemoryGauge, registerLongTaskObserver, registerWebVitals }) => {
+        registerMemoryGauge();
+        registerLongTaskObserver();
+        registerWebVitals();
+      })
+      .catch(() => {
+        // Non-critical — perf metrics registration failed
+      });
   } catch (error) {
     console.error('[OTel] Failed to initialize telemetry:', error);
     // Don't throw - telemetry failure shouldn't break the app

@@ -5,6 +5,7 @@ import { useAuth } from './AuthProvider';
 import { mutators } from '../zero/mutators';
 import { schema } from '@xyne/shared';
 import { VITE_ZERO_SERVER } from '../config';
+import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
 
@@ -71,6 +72,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
           memberId: user.memberId,
         },
         maxHeaderLength: 3072,
+        batchViewUpdates: createBatchViewUpdatesWithMetrics(),
         onUpdateNeeded: (reason: UpdateNeededReason): void => {
           void handleUpdateNeeded(reason);
         },

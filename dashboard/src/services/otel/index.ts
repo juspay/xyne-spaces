@@ -42,6 +42,15 @@ export {
 
 export { trackNudgeActed, trackNudgeDismissed } from './nudgeMetrics';
 
+export {
+  componentRenderDuration,
+  registerMemoryGauge,
+  registerLongTaskObserver,
+  registerWebVitals,
+  pokeRenderDuration,
+  createBatchViewUpdatesWithMetrics,
+} from './perfMetrics';
+
 export function safeRecordMetric(fn: () => void): void {
   if (!ENABLE_OTEL_METRICS) {
     return;

@@ -1,4 +1,5 @@
 import { memo, ReactElement, useRef, useState, useEffect } from 'react';
+import { withProfiler } from '../../../utils/withProfiler';
 import { Link, useNavigate } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X } from 'lucide-react';
 import { ChannelVisibility, ChannelScopeType, ChannelType, NotificationLevel } from '@xyne/shared';
@@ -327,4 +328,4 @@ const ChannelItemV2 = memo(
 
 ChannelItemV2.displayName = 'ChannelItemV2';
 
-export default ChannelItemV2;
+export default withProfiler(ChannelItemV2, 'ChannelItemV2');
