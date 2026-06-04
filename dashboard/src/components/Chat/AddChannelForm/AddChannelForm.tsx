@@ -3,7 +3,8 @@ import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
-import { Hash, Lock, AlertCircle } from 'lucide-react';
+import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import { Hash, Lock, AlertCircle, FolderKanban } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
 import {
@@ -117,8 +118,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const projectOptions = useMemo(
     () =>
       projects?.map(project => ({
-        label: project.name,
         value: project.id,
+        label: project.name,
+        icon: <FolderKanban className='w-4 h-4 text-muted-foreground' />,
       })) || [],
     [projects],
   );
@@ -596,33 +598,15 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       >
         {field => (
           <div className='space-y-1.5'>
-            <label htmlFor='project-select' className='text-sm font-medium text-foreground'>
-              Project *
-            </label>
-            <Select
-              value={field.state.value}
-              onValueChange={selected => field.handleChange(selected)}
-              disabled={projectOptions.length === 0}
-            >
-              <SelectTrigger
-                id='project-select'
-                data-testid='project-select-trigger'
-                className='w-full'
-              >
-                <SelectValue
-                  placeholder={
-                    projectOptions.length > 0 ? 'Select a project' : 'No projects available'
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {projectOptions.map(option => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <p className='text-sm font-medium text-foreground'>Project *</p>
+            <EntitySelector
+              options={projectOptions}
+              selectedValue={field.state.value || null}
+              onSelect={val => field.handleChange(val ?? '')}
+              placeholder={projectOptions.length > 0 ? 'Select a project' : 'No projects available'}
+              searchPlaceholder='Search projects...'
+              width='100%'
+            />
             {field.state.meta.errors.length > 0 && (
               <p className='text-sm text-destructive'>{field.state.meta.errors[0] as string}</p>
             )}
