@@ -505,7 +505,11 @@ export class XyneAIControllerV2 {
 
     try {
       const result = await getClawConversationMessages({ headers: req.headers, userId }, convId, agentSlug);
-      res.json(result);
+      res.json({
+        ...result,
+        ...(result.toolInvocations && { toolInvocations: result.toolInvocations }),
+        ...(result.invocationsByMsgId && { invocationsByMsgId: result.invocationsByMsgId }),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] getMessages error:', error);

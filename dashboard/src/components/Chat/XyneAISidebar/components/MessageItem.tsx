@@ -8,6 +8,7 @@ import {
   Download,
   Check,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -1087,6 +1088,43 @@ export const MessageItem = React.memo(
                 )}
               </div>
 
+              {/* Error display for bot messages */}
+              {message.type === 'bot' && message.errorInfo && (
+                <div className='mt-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3'>
+                  <div className='flex items-start gap-2'>
+                    <AlertTriangle size={14} className='mt-0.5 shrink-0 text-destructive' />
+                    <div className='flex-1 min-w-0'>
+                      <div className='text-xs font-medium text-destructive'>
+                        {message.errorInfo.title}
+                        {message.errorInfo.code && (
+                          <span className='ml-1 text-[10px] opacity-70'>
+                            ({message.errorInfo.code})
+                          </span>
+                        )}
+                      </div>
+                      <div className='mt-0.5 text-xs text-muted-foreground'>
+                        {message.errorInfo.message}
+                      </div>
+                      {message.errorInfo.helpText && (
+                        <div className='mt-1 text-[11px] text-muted-foreground/80'>
+                          {message.errorInfo.helpText}
+                        </div>
+                      )}
+                      {message.errorInfo.rawError && (
+                        <details className='mt-2'>
+                          <summary className='text-[10px] text-muted-foreground/60 cursor-pointer hover:text-muted-foreground'>
+                            Technical details
+                          </summary>
+                          <pre className='mt-1 max-h-32 overflow-y-auto rounded bg-muted p-2 text-[10px] text-muted-foreground whitespace-pre-wrap break-all'>
+                            {message.errorInfo.rawError}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Branch navigator for user messages (edit branches) - below the bubble */}
               {message.type === 'user' && branchInfo && onBranchNavigate && (
                 <div className='flex justify-end mt-1'>
@@ -1161,6 +1199,7 @@ export const MessageItem = React.memo(
       return (
         prev.message.id === next.message.id &&
         prev.message.content === next.message.content &&
+        prev.message.errorInfo === next.message.errorInfo &&
         prev.feedbackValue === next.feedbackValue
       );
     }
@@ -1174,6 +1213,7 @@ export const MessageItem = React.memo(
       prev.message.reasoning === next.message.reasoning &&
       prev.message.toolInvocations === next.message.toolInvocations &&
       prev.message.pendingActions === next.message.pendingActions &&
+      prev.message.errorInfo === next.message.errorInfo &&
       prev.feedbackValue === next.feedbackValue
     );
   },

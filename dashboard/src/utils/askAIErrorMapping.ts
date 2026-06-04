@@ -237,6 +237,7 @@ export function getAskAIErrorInfo(
         message: mapped.message,
         retryable: mapped.retryable,
         ...(mapped.helpText !== undefined && { helpText: mapped.helpText }),
+        ...(errorText && { rawError: errorText }),
       };
     }
     return {
@@ -246,6 +247,7 @@ export function getAskAIErrorInfo(
       helpText:
         'Try again. If this keeps happening, reduce context or contact a workspace administrator.',
       retryable: resolvedStatus >= 500 || resolvedStatus === 429,
+      ...(errorText && { rawError: errorText }),
     };
   }
 
@@ -271,6 +273,7 @@ export function getAskAIErrorInfo(
       helpText:
         'Try removing some channel context, long thread history, canvas selections, or attachments, then send the query again.',
       retryable: true,
+      ...(errorText && { rawError: errorText }),
     };
   }
 
@@ -285,14 +288,16 @@ export function getAskAIErrorInfo(
       message: matchedErrorClass.message,
       retryable: matchedErrorClass.retryable,
       ...(matchedErrorClass.helpText !== undefined && { helpText: matchedErrorClass.helpText }),
+      ...(errorText && { rawError: errorText }),
     };
   }
 
   return {
     code: 'UNKNOWN',
-    title: 'Ask AI couldn’t complete this request',
-    message: 'Something went wrong while generating a response.',
+    title: "Ask AI couldn't complete this request",
+    message: errorText || 'Something went wrong while generating a response.',
     helpText: 'Please try again. If this keeps happening, reduce the amount of context and retry.',
     retryable: true,
+    ...(errorText && { rawError: errorText }),
   };
 }
