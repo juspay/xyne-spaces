@@ -16,6 +16,7 @@ const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
     'bg-green-500/10 text-green-700 border-green-500/30 dark:text-green-400 dark:border-green-500/40',
   FAILED: 'bg-red-500/10 text-red-700 border-red-500/30 dark:text-red-400 dark:border-red-500/40',
   CANCELLED: 'bg-muted text-muted-foreground border-border',
+  SKIPPED: 'bg-muted text-muted-foreground border-border',
 };
 
 const STATUS_LABELS: Record<AutomationRunStatus, string> = {
@@ -25,6 +26,7 @@ const STATUS_LABELS: Record<AutomationRunStatus, string> = {
   COMPLETED: 'Completed',
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
+  SKIPPED: 'Skipped',
 };
 
 export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement {

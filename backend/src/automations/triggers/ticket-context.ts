@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ChannelType, EmailType, TicketPriority, TicketStatusV2 } from '@prisma/client';
 import { db } from '@/database/client';
+import { logger } from '@/utils/logger';
 
 const TicketSchema = z.object({
   id: z.string(),
@@ -353,9 +354,23 @@ export async function hydrateTicketBoundPayload<P extends { ticketId: string }>(
 ): Promise<P & Partial<TicketContext>> {
   const refreshed = await db.ticket
     .findUnique({ where: { id: payload.ticketId } })
-    .catch(() => null);
-  if (!refreshed) return payload;
+    .catch(err => {
+      logger.warn(
+        `[ticket-context] hydrateTicketBoundPayload: findUnique threw for ticketId=${payload.ticketId}:`,
+        err,
+      );
+      return null;
+    });
+  if (!refreshed) {
+    logger.warn(
+      `[ticket-context] hydrateTicketBoundPayload: ticket ${payload.ticketId} not found — returning payload WITHOUT ticket context (scope filters will treat ticket as absent)`,
+    );
+    return payload;
+  }
 
   const context = await buildTicketContext(refreshed);
+  logger.info(
+    `[ticket-context] hydrateTicketBoundPayload: resolved ticket ${payload.ticketId} → channelId=${refreshed.channelId ?? '∅'} boardId=${refreshed.boardId ?? '∅'} projectId=${refreshed.projectId ?? '∅'}`,
+  );
   return { ...payload, ...context };
 }

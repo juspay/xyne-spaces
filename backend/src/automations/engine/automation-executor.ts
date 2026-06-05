@@ -244,7 +244,7 @@ export class AutomationExecutor {
       );
       await this.prisma.workflowExecution.update({
         where: { id: executionId },
-        data: { status: AutomationRunStatus.COMPLETED },
+        data: { status: AutomationRunStatus.SKIPPED },
       });
       skeleton.__meta = { error: null, chain };
       await persistAutomationState(executionId, { context: JSON.stringify(skeleton) });

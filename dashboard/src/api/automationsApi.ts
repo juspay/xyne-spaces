@@ -50,6 +50,7 @@ export const AutomationRunStatusValues = {
   COMPLETED: 'COMPLETED',
   FAILED: 'FAILED',
   CANCELLED: 'CANCELLED',
+  SKIPPED: 'SKIPPED',
 } as const;
 export type AutomationRunStatus =
   (typeof AutomationRunStatusValues)[keyof typeof AutomationRunStatusValues];
