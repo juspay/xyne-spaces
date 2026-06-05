@@ -6,11 +6,12 @@
  * Recording persists across navigation via the global RecordingOverlay.
  */
 
-import { ReactElement, useState, useEffect, useRef } from 'react';
+import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { recordingService } from '../../services/Recording/recordingService';
 import { Mic, Clock, FileText, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
+import { ConnectionState } from 'livekit-client';
 import { formatDistanceToNow } from 'date-fns';
 import {
   useRecordingStore,
@@ -28,6 +29,11 @@ import {
   STT_MODEL_LABELS,
 } from '../../utils/recordingUtils';
 import { usePaginatedRecordings, type RecordingEntry } from '../../hooks/usePaginatedRecordings';
+import { useRecordingConnectionState } from './hooks/useRecordingConnectionState';
+import {
+  RecordingReconnectingOverlay,
+  RecordingConnectionWarningModal,
+} from './components/RecordingConnectionStatus';
 
 export default function RecordingsScreen(): ReactElement {
   const [error, setError] = useState<string | null>(null);
@@ -46,11 +52,22 @@ export default function RecordingsScreen(): ReactElement {
   const externalId = useRecordingStore(ctx => ctx.externalId);
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
+  const room = useRecordingStore(ctx => ctx.room);
 
   const isActive =
     recordingStatus === 'recording' ||
     recordingStatus === 'paused' ||
     recordingStatus === 'starting';
+
+  // Stable callback passed to the connection hook — stops the recording and
+  // shows the save-title modal when the room disconnects unexpectedly.
+  const handleUnexpectedDisconnect = useCallback((): void => {
+    sendRecordingEvent({ type: 'stopRecording' });
+    setShowTitleModal(true);
+  }, []);
+
+  const { roomConnectionState, showConnectionWarning, networkQuality, dismissConnectionWarning } =
+    useRecordingConnectionState(room, isActive, recordingStatus, handleUnexpectedDisconnect);
 
   // Live transcript streaming from global store (subscription is managed by the store)
   const { transcripts } = useTranscriptStream();
@@ -107,6 +124,9 @@ export default function RecordingsScreen(): ReactElement {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingStop, recordingStatus]);
+
+  // ─── REMOVED: connection state management moved to useRecordingConnectionState ───
+  // See hooks/useRecordingConnectionState.ts
 
   const handleSaveTitle = async (title: string): Promise<void> => {
     setSavingTitle(true);
@@ -379,7 +399,7 @@ export default function RecordingsScreen(): ReactElement {
 
       {/* ─── Active Recording View (slides in when recording) ───── */}
       <div
-        className='flex-1 overflow-hidden transition-transform duration-500 ease-in-out'
+        className='flex-1 overflow-hidden transition-transform duration-500 ease-in-out relative'
         style={{
           transform: isActive ? 'translateY(0)' : 'translateY(100%)',
           position: isActive ? 'relative' : 'absolute',
@@ -391,6 +411,9 @@ export default function RecordingsScreen(): ReactElement {
           startTime={startTime}
           isPaused={recordingStatus === 'paused'}
         />
+
+        {/* Reconnecting overlay — mirrors CallStateTransition style */}
+        {roomConnectionState === ConnectionState.Reconnecting && <RecordingReconnectingOverlay />}
       </div>
 
       {/* ─── Sticky Bottom Control Bar (always visible) ───── */}
@@ -412,6 +435,14 @@ export default function RecordingsScreen(): ReactElement {
         onSave={handleSaveTitle}
         isSaving={savingTitle}
       />
+
+      {/* ─── Connection Warning Modal ───── */}
+      {showConnectionWarning && isActive && (
+        <RecordingConnectionWarningModal
+          networkQuality={networkQuality}
+          onDismiss={dismissConnectionWarning}
+        />
+      )}
     </div>
   );
 }
