@@ -14,20 +14,22 @@ export class CanvasUserStatusACL extends BaseACL<'canvas_user_status'> {
       );
     }
 
-    if (canvas.channelId) {
-      const channel = await tx.run(zql.channels.where('id', canvas.channelId).one());
-      if (!channel || channel.workspaceId !== this.ctx.workspaceId) {
-        throw new MutationACLError(
-          'Canvas user status not found in this workspace',
-          'canvas_user_status',
-        );
-      }
-      return;
-    }
-
     const isCreator = canvas.createdBy === this.ctx.userID;
     const isParticipant = await tx.run(
-      zql.canvas_participants.where('canvasId', canvasId).where('userId', this.ctx.userID).one(),
+      zql.canvas_participants
+        .where('canvasId', canvasId)
+        .where(({ or, cmp, exists: ex }: any) =>
+          or(
+            cmp('userId', this.ctx.userID),
+            ex('userGroup', (ug: any) =>
+              ug.whereExists('userGroupMappings', (m: any) => m.where('userId', this.ctx.userID)),
+            ),
+            ex('channel', (ch: any) =>
+              ch.whereExists('participants', (cp: any) => cp.where('userId', this.ctx.userID)),
+            ),
+          ),
+        )
+        .one(),
     );
 
     if (!isCreator && !isParticipant && canvas.visibility !== CanvasVisibility.PUBLIC) {

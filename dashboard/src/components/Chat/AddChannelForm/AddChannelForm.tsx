@@ -600,6 +600,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           <div className='space-y-1.5'>
             <p className='text-sm font-medium text-foreground'>Project *</p>
             <EntitySelector
+              testId='project-select-trigger'
               options={projectOptions}
               selectedValue={field.state.value || null}
               onSelect={val => field.handleChange(val ?? '')}
