@@ -4,6 +4,9 @@ import { BaseQueryACL } from './base-acl';
 
 import {
   ActivitiesACL,
+  CollectionsACL,
+  CollectionItemsACL,
+  CollectionPermissionsACL,
   BoardComplexityScoresACL,
   BoardsACL,
   BookmarksACL,
@@ -188,6 +191,12 @@ export class QueryACLFactory {
         return new BaseQueryACL(ctx, table);
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
+      case 'collections':
+        return new CollectionsACL(ctx) as BaseQueryACL<TTable>;
+      case 'collection_items':
+        return new CollectionItemsACL(ctx) as BaseQueryACL<TTable>;
+      case 'collection_permissions':
+        return new CollectionPermissionsACL(ctx) as BaseQueryACL<TTable>;
       default:
         return new BaseQueryACL(ctx, table);
       case 'emails':

@@ -67,6 +67,7 @@ export interface StreamRequest {
   query: string;
   displayQuery?: string;
   channelIds: string[];
+  collectionIds?: string[];
   canvasIds?: string[] | undefined;
   ticketIds?: string[] | undefined;
   callIds?: string[] | undefined;
@@ -844,6 +845,8 @@ class XyneAIStreamManager {
           query: request.query,
           ...(request.displayQuery && { displayQuery: request.displayQuery }),
           channelIds: request.channelIds,
+          ...(request.collectionIds &&
+            request.collectionIds.length > 0 && { collectionIds: request.collectionIds }),
           ...(request.canvasIds &&
             request.canvasIds.length > 0 && { canvasIds: request.canvasIds }),
           ...(request.ticketIds &&

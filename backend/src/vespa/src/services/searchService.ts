@@ -190,7 +190,7 @@ export class SearchService {
           mail,
           useFuzzy,
           useSemanticAnyway,
-          wsId
+          wsId,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
@@ -262,7 +262,8 @@ export class SearchService {
       
       const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
 
-      const oldFallback = exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly
+      const isFileSearch = app.some(a => a.toLowerCase() === 'file');
+      const oldFallback = exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
 
       const FALLBACK_SCORE_THRESHOLD = await superpositionClient.getNumberValue(
         'vespa_fallback_score_threshold',
@@ -281,6 +282,7 @@ export class SearchService {
       const newFallback =
         searchQuery?.trim() &&
         !isTranscriptOnly &&
+        !isFileSearch &&
         goodResults.length < MIN_GOOD_RESULTS;
 
 

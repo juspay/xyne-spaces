@@ -18,7 +18,7 @@ import { PrismaClient } from '@prisma/client';
    
    export interface TransformedSearchResult {
      id: string;
-     type: 'user' | 'conversation' | 'channel' | 'ticket' | 'attachment';
+     type: 'user' | 'conversation' | 'channel' | 'ticket' | 'attachment' | 'collection';
      title: string; // Channel name for messages, document title for others
      subtitle: string;
      context?: string; // Message content for display (used by SearchResultItem)
@@ -57,7 +57,12 @@ import { PrismaClient } from '@prisma/client';
        callType?: string;
        mailId?: string;
        recipientCount?: number;
-     };
+       // Knowledge base / collection specific fields
+    projectId?: string;
+    collectionId?: string;
+    docId?: string;
+    folderId?: string;
+  };
      debugInfo?: {
        matchfeatures?: Record<string, any>;
        rankfeatures?: Record<string, any>;
@@ -101,11 +106,12 @@ import { PrismaClient } from '@prisma/client';
        return [];
      }
    
-     // Collect all user IDs and channel IDs we need to fetch
+     // Collect all user IDs, channel IDs, and collection IDs we need to fetch
      const userIdsToFetch = new Set<string>();
      const channelIdsToFetch = new Set<string>();
      const mailDocIds = new Set<string>();
-   
+     const collectionIdsToFetch = new Set<string>();
+
      hits.forEach((hit) => {
        const doc = hit.fields;
        const docType = doc.docType as string;
@@ -133,11 +139,16 @@ import { PrismaClient } from '@prisma/client';
          }
        }
    
+    // For collection documents, collect collectionId to fetch projectId
+    if (docType === 'file' && (doc as VespaFileDocument).subApp === 'collections' && (doc as VespaFileDocument).clId) {
+      collectionIdsToFetch.add((doc as VespaFileDocument).clId as string);
+    }
+
        // For messages in DMs/Group DMs, we need participant names from permissions
        if ((docType === 'message' || docType === 'chat_message') && 'permissions' in doc) {
          const msgDoc = doc as unknown as VespaChatMessageDocument & importedChannelFields;
          const scopeType = msgDoc.isIm ? 'DM' : msgDoc.isMpim ? 'GROUP_DM' : 'DEFAULT';
-         
+   
          // If it's a DM or Group DM and channelName is generic/missing, fetch participant names
          if ((scopeType === 'DM' || scopeType === 'GROUP_DM') && msgDoc.permissions) {
            msgDoc.permissions.forEach((userId: string) => userIdsToFetch.add(userId));
@@ -155,7 +166,7 @@ import { PrismaClient } from '@prisma/client';
        if ((docType === 'channel' || docType === 'chat_container') && 'permissions' in doc) {
          const channelDoc = doc as VespaChatContainerDocument;
          const scopeType = channelDoc.isIm ? 'DM' : channelDoc.isMpim ? 'GROUP_DM' : 'DEFAULT';
-         
+   
          if ((scopeType === 'DM' || scopeType === 'GROUP_DM') && channelDoc.permissions) {
            channelDoc.permissions.forEach((userId) => userIdsToFetch.add(userId));
          }
@@ -208,6 +219,44 @@ import { PrismaClient } from '@prisma/client';
        });
      }
    
+  // Batch fetch collection data (scopeType + scopeId) for collection documents
+  // Then resolve projectId from channel when scopeType === 'CHANNEL'
+  const collectionProjectMap: Record<string, { projectId: string; channelId: string }> = {};
+  if (collectionIdsToFetch.size > 0) {
+    const collections: { id: string; scopeType: string; scopeId: string }[] = await prisma.collection.findMany({
+      where: {
+        id: {
+          in: Array.from(collectionIdsToFetch),
+        },
+      },
+      select: {
+        id: true,
+        scopeType: true,
+        scopeId: true,
+      },
+    });
+
+    // Resolve projectId for CHANNEL-scoped collections
+    const channelScopeIds = collections
+      .filter(c => c.scopeType === 'CHANNEL')
+      .map(c => c.scopeId);
+
+    if (channelScopeIds.length > 0) {
+      const scopeChannels: { id: string; projectId: string }[] = await prisma.channel.findMany({
+        where: { id: { in: channelScopeIds } },
+        select: { id: true, projectId: true },
+      });
+      const channelProjectMap: Record<string, string> = {};
+      scopeChannels.forEach(ch => { channelProjectMap[ch.id] = ch.projectId; });
+
+      collections.forEach(collection => {
+        if (collection.scopeType === 'CHANNEL') {
+          const projectId = channelProjectMap[collection.scopeId] ?? '';
+          collectionProjectMap[collection.id] = { projectId, channelId: collection.scopeId };
+        }
+      });
+    }
+  }
      // Batch fetch mail → conversation → ticket mapping for Desk click-through.
      // Vespa stores the Postgres email.id directly as docId (see
      // ingest-mail-sample.ts), so we look up by id and the join is trivial.
@@ -238,9 +287,8 @@ import { PrismaClient } from '@prisma/client';
          };
        }
      }
-
      // Transform each hit
-     return hits.map((hit) => transformSingleHit(hit, userMap, mailMap));
+     return hits.map((hit) => transformSingleHit(hit, userMap, collectionProjectMap, mailMap));
    }
    
    /**
@@ -249,8 +297,9 @@ import { PrismaClient } from '@prisma/client';
    function transformSingleHit(
      hit: VespaSearchHit,
      userMap: UserMap,
+     collectionProjectMap: Record<string, { projectId: string; channelId: string }>,
      mailMap: MailMap,
-   ): TransformedSearchResult {
+): TransformedSearchResult {
      const doc = hit.fields;
      const docType = doc.docType as string;
    
@@ -281,8 +330,13 @@ import { PrismaClient } from '@prisma/client';
        //   break;
    
       case 'file':
-         result = transformFile(hit, doc as VespaFileDocument & Partial<importedChannelFields>);
-         break;
+         // Check if this is a collection document by subApp field
+      if ((doc as VespaFileDocument).subApp === 'collections') {
+        result = transformCollection(hit, doc as unknown as VespaFileDocument, collectionProjectMap);
+      } else {
+        result = transformFile(hit, doc as unknown as VespaFileDocument & Partial<importedChannelFields>);
+         }
+      break;
    
        case 'ticket':
          result = transformTicket(hit, doc as VespaTicketDocument & importedTicketFields, userMap);
@@ -448,7 +502,7 @@ import { PrismaClient } from '@prisma/client';
    }
    
    /**
-    * Transform file document
+    * Transform file document (non-collection files)
     */
    function transformFile(
      hit: VespaSearchHit,
@@ -494,6 +548,87 @@ import { PrismaClient } from '@prisma/client';
      };
    }
    
+/**
+ * Transform collection document (knowledge base file)
+ */
+function transformCollection(
+  hit: VespaSearchHit,
+  doc: VespaFileDocument,
+  collectionProjectMap: Record<string, { projectId: string; channelId: string }>,
+): TransformedSearchResult {
+  // Handle potentially invalid createdAt timestamp
+  let timestamp = '';
+  try {
+    if (doc.createdAt) {
+      const date = new Date(doc.createdAt);
+      if (!isNaN(date.getTime())) {
+        timestamp = formatTimestamp(date.toISOString());
+      }
+    }
+  } catch (error) {
+    logger.warn('Invalid createdAt for collection:', doc.docId, doc.createdAt);
+  }
+
+  // Extract collection ID and document name
+  const collectionId = doc.clId;
+  const docName = doc.fileName;
+
+  // Find the best matching chunk using chunk_scores from Vespa matchfeatures
+  const chunkScores = (hit.fields as any)?.matchfeatures?.chunk_scores;
+  let chunkIndex = 0;
+
+  if (chunkScores?.cells && typeof chunkScores.cells === 'object') {
+    let maxScore = -Infinity;
+    for (const [idx, score] of Object.entries(chunkScores.cells)) {
+      if (typeof score === 'number' && score > maxScore) {
+        maxScore = score;
+        chunkIndex = parseInt(idx, 10);
+      }
+    }
+  }
+
+  // Clamp to valid range
+  if (!doc.chunks || chunkIndex >= doc.chunks.length) {
+    chunkIndex = 0;
+  }
+
+  const chunkContent = doc.chunks?.[chunkIndex] || '';
+
+  // Parse metadata for collection name if available
+  let collectionName: string | undefined;
+  try {
+    if (doc.metadata) {
+      const metadata = JSON.parse(doc.metadata);
+      collectionName = metadata.collectionName;
+    }
+  } catch (error) {
+    logger.warn('Failed to parse metadata for collection:', doc.docId);
+  }
+
+  const scopeEntry = collectionId ? collectionProjectMap[collectionId] : undefined;
+
+  return {
+    id: doc.docId,
+    type: 'collection',
+    title: docName || 'Unknown Document',
+    subtitle: collectionName || 'Unknown Collection',
+    context: chunkContent || doc.description || '',
+    relevanceScore: hit.relevance,
+    avatar: doc.ownerId,
+    metadata: {
+      timestamp: timestamp || 'N/A',
+    },
+    searchContext: {
+      projectId: scopeEntry?.projectId,
+      channelId: scopeEntry?.channelId,
+      collectionId,
+      docId: doc.docId,
+      folderId: doc.clFd || undefined,
+      internalUrl: `/collections/items/${doc.docId}/download`,
+    },
+  };
+}
+
    /**
     * Transform ticket document
     */

@@ -121,6 +121,7 @@ export enum AttachmentEntityType {
   DELAYED_MESSAGE = 'DELAYED_MESSAGE',
   EMAIL = 'EMAIL',
   IMPACT = 'IMPACT',
+  COLLECTION = 'COLLECTION',
 }
 
 // @ts-ignore TS1294
@@ -744,6 +745,22 @@ export enum DelayedMessageStatus {
 export enum AttachmentUploadStatus {
   PENDING = 'PENDING',
   STARTED = 'STARTED',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+}
+
+// @ts-ignore TS1294
+export enum CollectionRole {
+  OWNER = 'OWNER',
+  EDITOR = 'EDITOR',
+  VIEWER = 'VIEWER',
+}
+
+// @ts-ignore TS1294
+export enum IngestionStatus {
+  NONE = 'NONE',
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
 }
@@ -2277,6 +2294,58 @@ export const savedUserConfigurationValueTable = table('saved_user_configuration_
   })
   .primaryKey('id');
 
+
+// Knowledge Base / Collection tables
+
+export const collectionTable = table('collections')
+  .columns({
+    id: string(),
+    parentId: string().optional(),
+    ownerId: string(),
+    name: string(),
+    scopeType: string(),
+    scopeId: string(),
+    description: string().optional(),
+    isPrivate: boolean(),
+    rootCollectionId: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+    deletedAt: number().optional(),
+  })
+  .primaryKey('id');
+
+export const collectionItemTable = table('collection_items')
+  .columns({
+    id: string(),
+    rootCollectionId: string(),
+    collectionId: string(),
+    fileId: string(),
+    ownerId: string(),
+    name: string(),
+    uploadedById: string().optional(),
+    ingestionStatus: enumeration<IngestionStatus>(),
+    versionNumber: number(),
+    isLatest: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
+    deletedAt: number().optional(),
+  })
+  .primaryKey('id');
+
+export const collectionPermissionTable = table('collection_permissions')
+  .columns({
+    id: string(),
+    collectionId: string(),
+    userId: string().optional(),
+    userGroupId: string().optional(),
+    role: enumeration<CollectionRole>(),
+    canShare: boolean(),
+    grantedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 // Define relationships
 
 export const merchantTable = table('merchants')
@@ -2888,6 +2957,11 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ one,
     destField: ['userGroupId'],
     destSchema: userGroupMappingTable,
   }),
+  collectionPermissions: many({
+    sourceField: ['id'],
+    destField: ['userGroupId'],
+    destSchema: collectionPermissionTable,
+  }),
 }));
 
 export const userTableRelationships = relationships(userTable, ({ one, many }) => ({
@@ -2960,6 +3034,57 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ['id'],
     destField: ['userId'],
     destSchema: installedAppsTable,
+  }),
+  collectionPermissions: many({
+    sourceField: ['id'],
+    destField: ['userId'],
+    destSchema: collectionPermissionTable,
+  }),
+}));
+
+// Knowledge Base / Collection relationships
+
+export const collectionTableRelationships = relationships(collectionTable, ({ many }) => ({
+  items: many({
+    sourceField: ['id'],
+    destField: ['collectionId'],
+    destSchema: collectionItemTable,
+  }),
+  permissions: many({
+    sourceField: ['rootCollectionId'],
+    destField: ['collectionId'],
+    destSchema: collectionPermissionTable,
+  }),
+}));
+
+export const collectionItemTableRelationships = relationships(collectionItemTable, ({ one }) => ({
+  collection: one({
+    sourceField: ['collectionId'],
+    destField: ['id'],
+    destSchema: collectionTable,
+  }),
+  attachment: one({
+    sourceField: ['id'],
+    destField: ['entityId'],
+    destSchema: messageAttachmentTable,
+  }),
+}));
+
+export const collectionPermissionTableRelationships = relationships(collectionPermissionTable, ({ one }) => ({
+  collection: one({
+    sourceField: ['collectionId'],
+    destField: ['id'],
+    destSchema: collectionTable,
+  }),
+  user: one({
+    sourceField: ['userId'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+  userGroup: one({
+    sourceField: ['userGroupId'],
+    destField: ['id'],
+    destSchema: userGroupTable,
   }),
 }));
 
@@ -4219,6 +4344,10 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTable,
     savedUserConfigurationValueTable,
+    // Knowledge Base
+    collectionTable,
+    collectionItemTable,
+    collectionPermissionTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -4324,6 +4453,10 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTableRelationships,
     savedUserConfigurationValueTableRelationships,
+    // Knowledge Base
+    collectionTableRelationships,
+    collectionItemTableRelationships,
+    collectionPermissionTableRelationships,
   ],
 });
 
@@ -4439,6 +4572,11 @@ export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 // Saved Views Types
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+
+// Knowledge Base Types
+export type Collection = Row<typeof schema.tables.collections>;
+export type CollectionItem = Row<typeof schema.tables.collection_items>;
+export type CollectionPermission = Row<typeof schema.tables.collection_permissions>;
 
 export type Context = {
   userID: string;

@@ -13,8 +13,10 @@ import WorkflowScreen from './WorkflowScreen/WorkflowScreen';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
-import KnowledgeBaseScreen from './KnowledgeBaseScreen/KnowledgeBase';
+import { KnowledgeBaseLayout } from './KnowledgeBaseScreen';
 import { MemoryScreen } from './MemoryScreen';
+import { TreeLayout } from '../components/knowledgeBase/layout/TreeLayout';
+import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
@@ -158,6 +160,7 @@ import Inspector from '../components/Inspector/Inspector';
 import { buildGrafanaLogsExploreUrl } from '../components/Inspector/grafanaUrl';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
+import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { getTicketsPath } from '../components/ErrorReportModal/ErrorReportModal.utils';
@@ -312,6 +315,8 @@ const AppRoot = (): ReactElement => {
   const xyneAICanvasInfo = useSelector(xyneAIActor, state => state.context.canvasInfo);
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
+  const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
+  const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
 
@@ -525,6 +530,8 @@ const AppRoot = (): ReactElement => {
                             threadInfo={xyneAIThreadInfo}
                             startFreshChat={xyneAIStartFreshChat}
                             canvasInfo={xyneAICanvasInfo}
+                            kbCollectionId={xyneAIKbCollectionId ?? ''}
+                            kbChannelId={xyneAIKbChannelId ?? ''}
                           />
                         </XyneAISidebarZIndexShell>
                       </Panel>
@@ -612,6 +619,7 @@ const AppRoot = (): ReactElement => {
                     <IncomingCallModal />
                     <GlobalCallOverlay />
                     <RecordingOverlay />
+                    <GlobalUploadProgress />
                     <NotificationHandler />
                     <CallFromRecentsHandler />
                     <BrowserPanelHandler />
@@ -624,6 +632,7 @@ const AppRoot = (): ReactElement => {
                 )}
                 <AttachmentGalleryModal />
                 <ThreadCitationModal />
+                <AttachmentCitationPreview />
                 <ErrorReportModal
                   isOpen={isErrorReportOpen}
                   onClose={() => setIsErrorReportOpen(false)}
@@ -658,6 +667,8 @@ const AppRoot = (): ReactElement => {
                       threadInfo={xyneAIThreadInfo}
                       startFreshChat={xyneAIStartFreshChat}
                       canvasInfo={xyneAICanvasInfo}
+                      kbCollectionId={xyneAIKbCollectionId ?? ''}
+                      kbChannelId={xyneAIKbChannelId ?? ''}
                     />
                   </Drawer>
                 )}
@@ -913,12 +924,36 @@ export const router = createBrowserRouter([
                 ),
               },
               {
+                // Layout route: providers live here and persist across all child routes.
+                // Navigating between TreeLayout ↔ FileViewerLayout never remounts providers.
                 path: 'knowledge-base',
-                element: (
-                  <ResourceProtectedRoute resourceName='KNOWLEDGE-BASE'>
-                    <KnowledgeBaseScreen />
-                  </ResourceProtectedRoute>
-                ),
+                element: <KnowledgeBaseLayout />,
+                children: [
+                  {
+                    index: true,
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId',
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId/:channelId',
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId/:channelId/:collectionId',
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId/:channelId/:collectionId/:folderId',
+                    element: <TreeLayout />,
+                  },
+                  {
+                    path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+                    element: <FileViewerLayout />,
+                  },
+                ],
               },
               {
                 path: 'memory',

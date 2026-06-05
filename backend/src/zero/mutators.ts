@@ -43,6 +43,7 @@ import {
   BaseTicketType,
   getNudgeActionBehavior,
   LinkVisibility,
+  CollectionRole,
   NudgeState,
   SurfaceAreaType,
   SurfaceLinkKind,
@@ -76,6 +77,9 @@ import { generatePlainTextContent } from "@/utils/contentUtils";
 import { extractAllMentions } from '@/utils/mentionParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
+import { db } from '@/database/client';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { notificationService } from '@/services/notificationService';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
 import { convert } from 'html-to-text';
@@ -105,6 +109,8 @@ import {
 import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
+import vespaClient from '@/vespa/client';
+import { fileSchema } from '@/vespa/src/types';
 
 const storageService = getStorageService();
 
@@ -11667,6 +11673,499 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         z.object({ id: z.string() }),
         async ({ tx, args: { id } }) => {
           await tx.mutate.board_sla_policies.update({ id, isActive: false, updatedAt: Date.now() });
+        },
+      ),
+    },
+    collection: {
+      createCollection: defineMutator(
+        z.object({
+          id: z.string(),
+          scopeType: z.string(),
+          scopeId: z.string(),
+          name: z.string(),
+          description: z.string().nullable().optional(),
+          isPrivate: z.boolean().optional(),
+          permissionId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, scopeType, scopeId, name, description, isPrivate, permissionId, timestamp } }) => {
+          // Verify user is a channel participant (for CHANNEL scope)
+          if (scopeType === 'CHANNEL') {
+            const isParticipant = await tx.run(
+              zql.channels
+                .where('id', scopeId)
+                .whereExists('participants', (p) => p.where('userId', authData.sub))
+                .one(),
+            );
+            if (!isParticipant) {
+              throw new Error('Collection creation failed: you must be a channel participant');
+            }
+          }
+
+          // Check for existing non-deleted collection with same name in this scope
+          const existingCollection = await db.collection.findFirst({
+            where: { ownerId: authData.sub, name, scopeType, scopeId, deletedAt: null },
+            select: { id: true },
+          });
+          if (existingCollection) {
+            throw new Error(`Collection "${name}" already exists`);
+          }
+
+          await tx.mutate.collections.insert({
+            id,
+            scopeType,
+            scopeId,
+            name,
+            description: description ?? undefined,
+            ownerId: authData.sub,
+            isPrivate: isPrivate ?? false,
+            rootCollectionId: id,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+
+          // Add creator as OWNER in collection_permissions
+          await tx.mutate.collection_permissions.insert({
+            id: permissionId,
+            collectionId: id,
+            userId: authData.sub,
+            role: CollectionRole.OWNER,
+            canShare: true,
+            grantedBy: authData.sub,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+
+      updateCollection: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().optional(),
+          description: z.string().nullable().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, name, description, timestamp } }) => {
+          const collection = await tx.run(zql.collections.where('id', id).one());
+          if (!collection) {
+            throw new Error('Collection not found');
+          }
+
+          // Verify OWNER or EDITOR permission
+          const isOwner = collection.ownerId === authData.sub;
+          if (!isOwner && collection.isPrivate) {
+            const permission = await tx.run(
+              zql.collection_permissions
+                .where('collectionId', id)
+                .where('userId', authData.sub)
+                .one(),
+            );
+            if (!permission || permission.role === CollectionRole.VIEWER) {
+              throw new Error('Collection update failed: requires EDITOR or OWNER permission');
+            }
+          }
+
+          await tx.mutate.collections.update({
+            id,
+            ...(name !== undefined && { name }),
+            ...(description !== undefined && { description: description ?? undefined }),
+            updatedAt: timestamp,
+          });
+        },
+      ),
+
+      deleteCollection: defineMutator(
+        z.object({
+          id: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, timestamp } }) => {
+          const collection = await tx.run(zql.collections.where('id', id).one());
+          if (!collection) {
+            throw new Error('Collection not found');
+          }
+          if (collection.ownerId !== authData.sub) {
+            throw new Error('Collection deletion failed: only the owner can delete a collection');
+          }
+
+          await tx.mutate.collections.update({
+            id,
+            deletedAt: timestamp,
+          });
+
+          // Cascade soft-delete to all items in the collection
+          const items = await tx.run(
+            zql.collection_items.where('collectionId', id).where('deletedAt', 'IS', null),
+          );
+
+          for (const item of items) {
+            await tx.mutate.collection_items.update({ id: item.id, deletedAt: timestamp });
+          }
+
+          // Queue Vespa delete jobs for all affected items
+          for (const item of items) {
+            const docItemId = item.id;
+            asyncTasks.push(async () => {
+              try {
+                await vespaQueue.addJob({
+                  schema: 'file',
+                  docId: docItemId,
+                  jobType: 'delete',
+                  userId: authData.sub,
+                });
+              } catch (error) {
+                logger.error(
+                  `[MUTATOR-DELETE-COLLECTION] Failed to queue Vespa delete for item ${docItemId}:`,
+                  error,
+                );
+              }
+            });
+          }
+        },
+      ),
+
+      createFolder: defineMutator(
+        z.object({
+          id: z.string(),
+          parentId: z.string(),
+          name: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, parentId, name, timestamp } }) => {
+          const parentCollection = await tx.run(zql.collections.where('id', parentId).one());
+          if (!parentCollection) {
+            throw new Error('Collection not found');
+          }
+
+          // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
+          const rootCollectionId = parentCollection.rootCollectionId ?? parentId;
+          const isOwner = parentCollection.ownerId === authData.sub;
+          if (!isOwner && parentCollection.isPrivate) {
+            const permission = await tx.run(
+              zql.collection_permissions
+                .where('collectionId', rootCollectionId)
+                .where('userId', authData.sub)
+                .one(),
+            );
+            if (!permission || permission.role === CollectionRole.VIEWER) {
+              throw new Error('Folder creation failed: requires EDITOR or OWNER permission');
+            }
+          }
+
+          await tx.mutate.collections.insert({
+            id,
+            parentId,
+            ownerId: authData.sub,
+            name,
+            scopeType: parentCollection.scopeType,
+            scopeId: parentCollection.scopeId,
+            isPrivate: parentCollection.isPrivate,
+            rootCollectionId: parentCollection.rootCollectionId ?? parentId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+
+      deleteItem: defineMutator(
+        z.object({
+          id: z.string(),
+          collectionId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, collectionId, timestamp } }) => {
+          const collection = await tx.run(zql.collections.where('id', collectionId).one());
+          if (!collection) {
+            throw new Error('Collection not found');
+          }
+
+          // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
+          const rootCollectionId = collection.rootCollectionId ?? collectionId;
+          const isOwner = collection.ownerId === authData.sub;
+          if (!isOwner && collection.isPrivate) {
+            const permission = await tx.run(
+              zql.collection_permissions
+                .where('collectionId', rootCollectionId)
+                .where('userId', authData.sub)
+                .one(),
+            );
+            if (!permission || permission.role === CollectionRole.VIEWER) {
+              throw new Error('Item deletion failed: requires EDITOR or OWNER permission');
+            }
+          }
+
+          // In the new design, folders are Collection rows and files are CollectionItem rows.
+          const folder = await tx.run(zql.collections.where('id', id).one());
+          if (folder) {
+            // Deleting a folder: soft-delete the sub-collection and all its files
+            await tx.mutate.collections.update({ id, deletedAt: timestamp });
+
+            const folderItems = await tx.run(
+              zql.collection_items.where('collectionId', id).where('deletedAt', 'IS', null),
+            );
+            for (const item of folderItems) {
+              await tx.mutate.collection_items.update({ id: item.id, deletedAt: timestamp });
+              asyncTasks.push(async () => {
+                try {
+                  await vespaQueue.addJob({
+                    schema: 'file',
+                    docId: item.id,
+                    jobType: 'delete',
+                    userId: authData.sub,
+                  });
+                } catch (error) {
+                  logger.error(`[MUTATOR-DELETE-ITEM] Failed to queue Vespa delete for item ${item.id}:`, error);
+                }
+              });
+            }
+          } else {
+            // Deleting a file
+            await tx.mutate.collection_items.update({ id, deletedAt: timestamp });
+            asyncTasks.push(async () => {
+              try {
+                await vespaQueue.addJob({
+                  schema: 'file',
+                  docId: id,
+                  jobType: 'delete',
+                  userId: authData.sub,
+                });
+              } catch (error) {
+                logger.error(`[MUTATOR-DELETE-ITEM] Failed to queue Vespa delete for item ${id}:`, error);
+              }
+            });
+          }
+        },
+      ),
+
+      renameItem: defineMutator(
+        z.object({
+          id: z.string(),
+          collectionId: z.string(),
+          name: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, collectionId, name, timestamp } }) => {
+          const collection = await tx.run(zql.collections.where('id', collectionId).one());
+          if (!collection) {
+            throw new Error('Collection not found');
+          }
+
+          // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
+          const rootCollectionId = collection.rootCollectionId ?? collectionId;
+          const isOwner = collection.ownerId === authData.sub;
+          if (!isOwner && collection.isPrivate) {
+            const permission = await tx.run(
+              zql.collection_permissions
+                .where('collectionId', rootCollectionId)
+                .where('userId', authData.sub)
+                .one(),
+            );
+            if (!permission || permission.role === CollectionRole.VIEWER) {
+              throw new Error('Item rename failed: requires EDITOR or OWNER permission');
+            }
+          }
+
+          await tx.mutate.collection_items.update({
+            id,
+            name,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+
+      grantPermission: defineMutator(
+        z.object({
+          id: z.string(),
+          collectionId: z.string(),
+          userId: z.string().optional(),
+          userGroupId: z.string().optional(),
+          role: z.nativeEnum(CollectionRole),
+          canShare: z.boolean(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, collectionId, userId, userGroupId, role, canShare, timestamp } }) => {
+          const collection = await tx.run(zql.collections.where('id', collectionId).one());
+          if (!collection) {
+            throw new Error('Collection not found');
+          }
+    if (collection.ownerId !== authData.sub) {
+      const rootCollectionId = collection.rootCollectionId ?? collectionId;
+      const granterPermission = await tx.run(
+        zql.collection_permissions
+          .where('collectionId', rootCollectionId)
+          .where('userId', authData.sub)
+          .one(),
+      );
+      if (!granterPermission || !granterPermission.canShare) {
+        throw new Error('Permission grant failed: only owners or users with canShare can grant permissions');
+      }
+
+      // Prevent role escalation: non-owners cannot grant a role higher than their own
+      const granterRole = granterPermission.role;
+      if (role === CollectionRole.OWNER) {
+        throw new Error('Permission grant failed: only the owner can grant OWNER role');
+      }
+      if (granterRole === CollectionRole.VIEWER && role !== CollectionRole.VIEWER) {
+        throw new Error('Permission grant failed: VIEWERs can only grant VIEWER role');
+      }
+      // Prevent granting canShare if the granter doesn't have it (already checked above, but also block passing it through)
+      if (canShare && !granterPermission.canShare) {
+        throw new Error('Permission grant failed: you do not have permission to grant share access');
+      }
+    }
+
+    // Prevent sharing with the collection owner
+    if (userId && userId === collection.ownerId) {
+      throw new Error('Cannot share collection with its owner');
+    }
+
+    const existing = userId
+            ? await tx.run(
+                zql.collection_permissions
+                  .where('collectionId', collectionId)
+                  .where('userId', userId)
+                  .one(),
+              )
+            : null;
+
+          if (existing) {
+            await tx.mutate.collection_permissions.update({
+              id: existing.id,
+              role,
+              canShare,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.collection_permissions.insert({
+              id,
+              collectionId,
+              userId,
+              userGroupId,
+              role,
+              canShare,
+              grantedBy: authData.sub,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+
+          // Sync updated permissions to Vespa for all files in the collection
+          asyncTasks.push(async () => {
+            try {
+              const allPerms = await db.collectionPermission.findMany({
+                where: { collectionId },
+                select: { userId: true },
+              });
+              const newPermissions = allPerms
+                .map(p => p.userId)
+                .filter((id): id is string => id !== null);
+
+              const files = await db.collectionItem.findMany({
+                where: { rootCollectionId: collectionId, isLatest: true, deletedAt: null },
+                select: { fileId: true },
+              });
+
+              await Promise.all(
+                files.map(file =>
+                  vespaClient.crudService.update(
+                    [{ docId: file.fileId, fields: { permissions: newPermissions } }],
+                    fileSchema,
+                  ).catch(err => {
+                    logger.warn(`[MUTATOR-GRANT-PERMISSION] Vespa update failed for ${file.fileId}`, {
+                      error: err instanceof Error ? err.message : String(err),
+                    });
+                  }),
+                ),
+              );
+              logger.info(`[MUTATOR-GRANT-PERMISSION] Synced Vespa permissions for ${files.length} files in collection ${collectionId}`);
+            } catch (error) {
+              logger.error(`[MUTATOR-GRANT-PERMISSION] Failed to sync Vespa permissions for collection ${collectionId}:`, error);
+            }
+          });
+
+          if (userId) {
+            asyncTasks.push(async () => {
+              try {
+                const granterUser = await db.user.findUnique({
+                  where: { id: authData.sub },
+                  select: { name: true },
+                });
+                const senderName = granterUser?.name || authData.email;
+                await notificationService.createNotification(userId, {
+                  type: 'DIRECT_MESSAGE' as any,
+                  title: 'Collection shared with you',
+                  message: `"${collection.name}" was shared with you as ${role} by ${senderName}`,
+                  actionUrl: `/knowledge-base`,
+                  relatedEntityType: 'collection' as any,
+                  relatedEntityId: collectionId,
+                  metadata: {
+                    notificationType: 'collection_shared',
+                    collectionId,
+                    collectionName: collection.name,
+                    scopeType: collection.scopeType,
+                    scopeId: collection.scopeId,
+                    role,
+                    sharedBy: senderName,
+                    sharedById: authData.sub,
+                  },
+                });
+              } catch (error) {
+                logger.error(`[MUTATOR-GRANT-PERMISSION] Failed to send notification to user ${userId}:`, error);
+              }
+            });
+          }
+        },
+      ),
+
+      revokePermission: defineMutator(
+        z.object({
+          id: z.string(),
+          collectionId: z.string(),
+        }),
+        async ({ tx, args: { id, collectionId } }) => {
+          const collection = await tx.run(zql.collections.where('id', collectionId).one());
+          if (!collection) {
+            throw new Error('Collection not found');
+          }
+          if (collection.ownerId !== authData.sub) {
+            throw new Error('Permission revoke failed: only the owner can revoke permissions');
+          }
+
+          await tx.mutate.collection_permissions.delete({ id });
+
+          // Sync updated permissions to Vespa for all files in the collection
+          asyncTasks.push(async () => {
+            try {
+              const allPerms = await db.collectionPermission.findMany({
+                where: { collectionId },
+                select: { userId: true },
+              });
+              const newPermissions = allPerms
+                .map(p => p.userId)
+                .filter((id): id is string => id !== null);
+
+              const files = await db.collectionItem.findMany({
+                where: { rootCollectionId: collectionId, isLatest: true, deletedAt: null },
+                select: { fileId: true },
+              });
+
+              await Promise.all(
+                files.map(file =>
+                  vespaClient.crudService.update(
+                    [{ docId: file.fileId, fields: { permissions: newPermissions } }],
+                    fileSchema,
+                  ).catch(err => {
+                    logger.warn(`[MUTATOR-REVOKE-PERMISSION] Vespa update failed for ${file.fileId}`, {
+                      error: err instanceof Error ? err.message : String(err),
+                    });
+                  }),
+                ),
+              );
+              logger.info(`[MUTATOR-REVOKE-PERMISSION] Synced Vespa permissions for ${files.length} files in collection ${collectionId}`);
+            } catch (error) {
+              logger.error(`[MUTATOR-REVOKE-PERMISSION] Failed to sync Vespa permissions for collection ${collectionId}:`, error);
+            }
+          });
         },
       ),
     },

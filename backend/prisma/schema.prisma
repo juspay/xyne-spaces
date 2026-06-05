@@ -186,6 +186,7 @@ enum AttachmentEntityType {
   DELAYED_MESSAGE
   WORKFLOW_STEPS
   IMPACT
+  COLLECTION
   @@schema("public")
 }
 
@@ -1010,6 +1011,7 @@ model UserGroup {
   workloadMappings     UserWorkloadMapping[]
   expertiseMappings    UserExpertiseMapping[]
   isActive    Boolean     @default(true)
+  collectionPermissions CollectionPermission[]
   workspace            Workspace            @relation(fields: [workspaceId], references: [id])
 
   @@unique([workspaceId, name])
@@ -1129,6 +1131,7 @@ model User {
   orgMember                 OrgMember?              @relation(fields: [orgMemberId], references: [memberId])
   externalTokens            UserExternalToken[]
 
+  permissions CollectionPermission[]
   @@unique([providerUserId, workspaceId])
   @@unique([email, workspaceId])
   @@index([email])
@@ -3336,6 +3339,115 @@ model ActivityAlias {
   @@schema("workflow")
 }
 
+// Collection-related Enums
+enum IngestionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  NONE
+  @@schema("public")
+}
+
+enum CollectionRole {
+  OWNER
+  EDITOR
+  VIEWER
+  @@schema("public")
+}
+
+// Collection serves as BOTH the root collection AND any sub-folder.
+// parentId = null  →  root collection (has its own permissions)
+// parentId = <id>  →  sub-folder whose parent is that Collection row
+//
+// Scoping uses a generic (scopeType, scopeId) pair so future scopes (THREAD, TICKET, etc.)
+// require no schema changes — just a new scopeType value.
+// Current scope: scopeType = 'CHANNEL', scopeId = <channelId>
+model Collection {
+  id              String    @id @default(cuid())
+  parentId        String?                        // null = root; non-null = sub-folder
+  ownerId         String
+  name            String
+  scopeType       String                         // e.g. 'CHANNEL' — entity type that owns this collection
+  scopeId         String                         // ID of the scoped entity (e.g. channelId)
+  description     String?
+  isPrivate       Boolean   @default(false)
+  rootCollectionId String?                        // null for root collections; root Collection.id for sub-folders
+
+  createdAt       DateTime
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  parent      Collection?          @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  children    Collection[]         @relation("FolderTree")
+  files       CollectionItem[]
+  permissions CollectionPermission[]
+
+  // Sub-folder name uniqueness enforced by DB; root-level uniqueness per owner/scope enforced in app code
+  // (PostgreSQL treats NULL != NULL so @@unique([parentId, name]) allows multiple roots)
+  @@unique([parentId, name], map: "unique_collection_parent_name")
+  @@index([id, ownerId], map: "idx_collections_id_owner")
+  @@index([deletedAt, createdAt, id], map: "idx_collections_deleted_created_id")
+  @@index([parentId, deletedAt], map: "idx_collections_parent_deleted")
+  @@index([rootCollectionId, deletedAt], map: "idx_collections_root_collection_deleted")
+  @@index([scopeType, scopeId, deletedAt], map: "idx_collections_scope_deleted")
+  @@map("collections")
+  @@schema("public")
+}
+
+// CollectionItem holds FILES only (no folders — those are Collection rows).
+// fileId is a stable UUID shared across all versions of the same file.
+// isLatest = true  →  current version, visible in folder listings
+// isLatest = false →  historical version, hidden from normal listings
+model CollectionItem {
+  id               String       @id @default(cuid())
+  rootCollectionId String                    // root Collection.id — for O(1) collection-scope queries
+  collectionId     String                    // immediate parent folder Collection.id
+  fileId           String                    // stable UUID shared across all versions of this file
+
+  ownerId          String
+  name             String
+  uploadedById     String?
+
+  ingestionStatus  IngestionStatus @default(NONE)
+  versionNumber    Int          @default(1)
+  isLatest         Boolean      @default(true)
+  createdAt        DateTime
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  collection  Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@index([fileId], map: "idx_items_file_id")
+  @@index([rootCollectionId, isLatest, deletedAt, createdAt, id], map: "idx_items_root_collection_latest")
+  @@index([collectionId, isLatest, deletedAt, createdAt, id], map: "idx_items_collection_latest")
+  @@map("collection_items")
+  @@schema("public")
+}
+
+model CollectionPermission {
+  id           String         @id @default(cuid())
+  collectionId String
+  userId       String?
+  userGroupId  String?
+  role         CollectionRole
+  canShare     Boolean        @default(false)
+  grantedBy    String?
+  createdAt    DateTime
+  updatedAt    DateTime       @updatedAt
+
+  collection Collection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  user       User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userGroup  UserGroup?  @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, userId])
+  @@unique([collectionId, userGroupId])
+  @@index([userGroupId])
+  @@index([collectionId, userId, id], map: "idx_collection_permissions_collection_user_id")
+  @@map("collection_permissions")
+  @@schema("public")
+}
+
 model StageApprovers {
   id                   String       @id @default(cuid())
   userId               String
@@ -3890,7 +4002,6 @@ model DelayedMessage {
   @@map("delayed_messages")
   @@schema("public")
 }
-
 
 model DataSource {
   id                    String    @id @default(cuid())

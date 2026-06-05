@@ -1,9 +1,7 @@
 import Bull from 'bull';
 import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
-import { InsertDocument, fileSchema, samTranscriptSchema, VespaSchema } from '@/vespa/src/types';
-import { config } from '@/config/env';
-import { superpositionClient } from '@/services/superpositionClient';
+import { InsertDocument, samTranscriptSchema, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
@@ -170,17 +168,6 @@ export class VespaWorker {
 		);
 
 		try {
-			if (jobType === 'feed' && schema === fileSchema) {
-				const isFileIndexingEnabled = await superpositionClient.getBooleanValue(
-					'enable_file_indexing',
-					config.enableFileIndexing,
-				);
-				if (!isFileIndexingEnabled) {
-					await job.discard();
-					throw new Error(`File indexing is disabled. Skipping feed for ${schema}/${docId}`);
-				}
-			}
-
 			let mappedData: InsertDocument | Partial<InsertDocument>;
 
 			const isSamTranscript = schema === samTranscriptSchema;

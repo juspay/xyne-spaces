@@ -948,6 +948,7 @@ const ChannelCommandMenu = ({
   };
 
   const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
+    // Handle attachment preview - show file preview modal
     if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
       return;
     }

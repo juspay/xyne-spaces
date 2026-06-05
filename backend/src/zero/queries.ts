@@ -2734,6 +2734,46 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  collectionSubfolders: defineQuery(
+    z.object({ rootCollectionId: z.string() }),
+    ({ args: { rootCollectionId } }) => {
+      return zql.collections
+        .where('parentId', 'IS NOT', null)
+        .where('rootCollectionId', rootCollectionId)
+        .where('deletedAt', 'IS', null)
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
+  collectionItems: defineQuery(
+    z.object({ collectionId: z.string() }),
+    ({ args: { collectionId } }) => {
+      return zql.collection_items
+        .where('collectionId', collectionId)
+        .where('isLatest', true)
+        .where('deletedAt', 'IS', null)
+        .orderBy('createdAt', 'asc')
+        .related('attachment', a =>
+          a.where('entityType', AttachmentEntityType.COLLECTION).where('isDeleted', false),
+        );
+    },
+  ),
+
+  scopedCollections: defineQuery(
+    z.object({ scopeType: z.string(), scopeId: z.string() }),
+    ({ ctx, args: { scopeType, scopeId } }) => {
+      return zql.collections
+        .where('scopeType', scopeType)
+        .where('scopeId', scopeId)
+        .where('parentId', 'IS', null)
+        .where('deletedAt', 'IS', null)
+        .related('permissions', p => p.where('userId', ctx.userID))
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
+
+
   messageNudges: defineQuery(
     z.object({
       messageId: z.string(),

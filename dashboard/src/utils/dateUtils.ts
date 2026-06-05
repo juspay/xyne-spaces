@@ -114,6 +114,44 @@ export const formatRelativeTime = (date: Date | number): string => {
 };
 
 /**
+ * Format date for file browser listings (Google Drive-style).
+ * - "Just now" for < 1 min
+ * - "X min ago" for < 1 hour
+ * - "Xh ago" for today (>1h old)
+ * - "Yesterday" for yesterday
+ * - "MMM d" (e.g. "May 22") for this year
+ * - "MMM d, yyyy" (e.g. "Dec 16, 2025") for previous years
+ */
+export const formatFileBrowserDate = (date: Date | number): string => {
+  const messageDate = new Date(date);
+  const referenceNow = new Date();
+
+  if (isToday(messageDate)) {
+    const diffInMilliseconds = referenceNow.getTime() - messageDate.getTime();
+    const diffInMinutes = Math.floor(diffInMilliseconds / (1000 * 60));
+    if (diffInMinutes < 1) {
+      return 'Just now';
+    } else if (diffInMinutes < 60) {
+      return `${diffInMinutes}m ago`;
+    }
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    return `${diffInHours}h ago`;
+  }
+
+  if (isYesterday(messageDate)) {
+    return 'Yesterday';
+  }
+
+  const currentYear = referenceNow.getFullYear();
+  const messageYear = messageDate.getFullYear();
+
+  if (currentYear === messageYear) {
+    return format(messageDate, 'MMM d');
+  }
+  return format(messageDate, 'MMM d, yyyy');
+};
+
+/**
  * Format relative timestamp for thread replies with week-aware context
  * - Today: "5m ago", "2h ago" (relative time)
  * - Yesterday: "Yesterday at 2:30 PM"

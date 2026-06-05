@@ -9,7 +9,6 @@ export {
     BaseStrategy,
     TextStrategy,
     PdfJsStrategy,
-    PdfPerPageStrategy,
     DocxStrategy,
     DoclingStrategy,
 } from "./strategies"

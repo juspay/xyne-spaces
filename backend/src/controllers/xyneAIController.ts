@@ -52,6 +52,7 @@ const XyneAIRequestSchema = z.object({
   query: z.string().min(1, 'Query cannot be empty'),
   session_id: z.preprocess(emptyToUndefined, z.string().uuid().optional()),
   channel_ids: z.array(z.string().min(1)).default([]), // Allow empty array - agent handles clarification
+  collection_ids: z.array(z.string().min(1)).optional(), // Selected collections for KB search
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvas_view_access_id: z.string().optional(), // Canvas context when Ask AI is triggered from canvas
   selection_contexts: z.array(SelectionContextSchema).optional(), // Selected text contexts from canvases
@@ -112,7 +113,7 @@ export class XyneAIController {
       query,
       session_id,
       channel_ids,
-      conversation_id,
+      collection_ids, conversation_id,
       canvas_view_access_id,
       selection_contexts,
       create_canvas_enabled,
@@ -241,6 +242,7 @@ export class XyneAIController {
         query,
         sessionId: session_id,
         channelIds: channel_ids,
+        collectionIds: collection_ids,
         conversationId: conversation_id,
         canvasViewAccessId: canvas_view_access_id,
         selectionContexts: transformedSelectionContexts,

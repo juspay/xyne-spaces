@@ -1,6 +1,5 @@
 export { BaseStrategy } from "./BaseStrategy"
 export { TextStrategy } from "./TextStrategy"
 export { PdfJsStrategy } from "./PdfJsStrategy"
-export { PdfPerPageStrategy } from "./PdfPerPageStrategy"
 export { DocxStrategy } from "./DocxStrategy"
 export { DoclingStrategy } from "./DoclingStrategy"

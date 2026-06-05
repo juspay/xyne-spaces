@@ -12,7 +12,13 @@ export const SearchableEntityType = {
 export type SearchableEntityType = (typeof SearchableEntityType)[keyof typeof SearchableEntityType];
 
 // Display types for frontend UI (some singular, conversation instead of messages)
-export type DisplayEntityType = 'user' | 'channel' | 'conversation' | 'ticket' | 'attachment';
+export type DisplayEntityType =
+  | 'user'
+  | 'channel'
+  | 'conversation'
+  | 'ticket'
+  | 'attachment'
+  | 'collection';
 
 export interface GlobalSearchFilters {
   query: string;
@@ -68,6 +74,11 @@ export interface SearchContext {
   mimeType?: string;
   internalUrl?: string;
   originalUrl?: string;
+  // Knowledge base / collection specific fields
+  projectId?: string;
+  collectionId?: string;
+  docId?: string;
+  folderId?: string;
   subApp?: string;
 }
 

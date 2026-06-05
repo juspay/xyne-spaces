@@ -1530,7 +1530,12 @@ export const AttachmentGalleryModal: React.FC = () => {
   };
 
   return (
-    <Dialog.Root open={isOpen} onOpenChange={() => attachmentViewerActor.send({ type: 'CLOSE' })}>
+    <Dialog.Root
+      open={isOpen}
+      onOpenChange={() => {
+        attachmentViewerActor.send({ type: 'CLOSE' });
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[50]' />
         <Dialog.Content
@@ -1548,7 +1553,9 @@ export const AttachmentGalleryModal: React.FC = () => {
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
           }}
-          onInteractOutside={() => attachmentViewerActor.send({ type: 'CLOSE' })}
+          onInteractOutside={() => {
+            attachmentViewerActor.send({ type: 'CLOSE' });
+          }}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
           onTouchStart={e => e.stopPropagation()}

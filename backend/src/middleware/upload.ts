@@ -6,6 +6,8 @@ import { AppError } from './errorHandler';
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
 
+// Generic streaming storage engine for message attachments.
+// Streams directly to object storage without buffering in memory.
 const streamingStorage: multer.StorageEngine = {
   _handleFile(req, file, cb) {
     (async () => {
@@ -80,12 +82,10 @@ const streamingStorage: multer.StorageEngine = {
 
   _removeFile(_req, file, cb) {
     const storagePath = file.path;
-
     if (!storagePath) {
       cb(null);
       return;
     }
-
     storageService
       .deleteFile(storagePath)
       .then(() => cb(null))
@@ -122,6 +122,55 @@ export const uploadConfig = multer({
   //     cb(new Error(`File type ${file.mimetype} is not allowed`));
   //   }
   // }
+});
+
+// Factory: creates a streaming Multer storage engine that pipes files directly to GCS.
+// scopeIdParam — the req.params key to use as the GCS scopeId (e.g. 'collectionId', 'itemId').
+function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEngine {
+  return {
+    _handleFile(req, file, cb) {
+      const scopeId = req.params?.[scopeIdParam];
+      if (!scopeId) {
+        file.stream.resume();
+        cb(new Error(`${scopeIdParam} is required`));
+        return;
+      }
+
+      storageService.uploadStream(file.stream, {
+        filename: file.originalname || `upload-${Date.now()}`,
+        contentType: file.mimetype || 'application/octet-stream',
+        scopeType: 'collection',
+        scopeId,
+        metadata: {
+          originalName: file.originalname,
+          uploadedAt: new Date().toISOString(),
+        },
+      }).then((result) => {
+        logger.info(`[COLLECTION-UPLOAD] Streamed to GCS: ${file.originalname} -> ${result.path} (${result.size} bytes)`);
+        cb(null, { path: result.path, filename: result.filename, size: result.size });
+      }).catch((error) => {
+        logger.error(`[COLLECTION-UPLOAD] Stream failed for ${file.originalname}:`, error);
+        cb(error instanceof Error ? error : new Error(String(error)));
+      });
+    },
+
+    _removeFile(_req, file, cb) {
+      if (!file.path) { cb(null); return; }
+      storageService.deleteFile(file.path)
+        .then(() => cb(null))
+        .catch((err) => cb(err instanceof Error ? err : new Error(String(err))));
+    },
+  };
+}
+
+export const collectionUpload = multer({
+  storage: makeCollectionStreamingStorage('collectionId'),
+  limits: { fileSize: 100 * 1024 * 1024, files: 50 },
+});
+
+export const versionUpload = multer({
+  storage: makeCollectionStreamingStorage('itemId'),
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 const createUploadStreamConfig = (fileSizeBytes: number, maxFiles: number) =>

@@ -247,7 +247,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.slack.projectId = projectIds;
       options.ticket.projectId = projectIds;
     }
-    
+
     // Add ticket-specific filters
     if (status) {
       options.ticket.status = (status as string).split(',');
