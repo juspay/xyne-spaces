@@ -23,6 +23,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
+import * as Switch from '@radix-ui/react-switch';
 import { Channel, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 import {
   isDMChannel,
@@ -326,6 +327,8 @@ const ChannelCommandMenu = ({
     setSelectedMentions,
     useVespaSearch,
     // setUseVespaSearch,
+    includeBotMessages,
+    setIncludeBotMessages,
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
@@ -2663,7 +2666,7 @@ const ChannelCommandMenu = ({
 
       {/* Footer - outside body flex so TicketPreviewPanel only spans results area */}
       {!inline && !isMobile && (
-        <div className='px-4 py-2 border-t border-border/40 text-sm text-muted-foreground flex items-center justify-end shrink-0 bg-muted/30 rounded-b-2xl'>
+        <div className='px-4 py-2 border-t border-border/40 text-sm text-muted-foreground flex items-center justify-between shrink-0 bg-muted/30 rounded-b-2xl'>
           {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
@@ -2679,6 +2682,28 @@ const ChannelCommandMenu = ({
             </Switch.Root>
           </div>
           */}
+          <div className='flex items-center gap-2'>
+            <label
+              htmlFor='include-bot-messages-toggle'
+              className='text-xs text-muted-foreground cursor-pointer'
+              title={
+                includeBotMessages
+                  ? 'Bot messages are included in search results'
+                  : 'Bot messages are hidden from search results'
+              }
+            >
+              Include bot messages
+            </label>
+            <Switch.Root
+              id='include-bot-messages-toggle'
+              checked={includeBotMessages}
+              onCheckedChange={setIncludeBotMessages}
+              aria-label='Toggle bot messages in search results'
+              className='w-9 h-5 bg-muted-foreground/40 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
+            >
+              <Switch.Thumb className='block w-4 h-4 bg-background rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-5' />
+            </Switch.Root>
+          </div>
           <div className='flex items-center gap-6'>
             <span className='flex gap-2.5 items-center'>
               <span>Open</span>

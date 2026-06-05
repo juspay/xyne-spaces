@@ -1114,9 +1114,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   );
 
   // Track the last search text and tab to avoid duplicate calls
-  const lastSearchedParamsRef = useRef<{ text: string; activeTab: TabType }>({
+  const lastSearchedParamsRef = useRef<{
+    text: string;
+    activeTab: TabType;
+    includeBotMessages: boolean;
+  }>({
     text: '',
     activeTab: TabType.ALL,
+    includeBotMessages: false,
   });
 
   // Debounced backend search with pagination reset
@@ -1139,13 +1144,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     if (
       normalizedText === lastSearchedParamsRef.current.text &&
       activeTab === lastSearchedParamsRef.current.activeTab &&
+      includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
       normalizedText !== ''
     ) {
       return;
     }
 
     const timer = setTimeout(() => {
-      lastSearchedParamsRef.current = { text: normalizedText, activeTab };
+      lastSearchedParamsRef.current = { text: normalizedText, activeTab, includeBotMessages };
       void performSearch(
         text,
         activeTab,
@@ -1168,6 +1174,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     options.onSearchComplete,
     options.mentionSearchType,
     performSearch,
+    includeBotMessages,
   ]);
 
   /**
