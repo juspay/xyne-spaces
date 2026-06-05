@@ -1475,7 +1475,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 .jp-message-html blockquote {
-  @apply border-l-2 pl-2 m-0 text-muted-foreground sm:border-l-4 sm:pl-4;
+  @apply border-l-2 pl-2 m-0 sm:border-l-4 sm:pl-4;
   border-left-color: var(--border-color, hsl(var(--border)));
   max-width: 100%;
   overflow-wrap: break-word;
@@ -2151,7 +2151,6 @@ img.inline-emoji,
 }
 
 [data-theme="midnight"] .jp-message-html blockquote {
-  color: #9ca3af;
   border-left-color: var(--border-color, #4b5563);
 }
 
