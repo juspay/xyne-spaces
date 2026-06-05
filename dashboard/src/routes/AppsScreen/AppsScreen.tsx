@@ -9,11 +9,13 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useZero } from '../../hooks/useZero';
+import { useUserSearch } from '../../hooks/useUsers';
 import { useMutation } from '@tanstack/react-query';
 import { appsService } from '../../services/Apps/appsService';
 import { mutators } from '../../zero/mutators';
 import { toast } from 'sonner';
-import { Plus, AppWindow, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, AppWindow, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import Input from '../../components/ui/Input/Input';
 
 const ITEMS_PER_PAGE = 15;
 
@@ -24,6 +26,7 @@ const AppsScreen = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentPage = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const cursorHistoryRef = useRef<{ createdAt: number; id: string }[]>([]);
 
@@ -56,6 +59,24 @@ const AppsScreen = (): ReactElement => {
       start: startCursor,
     }),
   );
+
+  const matchedUsers = useUserSearch(searchQuery, 50);
+
+  // Filter apps based on search query (name, description, created by)
+  const filteredApps = useMemo(() => {
+    if (!apps) return [];
+    if (!searchQuery.trim()) return apps;
+
+    const query = searchQuery.toLowerCase().trim();
+    const matchedUserIds = new Set(matchedUsers.map(u => u.id));
+
+    return apps.filter(app => {
+      const nameMatch = app.name?.toLowerCase().includes(query);
+      const descriptionMatch = app.description?.toLowerCase().includes(query);
+      const createdByMatch = matchedUserIds.has(app.createdBy);
+      return nameMatch || descriptionMatch || createdByMatch;
+    });
+  }, [apps, searchQuery, matchedUsers]);
 
   const hasNextPage = (apps?.length ?? 0) === ITEMS_PER_PAGE;
   const hasPreviousPage = currentPage > 1;
@@ -228,10 +249,28 @@ const AppsScreen = (): ReactElement => {
             />
           </Dialog>
 
+          {/* Search Bar */}
+          <div className='px-6 py-3 border-b border-border bg-muted/50'>
+            <div className='relative max-w-md'>
+              <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
+              <Input
+                type='text'
+                placeholder='Search apps by name, description or created by...'
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setSearchQuery(e.target.value)
+                }
+                className='pl-10 h-9'
+                data-track-category='Apps'
+                data-track-name='SearchApps'
+              />
+            </div>
+          </div>
+
           <div className='flex-1 overflow-y-auto p-4'>
-            {apps && apps.length > 0 ? (
+            {filteredApps && filteredApps.length > 0 ? (
               <AppsTable
-                apps={apps}
+                apps={filteredApps}
                 currentUserId={user?.id ?? ''}
                 onInstall={handleInstallApp}
                 onReinstall={handleInstallApp}
@@ -247,14 +286,20 @@ const AppsScreen = (): ReactElement => {
                 <div className='text-muted-foreground text-5xl mb-4'>
                   <AppWindow size={48} className='mx-auto opacity-50' />
                 </div>
-                <h3 className='text-xl font-semibold text-foreground mb-2'>No apps yet</h3>
-                <p className='text-muted-foreground'>Get started by creating your first xyne-app</p>
+                <h3 className='text-xl font-semibold text-foreground mb-2'>
+                  {searchQuery ? 'No matching apps found' : 'No apps yet'}
+                </h3>
+                <p className='text-muted-foreground'>
+                  {searchQuery
+                    ? 'Try adjusting your search query'
+                    : 'Get started by creating your first xyne-app'}
+                </p>
               </div>
             )}
           </div>
 
           {/* Pagination Controls */}
-          {(hasPreviousPage || hasNextPage) && (
+          {(hasPreviousPage || hasNextPage) && !searchQuery && (
             <div className='flex items-center justify-between px-6 py-3 border-t border-border bg-muted'>
               <Button
                 variant='outline'

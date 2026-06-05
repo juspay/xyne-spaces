@@ -138,6 +138,22 @@ export const AppsTable = ({
     }
   };
 
+  const handleCopyBotUserId = async (app: AppRow) => {
+    const botUserId = getBotUserId(app);
+    if (!botUserId) {
+      toast.error('No bot user ID available');
+      return;
+    }
+    try {
+      await copyTextToClipboard(botUserId);
+      toast.success('Bot user ID copied to clipboard');
+    } catch (error) {
+      toast.error('Failed to copy bot user ID', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
   const handleCopySigningSecret = async (appId: string) => {
     if (!onGetSigningSecret) {
       toast.error('Signing secret retrieval not available');
@@ -166,6 +182,20 @@ export const AppsTable = ({
           <div className='flex items-center gap-3'>
             <UserAvatar userId={botUserId ?? null} showActiveStatus={false} />
             <span className='font-medium text-foreground'>{app.name}</span>
+            {botUserId && (
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={e => {
+                  e.stopPropagation();
+                  void handleCopyBotUserId(app);
+                }}
+                title='Copy bot user ID'
+                className='h-6 w-6 p-0'
+              >
+                <Copy size={14} />
+              </Button>
+            )}
           </div>
         );
       },
