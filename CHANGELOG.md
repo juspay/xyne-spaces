@@ -1,3 +1,40 @@
+## [1.154.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.153.0...v1.154.0) (2026-06-05)
+
+
+### Features
+
+* add frontend performance monitoring metrics ([b487031](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b487031c4c0dfdee3859e20557dc50aad0e7a1a1)), closes [#7101](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7101)
+* Add hierarchy-aware search to canvas tree view ([c05fab9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c05fab9eb8ad0b9cf8dd210cf4190476fd50c057)), closes [#7047](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7047)
+* call new design change ([cddaea3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cddaea325504a82df856c2d9939b7087c2eac07b)), closes [#7016](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7016)
+* Feature/XyneApps Filters InstalledBy ([9998040](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/999804017657eb29c2029b87bf5b17ec39377b5b)), closes [#6957](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6957)
+* increased date for sbx ([71c2462](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/71c2462e8f78e5dc98bf21d06d8b00e387d2cbc6)), closes [#7141](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7141)
+* Multi Agent Support in Ask AI Sidebar ([0b38afd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0b38afd2a8afbdeb0c5197a108f6f1a31ebec8c0)), closes [#6919](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6919)
+* network handling ([157a212](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/157a212fd9a6c4b7267a6eebeb1dc0a0eeb6e522)), closes [#7111](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7111)
+* remove project and board delete buttons ([3fed550](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3fed5507d55bed23aae07fa37356214782c56338)), closes [#7114](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7114)
+* slack to desk channel list fix ([b6e2ab8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b6e2ab81deaed3f9babea68eece4733dd9b4fb4d)), closes [#7069](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7069)
+* streaming in upload download ([a487bd5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a487bd5177733bb913bae3978f8c44aad9ce0561)), closes [#6835](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6835)
+
+
+### Bug Fixes
+
+* Add search bar to create channel dialog and entity selector component change ([b898cee](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b898cee7d6ffcaf5f3d8cd5bfd7ccb555c54bb14)), closes [#7034](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7034)
+* added check for the usergroup and channelgroup participant ([0d02ba2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0d02ba2f621509f05e0fc44b904b9543029945d2)), closes [#7136](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7136)
+* Added Hyperlink Tooltip in Desk ([cd0cd4b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cd0cd4bf4fa89344561bb17a610d2907c2bf880d)), closes [#7076](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7076)
+* Agent Selector UI fix ([75d9a1b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75d9a1b3de2f87d200211b4c5105d7b808c68863)), closes [#7125](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7125)
+* automations external trigger fix ([a1b3e34](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a1b3e34c33b638efd3eb40150e494fc6ea71560d)), closes [#7087](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7087)
+* blockit2flowJSON fix2 ([1eaeae6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1eaeae662b0c0920003ec74edb2fe5846a578810)), closes [#7029](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7029)
+* bot messages in search ([93040c0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/93040c0f3125161d28f30a6866c95217de876c92)), closes [#7089](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7089)
+* cap brightness of custom emojis across all UI instances ([786ef5c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/786ef5c943db487d9277a05ae85a7fe7c337b950)), closes [#6007](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6007)
+* empty DMs hide ([0b01398](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0b01398b2328f59693d18a915058bef09bfe0a68)), closes [#6750](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6750)
+* Fix blockquote text opacity visibility ([4e92fae](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4e92faec8d53fc460659e53d934c05146197e277))
+* fix messages scroll ([072b390](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/072b390e43b9de893e5860e9b8a64c1510a92c82))
+* fixes inconsistent shift-enter behaviour on bullet list ([2774c7b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2774c7b0eba64603dd48910cd22b74f5714993f0))
+* outages alert implementation ([7dac048](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7dac04862c4112cee0827b4ceea5509cb809d08b)), closes [#7046](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7046)
+* receiver setting changes ([571293d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/571293dc97c86916d1fde534771eb11bbc43971a)), closes [#6958](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6958)
+* restore handleUnreadCount non-DM branch for backward compatibility ([825cc28](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/825cc28ae1bfc75df0d7e7642f82b05b12ed5c15)), closes [#7090](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7090)
+* schedule call issues ([9af7201](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9af7201631c1cc7d43f97d8559416ea56bf3ec6f)), closes [#7148](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7148)
+* star canvas for users ([f4c2e7e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f4c2e7ee630d705afb40e5142be05c85ee21b919)), closes [#6904](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6904)
+
 ## [1.153.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.152.0...v1.153.0) (2026-06-03)
 
 
