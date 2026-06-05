@@ -71,6 +71,7 @@ const renderEmoji = (emojiName: string | null | undefined): ReactElement => {
           src={imageUrl}
           alt={customEmoji.name}
           className='w-full h-full object-contain'
+          style={{ filter: 'url(#emoji-brightness-cap)' }}
           onError={e => {
             const target = e.target as HTMLImageElement;
             target.style.display = 'none';
