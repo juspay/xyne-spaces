@@ -5,6 +5,7 @@ import { Button } from '../../ui/Button/Button';
 import { InboxSettings } from './InboxSettings';
 import { EmailDeskSettings } from './EmailDeskSettings';
 import { DeskIntegrationCard } from '../DeskIntegrationCard/DeskIntegrationCard';
+import { SlackDeskIntegrationCard } from '../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { ClassificationSettings } from '../ClassificationSettings/ClassificationSettings';
 import { PrioritySettings } from '../PrioritySettings';
 import { SignatureEditor } from '../SignatureEditor/SignatureEditor';
@@ -45,6 +46,7 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
 
   const channelType = selectedChannelForSettings?.type;
   const isEmail = channelType === ChannelType.EMAIL;
+  const isSlack = channelType === ChannelType.SLACK;
 
   // Current values from the channel preference.
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
@@ -278,6 +280,14 @@ export const InboxSettingsPanel: React.FC<InboxSettingsPanelProps> = ({
                 />
                 <div className='border-t border-border' />
                 <DeskIntegrationCard channelId={channelId} canManage={canManage} />
+              </>
+            )}
+
+            {/* Slack-specific settings */}
+            {isSlack && (
+              <>
+                <div className='border-t border-border' />
+                <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />
               </>
             )}
 

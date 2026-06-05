@@ -26,6 +26,7 @@ const STATUS_OPTIONS = [
   { value: 'COMPLETED', label: 'Completed' },
   { value: 'FAILED', label: 'Failed' },
   { value: 'CANCELLED', label: 'Cancelled' },
+  { value: 'SKIPPED', label: 'Skipped' },
 ] as const;
 type StatusFilterValue = (typeof STATUS_OPTIONS)[number]['value'];
 
@@ -40,6 +41,7 @@ const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
     'bg-green-500/10 text-green-700 border-green-500/30 dark:text-green-400 dark:border-green-500/40',
   FAILED: 'bg-red-500/10 text-red-700 border-red-500/30 dark:text-red-400 dark:border-red-500/40',
   CANCELLED: 'bg-muted text-muted-foreground border-border',
+  SKIPPED: 'bg-muted text-muted-foreground border-border',
 };
 
 const DATE_PRESETS = [

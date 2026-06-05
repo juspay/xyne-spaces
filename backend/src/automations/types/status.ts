@@ -42,6 +42,7 @@ export enum AutomationRunStatus {
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
   CANCELLED = 'CANCELLED',
+  SKIPPED = 'SKIPPED',
 }
 
 export const AutomationRunStatusSchema = z.nativeEnum(AutomationRunStatus);

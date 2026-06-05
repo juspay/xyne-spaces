@@ -605,16 +605,32 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
   const [search, setSearch] = useState('');
   const channels = useAllChannels();
   const options: SelectorOption[] = useMemo(() => {
-    if (!channels) return [];
+    const byId = new Map<
+      string,
+      { id: string; name?: string | null; type: string | null | undefined }
+    >();
+    for (const c of channels ?? []) byId.set(c.id, { id: c.id, name: c.name, type: c.type });
     const lower = search.trim().toLowerCase();
-    return channels
+    const base = Array.from(byId.values())
       .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
       .map(c => ({
         value: c.id,
         label: c.name || '(unnamed channel)',
         icon: channelIcon(c.type),
       }));
-  }, [channels, search]);
+    const present = new Set(base.map(o => o.value));
+    const selectedExtra: SelectorOption[] = value
+      .filter(v => !present.has(v))
+      .map(v => {
+        const c = byId.get(v);
+        return {
+          value: v,
+          label: c?.name || v,
+          icon: channelIcon(c?.type),
+        };
+      });
+    return [...selectedExtra, ...base];
+  }, [channels, search, value]);
   return (
     <EntityMultiSelector
       options={options}
