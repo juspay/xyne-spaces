@@ -18,7 +18,7 @@ function isPermissionsStale(req: Request): boolean {
   return (req as any).auth?.permissionsStale === true
 }
 
-const PERMISSION_ENFORCEMENT_DATE = new Date('2026-06-06T00:00:00.000Z');
+const PERMISSION_ENFORCEMENT_DATE = new Date('2026-06-12T00:00:00.000Z');
 
 export function requirePermission(permission: string) {
   return (req: Request, res: Response, next: NextFunction): void => {
