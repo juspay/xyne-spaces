@@ -77,7 +77,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       return;
     }
 
-    const { name, description, visibility, projectId, assigneeUserGroupId } = req.query;
+    const { name, description, visibility, projectId, assigneeUserGroupId, boardId } = req.query;
     const userId = req.user!.id;
 
     if (!name || !projectId) {
@@ -94,6 +94,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
     const state = microsoftDeskService.generateState();
 
     await microsoftDeskService.storePendingChannel(state, {
+      mode: 'create',
       name: name as string,
       description: description as string | undefined,
       visibility: (visibility as string) || 'public',
@@ -101,6 +102,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       userId,
       workspaceId,
       assigneeUserGroupId: assigneeUserGroupId as string | undefined,
+      boardId: boardId as string | undefined,
       platform,
     });
 

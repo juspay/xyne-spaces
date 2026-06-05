@@ -669,6 +669,7 @@ export class ChannelController {
         deskType,
         dlEmail,
         slackChannelId,
+        boardId,
       }: {
         scopeType: ChannelScopeType;
         scopeId?: string;
@@ -682,6 +683,7 @@ export class ChannelController {
         deskType?: DeskType;
         dlEmail?: string;
         slackChannelId?: string;
+        boardId?: string;
       } = req.body;
 
       const userId = req.user!.id;
@@ -913,8 +915,8 @@ export class ChannelController {
       // Save EmailChannelPreference for EMAIL channels
       if (channelType === 'EMAIL') {
         const isDl = deskType === DeskType.DL;
-        let resolvedBoardId: string | undefined;
-        if (isDl) {
+        let resolvedBoardId: string | undefined = boardId;
+        if (isDl && !resolvedBoardId) {
           const firstBoard = await db.board.findFirst({
             where: { projectId: channel.projectId },
             orderBy: { createdAt: 'asc' },
@@ -963,22 +965,26 @@ export class ChannelController {
       // Save EmailChannelPreference + ExternalSource for SLACK channels
       if (channelType === 'SLACK' && slackChannelId) {
         try {
-          const firstBoard = await db.board.findFirst({
-            where: { projectId: channel.projectId },
-            orderBy: { createdAt: 'asc' },
-            select: { id: true },
-          });
-          if (!firstBoard) {
-            await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
-            res.status(409).json({ error: 'Project has no boards configured — cannot create Slack desk' });
-            return;
+          let slackBoardId = boardId;
+          if (!slackBoardId) {
+            const firstBoard = await db.board.findFirst({
+              where: { projectId: channel.projectId },
+              orderBy: { createdAt: 'asc' },
+              select: { id: true },
+            });
+            if (!firstBoard) {
+              await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
+              res.status(409).json({ error: 'Project has no boards configured — cannot create Slack desk' });
+              return;
+            }
+            slackBoardId = firstBoard.id;
           }
 
           await this.emailChannelPreferenceRepository.create({
             channelId: channel.id,
             ownerUserId: userId,
             deskType: DeskType.SLACK,
-            boardId: firstBoard.id,
+            boardId: slackBoardId,
             emailMergeMode: EmailMergeMode.DISABLED,
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });

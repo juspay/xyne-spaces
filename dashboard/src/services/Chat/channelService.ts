@@ -13,6 +13,7 @@ export interface CreateChannelFormData {
   topicTags: string[];
   projectId: string;
   assigneeUserGroupId?: string;
+  boardId?: string;
 }
 
 export interface CreateChannelRequest {
@@ -29,6 +30,7 @@ export interface CreateChannelRequest {
   deskType?: 'EMAIL' | 'DL' | 'SLACK';
   dlEmail?: string;
   slackChannelId?: string;
+  boardId?: string;
 }
 
 export type EmailDeskOpts =
@@ -121,6 +123,7 @@ export class ChannelService {
       projectId: formData.projectId,
       type: channelType,
       ...(formData.assigneeUserGroupId && { assigneeUserGroupId: formData.assigneeUserGroupId }),
+      ...(formData.boardId && { boardId: formData.boardId }),
       ...(channelType === 'EMAIL' &&
         emailDeskOpts && {
           deskType: emailDeskOpts.deskType,
