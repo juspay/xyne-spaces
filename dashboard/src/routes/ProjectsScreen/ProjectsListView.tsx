@@ -60,18 +60,7 @@ const ProjectsListView = (): ReactElement => {
     }
   };
 
-  const handleDeleteProject = async (projectId: string): Promise<void> => {
-    const result = zero.mutate(mutators.project.delete({ projectId }));
-    const res = await result.server;
-    if (res.type === 'error') {
-      toast.error('Action Failed', {
-        description: res.error.message || 'You do not have permission to delete this.',
-        duration: 5000,
-      });
-    }
-  };
-
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     if (isMobile || editingProject || showCreateModal) return;
     const rafId = requestAnimationFrame(() => {
       searchInputRef.current?.focus();
@@ -123,12 +112,7 @@ const ProjectsListView = (): ReactElement => {
         {/* Projects List */}
         <div className='space-y-3' data-testid='project-list'>
           {filteredProjects.map(project => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              onEdit={setEditingProject}
-              onDelete={projectId => void handleDeleteProject(projectId)}
-            />
+            <ProjectCard key={project.id} project={project} onEdit={setEditingProject} />
           ))}
         </div>
 

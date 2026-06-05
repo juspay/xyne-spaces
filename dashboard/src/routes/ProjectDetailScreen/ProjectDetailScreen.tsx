@@ -1,7 +1,5 @@
 import { ReactElement, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useZero } from '../../hooks/useZero';
-import { toast } from 'sonner';
 import { ArrowLeft, Edit2 } from 'lucide-react';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 
@@ -13,6 +11,8 @@ import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
+import { useZero } from '../../hooks/useZero';
+import { toast } from 'sonner';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 
 // Type for board data passed from BoardEditScreen to BoardStageConfigScreen
@@ -81,17 +81,6 @@ const ProjectDetailScreen = (): ReactElement => {
       </div>
     );
   }
-
-  const handleDeleteBoard = async (boardId: string): Promise<void> => {
-    const result = zero.mutate(mutators.board.delete({ boardId }));
-    const res = await result.server;
-    if (res.type === 'error') {
-      toast.error('Action Failed', {
-        description: res.error.message || 'You do not have permission to delete this.',
-        duration: 5000,
-      });
-    }
-  };
 
   // Lazy load full board details when user clicks edit
   const handleEditBoard = (board: BoardWithStages): void => {
@@ -200,11 +189,7 @@ const ProjectDetailScreen = (): ReactElement => {
           </Button>
         </div>
 
-        <BoardsTable
-          boards={boards}
-          onEdit={handleEditBoard}
-          onDelete={boardId => void handleDeleteBoard(boardId)}
-        />
+        <BoardsTable boards={boards} onEdit={handleEditBoard} />
       </div>
 
       {/* Create Board Modal (Template Selection) */}
