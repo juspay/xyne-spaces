@@ -461,15 +461,33 @@ async function createChannel(adminUser: StoredUser): Promise<BaselineChannel> {
   await page.locator("[data-testid='channel-name-input']").first().fill(channelName);
 
   const baselineProject = adminUser.projects[BASELINE_PROJECT_KEY];
-  await page.locator('button#project-select').first().click();
-  await page.locator('[data-slot="select-content"]').first().waitFor({ state: 'visible' });
-  await page
-    .locator(`[data-slot="select-item"]:has-text("${baselineProject.name}")`)
-    .first()
-    .click();
+  const projectTrigger = page.locator("[data-testid='project-select-trigger']").first();
+  const triggerShowsBaseline = projectTrigger.filter({ hasText: baselineProject.name });
+
+  // EntitySelector toggles selection on re-click, and the form auto-selects the
+  // first project on mount; opening the dropdown would clear that selection.
+  const autoSelected = await triggerShowsBaseline
+    .waitFor({ state: 'visible', timeout: 5000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!autoSelected) {
+    await projectTrigger.click();
+    await page
+      .locator(
+        `[data-testid='project-select-trigger-options'] button:has-text("${baselineProject.name}")`,
+      )
+      .first()
+      .click();
+    await triggerShowsBaseline.waitFor({ state: 'visible', timeout: 10000 });
+  }
 
   const createButton = page.locator("[data-testid='create-channel-button']").first();
   await createButton.waitFor({ state: 'visible' });
+  await page
+    .locator("[data-testid='create-channel-button']:not([disabled])")
+    .first()
+    .waitFor({ state: 'visible', timeout: 10000 });
 
   // 60s timeout, same reasoning as the other baseline waiters: the clock
   // starts here and must cover the click + POST round-trip on slow CI.

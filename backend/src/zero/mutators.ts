@@ -7320,7 +7320,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           const participant = await tx.run(
-            zql.canvas_participants.where('canvasId', canvasId).where('userId', authData.sub).one(),
+            zql.canvas_participants
+              .where('canvasId', canvasId)
+              .where(({ or, cmp, exists: ex }: any) =>
+                or(
+                  cmp('userId', authData.sub),
+                  ex('userGroup', (ug: any) =>
+                    ug.whereExists('userGroupMappings', (m: any) =>
+                      m.where('userId', authData.sub),
+                    ),
+                  ),
+                  ex('channel', (ch: any) =>
+                    ch.whereExists('participants', (cp: any) =>
+                      cp.where('userId', authData.sub),
+                    ),
+                  ),
+                ),
+              )
+              .one(),
           );
           const hasAccess =
             canvas.createdBy === authData.sub ||

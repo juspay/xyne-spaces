@@ -5081,7 +5081,20 @@ export const mutators = defineMutators({
         }
 
         const participant = await tx.run(
-          zql.canvas_participants.where('canvasId', canvasId).where('userId', ctx.userID).one(),
+          zql.canvas_participants
+            .where('canvasId', canvasId)
+            .where(({ or, cmp, exists: ex }: any) =>
+              or(
+                cmp('userId', ctx.userID),
+                ex('userGroup', (ug: any) =>
+                  ug.whereExists('userGroupMappings', (m: any) => m.where('userId', ctx.userID)),
+                ),
+                ex('channel', (ch: any) =>
+                  ch.whereExists('participants', (cp: any) => cp.where('userId', ctx.userID)),
+                ),
+              ),
+            )
+            .one(),
         );
         const hasAccess =
           canvas.createdBy === ctx.userID ||
