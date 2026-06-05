@@ -148,7 +148,7 @@ function reconcileConversationWindow(
       if (
         !insideWindow &&
         (lowerBound !== undefined
-          ? conv.createdAt >= lowerBound
+          ? conv.createdAt >= lowerBound && conv.createdAt <= tillMessage.createdAt
           : fromMessage.conversationId === conv.conversationId)
       ) {
         insideWindow = true;
@@ -551,7 +551,6 @@ const ChatListV3: React.FC<ChatListProps> = ({
       if (newPrependedCount > 0) {
         setFirstItemIndex(index => index - newPrependedCount);
       }
-      conversationsRef.current = merged;
       setConversationsState(merged);
     }
   }, [
