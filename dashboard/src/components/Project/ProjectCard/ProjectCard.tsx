@@ -9,10 +9,9 @@ import type { Project } from '@xyne/shared';
 interface ProjectCardProps {
   project: Project;
   onEdit: (project: Project) => void;
-  onDelete: (projectId: string) => void;
 }
 
-export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): ReactElement => {
+export const ProjectCard = ({ project, onEdit }: ProjectCardProps): ReactElement => {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
 
@@ -23,11 +22,6 @@ export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): Re
   const handleEditClick = (e?: React.MouseEvent<HTMLButtonElement>): void => {
     e?.stopPropagation();
     onEdit(project);
-  };
-
-  const handleDeleteClick = (e?: React.MouseEvent<HTMLButtonElement>): void => {
-    e?.stopPropagation();
-    void onDelete(project.id);
   };
 
   const handleCopyId = (e: React.MouseEvent): void => {
@@ -107,18 +101,6 @@ export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): Re
             })}
           >
             Edit
-          </Button>
-          <Button
-            variant='destructive'
-            onClick={handleDeleteClick}
-            data-track-category='Projects'
-            data-track-name='DeleteProject'
-            data-track-metadata={JSON.stringify({
-              projectId: project.id,
-              projectName: project.name,
-            })}
-          >
-            Delete
           </Button>
         </div>
       </div>

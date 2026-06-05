@@ -25,10 +25,9 @@ export interface BoardWithStages {
 interface BoardCardProps {
   board: BoardWithStages;
   onEdit: (board: BoardWithStages) => void;
-  onDelete: (boardId: string) => void;
 }
 
-export const BoardCard = ({ board, onEdit, onDelete }: BoardCardProps): ReactElement => {
+export const BoardCard = ({ board, onEdit }: BoardCardProps): ReactElement => {
   const stages = (
     board.stages && Array.isArray(board.stages) ? board.stages : []
   ) as readonly Stage[];
@@ -76,14 +75,6 @@ export const BoardCard = ({ board, onEdit, onDelete }: BoardCardProps): ReactEle
             onClick={() => onEdit(board)}
             data-track-category='Board'
             data-track-name='Edit_Board'
-            data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
-          />
-          <Button
-            buttonType={ButtonType.DANGER}
-            text='Delete'
-            onClick={() => void onDelete(board.id)}
-            data-track-category='Board'
-            data-track-name='Delete_Board'
             data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
           />
         </div>

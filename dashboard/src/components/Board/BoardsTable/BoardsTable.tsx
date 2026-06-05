@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { Edit2, Trash2, Copy, Check } from 'lucide-react';
+import { Edit2, Copy, Check } from 'lucide-react';
 import { EmptyState } from '../EmptyState';
 import { Button } from '../../ui/Button';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
@@ -9,10 +9,9 @@ import type { BoardWithStages } from '../BoardCard';
 interface BoardsTableProps {
   boards: readonly BoardWithStages[] | undefined;
   onEdit: (board: BoardWithStages) => void;
-  onDelete: (boardId: string) => void;
 }
 
-export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): ReactElement => {
+export const BoardsTable = ({ boards, onEdit }: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
 
   const handleCopyId = (e: React.MouseEvent, boardId: string): void => {
@@ -113,19 +112,6 @@ export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): Rea
                     >
                       <Edit2 size={14} />
                       Edit
-                    </Button>
-                    <Button
-                      variant='destructive'
-                      onClick={() => void onDelete(board.id)}
-                      data-track-category='Board'
-                      data-track-name='Delete_Board_Table'
-                      data-track-metadata={JSON.stringify({
-                        boardId: board.id,
-                        boardName: board.name,
-                      })}
-                    >
-                      <Trash2 size={14} />
-                      Delete
                     </Button>
                   </div>
                 </td>
