@@ -1116,6 +1116,10 @@ class XyneAIStreamManager {
               ? data['statusCode']
               : undefined;
         const errorInfo = getAskAIErrorInfo(rawError, httpStatus);
+
+        // Mark stream as errored so completeStream doesn't overwrite it
+        currentState.status = 'error';
+
         updateMessages(prev =>
           prev.map(msg =>
             msg.id === botMessageId
@@ -1442,6 +1446,12 @@ class XyneAIStreamManager {
   private completeStream(streamId: string, threadId: string, finalResponse: string): void {
     const currentState = this.activeStreams.get(threadId);
     if (!currentState) return;
+
+    // If the stream was already marked as errored (e.g. by a mid-stream error chunk),
+    // skip overwriting the error state.
+    if (currentState.status === 'error') {
+      return;
+    }
 
     currentState.status = 'completed';
     this.notifySubscribers({ ...currentState });
