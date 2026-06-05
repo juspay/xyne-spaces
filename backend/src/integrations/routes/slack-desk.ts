@@ -43,53 +43,40 @@ router.get(
         return;
       }
 
-      // Fetch channels the bot is a member of
-      const channels: Array<{ id: string; name: string; is_private: boolean; num_members: number }> = [];
-      let cursor: string | undefined;
+      // Fetch only channels (not DMs) the bot is a member of
+      const params = new URLSearchParams({
+        types: 'public_channel,private_channel',
+        exclude_archived: 'true',
+        limit: '200',
+      });
 
-      do {
-        const params = new URLSearchParams({
-          types: 'public_channel,private_channel',
-          exclude_archived: 'true',
-          limit: '200',
-        });
-        if (cursor) params.set('cursor', cursor);
+      const response = await fetch(`https://slack.com/api/users.conversations?${params}`, {
+        headers: { Authorization: `Bearer ${botToken}` },
+      });
 
-        const response = await fetch(`https://slack.com/api/conversations.list?${params}`, {
-          headers: { Authorization: `Bearer ${botToken}` },
-        });
+      const data = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        channels?: Array<{
+          id: string;
+          name: string;
+          is_private: boolean;
+          num_members: number;
+        }>;
+      };
 
-        const data = (await response.json()) as {
-          ok: boolean;
-          error?: string;
-          channels?: Array<{
-            id: string;
-            name: string;
-            is_member: boolean;
-            is_private: boolean;
-            num_members: number;
-          }>;
-          response_metadata?: { next_cursor?: string };
-        };
+      if (!data.ok) {
+        logger.error(`${TAG} Slack users.conversations failed`, { error: data.error });
+        res.status(502).json({ error: `Slack API error: ${data.error}` });
+        return;
+      }
 
-        if (!data.ok) {
-          logger.error(`${TAG} Slack conversations.list failed`, { error: data.error });
-          res.status(502).json({ error: `Slack API error: ${data.error}` });
-          return;
-        }
-
-        const memberChannels = (data.channels || []).filter(ch => ch.is_member);
-        channels.push(
-          ...memberChannels.map(ch => ({
-            id: ch.id,
-            name: ch.name,
-            is_private: ch.is_private,
-            num_members: ch.num_members,
-          }))
-        );
-
-        cursor = data.response_metadata?.next_cursor || undefined;
-      } while (cursor);
+      const channels = (data.channels || []).map(ch => ({
+        id: ch.id,
+        name: ch.name,
+        is_private: ch.is_private,
+        num_members: ch.num_members,
+      }));
 
       // Mark channels that already have an active slack-desk ExternalSource
       const existingSources = await db.externalSource.findMany({
