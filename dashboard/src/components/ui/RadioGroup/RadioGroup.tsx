@@ -47,6 +47,7 @@ interface RadioGroupProps {
   onChange?: (value: string) => void;
   children: React.ReactNode;
   className?: string;
+  disabled?: boolean;
 }
 
 const RadioGroup = ({
@@ -56,6 +57,7 @@ const RadioGroup = ({
   onChange,
   children,
   className,
+  disabled,
 }: RadioGroupProps): React.ReactElement => {
   return (
     <div className={cn('space-y-2', className)}>
@@ -68,6 +70,7 @@ const RadioGroup = ({
         value={value ?? null}
         {...(onChange && { onValueChange: onChange })}
         {...(name && { name })}
+        {...(disabled !== undefined && { disabled })}
       >
         {children}
       </RadioGroupRoot>

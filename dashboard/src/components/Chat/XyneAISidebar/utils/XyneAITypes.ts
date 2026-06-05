@@ -215,7 +215,15 @@ export interface SummarizerCitation {
   isTicket?: boolean; // Distinguishes ticket citations from message citations (legacy)
 
   // NEW: Multi-entity support
-  entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search';
+  entityType?:
+    | 'message'
+    | 'attachment'
+    | 'call'
+    | 'recording'
+    | 'canvas'
+    | 'ticket'
+    | 'web_search'
+    | 'knowledge_base';
   entityId?: string;
   canvasId?: string;
   callId?: string;

@@ -71,10 +71,11 @@ export const SearchUser: React.FC<SearchUserProps> = ({
   const availableUsers = useMemo(() => {
     if (!searchResults) return [];
 
-    const isSelfSearch = searchValue.trim().toLowerCase() === 'self';
-
-    const filtered = searchResults.filter(user => {
-      if (channelUserIds && !channelUserIds.has(user.id)) return false;
+    return searchResults.filter(user => {
+      // If channelId is provided, only show users who are channel participants
+      if (channelUserIds && !channelUserIds.has(user.id)) {
+        return false;
+      }
 
       // If allowedUserIds is provided (e.g. project members for share collection), only show those users
       if (allowedUserIds && !allowedUserIds.has(user.id)) {
@@ -88,35 +89,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
 
       return !isExcluded;
     });
-
-    if (!selfUser) return filtered;
-
-    // For "self" keyword, inject current user at top (Fuse.js won't match "self" by name)
-    if (isSelfSearch) {
-      const isExcluded =
-        excludeUserIds?.includes(selfUser.id) || selectedUsers.some(s => s.id === selfUser.id);
-      if (!isExcluded) {
-        return [selfUser, ...filtered.filter(u => u.id !== selfUser.id)];
-      }
-      return filtered;
-    }
-
-    // For name search, boost current user to top if Fuse.js returned them
-    const selfIndex = filtered.findIndex(u => u.id === selfUser.id);
-    if (selfIndex <= 0) return filtered;
-    const self = filtered[selfIndex];
-    if (!self) return filtered;
-    filtered.splice(selfIndex, 1);
-    return [self, ...filtered];
-  }, [
-    searchResults,
-    searchValue,
-    excludeUserIds,
-    selectedUsers,
-    channelUserIds,
-    allowedUserIds,
-    selfUser,
-  ]);
+  }, [searchResults, excludeUserIds, selectedUsers, channelUserIds, allowedUserIds]);
 
   // Get filtered users (limit to 10)
   const filteredUsers = availableUsers.slice(0, 10);

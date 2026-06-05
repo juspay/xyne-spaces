@@ -54,6 +54,9 @@ export interface XyneAIContext {
   canvasContexts: CanvasSelectionContext[];
   /** Session to focus when opening from a background completion toast */
   focusSessionId: string | null;
+  // Knowledge Base context
+  kbCollectionId: string | null;
+  kbChannelId: string | null;
 }
 
 // Event types for XyneAI machine
@@ -70,9 +73,13 @@ export type XyneAIEvent =
       selectionInfos?: SelectionInfo[];
       /** When set, selects this Ask AI session after OPEN (e.g. toast View) */
       focusSessionId?: string | null;
+      kbCollectionId?: string | null;
+      kbChannelId?: string | null;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
+  | { type: 'CLEAR_KB_CONTEXT' }
+  | { type: 'SET_KB_CONTEXT'; kbCollectionId: string | null; kbChannelId?: string | null }
   | { type: 'SET_CONTEXT'; contextType: XyneAIContextType; contextId: string }
   | { type: 'SET_CHANNEL'; channelId: string }
   | { type: 'SET_TICKET_CONTEXT'; channelId: string; threadInfo: ThreadInfo }
@@ -393,6 +400,8 @@ export const xyneAIMachine = setup({
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
               : null,
+          kbCollectionId: event.kbCollectionId ?? null,
+          kbChannelId: event.kbChannelId ?? null,
         };
 
         // Persist to IndexedDB
@@ -450,11 +459,30 @@ export const xyneAIMachine = setup({
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
               : context.focusSessionId,
+          kbCollectionId:
+            event.kbCollectionId !== undefined ? event.kbCollectionId : context.kbCollectionId,
+          kbChannelId: event.kbChannelId !== undefined ? event.kbChannelId : context.kbChannelId,
         };
 
         // Persist to IndexedDB
         void saveContextToIndexedDB(newContext);
 
+        return newContext;
+      }
+      return {};
+    }),
+    clearKbContext: assign(() => {
+      const newContext = { kbCollectionId: null, kbChannelId: null };
+      void saveContextToIndexedDB(newContext);
+      return newContext;
+    }),
+    setKbContext: assign(({ event }) => {
+      if (event.type === 'SET_KB_CONTEXT') {
+        const newContext = {
+          kbCollectionId: event.kbCollectionId,
+          kbChannelId: event.kbChannelId ?? null,
+        };
+        void saveContextToIndexedDB(newContext);
         return newContext;
       }
       return {};
@@ -470,6 +498,8 @@ export const xyneAIMachine = setup({
         canvasInfo: null,
         canvasContexts: [] as CanvasSelectionContext[],
         focusSessionId: null,
+        kbCollectionId: null,
+        kbChannelId: null,
       };
 
       // Clear from IndexedDB when closing
@@ -608,6 +638,8 @@ export const xyneAIMachine = setup({
     canvasInfo: null,
     canvasContexts: [],
     focusSessionId: null,
+    kbCollectionId: null,
+    kbChannelId: null,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',
@@ -624,6 +656,12 @@ export const xyneAIMachine = setup({
         CLEAR_TICKET_CONTEXT: {
           actions: 'clearTicketContext',
         },
+        CLEAR_KB_CONTEXT: {
+          actions: 'clearKbContext',
+        },
+        SET_KB_CONTEXT: {
+          actions: 'setKbContext',
+        },
       },
     },
     open: {
@@ -634,6 +672,12 @@ export const xyneAIMachine = setup({
         CLOSE: {
           target: 'closed',
           actions: 'setClosed',
+        },
+        CLEAR_KB_CONTEXT: {
+          actions: 'clearKbContext',
+        },
+        SET_KB_CONTEXT: {
+          actions: 'setKbContext',
         },
         SET_CONTEXT: {
           actions: 'setContext',

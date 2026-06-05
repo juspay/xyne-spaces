@@ -56,6 +56,7 @@ import {
   OrgRole,
   DelayedMessageStatus,
   Schema,
+  CollectionRole,
 
 } from './schema.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
@@ -9463,6 +9464,322 @@ export const mutators = defineMutators({
           status: 'ARCHIVED',
           updatedAt: timestamp,
         });
+      },
+    ),
+  },
+
+  collection: {
+    createCollection: defineMutator(
+      z.object({
+        id: z.string(),
+        scopeType: z.string(),
+        scopeId: z.string(),
+        name: z.string(),
+        description: z.string().nullable().optional(),
+        isPrivate: z.boolean().optional(),
+        permissionId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, scopeType, scopeId, name, description, isPrivate, permissionId, timestamp } }) => {
+        // Check for existing non-deleted collection with same name in this scope
+        const existingCollection = await tx.run(
+          zql.collections
+            .where('scopeType', scopeType)
+            .where('scopeId', scopeId)
+            .where('name', name)
+            .where('deletedAt', 'IS', null)
+            .one(),
+        );
+        if (existingCollection) {
+          throw new Error(`Collection "${name}" already exists`);
+        }
+
+        await tx.mutate.collections.insert({
+          id,
+          scopeType,
+          scopeId,
+          name,
+          description: description ?? undefined,
+          ownerId: ctx.userID,
+          isPrivate: isPrivate ?? false,
+          rootCollectionId: id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+
+        // Add creator as OWNER in collection_permissions
+        await tx.mutate.collection_permissions.insert({
+          id: permissionId,
+          collectionId: id,
+          userId: ctx.userID,
+          role: CollectionRole.OWNER,
+          canShare: true,
+          grantedBy: ctx.userID,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    updateCollection: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string().optional(),
+        description: z.string().nullable().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, name, description, timestamp } }) => {
+        const collection = await tx.run(zql.collections.where('id', id).one());
+        if (!collection) {
+          throw new Error('Collection not found');
+        }
+
+        // Verify OWNER or EDITOR permission
+        const isOwner = collection.ownerId === ctx.userID;
+        if (!isOwner && collection.isPrivate) {
+          const permission = await tx.run(
+            zql.collection_permissions
+              .where('collectionId', id)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (!permission || permission.role === CollectionRole.VIEWER) {
+            throw new Error('Collection update failed: requires EDITOR or OWNER permission');
+          }
+        }
+
+        await tx.mutate.collections.update({
+          id,
+          ...(name !== undefined && { name }),
+          ...(description !== undefined && { description: description ?? undefined }),
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    deleteCollection: defineMutator(
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, timestamp } }) => {
+        const collection = await tx.run(zql.collections.where('id', id).one());
+        if (!collection) {
+          throw new Error('Collection not found');
+        }
+        if (collection.ownerId !== ctx.userID) {
+          throw new Error('Collection deletion failed: only the owner can delete a collection');
+        }
+
+        await tx.mutate.collections.update({
+          id,
+          deletedAt: timestamp,
+        });
+
+        // Cascade soft-delete to all items in the collection
+        const items = await tx.run(
+          zql.collection_items.where('collectionId', id).where('deletedAt', 'IS', null),
+        );
+
+        for (const item of items) {
+          await tx.mutate.collection_items.update({ id: item.id, deletedAt: timestamp });
+        }
+      },
+    ),
+
+    createFolder: defineMutator(
+      z.object({
+        id: z.string(),
+        parentId: z.string(),
+        name: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, parentId, name, timestamp } }) => {
+        const parentCollection = await tx.run(zql.collections.where('id', parentId).one());
+        if (!parentCollection) {
+          throw new Error('Collection not found');
+        }
+
+        // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
+        const rootCollectionId = parentCollection.rootCollectionId ?? parentId;
+        const isOwner = parentCollection.ownerId === ctx.userID;
+        if (!isOwner && parentCollection.isPrivate) {
+          const permission = await tx.run(
+            zql.collection_permissions
+              .where('collectionId', rootCollectionId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (!permission || permission.role === CollectionRole.VIEWER) {
+            throw new Error('Folder creation failed: requires EDITOR or OWNER permission');
+          }
+        }
+
+        await tx.mutate.collections.insert({
+          id,
+          parentId,
+          ownerId: ctx.userID,
+          name,
+          scopeType: parentCollection.scopeType,
+          scopeId: parentCollection.scopeId,
+          isPrivate: parentCollection.isPrivate,
+          rootCollectionId: parentCollection.rootCollectionId ?? parentId,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    deleteItem: defineMutator(
+      z.object({
+        id: z.string(),
+        collectionId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, collectionId, timestamp } }) => {
+        const collection = await tx.run(zql.collections.where('id', collectionId).one());
+        if (!collection) {
+          throw new Error('Collection not found');
+        }
+
+        // Verify EDITOR+ permission
+        const isOwner = collection.ownerId === ctx.userID;
+        if (!isOwner && collection.isPrivate) {
+          const permission = await tx.run(
+            zql.collection_permissions
+              .where('collectionId', collectionId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (!permission || permission.role === CollectionRole.VIEWER) {
+            throw new Error('Item deletion failed: requires EDITOR or OWNER permission');
+          }
+        }
+
+        // In the new design, folders are Collection rows and files are CollectionItem rows.
+        const folder = await tx.run(zql.collections.where('id', id).one());
+        if (folder) {
+          await tx.mutate.collections.update({ id, deletedAt: timestamp });
+        } else {
+          await tx.mutate.collection_items.update({ id, deletedAt: timestamp });
+        }
+      },
+    ),
+
+    renameItem: defineMutator(
+      z.object({
+        id: z.string(),
+        collectionId: z.string(),
+        name: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, collectionId, name, timestamp } }) => {
+        const collection = await tx.run(zql.collections.where('id', collectionId).one());
+        if (!collection) {
+          throw new Error('Collection not found');
+        }
+
+        // Verify EDITOR+ permission
+        const isOwner = collection.ownerId === ctx.userID;
+        if (!isOwner && collection.isPrivate) {
+          const permission = await tx.run(
+            zql.collection_permissions
+              .where('collectionId', collectionId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (!permission || permission.role === CollectionRole.VIEWER) {
+            throw new Error('Item rename failed: requires EDITOR or OWNER permission');
+          }
+        }
+
+        await tx.mutate.collection_items.update({
+          id,
+          name,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    grantPermission: defineMutator(
+      z.object({
+        id: z.string(),
+        collectionId: z.string(),
+        userId: z.string().optional(),
+        userGroupId: z.string().optional(),
+        role: z.nativeEnum(CollectionRole),
+        canShare: z.boolean(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, collectionId, userId, userGroupId, role, canShare, timestamp } }) => {
+        const collection = await tx.run(zql.collections.where('id', collectionId).one());
+        if (!collection) {
+          throw new Error('Collection not found');
+        }
+        if (collection.ownerId !== ctx.userID) {
+          const granterPermission = await tx.run(
+            zql.collection_permissions
+              .where('collectionId', collectionId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (!granterPermission || !granterPermission.canShare) {
+            throw new Error('Permission grant failed: only owners or users with canShare can grant permissions');
+          }
+        }
+
+        // Prevent sharing with the collection owner
+        if (userId && userId === collection.ownerId) {
+          throw new Error('Cannot share collection with its owner');
+        }
+
+        const existing = userId
+          ? await tx.run(
+              zql.collection_permissions
+                .where('collectionId', collectionId)
+                .where('userId', userId)
+                .one(),
+            )
+          : null;
+
+        if (existing) {
+          await tx.mutate.collection_permissions.update({
+            id: existing.id,
+            role,
+            canShare,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.collection_permissions.insert({
+            id,
+            collectionId,
+            userId,
+            userGroupId,
+            role,
+            canShare,
+            grantedBy: ctx.userID,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+
+    revokePermission: defineMutator(
+      z.object({
+        id: z.string(),
+        collectionId: z.string(),
+      }),
+      async ({ tx, ctx, args: { id, collectionId } }) => {
+        const collection = await tx.run(zql.collections.where('id', collectionId).one());
+        if (!collection) {
+          throw new Error('Collection not found');
+        }
+        if (collection.ownerId !== ctx.userID) {
+          throw new Error('Permission revoke failed: only the owner can revoke permissions');
+        }
+
+        await tx.mutate.collection_permissions.delete({ id });
       },
     ),
   },

@@ -43,6 +43,10 @@ interface NotificationData {
       blockId?: string;
       conversation?: Conversation;
     };
+    metadata?: {
+      notificationType?: string;
+      [key: string]: unknown;
+    };
     createdAt: Date;
   };
   timestamp: string;
@@ -125,7 +129,10 @@ export const NotificationHandler: React.FC = () => {
         } else if (!(reactNativeBridge.isAvailable() && suppressNativeToasts)) {
           playNotificationSound();
 
-          const toastFn = getToastFn(data.notification.type);
+          // Use metadata.notificationType if available, otherwise use notification.type
+          const notificationType =
+            data.notification.metadata?.notificationType || data.notification.type;
+          const toastFn = getToastFn(notificationType);
           toastFn(data.notification.title, {
             description: data.notification.message,
             action: resolvedActionUrl
@@ -476,6 +483,10 @@ function getToastFn(notificationType: string) {
       return toast.success;
     case 'email_fetch_failed':
       return toast.error;
+    case 'collection_shared':
+      return toast.success;
+    case 'collection_deleted':
+      return toast.warning;
     default:
       return toast.info;
   }

@@ -9,6 +9,8 @@ import { fetchAndMapBySchema, VespaOperationType } from '@/zero/vespa-injection/
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { superpositionClient } from '@/services/superpositionClient';
 import { config } from '@/config/env';
+import { IngestionStatus } from '@prisma/client';
+import { SubApp } from '@/vespa/src/types';
 
 export class VespaFileWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -121,6 +123,11 @@ export class VespaFileWorker {
 	 * Record a failed job in the database
 	 */
 	private async recordFailedJob(job: Bull.Job<VespaJob>, error: Error): Promise<void> {
+		// Mark collection item as FAILED
+		if (job.data.schema === fileSchema) {
+			await this.updateCollectionItemStatus(job.data.docId, job.data.app, IngestionStatus.FAILED);
+		}
+
 		try {
 			const entityId = job.data.docId;
 			const entityType = job.data.schema;
@@ -156,6 +163,30 @@ export class VespaFileWorker {
 	}
 
 	/**
+	 * Update ingestionStatus for a collection item identified by fileId.
+	 * No-op for non-collection file jobs.
+	 */
+	private async updateCollectionItemStatus(fileId: string, app: SubApp | undefined, status: IngestionStatus): Promise<void> {
+		if (app !== SubApp.COLLECTIONS) return;
+		try {
+			const item = await db.collectionItem.findFirst({
+				where: { fileId, isLatest: true },
+				select: { id: true },
+			});
+			if (item) {
+				await db.collectionItem.update({
+					where: { id: item.id },
+					data: { ingestionStatus: status },
+				});
+			}
+		} catch (err) {
+			logger.warn(`[VESPA_FILE_WORKER] Failed to update ingestionStatus for ${fileId}`, {
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+
+	/**
 	 * Process a single job from the queue
 	 */
 	private async processJob(job: Bull.Job<VespaJob>): Promise<any> {
@@ -176,6 +207,9 @@ export class VespaFileWorker {
 					await job.discard();
 					throw new Error(`File indexing is disabled. Skipping feed for ${schema}/${docId}`);
 				}
+
+				// Mark as processing
+				await this.updateCollectionItemStatus(docId, app, IngestionStatus.PROCESSING);
 			}
 
 			let mappedData: InsertDocument | Partial<InsertDocument>;
@@ -205,6 +239,11 @@ export class VespaFileWorker {
 			}
 
 			await handler();
+
+			// Mark as completed after successful feed
+			if (jobType === 'feed' && schema === fileSchema) {
+				await this.updateCollectionItemStatus(docId, app, IngestionStatus.COMPLETED);
+			}
 
 			// Run post-ingest hooks (non-blocking)
 			void vespaPostIngestHooks

@@ -74,6 +74,10 @@ export const navigateToSearchResult = async (
       }
       break;
 
+    case 'collection':
+      navigateToCollection(result, navigate);
+      break;
+
     default:
       console.warn('[SEARCH-NAVIGATION] Unknown result type:', result.type);
   }
@@ -572,4 +576,33 @@ export const openSearchResult = async (
   // Web: open the regular route in a new browser tab (full app chrome).
   // No theme param needed — same origin = same localStorage = same theme.
   window.open(url, '_blank', 'noopener,noreferrer');
+};
+
+/**
+ * Navigate to a collection document in the knowledge base viewer
+ */
+export const navigateToCollection = (
+  result: DisplaySearchResult,
+  navigate: NavigateFunction,
+): void => {
+  const { projectId, channelId, docId, collectionId, folderId } = result.searchContext || {};
+
+  // Navigate to knowledge base file viewer
+  if (!projectId || !channelId || !collectionId || !docId) {
+    console.warn(
+      '[SEARCH-NAVIGATION] Cannot navigate to collection: missing projectId, channelId, collectionId, or docId',
+    );
+    return;
+  }
+
+  // Use '_' sentinel for root-level files (no parent folder), matching KB convention
+  const folder = folderId || '_';
+
+  const params = new URLSearchParams();
+  if (result.context) params.set('highlight', btoa(encodeURIComponent(result.context)));
+
+  const queryString = params.toString();
+  const path = `/knowledge-base/${projectId}/${channelId}/${collectionId}/${folder}/${docId}`;
+
+  void navigate(queryString ? `${path}?${queryString}` : path);
 };

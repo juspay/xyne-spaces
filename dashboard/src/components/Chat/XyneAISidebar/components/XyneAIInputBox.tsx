@@ -24,6 +24,7 @@ import {
   Mic,
   Microscope,
   Hash,
+  BookOpen,
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { Mark } from '@tiptap/core';
@@ -57,6 +58,7 @@ import { MentionSelector } from '../../../ui/Selectors';
 import type { MentionResult } from '../../../ui/Selectors/Selectors.types';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { useResearchOptions, type ResearchContext } from '../../../../hooks/useResearchAgent';
+import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
 import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
@@ -116,6 +118,7 @@ export interface XyneAIInputBoxProps {
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: () => void;
+  onSelectedCollectionsChange?: (collectionIds: string[]) => void;
   onResearchContextChange?: (context: ResearchContext | null) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
@@ -153,6 +156,8 @@ export interface XyneAIInputBoxProps {
   selectedAgentSlug?: string | null;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
+  kbCollectionId?: string | undefined;
+  collectionsList?: CollectionSummary[];
 }
 
 // Interface for the XyneAIInputBox imperative API (matches InputBoxHandle pattern)
@@ -161,6 +166,7 @@ export interface XyneAIInputBoxHandle {
   clearContent: () => void;
   insertContent: (content: string) => void;
   isSuggestionOpen: () => boolean;
+  kbCollectionId?: string;
   focus: () => void;
 }
 
@@ -187,6 +193,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       inputValue,
       onInputChange,
       onSubmit,
+      onSelectedCollectionsChange,
       onResearchContextChange,
       onThreadInfoChange,
       onSelectionInfosChange,
@@ -219,15 +226,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onDeepResearchToggle,
       createCanvasEnabled = false,
       onCreateCanvasToggle,
+      kbCollectionId = '',
       onUserTagsChange,
       isOnboarding = false,
       selectedAgentSlug = null,
       agents = [],
       onSelectAgent,
+      collectionsList: collectionsListProp = [],
     },
     ref,
   ): ReactElement => {
     const researchDropdownRef = useRef<HTMLDivElement>(null);
+    const collectionDropdownRef = useRef<HTMLDivElement>(null);
     const researchSearchInputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const hasAutoFocusedRef = useRef(false);
@@ -273,6 +283,50 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     const [researchSearchQuery, setResearchSearchQuery] = useState('');
     const [researchHighlightedIndex, setResearchHighlightedIndex] = useState(0);
     const [researchTab, setResearchTab] = useState<'products' | 'repositories'>('products');
+
+    // Collection state
+    const [selectedCollections, setSelectedCollections] = useState<{ id: string; name: string }[]>(
+      [],
+    );
+    const [showCollectionDropdown, setShowCollectionDropdown] = useState(false);
+    const [collectionSearchQuery, setCollectionSearchQuery] = useState('');
+    const collectionsList = collectionsListProp;
+
+    // Track if auto-added collection was manually removed
+    const autoAddedCollectionRemoved = useRef(false);
+
+    // Auto-add collection from KB context when collections are loaded
+    // Auto-add collection from KB when opened from Knowledge Base
+    useEffect(() => {
+      if (!kbCollectionId) {
+        return;
+      }
+
+      // Don't re-add if user manually removed the auto-added collection
+      if (autoAddedCollectionRemoved.current) {
+        return;
+      }
+
+      // Find collection from already loaded collectionsList
+      const collection = collectionsList.find(c => c.id === kbCollectionId);
+
+      if (collection && selectedCollections.length === 0) {
+        const newCollection = [{ id: collection.id, name: collection.name }];
+        setSelectedCollections(newCollection);
+        // Notify parent so it's sent to backend
+        onSelectedCollectionsChange?.(newCollection.map(c => c.id));
+      }
+    }, [kbCollectionId, collectionsList, selectedCollections.length, onSelectedCollectionsChange]);
+
+    // Filter collections based on search query
+    const filteredCollections = useMemo(() => {
+      if (!collectionSearchQuery.trim()) return collectionsList;
+      const query = collectionSearchQuery.toLowerCase();
+      return collectionsList.filter(
+        col =>
+          col.name.toLowerCase().includes(query) || col.description?.toLowerCase().includes(query),
+      );
+    }, [collectionsList, collectionSearchQuery]);
 
     // Thread info state - track if user has removed it
     const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
@@ -743,6 +797,17 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       [selectedChannels, onAddChannel],
     );
 
+    // Handle removing a selected collection pill
+    const handleRemoveCollection = (collectionIdToRemove: string): void => {
+      // Mark as manually removed so auto-add won't re-add it
+      if (collectionIdToRemove === kbCollectionId) {
+        autoAddedCollectionRemoved.current = true;
+      }
+      const newCollections = selectedCollections.filter(c => c.id !== collectionIdToRemove);
+      setSelectedCollections(newCollections);
+      onSelectedCollectionsChange?.(newCollections.map(c => c.id));
+    };
+
     // File size limits
     const MAX_INDIVIDUAL_FILE_SIZE = 100 * 1024 * 1024; // 100MB in bytes
     const MAX_TOTAL_SIZE = 200 * 1024 * 1024; // 200MB in bytes
@@ -1053,16 +1118,23 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           setShowResearchDropdown(false);
           setResearchSearchQuery('');
         }
+        if (
+          collectionDropdownRef.current &&
+          !collectionDropdownRef.current.contains(event.target as Node)
+        ) {
+          setShowCollectionDropdown(false);
+          setCollectionSearchQuery('');
+        }
       };
 
-      if (showResearchDropdown) {
+      if (showResearchDropdown || showCollectionDropdown) {
         document.addEventListener('mousedown', handleClickOutside);
         return (): void => {
           document.removeEventListener('mousedown', handleClickOutside);
         };
       }
       return undefined;
-    }, [showResearchDropdown]);
+    }, [showResearchDropdown, showCollectionDropdown]);
 
     // Notify parent when research context changes
     useEffect(() => {
@@ -1226,6 +1298,22 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   data-track-name='OPEN_CONTEXT_MODAL'
                 >
                   <span className='text-muted-foreground font-semibold text-sm'>/</span>
+                </button>
+
+                {/* Collection Button to open collection selector */}
+                <button
+                  type='button'
+                  onClick={() => {
+                    setShowCollectionDropdown(true);
+                    setCollectionSearchQuery('');
+                  }}
+                  className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-[#E4E6E7] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0`}
+                  aria-label='Select collections'
+                  title='Select collections'
+                  data-track-category='XyneAI'
+                  data-track-name='OPEN_COLLECTION_SELECTOR'
+                >
+                  <BookOpen className='w-4 h-4 text-[#7C3AED]' />
                 </button>
 
                 {/* Research Agent Button - only show if no research is selected */}
@@ -1415,6 +1503,32 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       data-track-category='XyneAI'
                       data-track-name='REMOVE_CHANNEL'
                       data-track-metadata={JSON.stringify({ channelId: channel.id })}
+                    >
+                      <X className='w-3 h-3' />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Collection Pills */}
+                {selectedCollections.map(collection => (
+                  <div
+                    key={collection.id}
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        <BookOpen className='w-3.5 h-3.5 text-[#7C3AED]' />
+                      </div>
+                      <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                        {collection.name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveCollection(collection.id)}
+                      className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                      aria-label={`Remove ${collection.name}`}
+                      data-track-category='XyneAI'
+                      data-track-name='REMOVE_COLLECTION'
                     >
                       <X className='w-3 h-3' />
                     </button>
@@ -1807,6 +1921,71 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             )}
           </div>
         </div>
+
+        {/* Collection Dropdown */}
+        {showCollectionDropdown && (
+          <div
+            ref={collectionDropdownRef}
+            className='absolute bottom-full left-4 right-4 mb-2 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden'
+          >
+            <div className='p-2 border-b border-border bg-muted'>
+              <input
+                type='text'
+                placeholder='Search collections...'
+                value={collectionSearchQuery}
+                onChange={e => setCollectionSearchQuery(e.target.value)}
+                className='w-full px-3 py-2 bg-popover text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary'
+                data-track-category='XyneAI'
+                data-track-name='COLLECTION_SEARCH_INPUT'
+              />
+            </div>
+            <div className='max-h-60 overflow-y-auto'>
+              {filteredCollections.length === 0 ? (
+                <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
+                  {collectionSearchQuery.length === 0
+                    ? 'Type to search collections'
+                    : 'No collections found'}
+                </div>
+              ) : (
+                <div className='py-1'>
+                  {filteredCollections.map(collection => {
+                    const isSelected = selectedCollections.some(c => c.id === collection.id);
+                    return (
+                      <button
+                        key={collection.id}
+                        type='button'
+                        onClick={() => {
+                          if (isSelected) {
+                            const updated = selectedCollections.filter(c => c.id !== collection.id);
+                            setSelectedCollections(updated);
+                            onSelectedCollectionsChange?.(updated.map(c => c.id));
+                          } else {
+                            const updated = [
+                              ...selectedCollections,
+                              { id: collection.id, name: collection.name },
+                            ];
+                            setSelectedCollections(updated);
+                            onSelectedCollectionsChange?.(updated.map(c => c.id));
+                          }
+                        }}
+                        className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent ${
+                          isSelected ? 'bg-accent' : ''
+                        }`}
+                        data-track-category='XyneAI'
+                        data-track-name='SELECT_COLLECTION'
+                        data-track-metadata={JSON.stringify({ collectionId: collection.id })}
+                      >
+                        <BookOpen className='w-4 h-4 text-[#7C3AED]' />
+                        <span className='flex-1 truncate'>{collection.name}</span>
+                        {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Research Agent Dropdown */}
         {showResearchDropdown && (

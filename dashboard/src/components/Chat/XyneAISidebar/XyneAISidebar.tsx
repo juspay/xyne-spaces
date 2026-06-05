@@ -1,6 +1,13 @@
 import { ReactElement, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
+import { queries } from '../../../zero/queries';
+import { useSelf } from '../../../hooks/useUsers';
+import type {
+  CollectionSummary,
+  CollectionRole,
+} from '../../../services/Knowledge/collectionService';
 import { Upload } from 'lucide-react';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { apiInstance } from '../../../services/clients/apiClient';
@@ -96,6 +103,8 @@ interface XyneAISidebarProps {
   onClose?: () => void;
   initialConversationId?: string;
   onConversationChange?: (conversationId: string) => void;
+  kbCollectionId?: string;
+  kbChannelId?: string;
 }
 
 const XyneAISidebar = ({
@@ -107,6 +116,8 @@ const XyneAISidebar = ({
   onClose,
   initialConversationId,
   onConversationChange,
+  kbCollectionId: kbCollectionIdProp,
+  kbChannelId,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -129,6 +140,7 @@ const XyneAISidebar = ({
   );
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
   const [showContextModal, setShowContextModal] = useState(false);
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -330,6 +342,27 @@ const XyneAISidebar = ({
     [allChannels],
   );
 
+  const currentUser = useSelf();
+  const [zeroCollections] = useZeroQuery(
+    queries.scopedCollections({ scopeType: 'CHANNEL', scopeId: kbChannelId ?? '' }),
+    !!currentUser?.id && !!kbChannelId,
+  );
+  const collectionsList: CollectionSummary[] = useMemo(() => {
+    if (!zeroCollections || !currentUser?.id) return [];
+    return zeroCollections.map(col => {
+      const perm = col.permissions?.find(p => p.userId === currentUser.id);
+      return {
+        id: col.id,
+        name: col.name,
+        description: col.description ?? null,
+        ownerId: col.ownerId,
+        role: (perm?.role ??
+          (col.ownerId === currentUser.id ? 'OWNER' : 'VIEWER')) as CollectionRole,
+        canShare: perm?.canShare ?? col.ownerId === currentUser.id,
+      };
+    });
+  }, [zeroCollections, currentUser?.id]);
+
   // Initialize selectedChannels with current channel (if not DM/GROUP_DM) on mount
   useEffect(() => {
     if (
@@ -390,7 +423,6 @@ const XyneAISidebar = ({
   // Web search stays enabled for the session to allow follow-up questions
   useEffect(() => {
     if (browserContext && webSearchAccessible && !webSearchEnabled) {
-      console.log('[XyneAISidebar] Auto-enabling web search for browser context');
       setWebSearchEnabled(true);
     }
   }, [browserContext, webSearchAccessible, webSearchEnabled]);
@@ -404,6 +436,7 @@ const XyneAISidebar = ({
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
+    collectionIds: selectedCollectionIds ?? [],
     conversationId,
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
@@ -452,15 +485,19 @@ const XyneAISidebar = ({
       setStreamThreadKey(newStreamSlotKey());
       usesDraftStreamKeyRef.current = true;
 
-      // Only update the xstate machine in sidebar mode (fullscreen manages its own lifecycle)
-      if (!isFullscreen) {
-        xyneAIActor.send({
-          type: 'OPEN',
-          ...(channelId && { channelId }),
-          ...(threadInfo && { threadInfo }),
-          ...(canvasInfo && { canvasInfo }),
-          startFreshChat: false,
-        });
+      // Only reset the flag in the machine for non-KB instances (AppRoot sidebar)
+      // KB inline sidebar doesn't use xstate, so skip this
+      if (channelId !== null) {
+        // Only update the xstate machine in sidebar mode (fullscreen manages its own lifecycle)
+        if (!isFullscreen) {
+          xyneAIActor.send({
+            type: 'OPEN',
+            ...(channelId && { channelId }),
+            ...(threadInfo && { threadInfo }),
+            ...(canvasInfo && { canvasInfo }),
+            startFreshChat: false,
+          });
+        }
       }
     }
   }, [startFreshChat, channelId, threadInfo, canvasInfo, isFullscreen]);
@@ -1231,10 +1268,19 @@ const XyneAISidebar = ({
   // Handle Summarizer citation clicks
   const handleSummarizerCitationClick = useCallback(
     (citation: SummarizerCitation): void => {
-      // Attachment citations: open the file directly in the viewer modal
-      if (citation.entityType === 'attachment' && citation.entityId) {
+      // Attachment & Knowledge Base citations: open the file directly in the viewer modal
+      if (
+        (citation.entityType === 'attachment' || citation.entityType === 'knowledge_base') &&
+        citation.entityId
+      ) {
+        // KB files are served from /collections/items/:itemId/download (not /attachments/:id/download)
+        // fetchFile's resolveUrl passes through paths starting with '/', so we use the full path
+        const attachmentId =
+          citation.entityType === 'knowledge_base'
+            ? `/collections/items/${citation.entityId}/download`
+            : citation.entityId;
         attachmentCitationPreviewStore.open({
-          attachmentId: citation.entityId,
+          attachmentId,
           fileName: citation.fileName ?? citation.entityId,
           mimeType: citation.mimeType ?? 'application/octet-stream',
           ...(citation.chunkPos !== undefined && { initialPage: citation.chunkPos }),
@@ -1434,8 +1480,13 @@ const XyneAISidebar = ({
 
     // Set the channel ID for this conversation if not already set
     // This ensures the conversation is saved to the correct channel even if user switches channels
-    if (!conversationChannelId && channelId) {
-      setConversationChannelId(channelId);
+    // For KB context (channelId is null), use kbCollectionId for storage
+    if (!conversationChannelId) {
+      if (channelId) {
+        setConversationChannelId(channelId);
+      } else if (kbCollectionIdProp) {
+        setConversationChannelId(kbCollectionIdProp);
+      }
     }
 
     // Scroll immediately after clearing input, before query is submitted
@@ -1471,6 +1522,7 @@ const XyneAISidebar = ({
     displayMessages,
     abortCurrentRequest,
     isLegacyConversation,
+    kbCollectionIdProp,
   ]);
 
   const hasBackgroundStreamingElsewhere = useMemo(() => {
@@ -1513,6 +1565,7 @@ const XyneAISidebar = ({
     onRemoveChannel: handleRemoveChannel,
     onAddChannel: handleAddChannel,
     nonDMChannels,
+    collectionsList,
     onOpenContextModal: handleOpenContextModal,
     selectedTickets,
     onRemoveTicket: handleRemoveTicket,
@@ -1870,6 +1923,8 @@ const XyneAISidebar = ({
                   agents={accessibleAgents}
                   onSelectAgent={handleSelectAgent}
                   {...sharedInputSectionProps}
+                  kbCollectionId={kbCollectionIdProp}
+                  onSelectedCollectionsChange={setSelectedCollectionIds}
                 />
               </div>
             </div>

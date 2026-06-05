@@ -12,7 +12,7 @@ import {
 } from '../types';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
-type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'transcript' | 'mail';
+type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail';
 
 export interface SlackFilters {
   channelId?: string[];
@@ -59,6 +59,8 @@ export interface FileFilters {
   createdRange?: string;
   channelId?: string[];
   ownerId?: string[];
+  collectionId?: string[];
+  projectId?: string[];
 }
 
 export interface MeetingFilters {
@@ -71,6 +73,7 @@ export interface MeetingFilters {
   createdOn?: string;
   createdRange?: string;
 }
+
 
 export interface MailFilters {
   userEmail?: string;
@@ -222,11 +225,9 @@ buildYql(
     if (apps.some((a) => a.toLowerCase() === 'transcript')) {
       appConditions.push(this.buildMeetingConditions(meetingFilters));
     }
-
-    if (apps.some(a => a.toLowerCase() === 'mail')) {
+     if (apps.some(a => a.toLowerCase() === 'mail')) {
       appConditions.push(this.buildMailConditions(mailFilters, userId));
     }
-
      // Combine app conditions
     if (appConditions.length > 0) {
       whereConditions.push(`(${appConditions.join(' or ')})`);
@@ -315,8 +316,24 @@ buildYql(
       subAppConditions.push(`subApp contains "RCA"`);
     }
 
+    // Collections: require owner/permissions/isPrivate check + project scoping
+    if (subApps.some(s => s === 'collections')) {
+      let collectionCondition = `(subApp contains "collections") and (ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false")`;
+      if (filters.projectId && filters.projectId.length > 0) {
+        const projectCondition = filters.projectId.map(id => `projectId contains "${id}"`).join(' or ');
+        collectionCondition += ` and (${projectCondition})`;
+      }
+      subAppConditions.push(`(${collectionCondition})`);
+    }
+
     if (subAppConditions.length > 0) {
       conditions.push(`(${subAppConditions.join(' or ')})`);
+    }
+
+    // Collection ID filter (scope to specific collections)
+    if (filters.collectionId && filters.collectionId.length > 0) {
+      const orCondition = filters.collectionId.map(id => `clId contains "${id}"`).join(' or ');
+      conditions.push(`(${orCondition})`);
     }
 
     // callType filter (e.g. HEADLESS for recordings)
@@ -361,6 +378,7 @@ buildYql(
     }
     return conditions.join(' and ');
   }
+
   /**
    * Build YQL condition for Slack app
    * Applies to message, channel, and attachment schemas
@@ -577,6 +595,9 @@ buildYql(
   }
 
   /**
+   * Build YQL condition for collection search
+   * Filters file documents where clId (collection ID) is not null/empty
+  /**
    * Build YQL condition for SAM Transcript search
    * Applies to sam_transcript schema only
    */
@@ -655,6 +676,7 @@ buildYql(
       ticket: [ticketSchema],
       user: [userSchema],
       file: [fileSchema],
+      collection: [fileSchema],
       transcript: [samTranscriptSchema],
       mail: [mailSchema],
     };

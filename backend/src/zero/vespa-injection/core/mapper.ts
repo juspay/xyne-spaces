@@ -5,7 +5,7 @@ import type { InsertValue } from '@rocicorp/zero';
 import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
 import { VespaJob, VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Conversation, Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call } from '@prisma/client';
+import { Conversation, Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem } from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
@@ -639,6 +639,122 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
   }
 }
 
+export const mapCollection = async (
+  args: CollectionItem,
+): Promise<VespaFileDocument> => {
+  const collectionItem = await db.collectionItem.findUnique({
+    where: { id: args.id },
+  });
+
+  const attachment = collectionItem
+    ? await db.messageAttachment.findFirst({
+        where: { entityId: collectionItem.id, entityType: 'COLLECTION' },
+      })
+    : null;
+
+  if (!collectionItem) {
+    throw new Error(`CollectionItem not found: ${args.id}`);
+  }
+
+  // Always resolve isPrivate and permissions from the ROOT collection.
+  // collectionId may point to a sub-folder whose isPrivate/permissions are not authoritative.
+  const rootCollection = await db.collection.findUnique({
+    where: { id: collectionItem.rootCollectionId },
+    include: { permissions: true },
+  });
+
+  if (!rootCollection) {
+    throw new Error(`Root collection not found: ${collectionItem.rootCollectionId}`);
+  }
+
+  // Resolve permissions from the root collection (ownerId covered by YQL: ownerId contains userId)
+  const permissions = rootCollection.permissions
+    .map(p => p.userId)
+    .filter((id): id is string => id !== null);
+
+  // Process file: fetch from GCS and extract chunks using FileProcessor
+  let chunks: string[] = [];
+  let chunks_pos: string[] = [];
+  let image_chunks: string[] = [];
+  let image_chunks_pos: string[] = [];
+  let chunks_map: any[] | undefined;
+  let documentOutline: string | undefined;
+
+  if (attachment?.url) {
+    try {
+      const storageService = getStorageService();
+      const buffer = await storageService.getFileBuffer(attachment!.url);
+
+      const processor = FileProcessor.fromMimeType(attachment?.mimetype || '');
+      const result = await processor.processBuffer(buffer, collectionItem.id);
+
+      chunks = result.chunks || [];
+      chunks_pos = result.chunks_pos
+        ? result.chunks_pos.map(String)
+        : chunks.map((_, index) => String(index));
+      image_chunks = result.image_chunks || [];
+      image_chunks_pos = (result.image_chunks_pos || []).map(String);
+      chunks_map = result.chunks_map;
+      documentOutline = result.documentOutline;
+
+      logger.info(`[MAP_FILE] Processed file ${collectionItem.name} (${collectionItem.id}): ${chunks.length} chunks, ${image_chunks.length} image chunks, method: ${result.processingMethod}`);
+    } catch (error) {
+      logger.error(`[MAP_FILE] Failed to process file ${collectionItem.name} (${collectionItem.id}):`, error);
+      // Still insert the document with empty chunks so it's searchable by metadata
+    }
+  }
+
+  // Resolve projectId, channelRef, workspaceId and orgId from scope.
+  // For scopeType = 'CHANNEL', look up the channel to derive these.
+  // Future scope types add branches here — no schema change needed.
+  let projectId: string | undefined;
+  let channelRef: string | undefined;
+  let workspaceId: string | undefined;
+  let orgId: string | undefined;
+  if (rootCollection.scopeType === 'CHANNEL') {
+    const channel = await db.channel.findUnique({
+      where: { id: rootCollection.scopeId },
+      select: { projectId: true, workspaceId: true },
+    });
+    projectId = channel?.projectId ?? undefined;
+    channelRef = getRef(channelSchema, rootCollection.scopeId);
+    const resolved = await resolveOrgAndWorkspace(channel?.workspaceId);
+    workspaceId = resolved.workspaceId;
+    orgId = resolved.orgId;
+  }
+
+  return {
+    docId: collectionItem.fileId,
+    docType: VespaDocType.FILE,
+    fileName: collectionItem.name,
+    description: '',
+    chunks,
+    chunks_pos,
+    chunks_map,
+    image_chunks,
+    image_chunks_pos,
+    documentOutline,
+    metadata: '{}',
+    createdBy: collectionItem.uploadedById || collectionItem.ownerId,
+    createdAt: toTimestamp(collectionItem.createdAt),
+    updatedAt: toTimestamp(collectionItem.updatedAt),
+    ownerId: collectionItem.ownerId,
+    permissions,
+    urlInternal: attachment?.url || '',
+    urlOriginal: '',
+    fileSize: Number(attachment?.size || 0),
+    isPrivate: rootCollection.isPrivate,
+    mimeType: attachment?.mimetype || '',
+    subApp: 'collections',
+    clId: collectionItem.rootCollectionId,
+    clFd: collectionItem.collectionId,
+    projectId,
+    channelRef,
+    workspaceId,
+    orgId,
+  };
+}
+
 export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
   // Get channel info if channelId exists
   let channelRef: string | undefined;
@@ -1151,6 +1267,8 @@ export const mapBySchema = async (
             return mapTranscript(args as InsertValue<TranscriptsSchema>, workspaceId, orgId);
           case SubApp.RCA:
             return mapRCA(args as RCAWithRelations, workspaceId, orgId);
+          case SubApp.COLLECTIONS:
+            return mapCollection(args as CollectionItem);
           case SubApp.CHAT_ATTACHMENT:
           case SubApp.TICKET_ATTACHMENT:
             return mapFile(args as InsertValue<MessageAttachmentsSchema>, workspaceId, orgId);
@@ -1194,7 +1312,7 @@ export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
   app?: SubApp
-): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | null> => {
+): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | null> => {
   switch (schema) {
     case channelSchema:
       return await db.channel.findUnique({
@@ -1229,9 +1347,14 @@ export const fetchDataBySchema = async (
           return await db.call.findUnique({
             where: { id: docId }
           });
-        case SubApp.RCA:
+        case SubApp.RCA: {
           const releaseRepository = new ReleaseRepository();
           return await releaseRepository.getRCAById(docId, { includeImpacts: true, includeCOEs: true }) as RCAWithRelations;
+        }
+        case SubApp.COLLECTIONS:
+          return await db.collectionItem.findFirst({
+            where: { fileId: docId, isLatest: true }
+          });
         case SubApp.CHAT_ATTACHMENT:
         case SubApp.TICKET_ATTACHMENT:
           return await db.messageAttachment.findUnique({

@@ -164,6 +164,7 @@ export enum AttachmentEntityType {
   DELAYED_MESSAGE = "DELAYED_MESSAGE",
   WORKFLOW_STEPS = "WORKFLOW_STEPS",
   IMPACT = "IMPACT",
+  COLLECTION = "COLLECTION",
 }
 
 export enum AttachmentUploadStatus {
@@ -614,6 +615,20 @@ export enum Platform {
   WEB = "WEB",
   ELECTRON = "ELECTRON",
   MOBILE = "MOBILE",
+}
+
+export enum IngestionStatus {
+  PENDING = "PENDING",
+  PROCESSING = "PROCESSING",
+  COMPLETED = "COMPLETED",
+  FAILED = "FAILED",
+  NONE = "NONE",
+}
+
+export enum CollectionRole {
+  OWNER = "OWNER",
+  EDITOR = "EDITOR",
+  VIEWER = "VIEWER",
 }
 
 export enum ApplicationReleaseTicketStatus {
@@ -2336,6 +2351,55 @@ export const activityAliasTable = table("activity_aliases")
   })
   .primaryKey("id");
 
+export const collectionTable = table("collections")
+  .columns({
+    id: string(),
+    parentId: string().optional(),
+    ownerId: string(),
+    name: string(),
+    scopeType: string(),
+    scopeId: string(),
+    description: string().optional(),
+    isPrivate: boolean(),
+    rootCollectionId: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+    deletedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const collectionItemTable = table("collection_items")
+  .columns({
+    id: string(),
+    rootCollectionId: string(),
+    collectionId: string(),
+    fileId: string(),
+    ownerId: string(),
+    name: string(),
+    uploadedById: string().optional(),
+    ingestionStatus: enumeration<IngestionStatus>(),
+    versionNumber: number(),
+    isLatest: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
+    deletedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const collectionPermissionTable = table("collection_permissions")
+  .columns({
+    id: string(),
+    collectionId: string(),
+    userId: string().optional(),
+    userGroupId: string().optional(),
+    role: enumeration<CollectionRole>(),
+    canShare: boolean(),
+    grantedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const stageApproversTable = table("stage_approvers")
   .columns({
     id: string(),
@@ -3971,6 +4035,55 @@ export const formFieldsTableRelationships = relationships(formFieldsTable, ({ on
   })
 }));
 
+export const collectionTableRelationships = relationships(collectionTable, ({ one, many }) => ({
+  parent: one({
+    sourceField: ["parentId"],
+    destField: ["id"],
+    destSchema: collectionTable,
+  }),
+  children: many({
+    sourceField: ["id"],
+    destField: ["parentId"],
+    destSchema: collectionTable,
+  }),
+  files: many({
+    sourceField: ["id"],
+    destField: ["collectionId"],
+    destSchema: collectionItemTable,
+  }),
+  permissions: many({
+    sourceField: ["id"],
+    destField: ["collectionId"],
+    destSchema: collectionPermissionTable,
+  })
+}));
+
+export const collectionItemTableRelationships = relationships(collectionItemTable, ({ one }) => ({
+  collection: one({
+    sourceField: ["collectionId"],
+    destField: ["id"],
+    destSchema: collectionTable,
+  })
+}));
+
+export const collectionPermissionTableRelationships = relationships(collectionPermissionTable, ({ one }) => ({
+  collection: one({
+    sourceField: ["collectionId"],
+    destField: ["id"],
+    destSchema: collectionTable,
+  }),
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  userGroup: one({
+    sourceField: ["userGroupId"],
+    destField: ["id"],
+    destSchema: userGroupTable,
+  })
+}));
+
 export const appsTableRelationships = relationships(appsTable, ({ one, many }) => ({
   createdByUser: one({
     sourceField: ["createdBy"],
@@ -4266,6 +4379,9 @@ export const schema = createSchema(
       draftMessageTable,
       userActivityEventTable,
       activityAliasTable,
+      collectionTable,
+      collectionItemTable,
+      collectionPermissionTable,
       stageApproversTable,
       applicationTable,
       applicationReleaseTicketTable,
@@ -4365,6 +4481,9 @@ export const schema = createSchema(
       canvasParticipantTableRelationships,
       formTableRelationships,
       formFieldsTableRelationships,
+      collectionTableRelationships,
+      collectionItemTableRelationships,
+      collectionPermissionTableRelationships,
       appsTableRelationships,
       installedAppsTableRelationships,
       appIncomingWebhookTableRelationships,
@@ -4488,6 +4607,9 @@ export type Merchant = Row<typeof schema.tables.merchants>;
 export type DraftMessage = Row<typeof schema.tables.draft_messages>;
 export type UserActivityEvent = Row<typeof schema.tables.user_activity_events>;
 export type ActivityAlias = Row<typeof schema.tables.activity_aliases>;
+export type Collection = Row<typeof schema.tables.collections>;
+export type CollectionItem = Row<typeof schema.tables.collection_items>;
+export type CollectionPermission = Row<typeof schema.tables.collection_permissions>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type Application = Row<typeof schema.tables.applications>;
 export type ApplicationReleaseTicket = Row<typeof schema.tables.application_release_tickets>;

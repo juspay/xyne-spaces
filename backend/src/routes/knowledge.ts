@@ -217,7 +217,7 @@ router.delete('/documents/:id', async (req: Request, res: Response): Promise<voi
 /**
  * POST /api/knowledge/convert
  * Convert BlockNote content to Markdown (utility endpoint)
- * 
+ *
  * Request body:
  * - blocks: BlockNote JSON blocks array
  */
