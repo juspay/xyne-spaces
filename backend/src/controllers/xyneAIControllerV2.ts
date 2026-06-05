@@ -294,24 +294,42 @@ export class XyneAIControllerV2 {
           const result = await runClawAgentStream(req, res, runReq);
           if (result.error) {
             status = 'error';
+            res.write(
+              `data: ${JSON.stringify({ type: 'error', error: result.error })}\n\n`,
+            );
           }
+        } catch (streamError) {
+          status = 'error';
+          logger.error('[XyneAIv2] stream failed', {
+            flow: 'xyne-ai-v2',
+            mode,
+            userId,
+            sessionId: effectiveSessionId,
+            conversationId: effectiveConversationId,
+            durationMs: Date.now() - startTime,
+            error: streamError instanceof Error ? streamError.message : String(streamError),
+          });
+          const errorMessage =
+            streamError instanceof Error ? streamError.message : String(streamError);
+          res.write(`data: ${JSON.stringify({ type: 'error', error: errorMessage })}\n\n`);
         } finally {
           clearInterval(pingInterval);
+        }
+
+        // Always send the end event after all processing (success or handled error)
+        if (!res.writableEnded) {
           res.write(`data: ${JSON.stringify({ type: 'end' })}\n\n`);
           if (!res.writableEnded) res.end();
         }
-      } catch (streamError) {
+      } catch (unexpectedError) {
         status = 'error';
-        logger.error('[XyneAIv2] stream failed', {
-          flow: 'xyne-ai-v2',
-          mode,
-          userId,
-          sessionId: effectiveSessionId,
-          conversationId: effectiveConversationId,
-          durationMs: Date.now() - startTime,
-          error: streamError instanceof Error ? streamError.message : String(streamError),
-        });
-        throw streamError;
+        logger.error('[XyneAIv2] unexpected error', unexpectedError);
+        if (!res.writableEnded) {
+          const errorMessage =
+            unexpectedError instanceof Error ? unexpectedError.message : 'Unexpected error';
+          res.write(`data: ${JSON.stringify({ type: 'error', error: errorMessage })}\n\n`);
+          res.end();
+        }
       } finally {
         try {
           const duration = Date.now() - startTime;

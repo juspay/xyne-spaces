@@ -165,7 +165,7 @@ const ERROR_CLASS_MAPPINGS: ErrorClassMapping[] = [
     retryable: true,
   },
   {
-    keywords: ['readtimeout', 'timeout'],
+    keywords: ['readtimeout', 'timeout', 'terminated'],
     code: 'TIMEOUT',
     title: 'Request timed out',
     message: 'Ask AI took too long to complete this request.',
@@ -207,9 +207,17 @@ const ERROR_CLASS_MAPPINGS: ErrorClassMapping[] = [
   {
     keywords: ['exception'],
     code: 'EXCEPTION',
-    title: 'Ask AI couldn’t complete this request',
+    title: 'Ask AI couldn\'t complete this request',
     message: 'Ask AI ran into an internal error while generating a response.',
     helpText: 'Please try again.',
+    retryable: true,
+  },
+  {
+    keywords: ['fetch failed', 'econnrefused', 'networkerror'],
+    code: 'NETWORK_ERROR',
+    title: 'Network error',
+    message: 'Couldn\'t connect to the AI model service.',
+    helpText: 'This usually means the model service is unreachable. Check that the service is running and try again.',
     retryable: true,
   },
 ];
