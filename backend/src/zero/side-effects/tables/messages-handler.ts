@@ -239,7 +239,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
         where: { id: channelId },
-        select: { name: true, scopeType: true, projectId: true }
+        select: { name: true, scopeType: true, projectId: true, project: { select: { name: true } } }
       }),
       db.user.findUnique({
         where: { id: senderId },
@@ -385,6 +385,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       isReply && !allowThreadBroadcastMentions ? undefined : channelId
     );
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
+
     const validMentionedUsers = mentionedUsers
       .filter(u => u.mentionSource === 'direct' || u.mentionSource === 'group')
       .filter(user => channelParticipantIds.has(user.userId) && user.userId !== senderId)
@@ -410,6 +411,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         channelId,
         channelName: channel?.name ?? channelId,
+        ...(channel?.projectId ? { projectId: channel.projectId } : {}),
+        ...(channel?.project?.name ? { projectName: channel.project.name } : {}),
         ...(attachments.length > 0 && {
           attachments: attachments.map(att => ({
             attachmentId: att.id,
@@ -439,6 +442,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         channelId,
         channelName: channel?.name ?? channelId,
+        ...(channel?.projectId ? { projectId: channel.projectId } : {}),
+        ...(channel?.project?.name ? { projectName: channel.project.name } : {}),
         mentionedUserIds: nonAppMentionedUserIds,
       }, observerAppUserIds);
     }
@@ -450,7 +455,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       ...new Set(
         mentionedUsers
           .map(u => u.userId)
-          .filter(userId => channelParticipantIds.has(userId) && userId !== senderId)
+          .filter(
+            userId =>
+              channelParticipantIds.has(userId) &&
+              userId !== senderId
+          )
       ),
     ];
 
@@ -558,7 +567,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       senderId,
       mentionType,
       finalMentionedUserIds,
-      conversation.initialMessageId !== messageId
+      conversation.initialMessageId !== messageId,
     );
 
     // Handle bot mentions in channels - trigger bot execution when @mentioned
@@ -574,7 +583,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       await this.createReplyActivity(
         conversationId,
         messageId,
-        finalMentionedUserIds,
+        notificationUserIds,
         senderId,
         channelId,
         channelName,
@@ -1155,6 +1164,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     hasAttachment: boolean
   ): Promise<void> {
     const isLargeGroupDm = channelParticipants.length > LARGE_GROUP_DM_THRESHOLD;
+    const isReply = !!(initialMessageId && initialMessageId !== messageId);
     if (mentionType) {
       await this.handleSpecialMentionActivities(channelId, messageId, senderId, mentionType, [], initialMessageId !== messageId);
     }
@@ -1185,7 +1195,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     }
 
-    const isReply = initialMessageId && initialMessageId !== messageId;
     if (isReply && conversationId) {
       await this.createReplyActivity(
         conversationId,
@@ -1290,7 +1299,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     senderId: string,
     mentionType: '@channel' | '@here' | undefined,
     mentionedUserIds: string[] = [],
-    isThreadActivity: boolean = false
+    isThreadActivity: boolean = false,
   ): Promise<void> {
     if (!mentionType) {
       return;
@@ -1298,7 +1307,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const processSpecialMentionUsers = async (recipientIds: string[]): Promise<void> => {
       const excludedUserSet = new Set(mentionedUserIds);
-      const uniqueRecipientIds = [
+      let uniqueRecipientIds = [
         ...new Set(
           recipientIds.filter(id => id && id !== senderId && !excludedUserSet.has(id))
         ),
