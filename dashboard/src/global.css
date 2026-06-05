@@ -1757,6 +1757,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   object-fit: contain;
 }
 
+img.inline-emoji,
+.epr-emoji-img {
+  filter: url(#emoji-brightness-cap);
+}
+
 /* ───────────────────────────────────────────── */
 /* Chat layout fixes — scoped ONLY to summaries  */
 /* ───────────────────────────────────────────── */

@@ -14,6 +14,17 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
+    <!-- Tones down only the bright parts of custom emojis; dark ones stay as-is.
+         Used in CSS via filter: url(#emoji-brightness-cap). -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="emoji-brightness-cap" color-interpolation-filters="sRGB">
+        <feComponentTransfer>
+          <feFuncR type="table" tableValues="0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.78 0.84 0.88" />
+          <feFuncG type="table" tableValues="0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.78 0.84 0.88" />
+          <feFuncB type="table" tableValues="0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.78 0.84 0.88" />
+        </feComponentTransfer>
+      </filter>
+    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
