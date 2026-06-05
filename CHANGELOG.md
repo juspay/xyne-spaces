@@ -1,3 +1,16 @@
+## [1.155.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.154.0...v1.155.0) (2026-06-05)
+
+
+### Features
+
+* knowledge base with Ask AI. ([a5fa1e0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a5fa1e03213da146f6977af8ffc43dff33b9cc42)), closes [#6287](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6287) [#5751](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5751)
+
+
+### Bug Fixes
+
+* automations and slack disconnection for desk ([d4f2973](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d4f2973153569224859941a6f2601599c7bf2042)), closes [#7165](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7165)
+* remove mark activity unread from mobile ([96a977e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/96a977e5d2399d197aa6c2a94fa58ed2babf26b0)), closes [#7145](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7145)
+
 ## [1.154.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.153.0...v1.154.0) (2026-06-05)
 
 
