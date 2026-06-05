@@ -782,17 +782,24 @@ export class ScheduleCallController {
           const newStartTime = startTime ?? series.startTime;
           const newEndTime = endTime ?? series.endTime;
 
+          // Compute the delta in milliseconds between the old and new HH:mm strings.
+          // Both are in the user's timezone, so subtracting them is timezone-agnostic.
+          // Applying this delta to the existing UTC timestamps avoids the setHours() trap
+          // of interpreting the time in server-local time (UTC in prod) instead of the
+          // user's timezone.
+          const [oldStartH, oldStartM] = series.startTime.split(':').map(Number);
+          const [newStartH, newStartM] = newStartTime.split(':').map(Number);
+          const startDeltaMs = ((newStartH! * 60 + newStartM!) - (oldStartH! * 60 + oldStartM!)) * 60_000;
+
+          const [oldEndH, oldEndM] = series.endTime.split(':').map(Number);
+          const [newEndH, newEndM] = newEndTime.split(':').map(Number);
+          const endDeltaMs = ((newEndH! * 60 + newEndM!) - (oldEndH! * 60 + oldEndM!)) * 60_000;
+
           for (const instance of allScheduledInstances) {
-            // Calculate new startsAt by applying new startTime to the existing date
             const existingStart = instance.startsAt!;
             const existingEnd = instance.endsAt!;
-            const newStartsAt = new Date(existingStart);
-            const [newStartHours, newStartMinutes] = newStartTime.split(':').map(Number);
-            newStartsAt.setHours(newStartHours, newStartMinutes, 0, 0);
-
-            const newEndsAt = new Date(existingEnd);
-            const [newEndHours, newEndMinutes] = newEndTime.split(':').map(Number);
-            newEndsAt.setHours(newEndHours, newEndMinutes, 0, 0);
+            const newStartsAt = new Date(existingStart.getTime() + startDeltaMs);
+            const newEndsAt = new Date(existingEnd.getTime() + endDeltaMs);
 
             // Update startsAt and endsAt in-place
             await db.call.update({

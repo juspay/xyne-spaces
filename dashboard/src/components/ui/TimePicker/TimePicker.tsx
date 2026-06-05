@@ -45,6 +45,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
   );
   const [period, setPeriod] = useState<string>(value ? value.split(' ')[1] || 'AM' : 'AM');
   const [open, setOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   const handleHourChange = (newHour: string) => {
     if (newHour === '' || newHour === '0') {
@@ -88,7 +89,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
   };
 
   useEffect(() => {
-    if (value) {
+    if (value && !isEditing) {
       const parts = value.split(':');
       const h = parts[0]?.split(' ')[0] ?? '';
       const m = parts[1]?.split(' ')[0] ?? '';
@@ -97,7 +98,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
       setMinute(m);
       setPeriod(p);
     }
-  }, [value]);
+  }, [value, isEditing]);
 
   const displayTime =
     hour && minute ? `${hour.padStart(2, '0')}:${minute.padStart(2, '0')} ${period}` : placeholder;
@@ -151,7 +152,11 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                 id='timepicker-hour'
                 value={hour}
                 onChange={e => handleHourChange(e.target.value)}
-                onFocus={e => e.target.select()}
+                onFocus={e => {
+                  e.target.select();
+                  setIsEditing(true);
+                }}
+                onBlur={() => setIsEditing(false)}
                 type='text'
                 inputMode='numeric'
                 pattern='[0-9]*'
@@ -172,7 +177,11 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                 id='timepicker-minute'
                 value={minute}
                 onChange={e => handleMinuteChange(e.target.value)}
-                onFocus={e => e.target.select()}
+                onFocus={e => {
+                  e.target.select();
+                  setIsEditing(true);
+                }}
+                onBlur={() => setIsEditing(false)}
                 type='text'
                 inputMode='numeric'
                 pattern='[0-9]*'

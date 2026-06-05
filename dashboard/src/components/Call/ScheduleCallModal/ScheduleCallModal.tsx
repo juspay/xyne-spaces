@@ -40,6 +40,11 @@ import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { ExternalInviteesInput } from './ExternalInviteesInput';
 import { InvitationPreviewStep } from './InvitationPreviewStep';
+import {
+  validateCallDateTimes,
+  validateRecurringCallTimes,
+  mergeDateWithTime,
+} from '../../../utils/callTimeValidation';
 
 /** Shape of a scheduled call passed in for pre-filling in edit mode. */
 export interface EditCallData {
@@ -392,7 +397,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   //   - at least one participant is added
   //   - no channel is selected in the participants field (channel already serves as the target)
   const hasParticipantChannel = participants.some(v => v.startsWith('channel:'));
-  const showPostCallUpdates = participants.length > 0 && !hasParticipantChannel;
+  const showPostCallUpdates =
+    (participants.length > 0 || postCallUpdates) && !hasParticipantChannel;
 
   const participantLabel = useMemo(() => {
     if (participants.some(v => v.startsWith('channel:'))) return 'Selected Channel';
@@ -553,6 +559,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       setEditEntireSeries(false);
       // Set isRecurring based on whether this is a recurring series call
       setIsRecurring(!!initialCall.recurringSeriesId);
+      validateTimes(callStart, callEnd);
     } else {
       const displayName = getUserDisplayName(user);
       const start = initialStartsAt ?? defaultStart;
@@ -568,6 +575,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       }
       setRecurringStartTime(toHHMM(start));
       setRecurringEndTime(toHHMM(end));
+      validateTimes(start, end);
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -644,6 +652,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   const buildUserOption = (u: (typeof allUsers)[number]) => ({
     ...u,
     label: getUserDisplayName(u),
+    subtitle: u.name,
     value: `user:${u.id}`,
     icon: (
       <Avatar
@@ -978,31 +987,26 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   ]);
 
   // Validate start and end times
-  const validateTimes = useCallback(() => {
-    const currentStartsAt = watch('startsAt');
-    const currentEndsAt = watch('endsAt');
-    const now = new Date();
+  const validateTimes = useCallback(
+    (newStartsAt?: Date, newEndsAt?: Date) => {
+      const currentStartsAt = newStartsAt ?? watch('startsAt');
+      const currentEndsAt = newEndsAt ?? watch('endsAt');
+      const { startsAtError, endsAtError } = validateCallDateTimes(currentStartsAt, currentEndsAt);
 
-    // Validate start time
-    if (currentStartsAt && currentStartsAt <= now) {
-      setError('startsAt', {
-        type: 'manual',
-        message: 'Start time must be in the future',
-      });
-    } else {
-      clearErrors('startsAt');
-    }
+      if (startsAtError) {
+        setError('startsAt', { type: 'manual', message: startsAtError });
+      } else {
+        clearErrors('startsAt');
+      }
 
-    // Validate end time
-    if (currentStartsAt && currentEndsAt && currentEndsAt <= currentStartsAt) {
-      setError('endsAt', {
-        type: 'manual',
-        message: 'End time must be after start time',
-      });
-    } else {
-      clearErrors('endsAt');
-    }
-  }, [watch, setError, clearErrors]);
+      if (endsAtError) {
+        setError('endsAt', { type: 'manual', message: endsAtError });
+      } else {
+        clearErrors('endsAt');
+      }
+    },
+    [watch, setError, clearErrors],
+  );
 
   const handleStartTimeChange = useCallback(
     (timeString: string): void => {
@@ -1011,12 +1015,14 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         setValue('startsAt', newStartsAt, { shouldValidate: true });
 
         // Auto-adjust end time to be 1 hour after start time if end time is before start time
+        let effectiveEndsAt = endsAt;
         if (endsAt && newStartsAt >= endsAt) {
           const newEndsAt = new Date(newStartsAt.getTime() + 60 * 60 * 1000);
           setValue('endsAt', newEndsAt, { shouldValidate: true });
+          effectiveEndsAt = newEndsAt;
         }
 
-        setTimeout(() => validateTimes(), 0);
+        validateTimes(newStartsAt, effectiveEndsAt);
       }
     },
     [startsAt, endsAt, setValue, parseTimeAndUpdateDate, validateTimes],
@@ -1027,11 +1033,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const newEndsAt = parseTimeAndUpdateDate(time, endsAt);
       if (newEndsAt) {
         setValue('endsAt', newEndsAt, { shouldValidate: true });
-
-        setTimeout(() => validateTimes(), 0);
+        validateTimes(startsAt, newEndsAt);
       }
     },
-    [endsAt, setValue, parseTimeAndUpdateDate, validateTimes],
+    [startsAt, endsAt, setValue, parseTimeAndUpdateDate, validateTimes],
   );
 
   /** Recurring-mode-only handlers: update the string state directly, no Date mutation needed. */
@@ -1069,19 +1074,21 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       // react-hook-form clears manual setError calls when handleSubmit re-validates,
       // so we re-check the constraint here to prevent saving invalid data.
       if (isRecurring) {
-        if (recurringEndTime <= recurringStartTime) {
-          setError('endsAt', {
-            type: 'manual',
-            message: 'End time must be after start time',
-          });
+        const recurringTimeError = validateRecurringCallTimes(recurringStartTime, recurringEndTime);
+        if (recurringTimeError) {
+          setError('endsAt', { type: 'manual', message: recurringTimeError });
           return;
         }
-      } else if (data.endsAt <= data.startsAt) {
-        setError('endsAt', {
-          type: 'manual',
-          message: 'End time must be after start time',
-        });
-        return;
+      } else {
+        const { startsAtError, endsAtError } = validateCallDateTimes(data.startsAt, data.endsAt);
+        if (startsAtError) {
+          setError('startsAt', { type: 'manual', message: startsAtError });
+          return;
+        }
+        if (endsAtError) {
+          setError('endsAt', { type: 'manual', message: endsAtError });
+          return;
+        }
       }
 
       if (postCallUpdates && !updateChannelId) {
@@ -1559,7 +1566,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                             id='series-starts-on'
                             selectedDate={startsAt}
                             onSelect={date => {
-                              if (date) field.onChange(date);
+                              if (date) {
+                                const merged = mergeDateWithTime(date, field.value ?? startsAt);
+                                field.onChange(merged);
+                                validateTimes(merged, endsAt);
+                              }
                             }}
                             placeholder='Select start date'
                             minDate={new Date(new Date().setHours(0, 0, 0, 0))}
@@ -1650,7 +1661,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                             <DatePicker
                               selectedDate={startsAt}
                               onSelect={date => {
-                                if (date) field.onChange(date);
+                                if (date) {
+                                  const merged = mergeDateWithTime(date, field.value ?? startsAt);
+                                  field.onChange(merged);
+                                  validateTimes(merged, endsAt);
+                                }
                               }}
                               placeholder='Select start date'
                               minDate={new Date(new Date().setHours(0, 0, 0, 0))}
@@ -1703,10 +1718,18 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                             <DatePicker
                               selectedDate={field.value}
                               onSelect={date => {
-                                if (date) field.onChange(date);
+                                if (date) {
+                                  const merged = mergeDateWithTime(date, field.value);
+                                  field.onChange(merged);
+                                  validateTimes(startsAt, merged);
+                                }
                               }}
                               placeholder='Select end date'
-                              minDate={startsAt ?? new Date(new Date().setHours(0, 0, 0, 0))}
+                              minDate={
+                                startsAt
+                                  ? new Date(new Date(startsAt).setHours(0, 0, 0, 0))
+                                  : new Date(new Date().setHours(0, 0, 0, 0))
+                              }
                               inputClassName={cn(
                                 'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
                                 errors.endsAt && 'border-red-500',
