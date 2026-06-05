@@ -33,6 +33,11 @@ export const EtaActivity = ({
   // On mobile: will navigate to minimized view with details tab
   // On desktop: will navigate to tab-based route in ConversationPannel
   const targetPath = `/chat/activity/${activity.channelId || ticket?.conversation?.channelId}/${ticket?.conversationId}/${activity.actionSourceId}?selectedTab=details`;
+  const channelIdForPath = activity.channelId || ticket?.conversation?.channelId;
+  const supportTargetPath =
+    channelIdForPath && ticket?.conversationId
+      ? `/support/${channelIdForPath}?conversationId=${ticket.conversationId}`
+      : undefined;
   const stageName = ticket?.stageName || '';
 
   const expandedContent = (
@@ -66,6 +71,7 @@ export const EtaActivity = ({
       badgeColorClass={isWarning ? 'bg-yellow-100' : isStageBreach ? 'bg-orange-100' : 'bg-red-100'}
       description={<span className='text-muted-foreground text-sm'>ticket in</span>}
       targetPath={targetPath}
+      supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
       isSelected={isSelected}
     >
