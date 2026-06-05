@@ -1118,6 +1118,9 @@ const SupportScreen = (): ReactElement => {
       if (rest.assigneeUserGroupId) {
         params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
       }
+      if (rest.boardId) {
+        params.set('boardId', rest.boardId);
+      }
       if (isElectron) {
         params.set('platform', 'electron');
       }
@@ -1142,6 +1145,9 @@ const SupportScreen = (): ReactElement => {
       }
       if (rest.assigneeUserGroupId) {
         params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
+      }
+      if (rest.boardId) {
+        params.set('boardId', rest.boardId);
       }
       if (isElectron) {
         params.set('platform', 'electron');
@@ -1932,7 +1938,7 @@ const SupportScreen = (): ReactElement => {
         onOpenChange={setShowCreateChannelModal}
         title='Create Desk Channel'
       >
-        <div className='p-4'>
+        <div className='p-4 overflow-y-auto max-h-[80vh] scrollbar-none'>
           <AddChannelForm
             title='Create Desk Channel'
             hideVisibility={false}
@@ -2332,8 +2338,11 @@ const SupportTicketDetail = ({
     if (ticketDraft?.draftContent?.trim()) {
       setComposerOpen(true);
       draftAutoOpenedConversationRef.current = conversationId;
+      if (ticketDraft.userId === null) {
+        setReplyMode('replyAll');
+      }
     }
-  }, [conversationId, ticketDraft, setComposerOpen]);
+  }, [conversationId, ticketDraft, setComposerOpen, setReplyMode]);
 
   const cursorStart =
     ticket?.id && typeof ticket.lastEmailAt === 'number'

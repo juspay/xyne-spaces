@@ -154,6 +154,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       topicTags: [] as string[],
       projectId: '',
       assigneeUserGroupId: '',
+      boardId: '',
     } as CreateChannelFormData & { assigneeUserGroupId?: string },
     onSubmit: ({ value }) => {
       if (duplicateCheck?.isDuplicate) {
@@ -216,6 +217,21 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const visibility = useStore(form.store, state => state.values.visibility);
   const nameValue = useStore(form.store, state => state.values.name);
   const projectIdValue = useStore(form.store, state => state.values.projectId);
+  const boardIdValue = useStore(form.store, state => state.values.boardId);
+
+  // Memoized board options based on selected project
+  const selectedProject = useMemo(
+    () => projects?.find(p => p.id === projectIdValue),
+    [projects, projectIdValue],
+  );
+
+  const boardOptions = useMemo(
+    () =>
+      (selectedProject as unknown as { boards?: { id: string; name: string }[] })?.boards?.map(
+        board => ({ label: board.name, value: board.id }),
+      ) ?? [],
+    [selectedProject],
+  );
 
   const isSubmitDisabled =
     !nameValue ||
@@ -235,6 +251,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       form.setFieldValue('projectId', projects[0]!.id);
     }
   }, [projects, form]);
+
+  // Clear board selection when project changes and the selected board no longer belongs
+  useEffect(() => {
+    if (!boardIdValue) return;
+    const boardsForProject = (selectedProject as unknown as { boards?: { id: string }[] })?.boards;
+    const boardStillValid = boardsForProject?.some(b => b.id === boardIdValue);
+    if (!boardStillValid) {
+      form.setFieldValue('boardId', '');
+    }
+  }, [projectIdValue, selectedProject, boardIdValue, form]);
 
   // Debounce the channel name for duplicate checking
   useEffect(() => {
@@ -619,6 +645,48 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           </div>
         )}
       </form.Field>
+
+      {/* Board Selection (desk channels only) */}
+      {requireConnector && (
+        <form.Field name='boardId'>
+          {field => (
+            <div className='space-y-1.5'>
+              <label htmlFor='board-select' className='text-sm font-medium text-foreground'>
+                Board
+              </label>
+              <Select
+                value={field.state.value || ''}
+                onValueChange={selected => field.handleChange(selected || undefined)}
+                disabled={!projectIdValue || boardOptions.length === 0}
+              >
+                <SelectTrigger id='board-select' className='w-full'>
+                  <SelectValue
+                    placeholder={
+                      !projectIdValue
+                        ? 'Select a project first'
+                        : boardOptions.length > 0
+                          ? 'Select a board'
+                          : 'No boards available'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {boardOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {boardOptions.length === 0 && projectIdValue && (
+                <p className='text-sm text-muted-foreground mt-1'>
+                  No boards found for this project.
+                </p>
+              )}
+            </div>
+          )}
+        </form.Field>
+      )}
 
       {/* Assignee User Group Selection (for email channels only) */}
       {requireConnector && (

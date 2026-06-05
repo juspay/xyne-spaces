@@ -29,6 +29,7 @@ export interface PendingChannelCreate {
   userId: string;
   workspaceId: string;
   assigneeUserGroupId?: string;
+  boardId?: string;
   platform?: 'electron' | 'web';
 }
 
@@ -309,7 +310,7 @@ export class MicrosoftDeskService {
           sourceType: 'microsoft',
           displayName: credentials.email,
           channelId: channel.id,
-          boardId: board?.id, // @deprecated - kept for backward compatibility
+          boardId: channelData.boardId ?? board?.id, // @deprecated - kept for backward compatibility
           credentials: encryptedCredentials,
           isActive: true,
           // Cursor intentionally left null — the caller triggers an initial refetch
@@ -328,7 +329,7 @@ export class MicrosoftDeskService {
           channelId: channel.id,
           ownerUserId: channelData.userId,
           ...(channelData.assigneeUserGroupId && { assigneeUserGroupId: channelData.assigneeUserGroupId }),
-          ...(board?.id && { boardId: board.id }), // Save boardId to EmailChannelPreference (new location)
+          ...(channelData.boardId ? { boardId: channelData.boardId } : board?.id ? { boardId: board.id } : {}),
           emailMergeMode: config.emailMergeModeDefault as EmailMergeMode,
           deskType: DeskType.EMAIL,
         },

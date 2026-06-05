@@ -29,6 +29,7 @@ type PendingChannelData = {
   userId: string;
   workspaceId: string;
   assigneeUserGroupId?: string;
+  boardId?: string;
 };
 
 // Redis-backed CSRF state store. Replaces the previous in-memory Map so OAuth
@@ -146,7 +147,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
   const platform: 'electron' | 'web' =
     req.query.platform === 'electron' ? 'electron' : 'web';
   try {
-    const { name, description, visibility, projectId, assigneeUserGroupId } = req.query;
+    const { name, description, visibility, projectId, assigneeUserGroupId, boardId } = req.query;
     const userId = req.user!.id;
     const workspaceId = req.user!.workspaceId;
 
@@ -171,6 +172,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
         userId,
         workspaceId,
         assigneeUserGroupId: assigneeUserGroupId as string | undefined,
+        boardId: boardId as string | undefined,
       },
       platform,
       timestamp: Date.now(),
@@ -574,6 +576,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             channelId: ch.id,
             ownerUserId: cd.userId,
             ...(cd.assigneeUserGroupId && { assigneeUserGroupId: cd.assigneeUserGroupId }),
+            ...(cd.boardId && { boardId: cd.boardId }),
             emailMergeMode: appConfig.emailMergeModeDefault as EmailMergeMode,
             deskType: DeskType.EMAIL,
           },
@@ -590,7 +593,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             sourceType: ExternalSourcePlatform.GOOGLE,
             displayName: emailAddress,
             channelId: ch.id,
-            boardId: board?.id,
+            boardId: cd.boardId ?? board?.id,
             credentials: network.encryptedCredentials,
             ownerUserId: cd.userId,
             isActive: true,
