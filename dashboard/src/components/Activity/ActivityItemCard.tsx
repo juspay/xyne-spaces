@@ -272,7 +272,8 @@ export const ActivityItemCard = ({
           </div>
 
           <div className='flex items-center gap-1 flex-shrink-0 ml-auto sm:ml-2'>
-            {activity.isRead &&
+            {!isMobile &&
+              activity.isRead &&
               !['reacted', 'removed'].includes(activity.actorAction) &&
               !isDeskChannelType(channel?.type) &&
               channel?.type !== ChannelType.SUPPORT && (
