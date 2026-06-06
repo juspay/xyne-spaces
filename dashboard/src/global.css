@@ -67,6 +67,8 @@
     --sidebar-divider: #e5ebf0;
     --metrics-bar-color: #485056;
     --metrics-bar-divider: rgba(0, 0, 0, 0.5);
+    --update-btn-bg: #57ab02;
+    --update-btn-text: #ffffff;
     --nav-active-icon: #27699d;
     --nav-disabled-icon: #a1bcd1;
     --call-action-button-color: #27699d;
@@ -160,6 +162,8 @@
     --sidebar-divider: #e5ebf0;
     --metrics-bar-color: #ffffff;
     --metrics-bar-divider: rgba(255, 255, 255, 0.5);
+    --update-btn-bg: #ffffff;
+    --update-btn-text: #000000;
     --nav-active-icon: #ffffff;
     --nav-disabled-icon: #c9cccf;
     --call-action-button-color: #27699d;
@@ -239,6 +243,8 @@
     --sidebar-divider: #363a3f;
     --metrics-bar-color: #b0b4ba;
     --metrics-bar-divider: rgba(255, 255, 255, 0.2);
+    --update-btn-bg: #ffffff;
+    --update-btn-text: #000000;
     --nav-active-icon: #b0b4ba;
     --nav-disabled-icon: #43484e;
     --call-action-button-color: #b0b4ba;
