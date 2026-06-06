@@ -1,3 +1,10 @@
+## [1.155.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.155.0...v1.155.1) (2026-06-06)
+
+
+### Bug Fixes
+
+* removes metrices from topbar and fixes overflow ([e091920](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e091920eee6a3b6232dd2ff813168e515eec5e60))
+
 ## [1.155.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.154.0...v1.155.0) (2026-06-05)
 
 
