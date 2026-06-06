@@ -1,6 +1,5 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import MetricsBar from '../MetricsBar/MetricsBar';
 import {
   AlertCircle,
   ArrowLeft,
@@ -9,6 +8,7 @@ import {
   ExternalLink,
   Headset,
   LucideCommand,
+  RefreshCw,
   Search,
   CircleHelp,
   Square,
@@ -156,6 +156,41 @@ const GlobalTopBar = ({
 }: GlobalTopBarProps): ReactElement => {
   const [supportMenuOpen, setSupportMenuOpen] = useState(false);
   const menuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState<{
+    currentVersion: string;
+    latestVersion: string;
+    loadType: 'manual' | 'auto';
+  } | null>(null);
+
+  // Listen for app update available event from Electron
+  useEffect(() => {
+    if (!window.electronAPI?.onAppUpdateAvailable) return;
+
+    const cleanup = window.electronAPI.onAppUpdateAvailable(data => {
+      // Validate the data structure
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        typeof data.currentVersion !== 'string' ||
+        typeof data.latestVersion !== 'string' ||
+        (data.loadType !== 'manual' && data.loadType !== 'auto')
+      ) {
+        console.warn('Invalid app update data received:', data);
+        return;
+      }
+
+      if (data.loadType === 'auto') {
+        window.location.reload();
+      }
+      setUpdateAvailable(data);
+    });
+
+    return cleanup;
+  }, []);
+
+  const handleApplyUpdate = (): void => {
+    window.electronAPI?.applyAppUpdate?.();
+  };
 
   const openSupportMenu = (): void => {
     if (menuTimerRef.current) clearTimeout(menuTimerRef.current);
@@ -177,7 +212,7 @@ const GlobalTopBar = ({
 
   return (
     <div
-      className='flex items-center justify-between min-[500px]:px-2 px-2 pt-[8px] pb-[2px]'
+      className='relative flex items-center justify-between min-[500px]:px-2 px-2 pt-[8px] pb-[2px]'
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       onDoubleClick={handleDoubleClick}
     >
@@ -190,20 +225,25 @@ const GlobalTopBar = ({
           {canCreateWorkspace && <WorkspaceSwitcher />}
         </div>
       </div>
-      <div className='flex-1 flex items-center justify-between'>
+      <div className='absolute left-1/2 -translate-x-1/2 flex items-center'>
         <NavigationAndSearch />
+      </div>
+      <div className='flex items-center'>
         <div
           className='flex items-center gap-1'
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          <MetricsBar />
-          <ZeroConnectionStatus />
+          {/* Pills collapse from the left as the bar narrows: Connected first
+              (below 1100px), then Support (below 950px). Update always stays. */}
+          <div className='flex items-center max-[1100px]:hidden'>
+            <ZeroConnectionStatus />
+          </div>
           {isRecording && onStopRecording && (
             <Tooltip content='Stop recording'>
               <button
                 type='button'
                 onClick={onStopRecording}
-                className='flex h-6 items-center gap-1.5 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-red-500 dark:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer'
+                className='flex h-6 items-center gap-1.5 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-red-500 dark:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer max-[820px]:hidden'
                 aria-label='stop-recording'
                 data-track-category='ERROR_REPORT'
                 data-track-name='StopRecordingTopBar'
@@ -219,7 +259,7 @@ const GlobalTopBar = ({
           )}
           {!isRecording && onOpenErrorReport && (
             <div
-              className='relative'
+              className='relative max-[820px]:hidden'
               onMouseEnter={openSupportMenu}
               onMouseLeave={scheduleSupportMenuClose}
             >
@@ -273,6 +313,29 @@ const GlobalTopBar = ({
                 </div>
               )}
             </div>
+          )}
+          {updateAvailable && (
+            <Tooltip
+              content={`Update available: ${updateAvailable.currentVersion} → ${updateAvailable.latestVersion}`}
+              side='bottom'
+              delayDuration={300}
+            >
+              <button
+                type='button'
+                onClick={handleApplyUpdate}
+                className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-semibold text-xs leading-none tracking-normal bg-[var(--update-btn-bg)] text-[var(--update-btn-text)] hover:opacity-80 transition-opacity cursor-pointer'
+                aria-label='apply-update'
+                data-track-category='MetricsBar'
+                data-track-name='ApplyUpdate'
+                data-track-metadata={JSON.stringify({
+                  currentVersion: updateAvailable.currentVersion,
+                  latestVersion: updateAvailable.latestVersion,
+                })}
+              >
+                <RefreshCw className='w-4 h-4' />
+                <span>Update</span>
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>
