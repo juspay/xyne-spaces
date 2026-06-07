@@ -84,5 +84,12 @@ router.get(
   emailController.listClawAgents,
 );
 
+// On-demand auto-draft reasoning + tool calls (read-through to claw; not stored)
+router.get(
+  '/:conversationId/autodraft-insight',
+  authMiddleware.authenticate,
+  emailController.getAutoDraftInsight,
+);
+
 
 export default router;

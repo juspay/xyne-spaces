@@ -71,6 +71,12 @@ export enum AutoDraftMode {
 }
 
 // @ts-ignore TS1294
+export enum AutoDraftStatus {
+  GENERATING = 'GENERATING',
+  READY = 'READY',
+}
+
+// @ts-ignore TS1294
 export enum TicketReferenceRelation {
   LINKED = 'LINKED',
   DUPLICATE_CONFIRMED = 'DUPLICATE_CONFIRMED',
@@ -1851,6 +1857,7 @@ export const emailDraftTable = table('email_drafts')
     channelId: string(),
     draftContent: string(),
     attachmentIds: json().optional(),
+    autoDraftStatus: enumeration<AutoDraftStatus>().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

@@ -22,6 +22,7 @@ import {
   Plus,
   Wand2,
   Sparkles,
+  Brain,
   Loader2,
   Pencil,
   Users2,
@@ -37,7 +38,7 @@ import {
   BarChart4Icon,
   Circle,
 } from 'lucide-react';
-import { ChannelVisibility, ChannelType, EmailType } from '@xyne/shared';
+import { ChannelVisibility, ChannelType, EmailType, AutoDraftStatus } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -96,6 +97,7 @@ import { PriorityPicker } from '../../components/Tickets/TicketListView/Priority
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
 import { DraftSourcesPanel } from '../../components/xyne-desk/DraftSourcesPanel/DraftSourcesPanel';
+import { AutoDraftReasoningPanel } from '../../components/xyne-desk/AutoDraftReasoningPanel/AutoDraftReasoningPanel';
 import type { DraftSource } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import {
   fetchSessionDetail,
@@ -470,7 +472,7 @@ interface DemergeEmailResponse {
     conversationId: string;
   };
 }
-type TabType = 'messages' | 'details' | 'sources';
+type TabType = 'messages' | 'details' | 'sources' | 'reasoning';
 
 type ViewMode = 'kanban' | 'list';
 
@@ -2574,10 +2576,12 @@ const SupportTicketDetail = ({
     });
   }, [messages]);
 
+  const hasAutoDraftReasoning = ticketDraft?.autoDraftStatus === AutoDraftStatus.READY;
   const activeTab: TabType = ((): TabType => {
     const t = searchParams.get('selectedTab');
     if (t === 'details') return 'details';
     if (t === 'sources') return 'sources';
+    if (t === 'reasoning' && hasAutoDraftReasoning) return 'reasoning';
     return 'messages';
   })();
   const setActiveTab = useCallback(
@@ -3223,6 +3227,31 @@ const SupportTicketDetail = ({
                               </button>
                             </Tabs.Trigger>
                           )}
+                          {hasAutoDraftReasoning && (
+                            <Tabs.Trigger asChild value='reasoning'>
+                              <button
+                                className={cn(
+                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                                  activeTab === 'reasoning'
+                                    ? 'border-b-2 border-primary'
+                                    : 'border-b-2 border-transparent',
+                                )}
+                                data-track-category='Support'
+                                data-track-name='OpenReasoningTab'
+                              >
+                                <span
+                                  className={`${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
+                                >
+                                  <Brain size={12} />
+                                </span>
+                                <span
+                                  className={`text-sm font-medium ${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
+                                >
+                                  Reasoning
+                                </span>
+                              </button>
+                            </Tabs.Trigger>
+                          )}
                         </Tabs.List>
                         <div className='flex items-center gap-2 shrink-0'>
                           {/* Initiate Call Button */}
@@ -3331,6 +3360,18 @@ const SupportTicketDetail = ({
                         highlightedRef={highlightedSourceRef}
                       />
                     </Tabs.Content>
+
+                    {hasAutoDraftReasoning && conversationId && channelId && (
+                      <Tabs.Content
+                        value='reasoning'
+                        className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
+                      >
+                        <AutoDraftReasoningPanel
+                          conversationId={conversationId}
+                          channelId={channelId}
+                        />
+                      </Tabs.Content>
+                    )}
                   </Tabs.Root>
                 ) : (
                   <div className='h-full flex items-center justify-center'>

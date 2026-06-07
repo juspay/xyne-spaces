@@ -14,7 +14,7 @@ export interface TicketListItem {
   aiCategory?: string | null;
   metadata?: unknown;
   emailCount?: number | null;
-  emailDrafts?: readonly { userId: string | null }[] | null;
+  emailDrafts?: readonly { userId: string | null; autoDraftStatus?: string | null }[] | null;
   emailReads?: readonly unknown[] | null;
   conversation?: unknown;
   _raw?: Record<string, unknown>;

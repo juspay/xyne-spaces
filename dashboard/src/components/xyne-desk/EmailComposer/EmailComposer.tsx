@@ -10,6 +10,7 @@ import React, {
 import type { Editor } from '@tiptap/react';
 import {
   ArrowUp,
+  Loader2,
   Minimize2,
   Paperclip,
   Pencil,
@@ -50,6 +51,7 @@ import { queries } from '../../../zero/queries';
 import { useUsers } from '../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useComposeSubjectAI } from '../../../hooks/useComposeSubjectAI';
+import { AutoDraftStatus } from '@xyne/shared';
 import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailDraft';
 import { useDeskAIDraft } from '../../../hooks/useDeskAIDraft';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
@@ -217,6 +219,8 @@ export const EmailComposer = ({
   const deskContacts = useDeskContacts(channelId);
   // Use email draft hooks
   const draft = useEmailDraft(conversationId);
+  const isAutoDraftGenerating =
+    !isComposeMode && draft?.autoDraftStatus === AutoDraftStatus.GENERATING;
   const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId, channelId);
   const [emailContent, setEmailContent] = useState<string>('');
   // Subject is only meaningful in compose mode — reply inherits from the thread.
@@ -2039,6 +2043,17 @@ export const EmailComposer = ({
             const sideBySide =
               isInlineAIPanelOpen || ((hasEmailBody || isComposeMode) && aiDraft.isDraftActive);
             const aiOnlyFull = aiDraft.isDraftActive && !hasEmailBody && !isComposeMode;
+            const toolbarRightSlot = isAutoDraftGenerating ? (
+              <Tooltip delayDuration={300} content='Generating AI draft…'>
+                <span
+                  className='inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-violet-100 text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
+                  aria-label='Generating AI draft'
+                >
+                  <Loader2 size={10} className='animate-spin' />
+                  Drafting…
+                </span>
+              </Tooltip>
+            ) : undefined;
 
             const draftCard = aiDraft.isDraftActive ? (
               <DraftCard
@@ -2131,6 +2146,7 @@ export const EmailComposer = ({
                       disabled={isSending}
                       className='flex-1 min-h-0'
                       footerSlot={composerFooter}
+                      toolbarRightSlot={toolbarRightSlot}
                       showSelectionRefine={features.showAI && !aiDraft.isStreaming && !isSending}
                       onSelectionRefine={selectedText => {
                         aiDraft.prepareRefineFromExternal(emailContent, selectedText);
@@ -2181,6 +2197,7 @@ export const EmailComposer = ({
                 disabled={isSending}
                 className='flex-1 min-h-0'
                 footerSlot={composerFooter}
+                toolbarRightSlot={toolbarRightSlot}
               />
             );
           })()}

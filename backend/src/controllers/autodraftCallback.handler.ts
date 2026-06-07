@@ -35,6 +35,7 @@ export async function handleAutoDraftCallback(
         status,
         error,
       });
+      await emailService.clearAutoDraftGenerating(conversationId);
       res.json({ success: true, persisted: false });
       return;
     }

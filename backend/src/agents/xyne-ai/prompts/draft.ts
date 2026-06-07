@@ -115,32 +115,15 @@ export function buildDraftEmailClawTask(params: {
   const rawName = userInfo?.userName?.trim() || 'the support specialist';
   const name = titleCaseName(rawName);
 
-  return `You are drafting a customer support email reply on behalf of ${name} for a desk ticket. The reply you produce is sent to the customer verbatim once ${name} accepts it, so it must read as if ${name} personally wrote it.
+  return `Draft a customer support email reply on behalf of ${name}.
 
-CRITICAL — your ENTIRE output is the email body and nothing else:
-- Your response is pasted directly into the customer's inbox. There is no human reading it first to strip anything out.
-- The VERY FIRST characters of your response MUST be the greeting (e.g. "Hi ..."). Do NOT start with anything else.
-- NO preamble, NO meta-commentary, NO narration, NO "Here is the draft", NO "I'll help with that", NO restating the task.
-- NEVER mention your own tools, capabilities, access, or limitations. If you cannot read the thread or a tool is unavailable, SILENTLY draft from the information you do have — do NOT write sentences like "I don't have access to ...", "based solely on the latest email", or "I was unable to ...". The customer must never see any reference to your internal process.
-- NO exposed reasoning, thinking, or step-by-step planning. Output only the finished reply.
-- NO subject line, NO markdown code fences, NO surrounding quotes.
-
-Latest inbound email (this is the one to reply to):
+Latest inbound email to reply to:
 Subject: ${emailSubject}
 
 ${emailBody}
 
-Context gathering (best-effort, optional — never block or comment on this):
-- If available, call the \`spaces-emails\` tool with conversationId="${conversationId}" to read the prior inbound/outbound history before drafting.
-- If the latest email references attachments and the tools exist, use \`spaces-thread-attachments\` and \`spaces-fetch-attachment\` to read them.
-- You may use other tools to search related past tickets, internal notes, and docs.
-- If any of these tools are unavailable or return nothing, just draft from the latest email above. Do NOT acknowledge that you skipped them.
-- Never fabricate facts and never leave placeholders; only fill in real values you actually find.
+---
+Your entire response is the email body that is sent to the customer as-is. The very first character must be the greeting (e.g. "Hi ...") — do NOT prefix it with any summary, "Here is the reply", or commentary about your investigation. Preserve every concrete specific you found; reformat it into a clear reply but never soften or generalize it away. ${hasDeskSignature ? `End after the final sentence — a signature is appended automatically, so add no sign-off or sender name.` : `End with a sign-off as "${name}".`}
 
-Writing rules:
-- Open with a salutation addressing the customer by name when known (e.g. "Hi <Customer_Name>,"), falling back to "Hi there," when the name is unknown.
-- Match the customer's tone and language, and address their specific concern directly — no generic boilerplate.
-- Do NOT narrate any search process to the customer ("I checked our records", "I searched our knowledge base").
-- ${hasDeskSignature ? 'A desk signature is configured for this desk — do NOT add any sign-off, regards line, or sender name; end after the final actionable sentence.' : `No desk signature is configured for this desk — end with an appropriate sign-off using "${name}" exactly as written.`}
-`;
+PS: You can use conversationId="${conversationId}" with your tools to read the prior emails in this thread before drafting, so your reply fits the full context.`;
 }

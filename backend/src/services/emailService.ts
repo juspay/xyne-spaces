@@ -577,6 +577,9 @@ export class EmailService {
       hasDeskSignature,
       agentSlug: autoDraftAgentSlug ?? 'default',
     });
+
+    await this.setAutoDraftGenerating(conversationId, channelId);
+
     try {
       if (autoDraftAgentSlug) {
         const latestBodyText = htmlToText(emailBody || '', { wordwrap: false }).trim() || emailBody;
@@ -653,6 +656,7 @@ export class EmailService {
         streamDurationMs: Date.now() - streamStart,
         error: error instanceof Error ? error.message : String(error),
       });
+      await this.clearAutoDraftGenerating(conversationId);
       return;
     }
 
@@ -667,6 +671,61 @@ export class EmailService {
       // exists in the local workflowExecution table and can be tagged.
       tagSession: true,
     });
+  }
+
+  private async setAutoDraftGenerating(conversationId: string, channelId: string): Promise<void> {
+    try {
+      const existingSeed = await this.prisma.emailDraft.findFirst({
+        where: { conversationId, userId: null },
+        select: { id: true },
+      });
+      if (existingSeed) {
+        await this.prisma.emailDraft.update({
+          where: { id: existingSeed.id },
+          data: { autoDraftStatus: 'GENERATING', updatedAt: new Date() },
+        });
+      } else {
+        await this.prisma.emailDraft.create({
+          data: {
+            conversationId,
+            channelId,
+            userId: null,
+            draftContent: '',
+            autoDraftStatus: 'GENERATING',
+          },
+        });
+      }
+    } catch (error) {
+      logger.warn('[AutoDraft] failed to mark GENERATING', {
+        mode: 'autodraft',
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async clearAutoDraftGenerating(conversationId: string): Promise<void> {
+    try {
+      const seed = await this.prisma.emailDraft.findFirst({
+        where: { conversationId, userId: null, autoDraftStatus: 'GENERATING' },
+        select: { id: true, draftContent: true },
+      });
+      if (!seed) return;
+      if (!seed.draftContent || !seed.draftContent.trim()) {
+        await this.prisma.emailDraft.delete({ where: { id: seed.id } });
+      } else {
+        await this.prisma.emailDraft.update({
+          where: { id: seed.id },
+          data: { autoDraftStatus: 'READY' },
+        });
+      }
+    } catch (error) {
+      logger.warn('[AutoDraft] failed to clear GENERATING', {
+        mode: 'autodraft',
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   async persistAutoDraft(params: {
@@ -692,6 +751,7 @@ export class EmailService {
         conversationId,
         sessionId,
       });
+      await this.clearAutoDraftGenerating(conversationId);
       return;
     }
 
@@ -705,7 +765,7 @@ export class EmailService {
       if (existingSeed) {
         await this.prisma.emailDraft.update({
           where: { id: existingSeed.id },
-          data: { draftContent: html, channelId, updatedAt: now },
+          data: { draftContent: html, channelId, autoDraftStatus: 'READY', updatedAt: now },
         });
       } else {
         await this.prisma.emailDraft.create({
@@ -714,6 +774,7 @@ export class EmailService {
             channelId,
             userId: null,
             draftContent: html,
+            autoDraftStatus: 'READY',
           },
         });
       }

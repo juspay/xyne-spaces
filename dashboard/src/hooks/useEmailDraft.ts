@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { AutoDraftStatus } from '@xyne/shared';
 import { useZero } from './useZero';
 import { queries } from '../zero/queries';
 import { useCachedQuery } from './useCachedQuery';
@@ -13,6 +14,7 @@ export interface EmailDraftRecord {
   userId?: string | null;
   draftContent: string;
   attachmentIds?: string[];
+  autoDraftStatus?: AutoDraftStatus | null;
   createdAt: number;
   updatedAt: number;
 }

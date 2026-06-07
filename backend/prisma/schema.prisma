@@ -56,6 +56,12 @@ enum AutoDraftMode {
   @@schema("public")
 }
 
+enum AutoDraftStatus {
+  GENERATING
+  READY
+  @@schema("public")
+}
+
 enum TicketStatus {      // Deprecated
   NEW                    // Ticket created, awaiting triage or auto-assignment
   IN_PROGRESS            // Work actively ongoing
@@ -2113,6 +2119,7 @@ model EmailDraft {
   channelId String
   draftContent String
   attachmentIds Json? // Array of attachment IDs for draft attachments
+  autoDraftStatus AutoDraftStatus?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

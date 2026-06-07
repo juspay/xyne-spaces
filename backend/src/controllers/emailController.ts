@@ -621,6 +621,44 @@ export class EmailController {
     }
   };
 
+  getAutoDraftInsight = async (req: Request, res: Response) => {
+    try {
+      const { conversationId } = req.params;
+      const channelId = (req.query.channelId as string | undefined)?.trim();
+      if (!conversationId || !channelId) {
+        return res.status(400).json({ error: 'conversationId and channelId are required' });
+      }
+
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+      const isMember = await this.channelParticipantRepo.isParticipant(channelId, userId);
+      if (!isMember) {
+        return res.status(403).json({ error: 'Not a member of this channel' });
+      }
+
+      const preference = await this.emailChannelPreferenceRepo.findByChannelId(channelId);
+      const agentSlug = preference?.autoDraftAgentSlug?.trim() || null;
+      const personaUserId = preference?.ownerUserId || null;
+      if (!agentSlug || !personaUserId) {
+        return res.json({ available: false, reasoning: null, toolInvocations: [] });
+      }
+
+      const insight = await clawClient.getConversationInsight({
+        agentSlug,
+        conversationId,
+        userId: personaUserId,
+      });
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ available: true, ...insight });
+    } catch (error: any) {
+      logger.error('[EmailController] getAutoDraftInsight error:', {
+        message: error?.message,
+      });
+      return res.status(502).json({ error: 'Failed to fetch auto-draft insight' });
+    }
+  };
+
   composeEmail = async (req: Request, res: Response) => {
     try {
       const {
