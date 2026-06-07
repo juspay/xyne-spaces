@@ -218,7 +218,7 @@ export class MicrosoftRefetch extends BaseRefetch {
     if (threadsNeedingUnreadBump > 0) {
       try {
         await channelRepo.incrementUnreadForAllMembers(
-          source.channelId!,
+          ingestChannelId,
           threadsNeedingUnreadBump,
         );
       } catch (error) {
@@ -227,7 +227,7 @@ export class MicrosoftRefetch extends BaseRefetch {
     }
     if (processed > 0) {
       try {
-        await channelRepo.updateLastActivity(source.channelId!);
+        await channelRepo.updateLastActivity(ingestChannelId);
       } catch (error) {
         logger.warn(`${TAG} updateLastActivity (end-of-refetch) failed`, { error });
       }

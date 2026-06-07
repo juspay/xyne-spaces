@@ -801,7 +801,8 @@ export class PRTicketStatusSyncService {
         ticket.boardId,
         assignmentType,
         excludeUserId,
-        ticket.projectId
+        ticket.projectId,
+        ticket.channelId ?? undefined,
       );
 
       if (!assignmentResult.assignedUserId) {

@@ -73,6 +73,23 @@ function filterUsersByResponsibility(
     .map(mapping => mapping.userId);
 }
 
+async function filterMappingsToChannelParticipants(
+  userGroupMappings: UserGroupMapping[],
+  channelId: string,
+): Promise<UserGroupMapping[]> {
+  const channel = await repositories.channels.findById(channelId);
+  if (!channel || String(channel.visibility) !== 'PRIVATE') {
+    return userGroupMappings;
+  }
+  const participants = await repositories.channelParticipants.getChannelParticipants(channelId);
+  const participantIds = new Set(participants.map(p => p.userId));
+  const filtered = userGroupMappings.filter(m => participantIds.has(m.userId));
+  logger.info(
+    `[Assignment] Private channel ${channelId} participant filter: ${userGroupMappings.length} group members → ${filtered.length} eligible participants`,
+  );
+  return filtered;
+}
+
 /**
  * Auto-assignment system that selects the most suitable user for a board or ticket.
  * Uses existing database tables only - no expression-based rules or configuration.
@@ -110,16 +127,22 @@ export async function evaluateAssignmentRule(
   assignmentType: AssignmentType = AssignmentType.TICKET_ASSIGNEE,
   excludeUserId?: string,
   projectId?: string,
+  channelId?: string,
 ): Promise<AssignmentResult> {
-  logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}${projectId ? `, projectId: ${projectId}` : ''}`);
+  logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}`);
 
   // Fetch user group mappings
-  const userGroupMappings = await repositories.userGroupMapping.findMany({
+  let userGroupMappings = await repositories.userGroupMapping.findMany({
     where: { userGroupId },
   });
 
+  // Only consider members who can actually access the desk's channel.
+  if (channelId) {
+    userGroupMappings = await filterMappingsToChannelParticipants(userGroupMappings, channelId);
+  }
+
   if (userGroupMappings.length === 0) {
-    logger.info(`[Assignment] No users in userGroupId: ${userGroupId}`);
+    logger.info(`[Assignment] No eligible users in userGroupId: ${userGroupId}${channelId ? ` for channel ${channelId}` : ''}`);
     return { reason: 'NO_ON_CALL_USERS' };
   }
 
@@ -567,11 +590,17 @@ export async function evaluateAllRoles(
   userGroupId: string,
   boardId: string,
   projectId?: string,
+  channelId?: string,
 ): Promise<AllRolesResult> {
-  logger.info(`[Assignment] evaluateAllRoles for userGroupId: ${userGroupId}, boardId: ${boardId}${projectId ? `, projectId: ${projectId}` : ''}`);
+  logger.info(`[Assignment] evaluateAllRoles for userGroupId: ${userGroupId}, boardId: ${boardId}${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}`);
 
   // ── Single round of DB fetches ─────────────────────────────────────────────
-  const userGroupMappings = await repositories.userGroupMapping.findMany({ where: { userGroupId } });
+  let userGroupMappings = await repositories.userGroupMapping.findMany({ where: { userGroupId } });
+
+  // Only consider members who can actually access the desk's channel.
+  if (channelId) {
+    userGroupMappings = await filterMappingsToChannelParticipants(userGroupMappings, channelId);
+  }
 
   if (userGroupMappings.length === 0) {
     const empty: AssignmentResult = { reason: 'NO_ON_CALL_USERS' };
