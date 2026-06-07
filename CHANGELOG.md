@@ -1,3 +1,11 @@
+## [1.157.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.156.0...v1.157.0) (2026-06-07)
+
+
+### Features
+
+* [XYNE-DESK] xyne desk fixes ([cd3318a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cd3318a55841a6459703e9a73afd0205a02bfb77)), closes [#7177](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7177)
+* add switch statement support in automations ([711be66](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/711be6605482026ca2dba22d960b590ec91dbfc8)), closes [#7181](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7181)
+
 ## [1.156.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.155.1...v1.156.0) (2026-06-07)
 
 
