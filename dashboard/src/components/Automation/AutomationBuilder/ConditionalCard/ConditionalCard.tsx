@@ -13,12 +13,10 @@ import { cn } from '../../../../utils/classNames';
 import { Popover } from '../../../ui/Popover/Popover';
 import { Dialog } from '../../../ui/Dialog/Dialog';
 import { Button } from '../../../ui/Button/Button';
-import { CONDITIONAL_STEP_TYPE, makeStepId } from '../../Automation.types';
-import type { ActionStepConfig, AutomationStepConfig, Condition } from '../../Automation.types';
+import type { AutomationStepConfig, Condition, ValidationIssue } from '../../Automation.types';
 import { ConditionEditor } from '../ConditionEditor/ConditionEditor';
 import { summarizeCondition } from '../ConditionEditor/ConditionEditor.utils';
-import { AddStepRow } from '../AddStepRow/AddStepRow';
-import { StepCard } from '../StepCard/StepCard';
+import { BranchSteps } from '../BranchSteps/BranchSteps';
 import type { ConditionalCardProps } from './ConditionalCard.types';
 
 export function ConditionalCard({
@@ -37,6 +35,8 @@ export function ConditionalCard({
   issues,
   pathPrefix,
   ensureSchema,
+  renderConditionalCard,
+  renderSwitchCard,
 }: ConditionalCardProps): React.ReactElement {
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -45,8 +45,6 @@ export function ConditionalCard({
   useEffect(() => {
     if (editorOpen) setDraftCondition(step.config.condition);
   }, [editorOpen, step.config.condition]);
-
-  const branchCatalog = catalog.filter(c => c.type !== CONDITIONAL_STEP_TYPE);
 
   const conditionSummary = summarizeCondition(step.config.condition);
   const conditionUnset =
@@ -62,8 +60,8 @@ export function ConditionalCard({
     });
   };
 
-  const issuesUnder = (prefix: string): typeof issues =>
-    issues?.filter(i => i.path.startsWith(prefix)) ?? [];
+  const issuesUnder = (prefix: string): ValidationIssue[] =>
+    issues.filter(i => i.path.startsWith(prefix));
 
   return (
     <div
@@ -237,143 +235,41 @@ export function ConditionalCard({
           </Dialog>
 
           <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-            <Branch
+            <BranchSteps
               label='If true'
               accent='green'
               steps={step.config.if_true ?? []}
-              catalog={branchCatalog}
+              catalog={catalog}
               schemaCache={schemaCache}
               schemaLoadingFor={schemaLoadingFor}
+              operators={operators}
               variableSources={variableSources}
               onChange={next => updateBranch('if_true', next)}
               ensureSchema={ensureSchema}
               issues={issuesUnder(`${pathPrefix}.config.if_true`)}
               pathPrefix={`${pathPrefix}.config.if_true`}
+              renderConditionalCard={renderConditionalCard}
+              renderSwitchCard={renderSwitchCard}
             />
-            <Branch
+            <BranchSteps
               label='Else'
               accent='red'
               steps={step.config.if_false ?? []}
-              catalog={branchCatalog}
+              catalog={catalog}
               schemaCache={schemaCache}
               schemaLoadingFor={schemaLoadingFor}
+              operators={operators}
               variableSources={variableSources}
               onChange={next => updateBranch('if_false', next)}
               ensureSchema={ensureSchema}
               issues={issuesUnder(`${pathPrefix}.config.if_false`)}
               pathPrefix={`${pathPrefix}.config.if_false`}
+              renderConditionalCard={renderConditionalCard}
+              renderSwitchCard={renderSwitchCard}
             />
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-interface BranchProps {
-  label: string;
-  accent: 'green' | 'red';
-  steps: AutomationStepConfig[];
-  catalog: ConditionalCardProps['catalog'];
-  schemaCache: ConditionalCardProps['schemaCache'];
-  schemaLoadingFor: ConditionalCardProps['schemaLoadingFor'];
-  variableSources: ConditionalCardProps['variableSources'];
-  onChange: (next: AutomationStepConfig[]) => void;
-  ensureSchema: (type: string) => void;
-  issues: ConditionalCardProps['issues'];
-  pathPrefix: string;
-}
-
-function Branch({
-  label,
-  accent,
-  steps,
-  catalog,
-  schemaCache,
-  schemaLoadingFor,
-  variableSources,
-  onChange,
-  ensureSchema,
-  issues,
-  pathPrefix,
-}: BranchProps): React.ReactElement {
-  const accentClasses =
-    accent === 'green' ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5';
-
-  const handleAdd = (type: string): void => {
-    const newStep: ActionStepConfig = {
-      id: makeStepId(),
-      type,
-      config: {},
-    };
-    onChange([...steps, newStep]);
-    ensureSchema(type);
-  };
-
-  const handleStepChange = (index: number, config: Record<string, unknown>): void => {
-    const copy = steps.slice();
-    const target = copy[index];
-    if (!target) return;
-    if (target.type === 'CONDITIONAL') return;
-    copy[index] = { ...target, config } as ActionStepConfig;
-    onChange(copy);
-  };
-
-  const handleRemove = (index: number): void => {
-    onChange(steps.filter((_, i) => i !== index));
-  };
-
-  const handleMove = (index: number, direction: -1 | 1): void => {
-    const next = index + direction;
-    if (next < 0 || next >= steps.length) return;
-    const copy = steps.slice();
-    const a = copy[index];
-    const b = copy[next];
-    if (!a || !b) return;
-    copy[index] = b;
-    copy[next] = a;
-    onChange(copy);
-  };
-
-  return (
-    <div className={cn('flex flex-col gap-2 rounded-lg border p-3', accentClasses)}>
-      <div className='text-xs font-medium uppercase tracking-wide text-foreground'>{label}</div>
-      <div className='flex flex-col gap-2'>
-        {steps.length === 0 ? (
-          <div className='py-3 text-center text-[11px] text-muted-foreground italic'>
-            No steps in this branch yet.
-          </div>
-        ) : (
-          steps.map((s, i) => {
-            if (s.type === 'CONDITIONAL') {
-              return null;
-            }
-            const action = s as ActionStepConfig;
-            const catalogItem = catalog.find(c => c.type === action.type) ?? null;
-            const schema = schemaCache[action.type] ?? null;
-            const stepIssues = issues?.filter(it => it.path.startsWith(`${pathPrefix}[${i}]`));
-            return (
-              <StepCard
-                key={action.id}
-                step={action}
-                catalogItem={catalogItem}
-                schema={schema}
-                schemaLoading={schemaLoadingFor?.(action.type) ?? false}
-                index={i + 1}
-                total={steps.length}
-                variableSources={variableSources}
-                onConfigChange={cfg => handleStepChange(i, cfg)}
-                onMoveUp={() => handleMove(i, -1)}
-                onMoveDown={() => handleMove(i, 1)}
-                onDelete={() => handleRemove(i)}
-                issues={stepIssues ?? []}
-                pathPrefix={`${pathPrefix}[${i}].config.`}
-              />
-            );
-          })
-        )}
-        <AddStepRow catalog={catalog} onPick={handleAdd} variant='compact' />
-      </div>
     </div>
   );
 }

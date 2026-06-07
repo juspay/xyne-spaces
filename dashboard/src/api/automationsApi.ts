@@ -154,7 +154,22 @@ export interface ConditionalStepConfig {
   };
 }
 
-export type AutomationStepConfig = ActionStepConfig | ConditionalStepConfig;
+export interface SwitchCaseEntry {
+  condition: Condition;
+  label?: string;
+  steps: AutomationStepConfig[];
+}
+
+export interface SwitchStepConfig {
+  id: string;
+  type: 'SWITCH';
+  config: {
+    cases: SwitchCaseEntry[];
+    default: AutomationStepConfig[];
+  };
+}
+
+export type AutomationStepConfig = ActionStepConfig | ConditionalStepConfig | SwitchStepConfig;
 
 export const ScheduleOffsetUnitValues = {
   minutes: 'minutes',

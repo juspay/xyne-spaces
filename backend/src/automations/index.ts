@@ -11,6 +11,7 @@ import { messageReceivedTrigger } from './triggers/message-received.trigger';
 import { webhookTrigger } from './triggers/webhook.trigger';
 
 import { conditionalStep } from './steps/conditional.step';
+import { switchStep } from './steps/switch.step';
 
 import { sendMessageStep } from './steps/send-message.step';
 import { notifyUserStep } from './steps/notify-user.step';
@@ -48,6 +49,7 @@ export async function initializeAutomations(): Promise<void> {
   triggerRegistry.register(webhookTrigger);
 
   stepRegistry.register(conditionalStep);
+  stepRegistry.register(switchStep);
 
   stepRegistry.register(sendMessageStep);
   stepRegistry.register(notifyUserStep);

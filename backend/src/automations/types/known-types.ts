@@ -6,6 +6,7 @@ export const KnownTriggerTypeSchema = z.nativeEnum(KnownTriggerType);
 
 export enum ControlFlowStepType {
   CONDITIONAL = 'CONDITIONAL',
+  SWITCH = 'SWITCH',
 }
 
 export const ControlFlowStepTypeSchema = z.nativeEnum(ControlFlowStepType);

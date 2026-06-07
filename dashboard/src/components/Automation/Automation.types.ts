@@ -4,6 +4,8 @@ export type {
   AutomationStepConfig,
   ActionStepConfig,
   ConditionalStepConfig,
+  SwitchStepConfig,
+  SwitchCaseEntry,
   AutomationRun,
   Condition,
   LeafCondition,
@@ -38,6 +40,7 @@ export {
 } from '../../api/automationsApi';
 
 export const CONDITIONAL_STEP_TYPE = 'CONDITIONAL';
+export const SWITCH_STEP_TYPE = 'SWITCH';
 
 export {
   VARIABLE_REF_REGEX,
