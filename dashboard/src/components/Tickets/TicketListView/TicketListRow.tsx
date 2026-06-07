@@ -1,5 +1,5 @@
 import { MouseEvent, ReactElement, useMemo, useRef } from 'react';
-import { Sparkles, Pencil, Wand2 } from 'lucide-react';
+import { Sparkles, Pencil, Wand2, Loader2 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
@@ -93,12 +93,15 @@ export const TicketListRow = ({
     ? 'Human Intervention'
     : (ticket.stageName ?? formatStatusText(ticket.status));
   const emailCount = ticket.emailCount ?? 0;
-  const draftKind = useMemo((): 'user' | 'auto' | null => {
+  const draftKind = useMemo((): 'user' | 'auto' | 'generating' | null => {
     const drafts = (ticket.emailDrafts ?? []) as ReadonlyArray<{
       userId: string | null;
+      autoDraftStatus?: string | null;
     }>;
     if (drafts.length === 0) return null;
     if (drafts.some(d => d.userId !== null)) return 'user';
+    if (drafts.some(d => d.userId === null && d.autoDraftStatus === 'GENERATING'))
+      return 'generating';
     return 'auto';
   }, [ticket.emailDrafts]);
 
@@ -222,6 +225,17 @@ export const TicketListRow = ({
               >
                 <Wand2 size={10} />
                 AI draft
+              </span>
+            </Tooltip>
+          )}
+          {draftKind === 'generating' && (
+            <Tooltip delayDuration={500} content='Generating AI draft…'>
+              <span
+                className='inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-violet-100 text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
+                aria-label='Generating AI draft'
+              >
+                <Loader2 size={10} className='animate-spin' />
+                Drafting…
               </span>
             </Tooltip>
           )}

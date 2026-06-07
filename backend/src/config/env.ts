@@ -280,6 +280,7 @@ const envSchema = Joi.object({
   XYNE_CLAW_URL: Joi.string().uri().default(''),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
   XYNE_CLAW_AUTH_URL: Joi.string().uri().default(''),
+  XYNE_CLAW_WEBHOOK_URL: Joi.string().uri().default(''),
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v1'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
@@ -641,6 +642,7 @@ export const config = {
     url: envVars.XYNE_CLAW_URL as string,
     s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
     authUrl: envVars.XYNE_CLAW_AUTH_URL as string,
+    webhookUrl: envVars.XYNE_CLAW_WEBHOOK_URL as string,
   },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
