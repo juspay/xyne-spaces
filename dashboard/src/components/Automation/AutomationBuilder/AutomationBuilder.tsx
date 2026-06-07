@@ -24,8 +24,10 @@ import {
   type AutomationConfig,
   type AutomationStepConfig,
   type ConditionalStepConfig,
+  type SwitchStepConfig,
   type ScheduleConfig,
   CONDITIONAL_STEP_TYPE,
+  SWITCH_STEP_TYPE,
   AutomationStatusValues,
   makeStepId,
   type SaveResult,
@@ -48,6 +50,8 @@ import { triggerTypeToEventType } from '../automation.adapter';
 import { TriggerCard } from './TriggerCard/TriggerCard';
 import { StepCard } from './StepCard/StepCard';
 import { ConditionalCard } from './ConditionalCard/ConditionalCard';
+import { SwitchCard } from './SwitchCard/SwitchCard';
+import type { ControlFlowRenderProps } from './BranchSteps/BranchSteps';
 import { AddStepRow } from './AddStepRow/AddStepRow';
 import { ScheduleCard } from './ScheduleCard/ScheduleCard';
 import { ValidationBanner } from './ValidationBanner/ValidationBanner';
@@ -87,6 +91,56 @@ const STATUS_LABEL: Record<string, string> = {
   AUTO_REVOKED: 'Auto-revoked',
   ARCHIVED: 'Archived',
 };
+
+const renderConditionalCard = (
+  step: ConditionalStepConfig,
+  props: ControlFlowRenderProps,
+): React.ReactElement => (
+  <ConditionalCard
+    step={step}
+    catalog={props.catalog}
+    schemaCache={props.schemaCache}
+    schemaLoadingFor={props.schemaLoadingFor}
+    operators={props.operators}
+    variableSources={props.variableSources}
+    index={props.index}
+    total={props.total}
+    onChange={next => props.onChange(next)}
+    onMoveUp={props.onMoveUp}
+    onMoveDown={props.onMoveDown}
+    onDelete={props.onDelete}
+    issues={props.issues}
+    pathPrefix={props.pathPrefix}
+    ensureSchema={props.ensureSchema}
+    renderConditionalCard={props.renderConditionalCard}
+    renderSwitchCard={props.renderSwitchCard}
+  />
+);
+
+const renderSwitchCard = (
+  step: SwitchStepConfig,
+  props: ControlFlowRenderProps,
+): React.ReactElement => (
+  <SwitchCard
+    step={step}
+    catalog={props.catalog}
+    schemaCache={props.schemaCache}
+    schemaLoadingFor={props.schemaLoadingFor}
+    operators={props.operators}
+    variableSources={props.variableSources}
+    index={props.index}
+    total={props.total}
+    onChange={next => props.onChange(next)}
+    onMoveUp={props.onMoveUp}
+    onMoveDown={props.onMoveDown}
+    onDelete={props.onDelete}
+    issues={props.issues}
+    pathPrefix={props.pathPrefix}
+    ensureSchema={props.ensureSchema}
+    renderConditionalCard={props.renderConditionalCard}
+    renderSwitchCard={props.renderSwitchCard}
+  />
+);
 
 export function AutomationBuilder({
   automation,
@@ -510,6 +564,23 @@ export function AutomationBuilder({
             type,
             insertAt,
             finalIndex: next.indexOf(cond),
+          });
+          return { ...prev, steps: next };
+        });
+        return;
+      }
+      if (type === SWITCH_STEP_TYPE) {
+        const sw: SwitchStepConfig = {
+          id: makeStepId(),
+          type: SWITCH_STEP_TYPE,
+          config: { cases: [], default: [] },
+        };
+        setConfig(prev => {
+          const next = insertInto(prev.steps, sw);
+          console.info('[automations] step added', {
+            type,
+            insertAt,
+            finalIndex: next.indexOf(sw),
           });
           return { ...prev, steps: next };
         });
@@ -970,6 +1041,28 @@ export function AutomationBuilder({
                     issues={stepIssues}
                     pathPrefix={`steps[${index}]`}
                     ensureSchema={ensureSchema}
+                    renderConditionalCard={renderConditionalCard}
+                    renderSwitchCard={renderSwitchCard}
+                  />
+                ) : step.type === SWITCH_STEP_TYPE ? (
+                  <SwitchCard
+                    step={step as SwitchStepConfig}
+                    catalog={stepCatalog}
+                    schemaCache={stepSchemaCache}
+                    schemaLoadingFor={stepSchemaLoadingFor}
+                    operators={operators}
+                    variableSources={variableSources}
+                    index={index + 1}
+                    total={config.steps.length}
+                    onChange={next => updateStepAt(index, next)}
+                    onMoveUp={() => handleMoveStep(index, -1)}
+                    onMoveDown={() => handleMoveStep(index, 1)}
+                    onDelete={() => handleDeleteStep(index)}
+                    issues={stepIssues}
+                    pathPrefix={`steps[${index}]`}
+                    ensureSchema={ensureSchema}
+                    renderConditionalCard={renderConditionalCard}
+                    renderSwitchCard={renderSwitchCard}
                   />
                 ) : (
                   <StepCard

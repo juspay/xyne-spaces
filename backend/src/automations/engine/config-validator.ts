@@ -3,6 +3,7 @@ import type {
   AutomationConfig,
   AutomationStepConfig,
   ConditionalStepConfig,
+  SwitchStepConfig,
   Condition,
 } from '../types/automation-config';
 import { getVariableRefInnerSchema } from '../types/automation-config';
@@ -247,6 +248,12 @@ export class ConfigValidator {
         continue;
       }
 
+      if (step.type === ControlFlowStepType.SWITCH) {
+        this.validateSwitchStep(step as SwitchStepConfig, stepPath, outputSchemas, issues);
+        outputSchemas.set(`${step.id}.output`, z.object({ matchedIndex: z.number() }));
+        continue;
+      }
+
       if (!this.stepRegistry.has(step.type)) {
         issues.push({
           path: `${stepPath}.type`,
@@ -296,6 +303,38 @@ export class ConfigValidator {
     if (cfg.if_false && cfg.if_false.length > 0) {
       this.walkSteps(cfg.if_false, `${stepPath}.config.if_false`, new Map(outputSchemas), issues);
     }
+  }
+
+  private validateSwitchStep(
+    step: SwitchStepConfig,
+    stepPath: string,
+    outputSchemas: Map<string, z.ZodSchema>,
+    issues: ValidationIssue[],
+  ): void {
+    const cfg = step.config;
+
+    for (let i = 0; i < cfg.cases.length; i++) {
+      const caseEntry = cfg.cases[i]!;
+      this.validateConditionRefs(
+        caseEntry.condition,
+        `${stepPath}.config.cases[${i}].condition`,
+        outputSchemas,
+        issues,
+      );
+      this.walkSteps(
+        caseEntry.steps,
+        `${stepPath}.config.cases[${i}].steps`,
+        new Map(outputSchemas),
+        issues,
+      );
+    }
+
+    this.walkSteps(
+      cfg.default,
+      `${stepPath}.config.default`,
+      new Map(outputSchemas),
+      issues,
+    );
   }
 
   private validateConditionRefs(

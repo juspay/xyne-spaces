@@ -11,7 +11,7 @@ import type { AutomationStepConfig } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
 import type { TriggerType } from '../types/trigger-types';
 import type { StepType } from '../types/step-types';
-import { ControlFlowStepType } from '../types/known-types';
+import { CONTROL_FLOW_STEP_TYPES } from '../types/known-types';
 import type { StepRegistry } from '../steps/step-registry';
 import { BaseActionStep, BaseControlFlowStep, StepKind } from '../steps/base-step';
 import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver';
@@ -431,7 +431,7 @@ export class AutomationExecutor {
       } catch (err) {
         if (PauseStep.is(err)) {
           throw new Error(
-            `Step "${step.id}" (${step.type}) tried to pause inside a CONDITIONAL branch. Pausing is only supported at the top level — restructure the automation so the waiting step is not nested.`,
+            `Step "${step.id}" (${step.type}) tried to pause inside a control-flow branch. Pausing is only supported at the top level — restructure the automation so the waiting step is not nested.`,
           );
         }
         throw err;
@@ -448,7 +448,7 @@ export class AutomationExecutor {
   ): Promise<void> {
     const data = payload === null ? null : JSON.stringify(payload);
     const executorType =
-      step.type === ControlFlowStepType.CONDITIONAL ? 'conditional' : 'deterministic';
+      CONTROL_FLOW_STEP_TYPES.has(step.type) ? 'conditional' : 'deterministic';
     await this.prisma.workflowStep.upsert({
       where: {
         workflowExecutionId_stepName: { workflowExecutionId: runId, stepName },

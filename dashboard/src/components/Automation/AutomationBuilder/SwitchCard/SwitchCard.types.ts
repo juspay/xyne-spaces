@@ -1,16 +1,15 @@
 import type {
-  AutomationStepConfig,
   ConditionalStepConfig,
+  SwitchStepConfig,
   OperatorMeta,
   StepCatalogItem,
-  SwitchStepConfig,
   ValidationIssue,
 } from '../../Automation.types';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ControlFlowRenderProps } from '../BranchSteps/BranchSteps';
 
-export interface ConditionalCardProps {
-  step: ConditionalStepConfig;
+export interface SwitchCardProps {
+  step: SwitchStepConfig;
   catalog: StepCatalogItem[];
   schemaCache: Record<string, import('../../Automation.types').StepSchema | undefined>;
   schemaLoadingFor: (type: string) => boolean;
@@ -18,7 +17,7 @@ export interface ConditionalCardProps {
   variableSources: VariablePickerSource[];
   index: number;
   total: number;
-  onChange: (next: ConditionalStepConfig) => void;
+  onChange: (next: SwitchStepConfig) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
@@ -30,11 +29,4 @@ export interface ConditionalCardProps {
     props: ControlFlowRenderProps,
   ) => React.ReactElement;
   renderSwitchCard: (step: SwitchStepConfig, props: ControlFlowRenderProps) => React.ReactElement;
-}
-
-export interface BranchEditorAPI {
-  updateAt: (index: number, next: AutomationStepConfig) => void;
-  append: (step: AutomationStepConfig) => void;
-  removeAt: (index: number) => void;
-  move: (index: number, direction: -1 | 1) => void;
 }

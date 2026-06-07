@@ -62,7 +62,7 @@ export const ConditionSchema: z.ZodType<Condition> = z.lazy(() =>
 
 export interface ActionStepConfig {
   id: string;
-  type: Exclude<StepType, ControlFlowStepType.CONDITIONAL>;
+  type: Exclude<StepType, ControlFlowStepType>;
   config: Record<string, unknown>;
 }
 
@@ -76,7 +76,22 @@ export interface ConditionalStepConfig {
   };
 }
 
-export type AutomationStepConfig = ActionStepConfig | ConditionalStepConfig;
+export interface SwitchCaseEntry {
+  condition: Condition;
+  label?: string;
+  steps: AutomationStepConfig[];
+}
+
+export interface SwitchStepConfig {
+  id: string;
+  type: ControlFlowStepType.SWITCH;
+  config: {
+    cases: SwitchCaseEntry[];
+    default: AutomationStepConfig[];
+  };
+}
+
+export type AutomationStepConfig = ActionStepConfig | ConditionalStepConfig | SwitchStepConfig;
 
 export const ScheduleOffsetUnitSchema = z.enum(['minutes', 'hours', 'days']);
 export type ScheduleOffsetUnit = z.infer<typeof ScheduleOffsetUnitSchema>;

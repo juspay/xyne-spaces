@@ -3,11 +3,12 @@ import type {
   AutomationStepConfig,
   ActionStepConfig,
   ConditionalStepConfig,
+  SwitchStepConfig,
   StepSchema,
   TriggerSchema,
   ValidationIssue,
 } from '../Automation.types';
-import { CONDITIONAL_STEP_TYPE } from '../Automation.types';
+import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE } from '../Automation.types';
 import type { VariablePickerSource } from './VariablePicker/VariablePicker.types';
 
 export function emptyConfig(): AutomationConfig {
@@ -43,7 +44,7 @@ export function buildVariableSources(
   for (let i = 0; i < upToIndex; i++) {
     const step = steps[i];
     if (!step) continue;
-    if (step.type === CONDITIONAL_STEP_TYPE) continue;
+    if (step.type === CONDITIONAL_STEP_TYPE || step.type === SWITCH_STEP_TYPE) continue;
     const schema = schemaCache[step.type];
     if (!schema) continue;
     const groupLabel = `Step ${i + 1} — ${schema.name}`;
@@ -155,6 +156,14 @@ function walk(steps: AutomationStepConfig[], set: Set<string>): void {
       const cond = step as ConditionalStepConfig;
       walk(cond.config.if_true ?? [], set);
       walk(cond.config.if_false ?? [], set);
+      continue;
+    }
+    if (step.type === SWITCH_STEP_TYPE) {
+      const sw = step as SwitchStepConfig;
+      for (const caseEntry of sw.config.cases) {
+        walk(caseEntry.steps, set);
+      }
+      walk(sw.config.default, set);
       continue;
     }
     set.add((step as ActionStepConfig).type);

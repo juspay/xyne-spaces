@@ -83,6 +83,18 @@ export function encryptWebhookStepHeaders(steps: unknown): boolean {
       if (encryptWebhookStepHeaders(step.config['if_true'])) changed = true;
       if (encryptWebhookStepHeaders(step.config['if_false'])) changed = true;
     }
+
+    if (step.type === ControlFlowStepType.SWITCH && step.config) {
+      const cases = step.config['cases'];
+      if (Array.isArray(cases)) {
+        for (const c of cases) {
+          if (c && typeof c === 'object' && 'steps' in c) {
+            if (encryptWebhookStepHeaders((c as { steps: unknown }).steps)) changed = true;
+          }
+        }
+      }
+      if (encryptWebhookStepHeaders(step.config['default'])) changed = true;
+    }
   }
   return changed;
 }
