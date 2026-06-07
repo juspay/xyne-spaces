@@ -155,6 +155,7 @@ class EmailClassificationWorker {
             boardId: ticket.boardId!,
             createdBy: SYSTEM_ACTOR,
             projectId: ticket.projectId ?? undefined,
+            channelId: ticket.channelId ?? undefined,
           });
           if (fullRoles.member) {
             newAssignedTo = fullRoles.member;
@@ -170,6 +171,7 @@ class EmailClassificationWorker {
             AssignmentType.TICKET_ASSIGNEE,
             undefined,
             ticket.projectId ?? undefined,
+            ticket.channelId ?? undefined,
           );
           if (assignmentResult.assignedUserId) {
             newAssignedTo = assignmentResult.assignedUserId;

@@ -3,7 +3,7 @@ import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
-import { repositories } from '@/database/repositories';
+import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 
 const AssignTicketToGroupConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -38,11 +38,11 @@ export class AssignTicketToGroupStep extends BaseActionStep<
   ): Promise<AssignTicketToGroupOutput> {
     const ticketId = config.ticketId as string;
     const groupId = config.groupId as string;
-    await repositories.tickets.assignUserGroupToTicket(
+    await ticketAssignmentService.assignTicketToGroup({
       ticketId,
       groupId,
-      context.automation.createdById,
-    );
+      actorId: context.automation.createdById,
+    });
     return { ticketId, groupId };
   }
 }

@@ -1,8 +1,9 @@
 import { DatabaseClient } from '@/database/client';
 import { TicketStatusV2, UserResponsibility } from '@prisma/client';
-import { evaluateAllRoles } from '@/utils/assignmentEngine';
+import { evaluateAllRoles, evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { logger } from '@/utils/logger';
 import { syncUserWorkload } from '@/utils/workloadUtils';
+import { repositories } from '@/database/repositories';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -162,10 +163,11 @@ export class TicketAssignmentService {
     boardId: string;
     createdBy: string;
     projectId?: string;
+    channelId?: string;
   }): Promise<FullRoleAssignmentResult> {
-    const { ticketId, userGroupId, boardId, createdBy, projectId } = params;
+    const { ticketId, userGroupId, boardId, createdBy, projectId, channelId } = params;
 
-    const allRoles = await evaluateAllRoles(userGroupId, boardId, projectId);
+    const allRoles = await evaluateAllRoles(userGroupId, boardId, projectId, channelId);
 
     // upsert into ticket_assignments + sync workload for one resolved role
     const persist = async (
@@ -218,6 +220,80 @@ export class TicketAssignmentService {
     );
 
     return result;
+  }
+  
+  async assignTicketToGroup(params: {
+    ticketId: string;
+    groupId: string;
+    actorId: string;
+  }): Promise<string | null> {
+    const { ticketId, groupId, actorId } = params;
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { boardId: true, projectId: true, channelId: true },
+    });
+    if (!ticket) {
+      logger.warn(`[AUTO-ASSIGN] Ticket ${ticketId} not found; cannot assign to group ${groupId}`);
+      return null;
+    }
+
+    // Set group ownership via the existing repository method (handles md sync).
+    await repositories.tickets.assignUserGroupToTicket(ticketId, groupId, actorId);
+
+    const board = await prisma.board.findUnique({
+      where: { id: ticket.boardId },
+      select: { metadata: true },
+    });
+    const isFullRole =
+      (board?.metadata as { fullRoleAssignment?: boolean } | null)?.fullRoleAssignment === true;
+
+    let assignedUserId: string | undefined;
+    if (isFullRole) {
+      const fullRoles = await this.assignFullRolesToTicket({
+        ticketId,
+        userGroupId: groupId,
+        boardId: ticket.boardId,
+        createdBy: actorId,
+        projectId: ticket.projectId,
+        channelId: ticket.channelId,
+      });
+      assignedUserId = fullRoles.member;
+    } else {
+      const result = await evaluateAssignmentRule(
+        groupId,
+        ticket.boardId,
+        undefined,
+        undefined,
+        ticket.projectId,
+        ticket.channelId,
+      );
+      assignedUserId = result.assignedUserId;
+    }
+
+    if (!assignedUserId) {
+      logger.info(
+        `[AUTO-ASSIGN] No eligible member in group ${groupId} for ticket ${ticketId} (e.g. NO_ON_CALL_USERS); group set without assignee`,
+      );
+      return null;
+    }
+
+    // Set the assignee via the existing repository method (md sync + ticket-updated event).
+    await repositories.tickets.updateTicketAssignee(ticketId, assignedUserId, actorId);
+
+    // Full-role path already syncs workload per role inside assignFullRolesToTicket.
+    if (!isFullRole) {
+      try {
+        await syncUserWorkload(assignedUserId, groupId, ticket.boardId, actorId);
+      } catch (workloadError) {
+        logger.error('[AUTO-ASSIGN] Error syncing workload:', workloadError);
+      }
+    }
+
+    logger.info(
+      `[AUTO-ASSIGN] Assigned member ${assignedUserId} from group ${groupId} to ticket ${ticketId}`,
+    );
+    return assignedUserId;
   }
 }
 

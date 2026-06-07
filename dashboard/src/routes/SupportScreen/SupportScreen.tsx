@@ -38,7 +38,13 @@ import {
   BarChart4Icon,
   Circle,
 } from 'lucide-react';
-import { ChannelVisibility, ChannelType, EmailType, AutoDraftStatus } from '@xyne/shared';
+import {
+  ChannelVisibility,
+  ChannelType,
+  EmailType,
+  NotificationLevel,
+  AutoDraftStatus,
+} from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -57,7 +63,6 @@ import {
   useEmailChannels,
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
-import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
@@ -78,7 +83,6 @@ import { mutators } from '../../zero/mutators';
 import * as Tabs from '@radix-ui/react-tabs';
 import { TicketDetails } from '../../components/Tickets/TicketDetails/TicketDetails';
 import { Button } from '../../components/ui/Button/Button';
-import Badge from '../../components/ui/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
@@ -491,6 +495,7 @@ const SupportScreen = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
   const { isMobile } = usePlatform();
+  const zero = useZero();
   // Channel selection is sourced strictly from the URL path (/support/:channelId).
   // A bare /support visit renders the empty state prompting the user to pick one.
   const selectedChannelId = channelIdParam ?? null;
@@ -901,7 +906,6 @@ const SupportScreen = (): ReactElement => {
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
   const userChannelStatuses = useUserChannelStatuses();
-  const unreadCounts = useAllUnreadCount();
   // Both star and joined state live on channel_user_status (per-user). A row
   // in that list for a given channelId means the user has joined the channel;
   // isStarred narrows that further.
@@ -913,6 +917,11 @@ const SupportScreen = (): ReactElement => {
       if (status.isStarred) starred.add(status.channelId);
     }
     return { starredChannelIds: starred, joinedChannelIds: joined };
+  }, [userChannelStatuses]);
+  const statusByChannelId = useMemo(() => {
+    const map = new Map<string, (typeof userChannelStatuses)[number]>();
+    for (const status of userChannelStatuses) map.set(status.channelId, status);
+    return map;
   }, [userChannelStatuses]);
   const { starredEmailChannels, joinedEmailChannels, notJoinedEmailChannels } = useMemo(() => {
     const starred: typeof sortedEmailChannels = [];
@@ -939,6 +948,22 @@ const SupportScreen = (): ReactElement => {
   // CTA (there is nothing to join).
   const isSelectedChannelKnown =
     !!selectedChannelId && sortedEmailChannels.some(c => c.id === selectedChannelId);
+
+  useEffect(() => {
+    if (!selectedChannelId || !isSelectedChannelJoined) return;
+    const markViewed = (): void => {
+      void zero.mutate(
+        mutators.channel.markChannelAsViewed({
+          channelId: selectedChannelId,
+          timestamp: Date.now(),
+          draftMessageId: uuidv4(),
+          draftMessage: '',
+        }),
+      );
+    };
+    markViewed();
+    return markViewed;
+  }, [selectedChannelId, isSelectedChannelJoined]);
   const selectedChannelName =
     sortedEmailChannels.find(c => c.id === selectedChannelId)?.name?.trim() || 'Xyne Desk';
 
@@ -1195,7 +1220,14 @@ const SupportScreen = (): ReactElement => {
   const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
     const isActive = selectedChannelId === c.id;
     const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
-    const unreadCount = unreadCounts[c.id] ?? 0;
+    const status = statusByChannelId.get(c.id);
+    const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
+    const shouldShowBold =
+      !isActive &&
+      !isMuted &&
+      !!status?.lastViewedAt &&
+      !!c.channelStats?.lastActivityAt &&
+      c.channelStats.lastActivityAt > status.lastViewedAt;
     return (
       <div
         key={c.id}
@@ -1227,16 +1259,12 @@ const SupportScreen = (): ReactElement => {
         <span
           className={cn(
             'text-sm flex-1 truncate min-w-0',
-            unreadCount > 0 && !isActive && 'font-semibold text-sidebar-primary-foreground',
+            shouldShowBold && '!font-semibold text-sidebar-unread-foreground',
           )}
+          style={shouldShowBold ? { fontWeight: 700 } : undefined}
         >
           {c.name?.trim() || 'Unnamed Channel'}
         </span>
-        {unreadCount > 0 && (
-          <Badge className='font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
-            {unreadCount > 9 ? '9+' : unreadCount}
-          </Badge>
-        )}
       </div>
     );
   };

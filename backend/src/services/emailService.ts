@@ -1309,6 +1309,7 @@ export class EmailService {
       };
 
       const email = await this.emailRepository.create(emailData);
+      void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
       void dispatchEmailEventForEmailId(email.id);
@@ -1325,6 +1326,8 @@ export class EmailService {
             data: { lastEmailAt: receivedAt },
           });
         }
+
+        await syncTicketEmailCount(this.prisma, conversationId);
 
         const previousLatest = await this.prisma.email.findFirst({
           where: { conversationId, id: { not: email.id } },
@@ -1520,6 +1523,7 @@ export class EmailService {
             boardId,
             createdBy: userId,
             projectId: ticket.projectId,
+            channelId,
           });
           if (fullRoles.member) {
             const updatedTicket = await this.prisma.ticket.update({
@@ -1529,7 +1533,7 @@ export class EmailService {
             await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
           }
         } else {
-        const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, ticket.projectId);
+        const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, ticket.projectId, channelId);
         if (assignmentResult.assignedUserId) {
           const updatedTicket = await this.prisma.ticket.update({
             where: { id: ticket.id },
