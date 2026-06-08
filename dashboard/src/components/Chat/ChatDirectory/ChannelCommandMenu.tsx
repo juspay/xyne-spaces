@@ -21,8 +21,11 @@ import {
   Lock,
   Mail,
   ArrowRight,
+  ListFilter,
+  User,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
+import * as Popover from '@radix-ui/react-popover';
 import * as Switch from '@radix-ui/react-switch';
 import { Channel, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 import {
@@ -75,6 +78,7 @@ import {
   CMDK_USER_LIMIT,
 } from '../../../hooks/useSearchMetrics';
 import { useScope, useShortcutById } from '../../../shortcuts';
+import { useSearchMode } from '../../../hooks/useSearchMode';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
@@ -189,9 +193,15 @@ const ChannelCommandMenu = ({
 
   useScope('command', open);
 
+  const { searchMode } = useSearchMode();
+
   useShortcutById(
     'global.search',
     () => {
+      if (searchMode === 'screen') {
+        window.dispatchEvent(new CustomEvent('xyne:activate-search-bar'));
+        return;
+      }
       onOpenChange(!open);
       if (!open && !searchSessionId) {
         onOpen('keyboard_shortcut');
@@ -384,6 +394,7 @@ const ChannelCommandMenu = ({
   >(null);
 
   const insertTextRef = useRef<((text: string) => void) | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   // Type autocomplete - derived from searchText
   const typeAutocomplete = useMemo(() => {
@@ -406,7 +417,75 @@ const ChannelCommandMenu = ({
       match,
     };
   }, [searchText]);
-  const autocompleteSuffix = typeAutocomplete.suffix;
+  const autocompleteSuffix =
+    typeAutocomplete.suffix ||
+    (hideTabs && searchMode === 'screen' && searchText.trim() ? '\u00a0\u2013 Search' : undefined);
+
+  // Build URLSearchParams for navigating to the search results screen,
+  // including human-readable display text resolved from mention IDs.
+  function buildSearchParams(
+    text: string,
+    mentions: typeof selectedMentions,
+    byId: typeof usersById,
+    channels: typeof allChannels,
+  ): URLSearchParams {
+    const params = new URLSearchParams();
+    if (text.trim()) params.set('query', text.trim());
+
+    const fromMentions = mentions.filter(
+      m => m.type === MentionType.USER && (m.prefix === 'from:' || !m.prefix),
+    );
+    const fromIds = fromMentions.map(m => m.id);
+    if (fromIds.length > 0) params.set('from', fromIds.join(','));
+
+    const inMentions = mentions.filter(m => m.type === MentionType.CHANNEL && m.prefix === 'in:');
+    const inIds = inMentions.map(m => m.id);
+    if (inIds.length > 0) params.set('in', inIds.join(','));
+
+    const assigneeMentions = mentions.filter(
+      m => m.type === MentionType.USER && m.prefix === 'assignee:',
+    );
+    const assigneeIds = assigneeMentions.map(m => m.id);
+    if (assigneeIds.length > 0) params.set('assignee', assigneeIds.join(','));
+
+    const withMentions = mentions.filter(m => m.type === MentionType.USER && m.prefix === 'with:');
+    const withIds = withMentions.map(m => m.id);
+    if (withIds.length > 0) params.set('with', withIds.join(','));
+
+    // Build human-readable display string for the global search bar
+    const displayParts: string[] = [];
+    if (fromMentions.length > 0) {
+      const names = fromMentions
+        .map(m => {
+          const user = byId.get(m.id);
+          return user ? `@${getUserDisplayName(user)}` : '';
+        })
+        .filter(Boolean);
+      if (names.length > 0) displayParts.push(`from:${names.join(' ')}`);
+    }
+    if (inMentions.length > 0) {
+      const names = inMentions
+        .map(m => {
+          const ch = channels.find(c => c.channel.id === m.id);
+          return ch ? `#${ch.channel.name}` : '';
+        })
+        .filter(Boolean);
+      if (names.length > 0) displayParts.push(`in:${names.join(' ')}`);
+    }
+    if (assigneeMentions.length > 0) {
+      const names = assigneeMentions
+        .map(m => {
+          const user = byId.get(m.id);
+          return user ? `@${getUserDisplayName(user)}` : '';
+        })
+        .filter(Boolean);
+      if (names.length > 0) displayParts.push(`assignee:${names.join(' ')}`);
+    }
+    if (text.trim()) displayParts.push(text.trim());
+    if (displayParts.length > 0) params.set('display', displayParts.join(' '));
+
+    return params;
+  }
 
   const acceptTypeAutocomplete = useCallback(() => {
     if (!typeAutocomplete.suggestion || !typeAutocomplete.match) return;
@@ -821,11 +900,12 @@ const ChannelCommandMenu = ({
   // Reset active tab if the current tab is no longer in the enabled set.
   // In inline mode, fall back to the first enabled tab (never ALL).
   useEffect(() => {
-    if (!activeEnabledTabs.includes(activeTab)) {
+    // When hideTabs is true (screen-mode popup), ALL is always valid — no reset needed
+    if (!hideTabs && !activeEnabledTabs.includes(activeTab)) {
       setActiveTab(inline ? (activeEnabledTabs[0] ?? TabType.ALL) : TabType.ALL);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEnabledTabs, inline]);
+  }, [activeEnabledTabs, inline, hideTabs]);
 
   // Reset state when menu closes; also reset tab on open so dialog always starts on ALL
   useEffect(() => {
@@ -853,8 +933,11 @@ const ChannelCommandMenu = ({
     } else if (!inline) {
       // When opening the non-inline dialog, start on initialTab if provided, else ALL
       setActiveTab(initialTab ?? TabType.ALL);
+    } else if (inline && !searchSessionId) {
+      // Inline mode (screen-mode popup): start a search session so performSearch fires
+      onOpen('click');
     }
-  }, [open, searchSessionId, onClose, resetSearchState, inline, initialTab]);
+  }, [open, searchSessionId, onClose, onOpen, resetSearchState, inline, initialTab]);
 
   const toggleCategoryExpansion = (category: string): void => {
     setExpandedCategories(prev => {
@@ -1194,13 +1277,20 @@ const ChannelCommandMenu = ({
               ? paginationState[activeTab].cumulativeCount
               : items.length;
 
+          const displayItems =
+            searchMode === 'screen' && activeTab === TabType.ALL ? items.slice(0, 2) : items;
+
           return (
             <div key={groupKey} className='mb-4'>
               <Command.Group
-                heading={`${getGroupLabel(groupKey)} (${displayCount})`}
+                heading={
+                  searchMode === 'screen' && activeTab === TabType.ALL
+                    ? getGroupLabel(groupKey)
+                    : `${getGroupLabel(groupKey)} (${displayCount})`
+                }
                 className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
               >
-                {items.map((result, index) => (
+                {displayItems.map((result, index) => (
                   <SearchResultItem
                     key={result.id}
                     result={result}
@@ -1928,6 +2018,22 @@ const ChannelCommandMenu = ({
       '[cmdk-item][aria-selected="true"]',
     ) as HTMLElement | null;
 
+    // Screen-mode popup: Enter navigates to search screen only when no result item is selected
+    // (or when the "show results for" item is selected). If a regular result is selected, click it.
+    if (hideTabs && searchMode === 'screen') {
+      const isShowResultsItem = activeItem?.getAttribute('data-show-results-item') === 'true';
+      if (activeItem && !isShowResultsItem) {
+        lastModifierRef.current = e.metaKey || e.ctrlKey;
+        activeItem.click();
+        return;
+      }
+      onOpenChange(false);
+      void navigate(
+        `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
+      );
+      return;
+    }
+
     // Prime modifier ref before the synthetic .click() — a synthetic click
     // loses modifier state, so downstream selection handlers read this ref
     // instead of checking event.metaKey.
@@ -1951,7 +2057,11 @@ const ChannelCommandMenu = ({
           </button>
           <LexicalSearchInput
             value={searchText}
-            placeholder={`Search ${activeTab === TabType.ALL ? 'everything' : activeTab}...`}
+            placeholder={
+              hideTabs || activeTab === TabType.ALL
+                ? 'Search everything...'
+                : `Search ${activeTab}...`
+            }
             onChange={handleEditorChange}
             onUserSearch={handleUserSearch}
             onChannelSearch={handleChannelSearch}
@@ -1968,7 +2078,7 @@ const ChannelCommandMenu = ({
             onInsertMentionReady={handleInsertMentionReady}
             onPasteDetected={onPasteDetected}
             onManualKeystroke={onManualKeystroke}
-            autocompleteSuffix={autocompleteSuffix}
+            autocompleteSuffix={autocompleteSuffix ?? ''}
             onInsertTextReady={insertText => {
               insertTextRef.current = insertText;
             }}
@@ -2000,6 +2110,85 @@ const ChannelCommandMenu = ({
                 <Search className='w-4 h-4' />
               )}
             </button>
+          )}
+          {hideTabs && (
+            <Popover.Root open={filterOpen} onOpenChange={setFilterOpen}>
+              <div className='relative group/filtertip'>
+                <Popover.Trigger asChild>
+                  <button
+                    type='button'
+                    className={cn(
+                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors',
+                      filterOpen
+                        ? 'bg-primary/10 border-primary/40 text-primary'
+                        : 'border-border text-foreground hover:bg-accent hover:text-accent-foreground',
+                    )}
+                    aria-label='Show filters'
+                  >
+                    <ListFilter size={13} />
+                  </button>
+                </Popover.Trigger>
+                <div className='pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/filtertip:opacity-100 transition-opacity z-[10001]'>
+                  Show filters
+                </div>
+                <Popover.Portal>
+                  <Popover.Content
+                    side='bottom'
+                    align='end'
+                    sideOffset={6}
+                    className='z-[10000] bg-popover border border-border rounded-lg shadow-md min-w-[160px] p-1 text-popover-foreground'
+                    onOpenAutoFocus={e => e.preventDefault()}
+                  >
+                    {[
+                      { label: 'From', prefix: 'from: ', icon: <User size={13} /> },
+                      { label: 'In', prefix: 'in: ', icon: <Hash size={13} /> },
+                      { label: 'With', prefix: 'with: ', icon: <User size={13} /> },
+                      { label: 'Assignee', prefix: 'assignee: ', icon: <User size={13} /> },
+                    ].map(({ label, prefix, icon }) => (
+                      <button
+                        key={label}
+                        type='button'
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => {
+                          insertTextRef.current?.(prefix);
+                          setFilterOpen(false);
+                        }}
+                        className='flex w-full items-center gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left'
+                        data-track-category='SEARCH'
+                        data-track-name={`INSERT_FILTER_${label.toUpperCase()}`}
+                      >
+                        <span className='text-muted-foreground'>{icon}</span>
+                        {label}
+                      </button>
+                    ))}
+                    <div className='my-1 border-t border-border' />
+                    <button
+                      type='button'
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => setIncludeBotMessages(v => !v)}
+                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left'
+                      data-track-category='SEARCH'
+                      data-track-name='TOGGLE_BOT_MESSAGES'
+                    >
+                      <span>Include bot messages</span>
+                      <span
+                        className={cn(
+                          'w-8 h-4 rounded-full transition-colors flex-shrink-0',
+                          includeBotMessages ? 'bg-primary' : 'bg-muted-foreground/30',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'block w-3 h-3 rounded-full bg-white mt-0.5 transition-transform',
+                            includeBotMessages ? 'translate-x-4' : 'translate-x-0.5',
+                          )}
+                        />
+                      </span>
+                    </button>
+                  </Popover.Content>
+                </Popover.Portal>
+              </div>
+            </Popover.Root>
           )}
           <kbd className='px-1.5 py-0.5 text-xs font-semibold text-muted-foreground border border-border rounded flex-shrink-0 hidden sm:block'>
             Esc
@@ -2098,25 +2287,6 @@ const ChannelCommandMenu = ({
             </Tabs.Root>
           </div>
 
-          {searchText.trim() && (
-            <button
-              type='button'
-              onClick={() => {
-                onOpenChange(false);
-                void navigate(`/search-results?query=${encodeURIComponent(searchText.trim())}`);
-              }}
-              data-track-category='CHANNEL_COMMAND_MENU'
-              data-track-name='SHOW_ALL_SEARCH_RESULTS'
-              className='flex w-full items-center gap-2 px-4 py-2 text-sm text-muted-foreground border-b border-border hover:bg-muted transition-colors text-left'
-            >
-              <Search size={14} className='shrink-0' />
-              <span className='truncate'>
-                Show results for:{' '}
-                <span className='text-foreground'>{`"${searchText.trim()}"`}</span>
-              </span>
-            </button>
-          )}
-
           {/* Results */}
           <Command.List
             className={cn(
@@ -2129,6 +2299,63 @@ const ChannelCommandMenu = ({
               }
             }}
           >
+            {/* Show results for: [query] — screen mode only */}
+            {hideTabs &&
+              searchMode === 'screen' &&
+              (searchText.trim() || selectedMentions.length > 0) && (
+                <Command.Item
+                  value='__show-results-for__'
+                  data-show-results-item='true'
+                  onSelect={() => {
+                    onOpenChange(false);
+                    void navigate(
+                      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
+                    );
+                  }}
+                  className='flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground hover:bg-muted'
+                  data-track-category='SEARCH'
+                  data-track-name='SHOW_RESULTS_FOR'
+                >
+                  <Search size={14} className='text-muted-foreground shrink-0' />
+                  <span className='flex items-center flex-wrap gap-1'>
+                    <span className='text-sm'>Show results for:</span>
+                    {selectedMentions.map(m => {
+                      const isUser = m.type === MentionType.USER;
+                      const name = isUser
+                        ? getUserDisplayName(
+                            usersById.get(m.id) ?? { displayName: m.id, email: '' },
+                          )
+                        : (allChannels.find(c => c.channel.id === m.id)?.channel.name ?? m.id);
+                      const prefix = m.prefix ?? (isUser ? 'from:' : 'in:');
+                      return (
+                        <span
+                          key={`${m.prefix}-${m.id}`}
+                          className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
+                        >
+                          {isUser ? (
+                            <Avatar
+                              userId={m.id}
+                              size='sm'
+                              className='rounded-none flex-shrink-0 size-3'
+                            />
+                          ) : (
+                            <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                              <Hash size={12} className='text-foreground' />
+                            </div>
+                          )}
+                          <span className='leading-tight'>
+                            {prefix} {name}
+                          </span>
+                        </span>
+                      );
+                    })}
+                    {searchText.trim() && (
+                      <span className='font-semibold text-sm'>{searchText.trim()}</span>
+                    )}
+                  </span>
+                </Command.Item>
+              )}
+
             {/* Mention Suggestions - Show when mention search is active */}
             {mentionSearchType && (
               <>

@@ -7,6 +7,7 @@ export type PreferenceSection =
   | 'voice'
   | 'messaging'
   | 'launch'
+  | 'search'
   | 'calendar'
   | 'developer';
 

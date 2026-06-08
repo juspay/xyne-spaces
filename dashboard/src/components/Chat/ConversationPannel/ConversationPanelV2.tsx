@@ -140,9 +140,15 @@ const ExpandedTicketView = ({
 const ConversationPanelV2 = ({
   channelId,
   previousChannelId,
+  linkedConversationIdOverride,
+  linkedItemCreatedAtOverride,
+  onClose,
 }: {
   channelId: string;
   previousChannelId: string | null;
+  linkedConversationIdOverride?: string | null;
+  linkedItemCreatedAtOverride?: number | null;
+  onClose?: () => void;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -172,7 +178,7 @@ const ConversationPanelV2 = ({
   const urlHashValue = location.hash.match(/origin=([^&#]+)/);
 
   const urlCreatedAtMatch = location.hash.match(/createdAt=([^&#]+)/);
-  const urlConversationId = urlHashValue ? urlHashValue[1] : null;
+  const urlConversationId = linkedConversationIdOverride ?? (urlHashValue ? urlHashValue[1] : null);
   const activityNavigationState = routerLocation.state as {
     linkedItemCreatedAt?: number;
     linkedCutoffCreatedAt?: number | null;
@@ -203,6 +209,7 @@ const ConversationPanelV2 = ({
   const hashLinkedItemCreatedAt =
     urlCreatedAtMatch && urlCreatedAtMatch[1] ? parseInt(urlCreatedAtMatch[1], 10) : null;
   const urlCreatedAt =
+    linkedItemCreatedAtOverride ??
     hashLinkedItemCreatedAt ??
     stateLinkedItemCreatedAt ??
     (urlConversationId ? initialMessageById?.createdAt : null);
@@ -242,6 +249,7 @@ const ConversationPanelV2 = ({
           channelTabs={availableTabs}
           activeTab={tab}
           setActiveTab={handleTabChange}
+          {...(onClose && { onClose })}
         />
         <div className='flex-1 flex flex-col overflow-hidden pt-16 [@media(min-width:500px)]:pt-0'>
           {tab === 'messages' && (

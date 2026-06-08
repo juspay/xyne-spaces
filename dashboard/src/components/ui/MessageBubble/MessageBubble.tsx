@@ -448,6 +448,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   workflowNumber,
   showLinkPreview: shouldRenderLinkPreview = true,
   searchItemView = false,
+  afterTextContent,
   onUserClick,
 }) => {
   const navigate = useNavigate();
@@ -1223,6 +1224,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           />
                         </div>
                       )}
+                      {afterTextContent}
                     </div>
                   )}
                 </>

@@ -3,7 +3,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import { useVisibleChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import useMeasure from '../../../hooks/useMeasure';
-import { Star, Users2, Bell, ExternalLink } from 'lucide-react';
+import { Star, Users2, Bell, ExternalLink, X } from 'lucide-react';
 import CompactActionsMenu, { ActionMenuItem } from '../../ui/CompactActionsMenu';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Dialog from '../../ui/Dialog';
@@ -35,6 +35,7 @@ interface ConversationHeaderProps {
   channelTabs?: ConversationTabListType[];
   activeTab?: string;
   setActiveTab?: (tab: string, e?: React.MouseEvent) => void;
+  onClose?: () => void;
 }
 
 const ConversationHeader = ({
@@ -43,6 +44,7 @@ const ConversationHeader = ({
   channelTabs,
   activeTab,
   setActiveTab,
+  onClose,
 }: ConversationHeaderProps): JSX.Element | null => {
   const context = useAuthContextValues();
   const zero = useZero();
@@ -324,6 +326,17 @@ const ConversationHeader = ({
             isMember={!!channelUserStatus}
             disabled={channel.isArchived}
           />
+          {onClose && (
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={onClose}
+              className='p-2 rounded-lg h-8 w-8'
+              aria-label='Close'
+            >
+              <X className='w-4 h-4' />
+            </Button>
+          )}
         </div>
       </div>
       <div className='px-4'>

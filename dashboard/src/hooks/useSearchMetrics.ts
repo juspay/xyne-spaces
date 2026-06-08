@@ -178,7 +178,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const [useVespaSearch, setUseVespaSearch] = useState(true);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
   const [includeBotMessages, setIncludeBotMessages] = useState(false);
-
   // Load More Ref
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
@@ -1113,14 +1112,16 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     [searchSessionId, markSearchStart, resetSearchState, includeBotMessages],
   );
 
-  // Track the last search text and tab to avoid duplicate calls
+  // Track the last search text, tab, mentions, and includeBotMessages to avoid duplicate calls
   const lastSearchedParamsRef = useRef<{
     text: string;
     activeTab: TabType;
+    mentionsKey: string;
     includeBotMessages: boolean;
   }>({
     text: '',
     activeTab: TabType.ALL,
+    mentionsKey: '',
     includeBotMessages: false,
   });
 
@@ -1139,11 +1140,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // "sak" and "sak   " should trigger the same search
     const normalizedText = text.trimEnd();
 
-    // Skip if both text and tab are the same as last search
+    // Skip if text, tab, mentions, and includeBotMessages are all the same as last search
     // This prevents unnecessary API calls when typing only spaces
+    const currentMentionsKey = JSON.stringify(selectedMentions);
     if (
       normalizedText === lastSearchedParamsRef.current.text &&
       activeTab === lastSearchedParamsRef.current.activeTab &&
+      includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
+      currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
       normalizedText !== ''
     ) {
@@ -1151,7 +1155,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     }
 
     const timer = setTimeout(() => {
-      lastSearchedParamsRef.current = { text: normalizedText, activeTab, includeBotMessages };
+      lastSearchedParamsRef.current = {
+        text: normalizedText,
+        activeTab,
+        includeBotMessages,
+        mentionsKey: currentMentionsKey,
+      };
       void performSearch(
         text,
         activeTab,
