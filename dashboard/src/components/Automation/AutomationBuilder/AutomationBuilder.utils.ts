@@ -61,7 +61,9 @@ export function buildVariableSources(
     const outputSchema =
       step.type === 'RUN_AGENT'
         ? buildOutputSchemaFromRunAgentConfig(step.config)
-        : schema.outputSchema;
+        : step.type === 'TRIGGER_WEBHOOK'
+          ? buildOutputSchemaFromWebhookConfig(step.config)
+          : schema.outputSchema;
     sources.push({
       sourceKey: step.id,
       role: 'output',
@@ -76,7 +78,7 @@ export function buildVariableSources(
   return sources;
 }
 
-function buildOutputSchemaFromRunAgentConfig(
+export function buildOutputSchemaFromRunAgentConfig(
   config: Record<string, unknown>,
 ): import('../Automation.types').JsonSchema {
   const declaredRaw = (config as { outputSchema?: unknown }).outputSchema;
@@ -123,6 +125,21 @@ function buildWebhookTriggerOutputSchema(triggerConfig: Record<string, unknown>)
       body: jsonSchemaFromDeclared(cfg.bodySchema),
       headers: jsonSchemaFromDeclared(cfg.headerSchema),
       receivedAt: { type: 'string' },
+    },
+    additionalProperties: true,
+  };
+}
+
+/** Build the webhook action step's output schema from its declared responseSchema. */
+export function buildOutputSchemaFromWebhookConfig(config: Record<string, unknown>): JsonSchemaT {
+  const cfg = config as { responseSchema?: unknown };
+  return {
+    type: 'object',
+    properties: {
+      status: { type: 'number' },
+      ok: { type: 'boolean' },
+      responseBody: { type: 'string' },
+      responseJson: jsonSchemaFromDeclared(cfg.responseSchema),
     },
     additionalProperties: true,
   };

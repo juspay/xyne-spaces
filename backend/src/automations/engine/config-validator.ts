@@ -60,6 +60,23 @@ function buildWebhookTriggerOutputSchema(triggerConfig: unknown): z.ZodTypeAny {
     .passthrough();
 }
 
+function buildWebhookActionOutputSchema(stepConfig: unknown): z.ZodTypeAny {
+  const cfg = (stepConfig ?? {}) as { responseSchema?: unknown };
+  return z
+    .object({
+      status: z.number(),
+      ok: z.boolean(),
+      responseBody: z.string(),
+      responseJson: declaredToZod(cfg.responseSchema).nullable(),
+    })
+    .passthrough();
+}
+
+function buildRunAgentOutputSchema(stepConfig: unknown): z.ZodTypeAny {
+  const cfg = (stepConfig ?? {}) as { outputSchema?: unknown };
+  return declaredToZod(cfg.outputSchema);
+}
+
 function walkSchemaPath(schema: z.ZodTypeAny, segments: string[]): z.ZodTypeAny | null {
   if (segments.some(s => FORBIDDEN_KEYS.has(s))) return null;
 
@@ -285,7 +302,14 @@ export class ConfigValidator {
       );
 
       outputSchemas.set(`${step.id}.input`, stepImpl.configSchema);
-      outputSchemas.set(`${step.id}.output`, stepImpl.outputSchema);
+      outputSchemas.set(
+        `${step.id}.output`,
+        step.type === 'TRIGGER_WEBHOOK'
+          ? buildWebhookActionOutputSchema(step.config)
+          : step.type === 'RUN_AGENT'
+            ? buildRunAgentOutputSchema(step.config)
+            : stepImpl.outputSchema,
+      );
     }
   }
 

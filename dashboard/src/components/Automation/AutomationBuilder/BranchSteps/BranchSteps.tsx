@@ -1,5 +1,9 @@
 import { cn } from '../../../../utils/classNames';
 import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE, makeStepId } from '../../Automation.types';
+import {
+  buildOutputSchemaFromRunAgentConfig,
+  buildOutputSchemaFromWebhookConfig,
+} from '../AutomationBuilder.utils';
 import type {
   ActionStepConfig,
   AutomationStepConfig,
@@ -87,6 +91,12 @@ function buildBranchVariableSources(
       groupLabel,
       schema: schema.configSchema,
     });
+    const outputSchema =
+      s.type === 'RUN_AGENT'
+        ? buildOutputSchemaFromRunAgentConfig(s.config)
+        : s.type === 'TRIGGER_WEBHOOK'
+          ? buildOutputSchemaFromWebhookConfig(s.config)
+          : schema.outputSchema;
     sources.push({
       sourceKey: s.id,
       role: 'output',
@@ -94,7 +104,7 @@ function buildBranchVariableSources(
       sublabel: schema.name,
       groupKey: s.id,
       groupLabel,
-      schema: schema.outputSchema,
+      schema: outputSchema,
     });
   }
   return sources;

@@ -14,6 +14,7 @@ import {
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
 import { UseVariableButton } from '../SchemaForm/VariableFieldParts';
+import { SchemaJsonEditor, type SchemaTree } from '../SchemaForm/SchemaJsonEditor';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 type HttpMethod = (typeof HTTP_METHODS)[number];
@@ -122,6 +123,7 @@ interface WebhookStepFormProps {
   issues: ValidationIssue[] | null;
   pathPrefix: string;
   variableSources: VariablePickerSource[];
+  readOnly?: boolean;
 }
 
 export function WebhookStepForm({
@@ -130,7 +132,13 @@ export function WebhookStepForm({
   issues,
   pathPrefix,
   variableSources,
+  readOnly = false,
 }: WebhookStepFormProps): React.ReactElement {
+  const responseSchemaRaw = value['responseSchema'];
+  const responseSchema: SchemaTree =
+    responseSchemaRaw && typeof responseSchemaRaw === 'object' && !Array.isArray(responseSchemaRaw)
+      ? (responseSchemaRaw as SchemaTree)
+      : {};
   const url = typeof value['url'] === 'string' ? value['url'] : '';
   const methodRaw = value['method'];
   const method: HttpMethod = (HTTP_METHODS as readonly string[]).includes(methodRaw as string)
@@ -291,6 +299,23 @@ export function WebhookStepForm({
           {fieldIssue('body') ? <FieldError message={fieldIssue('body')!.message} /> : null}
         </FieldGroup>
       )}
+
+      <FieldGroup
+        label='Expected response body'
+        description='Declare the JSON shape of the response body so downstream steps can drill into it. This shape becomes responseJson inside the full step output: { status, ok, responseBody, responseJson: <your shape> }. Open the Input / output peek above this form to see the complete output. Leaves are type strings ("string" | "number" | "boolean" | "object" | "array"); nest objects for nested fields.'
+      >
+        <SchemaJsonEditor
+          value={responseSchema}
+          onChange={next => {
+            const cleaned = { ...value };
+            if (Object.keys(next).length === 0) delete cleaned['responseSchema'];
+            else cleaned['responseSchema'] = next;
+            onChange(cleaned);
+          }}
+          readOnly={readOnly}
+          emptyHint='Empty schema — downstream steps see responseJson as an opaque blob.'
+        />
+      </FieldGroup>
 
       <Collapsible
         open={advancedOpen}
