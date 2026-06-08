@@ -1,3 +1,29 @@
+## [1.159.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.158.0...v1.159.0) (2026-06-08)
+
+
+### Features
+
+* Add victoria Metrics for suggested vs created tickets ([7d3c323](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7d3c3239f296d1ae41f3a582c29699008e3bc828)), closes [#7164](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7164)
+* added for slack adapter api as well ([aa92557](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aa9255786e8eb3b84e34ff14876565a9e3ad7a38)), closes [#7203](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7203)
+* Ticket Creation webhook support ([d35166d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d35166df458d448b446235b6421f7c18183c0030)), closes [#7199](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7199)
+* Use Draft Agent as default agent and AI Composer UI Revamp ([5b67167](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5b6716776e6f82a0e71335ce552075e69fa5a24b)), closes [#7115](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7115)
+
+
+### Bug Fixes
+
+* [XYNE-DESK] fix email type support ticket boardID issue ([6058ae2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6058ae2684605dd0c18e258277abf66d7c8a31f6))
+* added ticket delay fix ([d163354](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d163354e0d1d6c39ed633ade1db147236d25f57a)), closes [#7208](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7208)
+* allow re-adding users to channels after removal or leave ([9d6c314](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9d6c3144ce1e2fab5d71f81b380b491cf7f2eb38)), closes [#7163](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7163)
+* automation steps ([2bca196](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2bca1964c9a1b91c0ffff89a0b9c0089b94ee0e0)), closes [#7251](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7251)
+* automations message ([a5d482b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a5d482b6492cc4d24db5a064dbc202022f068931)), closes [#7237](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7237)
+* calender sync fix for electron ([09ce1fe](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/09ce1fec5f56af0d592dadbedfdf0b7f0acf6f2f))
+* login fix ([f96198d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f96198d7df9006ec2caf96a430510555f1bb8149)), closes [#7205](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7205)
+* Prevent navigation for attachment onclick in linkpreview messages ([75acc39](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75acc3935ff2ac606adae3d3602dc68397ca1ead)), closes [#7041](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7041)
+* remove resource protected rule for support tab ([73f9574](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/73f957492fa13b98a5ff570ea09a0621c7d72657)), closes [#7222](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7222)
+* schedule-end-job-bug ([054bc2b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/054bc2bd10edfe0ab298c308a47237d35e6d36b7)), closes [#7211](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7211)
+* search screen ([b49d3b0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b49d3b0ccb439750b865081954c7d2c57f7e06c6)), closes [#7083](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7083)
+* slack fix main ([ae59a1f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ae59a1f05b98454ed6724a00c7fcaf34ffa0610b))
+
 ## [1.158.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.157.0...v1.158.0) (2026-06-08)
 
 
