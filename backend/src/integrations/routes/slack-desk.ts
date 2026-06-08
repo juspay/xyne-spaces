@@ -11,9 +11,11 @@ import express, { Request, Response } from 'express';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { ChannelType } from '@prisma/client';
+import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';
 import { decrypt } from '@/services/encryptionService';
+import { redisService } from '@/services/redisService';
 
 const TAG = '[SlackDesk]';
 const router = express.Router();
@@ -200,6 +202,94 @@ router.post(
     } catch (error) {
       logger.error(`${TAG} Error disconnecting Slack desk`, { error });
       res.status(500).json({ error: 'Failed to disconnect Slack desk' });
+    }
+  }
+);
+
+/**
+ * GET /api/integrations/slack-desk/users
+ * Returns Slack workspace members (cached in Redis for 12 hours).
+ * Used by the SlackComposer for @mention support.
+ */
+const SLACK_USERS_CACHE_PREFIX = 'slack_workspace_users:';
+const SLACK_USERS_CACHE_TTL = 43200; // 12 hours
+
+interface SlackUserItem {
+  id: string;
+  name: string;
+  displayName: string;
+  avatar: string;
+}
+
+router.get(
+  '/users',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = req.user!.workspaceId!;
+      const cacheKey = `${SLACK_USERS_CACHE_PREFIX}${workspaceId}`;
+
+      // Check Redis cache first
+      const cached = await redisService.get(cacheKey);
+      if (cached) {
+        res.json({ users: JSON.parse(cached) as SlackUserItem[] });
+        return;
+      }
+
+      // Cache miss — fetch from Slack API
+      const slackSource = await db.externalSource.findFirst({
+        where: { workspaceId, sourceType: 'slack', isActive: true },
+      });
+      if (!slackSource) {
+        res.status(503).json({ error: 'Slack is not connected for this workspace' });
+        return;
+      }
+
+      const slackCreds = JSON.parse(decrypt(slackSource.credentials));
+      const botToken = slackCreds.botOauthToken;
+      if (!botToken) {
+        res.status(503).json({ error: 'Slack bot token not found' });
+        return;
+      }
+
+      const client = new WebClient(botToken);
+      const users: SlackUserItem[] = [];
+      let cursor: string | undefined;
+
+      do {
+        const result = await client.users.list({
+          limit: 200,
+          ...(cursor && { cursor }),
+        });
+
+        if (!result.ok) {
+          logger.error(`${TAG} Slack users.list failed`, { error: result.error });
+          res.status(502).json({ error: `Slack API error: ${result.error}` });
+          return;
+        }
+
+        for (const member of result.members || []) {
+          // Skip bots, deleted users, and Slackbot
+          if (member.deleted || member.is_bot || member.id === 'USLACKBOT') continue;
+
+          users.push({
+            id: member.id!,
+            name: member.profile?.real_name || member.name || '',
+            displayName: member.profile?.display_name || member.profile?.real_name || member.name || '',
+            avatar: member.profile?.image_72 || '',
+          });
+        }
+
+        cursor = result.response_metadata?.next_cursor || undefined;
+      } while (cursor);
+
+      // Cache in Redis
+      await redisService.set(cacheKey, JSON.stringify(users), SLACK_USERS_CACHE_TTL);
+
+      res.json({ users });
+    } catch (error) {
+      logger.error(`${TAG} Error fetching Slack users`, { error });
+      res.status(500).json({ error: 'Failed to fetch Slack users' });
     }
   }
 );
