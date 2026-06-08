@@ -190,7 +190,11 @@ const GlobalCommandMenu = ({
     onOpenChange(true);
   }, [location.pathname, location.search, channelData, allUsers, onOpenChange, context.userID]);
 
-  useShortcutById('global.findInChannel', handleFindInChannel);
+  // Only the search-mode instance owns Cmd+F; the context-picker copy mounted in
+  // ThreadPannel would otherwise win the tiebreak and hijack the shortcut.
+  useShortcutById('global.findInChannel', handleFindInChannel, {
+    enabled: !contextSelectionMode,
+  });
 
   // Group channels by scope type
   const { starred, channels, directMessages } = useMemo(() => {
