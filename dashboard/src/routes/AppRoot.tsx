@@ -1103,16 +1103,14 @@ export const router = createBrowserRouter([
               {
                 path: 'support',
                 element: (
-                  <ResourceProtectedRoute resourceName='SUPPORT'>
-                    <SaveRoute
-                      keyword='support'
-                      stripSearchParams={['settings', 'openSettings']}
-                      preserveSearchParams={['emailConnected', 'emailError']}
-                      redirectOnlyAt={/^\/[^/]+\/support\/?$/}
-                    >
-                      <SupportScreen />
-                    </SaveRoute>
-                  </ResourceProtectedRoute>
+                  <SaveRoute
+                    keyword='support'
+                    stripSearchParams={['settings', 'openSettings']}
+                    preserveSearchParams={['emailConnected', 'emailError']}
+                    redirectOnlyAt={/^\/[^/]+\/support\/?$/}
+                  >
+                    <SupportScreen />
+                  </SaveRoute>
                 ),
                 children: [
                   {
