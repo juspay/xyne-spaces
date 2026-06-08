@@ -85,6 +85,7 @@ const CreateEmailTicketBodySchema = z.object({
   subject: z.string().min(1, 'subject is required').trim(),
   body: z.string().min(1, 'body is required').trim(),
   senderEmail: z.string().email('senderEmail must be a valid email').trim(),
+  boardId: z.string().min(1, 'boardId must not be empty').trim().optional(),
   priority: z.nativeEnum(TicketPriority).optional(),
   assignedToEmail: z.string().email('Invalid email format').trim().optional(),
   assignedUserGroupAlias: z.string().trim().optional(),
@@ -798,6 +799,7 @@ export class TicketController {
         subject,
         body,
         senderEmail,
+        boardId,
         priority,
         assignedToEmail,
         assignedUserGroupAlias,
@@ -807,6 +809,26 @@ export class TicketController {
 
       const userId = req.user!.id;
       const workspaceId = req.user!.workspaceId;
+
+      // Fetch channel to get projectId (needed for boardId validation)
+      const channel = await repositories.channels.findById(channelId);
+      if (!channel) {
+        res.status(404).json({ error: `Channel with ID ${channelId} not found`, code: 'CHANNEL_NOT_FOUND' });
+        return;
+      }
+
+      // Validate boardId if provided — must exist and belong to the same project as the channel
+      if (boardId) {
+        const board = await repositories.boards.findById(boardId);
+        if (!board) {
+          res.status(404).json({ error: `Board with ID ${boardId} not found`, code: 'BOARD_NOT_FOUND' });
+          return;
+        }
+        if (board.projectId !== channel.projectId) {
+          res.status(400).json({ error: `Board does not belong to the channel's project`, code: 'BOARD_PROJECT_MISMATCH' });
+          return;
+        }
+      }
 
       // Resolve recipientEmail using same 3-level priority as outbound reply sender:
       //   1. EmailChannelPreference.sendAsEmail — admin-configured alias (highest priority)
@@ -943,6 +965,7 @@ export class TicketController {
           externalThreadId,
           externalMessageId,
           receivedAt: new Date(),
+          ...(boardId && { boardId }),
         });
       } catch (createErr) {
         if (claimedExternalMessageId) {

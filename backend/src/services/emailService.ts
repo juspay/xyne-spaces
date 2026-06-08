@@ -894,12 +894,17 @@ export class EmailService {
     // Fetch boardId from EmailChannelPreference table
     const emailChannelPreference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
 
-    // boardId MUST be configured in EmailChannelPreference - no fallback allowed
-    // If passed boardId exists (deprecated), prefer the one from EmailChannelPreference
-    const configuredBoardId = emailChannelPreference?.boardId || passedBoardId;
+    // Priority: passedBoardId (explicit, from request) > emailChannelPreference.boardId (admin default) > first board in project
+    let configuredBoardId = passedBoardId || emailChannelPreference?.boardId;
 
     if (!configuredBoardId) {
-      logger.error(`[EmailService] EmailChannelPreference missing boardId configuration for channel: ${channelId}`);
+      logger.warn(`[EmailService] EmailChannelPreference missing boardId for channel ${channelId}, falling back to first board in project ${projectId}`);
+      const firstBoard = await this.prisma.board.findFirst({ where: { projectId }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+      configuredBoardId = firstBoard?.id;
+    }
+
+    if (!configuredBoardId) {
+      logger.error(`[EmailService] No board found for channel ${channelId} in project ${projectId}`);
       throw new Error(`EmailChannelPreference must have a boardId configured. Channel: ${channelId}. Please configure boardId in email_channel_preferences table.`);
     }
 
