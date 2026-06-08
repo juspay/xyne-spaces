@@ -192,10 +192,41 @@ export class AppsService {
     return response.data.permissions;
   }
 
-  /** Get the permission names currently granted to an app. */
-  async getGrantedPermissions(appId: string): Promise<string[]> {
-    const response = await apiInstance.get<{ permissions: string[] }>(`/apps/permissions/${appId}`);
-    return response.data.permissions;
+  /** Get the permission names currently granted to an app, along with per-permission statuses. */
+  async getGrantedPermissions(appId: string): Promise<{
+    permissions: string[];
+    permissionsPending: boolean;
+    statuses: { scope: string; status: string }[];
+  }> {
+    try {
+      const response = await apiInstance.get<{
+        permissions: string[];
+        permissionsPending: boolean;
+        statuses: { scope: string; status: string }[];
+      }>(`/apps/permissions/${appId}`);
+      return response.data;
+    } catch (err: unknown) {
+      // Backend returns 403 with full body (permissions + statuses) when no
+      // permissions are active yet. Extract it so the UI still shows badges.
+      const axiosErr = err as {
+        response?: {
+          status?: number;
+          data?: {
+            permissions?: string[];
+            permissionsPending?: boolean;
+            statuses?: { scope: string; status: string }[];
+          };
+        };
+      };
+      if (axiosErr?.response?.status === 403 && axiosErr.response.data) {
+        return {
+          permissions: axiosErr.response.data.permissions ?? [],
+          permissionsPending: axiosErr.response.data.permissionsPending ?? false,
+          statuses: axiosErr.response.data.statuses ?? [],
+        };
+      }
+      throw err;
+    }
   }
 
   /** Replace the full set of permissions for an app. */

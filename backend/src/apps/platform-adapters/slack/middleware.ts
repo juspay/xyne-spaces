@@ -55,8 +55,14 @@ function wrapSlackResponseAndAuth(
 
 	res.json = ((body?: unknown) => {
 		if (statusCode >= 400) {
-			const error = statusCode === 500 ? "internal_error" : "not_authed";
 			originalStatus(200);
+			// If the body already has an error/message, pass it through so callers
+			// get the real reason (e.g. missing_permission from requirePermission)
+			if (body && typeof body === 'object' && ('error' in body || 'message' in body)) {
+				return originalJson({ ok: false, ...(body as object) });
+			}
+			// Fallback to generic Slack-style wrapper
+			const error = statusCode === 500 ? "internal_error" : "not_authed";
 			return originalJson({ ok: false, error });
 		}
 		return originalJson(body);

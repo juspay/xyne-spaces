@@ -2,6 +2,12 @@ import { Request, Response, NextFunction } from 'express'
 import { logger } from '@/utils/logger'
 
 /**
+ * Apps installed before this date are exempt from permission enforcement.
+ * TODO: remove once all legacy apps have been backfilled and reinstalled.
+ */
+const PERMISSION_ENFORCEMENT_DATE = new Date('2026-06-12')
+
+/**
  * Extracts the scoped permissions array from the authenticated request.
  *
  * The permissions are expected to be attached to `req.auth` (populated by the
@@ -18,23 +24,22 @@ function isPermissionsStale(req: Request): boolean {
   return (req as any).auth?.permissionsStale === true
 }
 
-const PERMISSION_ENFORCEMENT_DATE = new Date('2026-06-12T00:00:00.000Z');
+/**
+ * Returns true when the app was installed before the permission enforcement date.
+ * Legacy apps bypass permission checks until they are reinstalled / backfilled.
+ */
+function isLegacyApp(req: Request): boolean {
+  const createdAt = (req as any).auth?.installedAppCreatedAt
+  if (!createdAt) return false
+  return new Date(createdAt) < PERMISSION_ENFORCEMENT_DATE
+}
 
 export function requirePermission(permission: string) {
   return (req: Request, res: Response, next: NextFunction): void => {
+    if (isLegacyApp(req)) { next(); return }
+
     const permissions = getPermissionsFromRequest(req)
     const stale = isPermissionsStale(req)
-
-
-    // Legacy bypass: apps installed before the permission system was enforced
-    // are allowed through without a scope check.
-
-    const installedAppCreatedAt: Date | undefined = (req as any).auth?.installedAppCreatedAt
-        console.log('Checking permission', {PERMISSION_ENFORCEMENT_DATE, installedAppCreatedAt })
-    if (installedAppCreatedAt && new Date(installedAppCreatedAt) < PERMISSION_ENFORCEMENT_DATE) {
-      next()
-      return
-    }
 
     if (!permissions.includes(permission)) {
       logger.warn(
@@ -59,6 +64,8 @@ export function requirePermission(permission: string) {
 
 export function requireAllPermissions(permissions: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
+    if (isLegacyApp(req)) { next(); return }
+
     const granted = getPermissionsFromRequest(req)
     const stale = isPermissionsStale(req)
     const missing = permissions.filter((p) => !granted.includes(p))
@@ -86,6 +93,8 @@ export function requireAllPermissions(permissions: string[]) {
 
 export function requireAnyPermission(permissions: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
+    if (isLegacyApp(req)) { next(); return }
+
     const granted = getPermissionsFromRequest(req)
     const stale = isPermissionsStale(req)
     const hasAny = permissions.some((p) => granted.includes(p))
