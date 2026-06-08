@@ -19,7 +19,7 @@ export class PermissionController {
   /**
    * GET /apps/permissions/:appId
    * Return permissions for the app.
-   * - If installed: returns the scoped installed_app_permissions
+   * - If installed: returns the scoped installed_app_permissions with statuses
    * - If not installed: returns the pre-install app_permission grants
    */
   getGranted = async (req: Request, res: Response): Promise<void> => {
@@ -28,17 +28,21 @@ export class PermissionController {
       const installation = await repositories.installedApps.findFirst({ where: { appId } });
       let permissions: string[];
       let permissionsPending = false;
+      let statuses: { scope: string; status: string }[] = [];
       if (installation) {
         permissions = await repositories.appPermissions.getInstalledPermissions(installation.id);
         permissionsPending = await repositories.appPermissions.hasPermissionsPendingReinstall(installation.id);
+        statuses = await repositories.appPermissions.getInstalledPermissionsWithStatus(installation.id);
 
         // 403 if all permissions are still UNAPPROVED (app was never reinstalled after grant)
-        const allStatuses = await repositories.appPermissions.getInstalledPermissionsWithStatus(installation.id);
-        const hasApproved = allStatuses.some((p) => p.status === AppPermissionStatus.APPROVED);
-        if (allStatuses.length > 0 && !hasApproved) {
+        const hasApproved = statuses.some((p) => p.status === AppPermissionStatus.APPROVED);
+        if (statuses.length > 0 && !hasApproved) {
           res.status(403).json({
             error: 'no_approved_permissions',
             message: 'All permissions are pending activation. Please reinstall the app.',
+            permissions,
+            permissionsPending,
+            statuses,
           });
           return;
         }
@@ -51,11 +55,14 @@ export class PermissionController {
         res.status(403).json({
           error: 'no_permissions',
           message: 'No permissions have been granted to this app.',
+          permissions,
+          permissionsPending,
+          statuses,
         });
         return;
       }
 
-      res.status(200).json({ permissions, permissionsPending });
+      res.status(200).json({ permissions, permissionsPending, statuses });
     } catch {
       res.status(500).json({ error: 'Internal server error' });
     }

@@ -242,6 +242,8 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
   const [available, setAvailable] = useState<AppPermission[]>([]);
   // Local selection — always editable regardless of install state
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Per-permission status map: scope → 'UNAPPROVED' | 'APPROVED' | 'PENDINGDELETE'
+  const [statusMap, setStatusMap] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -253,22 +255,68 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
       .catch(() => setAvailable([]));
   }, []);
 
-  // Pre-fill selection from already-granted permissions
-  useEffect(() => {
+  const loadGranted = useCallback(() => {
     void appsService
       .getGrantedPermissions(appId)
-      .then(names => {
-        setSelected(new Set(names));
+      .then(({ permissions, statuses }) => {
+        // Checked = APPROVED or UNAPPROVED (not PENDINGDELETE)
+        const checkedScopes = new Set(
+          statuses
+            .filter(s => s.status === 'APPROVED' || s.status === 'UNAPPROVED')
+            .map(s => s.scope),
+        );
+        // Fall back to permissions array for pre-install (no statuses)
+        if (statuses.length === 0 && permissions.length > 0) {
+          permissions.forEach(p => checkedScopes.add(p));
+        }
+        setSelected(checkedScopes);
+        const map: Record<string, string> = {};
+        statuses.forEach(s => {
+          map[s.scope] = s.status;
+        });
+        setStatusMap(map);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
   }, [appId]);
 
-  const handleToggle = (permissionName: string, checked: boolean) => {
+  // Pre-fill selection from already-granted permissions
+  useEffect(() => {
+    loadGranted();
+  }, [loadGranted]);
+
+  const getStatusBadge = (scope: string): ReactElement | null => {
+    const status = statusMap[scope];
+    if (!status) return null;
+    if (status === 'UNAPPROVED') {
+      return (
+        <span className='text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 whitespace-nowrap'>
+          Reinstall to activate
+        </span>
+      );
+    }
+    if (status === 'PENDINGDELETE') {
+      return (
+        <span className='text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 whitespace-nowrap'>
+          Removes on reinstall
+        </span>
+      );
+    }
+    if (status === 'APPROVED') {
+      return (
+        <span className='text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 whitespace-nowrap'>
+          Active
+        </span>
+      );
+    }
+    return null;
+  };
+
+  const handleToggle = (scope: string, checked: boolean) => {
     setSelected(prev => {
       const next = new Set(prev);
-      if (checked) next.add(permissionName);
-      else next.delete(permissionName);
+      if (checked) next.add(scope);
+      else next.delete(scope);
       return next;
     });
   };
@@ -278,6 +326,8 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
     try {
       await appsService.setPermissions(appId, Array.from(selected));
       toast.success(`Permissions saved (${selected.size} granted)`);
+      // Refresh statuses after save so badges update
+      loadGranted();
     } catch (e) {
       toast.error('Failed to save permissions', {
         description: e instanceof Error ? e.message : 'Unknown error',
@@ -335,9 +385,12 @@ const PermissionsSection = ({ appId, isInstalled }: PermissionsSectionProps): Re
                   data-track-name='TogglePermission'
                 />
                 <div className='flex-1 min-w-0'>
-                  <span className='text-xs font-mono text-foreground group-hover:text-primary transition-colors'>
-                    {scope}
-                  </span>
+                  <div className='flex items-center gap-2 flex-wrap'>
+                    <span className='text-xs font-mono text-foreground group-hover:text-primary transition-colors'>
+                      {scope}
+                    </span>
+                    {getStatusBadge(scope)}
+                  </div>
                   {perm.description && (
                     <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
                       {perm.description}
