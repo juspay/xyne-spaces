@@ -17,6 +17,7 @@ import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { TicketCard } from '../../Tickets/TicketCard/TicketCard';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { API_BASE_URL, APPS_PUBLIC_BASE_URL } from '../../../config';
 
 interface InternalMessagePreviewProps {
   metadata: InternalMessageLinkMetadata;
@@ -245,7 +246,20 @@ const AttachmentPreview: React.FC<{
       onClose={onClose}
     />
 
-    <div className='flex flex-wrap gap-2' data-prevent-drawer='true'>
+    <div
+      className='flex flex-wrap gap-2'
+      data-prevent-drawer='true'
+      onClick={e => e.stopPropagation()}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.stopPropagation();
+        }
+      }}
+      role='button'
+      tabIndex={0}
+      data-track-category='LINK_PREVIEW'
+      data-track-name='ATTACHMENT_LINK_PREVIEW'
+    >
       {attachments.map(att => (
         <div key={att.id}>
           <MessageAttachment
@@ -342,6 +356,24 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
   const isDM = isDMChannel(channelScopeType as ChannelScopeType);
   const showAttachments = !isDeleted && hasAttachment && attachments && attachments.length > 0;
 
+  const normalizeToCurrentOrigin = (targetUrl: URL): URL => {
+    const currentHost = window.location.host;
+    const targetHost = targetUrl.host;
+
+    if (targetHost === currentHost) return targetUrl;
+
+    // Derive known app domains from existing config (already environment-aware)
+    const knownHosts = [new URL(API_BASE_URL).host, new URL(APPS_PUBLIC_BASE_URL).host];
+
+    if (knownHosts.includes(targetHost)) {
+      const normalized = new URL(targetUrl.href);
+      normalized.host = currentHost;
+      return normalized;
+    }
+
+    return targetUrl;
+  };
+
   const handleNavigate = (event?: React.MouseEvent | React.KeyboardEvent): void => {
     if (!url) return;
 
@@ -355,8 +387,9 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
 
     try {
       const targetUrl = new URL(url, window.location.origin);
-      if (targetUrl.origin === window.location.origin) {
-        void navigate(`${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`);
+      const normalizedUrl = normalizeToCurrentOrigin(targetUrl);
+      if (normalizedUrl.origin === window.location.origin) {
+        void navigate(`${normalizedUrl.pathname}${normalizedUrl.search}${normalizedUrl.hash}`);
         return;
       }
     } catch {
