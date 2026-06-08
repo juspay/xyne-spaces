@@ -28,7 +28,10 @@ export class IncomingWebhooksRepository extends BaseRepository<
     };
     return this.db.appIncomingWebhook.findMany({
       where,
-      include: { channel: { select: { name: true, visibility: true } } },
+      include: {
+        channel: { select: { name: true, visibility: true } },
+        board: { select: { id: true, name: true } },
+      },
       orderBy: { createdAt: 'desc' },
       ...(options?.skip !== undefined && { skip: options.skip }),
       ...(options?.take !== undefined && { take: options.take }),

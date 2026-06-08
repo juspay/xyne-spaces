@@ -344,6 +344,18 @@ export enum UserType {
 }
 
 // @ts-ignore TS1294
+export enum AppIncomingWebhookType {
+  SLACK = 'SLACK',
+  SENTINELONE = 'SENTINELONE',
+}
+
+// @ts-ignore TS1294
+export enum AppIncomingWebhookAction {
+  MESSAGE = 'MESSAGE',
+  TICKET = 'TICKET',
+}
+
+// @ts-ignore TS1294
 export enum UserPresenceStatus {
   ONLINE = 'ONLINE',
   AWAY = 'AWAY',
