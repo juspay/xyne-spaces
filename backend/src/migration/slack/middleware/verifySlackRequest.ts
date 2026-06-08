@@ -7,7 +7,7 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { logger } from '../../../utils/logger';
-import { config } from '../../../config/env';
+import { getBotConfigByTeamId } from '../slackMigrationBotConfig';
 
 /**
  * Middleware to verify Slack request signatures
@@ -17,11 +17,30 @@ export function verifySlackRequest(req: Request, res: Response, next: NextFuncti
   try {
     const slackSignature = req.headers['x-slack-signature'] as string;
     const timestamp = req.headers['x-slack-request-timestamp'] as string;
-    const signingSecret = config.slackSigningSecret;
 
-    // Check if signing secret is configured
+    // For slash commands: team_id is a top-level field in req.body
+    // For interactive payloads: team_id is nested inside req.body.payload (a JSON string) as payload.team.id
+    let teamId = req.body?.team_id as string | undefined;
+    if (!teamId && req.body?.payload) {
+      const rawPayload = typeof req.body.payload === 'string' ? req.body.payload : JSON.stringify(req.body.payload);
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(rawPayload);
+      } catch (err) {
+        logger.error('[Slack Verification] Failed to parse interactive payload', {
+          error: err instanceof Error ? err.message : String(err),
+          payloadPreview: rawPayload.slice(0, 100),
+        });
+        return res.status(400).send('Invalid payload format');
+      }
+      teamId = (payload?.team as Record<string, unknown>)?.id as string | undefined ?? payload?.team_id as string | undefined;
+    }
+    logger.info('[Slack Verification] Incoming request team_id', { team_id: teamId });
+
+    // Resolve the signing secret for this specific team
+    const signingSecret = teamId ? getBotConfigByTeamId(teamId).slackSigningSecret : '';
     if (!signingSecret) {
-      logger.error('[Slack Verification] SLACK_SIGNING_SECRET is not configured');
+      logger.error('[Slack Verification] No signing secret found for team', { team_id: teamId });
       return res.status(500).json({
         response_type: 'ephemeral',
         text: 'Slack verification is not configured.',
@@ -80,21 +99,16 @@ export function verifySlackRequest(req: Request, res: Response, next: NextFuncti
     // Create signature base string
     const sigBasestring = `v0:${timestamp}:${rawBody}`;
 
-    // Calculate expected signature
-    const mySignature =
-      'v0=' +
-      crypto.createHmac('sha256', signingSecret).update(sigBasestring, 'utf8').digest('hex');
-
-    // Use timing-safe comparison to prevent timing attacks
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(mySignature, 'utf8'),
-      Buffer.from(slackSignature, 'utf8')
-    );
+    // Try each configured signing secret (supports multi-workspace setups)
+    const expected = 'v0=' + crypto.createHmac('sha256', signingSecret).update(sigBasestring, 'utf8').digest('hex');
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    const receivedBuf = Buffer.from(slackSignature, 'utf8');
+    const isValid = expectedBuf.length === receivedBuf.length && crypto.timingSafeEqual(expectedBuf, receivedBuf);
 
     if (!isValid) {
-      logger.warn('[Slack Verification] Invalid signature', {
-        expected: mySignature,
+      logger.warn('[Slack Verification] Invalid signature for team', {
         received: slackSignature,
+        team_id: teamId,
       });
       return res.status(401).send('Invalid signature');
     }

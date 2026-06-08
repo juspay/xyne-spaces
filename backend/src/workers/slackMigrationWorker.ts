@@ -48,6 +48,44 @@ function yesterdayISODate(): string {
   return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
 }
 
+/**
+ * Parse a simple "MM HH * * *" cron string into { hour, minute } (UTC).
+ * Returns null if the string doesn't match the expected format.
+ */
+function parseCronHourMinute(cron: string): { hour: number; minute: number } | null {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length < 2) return null;
+  const minute = parseInt(parts[0], 10);
+  const hour = parseInt(parts[1], 10);
+  if (isNaN(hour) || isNaN(minute)) return null;
+  return { hour, minute };
+}
+
+/**
+ * Returns true if the current UTC time falls between the sync cron fire time
+ * and the cleanup cron fire time — i.e. the migration window is open.
+ *
+ * Example: syncCron = "30 18 * * *" (18:30 UTC), cleanupCron = "30 1 * * *" (01:30 UTC)
+ * → window is 18:30 UTC → 01:30 UTC (crosses midnight).
+ */
+function isInMigrationWindow(): boolean {
+  const syncTime = parseCronHourMinute(config.autoSyncSlackChannel.syncCron);
+  const cleanupTime = parseCronHourMinute(config.autoSyncSlackChannel.cleanupCron);
+  if (!syncTime || !cleanupTime) return false;
+
+  const now = new Date();
+  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const syncMinutes = syncTime.hour * 60 + syncTime.minute;
+  const cleanupMinutes = cleanupTime.hour * 60 + cleanupTime.minute;
+
+  if (syncMinutes > cleanupMinutes) {
+    // Window crosses midnight (e.g. 18:30 → 01:30 next day)
+    return nowMinutes >= syncMinutes || nowMinutes < cleanupMinutes;
+  }
+  // Window within the same calendar day
+  return nowMinutes >= syncMinutes && nowMinutes < cleanupMinutes;
+}
+
 // ─── Snapshot + Enqueue (12 AM IST) ──────────────────────────────────────────
 
 async function snapshotAndEnqueue(): Promise<void> {
@@ -178,6 +216,7 @@ async function processJob(job: Bull.Job<SlackMigrationJobData>): Promise<void> {
       userId: 'system-nightly',
       syncOptions: ['include_threads', 'include_attachments', 'include_deactivated_users', 'include_bot_messages'],
       postChannelAnnouncement: postNotification,
+      isDaily,
     });
 
     if (!result.success) {
@@ -216,9 +255,12 @@ class SlackMigrationWorker {
   async start(): Promise<void> {
     if (this.isInitialized) return;
 
-    // Flush stale jobs from the main processing queue only (not the cron queues —
-    // flushing cron queue keys would delete the repeat sorted sets and cause
-    // the next scheduled run to be miscalculated if the server restarts after the cron time).
+    const inWindow = isInMigrationWindow();
+
+    // Always flush the queue on startup — removes stale or leftover jobs from any
+    // previous run (today's or older). When inside the migration window we will
+    // immediately re-enqueue via snapshotAndEnqueue() below, which is idempotent:
+    // channels already marked "Migrated" are skipped, only pending ones get queued.
     try {
       const redis = redisService.getClient();
       const keys = await redis.keys('bull:slack-migration-nightly:*');
@@ -269,6 +311,17 @@ class SlackMigrationWorker {
     logger.info(
       `[SLACK-MIGRATION-WORKER] Started — snapshot cron: ${config.autoSyncSlackChannel.syncCron}, cleanup cron: ${config.autoSyncSlackChannel.cleanupCron}, concurrency: ${concurrency}`,
     );
+
+    // ── Recovery: re-enqueue if we restarted inside the migration window ─────
+    // The processor is already registered above, so any re-enqueued jobs will
+    // be picked up immediately. snapshotAndEnqueue skips rows already marked
+    // "Migrated …" so this is fully idempotent.
+    if (inWindow) {
+      logger.info('[SLACK-MIGRATION-WORKER] Re-enqueuing channels after restart within migration window');
+      snapshotAndEnqueue().catch((err) => {
+        logger.error('[SLACK-MIGRATION-WORKER] Recovery re-enqueue failed:', err);
+      });
+    }
   }
 
   async stop(): Promise<void> {

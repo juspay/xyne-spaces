@@ -2,6 +2,7 @@ import { logger } from '../../utils/logger';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
+import { getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
 import { postMessage } from './utils/postMessage';
 import { getMigrationMessageBlocks, getMigrationMessageFallbackText } from './utils/blockKit';
 import { DatabaseClient } from '../../database/client';
@@ -75,7 +76,8 @@ async function validateAndMapBoards(
   projectId: string,
   requiredBoards: string[],
   channelId: string,
-  messageTs: string | null
+  messageTs: string | null,
+  botToken?: string,
 ): Promise<BoardValidationResult | null> {
   const db = DatabaseClient.getInstance();
 
@@ -95,6 +97,7 @@ async function validateAndMapBoards(
         channelId: channelId,
         text: `❌ Missing boards in channel project: ${missingBoardNames}`,
         threadTs: messageTs,
+        botToken,
       });
     }
     logger.error('[Migration] Missing required boards in project', {
@@ -110,6 +113,7 @@ async function validateAndMapBoards(
         channelId: channelId,
         text: `❌ No board found for project ${projectId}.`,
         threadTs: messageTs,
+        botToken,
       });
     }
     logger.error('[Migration] No board found for project', {
@@ -214,9 +218,13 @@ async function ingestTicket(
   });
 
   if (!externalSource) {
-    const botToken = config.slackBotToken;
-    if (!botToken) {
-      throw new Error('SLACK_BOT_TOKEN is not configured');
+    // Resolve workspaceId from channelId to get the correct bot token
+    const jiraffeChannelRepo = new ChannelRepository();
+    const jiraffeCh = await jiraffeChannelRepo.findById(channelId);
+    const jiraffeWsId = jiraffeCh?.workspaceId || workspaceId || '';
+    const jiraffeBotToken = getBotConfigByWorkspaceId(jiraffeWsId).slackBotToken;
+    if (!jiraffeBotToken) {
+      throw new Error('slackBotToken is not configured for this workspace');
     }
     externalSource = await db.externalSource.create({
       data: {
@@ -224,17 +232,18 @@ async function ingestTicket(
         sourceType: 'jiraffe',
         displayName: 'Jiraffe Migration',
         channelId: channelId,
-        credentials: encrypt(JSON.stringify({ botToken })),
+        credentials: encrypt(JSON.stringify({ botToken: jiraffeBotToken })),
       },
     });
   }
 
-  // Fetch and transform thread replies (in both cases: ticket exists or not)
+  // Fetch and transform thread replies
   const threadReplies: SlackReply[] = [];
   try {
-    const botToken = config.slackBotToken;
+    const threadWsId = workspaceId || '';
+    const botToken = getBotConfigByWorkspaceId(threadWsId).slackBotToken;
     if (!botToken) {
-      logger.warn('[Migration] SLACK_BOT_TOKEN not configured, skipping thread replies fetch');
+      logger.warn('[Migration] slackBotToken not configured for workspace, skipping thread replies fetch', { workspaceId: threadWsId });
     } else {
       const client = new WebClient(botToken);
       const allowedBots = ['JIRAffe'];
@@ -279,9 +288,10 @@ async function ingestTicket(
   });
 
   // Get or create user (needed for both create and update paths)
-  const botToken = config.slackBotToken;
+  const userWsId = workspaceId || '';
+  const botToken = getBotConfigByWorkspaceId(userWsId).slackBotToken;
   if (!botToken) {
-    throw new Error('SLACK_BOT_TOKEN is not configured');
+    throw new Error('slackBotToken is not configured for this workspace');
   }
 
   let userId: string;
@@ -510,8 +520,9 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
     const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
 
     if (!xyneChannel) {
-      if (ENABLE_NOTIFICATIONS && input.userId && config.slackBotToken) {
-        const client = new WebClient(config.slackBotToken);
+      const validateWsConfig = getBotConfigByWorkspaceId(config.defaultWorkspaceId || '');
+      if (ENABLE_NOTIFICATIONS && input.userId && validateWsConfig.slackBotToken) {
+        const client = new WebClient(validateWsConfig.slackBotToken);
         await client.chat.postEphemeral({
           channel: input.channelId,
           user: input.userId,
@@ -535,13 +546,18 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
 
   // Get Xyne Space channel link
   let xyneSpaceChannelLink: string | undefined;
+  let jiraffeBotToken: string | undefined;
   if (input.xyneSpaceChannelId) {
     const channelRepo = new ChannelRepository();
     const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
     if (xyneChannel) {
       const channelName = xyneChannel.name;
       xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+      jiraffeBotToken = getBotConfigByWorkspaceId(xyneChannel.workspaceId).slackBotToken;
     }
+  }
+  if (!jiraffeBotToken) {
+    jiraffeBotToken = getBotConfigByWorkspaceId(config.defaultWorkspaceId || '').slackBotToken;
   }
 
   // Post initial message first
@@ -562,6 +578,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
         channelId: input.channelId,
         text: fallbackText,
         blocks,
+        botToken: jiraffeBotToken,
       })
     : null;
 
@@ -575,6 +592,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
       channelId: input.channelId,
       text: `🔄 Jiraffe migration initiated${migrationType}`,
       threadTs: messageTs,
+      botToken: jiraffeBotToken,
     });
   }
 
@@ -591,6 +609,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
         channelId: input.channelId,
         text: '❌ Channel not found or has no project associated.',
         threadTs: messageTs,
+        botToken: jiraffeBotToken,
       });
     }
     logger.error('[Migration] Channel not found or has no project', {
@@ -616,7 +635,8 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
     channel.projectId,
     requiredBoards,
     input.channelId,
-    messageTs
+    messageTs,
+    jiraffeBotToken,
   );
 
   if (!boardValidation) {
@@ -634,6 +654,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
         channelId: input.channelId,
         text: `❌ Failed to fetch tickets from Bitbot API`,
         threadTs: messageTs,
+        botToken: jiraffeBotToken,
       });
     }
     return;
@@ -653,6 +674,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
       channelId: input.channelId,
       text: `🔄 Jiraffe migration extracted ${ticketCount} tickets `,
       threadTs: messageTs,
+      botToken: jiraffeBotToken,
     });
   }
   let counter = 0;
@@ -711,6 +733,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
               channelId: input.channelId,
               text: `🔄 Jiraffe ${counter} tickets processed, ${ticketStatus}`,
               threadTs: messageTs,
+              botToken: jiraffeBotToken,
             });
           }
 
@@ -720,6 +743,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
                 channelId: input.channelId,
                 text: `🔄 Ticket ${counter}: Extracted ${threadReplies.length} associated thread replies`,
                 threadTs: messageTs,
+                botToken: jiraffeBotToken,
               });
             }
             try {
@@ -774,6 +798,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
               channelId: input.channelId,
               text: `❌ Ticket ${counter + 1}: Failed to ingest ticket - ${errorMessage}`,
               threadTs: messageTs,
+              botToken: jiraffeBotToken,
             });
           }
           logger.error('[Migration] Failed to ingest ticket', {
@@ -793,6 +818,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
             channelId: input.channelId,
             text: `⏸️ Batch ${batchNumber}/${totalBatches} completed (${batch.length} tickets). Waiting ${timeoutSeconds} seconds before processing next batch...`,
             threadTs: messageTs,
+            botToken: jiraffeBotToken,
           });
         }
 
@@ -809,6 +835,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
             channelId: input.channelId,
             text: `▶️ Timeout completed. Resuming migration with batch ${batchNumber + 1}/${totalBatches}...`,
             threadTs: messageTs,
+            botToken: jiraffeBotToken,
           });
         }
 
@@ -824,6 +851,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
         channelId: input.channelId,
         text: `❌ Migration stopped due to error: ${errorMessage}. Processed ${counter} tickets out of ${ticketCount} total tickets before stopping.`,
         threadTs: messageTs,
+        botToken: jiraffeBotToken,
       });
     }
     throw error;
@@ -834,6 +862,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
       channelId: input.channelId,
       text: `✅ Jiraffe migration completed successfully! Processed ${counter} tickets out of ${ticketCount} total tickets.`,
       threadTs: messageTs,
+      botToken: jiraffeBotToken,
     });
   }
   logger.info('[Migration] Jiraffe migration completed', {

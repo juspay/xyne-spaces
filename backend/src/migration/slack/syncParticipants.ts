@@ -11,24 +11,24 @@ import { addChannelParticipantsBeforeMigration } from './slackConversationServic
 import { checkUserAuthorization } from './command';
 import { getSyncParticipantsModal } from './utils/blockKit';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { config } from '../../config/env';
+import { getBotConfigByTeamId, getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
 
 export async function handleSyncParticipantsCommand(req: Request, res: Response): Promise<Response> {
   try {
-    const { trigger_id, channel_id, user_id } = req.body;
+    const { trigger_id, channel_id, user_id, team_id } = req.body;
 
-    const token = process.env.SLACK_BOT_TOKEN;
+    const token = getBotConfigByTeamId(team_id).slackBotToken;
     if (!token) {
-      logger.error('[Migration] SLACK_BOT_TOKEN is not set');
+      logger.error('[Migration] slackBotToken is not set for team', { team_id });
       return res.status(200).json({
         response_type: 'ephemeral',
         text: 'Slack integration is not configured.',
       });
     }
 
-    const authResult = await checkUserAuthorization(user_id);
+    const authResult = await checkUserAuthorization(user_id, team_id);
     if (!authResult.authorized) {
-      logger.warn('[Migration] Unauthorized user attempted /sync-participants command', { user_id });
+      logger.warn('[Migration] Unauthorized user attempted /sync-participants command', { user_id, team_id });
       return res.status(200).json({
         response_type: 'ephemeral',
         text: authResult.message || 'You are not authorized to perform this action.',
@@ -57,32 +57,41 @@ export async function runSyncParticipants({
   slackChannelId,
   xyneSpaceChannelId,
   userId,
+  teamId,
 }: {
   slackChannelId: string;
   xyneSpaceChannelId: string;
   userId: string;
+  teamId?: string;
 }): Promise<void> {
-  const token = process.env.SLACK_BOT_TOKEN!;
-  const client = new WebClient(token);
-  const logChannelId = config.slackMigrationLogChannelId || slackChannelId;
-
   const channelRepo = new ChannelRepository();
   const xyneChannel = await channelRepo.findById(xyneSpaceChannelId);
+
+  // Use a preliminary logChannelId before workspaceId is resolved
+  const preliminaryLogChannelId = slackChannelId;
+
   if (!xyneChannel) {
     logger.warn('[Migration] /sync-participants invalid xyne-space channelId', { xyneSpaceChannelId, userId });
+    // Resolve botToken from teamId so the error goes to the right workspace bot
+    const earlyBotToken = teamId ? getBotConfigByTeamId(teamId).slackBotToken : undefined;
     await postMessage({
-      channelId: logChannelId,
+      channelId: preliminaryLogChannelId,
       text: `❌ Invalid xyne-space channel ID: \`${xyneSpaceChannelId}\`. Channel not found in database.`,
+      botToken: earlyBotToken,
     });
     return;
   }
 
   const workspaceId = xyneChannel.workspaceId;
+  const wsConfig = getBotConfigByWorkspaceId(workspaceId);
+  const token = wsConfig.slackBotToken;
+  const client = new WebClient(token);
+  const logChannelId = wsConfig.slackMigrationLogChannelId || slackChannelId;
   const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${xyneSpaceChannelId}|${xyneChannel.name}>`;
-
   const startedTs = await postMessage({
     channelId: logChannelId,
     text: `🔄 <@${userId}> :: Started Participant sync for xyne-space channel ${xyneSpaceChannelLink}...`,
+    botToken: token,
   });
 
   try {

@@ -335,7 +335,7 @@ function transformFiles(rawFiles: any[] | undefined, includeAttachments: boolean
  * Get user info from cache, database, or fetch from Slack API
  * Caches both database lookups (userId) and API-fetched results to avoid unnecessary calls
  */
-export async function getUserInfo(slackUID: string, cache: UserInfoCache, workspaceId: string): Promise<{
+export async function getUserInfo(slackUID: string, cache: UserInfoCache, workspaceId: string, botToken?: string): Promise<{
   userEmail?: string;
   userName?: string;
   userId?: string;
@@ -375,9 +375,9 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache, worksp
     });
   }
 
-  const token = process.env.SLACK_BOT_TOKEN;
+  const token = botToken || process.env.SLACK_BOT_TOKEN;
   if (!token) {
-    throw new Error('SLACK_BOT_TOKEN environment variable is not set');
+    throw new Error('No bot token available for user lookup');
   }
 
   const userInfo = await retryWithBackoff(() => fetchSlackUserInfo(slackUID, token));
@@ -454,7 +454,7 @@ function extractUniqueUserIds(rawMessages: any[], threadRepliesMap: Map<string, 
 /**
  * Pre-fetch all user info in controlled batches to avoid rate limits
  */
-async function prefetchUserInfo(userIds: string[], cache: UserInfoCache, workspaceId: string): Promise<void> {
+async function prefetchUserInfo(userIds: string[], cache: UserInfoCache, workspaceId: string, botToken?: string): Promise<void> {
   const uncachedUserIds = userIds.filter((id) => id && !cache.has(id));
 
   if (uncachedUserIds.length === 0) {
@@ -469,7 +469,7 @@ async function prefetchUserInfo(userIds: string[], cache: UserInfoCache, workspa
   await processBatch(
     uncachedUserIds,
     async (userId) => {
-      await getUserInfo(userId, cache, workspaceId);
+      await getUserInfo(userId, cache, workspaceId, botToken);
     },
     {
       batchSize: USER_FETCH_BATCH_SIZE,
@@ -634,45 +634,45 @@ async function fetchAllThreadReplies(
 const blockKitParser = new SlackBlockKitParser();
 
 
-async function deepResolveMentions<T>(obj: T, token: string): Promise<T> {
+async function deepResolveMentions<T>(obj: T, token: string, workspaceId?: string): Promise<T> {
   if (typeof obj === 'string') {
-    return (await resolveSlackMentions(obj, token)) as unknown as T;
+    return (await resolveSlackMentions(obj, token, false, workspaceId)) as unknown as T;
   }
   if (Array.isArray(obj)) {
-    return (await Promise.all(obj.map((item) => deepResolveMentions(item, token)))) as unknown as T;
+    return (await Promise.all(obj.map((item) => deepResolveMentions(item, token, workspaceId)))) as unknown as T;
   }
   if (obj !== null && typeof obj === 'object') {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-      result[key] = await deepResolveMentions(value, token);
+      result[key] = await deepResolveMentions(value, token, workspaceId);
     }
     return result as T;
   }
   return obj;
 }
 
-async function extractMessageContent(msg: any, isBotContext: boolean = false): Promise<string> {
-  const token = process.env.SLACK_BOT_TOKEN || '';
+async function extractMessageContent(msg: any, isBotContext: boolean = false, botToken?: string, workspaceId?: string): Promise<string> {
+  const token = botToken || process.env.SLACK_BOT_TOKEN || '';
 
   if (!isBotContext) {
     // Normal messages: text only, no blocks, no attachments
     const resolvedText = msg.text
-      ? await resolveSlackMentions(msg.text, token)
+      ? await resolveSlackMentions(msg.text, token, false, workspaceId)
       : '';
     return blockKitParser.parse({ text: resolvedText });
   }
 
   // Bot context: blocks primary, text fallback, attachments always resolved
   const resolvedBlocks = msg.blocks?.length
-    ? await deepResolveMentions(msg.blocks, token)
+    ? await deepResolveMentions(msg.blocks, token, workspaceId)
     : undefined;
 
   const resolvedText = !resolvedBlocks && msg.text
-    ? await resolveSlackMentions(msg.text, token)
+    ? await resolveSlackMentions(msg.text, token, false, workspaceId)
     : undefined;
 
   const resolvedAttachments = msg.attachments?.length
-    ? await deepResolveMentions(msg.attachments, token)
+    ? await deepResolveMentions(msg.attachments, token, workspaceId)
     : undefined;
 
   return blockKitParser.parse({
@@ -690,15 +690,16 @@ export async function transformReply(
   includeBotMessages: boolean = false,
   pinnedMessageTs: Set<string> | undefined,
   workspaceId: string,
+  botToken?: string,
 ): Promise<SlackReply> {
   const isBot = !!reply.bot_id;
-  const userInfo = !isBot && reply.user ? await getUserInfo(reply.user, cache, workspaceId) : {};
+  const userInfo = !isBot && reply.user ? await getUserInfo(reply.user, cache, workspaceId, botToken) : {};
   const botName = isBot
     ? (reply.username || reply.app_name || reply.bot_profile?.name)
     : undefined;
 
   const isBotContext = !!reply.bot_id && (includeBotMessages || allowedBots.length > 0);
-  const htmlContent = await extractMessageContent(reply, isBotContext);
+  const htmlContent = await extractMessageContent(reply, isBotContext, botToken, workspaceId);
 
   // Check if this is a bot message that matches allowedBots
   let botEmail: string | undefined;
@@ -749,9 +750,10 @@ async function transformMessage(
   includeBotMessages: boolean = false,
   pinnedMessageTs: Set<string> | undefined,
   workspaceId: string,
+  botToken?: string,
 ): Promise<SlackMessage> {
   const isBot = !!rawMessage.bot_id;
-  const userInfo = !isBot && rawMessage.user ? await getUserInfo(rawMessage.user, cache, workspaceId) : {};
+  const userInfo = !isBot && rawMessage.user ? await getUserInfo(rawMessage.user, cache, workspaceId, botToken) : {};
   const botName = isBot
     ? (rawMessage.username || rawMessage.app_name || rawMessage.bot_profile?.name)
     : undefined;
@@ -760,7 +762,7 @@ async function transformMessage(
   let replies: SlackReply[] | undefined;
   if (threadReplies?.length) {
     replies = await Promise.all(
-      threadReplies.map((reply) => transformReply(reply, cache, includeAttachments, [], includeBotMessages, pinnedMessageTs, workspaceId))
+      threadReplies.map((reply) => transformReply(reply, cache, includeAttachments, [], includeBotMessages, pinnedMessageTs, workspaceId, botToken))
     );
 
     // Filter replies
@@ -777,7 +779,7 @@ async function transformMessage(
 
   // Transform message content
   const isBotContext = !!rawMessage.bot_id && includeBotMessages;
-  const htmlContent = await extractMessageContent(rawMessage, isBotContext);
+  const htmlContent = await extractMessageContent(rawMessage, isBotContext, botToken, workspaceId);
 
   return {
     content: htmlContent,
@@ -861,7 +863,7 @@ export async function extractChannelHistory(
   logger.info('[Migration] Extracted unique users', {
     totalUniqueUsers: allUserIds.length,
   });
-  await prefetchUserInfo(allUserIds, userCache, workspaceId);
+  await prefetchUserInfo(allUserIds, userCache, workspaceId, overrideToken);
 
   if (postingUserIds) {
     for (const userId of allUserIds) {
@@ -884,6 +886,7 @@ export async function extractChannelHistory(
         includeBotMessages,
         pinnedMessageTs,
         workspaceId,
+        overrideToken,
       )
     )
   );
@@ -903,4 +906,185 @@ export async function extractChannelHistory(
   });
 
   return messages;
+}
+
+// ============================================================================
+// Legacy Thread Replies (Daily Sync)
+// ============================================================================
+
+export interface LegacyThreadReplyOptions {
+  channelId: string;
+  workspaceId: string;
+  /** Unix timestamp string — only collect replies posted at or after this time */
+  repliesSinceTs: string;
+  /** Unix timestamp string — how far back to scan for parent messages (e.g. 30 days ago) */
+  scanOldestTs: string;
+  includeAttachments?: boolean;
+  includeDeactivatedUsers?: boolean;
+  includeBotMessages?: boolean;
+  token?: string;
+}
+
+/**
+ * Scan the last N days of channel history and find old threads (parent message
+ * posted before `repliesSinceTs`) that received new replies on or after
+ * `repliesSinceTs`.  For each such thread, only the new replies are fetched
+ * and returned as SlackMessage objects ready for ingestion.
+ *
+ * Used by the daily nightly sync to capture today's replies on older
+ * conversations without re-ingesting the entire channel history.
+ */
+export async function extractLegacyThreadReplies(
+  options: LegacyThreadReplyOptions,
+): Promise<SlackMessage[]> {
+  const {
+    channelId,
+    workspaceId,
+    repliesSinceTs,
+    scanOldestTs,
+    includeAttachments = true,
+    includeDeactivatedUsers = true,
+    includeBotMessages = false,
+    token: overrideToken,
+  } = options;
+
+  const client = overrideToken ? new WebClient(overrideToken) : getSlackClient();
+  const userCache: UserInfoCache = new Map();
+
+  const sinceFloat = parseFloat(repliesSinceTs);
+  const oldestFloat = parseFloat(scanOldestTs);
+
+  // ── Step 1: Scan channel history to find old threads with new replies ──────
+  logger.info('[Migration:LegacyReplies] Scanning channel history for old threads with new replies', {
+    channelId,
+    repliesSinceTs,
+    scanOldestTs,
+  });
+
+  const oldThreadsWithNewReplies: any[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const result: ConversationsHistoryResponse = await retryWithBackoff(() =>
+      client.conversations.history({
+        channel: channelId,
+        oldest: scanOldestTs,
+        limit: 1000,
+        cursor,
+      }),
+    );
+
+    if (!result.ok || !result.messages) break;
+
+    for (const msg of result.messages) {
+      const msgTs = parseFloat((msg as any).ts ?? '0');
+      const latestReply = parseFloat((msg as any).latest_reply ?? '0');
+
+      // Parent message is OLDER than the sync window AND got a reply WITHIN the sync window
+      if (
+        msgTs >= oldestFloat &&
+        msgTs < sinceFloat &&
+        latestReply >= sinceFloat &&
+        (msg as any).reply_count > 0
+      ) {
+        oldThreadsWithNewReplies.push(msg);
+      }
+    }
+
+    cursor = result.response_metadata?.next_cursor;
+  } while (cursor);
+
+  if (oldThreadsWithNewReplies.length === 0) {
+    logger.info('[Migration:LegacyReplies] No old threads with new replies found', { channelId });
+    return [];
+  }
+
+  logger.info('[Migration:LegacyReplies] Found old threads with new replies', {
+    channelId,
+    threadCount: oldThreadsWithNewReplies.length,
+  });
+
+  // ── Step 2: Fetch pinned message timestamps ───────────────────────────────
+  const pinnedMessageTs = await fetchPinnedMessageTimestamps(client, channelId);
+
+  // ── Step 3: Pre-fetch user info for parent messages ───────────────────────
+  const parentUserIds = oldThreadsWithNewReplies
+    .filter((m) => !m.bot_id && m.user)
+    .map((m) => m.user as string);
+  await prefetchUserInfo(parentUserIds, userCache, workspaceId, overrideToken);
+
+  // ── Step 4: For each thread, fetch only new replies and transform ──────────
+  const results: SlackMessage[] = [];
+
+  for (const parentMsg of oldThreadsWithNewReplies) {
+    try {
+      // Fetch replies posted at/after repliesSinceTs only
+      const newReplies: any[] = [];
+      let replyCursor: string | undefined;
+
+      do {
+        const replyResult: ConversationsRepliesResponse = await retryWithBackoff(() =>
+          client.conversations.replies({
+            channel: channelId,
+            ts: parentMsg.ts,
+            oldest: repliesSinceTs,
+            limit: 1000,
+            cursor: replyCursor,
+          }),
+        );
+
+        if (!replyResult.ok || !replyResult.messages) break;
+
+        // conversations.replies includes the parent as first message — skip it
+        const replies = replyResult.messages.filter(
+          (m) =>
+            m.ts !== parentMsg.ts &&
+            isHumanMessage(m, 'thread', [], includeBotMessages),
+        );
+        newReplies.push(...replies);
+
+        replyCursor = replyResult.response_metadata?.next_cursor;
+      } while (replyCursor);
+
+      if (newReplies.length === 0) continue;
+
+      // Pre-fetch user info for the new reply authors
+      const replyUserIds = newReplies
+        .filter((r) => !r.bot_id && r.user)
+        .map((r) => r.user as string);
+      await prefetchUserInfo(replyUserIds, userCache, workspaceId, overrideToken);
+
+      // Transform: parent message shell + only the new replies
+      const slackMsg = await transformMessage(
+        parentMsg,
+        newReplies,
+        userCache,
+        includeAttachments,
+        includeDeactivatedUsers,
+        includeBotMessages,
+        pinnedMessageTs,
+        workspaceId,
+        overrideToken,
+      );
+
+      results.push(slackMsg);
+
+      logger.info('[Migration:LegacyReplies] Processed old thread', {
+        threadTs: parentMsg.ts,
+        newRepliesCount: newReplies.length,
+      });
+    } catch (error) {
+      logger.error('[Migration:LegacyReplies] Error processing thread', {
+        threadTs: parentMsg.ts,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  logger.info('[Migration:LegacyReplies] Extraction complete', {
+    channelId,
+    threadsWithNewReplies: results.length,
+  });
+
+  return results;
 }

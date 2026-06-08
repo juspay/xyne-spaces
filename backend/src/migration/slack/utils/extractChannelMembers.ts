@@ -9,12 +9,12 @@ import { logger } from '../../../utils/logger';
 /**
  * Get Slack Web API client
  */
-function getSlackClient(): WebClient {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) {
-    throw new Error('SLACK_BOT_TOKEN environment variable is not set');
+function getSlackClient(token?: string): WebClient {
+  const resolvedToken = token || process.env.SLACK_BOT_TOKEN;
+  if (!resolvedToken) {
+    throw new Error('No bot token available for extractChannelMembers');
   }
-  return new WebClient(token);
+  return new WebClient(resolvedToken);
 }
 
 /**
@@ -57,8 +57,8 @@ async function retryWithBackoff<T>(
  * Fetch all members of a Slack channel
  * Uses conversations.members API with pagination support
  */
-export async function extractChannelMembers(channelId: string): Promise<string[]> {
-  const client = getSlackClient();
+export async function extractChannelMembers(channelId: string, botToken?: string): Promise<string[]> {
+  const client = getSlackClient(botToken);
   const allMemberIds: string[] = [];
   let cursor: string | undefined = undefined;
 

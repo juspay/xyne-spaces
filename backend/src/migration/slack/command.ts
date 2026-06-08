@@ -10,6 +10,7 @@ import { getSyncModal, getSyncJiraffeModal } from './utils/blockKit';
 import { verifySlackRequest } from './middleware/verifySlackRequest';
 import { handleSyncParticipantsCommand } from './syncParticipants';
 import { config } from '../../config/env';
+import { getBotConfigByTeamId } from './slackMigrationBotConfig';
 import { UserRepository } from '../../database/repositories/users';
 import { UserGroupRepository } from '../../database/repositories/userGroups';
 import { UserGroupMappingRepository } from '../../database/repositories/userGroupMappingRepository';
@@ -21,8 +22,12 @@ const router = Router();
 /**
  * Check if user is authorized to run migration commands
  */
-export async function checkUserAuthorization(user_id: string): Promise<{ authorized: boolean; message?: string }> {
-  const approvedUsers = config.slackMigrationApprovals;
+export async function checkUserAuthorization(
+  user_id: string,
+  teamId?: string
+): Promise<{ authorized: boolean; message?: string }> {
+  const botConfig = teamId ? getBotConfigByTeamId(teamId) : null;
+  const approvedUsers = botConfig?.migrationApprovals ?? config.slackMigrationApprovals;
 
   if (approvedUsers.length > 0) {
     if (!user_id) {
@@ -72,11 +77,16 @@ export async function checkUserAuthorization(user_id: string): Promise<{ authori
  */
 async function handleSyncCommand(req: Request, res: Response): Promise<Response> {
   try {
-    const { trigger_id, channel_id, user_id } = req.body;
+    const { trigger_id, channel_id, user_id, team_id } = req.body as {
+      trigger_id: string;
+      channel_id: string;
+      user_id: string;
+      team_id: string;
+    };
 
-    const token = process.env.SLACK_BOT_TOKEN;
+    const token = getBotConfigByTeamId(team_id).slackBotToken;
     if (!token) {
-      logger.error('[Migration] SLACK_BOT_TOKEN is not set');
+      logger.error('[Migration] slackBotToken is not set for team', { team_id });
       return res.status(200).json({
         response_type: 'ephemeral',
         text: 'Slack integration is not configured.',
@@ -84,9 +94,9 @@ async function handleSyncCommand(req: Request, res: Response): Promise<Response>
     }
 
     // Check authorization
-    const authResult = await checkUserAuthorization(user_id);
+    const authResult = await checkUserAuthorization(user_id, team_id);
     if (!authResult.authorized) {
-      logger.warn('[Migration] Unauthorized user attempted /sync command', { user_id });
+      logger.warn('[Migration] Unauthorized user attempted /sync command', { user_id, team_id });
       return res.status(200).json({
         response_type: 'ephemeral',
         text: authResult.message || 'You are not authorized to perform this action.',
@@ -118,11 +128,16 @@ async function handleSyncCommand(req: Request, res: Response): Promise<Response>
  */
 async function handleSyncJiraffeCommand(req: Request, res: Response): Promise<Response> {
   try {
-    const { trigger_id, channel_id, user_id } = req.body;
+    const { trigger_id, channel_id, user_id, team_id } = req.body as {
+      trigger_id: string;
+      channel_id: string;
+      user_id: string;
+      team_id: string;
+    };
 
-    const token = process.env.SLACK_BOT_TOKEN;
+    const token = getBotConfigByTeamId(team_id).slackBotToken;
     if (!token) {
-      logger.error('[Migration] SLACK_BOT_TOKEN is not set');
+      logger.error('[Migration] slackBotToken is not set for team', { team_id });
       return res.status(200).json({
         response_type: 'ephemeral',
         text: 'Slack integration is not configured.',
@@ -130,9 +145,9 @@ async function handleSyncJiraffeCommand(req: Request, res: Response): Promise<Re
     }
 
     // Check authorization
-    const authResult = await checkUserAuthorization(user_id);
+    const authResult = await checkUserAuthorization(user_id, team_id);
     if (!authResult.authorized) {
-      logger.warn('[Migration] Unauthorized user attempted /sync-jiraffe command', { user_id });
+      logger.warn('[Migration] Unauthorized user attempted /sync-jiraffe command', { user_id, team_id });
       return res.status(200).json({
         response_type: 'ephemeral',
         text: authResult.message || 'You are not authorized to perform this action.',

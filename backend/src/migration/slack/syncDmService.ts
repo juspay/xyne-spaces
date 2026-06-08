@@ -30,6 +30,7 @@ import { ExternalSourceRepository } from '../../database/repositories/externalSo
 import { findOrCreateUser } from '../scripts/ingestConversationSlack';
 import { getUserInfo, UserInfoCache } from './utils/extractConversation';
 import { config } from '../../config/env';
+import { getBotConfigByTeamId, getBotConfigByWorkspaceId, getWorkspaceIdByTeamId } from './slackMigrationBotConfig';
 import { db } from '../../database/client';
 import { AuthProvider } from '@prisma/client';
 
@@ -39,20 +40,20 @@ import { AuthProvider } from '@prisma/client';
 
 export async function handleSyncDmCommand(req: Request, res: Response): Promise<Response> {
   try {
-    const { trigger_id, channel_id, user_id } = req.body;
+    const { trigger_id, channel_id, user_id, team_id } = req.body;
 
-    const token = process.env.SLACK_BOT_TOKEN;
+    const token = getBotConfigByTeamId(team_id).slackBotToken;
     if (!token) {
-      logger.error('[Migration] SLACK_BOT_TOKEN is not set');
+      logger.error('[Migration] slackBotToken is not set for team', { team_id });
       return res.status(200).json({
         response_type: 'ephemeral',
         text: 'Slack integration is not configured.',
       });
     }
 
-    const authResult = await checkUserAuthorization(user_id);
+    const authResult = await checkUserAuthorization(user_id, team_id);
     if (!authResult.authorized) {
-      logger.warn('[Migration] Unauthorized user attempted /sync-dm command', { user_id });
+      logger.warn('[Migration] Unauthorized user attempted /sync-dm command', { user_id, team_id });
       return res.status(200).json({
         response_type: 'ephemeral',
         text: authResult.message || 'You are not authorized to perform this action.',
@@ -85,19 +86,23 @@ export async function runMigrationAllDms({
   userToken,
   userId: slackUserId,
   responseChannelId,
+  teamId,
 }: {
   userToken: string;
   userId?: string;
   responseChannelId?: string;
+  teamId?: string;
 }): Promise<void> {
-  const logChannelId = config.slackMigrationLogChannelId || responseChannelId;
+  const workspaceId = (teamId ? getWorkspaceIdByTeamId(teamId) : '') || config.defaultWorkspaceId;
+  const wsConfig = getBotConfigByWorkspaceId(workspaceId || '');
+  const logChannelId = wsConfig.slackMigrationLogChannelId || responseChannelId;
   const userClient = new WebClient(userToken);
-  const workspaceId = config.defaultWorkspaceId;
+  const dmBotToken = wsConfig.slackBotToken;
 
   if (!workspaceId) {
     logger.error('[SyncDM] defaultWorkspaceId not configured');
     if (logChannelId) {
-      await postMessage({ channelId: logChannelId, text: '❌ Migration failed: defaultWorkspaceId is not configured.' });
+      await postMessage({ channelId: logChannelId, text: '❌ Migration failed: defaultWorkspaceId is not configured.', botToken: dmBotToken });
     }
     return;
   }
@@ -110,7 +115,7 @@ export async function runMigrationAllDms({
   } catch (err) {
     logger.error('[SyncDM] auth.test failed — invalid user token', { error: err });
     if (logChannelId) {
-      await postMessage({ channelId: logChannelId, text: '❌ DM migration failed: invalid user token (auth.test failed).' });
+      await postMessage({ channelId: logChannelId, text: '❌ DM migration failed: invalid user token (auth.test failed).', botToken: dmBotToken });
     }
     return;
   }
@@ -126,7 +131,7 @@ export async function runMigrationAllDms({
   if (!callerXyneId) {
     logger.error('[SyncDM] Could not resolve caller to a Xyne user', { callerSlackId });
     if (logChannelId) {
-      await postMessage({ channelId: logChannelId, text: '❌ DM migration failed: your Slack account is not registered in Xyne.' });
+      await postMessage({ channelId: logChannelId, text: '❌ DM migration failed: your Slack account is not registered in Xyne.', botToken: dmBotToken });
     }
     return;
   }
@@ -155,6 +160,7 @@ export async function runMigrationAllDms({
     await postMessage({
       channelId: logChannelId,
       text: `🔄 Starting DM migration for <@${slackUserId}>: found *${allDms.length}* DM conversation(s) (including bots/unresolvable users — those will be skipped).`,
+      botToken: dmBotToken,
     });
   }
 
@@ -309,6 +315,7 @@ export async function runMigrationAllDms({
     await postMessage({
       channelId: logChannelId,
       text: `✅ DM migration complete for <@${slackUserId}>:\n• Migrated/Updated: ${migrated}\n• Skipped (bot/unresolvable user): ${skippedUnresolvable}\n• Failed: ${failed}`,
+      botToken: dmBotToken,
     });
   }
 

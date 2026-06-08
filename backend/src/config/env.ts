@@ -88,6 +88,8 @@ const envSchema = Joi.object({
   MIGRATION_SHEETS_REFRESH_TOKEN: Joi.string().allow('').default(''), // OAuth2 refresh token with spreadsheets scope
   MIGRATION_SHEET_ID: Joi.string().allow('').default(''), // Google Spreadsheet ID
   ENABLE_SLACK_MIGRATION_WORKER: Joi.boolean().default(false), // Toggle nightly migration cron on/off
+  // Per-workspace Slack bot config (JSON keyed by Xyne workspaceId). Falls back to flat vars if empty.
+  MIGRATION_SLACK_BOT_CONFIGS: Joi.string().allow('').default(''),
   SLACK_MIGRATION_CONCURRENCY: Joi.number().integer().min(1).default(2), // Max channels processed in parallel
   SLACK_MIGRATION_SYNC_CRON: Joi.string().default(''), // Nightly sync cron (default: 12 AM IST = 18:30 UTC)
   SLACK_MIGRATION_CLEANUP_CRON: Joi.string().default(''), // Cleanup cron (default: 7 AM IST = 01:30 UTC)
@@ -432,6 +434,7 @@ export const config = {
     cleanupCron: envVars.SLACK_MIGRATION_CLEANUP_CRON as string,
   },
   slackMigrationNotificationsEnabled: envVars.SLACK_MIGRATION_NOTIFICATIONS_ENABLED,
+  migrationSlackBotConfigs: envVars.MIGRATION_SLACK_BOT_CONFIGS as string,
   zoho: {
     autoWorkflowEnabled: envVars.ZOHO_AUTO_WORKFLOW_ENABLED,
   },
