@@ -1,3 +1,15 @@
+## [1.158.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.157.0...v1.158.0) (2026-06-08)
+
+
+### Features
+
+* unified config map for juspay and nammayatry ([d7ac6f5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d7ac6f51aad7c57f0e92a6e7fd78a028ea5f68a8)), closes [#7014](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7014)
+
+
+### Bug Fixes
+
+* scope Cmd+F to search-mode GlobalCommandMenu only ([db998fa](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/db998fa3a662b09fe3e569d3108bac33e19fda72)), closes [#6295](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6295)
+
 ## [1.157.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.156.0...v1.157.0) (2026-06-07)
 
 
