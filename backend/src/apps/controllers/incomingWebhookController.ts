@@ -1,16 +1,35 @@
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import {
+  AppIncomingWebhookAction,
+  AppIncomingWebhookType,
+  Prisma,
+} from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { findOrCreateConversation } from '../core/conversationUtils';
+import { createTicketWithConversation } from '../core/ticketutils';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
 import { MessageType } from '@xyne/shared';
 import { config } from '@/config/env';
+import {
+  buildSentinelRawFallbackMessage,
+  buildSentinelRawFallbackTicketDescription,
+  buildSentinelRawFallbackTicketText,
+  createEmptySentinelNormalizedPayload,
+  formatSentinelOneMessage,
+  formatSentinelOneTicketDescription,
+  formatSentinelOneTicketText,
+  parseExactSentinelPayload,
+} from './sentinelWebhookParser';
 
 const WEBHOOK_NAME_MAX_LENGTH = 84;
+type IncomingWebhookType = AppIncomingWebhookType;
+type IncomingWebhookAction = AppIncomingWebhookAction;
+type StoredIncomingWebhook = Prisma.AppIncomingWebhookGetPayload<{}>;
 
 const IncomingWebhookParamsSchema = z.object({
   workspaceId: z.string().min(1).trim(),
@@ -37,7 +56,10 @@ const IncomingWebhookBodySchema = z.object({
 const CreateWebhookBodySchema = z.object({
   installedAppId: z.string().min(1),
   channelId: z.string().min(1),
+  boardId: z.string().min(1).optional(),
   name: z.string().min(1).max(WEBHOOK_NAME_MAX_LENGTH),
+  type: z.nativeEnum(AppIncomingWebhookType).default(AppIncomingWebhookType.SLACK),
+  action: z.nativeEnum(AppIncomingWebhookAction).default(AppIncomingWebhookAction.MESSAGE),
 });
 
 const UpdateWebhookBodySchema = z.object({
@@ -80,45 +102,153 @@ class IncomingWebhookController {
     this.blockKitParser = new SlackBlockKitParser();
   }
 
-  buildIncomingWebhookUrl = (workspaceId: string | undefined, installedAppId: string, secret: string): string =>
-    `/api/apps/webhooks/${workspaceId}/${installedAppId}/${secret}`;
+  buildIncomingWebhookUrl = (
+    workspaceId: string | undefined,
+    installedAppId: string,
+    secret: string,
+    type: IncomingWebhookType = AppIncomingWebhookType.SLACK,
+  ): string => {
+    const safeWorkspaceId = workspaceId ?? '';
+    if (type === AppIncomingWebhookType.SENTINELONE) {
+      return `/api/apps/webhooks/sentinel/${safeWorkspaceId}/${installedAppId}/${secret}`;
+    }
+
+    return `/api/apps/webhooks/${safeWorkspaceId}/${installedAppId}/${secret}`;
+  };
+
+  private async parseBody(
+    req: Request,
+    workspaceId: string,
+    appId: string,
+  ): Promise<unknown | null> {
+    if (Buffer.isBuffer(req.body)) {
+      try {
+        return JSON.parse(req.body.toString('utf8'));
+      } catch (error) {
+        logger.warn('[Incoming-Webhook] Failed to parse buffered webhook body', {
+          workspaceId,
+          appId,
+          error,
+        });
+        return null;
+      }
+    }
+
+    return req.body;
+  }
+
+  private async resolveWebhookContext(
+    req: Request,
+    expectedType: IncomingWebhookType,
+  ): Promise<{
+    workspaceId: string;
+    appId: string;
+    installedApp: NonNullable<Awaited<ReturnType<typeof repositories.installedApps.findFirst>>>;
+    channelId: string;
+    webhook: StoredIncomingWebhook;
+    body: unknown;
+  } | null> {
+    const paramsResult = IncomingWebhookParamsSchema.safeParse(req.params);
+    if (!paramsResult.success) {
+      logger.warn('[Incoming-Webhook] Invalid incoming webhook params', {
+        params: req.params,
+        issues: paramsResult.error.issues,
+        expectedType,
+      });
+      return null;
+    }
+
+    const { workspaceId, appId, secret } = paramsResult.data;
+    const body = await this.parseBody(req, workspaceId, appId);
+    if (body === null) {
+      return null;
+    }
+
+    const installedApp = await repositories.installedApps.findFirst({
+      where: { id: appId },
+    });
+    if (!installedApp) {
+      return null;
+    }
+
+    const botUser = await repositories.users.findById(installedApp.userId);
+    if (!botUser || botUser.workspaceId !== workspaceId) {
+      return null;
+    }
+
+    const activeWebhooks = await repositories.incomingWebhooks.findActiveByInstalledAppId(installedApp.id);
+
+    let matchedWebhook: typeof activeWebhooks[number] | null = null;
+    const secretBuffer = Buffer.from(secret, 'utf8');
+
+    for (const webhook of activeWebhooks) {
+      try {
+        const decryptedSecret = decrypt(webhook.secret);
+        const storedBuffer = Buffer.from(decryptedSecret, 'utf8');
+        if (
+          storedBuffer.length === secretBuffer.length &&
+          crypto.timingSafeEqual(storedBuffer, secretBuffer)
+        ) {
+          matchedWebhook = webhook;
+          break;
+        }
+      } catch (error) {
+        logger.warn('[Incoming-Webhook] Failed to decrypt webhook secret during incoming validation', {
+          webhookId: webhook.id,
+          installedAppId: installedApp.id,
+          error,
+        });
+      }
+    }
+
+    if (!matchedWebhook) {
+      return null;
+    }
+
+    const webhookType =
+      (matchedWebhook.type as IncomingWebhookType | undefined) ?? AppIncomingWebhookType.SLACK;
+    if (webhookType !== expectedType) {
+      logger.warn('[Incoming-Webhook] Webhook type mismatch', {
+        webhookId: matchedWebhook.id,
+        installedAppId: installedApp.id,
+        expectedType,
+        actualType: webhookType,
+      });
+      return null;
+    }
+
+    const { channelId } = matchedWebhook;
+    const isParticipant = await repositories.channelParticipants.isParticipant(
+      channelId,
+      installedApp.userId,
+    );
+    if (!isParticipant) {
+      return null;
+    }
+
+    return {
+      workspaceId,
+      appId,
+      installedApp,
+      channelId,
+      webhook: matchedWebhook,
+      body,
+    };
+  }
 
   handleIncoming = async (req: Request, res: Response): Promise<void> => {
     try {
-      const paramsResult = IncomingWebhookParamsSchema.safeParse(req.params);
-      if (!paramsResult.success) {
-        logger.warn('[Incoming-Webhook] Invalid incoming webhook params', {
-          params: req.params,
-          issues: paramsResult.error.issues,
-        });
+      const context = await this.resolveWebhookContext(req, AppIncomingWebhookType.SLACK);
+      if (!context) {
         res.status(400).send('invalid_payload');
         return;
       }
 
-      const { workspaceId, appId, secret } = paramsResult.data;
-
-      let body: unknown;
-      if (Buffer.isBuffer(req.body)) {
-        try {
-          body = JSON.parse(req.body.toString('utf8'));
-        } catch (error) {
-          logger.warn('[Incoming-Webhook] Failed to parse buffered webhook body', {
-            workspaceId,
-            appId,
-            error,
-          });
-          res.status(400).send('invalid_payload');
-          return;
-        }
-      } else {
-        body = req.body;
-      }
-
-      const bodyResult = IncomingWebhookBodySchema.safeParse(body);
+      const bodyResult = IncomingWebhookBodySchema.safeParse(context.body);
       if (!bodyResult.success) {
         logger.warn('[Incoming-Webhook] Invalid incoming webhook body', {
-          workspaceId,
-          appId,
+          workspaceId: context.workspaceId,
+          appId: context.appId,
           issues: bodyResult.error.issues,
         });
         res.status(400).send('no_text');
@@ -127,64 +257,11 @@ class IncomingWebhookController {
 
       const { text, blocks, attachments, conversationId } = bodyResult.data;
 
-      const installedApp = await repositories.installedApps.findFirst({
-        where: { id: appId },
-      });
-      if (!installedApp) {
-        res.status(400).send('invalid_payload');
-        return;
-      }
-
-      const botUser = await repositories.users.findById(installedApp.userId);
-      if (!botUser || botUser.workspaceId !== workspaceId) {
-        res.status(400).send('invalid_payload');
-        return;
-      }
-
-      const activeWebhooks = await repositories.incomingWebhooks.findActiveByInstalledAppId(installedApp.id);
-
-      let matchedWebhook: typeof activeWebhooks[number] | null = null;
-      const secretBuffer = Buffer.from(secret, 'utf8');
-
-      for (const webhook of activeWebhooks) {
-        try {
-          const decryptedSecret = decrypt(webhook.secret);
-          const storedBuffer = Buffer.from(decryptedSecret, 'utf8');
-          if (storedBuffer.length === secretBuffer.length &&
-            crypto.timingSafeEqual(storedBuffer, secretBuffer)) {
-            matchedWebhook = webhook;
-            break;
-          }
-        } catch (error) {
-          logger.warn('[Incoming-Webhook] Failed to decrypt webhook secret during incoming validation', {
-            webhookId: webhook.id,
-            installedAppId: installedApp.id,
-            error,
-          });
-        }
-      }
-
-      if (!matchedWebhook) {
-        res.status(400).send('invalid_payload');
-        return;
-      }
-
-      const { channelId } = matchedWebhook;
-
-      const isParticipant = await repositories.channelParticipants.isParticipant(
-        channelId,
-        installedApp.userId,
-      );
-      if (!isParticipant) {
-        res.status(400).send('invalid_payload');
-        return;
-      }
-
       const resolvedMessageParts = await resolveSlackMessageParts({
         text,
         blocks,
         attachments,
-      }, config.slackBotToken, workspaceId);
+      }, config.slackBotToken, context.workspaceId);
 
       const content = this.blockKitParser.parse({
         text: resolvedMessageParts.text,
@@ -194,8 +271,8 @@ class IncomingWebhookController {
 
       // Post the message to the channel
       await findOrCreateConversation(
-        channelId,
-        installedApp.userId,
+        context.channelId,
+        context.installedApp.userId,
         content,
         false,
         conversationId,
@@ -207,6 +284,90 @@ class IncomingWebhookController {
       res.status(200).send('ok');
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling incoming webhook', {
+        params: req.params,
+        error,
+      });
+      res.status(500).send('rollup_error');
+    }
+  };
+
+  handleSentinelIncoming = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const context = await this.resolveWebhookContext(req, AppIncomingWebhookType.SENTINELONE);
+      if (!context) {
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      const payload = parseExactSentinelPayload(context.body);
+      const webhookAction =
+        (context.webhook.action as IncomingWebhookAction | undefined) ??
+        AppIncomingWebhookAction.MESSAGE;
+
+      if (webhookAction === AppIncomingWebhookAction.TICKET) {
+        if (!context.webhook.boardId) {
+          logger.warn('[Incoming-Webhook] Ticket webhook missing boardId', {
+            webhookId: context.webhook.id,
+            installedAppId: context.installedApp.id,
+          });
+          res.status(400).send('invalid_payload');
+          return;
+        }
+
+        const board = await repositories.boards.findById(context.webhook.boardId);
+        const channel = await repositories.channels.findById(context.channelId);
+        if (!board || !channel || board.projectId !== channel.projectId) {
+          logger.warn('[Incoming-Webhook] Invalid board/channel configuration for ticket webhook', {
+            webhookId: context.webhook.id,
+            boardId: context.webhook.boardId,
+            channelId: context.channelId,
+            boardProjectId: board?.projectId,
+            channelProjectId: channel?.projectId,
+          });
+          res.status(400).send('invalid_payload');
+          return;
+        }
+
+        const normalizedPayload = payload ?? createEmptySentinelNormalizedPayload();
+        const result = await createTicketWithConversation({
+          title: payload ? payload.threatName || 'Unknown threat' : 'SentinelOne webhook received',
+          description: payload
+            ? formatSentinelOneTicketDescription(payload)
+            : buildSentinelRawFallbackTicketDescription(context.body),
+          projectId: board.projectId,
+          boardId: board.id,
+          channelId: context.channelId,
+          userId: context.installedApp.userId,
+          text: payload
+            ? formatSentinelOneTicketText(normalizedPayload)
+            : buildSentinelRawFallbackTicketText(),
+        });
+
+        res.status(201).json(result);
+        return;
+      }
+
+      const content = payload
+        ? formatSentinelOneMessage(payload)
+        : buildSentinelRawFallbackMessage(
+            context.body,
+            createEmptySentinelNormalizedPayload(),
+          );
+
+      await findOrCreateConversation(
+        context.channelId,
+        context.installedApp.userId,
+        content,
+        false,
+        undefined,
+        undefined,
+        MessageType.BOT,
+        {},
+      );
+
+      res.status(200).send('ok');
+    } catch (error) {
+      logger.error('[Incoming-Webhook] Error handling SentinelOne webhook', {
         params: req.params,
         error,
       });
@@ -226,7 +387,7 @@ class IncomingWebhookController {
         return;
       }
 
-      const { installedAppId, channelId, name } = bodyResult.data;
+      const { installedAppId, channelId, boardId, name, type, action } = bodyResult.data;
       const userId = req.user?.id;
       if (!userId) {
         logger.warn('[Incoming-Webhook] Missing authenticated user for create webhook', {
@@ -260,13 +421,48 @@ class IncomingWebhookController {
         return;
       }
 
+      const channel = await repositories.channels.findById(channelId);
+      if (!channel) {
+        res.status(404).json({ error: 'Channel not found' });
+        return;
+      }
+
+      const normalizedAction: IncomingWebhookAction =
+        type === AppIncomingWebhookType.SLACK ? AppIncomingWebhookAction.MESSAGE : action;
+      const effectiveBoardId =
+        normalizedAction === AppIncomingWebhookAction.TICKET ? boardId : undefined;
+
+      let boardName: string | null = null;
+      if (normalizedAction === AppIncomingWebhookAction.TICKET && !effectiveBoardId) {
+        res.status(400).json({ error: 'Board is required for ticket webhooks' });
+        return;
+      }
+
+      if (effectiveBoardId) {
+        const board = await repositories.boards.findById(effectiveBoardId);
+        if (!board) {
+          res.status(404).json({ error: 'Board not found' });
+          return;
+        }
+
+        if (board.projectId !== channel.projectId) {
+          res.status(400).json({ error: 'Board must belong to the same project as the selected channel' });
+          return;
+        }
+
+        boardName = board.name;
+      }
+
       const rawSecret = crypto.randomBytes(32).toString('hex');
       const encryptedSecret = encrypt(rawSecret);
 
       const webhook = await repositories.incomingWebhooks.create({
         installedAppId,
         channelId,
+        ...(effectiveBoardId ? { boardId: effectiveBoardId } : {}),
         name,
+        type,
+        action: normalizedAction,
         secret: encryptedSecret,
         createdBy: userId,
       });
@@ -274,9 +470,7 @@ class IncomingWebhookController {
       const botUser = await repositories.users.findById(installedApp.userId) as
         (Awaited<ReturnType<typeof repositories.users.findById>> & { workspaceId?: string }) | null;
 
-      const webhookUrl = this.buildIncomingWebhookUrl(botUser?.workspaceId, installedAppId, rawSecret);
-
-      const channel = await repositories.channels.findById(channelId);
+      const webhookUrl = this.buildIncomingWebhookUrl(botUser?.workspaceId, installedAppId, rawSecret, type);
 
       res.status(201).json({
         id: webhook.id,
@@ -284,6 +478,10 @@ class IncomingWebhookController {
         channelId: webhook.channelId,
         channelName: channel?.name ?? '',
         channelVisibility: channel?.visibility ?? 'public',
+        boardId: webhook.boardId ?? null,
+        boardName,
+        type,
+        action: normalizedAction,
         isActive: webhook.isActive,
         createdAt: webhook.createdAt,
         webhookUrl,
@@ -344,7 +542,14 @@ class IncomingWebhookController {
         if (webhook.isActive) {
           try {
             const rawSecret = decrypt(webhook.secret);
-            webhookUrl = this.buildIncomingWebhookUrl(botUser?.workspaceId, installedAppId, rawSecret);
+            const webhookType =
+              (webhook.type as IncomingWebhookType | undefined) ?? AppIncomingWebhookType.SLACK;
+            webhookUrl = this.buildIncomingWebhookUrl(
+              botUser?.workspaceId,
+              installedAppId,
+              rawSecret,
+              webhookType,
+            );
           } catch (error) {
             logger.warn('[Incoming-Webhook] Failed to decrypt webhook secret while listing webhooks', {
               webhookId: webhook.id,
@@ -361,6 +566,12 @@ class IncomingWebhookController {
           channelId: webhook.channelId,
           channelName: webhook.channel.name,
           channelVisibility: webhook.channel.visibility,
+          boardId: webhook.boardId ?? null,
+          boardName: webhook.board?.name ?? null,
+          type: (webhook.type as IncomingWebhookType | undefined) ?? AppIncomingWebhookType.SLACK,
+          action:
+            (webhook.action as IncomingWebhookAction | undefined) ??
+            AppIncomingWebhookAction.MESSAGE,
           isActive: webhook.isActive,
           createdAt: webhook.createdAt,
           webhookUrl,

@@ -23,6 +23,7 @@ import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import {
   appsService,
   type BotChannel,
+  type ProjectBoard,
   type IncomingWebhook,
   type AppCommand,
   type UpsertCommandRequest,
@@ -425,6 +426,16 @@ export interface EditAppFormProps {
 }
 
 const WEBHOOK_NAME_MAX_LENGTH = 84;
+const WEBHOOK_TYPE_OPTIONS = [
+  { value: 'SLACK', label: 'Slack' },
+  { value: 'SENTINELONE', label: 'SentinelOne' },
+] as const;
+type IncomingWebhookType = (typeof WEBHOOK_TYPE_OPTIONS)[number]['value'];
+const WEBHOOK_ACTION_OPTIONS = [
+  { value: 'MESSAGE', label: 'Message' },
+  { value: 'TICKET', label: 'Ticket' },
+] as const;
+type IncomingWebhookAction = (typeof WEBHOOK_ACTION_OPTIONS)[number]['value'];
 
 function WebhookNameInput({
   value,
@@ -485,6 +496,11 @@ export const EditAppForm = ({
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [webhookName, setWebhookName] = useState('');
   const [selectedChannelId, setSelectedChannelId] = useState('');
+  const [selectedWebhookType, setSelectedWebhookType] = useState<IncomingWebhookType>('SLACK');
+  const [selectedWebhookAction, setSelectedWebhookAction] =
+    useState<IncomingWebhookAction>('MESSAGE');
+  const [projectBoards, setProjectBoards] = useState<ProjectBoard[]>([]);
+  const [selectedBoardId, setSelectedBoardId] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [editingWebhookId, setEditingWebhookId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -523,6 +539,38 @@ export const EditAppForm = ({
     fetchWebhooks(0);
   }, [fetchWebhooks]);
 
+  useEffect(() => {
+    if (
+      selectedWebhookType !== 'SENTINELONE' ||
+      selectedWebhookAction !== 'TICKET' ||
+      !selectedChannelId
+    ) {
+      setProjectBoards([]);
+      setSelectedBoardId('');
+      return;
+    }
+
+    const selectedChannel = botChannels.find(channel => channel.id === selectedChannelId);
+    if (!selectedChannel?.projectId) {
+      setProjectBoards([]);
+      setSelectedBoardId('');
+      return;
+    }
+
+    void appsService
+      .getProjectBoards(selectedChannel.projectId)
+      .then(boards => {
+        setProjectBoards(boards);
+        setSelectedBoardId(currentSelectedBoardId =>
+          boards.some(board => board.id === currentSelectedBoardId) ? currentSelectedBoardId : '',
+        );
+      })
+      .catch(() => {
+        setProjectBoards([]);
+        setSelectedBoardId('');
+      });
+  }, [botChannels, selectedChannelId, selectedWebhookType, selectedWebhookAction]);
+
   const getFullWebhookUrl = (relativePath: string): string => {
     if (!relativePath) return '';
     const incomingWebhookPath = '/api/apps';
@@ -540,11 +588,20 @@ export const EditAppForm = ({
       await appsService.createIncomingWebhook({
         installedAppId,
         channelId: selectedChannelId,
+        ...(selectedWebhookAction === 'TICKET' && selectedBoardId
+          ? { boardId: selectedBoardId }
+          : {}),
         name: webhookName.trim(),
+        type: selectedWebhookType,
+        action: selectedWebhookType === 'SENTINELONE' ? selectedWebhookAction : 'MESSAGE',
       });
       setShowCreateForm(false);
       setWebhookName('');
       setSelectedChannelId('');
+      setSelectedWebhookType('SLACK');
+      setSelectedWebhookAction('MESSAGE');
+      setProjectBoards([]);
+      setSelectedBoardId('');
       toast.success('Incoming webhook created');
       fetchWebhooks(0);
     } catch (error) {
@@ -839,8 +896,8 @@ export const EditAppForm = ({
             <div className='border-t border-border pt-4'>
               <span className='block text-sm font-medium text-foreground'>Incoming Webhooks</span>
               <p className='text-xs text-muted-foreground mt-1'>
-                Generate webhook URLs for external services to post messages as this bot. Compatible
-                with Slack incoming webhooks.
+                Generate webhook URLs for external services to post messages as this bot. Supports
+                Slack and SentinelOne webhook URL formats.
               </p>
               {botChannels.length > 0 && !showCreateForm && (
                 <Button
@@ -858,6 +915,56 @@ export const EditAppForm = ({
 
             {showCreateForm && botChannels.length > 0 && (
               <div className='border border-border rounded-md p-3 space-y-3'>
+                <div className='space-y-2'>
+                  <label
+                    htmlFor='webhook-type-select'
+                    className='block text-xs font-medium text-foreground'
+                  >
+                    Webhook Type
+                  </label>
+                  <Select
+                    value={selectedWebhookType}
+                    onValueChange={value => setSelectedWebhookType(value as IncomingWebhookType)}
+                  >
+                    <SelectTrigger id='webhook-type-select' className='w-full'>
+                      <SelectValue placeholder='Select a webhook type' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WEBHOOK_TYPE_OPTIONS.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {selectedWebhookType === 'SENTINELONE' && (
+                  <div className='space-y-2'>
+                    <label
+                      htmlFor='webhook-action-select'
+                      className='block text-xs font-medium text-foreground'
+                    >
+                      Action
+                    </label>
+                    <Select
+                      value={selectedWebhookAction}
+                      onValueChange={value =>
+                        setSelectedWebhookAction(value as IncomingWebhookAction)
+                      }
+                    >
+                      <SelectTrigger id='webhook-action-select' className='w-full'>
+                        <SelectValue placeholder='Select a webhook action' />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WEBHOOK_ACTION_OPTIONS.map(option => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className='space-y-2'>
                   <label
                     htmlFor='webhook-channel-select'
@@ -891,6 +998,50 @@ export const EditAppForm = ({
                     </SelectContent>
                   </Select>
                 </div>
+                {selectedWebhookType === 'SENTINELONE' && selectedWebhookAction === 'TICKET' && (
+                  <div className='space-y-2'>
+                    <label
+                      htmlFor='webhook-board-select'
+                      className='block text-xs font-medium text-foreground'
+                    >
+                      Board
+                    </label>
+                    <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
+                      <SelectTrigger
+                        id='webhook-board-select'
+                        className='w-full'
+                        disabled={!selectedChannelId || projectBoards.length === 0}
+                      >
+                        <SelectValue
+                          placeholder={
+                            !selectedChannelId
+                              ? 'Select a channel first'
+                              : projectBoards.length === 0
+                                ? 'No boards available'
+                                : 'Select a board'
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectBoards.map(board => (
+                          <SelectItem key={board.id} value={board.id}>
+                            {board.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!selectedChannelId && (
+                      <p className='text-xs text-muted-foreground'>
+                        Choose a channel first so we can load boards from that project.
+                      </p>
+                    )}
+                    {selectedChannelId && projectBoards.length === 0 && (
+                      <p className='text-xs text-muted-foreground'>
+                        No boards found for the selected channel&apos;s project.
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div className='space-y-1'>
                   <label
                     htmlFor='webhook-name-input'
@@ -911,7 +1062,14 @@ export const EditAppForm = ({
                     type='button'
                     size='sm'
                     onClick={() => void handleCreateWebhook()}
-                    disabled={isCreating || !webhookName.trim() || !selectedChannelId}
+                    disabled={
+                      isCreating ||
+                      !webhookName.trim() ||
+                      !selectedChannelId ||
+                      (selectedWebhookType === 'SENTINELONE' &&
+                        selectedWebhookAction === 'TICKET' &&
+                        !selectedBoardId)
+                    }
                   >
                     {isCreating ? 'Creating...' : 'Create'}
                   </Button>
@@ -923,6 +1081,10 @@ export const EditAppForm = ({
                       setShowCreateForm(false);
                       setWebhookName('');
                       setSelectedChannelId('');
+                      setSelectedWebhookType('SLACK');
+                      setSelectedWebhookAction('MESSAGE');
+                      setProjectBoards([]);
+                      setSelectedBoardId('');
                     }}
                   >
                     Cancel
@@ -989,12 +1151,23 @@ export const EditAppForm = ({
                       <span className='text-sm font-medium text-foreground truncate'>
                         {webhook.name}
                       </span>
+                      <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
+                        {webhook.type === 'SENTINELONE' ? 'SentinelOne' : 'Slack'}
+                      </span>
+                      <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
+                        {webhook.action === 'TICKET' ? 'Ticket' : 'Message'}
+                      </span>
                       <span className='text-xs text-muted-foreground inline-flex items-center gap-0.5'>
                         <span className='w-3 flex-shrink-0 flex items-center justify-center'>
                           {webhook.channelVisibility === 'PRIVATE' ? <Lock size={10} /> : '#'}
                         </span>
                         {webhook.channelName}
                       </span>
+                      {webhook.boardName && (
+                        <span className='text-xs text-muted-foreground'>
+                          Board: {webhook.boardName}
+                        </span>
+                      )}
                     </div>
                     <div className='flex items-center gap-0.5'>
                       <Button

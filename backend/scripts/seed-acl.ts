@@ -40,6 +40,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'ORGANIZATIONS', description: 'Organization management access' },
   { name: 'INSPECTOR', description: 'Inspector panel access (/inspector)' },
   { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'},
+  { name: 'XYNE-APPS', description: 'Admin access to Xyne Apps management (webhooks, bot configuration, signing secrets)'},
   {
     name: 'AUTOMATIONS',
     description:

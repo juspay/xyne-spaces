@@ -16,6 +16,10 @@ const AppIdParamsSchema = z.object({
   appId: z.string().min(1, 'App ID is required').trim(),
 });
 
+const ProjectIdParamsSchema = z.object({
+  projectId: z.string().min(1, 'Project ID is required').trim(),
+});
+
 const ConfigureWebhookBodySchema = z.object({
   webhookUrl: z.string().url('Invalid webhook URL format').min(1, 'Webhook URL is required').trim(),
 });
@@ -419,11 +423,47 @@ export class AppController {
       const accessibleChannelIds = channelIds.filter(channelId => requesterChannelIds.has(channelId));
       const channels = await repositories.channels.getChannelsByIds(accessibleChannelIds);
 
-      const result = channels.map(ch => ({ id: ch.id, name: ch.name, visibility: ch.visibility }));
+      const result = channels.map(ch => ({
+        id: ch.id,
+        name: ch.name,
+        visibility: ch.visibility,
+        projectId: ch.projectId,
+      }));
 
       res.status(200).json({ channels: result });
     } catch (error) {
       logger.error('Error getting bot channels:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getProjectBoards = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const paramsResult = ProjectIdParamsSchema.safeParse(req.params);
+      if (!paramsResult.success) {
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      const { projectId } = paramsResult.data;
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const boards = await repositories.boards.findBoardsByProject(projectId);
+      const scopedBoards = boards.filter(board => board.workspaceId === workspaceId);
+
+      res.status(200).json({
+        boards: scopedBoards.map(board => ({
+          id: board.id,
+          name: board.name,
+          projectId: board.projectId,
+        })),
+      });
+    } catch (error) {
+      logger.error('Error getting project boards:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

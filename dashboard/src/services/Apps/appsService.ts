@@ -29,6 +29,13 @@ export interface BotChannel {
   id: string;
   name: string;
   visibility: string;
+  projectId: string;
+}
+
+export interface ProjectBoard {
+  id: string;
+  name: string;
+  projectId: string;
 }
 
 export interface IncomingWebhook {
@@ -37,6 +44,10 @@ export interface IncomingWebhook {
   channelId: string;
   channelName: string;
   channelVisibility: string;
+  boardId?: string | null;
+  boardName?: string | null;
+  type: 'SLACK' | 'SENTINELONE';
+  action: 'MESSAGE' | 'TICKET';
   isActive: boolean;
   createdAt: string;
   webhookUrl: string;
@@ -45,7 +56,10 @@ export interface IncomingWebhook {
 export interface CreateIncomingWebhookRequest {
   installedAppId: string;
   channelId: string;
+  boardId?: string;
   name: string;
+  type: 'SLACK' | 'SENTINELONE';
+  action?: 'MESSAGE' | 'TICKET';
 }
 
 export interface AppCommand {
@@ -94,6 +108,13 @@ export class AppsService {
       `/apps/bot-channels/${appId}`,
     );
     return response.data.channels;
+  }
+
+  async getProjectBoards(projectId: string): Promise<ProjectBoard[]> {
+    const response = await apiInstance.get<{ boards: ProjectBoard[] }>(
+      `/apps/project-boards/${projectId}`,
+    );
+    return response.data.boards;
   }
 
   async createIncomingWebhook(data: CreateIncomingWebhookRequest): Promise<IncomingWebhook> {

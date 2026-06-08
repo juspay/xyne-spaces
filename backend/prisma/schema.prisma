@@ -247,6 +247,18 @@ enum ChannelVisibility {
   @@schema("public")
 }
 
+enum AppIncomingWebhookType {
+  SLACK
+  SENTINELONE
+  @@schema("workflow")
+}
+
+enum AppIncomingWebhookAction {
+  MESSAGE
+  TICKET
+  @@schema("workflow")
+}
+
 enum CalendarVisibility {
   PUBLIC
   PRIVATE
@@ -1841,6 +1853,7 @@ model Board {
   boardComplexityScores BoardComplexityScore[]
   workloadMappings      UserWorkloadMapping[]
   expertiseMappings     UserExpertiseMapping[]
+  incomingWebhooks      AppIncomingWebhook[]
 
   @@unique([name, projectId])
   @@index([projectId])
@@ -3882,7 +3895,10 @@ model AppIncomingWebhook {
   id             String    @id @default(cuid())
   installedAppId String
   channelId      String
+  boardId        String?
   name           String
+  type           AppIncomingWebhookType @default(SLACK)
+  action         AppIncomingWebhookAction @default(MESSAGE)
   secret         String
   isActive       Boolean   @default(true)
   createdBy      String
@@ -3892,9 +3908,11 @@ model AppIncomingWebhook {
 
   installedApp   InstalledApps @relation(fields: [installedAppId], references: [id])
   channel        Channel       @relation(fields: [channelId], references: [id])
+  board          Board?        @relation(fields: [boardId], references: [id])
   createdByUser  User          @relation("AppIncomingWebhookCreatedBy", fields: [createdBy], references: [id])
   revokedByUser  User?         @relation("AppIncomingWebhookRevokedBy", fields: [revokedBy], references: [id])
 
+  @@index([boardId])
   @@index([installedAppId, channelId])
   @@index([installedAppId])
   @@index([secret])
