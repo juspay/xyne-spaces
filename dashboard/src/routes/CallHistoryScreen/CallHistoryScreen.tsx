@@ -223,7 +223,12 @@ const CallHistoryScreen = (): ReactElement => {
   useEffect(() => {
     if (!reauthCountdown) return;
     if (reauthCountdown.count === 0) {
-      window.location.href = reauthCountdown.loginUrl;
+      const isElectron = typeof window.electronAPI?.openExternal === 'function';
+      if (isElectron && window.electronAPI) {
+        window.electronAPI.openExternal(reauthCountdown.loginUrl);
+      } else {
+        window.location.href = reauthCountdown.loginUrl;
+      }
       return;
     }
     const timer = setTimeout(() => {
@@ -253,10 +258,12 @@ const CallHistoryScreen = (): ReactElement => {
     } catch {
       setIsSyncing(false);
       if (!isRetry) {
+        const isElectron = typeof window.electronAPI?.openExternal === 'function';
+        const platformParam = isElectron ? '&platform=electron' : '';
         const loginUrl =
           calendarProvider === 'MICROSOFT'
-            ? `${API_BASE_URL}/v2/auth/microsoft/login?connectCalendar=true`
-            : `${API_BASE_URL}/v2/auth/login?connectCalendar=true`;
+            ? `${API_BASE_URL}/v2/auth/microsoft/login?connectCalendar=true${platformParam}`
+            : `${API_BASE_URL}/v2/auth/login?connectCalendar=true${platformParam}`;
         setSyncMessage({ text: '', ok: false, reauth: true });
         setReauthCountdown({ count: 5, loginUrl });
         return;

@@ -849,6 +849,7 @@ export class AuthV2Controller {
         logger.info(`[${requestId}] Electron auto-login complete - cookies set: user_session_id`);
 
         // Return JSON with workspaces (Electron expects this for renderer to handle)
+        // If this was a calendar re-auth, include a flag so the Electron app navigates back to calls.
         res.status(200).json({
           success: true,
           email: googleUserData.email,
@@ -856,6 +857,7 @@ export class AuthV2Controller {
           picture: googleUserData.picture,
           workspaces,
           userExistsButRemoved,
+          ...(stateData.connectCalendar ? { connectCalendar: true, workspaceId } : {}),
         });
         return;
       }
