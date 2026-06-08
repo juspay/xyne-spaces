@@ -15,7 +15,6 @@ import { getCachedJiraUserEmailMappings } from '@/services/jira/jiraUserMapCsv';
 import { getCanvasUrl } from '@/services/canvasService';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { generateKeyBetween } from 'fractional-indexing';
-import { calculateETADeadline } from '@/utils/etaCalculation';
 import {
   queueJiraPurgeAttachmentVespaDeleteJob,
   queueJiraPurgeMessageVespaDeleteJob,
@@ -298,7 +297,6 @@ export class JiraMigrationController {
       const updateBatches = chunkArray(ticketUpdates, UPDATES_PER_SECOND);
       for (let batchIndex = 0; batchIndex < updateBatches.length; batchIndex += 1) {
         const batch = updateBatches[batchIndex]!;
-        const batchTicketIds = batch.map(u => u.ticketId);
 
         await db.$transaction(async tx => {
           for (const update of batch) {
@@ -309,28 +307,6 @@ export class JiraMigrationController {
                 kanbanPosition: update.kanbanPosition,
                 updatedBy: actorUserId,
                 updatedAt: now,
-              },
-            });
-          }
-
-          // Reset stage ETA tracking for moved tickets in this batch (old stageIds belong to old board).
-          await tx.ticketStageEta.deleteMany({
-            where: { ticketId: { in: batchTicketIds } },
-          });
-
-          // Recreate current-stage ETA entries (best-effort) using target board stage ETA.
-          for (const update of batch) {
-            const stage = targetStageByName.get(update.stageName);
-            if (!stage || !stage.eta || stage.eta <= 0) continue;
-            const stageEtaDeadline = calculateETADeadline(now, stage.eta);
-            await tx.ticketStageEta.create({
-              data: {
-                ticketId: update.ticketId,
-                stageId: stage.id,
-                stageEnteredAt: now,
-                stageLeftAt: null,
-                stageEta: stageEtaDeadline,
-                updatedBy: actorUserId,
               },
             });
           }
@@ -1338,6 +1314,98 @@ export class JiraMigrationController {
       logger.error('Jira migration boards fetch failed', error);
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to fetch Jira boards',
+      });
+    }
+  };
+
+  deleteJiraMigratedStageEta = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { dryRun, externalSourceId } = req.body as {
+        dryRun?: boolean;
+        externalSourceId?: string;
+      };
+
+      const resolvedDryRun = dryRun !== false;
+
+      logger.info(`[JIRA-MIGRATION] deleteJiraMigratedStageEta started — dryRun=${resolvedDryRun}${externalSourceId ? ` externalSourceId=${externalSourceId}` : ' (all sources)'}`);
+
+      // Find ticket IDs imported from Jira via external_messages
+      const jiraTicketMappings = await db.externalMessage.findMany({
+        where: {
+          entityType: 'TICKET',
+          entityId: { not: null },
+          ...(externalSourceId ? { externalSourceId } : {}),
+        },
+        select: { entityId: true },
+        distinct: ['entityId'],
+      });
+
+      const jiraTicketIds = jiraTicketMappings
+        .map(r => r.entityId)
+        .filter((id): id is string => id !== null);
+
+      const toDeleteCount = await db.ticketStageEta.count({
+        where: { ticketId: { in: jiraTicketIds } },
+      });
+
+      logger.info(`[JIRA-MIGRATION] Found ${jiraTicketIds.length} Jira-migrated tickets, ${toDeleteCount} stageEta entries to delete`);
+
+      if (resolvedDryRun) {
+        res.json({
+          success: true,
+          dryRun: true,
+          jiraMigratedTickets: jiraTicketIds.length,
+          stageEtaEntriesToDelete: toDeleteCount,
+          message: 'Dry run — pass dryRun: false to apply',
+        });
+        return;
+      }
+
+      const stageEtaEntries = await db.ticketStageEta.findMany({
+        where: { ticketId: { in: jiraTicketIds } },
+        select: { id: true },
+      });
+
+      let deleted = 0;
+      const DELETES_PER_SECOND = 50;
+      const DELETE_INTERVAL_MS = 1000;
+      const deletesPerInterval = Math.max(
+        1,
+        Math.floor((DELETES_PER_SECOND * DELETE_INTERVAL_MS) / 1000),
+      );
+      const deleteChunks = chunkArray(
+        stageEtaEntries.map(entry => entry.id),
+        deletesPerInterval,
+      );
+
+      for (let index = 0; index < deleteChunks.length; index += 1) {
+        const batch = deleteChunks[index];
+        if (batch.length === 0) continue;
+
+        const result = await db.ticketStageEta.deleteMany({
+          where: { id: { in: batch } },
+        });
+        deleted += result.count;
+
+        logger.info(`[JIRA-MIGRATION] Progress: ${deleted}/${toDeleteCount} stageEta entries deleted (batch ${index + 1}/${deleteChunks.length})`);
+
+        if (index < deleteChunks.length - 1) {
+          await sleep(DELETE_INTERVAL_MS);
+        }
+      }
+
+      logger.info(`[JIRA-MIGRATION] Done — deleted ${deleted} stageEta entries for ${jiraTicketIds.length} Jira-migrated tickets`);
+
+      res.json({
+        success: true,
+        dryRun: false,
+        jiraMigratedTickets: jiraTicketIds.length,
+        stageEtaEntriesDeleted: deleted,
+      });
+    } catch (error) {
+      logger.error('deleteJiraMigratedStageEta failed', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to delete stage ETA entries',
       });
     }
   };

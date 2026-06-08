@@ -11,6 +11,22 @@ import {
 } from '@/utils/etaNotificationUtils';
 
 const BREACH_REMIND_DAYS = [1, 3, 7, 15, 31, 63, 127, 255];
+const ETA_REMINDER_BATCH_SIZE = 50;
+const ETA_REMINDER_BATCH_DELAY_MS = 1000;
+
+const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
+  if (chunkSize <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
+};
+
+const sleep = async (ms: number): Promise<void> => {
+  if (ms <= 0) return;
+  await new Promise(resolve => setTimeout(resolve, ms));
+};
 
 class EtaDeadlineWorker {
   private isInitialized = false;
@@ -49,52 +65,61 @@ class EtaDeadlineWorker {
 
     try {
       // Get all non-terminal tickets with eta
-      const tickets = await this.getOpenTickets();
+      const tickets = await this.getOpenTickets(today);
 
       logger.info(`[ETA-DEADLINE-WORKER] Found ${tickets.length} open tickets with ETA`);
 
-      for (const ticket of tickets) {
-        if (!ticket.eta) continue;
+      const ticketBatches = chunkArray(tickets, ETA_REMINDER_BATCH_SIZE);
 
-        // Get bot actorId for this ticket's workspace
-        const actorId = await getTicketBotActorId(ticket.workspaceId);
+      for (let batchIndex = 0; batchIndex < ticketBatches.length; batchIndex += 1) {
+        const ticketBatch = ticketBatches[batchIndex]!;
 
-        const daysOverdue = calculateDaysOverdueMidnight(new Date(ticket.eta), today);
+        logger.info(
+          `[ETA-DEADLINE-WORKER] Processing ETA batch ${batchIndex + 1}/${ticketBatches.length} (${ticketBatch.length} tickets)`
+        );
 
-        if (daysOverdue > 0) {
-          // Check if today is a reminder day in the exponential sequence
-          if (BREACH_REMIND_DAYS.includes(daysOverdue)) {
-            // Get users to notify (including form field users)
-            const usersToNotify = await getUsersToNotifyForTicket(
-              ticket.id,
-              ticket.assignedTo,
-              ticket.createdBy
-            );
+        for (const ticket of ticketBatch) {
+          if (!ticket.eta) continue;
 
-            // Use helper to create activities
-            await TicketsSideEffectHandler.createEtaBreachActivities({
-              ticketId: ticket.id,
-              xyneId: ticket.xyneId,
-              channelId: ticket.channelId,
-              userIds: usersToNotify,
-              actorAction: 'eta_breach',
-              actorId,
-              daysOverdue,
-            });
+          const actorId = await getTicketBotActorId(ticket.workspaceId);
+          const daysOverdue = calculateDaysOverdueMidnight(new Date(ticket.eta), today);
 
-            if (ticket.conversationId) {
-              await createEtaSystemMessage({
-                conversationId: ticket.conversationId,
-                content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
-                createdAt: now,
-                activityType: 'ETA',
-              });
-            }
-
-            logger.info(
-              `[ETA-DEADLINE-WORKER] Sending breach reminder for ticket ${ticket.xyneId} (${daysOverdue} days overdue)`
-            );
+          if (daysOverdue <= 0 || !BREACH_REMIND_DAYS.includes(daysOverdue)) {
+            continue;
           }
+
+          const usersToNotify = await getUsersToNotifyForTicket(
+            ticket.id,
+            ticket.assignedTo,
+            ticket.createdBy
+          );
+
+          await TicketsSideEffectHandler.createEtaBreachActivities({
+            ticketId: ticket.id,
+            xyneId: ticket.xyneId,
+            channelId: ticket.channelId,
+            userIds: usersToNotify,
+            actorAction: 'eta_breach',
+            actorId,
+            daysOverdue,
+          });
+
+          if (ticket.conversationId) {
+            await createEtaSystemMessage({
+              conversationId: ticket.conversationId,
+              content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
+              createdAt: now,
+              activityType: 'ETA',
+            });
+          }
+
+          logger.info(
+            `[ETA-DEADLINE-WORKER] Sending breach reminder for ticket ${ticket.xyneId} (${daysOverdue} days overdue)`
+          );
+        }
+
+        if (batchIndex < ticketBatches.length - 1) {
+          await sleep(ETA_REMINDER_BATCH_DELAY_MS);
         }
       }
 
@@ -105,7 +130,7 @@ class EtaDeadlineWorker {
     }
   }
 
-  private async getOpenTickets(): Promise<Array<{
+  private async getOpenTickets(today: Date): Promise<Array<{
     id: string;
     xyneId: string;
     eta: Date | null;
@@ -117,7 +142,10 @@ class EtaDeadlineWorker {
   }>> {
     return await db.ticket.findMany({
       where: {
-        eta: { not: null },
+        eta: {
+          not: null,
+          lt: today,
+        },
         statusV2: { in: OPEN_STATUSES },
       },
       select: {
