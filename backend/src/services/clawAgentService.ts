@@ -97,12 +97,58 @@ export interface ClawFeedbackPayload {
   value: 'LIKE' | 'DISLIKE';
 }
 
+
+// ============================================================================
+// S2S (server-to-server) helpers for backend-initiated claw runs
+// ============================================================================
+
+export interface S2SClawAgent {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  isDefault: boolean;
+  color: string;
+  spacesAppUserId?: string | null;
+}
+
+export interface S2SRunAgentRequest {
+  agentSlug: string;
+  task: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  callbackUrl: string;
+  conversationId?: string;
+  channelId?: string;
+  ticketIds?: string[];
+  webSearchEnabled?: boolean;
+}
+
+export interface S2SRunAgentResponse {
+  success: boolean;
+  sessionId?: string;
+  error?: string;
+}
+
+export interface ConversationInsight {
+  reasoning: string | null;
+  toolInvocations: unknown[];
+}
+
+
 // ============================================================================
 // Internal helpers
 // ============================================================================
 
 function getClawBaseUrl(): string {
   return config.xyneClaw.authUrl;
+}
+
+function getS2SHeaders(): Record<string, string> {
+  const s2sKey = config.xyneClaw.s2sKey;
+  return s2sKey ? { 'x-s2s-key': s2sKey } : {};
 }
 
 function inferMimeType(filename: string | undefined, existingMimeType: string): string {
@@ -722,4 +768,119 @@ export async function downloadClawAttachment(
     contentDisposition: response.headers.get('content-disposition'),
     contentLength: response.headers.get('content-length'),
   };
+}
+
+
+/** List enabled Claw agents via S2S (used by email auto-draft agent picker). */
+export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/agents`;
+  let res: globalThis.Response;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    throw new Error(
+      `[ClawAgentService] listS2SClawAgents: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (!res.ok) {
+    const body = await safeReadText(res);
+    throw new Error(`[ClawAgentService] listS2SClawAgents: HTTP ${res.status} — ${body}`);
+  }
+
+  const json = (await res.json()) as { success: boolean; data?: S2SClawAgent[]; error?: string };
+  if (!json.success || !Array.isArray(json.data)) {
+    throw new Error(`[ClawAgentService] listS2SClawAgents: bad response shape — ${JSON.stringify(json)}`);
+  }
+  return json.data.filter(a => a.enabled);
+}
+
+/** Run a claw agent via S2S (non-streaming, callback-based). Mirrors legacy clawClient.runAgent(). */
+export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAgentResponse> {
+  const url = config.xyneClaw.webhookUrl;
+  const sessionId = randomUUID();
+  let res: globalThis.Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
+      body: JSON.stringify({
+        s2sKey: config.xyneClaw.s2sKey,
+        sessionId,
+        agentSlug: req.agentSlug,
+        task: req.task,
+        userId: req.userId,
+        callbackUrl: req.callbackUrl,
+        ...(req.conversationId ? { conversationId: req.conversationId } : {}),
+        ...(req.channelId ? { channelId: req.channelId } : {}),
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    throw new Error(
+      `[ClawAgentService] runS2SClawAgent: failed to reach claw-auth webhook at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const json = (await res.json().catch(() => ({}))) as S2SRunAgentResponse;
+  if (!res.ok || !json.success) {
+    throw new Error(
+      `[ClawAgentService] runS2SClawAgent: webhook rejected the run (HTTP ${res.status}, error=${json.error ?? 'unknown'})`,
+    );
+  }
+  return { success: true, sessionId: json.sessionId ?? sessionId };
+}
+
+/** Fetch the latest assistant reasoning and tool invocations from a claw conversation. Used by email auto-draft. */
+export async function getConversationInsight(params: {
+  agentSlug: string;
+  conversationId: string;
+  userId: string;
+}): Promise<ConversationInsight> {
+  const { agentSlug, conversationId, userId } = params;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(conversationId)}/messages`;
+  let res: globalThis.Response;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': userId, ...getS2SHeaders() },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    throw new Error(
+      `[ClawAgentService] getConversationInsight: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (!res.ok) {
+    const body = await safeReadText(res);
+    throw new Error(`[ClawAgentService] getConversationInsight: HTTP ${res.status} — ${body}`);
+  }
+
+  const json = (await res.json()) as {
+    success?: boolean;
+    data?: Array<{ id: string; role: string; reasoning?: string | null }>;
+    invocationsByMsgId?: Record<string, unknown[]>;
+  };
+  const messages = Array.isArray(json.data) ? json.data : [];
+  const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+  const reasoning =
+    lastAssistant?.reasoning && lastAssistant.reasoning.trim() ? lastAssistant.reasoning : null;
+  const toolInvocations =
+    lastAssistant && Array.isArray(json.invocationsByMsgId?.[lastAssistant.id])
+      ? (json.invocationsByMsgId![lastAssistant.id] as unknown[])
+      : [];
+  return { reasoning, toolInvocations };
+}
+
+async function safeReadText(res: globalThis.Response): Promise<string> {
+  try {
+    return await res.text();
+  } catch {
+    return '<unreadable>';
+  }
 }

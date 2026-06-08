@@ -17,7 +17,7 @@ import { UserRepository } from '@/database/repositories/users';
 import { logger } from '@/utils/logger';
 import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma, DeskType } from '@prisma/client';
 import { db } from '@/database/client';
-import { clawClient } from '@/services/clawClient';
+import { listS2SClawAgents, getConversationInsight } from '@/services/clawAgentService';
 import { ZohoService } from '@/services/zohoService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { GoogleService } from '@/services/googleService';
@@ -605,7 +605,7 @@ export class EmailController {
         return res.json({ agents: [] });
       }
 
-      const allAgents = await clawClient.listAgents();
+      const allAgents = await listS2SClawAgents();
       const agents = allAgents
         .filter(a => a.spacesAppUserId && participantUserIds.has(a.spacesAppUserId))
         .map(a => ({ slug: a.slug, name: a.name, color: a.color }));
@@ -643,7 +643,7 @@ export class EmailController {
         return res.json({ available: false, reasoning: null, toolInvocations: [] });
       }
 
-      const insight = await clawClient.getConversationInsight({
+      const insight = await getConversationInsight({
         agentSlug,
         conversationId,
         userId: personaUserId,

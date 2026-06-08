@@ -1,217 +1,281 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { Sparkles, X, ArrowRight, ArrowUpRight } from 'lucide-react';
+import { useState, useRef, useEffect, type ReactElement } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Wand2,
+  X,
+  Sparkles,
+  ArrowRight,
+  AlignLeft,
+  CheckCheck,
+  Maximize2,
+  Minimize2,
+} from 'lucide-react';
+import { XyneAIStar } from '../../icons/xyne-ai';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
 
 export interface AIQuickRewriteAction {
   id: AIRefineQuickAction;
   label: string;
+  icon: React.ReactNode;
 }
 
-export type AIComposerPanelMode = 'quick-rewrite' | 'ask-ai';
+const QUICK_REWRITE_ACTIONS: ReadonlyArray<AIQuickRewriteAction> = [
+  { id: 'polish', label: 'Polish', icon: <AlignLeft size={14} /> },
+  { id: 'formalise', label: 'Formalize', icon: <CheckCheck size={14} /> },
+  { id: 'elaborate', label: 'Elaborate', icon: <Maximize2 size={14} /> },
+  { id: 'shorten', label: 'Shorten', icon: <Minimize2 size={14} /> },
+];
 
 interface AIComposerPanelProps {
-  mode: AIComposerPanelMode;
-  onQuickRewrite: (action: AIRefineQuickAction) => void;
-  onCustomRewrite: (instruction: string) => void;
   onAskAISubmit: (instruction: string) => void;
   onOpenAskAISidebar?: () => void;
   onClose: () => void;
   disabled?: boolean;
-  quickRewriteActions?: ReadonlyArray<AIQuickRewriteAction>;
 }
 
-const DEFAULT_QUICK_REWRITE_ACTIONS: ReadonlyArray<AIQuickRewriteAction> = [
-  { id: 'formalise', label: 'Formalize' },
-  { id: 'shorten', label: 'Shorten' },
-  { id: 'elaborate', label: 'Elaborate' },
-  { id: 'polish', label: 'Polish' },
-];
-
 export const AIComposerPanel = ({
-  mode,
-  onQuickRewrite,
-  onCustomRewrite,
   onAskAISubmit,
   onOpenAskAISidebar,
   onClose,
   disabled = false,
-  quickRewriteActions = DEFAULT_QUICK_REWRITE_ACTIONS,
 }: AIComposerPanelProps): ReactElement => {
   const [value, setValue] = useState('');
-  const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  const isAskAI = mode === 'ask-ai';
-  const [customInputVisible, setCustomInputVisible] = useState(false);
-  const showInput = isAskAI || customInputVisible;
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setCustomInputVisible(false);
-    setValue('');
-  }, [mode]);
-
-  useEffect(() => {
-    if (showInput) inputRef.current?.focus();
-  }, [showInput]);
+    inputRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    const panelHeight = panelRef.current?.clientHeight ?? 0;
-    const maxHeight = Math.max(80, Math.floor(panelHeight * 0.3));
+    const maxHeight = Math.max(80, Math.floor((containerRef.current?.clientHeight ?? 200) * 0.35));
     const next = Math.min(el.scrollHeight, maxHeight);
     el.style.height = `${next}px`;
     el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [value, showInput]);
+  }, [value]);
 
   const submitInput = (): void => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    if (isAskAI) {
-      onAskAISubmit(trimmed);
-    } else {
-      onCustomRewrite(trimmed);
-    }
+    onAskAISubmit(trimmed);
     setValue('');
   };
 
-  const title = isAskAI ? 'Ask AI' : 'Quick rewrite';
-
-  const placeholder = isAskAI
-    ? 'Ask AI to do something with full context…'
-    : 'Describe how to rewrite the text…';
-
   return (
-    <div
-      ref={panelRef}
-      className='rounded-2xl p-[1.5px] overflow-hidden flex flex-col h-full min-h-0'
-      style={{
-        background:
-          'linear-gradient(135deg, rgba(248,113,113,0.5), rgba(252,165,165,0.3), rgba(248,113,113,0.5))',
-      }}
+    <motion.div
+      ref={containerRef}
+      className='flex flex-col h-full min-h-0'
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
     >
-      <div className='rounded-[calc(1rem-1.5px)] bg-background/95 dark:bg-background/90 backdrop-blur-xl overflow-hidden flex flex-col h-full min-h-0'>
-        <div className='flex items-center justify-between px-4 py-2.5 min-h-[3rem] flex-shrink-0'>
-          <div className='flex items-center gap-2.5'>
-            <div
-              className='relative flex items-center justify-center w-6 h-6 rounded-lg'
-              style={{ background: '#F87171' }}
-            >
-              <Sparkles size={12} className='text-white' />
-            </div>
-            <span className='text-sm font-bold text-foreground'>{title}</span>
+      {/* Top bar */}
+      <div className='flex items-center justify-between px-3 py-2 flex-shrink-0'>
+        <div className='flex items-center gap-2'>
+          <div className='relative flex items-center justify-center w-5 h-5 rounded-md bg-red-400'>
+            <Sparkles size={11} className='text-white' />
           </div>
-          <div className='flex items-center gap-0.5'>
-            {onOpenAskAISidebar && (
-              <button
-                type='button'
-                onClick={onOpenAskAISidebar}
-                className='size-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                aria-label='Open Ask AI sidebar'
-                title='Open Ask AI sidebar'
-                data-track-category='AIDraft'
-                data-track-name='OpenAskAISidebarFromPanel'
-              >
-                <ArrowUpRight size={14} />
-              </button>
-            )}
+          <span className='text-xs font-semibold text-foreground'>Ask AI</span>
+        </div>
+        <div className='flex items-center gap-0.5'>
+          {onOpenAskAISidebar && (
             <button
               type='button'
-              onClick={onClose}
+              onClick={onOpenAskAISidebar}
               className='size-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-              aria-label='Close AI panel'
-              data-track-category='AIDraft'
-              data-track-name='CloseAIPanel'
+              aria-label='Open Ask AI sidebar'
+              title='Open Ask AI sidebar'
+              data-track-category='Support'
+              data-track-name='OpenAskAISidebarFromComposer'
             >
-              <X size={14} />
+              <svg
+                width='14'
+                height='14'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='2'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              >
+                <path d='M7 7h10v10' />
+                <path d='M7 17 17 7' />
+              </svg>
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={onClose}
+            className='size-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+            aria-label='Close'
+            data-track-category='Support'
+            data-track-name='CloseAIComposerPanel'
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className='flex-1 min-h-0 overflow-auto px-3 pb-2'>
+        <p className='text-[11px] text-muted-foreground mb-2'>
+          The agent will search relevant documents, tickets, and messages to ground its answer.
+        </p>
+      </div>
+
+      {/* Animated border input */}
+      <div className='flex-shrink-0 px-3 pb-3'>
+        <div className='xyne-ai-prompt-border-wrap'>
+          <div className='rounded-full bg-background flex items-end gap-1.5 px-3.5 py-2'>
+            <textarea
+              ref={inputRef}
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  submitInput();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  onClose();
+                }
+              }}
+              disabled={disabled}
+              placeholder='What do you need?'
+              rows={1}
+              className='flex-1 bg-transparent text-sm outline-none resize-none leading-snug placeholder:text-muted-foreground/50 min-h-[20px] max-h-[120px] py-0.5'
+              data-track-category='Support'
+              data-track-name='AIComposerTextareaKeydown'
+            />
+            <button
+              type='button'
+              onClick={submitInput}
+              disabled={disabled || !value.trim()}
+              className='p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0 mb-0.5'
+              aria-label='Submit'
+              data-track-category='Support'
+              data-track-name='SubmitAskAIInstruction'
+            >
+              <ArrowRight size={14} />
             </button>
           </div>
         </div>
+      </div>
+    </motion.div>
+  );
+};
 
-        {/* Quick-rewrite chips — only shown in quick-rewrite mode. The
-            preset chips fire an instant pure-LLM rewrite; the trailing
-            "Custom…" chip reveals an input below for a user-typed
-            rewrite instruction (also pure LLM). Ask-AI mode has its
-            own input and doesn't need chips. */}
-        {!isAskAI && (
-          <div className='px-4 py-3 flex flex-wrap gap-1.5 flex-shrink-0 content-start'>
-            {quickRewriteActions.map(opt => (
+// Unified dropdown menu component used in the composer toolbar
+interface AIRefineDropdownProps {
+  onQuickRewrite: (action: AIRefineQuickAction) => void;
+  onAskAI: () => void;
+  disabled?: boolean;
+}
+
+export const AIRefineDropdown = ({
+  onQuickRewrite,
+  onAskAI,
+  disabled = false,
+}: AIRefineDropdownProps): ReactElement => {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleDocClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        !buttonRef.current?.contains(target) &&
+        !(target as HTMLElement).closest('.ai-refine-menu')
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleDocClick);
+    return () => document.removeEventListener('mousedown', handleDocClick);
+  }, [open]);
+
+  return (
+    <div className='relative'>
+      <button
+        ref={buttonRef}
+        type='button'
+        onClick={() => setOpen(prev => !prev)}
+        disabled={disabled}
+        className='size-7 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+        aria-label='Refine'
+        aria-expanded={open}
+        data-track-category='Support'
+        data-track-name='ToggleAIRefineDropdown'
+      >
+        <Wand2 size={14} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className='ai-refine-menu absolute bottom-full right-0 mb-1.5 z-50 w-52 rounded-xl border border-border bg-popover shadow-lg overflow-hidden'
+            initial={{ opacity: 0, scale: 0.96, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 4 }}
+            transition={{ duration: 0.12 }}
+          >
+            {/* Quick rewrite section */}
+            <div className='px-3 pt-2.5 pb-1'>
+              <p className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'>
+                Quick rewrite
+              </p>
+            </div>
+            {QUICK_REWRITE_ACTIONS.map(action => (
               <button
-                key={opt.id}
+                key={action.id}
                 type='button'
                 disabled={disabled}
-                onClick={() => onQuickRewrite(opt.id)}
-                className='text-xs px-2.5 py-1 rounded-full border border-border bg-background text-foreground hover:border-red-300 hover:bg-red-50/70 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed self-start'
-                data-track-category='AIDraft'
-                data-track-name='QuickRewriteAction'
-                data-track-metadata={JSON.stringify({ label: opt.label })}
+                onClick={() => {
+                  onQuickRewrite(action.id);
+                  setOpen(false);
+                }}
+                className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
+                data-track-category='Support'
+                data-track-name='QuickRewrite'
+                data-track-metadata={JSON.stringify({ action: action.id })}
               >
-                {opt.label}
+                <span className='text-muted-foreground'>{action.icon}</span>
+                <span>{action.label}</span>
               </button>
             ))}
-            {!customInputVisible && (
-              <button
-                type='button'
-                disabled={disabled}
-                onClick={() => setCustomInputVisible(true)}
-                className='text-xs px-2.5 py-1 rounded-full border border-border bg-background text-foreground hover:border-red-300 hover:bg-red-50/70 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed self-start'
-                data-track-category='AIDraft'
-                data-track-name='RevealCustomRewriteInput'
-              >
-                Custom…
-              </button>
-            )}
-          </div>
-        )}
 
-        {!showInput && <div className='flex-1 min-h-0' />}
+            {/* Separator */}
+            <div className='border-t border-border my-1' />
 
-        {showInput && (
-          <>
-            <div className='flex-1 min-h-0' />
-            <div
-              className='px-4 pb-3 pt-2 flex-shrink-0'
-              style={{ borderTop: '1px solid rgba(248,113,113,0.35)' }}
-            >
-              <div className='relative'>
-                <textarea
-                  ref={inputRef}
-                  value={value}
-                  onChange={e => setValue(e.target.value)}
-                  onKeyDown={e => {
-                    // Enter submits; Shift+Enter inserts a newline.
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      submitInput();
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      onClose();
-                    }
-                  }}
-                  disabled={disabled}
-                  placeholder={placeholder}
-                  rows={1}
-                  className='w-full text-sm border border-border rounded-lg bg-background pl-3 pr-9 py-2 outline-none focus:border-red-300 placeholder:text-muted-foreground/60 disabled:opacity-50 resize-none leading-snug'
-                  data-track-category='AIDraft'
-                  data-track-name={isAskAI ? 'AskAICustomInput' : 'CustomRewriteInput'}
-                />
-                <button
-                  type='button'
-                  onClick={submitInput}
-                  disabled={disabled || !value.trim()}
-                  className='absolute right-1 top-[18px] -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-                  aria-label={isAskAI ? 'Submit Ask AI instruction' : 'Submit custom rewrite'}
-                  data-track-category='AIDraft'
-                  data-track-name={isAskAI ? 'SubmitAskAI' : 'SubmitCustomRewrite'}
-                >
-                  <ArrowRight size={14} />
-                </button>
-              </div>
+            {/* Ask AI section */}
+            <div className='px-3 pt-1 pb-1'>
+              <p className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'>
+                Ask AI
+              </p>
             </div>
-          </>
+            <button
+              type='button'
+              disabled={disabled}
+              onClick={() => {
+                onAskAI();
+                setOpen(false);
+              }}
+              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
+              data-track-category='Support'
+              data-track-name='OpenAskAIFromDropdown'
+            >
+              <span className='text-[#6276be]'>
+                <XyneAIStar size={14} />
+              </span>
+              <span>Help me draft</span>
+            </button>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
     </div>
   );
 };
