@@ -177,6 +177,20 @@ export class CallRepository {
     return result;
   }
 
+  /**
+   * Find SCHEDULED calls whose endsAt has passed (stale scheduled calls).
+   * These are calls that were never started and whose window has expired —
+   * the Bull auto-end job may have been missed or lost.
+   */
+  async findStaleScheduledCalls(): Promise<Call[]> {
+    return DatabaseClient.getInstance().call.findMany({
+      where: {
+        status: CallStatus.SCHEDULED,
+        endsAt: { lt: new Date() },
+      },
+    });
+  }
+
   async update(id: string, data: UpdateCallInput): Promise<Call> {
     const result = await DatabaseClient.getInstance().call.update({
       where: { id },

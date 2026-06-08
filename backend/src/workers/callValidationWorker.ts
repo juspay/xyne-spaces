@@ -1,10 +1,11 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { Call } from '@prisma/client';
+import { Call, CallStatus } from '@prisma/client';
 import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { callCountService } from '@/services/callCountService';
+import { recurringCallService } from '@/services/recurringCallService';
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -72,6 +73,22 @@ export class CallValidationWorker {
     try {
       logger.info('[CallValidationWorker] Starting validation cycle');
 
+      // Run both checks in parallel
+      await Promise.all([
+        this.validateLiveActiveCalls(),
+        this.cleanupStaleScheduledCalls(),
+      ]);
+
+      logger.info('[CallValidationWorker] Validation cycle completed');
+    } catch (error) {
+      logger.error('[CallValidationWorker] Error during validation cycle:', error);
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  private async validateLiveActiveCalls(): Promise<void> {
+    try {
       // Fetch all active calls
       const activeCalls = await repositories.calls.findAllActiveCalls();
 
@@ -95,12 +112,81 @@ export class CallValidationWorker {
       for (const call of activeCalls) {
         await this.validateCall(call, roomInfoMap);
       }
-
-      logger.info('[CallValidationWorker] Validation cycle completed');
     } catch (error) {
-      logger.error('[CallValidationWorker] Error during validation cycle:', error);
-    } finally {
-      this.isRunning = false;
+      logger.error('[CallValidationWorker] Error validating live active calls:', error);
+    }
+  }
+
+  /**
+   * Defense mechanism: find SCHEDULED calls whose endsAt has passed and
+   * verify there is no active LiveKit room for them. If there is no room,
+   * mark the call as ENDED. This catches cases where the Bull auto-end job
+   * was lost (e.g. Redis restart, cancelled instance chain broken, etc.).
+   */
+  private async cleanupStaleScheduledCalls(): Promise<void> {
+    try {
+      const staleCalls = await repositories.calls.findStaleScheduledCalls();
+
+      if (staleCalls.length === 0) {
+        logger.debug('[CallValidationWorker] No stale scheduled calls found');
+        return;
+      }
+
+      logger.info(`[CallValidationWorker] Found ${staleCalls.length} stale scheduled call(s) to inspect`);
+
+      // Batch-fetch room info for all stale calls
+      const roomNames = staleCalls.map(call => call.externalId);
+      const roomInfos = await livekitService.listRooms(roomNames);
+      const roomInfoMap = new Map(roomInfos.map(room => [room.name, room]));
+
+      for (const call of staleCalls) {
+        await this.endStaleScheduledCall(call, roomInfoMap);
+      }
+    } catch (error) {
+      logger.error('[CallValidationWorker] Error cleaning up stale scheduled calls:', error);
+    }
+  }
+
+  private async endStaleScheduledCall(call: Call, roomInfoMap: Map<string, any>): Promise<void> {
+    const { id: callId, externalId, recurringSeriesId } = call;
+
+    try {
+      const roomInfo = roomInfoMap.get(externalId);
+
+      if (roomInfo && roomInfo.numParticipants > 0) {
+        // A live room exists with active participants — the call is actually ongoing.
+        // The webhook will handle transitioning it to ENDED when the room finishes.
+        logger.info(
+          `[CallValidationWorker] Stale scheduled call ${externalId} has an active LiveKit room (${roomInfo.numParticipants} participant(s)) — skipping`,
+        );
+        return;
+      }
+
+      // No room or empty room — safe to end
+      await repositories.calls.update(callId, { status: CallStatus.ENDED });
+      logger.info(
+        `[CallValidationWorker] Ended stale scheduled call ${externalId} — endsAt passed with no active LiveKit room`,
+      );
+
+      // Trigger recurring series chain so the next instance gets its Bull jobs
+      if (recurringSeriesId) {
+        try {
+          await Promise.all([
+            recurringCallService.replenishInstanceBuffer(recurringSeriesId),
+            recurringCallService.scheduleJobsForNextInstance(recurringSeriesId, call.endsAt ?? new Date()),
+          ]);
+          logger.info(
+            `[CallValidationWorker] Replenished buffer and scheduled next Bull jobs for series ${recurringSeriesId}`,
+          );
+        } catch (err) {
+          logger.error(
+            `[CallValidationWorker] Failed to replenish/schedule next jobs for series ${recurringSeriesId}:`,
+            err,
+          );
+        }
+      }
+    } catch (error) {
+      logger.error(`[CallValidationWorker] Failed to clean up stale scheduled call ${externalId}:`, error);
     }
   }
 
