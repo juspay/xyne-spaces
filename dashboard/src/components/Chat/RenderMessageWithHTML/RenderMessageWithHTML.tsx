@@ -253,10 +253,17 @@ const CanvasLink = ({
   );
 };
 
-export function MentionRenderer({ userId }: { userId: string }): JSX.Element {
+export function MentionRenderer({
+  userId,
+  fallbackName,
+}: {
+  userId: string;
+  fallbackName?: string | undefined;
+}): JSX.Element {
   const context = useAuthContextValues();
   const users = useUsers();
-  const displayName = getUserDisplayNameById(users, userId);
+  const resolved = getUserDisplayNameById(users, userId);
+  const displayName = resolved === 'Unknown' && fallbackName ? fallbackName : resolved;
 
   const isCurrentUser = context.userID === userId;
 
@@ -855,8 +862,15 @@ const parseNode = (
 
   if (el.hasAttribute('data-mention') && el.getAttribute('data-mention-type') === 'user') {
     const userId = el.getAttribute('data-user-id') || '';
+    const username = el.getAttribute('data-username') || undefined;
 
-    return <MentionRenderer key={`${keyPrefix}-mention-${idx}`} userId={userId} />;
+    return (
+      <MentionRenderer
+        key={`${keyPrefix}-mention-${idx}`}
+        userId={userId}
+        fallbackName={username}
+      />
+    );
   }
 
   if (el.getAttribute('data-mention-type') === 'group') {

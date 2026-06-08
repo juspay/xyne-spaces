@@ -3033,7 +3033,16 @@ const SupportTicketDetail = ({
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {channel?.type === ChannelType.SLACK ? (
-                    <SlackThread emails={emails} />
+                    <SlackThread
+                      emails={emails}
+                      ticketId={ticket?.id}
+                      lastEmailAt={ticket?.lastEmailAt}
+                      emailReads={
+                        ticket?.emailReads as
+                          | Array<{ userId: string; lastReadEmailAt: number }>
+                          | undefined
+                      }
+                    />
                   ) : (
                     <EmailThread
                       collapseState={emailCollapseState}

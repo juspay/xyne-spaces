@@ -7,6 +7,7 @@ import { decrypt } from '@/services/encryptionService';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { logger } from '@/utils/logger';
+import { htmlToSlackMrkdwn } from '@/integrations/adapters/slack-desk/slackMrkdwn';
 
 const TAG = '[SlackDeskService]';
 
@@ -67,7 +68,8 @@ class SlackDeskService {
       senderName = user?.email ? `${user.name} <${user.email}>` : user?.name ?? senderName;
     }
 
-    // 3. Post message to Slack thread
+    const mrkdwnBody = htmlToSlackMrkdwn(body);
+
     const postMessage = async (token: string) => {
       const slackResponse = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
@@ -78,7 +80,7 @@ class SlackDeskService {
         body: JSON.stringify({
           channel: slackChannelId,
           thread_ts: threadTs,
-          text: body,
+          text: mrkdwnBody,
         }),
       });
 
