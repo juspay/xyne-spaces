@@ -43,6 +43,7 @@ import {
   serializeConversationMessageRow,
   type SerializedConversationMessageRow,
 } from '../serializers/conversationMessageSerializer';
+import { getCallTicketsCreatedFromSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 
 // Local type definitions
 interface UserInfo {
@@ -1612,6 +1613,8 @@ export class ConversationController {
         content: updatedContent,
         edited: true,
       });
+
+      getCallTicketsCreatedFromSuggestionsTotal().add(1, { workspaceId: req.user!.workspaceId! });
 
       // Get conversation for channelId
       const conversation = await this.conversationRepository.findById(conversationId);

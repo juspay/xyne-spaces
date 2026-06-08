@@ -14,6 +14,7 @@ import { pulseService, type PulseActionItem } from '@/services/pulseService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
+import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -1349,6 +1350,7 @@ Output ONLY the processed transcript, nothing else.`;
     // ── 2. Post ticket suggestions as batched separate messages ──────────────
     // Update existing ticket messages in place (preserves chat position).
     // Delete extras if batch count shrinks. Create new ones if it grows.
+    getCallTicketSuggestionsTotal().add(ticketSuggestions?.length ?? 0, { workspaceId: channel.workspaceId });
     if (ticketSuggestions && ticketSuggestions.length > 0) {
       const BATCH_SIZE = 10;
 
