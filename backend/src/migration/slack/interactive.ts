@@ -22,7 +22,8 @@ router.post('/interactive', verifySlackRequest, async (req: Request, res: Respon
     }
 
     const payload = typeof payloadString === 'string' ? JSON.parse(payloadString) : payloadString;
-    const { type, view, user, container } = payload;
+    const { type, view, user, container, team } = payload;
+    const teamId: string = team?.id ?? '';
 
     if (type === 'view_submission' && view?.callback_id === 'sync_modal') {
       const values = view.state.values || {};
@@ -158,7 +159,7 @@ router.post('/interactive', verifySlackRequest, async (req: Request, res: Respon
 
       Promise.resolve()
         .then(() =>
-          runSyncParticipants({ slackChannelId: channelId, xyneSpaceChannelId, userId: user?.id })
+          runSyncParticipants({ slackChannelId: channelId, xyneSpaceChannelId, userId: user?.id, teamId })
         )
         .catch((error) => {
           logger.error('[Migration] Error processing sync-participants', {
@@ -208,6 +209,7 @@ router.post('/interactive', verifySlackRequest, async (req: Request, res: Respon
             userToken,
             userId: user?.id,
             responseChannelId,
+            teamId,
           })
         )
         .catch((error) => {

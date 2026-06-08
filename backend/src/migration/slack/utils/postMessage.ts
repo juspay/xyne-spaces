@@ -12,15 +12,16 @@ export interface PostMessageOptions {
   text?: string;
   blocks?: any[];
   threadTs?: string; // For thread replies
+  botToken?: string; // Per-workspace bot token; falls back to config.slackBotToken
 }
 
-function getSlackClient(): WebClient | null {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) {
-    logger.warn('[Migration] SLACK_BOT_TOKEN is not set');
+function getSlackClient(token?: string): WebClient | null {
+  const resolvedToken = token || process.env.SLACK_BOT_TOKEN;
+  if (!resolvedToken) {
+    logger.warn('[Migration] No bot token available for postMessage');
     return null;
   }
-  return new WebClient(token);
+  return new WebClient(resolvedToken);
 }
 
 async function openDMConversation(client: WebClient, userId: string): Promise<string | null> {
@@ -58,14 +59,14 @@ async function getTargetChannel(
  * Posts a message to Slack (channel, thread, or DM)
  */
 export async function postMessage(options: PostMessageOptions): Promise<string | null> {
-  const { channelId, userId, text, blocks, threadTs } = options;
+  const { channelId, userId, text, blocks, threadTs, botToken } = options;
 
   if (!channelId && !userId) {
     logger.warn('[Migration] Either channelId or userId is required');
     return null;
   }
 
-  const client = getSlackClient();
+  const client = getSlackClient(botToken);
   if (!client) {
     return null;
   }

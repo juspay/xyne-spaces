@@ -6,7 +6,7 @@
 import { logger } from '../../utils/logger';
 import { getMigrationMessageBlocks, getMigrationMessageFallbackText } from './utils/blockKit';
 import { postMessage } from './utils/postMessage';
-import { extractChannelHistory , UserInfoCache, getUserInfo } from './utils/extractConversation';
+import { extractChannelHistory, extractLegacyThreadReplies, UserInfoCache, getUserInfo } from './utils/extractConversation';
 import { extractChannelMembers } from './utils/extractChannelMembers';
 import {
   findOrCreateUser,
@@ -17,6 +17,7 @@ import { ChannelParticipantRepository } from '../../database/repositories/channe
 import { UserRepository } from '../../database/repositories/users';
 import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
+import { getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
@@ -70,6 +71,10 @@ export interface MigrationInput {
   userToken?: string;
   /** Whether to post the final @channel announcement to the source Slack channel. Defaults to true. */
   postChannelAnnouncement?: boolean;
+  /** True for daily nightly runs — triggers a 30-day back-scan to pick up
+   *  today's replies on older conversations (threads whose parent was posted
+   *  before the current sync window). */
+  isDaily?: boolean;
 }
 
 export interface MigrationResult {
@@ -88,6 +93,7 @@ interface TimeBatch {
 
 interface BatchResult {
   messages: number;
+  replies: number;
 }
 
 interface ParticipantFailure {
@@ -110,7 +116,15 @@ interface UserToAdd {
 
 const BATCH_SIZE_DAYS = 30;
 const BATCH_DELAY_MS = 60000; // 1 minute
-const ENABLE_NOTIFICATIONS = config.slackMigrationNotificationsEnabled; // Controlled via SLACK_MIGRATION_NOTIFICATIONS_ENABLED env var
+/** Max combined (top-level + thread replies) messages ingested per sub-batch */
+const INGEST_SUB_BATCH_SIZE = 50;
+/** Delay between sub-batches to avoid OOM / DB spikes */
+const INGEST_SUB_BATCH_DELAY_MS = 1000; // 1 second
+
+/** Resolve per-workspace notifications flag, falling back to global config */
+function getEnableNotifications(workspaceId?: string): boolean {
+  return getBotConfigByWorkspaceId(workspaceId || '').notificationsEnabled;
+}
 
 // ============================================================================
 // Utility Functions
@@ -185,6 +199,7 @@ async function processBatch(
   externalSourceName: string,
   messageTs: string | null | undefined,
   logChannelId: string,
+  botToken?: string,
 ): Promise<BatchResult> {
   const { channelId, xyneSpaceChannelId, syncOptions, userToken } = input;
 
@@ -211,11 +226,12 @@ async function processBatch(
   const latestTimestamp = dateToUnixTimestamp(latestDate);
 
   // Notify user
-  if (ENABLE_NOTIFICATIONS && messageTs) {
+  if (getEnableNotifications(workspaceId) && messageTs) {
     await postMessage({
       channelId: logChannelId,
       text: `🔄 Processing batch ${batch.batchNumber}/${batch.totalBatches} (${batch.startDate} to ${batch.endDate})`,
       threadTs: messageTs,
+      botToken,
     });
   }
 
@@ -229,14 +245,16 @@ async function processBatch(
     includeAttachments: syncOptions?.includes('include_attachments'),
     includeDeactivatedUsers: syncOptions?.includes('include_deactivated_users'),
     includeBotMessages: syncOptions?.includes('include_bot_messages'),
-    ...(userToken && { token: userToken }),
+    token: userToken || botToken,
   });
 
-  if (ENABLE_NOTIFICATIONS && messageTs) {
+  if (getEnableNotifications(workspaceId) && messageTs) {
+    const replyCount = conversationHistory.reduce((sum, m) => sum + (m.replies?.length ?? 0), 0);
     await postMessage({
       channelId: logChannelId,
-      text: `✅ Batch ${batch.batchNumber}/${batch.totalBatches} extracted: ${conversationHistory.length} messages`,
+      text: `✅ Batch ${batch.batchNumber}/${batch.totalBatches} extracted: ${conversationHistory.length} top-level messages, ${replyCount} thread replies`,
       threadTs: messageTs,
+      botToken,
     });
   }
 
@@ -245,25 +263,72 @@ async function processBatch(
     if (!xyneChannel) {
       throw new Error('workspaceId is required for Slack conversation ingestion');
     }
-    await ingestConversationSlack({
-      slackMessages: conversationHistory,
-      externalSourceName,
-      channelId: xyneSpaceChannelId,
-      workspaceId,
-      ...(input.userToken && { userToken: input.userToken }),
+
+    // ── Sub-batch ingestion: chunk into groups of INGEST_SUB_BATCH_SIZE ────
+    // Each message's "weight" = 1 (top-level) + number of thread replies.
+    // We accumulate messages until the running weight would exceed the limit,
+    // then flush and wait 1 second before continuing. This prevents OOM and
+    // DB spikes when a single 30-day batch contains thousands of thread replies.
+    const subBatches: (typeof conversationHistory)[] = [];
+    let currentSubBatch: typeof conversationHistory = [];
+    let currentWeight = 0;
+
+    for (const msg of conversationHistory) {
+      const msgWeight = 1 + (msg.replies?.length ?? 0);
+      if (currentWeight + msgWeight > INGEST_SUB_BATCH_SIZE && currentSubBatch.length > 0) {
+        subBatches.push(currentSubBatch);
+        currentSubBatch = [];
+        currentWeight = 0;
+      }
+      currentSubBatch.push(msg);
+      currentWeight += msgWeight;
+    }
+    if (currentSubBatch.length > 0) subBatches.push(currentSubBatch);
+
+    logger.info('[Migration] Ingesting sub-batches', {
+      channelId,
+      totalSubBatches: subBatches.length,
+      subBatchSize: INGEST_SUB_BATCH_SIZE,
     });
 
-    if (ENABLE_NOTIFICATIONS && messageTs) {
+    for (let si = 0; si < subBatches.length; si++) {
+      const subBatch = subBatches[si];
+      const subBatchReplies = subBatch.reduce((s, m) => s + (m.replies?.length ?? 0), 0);
+
+      logger.info(`[Migration] Ingesting sub-batch ${si + 1}/${subBatches.length}`, {
+        topLevel: subBatch.length,
+        replies: subBatchReplies,
+      });
+
+      await ingestConversationSlack({
+        slackMessages: subBatch,
+        externalSourceName,
+        channelId: xyneSpaceChannelId,
+        workspaceId,
+        ...(input.userToken && { userToken: input.userToken }),
+        ...(botToken && { botToken }),
+      });
+
+      if (si < subBatches.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, INGEST_SUB_BATCH_DELAY_MS));
+      }
+    }
+
+    if (getEnableNotifications(workspaceId) && messageTs) {
+      const totalReplies = conversationHistory.reduce((s, m) => s + (m.replies?.length ?? 0), 0);
       await postMessage({
         channelId: logChannelId,
-        text: `✅ Batch ${batch.batchNumber}/${batch.totalBatches} ingested`,
+        text: `✅ Batch ${batch.batchNumber}/${batch.totalBatches} ingested: ${conversationHistory.length} top-level messages, ${totalReplies} thread replies (${subBatches.length} sub-batch${subBatches.length !== 1 ? 'es' : ''})`,
         threadTs: messageTs,
+        botToken,
       });
     }
   }
 
+  const totalReplies = conversationHistory.reduce((s, m) => s + (m.replies?.length ?? 0), 0);
   return {
     messages: conversationHistory.length,
+    replies: totalReplies,
   };
 }
 
@@ -284,8 +349,10 @@ async function validateInput(input: MigrationInput): Promise<void> {
     const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
 
     if (!xyneChannel) {
-      if (ENABLE_NOTIFICATIONS && input.userId && config.slackBotToken) {
-        const client = new WebClient(config.slackBotToken);
+      const wsId = xyneChannel ? (xyneChannel as any).workspaceId : '';
+      const vBotToken = getBotConfigByWorkspaceId(wsId).slackBotToken;
+      if (getEnableNotifications(wsId) && input.userId && vBotToken) {
+        const client = new WebClient(vBotToken);
         await client.chat.postEphemeral({
           channel: input.channelId,
           user: input.userId,
@@ -327,10 +394,16 @@ export async function resolveAndCreateChannelUsers(
     xyneChannelId,
   });
 
+  // Resolve workspaceId up front so we can use per-workspace bot token
+  const resolveChannelRepo = new ChannelRepository();
+  const resolvedChannel = await resolveChannelRepo.findById(xyneChannelId);
+  const resolvedWorkspaceId = resolvedChannel?.workspaceId ?? '';
+  const resolvedBotToken = getBotConfigByWorkspaceId(resolvedWorkspaceId).slackBotToken;
+
   // Fetch channel info to get the creator
   let channelCreatorSlackId: string | undefined;
   try {
-    const client = new WebClient(config.slackBotToken);
+    const client = new WebClient(resolvedBotToken);
     const channelInfo = await client.conversations.info({ channel: slackChannelId });
     channelCreatorSlackId = channelInfo.channel?.creator;
     logger.info('[Migration] Channel creator fetched', { slackChannelId, channelCreatorSlackId });
@@ -341,7 +414,7 @@ export async function resolveAndCreateChannelUsers(
     });
   }
 
-  const channelMemberIds = await extractChannelMembers(slackChannelId);
+  const channelMemberIds = await extractChannelMembers(slackChannelId, resolvedBotToken);
   const userRepo = new UserRepository();
   const channelRepo = new ChannelRepository();
   const userInfoCache: UserInfoCache = new Map();
@@ -355,7 +428,7 @@ export async function resolveAndCreateChannelUsers(
 
   for (const memberId of channelMemberIds) {
     try {
-      const userInfo = await getUserInfo(memberId, userInfoCache, workspaceId);
+      const userInfo = await getUserInfo(memberId, userInfoCache, workspaceId, resolvedBotToken);
       if (userInfo?.isBot) {
         logger.info('[Migration] Skipping bot member', { memberId });
         continue;
@@ -535,6 +608,7 @@ export async function addChannelParticipantsBeforeMigration(
   const workspaceId = channel?.workspaceId ?? '';
 
   const channelParticipantRepo = new ChannelParticipantRepository();
+  const botToken = getBotConfigByWorkspaceId(workspaceId).slackBotToken;
 
   const creatorUser = channelCreatorSlackId
     ? usersToBeAdded.find((u) => u.slackUserId === channelCreatorSlackId)
@@ -575,19 +649,21 @@ export async function addChannelParticipantsBeforeMigration(
           xyneChannelId, batchNum, totalBatches,
           addedCount: result.addedCount, existingCount: result.existingCount,
         });
-        if (ENABLE_NOTIFICATIONS) {
+        if (getEnableNotifications(workspaceId)) {
           await postMessage({
             channelId: logChannelId,
             text: `✅ Batch ${batchNum}/${totalBatches}: added ${result.addedCount} participant(s).`,
             threadTs,
+            botToken,
           });
         }
         if (i + BATCH_SIZE < memberUserIds.length) {
-          if (ENABLE_NOTIFICATIONS) {
+          if (getEnableNotifications(workspaceId)) {
             await postMessage({
               channelId: logChannelId,
               text: `⏳ Waiting 60 seconds before next batch...`,
               threadTs,
+              botToken,
             });
           }
           await new Promise((resolve) => setTimeout(resolve, PARTICIPANT_BATCH_DELAY_MS));
@@ -619,9 +695,11 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
   let messageTs: string | null = null;
 
   // All progress/error messages go to the dedicated log channel if configured,
-  // falling back to the source channel. The final @channel announcement always
-  // goes to the source channel regardless.
-  const logChannelId = config.slackMigrationLogChannelId || input.channelId!;
+  // falling back to the source channel.
+  // workspaceId resolved from the channel; defaults applied in getBotConfigByWorkspaceId
+  let wsConfig = getBotConfigByWorkspaceId(config.defaultWorkspaceId || '');
+  // resolvedLogChannelId is re-set after workspaceId is known inside the try block
+  let resolvedLogChannelId = wsConfig.slackMigrationLogChannelId || input.channelId!;
 
   try {
     // Validate input
@@ -634,9 +712,12 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       if (xyneChannel) {
         const channelName = xyneChannel.name;
         const workspaceId = xyneChannel.workspaceId;
+        wsConfig = getBotConfigByWorkspaceId(workspaceId);
         xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${input.xyneSpaceChannelId}|${channelName}>`;
       }
     }
+    // Re-resolve resolvedLogChannelId now that we have the real workspaceId config
+    resolvedLogChannelId = wsConfig.slackMigrationLogChannelId || input.channelId!;
 
     // Post initial message to log channel
     const blocks = getMigrationMessageBlocks({
@@ -647,11 +728,12 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     });
     const fallbackText = getMigrationMessageFallbackText(input.syncDate!);
 
-    messageTs = ENABLE_NOTIFICATIONS
+    messageTs = wsConfig.notificationsEnabled
       ? await postMessage({
-          channelId: logChannelId,
+          channelId: resolvedLogChannelId,
           text: fallbackText,
           blocks,
+          botToken: wsConfig.slackBotToken,
         })
       : null;
 
@@ -662,11 +744,12 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     // ingestion (Step 3) so that Zero has 0 subscribers during the bulk write.
     let resolvedUsers: { usersToBeAdded: UserToAdd[]; channelCreatorSlackId: string | undefined } | null = null;
     if (input.xyneSpaceChannelId) {
-      if (ENABLE_NOTIFICATIONS && messageTs) {
+      if (wsConfig.notificationsEnabled && messageTs) {
         await postMessage({
-          channelId: logChannelId,
+          channelId: resolvedLogChannelId,
           text: '🔄 Resolving channel members...',
           threadTs: messageTs,
+          botToken: wsConfig.slackBotToken,
         });
       }
       resolvedUsers = await resolveAndCreateChannelUsers(input.channelId!, input.xyneSpaceChannelId);
@@ -677,11 +760,12 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     // fan-out to connected clients occurs during ingestion.
     const batches = createTimeBatches(input.syncDate!, input.syncEndDate);
 
-    if (ENABLE_NOTIFICATIONS && messageTs) {
+    if (wsConfig.notificationsEnabled && messageTs) {
       await postMessage({
-        channelId: logChannelId,
+        channelId: resolvedLogChannelId,
         text: `🔄 Migration initiated - Processing ${batches.length} batches (${BATCH_SIZE_DAYS} days each)`,
         threadTs: messageTs,
+        botToken: wsConfig.slackBotToken,
       });
     }
 
@@ -690,21 +774,24 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
     // Process batches
     let totalMessages = 0;
+    let totalReplies = 0;
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
 
       try {
-        const result = await processBatch(batch, input, externalSourceName, messageTs, logChannelId);
+        const result = await processBatch(batch, input, externalSourceName, messageTs, resolvedLogChannelId, wsConfig.slackBotToken);
         totalMessages += result.messages;
+        totalReplies += result.replies;
 
         // Delay between batches (except last)
         if (i < batches.length - 1) {
-          if (ENABLE_NOTIFICATIONS && messageTs) {
+          if (wsConfig.notificationsEnabled && messageTs) {
             await postMessage({
-              channelId: logChannelId,
+              channelId: resolvedLogChannelId,
               text: `⏳ Waiting ${BATCH_DELAY_MS / 1000} seconds before next batch...`,
               threadTs: messageTs,
+              botToken: wsConfig.slackBotToken,
             });
           }
 
@@ -716,16 +803,114 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
           error: error instanceof Error ? error.message : 'Unknown error',
         });
 
-        if (ENABLE_NOTIFICATIONS && messageTs) {
+        if (wsConfig.notificationsEnabled && messageTs) {
           await postMessage({
-            channelId: logChannelId,
+            channelId: resolvedLogChannelId,
             text: `❌ Batch ${batch.batchNumber}/${batch.totalBatches} failed: ${
               error instanceof Error ? error.message : 'Unknown error'
             }`,
             threadTs: messageTs,
+            botToken: wsConfig.slackBotToken,
           });
         }
         // Continue with next batch
+      }
+    }
+
+    // ── Step 2b: legacy thread replies (daily mode only) ─────────────────────
+    // Scan the past 30 days of channel history and ingest any replies posted
+    // TODAY on threads whose parent message predates the sync window.
+    if (input.isDaily && input.channelId && input.xyneSpaceChannelId) {
+      try {
+        const channelRepo = new ChannelRepository();
+        const xyneChannelForLegacy = await channelRepo.findById(input.xyneSpaceChannelId);
+        const legacyWorkspaceId = xyneChannelForLegacy?.workspaceId || config.defaultWorkspaceId;
+
+        // repliesSinceTs = start of the sync day (same as what processBatch used as oldest)
+        const syncDayStart = new Date(input.syncDate!);
+        syncDayStart.setHours(0, 0, 0, 0);
+        const repliesSinceTs = dateToUnixTimestamp(syncDayStart);
+
+        // scanOldestTs = 30 days before the sync day
+        const scanStart = new Date(syncDayStart);
+        scanStart.setDate(scanStart.getDate() - 30);
+        const scanOldestTs = dateToUnixTimestamp(scanStart);
+
+        if (wsConfig.notificationsEnabled && messageTs) {
+          await postMessage({
+            channelId: resolvedLogChannelId,
+            text: '🔄 Scanning for replies on older threads...',
+            threadTs: messageTs,
+            botToken: wsConfig.slackBotToken,
+          });
+        }
+
+        const legacyMessages = await extractLegacyThreadReplies({
+          channelId: input.channelId,
+          workspaceId: legacyWorkspaceId!,
+          repliesSinceTs,
+          scanOldestTs,
+          includeAttachments: input.syncOptions?.includes('include_attachments'),
+          includeDeactivatedUsers: input.syncOptions?.includes('include_deactivated_users'),
+          includeBotMessages: input.syncOptions?.includes('include_bot_messages'),
+          token: input.userToken || wsConfig.slackBotToken,
+        });
+
+        if (legacyMessages.length > 0 && xyneChannelForLegacy) {
+          const externalSourceNameLegacy = `slackMigration-${input.channelId}`;
+
+          // Sub-batch legacy messages using the same weight-based OOM protection
+          // as processBatch (weight = 1 top-level + N replies per message).
+          const legacySubBatches: (typeof legacyMessages)[] = [];
+          let legacyCurrent: typeof legacyMessages = [];
+          let legacyWeight = 0;
+          for (const msg of legacyMessages) {
+            const msgWeight = 1 + (msg.replies?.length ?? 0);
+            if (legacyWeight + msgWeight > INGEST_SUB_BATCH_SIZE && legacyCurrent.length > 0) {
+              legacySubBatches.push(legacyCurrent);
+              legacyCurrent = [];
+              legacyWeight = 0;
+            }
+            legacyCurrent.push(msg);
+            legacyWeight += msgWeight;
+          }
+          if (legacyCurrent.length > 0) legacySubBatches.push(legacyCurrent);
+
+          for (let lsi = 0; lsi < legacySubBatches.length; lsi++) {
+            await ingestConversationSlack({
+              slackMessages: legacySubBatches[lsi],
+              externalSourceName: externalSourceNameLegacy,
+              channelId: input.xyneSpaceChannelId,
+              workspaceId: legacyWorkspaceId!,
+              ...(input.userToken && { userToken: input.userToken }),
+              ...(wsConfig.slackBotToken && { botToken: wsConfig.slackBotToken }),
+            });
+            if (lsi < legacySubBatches.length - 1) {
+              await new Promise((resolve) => setTimeout(resolve, INGEST_SUB_BATCH_DELAY_MS));
+            }
+          }
+
+          totalMessages += legacyMessages.length;
+
+          if (wsConfig.notificationsEnabled && messageTs) {
+            await postMessage({
+              channelId: resolvedLogChannelId,
+              text: `✅ Ingested ${legacyMessages.length} legacy thread(s) with new replies`,
+              threadTs: messageTs,
+              botToken: wsConfig.slackBotToken,
+            });
+          }
+        } else {
+          logger.info('[Migration] No legacy thread replies found for daily sync', {
+            channelId: input.channelId,
+          });
+        }
+      } catch (error) {
+        // Non-fatal: log and continue so the main migration result is not affected
+        logger.error('[Migration] Legacy thread replies scan failed', {
+          channelId: input.channelId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
       }
     }
 
@@ -734,11 +919,12 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     //  - Zero subscribers are added for the first time → one bulk sync per client
     //  - conversationSeenCutoffAt = now → no unread badge for migrated content
     if (resolvedUsers && input.xyneSpaceChannelId) {
-      if (ENABLE_NOTIFICATIONS && messageTs) {
+      if (wsConfig.notificationsEnabled && messageTs) {
         await postMessage({
-          channelId: logChannelId,
+          channelId: resolvedLogChannelId,
           text: '🔄 Adding channel participants...',
           threadTs: messageTs,
+          botToken: wsConfig.slackBotToken,
         });
       }
       await addChannelParticipantsAfterMigration(
@@ -749,24 +935,26 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     }
 
     // Post final summary to log channel (threaded)
-    if (ENABLE_NOTIFICATIONS && messageTs) {
+    if (wsConfig.notificationsEnabled && messageTs) {
       if (input.xyneSpaceChannelId) {
         await postMessage({
-          channelId: logChannelId,
-          text: `🎉 Migration complete!\n\nTotal messages: ${totalMessages}`,
+          channelId: resolvedLogChannelId,
+          text: `🎉 Migration complete!\n\nTop-level messages: ${totalMessages}\nThread replies: ${totalReplies}\nTotal: ${totalMessages + totalReplies}`,
           threadTs: messageTs,
+          botToken: wsConfig.slackBotToken,
         });
       } else {
         await postMessage({
-          channelId: logChannelId,
-          text: `🎉 Extraction complete!\n\nTotal messages extracted: ${totalMessages}\n⚠️ No Xyne channel selected - ingestion skipped`,
+          channelId: resolvedLogChannelId,
+          text: `🎉 Extraction complete!\n\nTop-level messages extracted: ${totalMessages}\nThread replies: ${totalReplies}\n⚠️ No Xyne channel selected - ingestion skipped`,
           threadTs: messageTs,
+          botToken: wsConfig.slackBotToken,
         });
       }
     }
 
     // Final @channel announcement always goes to the source channel
-    if (ENABLE_NOTIFICATIONS && input.postChannelAnnouncement !== false) {
+    if (wsConfig.notificationsEnabled && input.postChannelAnnouncement !== false) {
       let xyneSpaceWorkspaceId: string | undefined;
       if (input.xyneSpaceChannelId) {
         const channelRepo2 = new ChannelRepository();
@@ -777,12 +965,14 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         ? `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${input.xyneSpaceChannelId}|Xyne Spaces>`
         : 'Xyne Spaces';
       let finalMessage = `<!channel> This Channel has been migrated to ${xyneSpacesLink}. Please move your conversations there only this channel will be soon archived.`;
-      if (config.slackMigrationFinalMessage) {
-        finalMessage += `\n${config.slackMigrationFinalMessage}`;
+      const finalMsgSuffix = wsConfig.migrationFinalMessage;
+      if (finalMsgSuffix) {
+        finalMessage += `\n${finalMsgSuffix}`;
       }
       await postMessage({
         channelId: input.channelId!,
         text: finalMessage,
+        botToken: wsConfig.slackBotToken,
       });
     }
 
@@ -802,12 +992,13 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       error: errorMessage,
     });
 
-    if (messageTs && ENABLE_NOTIFICATIONS) {
+    if (messageTs && wsConfig.notificationsEnabled) {
       try {
         await postMessage({
-          channelId: logChannelId,
+          channelId: resolvedLogChannelId,
           threadTs: messageTs,
           text: `❌ Migration failed: ${errorMessage}`,
+          botToken: wsConfig.slackBotToken,
         });
       } catch (error) {
         logger.error('[Migration] postMessage failed', {
@@ -868,8 +1059,6 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
         return d.toISOString().split('T')[0];
       })();
 
-  const logChannelId = config.slackMigrationLogChannelId || responseChannelId || dmChannelId;
-
   logger.info('[MigrationDM] Starting DM migration', {
     dmChannelId,
     xyneSpaceChannelId,
@@ -878,14 +1067,16 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
   });
 
   let messageTs: string | null = null;
+  let dmBotToken: string | undefined;
 
   try {
     // Validate xyneSpaceChannelId exists in DB
     const channelRepo = new ChannelRepository();
     const xyneChannel = await channelRepo.findById(xyneSpaceChannelId);
     if (!xyneChannel) {
-      if (ENABLE_NOTIFICATIONS && userId && config.slackBotToken && responseChannelId) {
-        const client = new WebClient(config.slackBotToken);
+      const dmWsConfig = getBotConfigByWorkspaceId(config.defaultWorkspaceId || '');
+      if (getEnableNotifications(config.defaultWorkspaceId) && userId && dmWsConfig.slackBotToken && responseChannelId) {
+        const client = new WebClient(dmWsConfig.slackBotToken);
         await client.chat.postEphemeral({
           channel: responseChannelId,
           user: userId,
@@ -897,6 +1088,9 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
 
     const channelName = xyneChannel.name;
     const xyneSpaceWorkspaceId = xyneChannel.workspaceId;
+    const dmWsConfig = getBotConfigByWorkspaceId(xyneSpaceWorkspaceId);
+    dmBotToken = dmWsConfig.slackBotToken;
+    const dmLogChannelId = dmWsConfig.slackMigrationLogChannelId || responseChannelId || dmChannelId;
     const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${xyneSpaceChannelId}|${channelName}>`;
 
     // Post thread-starter to log channel
@@ -907,26 +1101,28 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
     });
     const fallbackText = getMigrationMessageFallbackText(effectiveSyncDate);
 
-    messageTs = ENABLE_NOTIFICATIONS
-      ? await postMessage({ channelId: logChannelId, text: fallbackText, blocks })
+    messageTs = getEnableNotifications(xyneSpaceWorkspaceId)
+      ? await postMessage({ channelId: dmLogChannelId, text: fallbackText, blocks, botToken: dmBotToken })
       : null;
 
-    if (ENABLE_NOTIFICATIONS && messageTs) {
+    if (getEnableNotifications(xyneSpaceWorkspaceId) && messageTs) {
       await postMessage({
-        channelId: logChannelId,
+        channelId: dmLogChannelId,
         text: `🔄 DM migration initiated for <#${dmChannelId}> → ${xyneSpaceChannelLink}`,
         threadTs: messageTs,
+        botToken: dmBotToken,
       });
     }
 
     // Create time batches and process
     const batches = createTimeBatches(effectiveSyncDate);
 
-    if (ENABLE_NOTIFICATIONS && messageTs) {
+    if (getEnableNotifications(xyneSpaceWorkspaceId) && messageTs) {
       await postMessage({
-        channelId: logChannelId,
+        channelId: dmLogChannelId,
         text: `🔄 Processing ${batches.length} batch(es) of ${BATCH_SIZE_DAYS} days each`,
         threadTs: messageTs,
+        botToken: dmBotToken,
       });
     }
 
@@ -937,12 +1133,12 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
       syncDate: effectiveSyncDate,
       userId,
       syncOptions: [
-        'include_attachments',      // include file attachments
-        'include_threads',           // include thread replies (common in DMs)
-        'include_deactivated_users', // preserve history from users who left
-        'include_bot_messages',      // include bot messages (e.g. workflow notifications)
+        'include_attachments',
+        'include_threads',
+        'include_deactivated_users',
+        'include_bot_messages',
       ],
-      userToken,      // user's personal xoxp token — required to read DM history
+      userToken,
     };
 
     let totalMessages = 0;
@@ -950,15 +1146,16 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
       try {
-        const result = await processBatch(batch, migrationInput, externalSourceName, messageTs, logChannelId);
+        const result = await processBatch(batch, migrationInput, externalSourceName, messageTs, dmLogChannelId, dmWsConfig.slackBotToken);
         totalMessages += result.messages;
 
         if (i < batches.length - 1) {
-          if (ENABLE_NOTIFICATIONS && messageTs) {
+          if (getEnableNotifications(xyneSpaceWorkspaceId) && messageTs) {
             await postMessage({
-              channelId: logChannelId,
+              channelId: dmLogChannelId,
               text: `⏳ Waiting ${BATCH_DELAY_MS / 1000}s before next batch…`,
               threadTs: messageTs,
+              botToken: dmBotToken,
             });
           }
           await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
@@ -969,42 +1166,45 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
           error: error instanceof Error ? error.message : 'Unknown error',
         });
 
-        if (ENABLE_NOTIFICATIONS && messageTs) {
+        if (getEnableNotifications(xyneSpaceWorkspaceId) && messageTs) {
           await postMessage({
-            channelId: logChannelId,
+            channelId: dmLogChannelId,
             text: `❌ Batch ${batch.batchNumber}/${batch.totalBatches} failed: ${
               error instanceof Error ? error.message : 'Unknown error'
             }`,
             threadTs: messageTs,
+            botToken: dmBotToken,
           });
         }
         // Continue with next batch
       }
     }
 
-    if (ENABLE_NOTIFICATIONS && messageTs) {
+    if (getEnableNotifications(xyneSpaceWorkspaceId) && messageTs) {
       await postMessage({
-        channelId: logChannelId,
+        channelId: dmLogChannelId,
         text: `🎉 DM migration complete! Total messages migrated: ${totalMessages}`,
         threadTs: messageTs,
+        botToken: dmBotToken,
       });
     }
 
     logger.info('[MigrationDM] DM migration completed', { totalMessages, dmChannelId });
-
-    // Pinned messages are now handled inline during extractChannelHistory (same mechanism as /sync)
 
     return { success: true, channelId: dmChannelId };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error('[MigrationDM] DM migration failed', { error: errorMessage });
 
-    if (messageTs && ENABLE_NOTIFICATIONS) {
+    // dmLogChannelId may not be set if error thrown before channel lookup
+    const errLogChannel = dmChannelId;
+    if (messageTs && getEnableNotifications(config.defaultWorkspaceId)) {
       try {
         await postMessage({
-          channelId: logChannelId,
+          channelId: errLogChannel,
           threadTs: messageTs,
           text: `❌ DM migration failed: ${errorMessage}`,
+          botToken: dmBotToken,
         });
       } catch (postError) {
         logger.error('[MigrationDM] postMessage failed', {

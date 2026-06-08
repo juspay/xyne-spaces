@@ -4,6 +4,7 @@ import { logger } from '../../utils/logger';
 import { fetchPinnedMessageTimestamps } from './utils/extractConversation';
 import { postMessage } from './utils/postMessage';
 import { checkUserAuthorization } from './command';
+import { getBotConfigByTeamId } from './slackMigrationBotConfig';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { MessageRepository } from '../../database/repositories/messageRepository';
@@ -11,9 +12,9 @@ import { ConversationRepository } from '../../database/repositories/conversation
 
 export async function handleSyncPinnedMessagesCommand(req: Request, res: Response): Promise<Response> {
   try {
-    const { channel_id, user_id } = req.body;
+    const { channel_id, user_id, team_id } = req.body;
 
-    const authResult = await checkUserAuthorization(user_id);
+    const authResult = await checkUserAuthorization(user_id, team_id);
     if (!authResult.authorized) {
       logger.warn('[Migration] Unauthorized user attempted /sync-pinned-messages command', { user_id });
       return res.status(200).json({
@@ -22,10 +23,12 @@ export async function handleSyncPinnedMessagesCommand(req: Request, res: Respons
       });
     }
 
+    const botToken = getBotConfigByTeamId(team_id).slackBotToken;
+
     res.status(200).json({ response_type: 'ephemeral', text: '🔄 Syncing pinned messages...' });
 
     Promise.resolve()
-      .then(() => syncPinnedMessages({ slackChannelId: channel_id }))
+      .then(() => syncPinnedMessages({ slackChannelId: channel_id, botToken }))
       .catch((error) => {
         logger.error('[Migration] Error syncing pinned messages', {
           error: error instanceof Error ? error.message : 'Unknown error',
@@ -46,8 +49,10 @@ export async function handleSyncPinnedMessagesCommand(req: Request, res: Respons
 
 export async function syncPinnedMessages({
   slackChannelId,
+  botToken,
 }: {
   slackChannelId: string;
+  botToken?: string;
 }): Promise<void> {
   const externalSourceRepo = new ExternalSourceRepository();
   const externalMessageRepo = new ExternalMessageRepository();
@@ -56,14 +61,14 @@ export async function syncPinnedMessages({
 
   const externalSource = await externalSourceRepo.findByName(`slackMigration-${slackChannelId}`);
   if (!externalSource) {
-    await postMessage({ channelId: slackChannelId, text: '❌ This channel has not been migrated yet. Run `/sync` first.' });
+    await postMessage({ channelId: slackChannelId, text: '❌ This channel has not been migrated yet. Run `/sync` first.', botToken });
     return;
   }
 
-  const token = process.env.SLACK_BOT_TOKEN;
+  const token = botToken || process.env.SLACK_BOT_TOKEN;
   if (!token) {
-    logger.error('[SyncPins] SLACK_BOT_TOKEN is not set');
-    await postMessage({ channelId: slackChannelId, text: '❌ Slack integration is not configured.' });
+    logger.error('[SyncPins] No bot token available');
+    await postMessage({ channelId: slackChannelId, text: '❌ Slack integration is not configured.', botToken });
     return;
   }
 
@@ -71,7 +76,7 @@ export async function syncPinnedMessages({
   const pinnedTs = await fetchPinnedMessageTimestamps(client, slackChannelId);
 
   if (pinnedTs.size === 0) {
-    await postMessage({ channelId: slackChannelId, text: '✅ No pinned messages found in this channel.' });
+    await postMessage({ channelId: slackChannelId, text: '✅ No pinned messages found in this channel.', botToken });
     return;
   }
 
@@ -100,5 +105,5 @@ export async function syncPinnedMessages({
   logger.info('[SyncPins] Pin sync complete', { slackChannelId, pinnedCount, skippedCount });
 
   const skippedNote = skippedCount > 0 ? ` ${skippedCount} message(s) skipped (pinned after migration window).` : '';
-  await postMessage({ channelId: slackChannelId, text: `✅ Pinned ${pinnedCount} conversation(s).${skippedNote}` });
+  await postMessage({ channelId: slackChannelId, text: `✅ Pinned ${pinnedCount} conversation(s).${skippedNote}`, botToken });
 }
