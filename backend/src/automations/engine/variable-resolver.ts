@@ -85,11 +85,7 @@ function stringifyForTemplate(value: unknown): string {
       return String(value);
     }
   }
-  if (typeof value === 'string') {
-    const encoded = JSON.stringify(value);
-    return encoded.slice(1, -1);
-  }
-  return String(value);
+  return typeof value === 'string' ? value : String(value);
 }
 
 export const variableResolver = new VariableResolver();
