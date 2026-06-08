@@ -142,7 +142,7 @@ export class TicketRepository {
 
     const stageEnteredAt = new Date();
     // Only create TicketStageEta entry if the selected stage has ETA
-    if (selectedStage.eta !== null && selectedStage.eta > 0) {
+    if (!data.skipStageEta && selectedStage.eta !== null && selectedStage.eta > 0) {
       const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta);
       await db.ticketStageEta.create({
         data: {

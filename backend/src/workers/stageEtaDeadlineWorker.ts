@@ -14,6 +14,22 @@ import {
 
 // Window for initial breach notification (30 minutes)
 const BREACH_WINDOW_MS = 30 * 60 * 1000;
+const STAGE_ETA_REMINDER_BATCH_SIZE = 50;
+const STAGE_ETA_REMINDER_BATCH_DELAY_MS = 1000;
+
+const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
+  if (chunkSize <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
+};
+
+const sleep = async (ms: number): Promise<void> => {
+  if (ms <= 0) return;
+  await new Promise(resolve => setTimeout(resolve, ms));
+};
 
 class StageEtaDeadlineWorker {
   private isInitialized = false;
@@ -102,6 +118,7 @@ class StageEtaDeadlineWorker {
       where: {
         ticketId: { in: tickets.map(t => t.id) },
         stageLeftAt: null,
+        stageEta: { lte: now },
       },
     });
 
@@ -117,75 +134,79 @@ class StageEtaDeadlineWorker {
     const ticketMap = new Map(tickets.map(t => [t.id, t]));
     const stageMap = new Map(stages.map(s => [s.id, s]));
 
-    for (const entry of activeStageEntries) {
-      const ticket = ticketMap.get(entry.ticketId);
-      const stage = stageMap.get(entry.stageId);
+    const entryBatches = chunkArray(activeStageEntries, STAGE_ETA_REMINDER_BATCH_SIZE);
 
-      if (!ticket || !stage) continue;
-
-      // Get bot actorId for this ticket's workspace
-      const actorId = await getTicketBotActorId(ticket.workspaceId);
-
-      // Skip if stage ETA is not set on the board (ETA was disabled after entry was created)
-      if (stage.eta === null || stage.eta === 0) continue;
-
-      // Get stage name from stage entry and compare with ticket's current stage
-      if (!stage || stage.name !== ticket.stageName) continue;
-
-      const stageEta = new Date(entry.stageEta!);
-
-      // Check if stage ETA is breached
-      if (stageEta > now) continue; // Not yet breached
-
-      const timeSinceBreach = now.getTime() - stageEta.getTime();
-      const daysOverdue = calculateDaysOverdueExact(stageEta, now);
-
-      // Determine if we should send notification:
-      // 1. Initial breach: within last 30 mins
-      // 2. Follow-up: at same time every subsequent day (within 30 min window)
-      const isInitialBreach = timeSinceBreach <= BREACH_WINDOW_MS;
-      const isFollowUpTime = timeSinceBreach > BREACH_WINDOW_MS && isSameTimeDaily(stageEta, now);
-
-      if (!isInitialBreach && !isFollowUpTime) continue;
-
-      // Create message based on whether it's initial breach or follow-up
-      const overdueText = daysOverdue === 0 ? 'due today' : `overdue (${daysOverdue} days)`;
-      const message = isInitialBreach
-        ? `Ticket ${ticket.xyneId} stage "${stage.name}" is ${overdueText}`
-        : `Reminder: Ticket ${ticket.xyneId} stage "${stage.name}" is still ${overdueText}`;
-
-      // Create activities for users using helper (includes assignedTo, createdBy, and form field users)
-      const usersToNotify = await getUsersToNotifyForTicket(
-        ticket.id,
-        ticket.assignedTo,
-        ticket.createdBy
-      );
-
-      await TicketsSideEffectHandler.createEtaBreachActivities({
-        ticketId: ticket.id,
-        xyneId: ticket.xyneId,
-        channelId: ticket.channelId,
-        userIds: usersToNotify,
-        actorAction: 'stage_eta_breach',
-        actorId,
-        stageName: stage.name,
-        daysOverdue,
-      });
-
-      // Send message
-      if (ticket.conversationId) {
-        await createEtaSystemMessage({
-          conversationId: ticket.conversationId,
-          content: message,
-          createdAt: now,
-          activityType: 'STAGE_ETA',
-          stageId: stage.id,
-        });
-      }
+    for (let batchIndex = 0; batchIndex < entryBatches.length; batchIndex += 1) {
+      const entryBatch = entryBatches[batchIndex]!;
 
       logger.info(
-        `[STAGE-ETA-DEADLINE-WORKER] ${isInitialBreach ? 'Initial breach' : 'Follow-up'} reminder for ticket ${ticket.xyneId} stage "${stage.name}" (${daysOverdue} days overdue)`
+        `[STAGE-ETA-DEADLINE-WORKER] Processing stage ETA batch ${batchIndex + 1}/${entryBatches.length} (${entryBatch.length} entries)`
       );
+
+      for (const entry of entryBatch) {
+        const ticket = ticketMap.get(entry.ticketId);
+        const stage = stageMap.get(entry.stageId);
+
+        if (!ticket || !stage) continue;
+
+        const actorId = await getTicketBotActorId(ticket.workspaceId);
+
+        // Skip if stage ETA is not set on the board (ETA was disabled after entry was created)
+        if (stage.eta === null || stage.eta === 0) continue;
+
+        // Get stage name from stage entry and compare with ticket's current stage
+        if (stage.name !== ticket.stageName) continue;
+
+        const stageEta = new Date(entry.stageEta!);
+        if (stageEta > now) continue;
+
+        const timeSinceBreach = now.getTime() - stageEta.getTime();
+        const daysOverdue = calculateDaysOverdueExact(stageEta, now);
+        const isInitialBreach = timeSinceBreach <= BREACH_WINDOW_MS;
+        const isFollowUpTime = timeSinceBreach > BREACH_WINDOW_MS && isSameTimeDaily(stageEta, now);
+
+        if (!isInitialBreach && !isFollowUpTime) continue;
+
+        const overdueText = daysOverdue === 0 ? 'due today' : `overdue (${daysOverdue} days)`;
+        const message = isInitialBreach
+          ? `Ticket ${ticket.xyneId} stage "${stage.name}" is ${overdueText}`
+          : `Reminder: Ticket ${ticket.xyneId} stage "${stage.name}" is still ${overdueText}`;
+
+        const usersToNotify = await getUsersToNotifyForTicket(
+          ticket.id,
+          ticket.assignedTo,
+          ticket.createdBy
+        );
+
+        await TicketsSideEffectHandler.createEtaBreachActivities({
+          ticketId: ticket.id,
+          xyneId: ticket.xyneId,
+          channelId: ticket.channelId,
+          userIds: usersToNotify,
+          actorAction: 'stage_eta_breach',
+          actorId,
+          stageName: stage.name,
+          daysOverdue,
+        });
+
+        if (ticket.conversationId) {
+          await createEtaSystemMessage({
+            conversationId: ticket.conversationId,
+            content: message,
+            createdAt: now,
+            activityType: 'STAGE_ETA',
+            stageId: stage.id,
+          });
+        }
+
+        logger.info(
+          `[STAGE-ETA-DEADLINE-WORKER] ${isInitialBreach ? 'Initial breach' : 'Follow-up'} reminder for ticket ${ticket.xyneId} stage "${stage.name}" (${daysOverdue} days overdue)`
+        );
+      }
+
+      if (batchIndex < entryBatches.length - 1) {
+        await sleep(STAGE_ETA_REMINDER_BATCH_DELAY_MS);
+      }
     }
   }
 

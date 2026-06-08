@@ -30,6 +30,7 @@ export interface CreateTicketRequest {
   dynamicFields?: Record<string, string>; // Dynamic form field values for the ticket
   workflowType?: string; // Optional workflow type for automation
   stageName?: string; // Optional stage name for the ticket
+  skipStageEta?: boolean; // Skip creating active stage ETA tracking entry
   tags?: string[]; // Optional tags for categorization
   merchantId?: string; // Merchant ID to which the ticket is linked
   ticketType?: string; // Lookup value from lookup_values table (type=TICKET_TYPE)

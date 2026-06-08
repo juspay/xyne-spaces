@@ -9,7 +9,7 @@ export interface StageEtaDeadlineJobData {
   type: StageEtaDeadlineJobType;
 }
 
-const THIRTY_MIN_CRON = '*/30 * * * *';
+const ONE_HOUR_CRON = '0 * * * *';
 
 
 class StageEtaDeadlineQueue {
@@ -62,11 +62,11 @@ class StageEtaDeadlineQueue {
       'check-stage-eta-deadlines',
       { type: 'check-stage-eta-deadlines' },
       {
-        repeat: { cron: THIRTY_MIN_CRON },
+        repeat: { cron: ONE_HOUR_CRON },
         jobId: 'stage-eta-deadline-check-repeatable',
       }
     );
-    logger.info('[STAGE-ETA-DEADLINE] Scheduled repeatable job: check-stage-eta-deadlines (every 30 mins)');
+    logger.info('[STAGE-ETA-DEADLINE] Scheduled repeatable job: check-stage-eta-deadlines (every hour)');
   }
 
   private setupEventListeners(): void {
