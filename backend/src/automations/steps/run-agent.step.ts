@@ -185,7 +185,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
 export const runAgentStep = new RunAgentStep();
 
 function buildCallbackUrl(executionId: string, stepName: string): string {
-  return `${config.backendUrl.replace(/\/$/, '')}/api/internal/automations/claw-callback/${encodeURIComponent(executionId)}/${encodeURIComponent(stepName)}`;
+  return `${config.xyneClaw.callbackUrl.replace(/\/$/, '')}/api/internal/automations/claw-callback/${encodeURIComponent(executionId)}/${encodeURIComponent(stepName)}`;
 }
 
 async function resolveRunUserId(agentSlug: string, fallbackUserId: string): Promise<string> {

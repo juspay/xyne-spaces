@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
+import { OutputSchemaSchema } from '../engine/declared-schema';
 import { decryptHeaderValue, isSensitiveHeader } from '../engine/webhook-step-encryption';
 import { logger } from '@/utils/logger';
 
@@ -47,6 +48,9 @@ const TriggerWebhookConfigSchema = z.object({
     .max(10 * 60 * 1000)
     .default(10_000)
     .describe('Request timeout in milliseconds. Max 600000 (10 minutes).'),
+  responseSchema: OutputSchemaSchema.default({}).describe(
+    'Expected JSON shape of the response body. Declared keys surface as nested variables under responseJson for downstream steps. Leaves are "string" | "number" | "boolean" | "object" | "array".',
+  ),
 });
 
 const TriggerWebhookOutputSchema = z.object({

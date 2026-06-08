@@ -14,6 +14,10 @@ import { Popover } from '../../../ui/Popover/Popover';
 import { resolveSchema } from '../SchemaForm/SchemaForm.utils';
 import type { JsonSchema } from '../../Automation.types';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
+import {
+  buildOutputSchemaFromRunAgentConfig,
+  buildOutputSchemaFromWebhookConfig,
+} from '../AutomationBuilder.utils';
 import { WebhookStepForm } from './WebhookStepForm';
 import { RunAgentStepForm } from './RunAgentStepForm';
 import { SendMessageStepForm } from './SendMessageStepForm';
@@ -174,7 +178,13 @@ export function StepCard({
                 open={peekOpen}
                 onToggle={() => setPeekOpen(prev => !prev)}
                 configSchema={schema.configSchema}
-                outputSchema={schema.outputSchema}
+                outputSchema={
+                  step.type === 'RUN_AGENT'
+                    ? buildOutputSchemaFromRunAgentConfig(step.config)
+                    : step.type === 'TRIGGER_WEBHOOK'
+                      ? buildOutputSchemaFromWebhookConfig(step.config)
+                      : schema.outputSchema
+                }
               />
               {step.type === 'TRIGGER_WEBHOOK' ? (
                 <WebhookStepForm
@@ -183,6 +193,7 @@ export function StepCard({
                   issues={issues ?? null}
                   pathPrefix={pathPrefix}
                   variableSources={variableSources}
+                  readOnly={readOnly}
                 />
               ) : step.type === 'RUN_AGENT' ? (
                 <RunAgentStepForm
