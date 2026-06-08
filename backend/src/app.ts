@@ -14,6 +14,7 @@ import { requestLogger } from '@/middleware/requestLogger';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
+import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
 import { DatabaseClient } from '@/database/client';
 import webhookRoutes from '@/routes/webhooks';
@@ -279,6 +280,8 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
+    // Claw MCP route (user + app auth) — must be before /api/query
+    this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
     this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
 
     // Commit analysis routes (auth and ACL required)
@@ -399,6 +402,8 @@ export class App {
     this.app.use('/api/public/users', publicUserRoutes);
 
     // Protected routes (auth first, then ACL middleware)
+    // Claw MCP route (user + app auth) — must be before /api/tickets
+    this.app.use('/api/tickets/claw', authenticateUserOrApp, ticketRoutes);
     this.app.use(
       '/api/tickets',
       authMiddleware.authenticate,
@@ -439,6 +444,8 @@ export class App {
     // New chat schema routes
     this.app.use('/api/integrations/microsoft', microsoftDeskAuthRoutes); // Microsoft email channel OAuth (auth handled per-route)
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
+    // Claw MCP route (user + app auth) — must be before /api/conversations
+    this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
@@ -449,6 +456,8 @@ export class App {
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
+    // Claw MCP route (user + app auth) — must be before /api/calls
+    this.app.use('/api/calls/claw', authenticateUserOrApp, callRoutes);
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
@@ -480,6 +489,9 @@ export class App {
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
+    this.app.use('/api/canvas/claw', authenticateUserOrApp, canvasRoutes);
+    this.app.use('/api/docs/claw', authenticateUserOrApp, docsRoutes);
+    this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
 
     
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)

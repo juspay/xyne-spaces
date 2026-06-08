@@ -3,6 +3,7 @@ import multer from 'multer';
 import { memoryController } from '@/controllers/memoryController';
 import { documentController } from '@/controllers/documentController';
 import { authMiddleware } from '@/middleware/auth';
+import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { authorize } from '@/middleware/authorize';
 import { validateZod } from '@/middleware/validation';
 import { AccessType } from '@prisma/client';
@@ -73,6 +74,8 @@ const memoryUpdateSchema = z.object({
 router.post('/search', authMiddleware.authenticate, validateZod(memorySearchSchema), memoryController.searchMemoryDocuments);
 
 
+router.post('/claw/search', authenticateUserOrApp, validateZod(memorySearchSchema), memoryController.searchMemoryDocuments);
+
 /**
   * @route PATCH /api/memory/:docId
   * @desc Update a memory document (partial update)
@@ -105,6 +108,8 @@ router.post('/turn', authMiddleware.authenticate, memoryController.bufferSession
   * @body VespaMemoryDocument
   */
 router.post('/index', authMiddleware.authenticate, memoryController.indexMemoryDocument);
+
+router.post('/claw/index', authenticateUserOrApp, memoryController.indexMemoryDocument);
 
 /**
   * Validation schema for POST /memory/replaceSession
