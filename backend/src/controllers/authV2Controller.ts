@@ -447,12 +447,15 @@ export class AuthV2Controller {
 
       // Store pending auth data in cookie for later loginWorkspace/createOrg call
       const isProduction = process.env.NODE_ENV === 'production';
-      res.cookie('google_access_token', JSON.stringify({
-        user: googleUserData,
+      res.cookie('google_access_token', jwt.sign({
+        googleId: googleUserData.googleId,
+        email: googleUserData.email,
+        name: googleUserData.name,
+        picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token,
         accessToken: access_token,
-      }), {
+      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -776,12 +779,15 @@ export class AuthV2Controller {
       const effectiveInvitationId = stateData.invitationId || invitationId;
       if (effectiveInvitationId) {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
-        res.cookie('google_access_token', JSON.stringify({
-          user: googleUserData,
+        res.cookie('google_access_token', jwt.sign({
+          googleId: googleUserData.googleId,
+          email: googleUserData.email,
+          name: googleUserData.name,
+          picture: googleUserData.picture,
           provider: AuthProvider.GOOGLE,
           refreshToken: refresh_token,
           accessToken: access_token,
-        }), {
+        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'strict' as const,
@@ -855,12 +861,15 @@ export class AuthV2Controller {
       }
 
       // Store pending auth data for later loginWorkspace/createOrg call (multi-workspace case)
-      res.cookie('google_access_token', JSON.stringify({
-        user: googleUserData,
+      res.cookie('google_access_token', jwt.sign({
+        googleId: googleUserData.googleId,
+        email: googleUserData.email,
+        name: googleUserData.name,
+        picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token,
         accessToken: access_token,
-      }), {
+      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -993,13 +1002,15 @@ export class AuthV2Controller {
       };
 
       // Store all Google auth data in one cookie (until workspace selection)
-      const customToken = {
-        user: googleUserData,
+      res.cookie('google_access_token', jwt.sign({
+        googleId: googleUserData.googleId,
+        email: googleUserData.email,
+        name: googleUserData.name,
+        picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token || null,
         accessToken: access_token || null,
-      };
-      res.cookie('google_access_token', JSON.stringify(customToken), cookieOptions);
+      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), cookieOptions);
       logger.info(`[${requestId}] Stored pending auth data for workspace selection`);
 
       /**
@@ -1761,11 +1772,8 @@ export class AuthV2Controller {
   };
 
   /**
-   * This function is only to handle BACKWARD COMPATIBILITY for the old google_access_token cookie format (raw JWT string).
-   * Parses the google_access_token cookie, supporting both formats:
-   * - NEW format: JSON object { user, provider, refreshToken, accessToken }
-   * - OLD format: Raw JWT string (pre-workspace dashboard)
-   * Returns null if the cookie cannot be parsed.
+   * Parses and verifies the google_access_token pending-auth cookie (signed JWT).
+   * Returns null if the token is invalid, expired, or cannot be verified.
    */
   private parsePendingAuthCookie(cookie: string): {
     oauthUserData: { email: string; name: string; googleId?: string; providerUserId?: string; picture?: string };
@@ -1774,35 +1782,29 @@ export class AuthV2Controller {
     pendingAccessToken: string | undefined;
   } | null {
     try {
-      const parsed = JSON.parse(cookie);
-      if (parsed.user && parsed.provider) {
-        return {
-          oauthUserData: { ...parsed.user, name: parsed.user.name || '' },
-          provider: parsed.provider,
-          pendingRefreshToken: parsed.refreshToken,
-          pendingAccessToken: parsed.accessToken,
-        };
-      }
-      throw new Error('Invalid auth data structure');
+      const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
+        googleId?: string;
+        email?: string;
+        name?: string;
+        picture?: string;
+        provider?: string;
+        refreshToken?: string | null;
+        accessToken?: string | null;
+      };
+      if (!decoded?.email) throw new Error('Invalid JWT payload');
+      return {
+        oauthUserData: {
+          email: decoded.email,
+          name: decoded.name || '',
+          googleId: decoded.googleId,
+          picture: decoded.picture,
+        },
+        provider: decoded.provider || AuthProvider.GOOGLE,
+        pendingRefreshToken: decoded.refreshToken || undefined,
+        pendingAccessToken: decoded.accessToken || undefined,
+      };
     } catch {
-      // OLD FORMAT: Raw JWT string - decode it
-      try {
-        const decoded = jwt.decode(cookie) as { sub?: string; email?: string; name?: string; picture?: string } | null;
-        if (!decoded?.email) throw new Error('Invalid JWT token');
-        return {
-          oauthUserData: {
-            email: decoded.email,
-            name: decoded.name || '',
-            googleId: decoded.sub,
-            picture: decoded.picture,
-          },
-          provider: AuthProvider.GOOGLE,
-          pendingRefreshToken: undefined,
-          pendingAccessToken: undefined,
-        };
-      } catch {
-        return null;
-      }
+      return null;
     }
   }
 }
