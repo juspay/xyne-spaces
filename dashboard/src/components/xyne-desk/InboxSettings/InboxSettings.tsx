@@ -86,7 +86,8 @@ export const InboxSettings: React.FC<InboxSettingsProps> = ({
               <p className='text-sm font-medium text-foreground'>Auto AI draft</p>
               <p className='text-xs text-muted-foreground mt-0.5'>
                 Automatically prepare an AI-generated draft reply each time a new email arrives on
-                this desk. Drafts are shared across the team.
+                this desk. Drafts are shared across the team. The selected agent is also used when
+                you click Ask AI later while composing a reply.
               </p>
             </div>
           </div>

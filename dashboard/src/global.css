@@ -3019,3 +3019,23 @@ img.inline-emoji,
     0 0 10px 1px rgba(255, 100, 0, 0.25),
     0 0 22px 4px rgba(255, 137, 4, 0.15);
 }
+
+/* Mellower version for AI prompt bar — slower rotation, softer colors, gentle glow */
+.xyne-ai-prompt-border-wrap {
+  background: conic-gradient(
+    from var(--xyne-angle),
+    rgba(255, 79, 79, 0.55) 0%,
+    rgba(255, 137, 4, 0.4) 20%,
+    rgba(255, 214, 168, 0.5) 40%,
+    rgba(255, 255, 255, 0.85) 50%,
+    rgba(255, 214, 168, 0.5) 60%,
+    rgba(255, 137, 4, 0.4) 80%,
+    rgba(255, 79, 79, 0.55) 100%
+  );
+  animation: xyne-border-spin 4.5s linear infinite;
+  padding: 1.5px;
+  border-radius: 9999px;
+  box-shadow:
+    0 0 8px 0 rgba(255, 100, 0, 0.08),
+    0 0 16px 2px rgba(255, 137, 4, 0.05);
+}

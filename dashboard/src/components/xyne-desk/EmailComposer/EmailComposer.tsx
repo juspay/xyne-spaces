@@ -21,7 +21,6 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import { XyneAIStar } from '../../icons/xyne-ai';
 import { toast } from 'sonner';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -61,7 +60,7 @@ import { DraftCard } from '../DraftCard/DraftCard';
 import { EmailEditor } from '../EmailEditor/EmailEditor';
 import { EmailTagWithAvatar } from '../EmailTagWithAvatar/EmailTagWithAvatar';
 import { RecipientSuggestionsDropdown } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
-import { AIComposerPanel } from '../AIComposerPanel/AIComposerPanel';
+import { AIComposerPanel, AIRefineDropdown } from '../AIComposerPanel/AIComposerPanel';
 import { stripCitationMarks } from '../../ui/TipTapExtensions/CitationMark';
 import { Popover } from '../../ui/Popover/Popover';
 
@@ -497,6 +496,7 @@ export const EmailComposer = ({
       cc: ccEmails,
       signatureWillBeAppended: !!selectedSignatureId,
     },
+    agentSlug: channelPreference?.autoDraftAgentSlug ?? 'draft-agent',
   });
 
   useEffect(() => {
@@ -2081,16 +2081,7 @@ export const EmailComposer = ({
             const aiPanel =
               aiPanelMode !== null ? (
                 <AIComposerPanel
-                  mode={aiPanelMode}
                   disabled={aiDraft.isStreaming}
-                  onQuickRewrite={action => {
-                    const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
-                    void aiDraft.quickRewrite(action, source);
-                  }}
-                  onCustomRewrite={instruction => {
-                    const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
-                    void aiDraft.customRewrite(instruction, source);
-                  }}
                   onAskAISubmit={instruction => {
                     aiDraft.askAIRefine(instruction, stripHtml(emailContent));
                   }}
@@ -2299,56 +2290,15 @@ export const EmailComposer = ({
             ) : null}
           </div>
           <div className='flex items-center gap-0.5'>
-            {features.showAI &&
-              ((): ReactElement => {
-                const noBodyToRewrite = !hasEmailBody && !aiDraft.isDraftActive;
-                const wandDisabled =
-                  aiDraft.isStreaming || (!isComposeMode && !emails?.length) || noBodyToRewrite;
-                const wandTooltip = noBodyToRewrite
-                  ? 'Write something first to rewrite it'
-                  : 'Customize with AI';
-                return (
-                  <Tooltip content={wandTooltip} side='bottom' delayDuration={300}>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setAIPanelMode('quick-rewrite');
-                      }}
-                      disabled={wandDisabled}
-                      className='size-7 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-                      aria-label='Customize draft with AI'
-                      data-track-category='Support'
-                      data-track-name='OpenAIPanel'
-                      data-track-metadata={JSON.stringify({
-                        hasExistingText: hasEmailBody,
-                      })}
-                    >
-                      <Wand2 size={14} />
-                    </button>
-                  </Tooltip>
-                );
-              })()}
-
             {features.showAI && (
-              <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
-                <button
-                  type='button'
-                  onClick={() => setAIPanelMode(aiPanelMode === 'ask-ai' ? null : 'ask-ai')}
-                  disabled={aiDraft.isStreaming}
-                  className={cn(
-                    'size-7 flex items-center justify-center rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed',
-                    aiPanelMode === 'ask-ai' ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
-                  )}
-                  aria-label='Ask AI'
-                  aria-pressed={aiPanelMode === 'ask-ai'}
-                  data-track-category='Support'
-                  data-track-name='OpenAskAI'
-                >
-                  <span className='inline-flex animate-ai-pop'>
-                    <XyneAIStar size={14} />
-                  </span>
-                </button>
-              </Tooltip>
+              <AIRefineDropdown
+                onQuickRewrite={action => {
+                  const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
+                  void aiDraft.quickRewrite(action, source);
+                }}
+                onAskAI={() => setAIPanelMode('ask-ai')}
+                disabled={aiDraft.isStreaming}
+              />
             )}
 
             {onClose && features.showDiscardButton && (
