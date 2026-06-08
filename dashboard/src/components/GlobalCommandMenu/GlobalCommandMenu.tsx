@@ -6,7 +6,7 @@ import {
   useAllVisibleChannels,
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
-import { isDeskChannelType, ChannelType } from '@xyne/shared';
+import { ChannelScopeType, isDeskChannelType, ChannelType } from '@xyne/shared';
 import {
   groupChannelsByScope,
   isDMChannel,
@@ -20,6 +20,19 @@ import { VisibleChannel } from '../../machines/stateMachine';
 import { useShortcutById } from '../../shortcuts';
 import type { MentionData } from '../Chat/ChatDirectory/MentionNode';
 import { useUsers } from '../../hooks/useUsers';
+
+export function resolveDMChannelName(
+  channel: { name: string; scopeType: ChannelScopeType },
+  currentUserId: string,
+  allUsers: { id: string; name?: string | null }[],
+): string {
+  if (!isDMChannel(channel.scopeType)) return channel.name;
+  const participantIds = getDMParticipantIdsToFetch(channel, currentUserId);
+  const names = participantIds
+    .map(id => allUsers.find(u => u.id === id)?.name)
+    .filter((name): name is string => !!name);
+  return names.length > 0 ? names.join(', ') : channel.name;
+}
 
 interface GlobalCommandMenuProps {
   open?: boolean;
@@ -102,16 +115,7 @@ const GlobalCommandMenu = ({
     const pathParts = location.pathname.split('/').filter(Boolean);
 
     const buildChannelMention = (channel: (typeof channelData)[number]): MentionData => {
-      let channelName = channel.name;
-      if (isDMChannel(channel.scopeType)) {
-        const participantIds = getDMParticipantIdsToFetch(channel, context.userID ?? '');
-        const participantNames = participantIds
-          .map(id => allUsers.find(u => u.id === id)?.name)
-          .filter((name): name is string => !!name);
-        if (participantNames.length > 0) {
-          channelName = participantNames.join(', ');
-        }
-      }
+      const channelName = resolveDMChannelName(channel, context.userID ?? '', allUsers);
       return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
     };
 

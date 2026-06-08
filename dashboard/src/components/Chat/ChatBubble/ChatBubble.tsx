@@ -120,6 +120,8 @@ interface ChatBubbleProps {
   onUserClick?: (userId: string) => void;
   isPrevActivity?: boolean;
   isNextActivity?: boolean;
+  linkedConversationId?: string | null;
+  afterTextContent?: React.ReactNode;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -144,6 +146,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   onUserClick,
   isPrevActivity = false,
   isNextActivity = false,
+  linkedConversationId,
+  afterTextContent,
 }) => {
   const { user } = useAuthContext();
   const { copyImage } = useClipboard();
@@ -180,7 +184,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isHighlighted, setIsHighlighted] = useState(false);
 
   useEffect(() => {
-    const highlightedConversationId = extractOriginFromHash(location.hash);
+    const highlightedConversationId = linkedConversationId ?? extractOriginFromHash(location.hash);
     const highlightedMessageId = extractMessageIdFromHash(location.hash);
 
     let shouldHighlight = false;
@@ -201,6 +205,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   }, [
     location.key,
     location.hash,
+    linkedConversationId,
     context,
     message.conversationId,
     message.messageId,
@@ -1051,6 +1056,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
+            {...(afterTextContent !== undefined && { afterTextContent })}
             {...(conversation && { conversation: conversation })}
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,

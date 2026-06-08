@@ -75,4 +75,5 @@ export interface MessageBubbleProps {
   workflowNumber?: number | undefined;
   showLinkPreview?: boolean;
   searchItemView?: boolean;
+  afterTextContent?: React.ReactNode;
 }

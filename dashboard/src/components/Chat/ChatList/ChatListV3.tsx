@@ -1285,6 +1285,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
                 projectId={projectId}
                 channelScopeType={channelScopeType}
                 handleOpenThread={handleOpenThread}
+                {...(linkedConversationId && { linkedConversationId })}
               />
             </div>
           );

@@ -7,6 +7,7 @@ import { useAILandingDefault } from './useAILandingDefault';
 import { useDebugSettings } from './useDebugSettings';
 import { useAskAIVersion } from './useAskAIVersion';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
+import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import {
   getLinkOpenExternalDefault,
@@ -37,6 +38,7 @@ export function usePreferencesState(enabled: boolean) {
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { askAIVersion, setAskAIVersion } = useAskAIVersion();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
+  const { searchMode, setSearchMode } = useSearchMode();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
     useThreadBroadcastMentions();
   const linksOpenExternalByDefault = useSyncExternalStore(
@@ -114,6 +116,8 @@ export function usePreferencesState(enabled: boolean) {
     setAskAIVersion,
     enterSendsMessage,
     setEnterSendsMessage,
+    searchMode,
+    setSearchMode,
     allowThreadBroadcastMentions,
     setAllowThreadBroadcastMentions,
     linksOpenExternalByDefault,

@@ -17,7 +17,7 @@ interface WordToken {
  * Extracts a window of text centered around the highest density of <hi> tags.
  */
 
-const getSmartSnippet = (html: string, limit: number): string => {
+export const getSmartSnippet = (html: string, limit: number): string => {
   if (!html) return '';
 
   const parser = new DOMParser();

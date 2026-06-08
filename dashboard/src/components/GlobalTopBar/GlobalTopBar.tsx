@@ -1,5 +1,6 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import * as Popover from '@radix-ui/react-popover';
 import {
   AlertCircle,
   ArrowLeft,
@@ -15,9 +16,11 @@ import {
 } from 'lucide-react';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
 import { invokeShortcut } from '../../shortcuts';
+import { useSearchMode } from '../../hooks/useSearchMode';
 import { toast } from 'sonner';
 import { Tooltip } from '../ui/Tooltip';
 import { WorkspaceSwitcher } from '../AppSidebar/WorkspaceSwitcher';
+import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
 
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 
@@ -32,9 +35,11 @@ interface GlobalTopBarProps {
 const NavigationAndSearch = (): ReactElement => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { searchMode } = useSearchMode();
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const maxIndexRef = useRef(0);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     const historyState = window.history.state as { idx?: number } | null;
@@ -45,24 +50,34 @@ const NavigationAndSearch = (): ReactElement => {
     setCanGoForward(currentIndex < maxIndexRef.current);
   }, [location]);
 
+  // Listen for Cmd+K dispatch from ChannelCommandMenu when in screen mode
+  useEffect(() => {
+    const handler = (): void => setSearchOpen(true);
+    window.addEventListener('xyne:activate-search-bar', handler);
+    return () => window.removeEventListener('xyne:activate-search-bar', handler);
+  }, []);
+
   const handleGoBack = (): void => {
-    if (canGoBack) {
-      void navigate(-1);
-    }
+    if (canGoBack) void navigate(-1);
   };
 
   const handleGoForward = (): void => {
-    if (canGoForward) {
-      void navigate(1);
-    }
+    if (canGoForward) void navigate(1);
   };
 
+  const isOnSearchScreen = location.pathname.endsWith('/search-results');
+  const searchScreenParams = new URLSearchParams(location.search);
+  const searchScreenQuery = isOnSearchScreen
+    ? (searchScreenParams.get('display') ?? searchScreenParams.get('query') ?? '')
+    : '';
+
   const handleSearchClick = (): void => {
-    // Programmatically invoke the global search shortcut (Cmd+K)
-    const success = invokeShortcut('mod+k');
-    if (!success) {
-      toast.error('Search unavailable');
+    if (searchMode === 'screen') {
+      setSearchOpen(true);
+      return;
     }
+    const success = invokeShortcut('mod+k');
+    if (!success) toast.error('Search unavailable');
   };
 
   return (
@@ -109,28 +124,75 @@ const NavigationAndSearch = (): ReactElement => {
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         onDoubleClick={e => e.stopPropagation()}
       >
-        <button
-          onClick={handleSearchClick}
-          style={{
-            backgroundColor: 'var(--nav-search-btn-bg)',
-            color: 'var(--nav-search-btn-text)',
+        <Popover.Root
+          open={searchMode === 'screen' && searchOpen}
+          onOpenChange={open => {
+            if (!open) setSearchOpen(false);
           }}
-          className='flex sm:w-[220px] md:w-[280px] lg:w-[420px] xl:w-[480px] h-[28px] px-2 items-center gap-3 text-[12px] rounded-lg cursor-pointer'
-          data-track-category='GLOBAL_TOP_BAR'
-          data-track-name='OpenSearch'
         >
-          <Search size={14} className='' />
-          <div className='flex gap-2 items-center'>
-            <span>Search</span>
-            <div className='flex items-center gap-1'>
-              <span>(</span>
-              <LucideCommand size={14} />
-              <span>+</span>
-              <span>K</span>
-              <span>)</span>
-            </div>
-          </div>
-        </button>
+          <Popover.Anchor asChild>
+            <button
+              id='global-search-bar'
+              onClick={handleSearchClick}
+              style={{
+                backgroundColor: 'var(--nav-search-btn-bg)',
+                color: 'var(--nav-search-btn-text)',
+              }}
+              className='flex sm:w-[220px] md:w-[280px] lg:w-[420px] xl:w-[480px] h-[28px] px-2 items-center gap-3 text-[12px] rounded-lg cursor-pointer'
+              data-track-category='GLOBAL_TOP_BAR'
+              data-track-name='OpenSearch'
+            >
+              <Search size={14} className='shrink-0' />
+              {isOnSearchScreen && searchScreenQuery ? (
+                <span className='truncate'>
+                  <span style={{ color: 'var(--nav-search-btn-text)', opacity: 0.6 }}>
+                    Search:{' '}
+                  </span>
+                  {searchScreenQuery}
+                </span>
+              ) : (
+                <div className='flex gap-2 items-center'>
+                  <span>Search</span>
+                  <div className='flex items-center gap-1'>
+                    <span>(</span>
+                    <LucideCommand size={14} />
+                    <span>+</span>
+                    <span>K</span>
+                    <span>)</span>
+                  </div>
+                </div>
+              )}
+            </button>
+          </Popover.Anchor>
+
+          <Popover.Portal>
+            {/* sideOffset=-28 pulls the panel up so its top edge aligns with the search pill,
+                creating the "overlay" effect. max-w-3xl matches the existing Command.Dialog width. */}
+            <Popover.Content
+              side='bottom'
+              align='start'
+              sideOffset={-28}
+              onOpenAutoFocus={e => e.preventDefault()}
+              onInteractOutside={() => setSearchOpen(false)}
+              className='z-[9999] bg-background border border-border rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D] overflow-hidden max-h-[80vh]'
+              style={{
+                width: 'calc(var(--radix-popper-anchor-width) + 16px)',
+                minWidth: '480px',
+                marginLeft: '-8px',
+              }}
+            >
+              <GlobalCommandMenu
+                inline
+                open={searchOpen}
+                onOpenChange={open => {
+                  if (!open) setSearchOpen(false);
+                }}
+                hideTabs
+              />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+
         <button
           onClick={() => void navigate('/guide')}
           style={{ color: 'var(--nav-search-btn-text)' }}

@@ -1049,6 +1049,15 @@ const parseNode = (
     props['className'] = className;
   }
 
+  // Forward data-* attributes for span elements (e.g. data-search-show-more, data-has-history)
+  if (tag === 'span') {
+    [...el.attributes].forEach(attr => {
+      if (attr.name.startsWith('data-')) {
+        props[attr.name] = attr.value;
+      }
+    });
+  }
+
   if (tag === 'ol') {
     const start = el.getAttribute('start');
     const type = el.getAttribute('type');

@@ -21,6 +21,7 @@ type ChatListItemProps = {
   measureRef?: (node: Element | null) => void;
   dataIndex?: number;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
+  linkedConversationId?: string | null;
 };
 
 const ChatListItemComponent = ({
@@ -34,6 +35,7 @@ const ChatListItemComponent = ({
   measureRef,
   dataIndex,
   onEmojiPickerOpenChange,
+  linkedConversationId,
 }: ChatListItemProps): ReactElement | null => {
   // All non-date-separator items are conversations - get conversation data first
   const conversation =
@@ -106,6 +108,7 @@ const ChatListItemComponent = ({
           onOpenThread: (e?: React.MouseEvent) => handleOpenThread(conversation.conversationId, e),
         }}
         {...(onEmojiPickerOpenChange && { onEmojiPickerOpenChange })}
+        {...(linkedConversationId !== null && { linkedConversationId })}
       />
     </div>
   );
