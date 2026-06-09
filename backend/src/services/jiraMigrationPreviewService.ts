@@ -570,10 +570,17 @@ export class JiraMigrationPreviewService {
       ...(input.filters?.creatorAccountIds?.length ? { creatorAccountIds: [...new Set(input.filters.creatorAccountIds.map(value => value.trim()).filter(Boolean))] } : {}),
       ...(input.filters?.assigneeAccountIds?.length ? { assigneeAccountIds: [...new Set(input.filters.assigneeAccountIds.map(value => value.trim()).filter(Boolean))] } : {}),
       ...(input.filters?.labels?.length ? { labels: [...new Set(input.filters.labels.map(value => value.trim()).filter(Boolean))] } : {}),
+      ...(input.filters?.epicKeys?.length ? { epicKeys: [...new Set(input.filters.epicKeys.map(value => value.trim().toUpperCase()).filter(Boolean))] } : {}),
     };
     const shouldLoadFilters =
       input.loadFilterOptions === true ||
-      Boolean(appliedFilters.reporterAccountIds?.length || appliedFilters.creatorAccountIds?.length || appliedFilters.assigneeAccountIds?.length || appliedFilters.labels?.length);
+      Boolean(
+        appliedFilters.reporterAccountIds?.length ||
+          appliedFilters.creatorAccountIds?.length ||
+          appliedFilters.assigneeAccountIds?.length ||
+          appliedFilters.labels?.length ||
+          appliedFilters.epicKeys?.length,
+      );
 
     const [
       project,
@@ -626,7 +633,13 @@ export class JiraMigrationPreviewService {
       : null;
 
     let filteredIssueCount = 0;
-    let filterOptions: JiraMigrationFilterOptions = { reporters: [], creators: [], assignees: [], labels: [] };
+    let filterOptions: JiraMigrationFilterOptions = {
+      reporters: [],
+      creators: [],
+      assignees: [],
+      labels: [],
+      epics: [],
+    };
     let orderedPreviewIssues: JiraIssue[] = [];
     let filteredStatusNames = new Set<string>();
     let responseNextPageToken: string | null = null;
