@@ -1408,6 +1408,8 @@ export const channelUserStatusTable = table('channel_user_status')
     isStarred: boolean(),
     isClosed: boolean(),
     unreadCount: number(),
+    sectionId: string().optional(),
+    sectionPosition: string().optional(),
     selectedBoardId: string().optional(),
     conversationSeenCutoffAt: number(),
     // Recap subscription fields
@@ -1418,6 +1420,21 @@ export const channelUserStatusTable = table('channel_user_status')
     mobileNotificationLevel: string(),
     isDeleted: boolean(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const channelSectionTable = table('channel_sections') // Prisma model: ChannelSection
+  .columns({
+    id: string(),
+    userId: string(),
+    workspaceId: string(),
+    name: string(),
+    emoji: string().optional(),
+    position: string(),
+    isCollapsed: boolean(),
+    isDeleted: boolean(),
+    createdAt: number(),
+    updatedAt: number().optional(),
   })
   .primaryKey('id');
 
@@ -4295,6 +4312,7 @@ export const schema = createSchema({
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
+    channelSectionTable,
     conversationTable,
     conversationParticipantTable,
     messageTable,
@@ -4481,6 +4499,7 @@ export const schema = createSchema({
 
 // Define types
 export type Schema = typeof schema;
+export type ChannelSection = Row<typeof schema.tables.channel_sections>;
 export type Agent = Row<typeof schema.tables.agents>;
 export type Model = Row<typeof schema.tables.models>;
 export type Tool = Row<typeof schema.tables.tools>;

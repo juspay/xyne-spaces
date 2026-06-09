@@ -1875,6 +1875,10 @@ export const queries = defineQueries({
     return zql.bookmarks.where('isDeleted', false).orderBy('createdAt', 'desc');
   }),
 
+  userChannelSections: defineQuery(z.object({}), () => {
+    return zql.channel_sections.where('isDeleted', false).orderBy('position', 'asc');
+  }),
+
   attachmentsByInitialMessage: defineQuery(
     z.object({ initialMessageId: z.string() }),
     ({ args: { initialMessageId } }) => {

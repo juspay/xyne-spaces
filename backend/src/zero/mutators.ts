@@ -1748,6 +1748,149 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           logger.info(`✅ [UNARCHIVE-CHANNEL] Channel ${channelId} unarchived by ${authData.sub}`);
         },
       ),
+      moveToSection: defineMutator(
+        z.object({
+          channelId: z.string(),
+          sectionId: z.string().nullable(),
+          position: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { channelId, sectionId, position, timestamp } }) => {
+          const userStatus = await tx.run(
+            zql.channel_user_status
+              .where('channelId', channelId)
+              .where('userId', authData.sub)
+              .where('isDeleted', false)
+              .one(),
+          );
+
+          if (!userStatus) {
+            throw new Error('Not a channel participant');
+          }
+
+          if (sectionId) {
+            const section = await tx.run(
+              zql.channel_sections
+                .where('id', sectionId)
+                .where('userId', authData.sub)
+                .where('isDeleted', false)
+                .one(),
+            );
+            if (!section) {
+              throw new Error('Section not found');
+            }
+          }
+
+          await tx.mutate.channel_user_status.update({
+            id: userStatus.id,
+            sectionId,
+            sectionPosition: sectionId ? position : null,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+    },
+    channelSection: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          emoji: z.string().nullable().optional(),
+          position: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, name, emoji, position, timestamp } }) => {
+          // Reject a name this user already uses in this workspace (case-insensitive).
+          const siblings = await tx.run(
+            zql.channel_sections
+              .where('userId', authData.sub)
+              .where('workspaceId', authData.workspaceId)
+              .where('isDeleted', false),
+          );
+          const normalized = name.trim().toLowerCase();
+          if (siblings.some(s => s.name.trim().toLowerCase() === normalized)) {
+            throw new Error('A section with this name already exists');
+          }
+          await tx.mutate.channel_sections.insert({
+            id,
+            userId: authData.sub,
+            workspaceId: authData.workspaceId,
+            name,
+            emoji: emoji ?? null,
+            position,
+            isCollapsed: false,
+            isDeleted: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      // One mutator for rename/emoji, collapse state, and reorder (all are field updates).
+      update: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().optional(),
+          emoji: z.string().nullable().optional(),
+          isCollapsed: z.boolean().optional(),
+          position: z.string().optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, name, emoji, isCollapsed, position, timestamp } }) => {
+          const section = await tx.run(
+            zql.channel_sections.where('id', id).where('userId', authData.sub).where('isDeleted', false).one(),
+          );
+          if (!section) {
+            throw new Error('Section not found');
+          }
+          if (name !== undefined) {
+            // Reject renaming to a name another of this user's sections already uses.
+            const normalized = name.trim().toLowerCase();
+            const siblings = await tx.run(
+              zql.channel_sections
+                .where('userId', authData.sub)
+                .where('workspaceId', section.workspaceId)
+                .where('isDeleted', false),
+            );
+            if (siblings.some(s => s.id !== id && s.name.trim().toLowerCase() === normalized)) {
+              throw new Error('A section with this name already exists');
+            }
+          }
+          await tx.mutate.channel_sections.update({
+            id,
+            ...(name !== undefined && { name }),
+            ...(emoji !== undefined && { emoji: emoji ?? null }),
+            ...(isCollapsed !== undefined && { isCollapsed }),
+            ...(position !== undefined && { position }),
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      remove: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          const section = await tx.run(
+            zql.channel_sections.where('id', id).where('userId', authData.sub).where('isDeleted', false).one(),
+          );
+          if (!section) {
+            throw new Error('Section not found');
+          }
+
+          // Detach channels in this section so they fall back to the default group.
+          const assigned = await tx.run(
+            zql.channel_user_status.where('userId', authData.sub).where('sectionId', id),
+          );
+          for (const status of assigned) {
+            await tx.mutate.channel_user_status.update({
+              id: status.id,
+              sectionId: null,
+              sectionPosition: null,
+              updatedAt: timestamp,
+            });
+          }
+
+          await tx.mutate.channel_sections.update({ id, isDeleted: true, updatedAt: timestamp });
+        },
+      ),
     },
     conversations: {
       send: defineMutator(

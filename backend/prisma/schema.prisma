@@ -1997,6 +1997,8 @@ model ChannelUserStatus {
   isStarred                 Boolean     @default(false)
   isClosed                  Boolean     @default(false) // Track if user has closed/hidden this DM
   unreadCount               Int         @default(0) // Track unread count for this channel
+  sectionId                 String?     // Custom sidebar section this channel is placed in for the user (null = default group)
+  sectionPosition           String?     // Fractional index (generateKeyBetween) within the custom section
   selectedBoardId           String?     // Track user's preferred board for this channel
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation seen by the user
   // Recap subscription fields
@@ -2022,7 +2024,26 @@ model ChannelUserStatus {
   @@index([userId, isRecapSubscribed]) // Fast recap subscriptions lookup
 
   @@index([userId, isDeleted, id])
+  @@index([userId, sectionId]) // Fast lookup of channels within a section + cleanup on section delete
   @@map("channel_user_status")
+  @@schema("public")
+}
+
+// Per-user custom sidebar sections (Slack-style). Personal to each user, scoped per workspace.
+model ChannelSection {
+  id          String    @id @default(cuid())
+  userId      String    // Owner — sections are per-user (no FK constraint)
+  workspaceId String    // Workspace scope for ACL + per-workspace sections (no FK constraint)
+  name        String    // Section label (the "tag" name)
+  emoji       String?   // Optional emoji icon
+  position    String    // Fractional index (generateKeyBetween) among the user's sections
+  isCollapsed Boolean   @default(false) // Per-user collapse state, synced across devices
+  isDeleted   Boolean   @default(false) // Soft delete flag
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime? // Nullable, set manually in code (matches ChannelUserStatus convention)
+
+  @@index([userId, workspaceId, isDeleted]) // Fast lookup of a user's sections in a workspace
+  @@map("channel_sections")
   @@schema("public")
 }
 
