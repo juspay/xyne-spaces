@@ -90,7 +90,7 @@ const InternalXyneLink = ({
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
   const channel = useChannel(parsedLink?.channelId ?? '');
-  const [ticket] = useCachedQuery(queries.ticketById({ ticketId: parsedLink?.ticketId ?? '' }), {
+  const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: parsedLink?.ticketId ?? '' }), {
     enabled: !!parsedLink?.ticketId,
   });
   const [canvas] = useCachedQuery(queries.getCanvas({ canvasId: parsedLink?.canvasId ?? '' }), {

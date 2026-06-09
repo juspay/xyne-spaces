@@ -899,6 +899,25 @@ export const ticketTagTable = table("ticket_tags")
   })
   .primaryKey("id");
 
+export const projectTagTable = table("project_tags")
+  .columns({
+    id: string(),
+    name: string(),
+    projectId: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const ticketTagMappingTable = table("ticket_tag_mappings")
+  .columns({
+    id: string(),
+    ticketId: string(),
+    tagId: string(),
+    tagName: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const ticketReferenceMappingTable = table("ticket_reference_mappings")
   .columns({
     id: string(),
@@ -4287,6 +4306,8 @@ export const schema = createSchema(
       ticketActivityTable,
       ticketEntityMappingTable,
       ticketTagTable,
+      projectTagTable,
+      ticketTagMappingTable,
       ticketReferenceMappingTable,
       ticketStageEtaTable,
       workflowTable,
@@ -4515,6 +4536,8 @@ export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
 export type TicketActivity = Row<typeof schema.tables.ticket_activities>;
 export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mappings>;
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
+export type ProjectTag = Row<typeof schema.tables.project_tags>;
+export type TicketTagMapping = Row<typeof schema.tables.ticket_tag_mappings>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;
 export type TicketStageEta = Row<typeof schema.tables.ticket_stage_eta>;
 export type Workflow = Row<typeof schema.tables.workflows>;

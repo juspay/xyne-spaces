@@ -15,7 +15,6 @@ import {
   LookupType,
   TicketPriority,
   TicketStatusV2,
-  TicketTag,
   type User as UserType,
 } from '@xyne/shared';
 import {
@@ -516,15 +515,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     debounceMs: 2000,
   });
 
-  // Query all tickets in the project to extract available tags
-  const [projectTickets] = useCachedQuery(
-    queries.ticketsByProject({ projectId: selectedChannelProjectId }),
+  // Project-level tags — lazy-loaded when the label dropdown is first opened
+  const [tagsQueried, setTagsQueried] = useState(false);
+  const [projectTags] = useCachedQuery(
+    queries.projectTagsByProjectId({ projectId: selectedChannelProjectId }),
+    { enabled: tagsQueried },
   );
 
   const userGroupOptions = useUserGroups();
 
+  const [ticketTypeQueried, setTicketTypeQueried] = useState(false);
   const [ticketTypeOptions] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
+    { enabled: ticketTypeQueried },
   );
   const users = useActiveUserSearch(assigneeSearchValue, 15);
 
@@ -1148,25 +1151,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       });
   };
 
-  // get unique tags from all project tickets
+  // get unique tags from project_tags
   const availableTags = useMemo(() => {
-    if (!projectTickets) return [];
+    if (!projectTags) return [];
 
     const tagSet = new Set<string>();
-    projectTickets.forEach(t => {
-      // Type guard to safely check for tags property
-      if ('tags' in t && Array.isArray(t.tags)) {
-        const ticketTags = t.tags as TicketTag[];
-        ticketTags.forEach(tag => {
-          if (tag?.name) {
-            tagSet.add(tag.name);
-          }
-        });
+    projectTags.forEach(t => {
+      if (t?.name) {
+        tagSet.add(t.name);
       }
     });
 
     return Array.from(tagSet).sort();
-  }, [projectTickets]);
+  }, [projectTags]);
 
   // Helper functions for dynamic field value normalization
   const getSingleStringValue = (value: string | string[]): string => {
@@ -2277,6 +2274,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       setNewTags(prev => [...prev, value]);
                       field.handleChange([...field.state.value, value]);
                     }}
+                    onOpenChange={open => {
+                      if (open && !tagsQueried) setTagsQueried(true);
+                    }}
                     placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
                     searchPlaceholder='Search labels'
                     showSearch={true}
@@ -2306,6 +2306,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     onSelect={(value: string | null) =>
                       field.handleChange(value as CreateTicketFormData['ticketType'])
                     }
+                    onOpenChange={open => {
+                      if (open) setTicketTypeQueried(true);
+                    }}
                     searchPlaceholder='ticket type'
                     placeholder='ticket type'
                     inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}

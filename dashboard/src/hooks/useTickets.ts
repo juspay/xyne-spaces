@@ -3,7 +3,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
 import { useCachedQuery } from './useCachedQuery';
 
-export type Ticket = NonNullable<QueryResultType<typeof queries.ticketById>>;
+export type Ticket = NonNullable<QueryResultType<typeof queries.ticketByIdV2>>;
 
 export interface UseTicketsResult {
   tickets: Ticket[];
@@ -18,7 +18,7 @@ export interface UseTicketsResult {
  * @returns Array containing the ticket (for backward compatibility)
  */
 export function useTickets(ticketId: string): UseTicketsResult {
-  const [ticketData, queryDetails] = useCachedQuery(queries.ticketById({ ticketId }));
+  const [ticketData, queryDetails] = useCachedQuery(queries.ticketByIdV2({ ticketId }));
 
   const processed = useMemo(() => {
     // Loading

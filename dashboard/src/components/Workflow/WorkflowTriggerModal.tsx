@@ -49,7 +49,7 @@ export default function WorkflowTriggerModal({
   const [showOptionalFields, setShowOptionalFields] = useState(false);
 
   // Fetch ticket data using Zero query
-  const ticketDataResult = useCachedQuery(queries.ticketById({ ticketId }));
+  const ticketDataResult = useCachedQuery(queries.ticketByIdV2({ ticketId }));
   const ticketData = ticketDataResult[0]; // Zero queries return arrays
 
   // Fetch workflow types using optimized hook

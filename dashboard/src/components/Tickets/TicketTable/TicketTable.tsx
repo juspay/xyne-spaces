@@ -489,15 +489,22 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           toAdd.forEach(tagName => {
             if (params.data) {
               zero.mutate(
-                mutators.ticketTag.create({ ticketId: params.data.id, tagId: uuidv4(), tagName }),
+                mutators.ticketTagV2.create({
+                  ticketId: params.data.id,
+                  tagId: uuidv4(),
+                  projectTagId: uuidv4(),
+                  mappingId: uuidv4(),
+                  projectId: params.data.projectId,
+                  tagName,
+                }),
               );
             }
           });
 
           toRemove.forEach(tagName => {
-            const tagId = oldTags.find(t => t.name === tagName)?.id;
-            if (tagId) {
-              zero.mutate(mutators.ticketTag.delete({ tagId }));
+            const tag = oldTags.find(t => t.name === tagName);
+            if (tag?.id) {
+              zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id }));
             }
           });
           return false;
@@ -573,7 +580,14 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           const existing = ticketTags?.get(ticket.id) || [];
           if (!existing.some(t => t.name === tagName)) {
             zero.mutate(
-              mutators.ticketTag.create({ ticketId: ticket.id, tagId: uuidv4(), tagName }),
+              mutators.ticketTagV2.create({
+                ticketId: ticket.id,
+                tagId: uuidv4(),
+                projectTagId: uuidv4(),
+                mappingId: uuidv4(),
+                projectId: ticket.projectId,
+                tagName,
+              }),
             );
           }
         });

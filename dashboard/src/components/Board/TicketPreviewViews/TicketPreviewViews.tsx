@@ -111,16 +111,16 @@ const TicketPreviewContent = ({
             </div>
             <div className='flex items-center gap-[6px]'>
               <div className='flex items-center gap-2 flex-wrap'>
-                {(ticket?.tags && ticket.tags.length > 0
-                  ? ticket.tags
+                {(ticket?.tagMappings && ticket.tagMappings.length > 0
+                  ? ticket.tagMappings
                   : [
-                      { name: 'Bug', color: 'bg-cyan-400' },
-                      { name: 'Feature', color: 'bg-purple-400' },
+                      { tagName: 'Bug', color: 'bg-cyan-400' },
+                      { tagName: 'Feature', color: 'bg-purple-400' },
                     ]
                 ).map((tag, idx) => {
-                  const tagName = typeof tag === 'string' ? tag : tag.name;
+                  const tagName = 'tagName' in tag ? tag.tagName : '';
                   const tagColor =
-                    typeof tag === 'string' ? 'bg-cyan-400' : tag.color || 'bg-cyan-400';
+                    'color' in tag ? (tag as { color: string }).color : 'bg-cyan-400';
                   return (
                     <span
                       key={idx}

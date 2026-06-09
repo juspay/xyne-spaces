@@ -44,6 +44,8 @@ export { TicketEntityMappingsACL } from './ticket-entity-mappings-acl';
 export { TicketReferenceMappingsACL } from './ticket-reference-mappings-acl';
 export { TicketSubTicketMappingsACL } from './ticket-sub-ticket-mappings-acl';
 export { TicketTagsACL } from './ticket-tags-acl';
+export { ProjectTagsACL } from './project-tags-acl';
+export { TicketTagMappingsACL } from './ticket-tag-mappings-acl';
 export { TicketsACL } from './tickets-acl';
 export { UserAssignmentStatesACL } from './user-assignment-states-acl';
 export { UserExpertiseMappingsACL } from './user-expertise-mappings-acl';

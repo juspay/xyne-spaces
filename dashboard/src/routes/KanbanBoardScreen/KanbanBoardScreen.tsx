@@ -66,7 +66,6 @@ import type { Stage } from './KanbanBoardScreen.types';
 import {
   getStageColor,
   getStatusColumns,
-  createTagsByTicketIdMap,
   groupTicketsByStage,
   groupTicketsByStatus,
   applyTicketFilters,
@@ -907,7 +906,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   ]);
 
   const [allProjectTickets, ticketsDetails] = useCachedQuery(
-    queries.ticketsQuery(ticketsQueryParams),
+    queries.ticketsQueryV2(ticketsQueryParams),
     {
       enabled:
         (viewMode === 'board' && !!boardId) ||
@@ -1041,7 +1040,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
-  const [allTags, allTagsDetails] = useCachedQuery(queries.getAllTicketTags());
+  const [projectTags, projectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectId({ projectId: effectiveProjectId || '' }),
+    { enabled: !!effectiveProjectId },
+  );
   const allUsers = useUsers();
   const allUserGroups = useUserGroups();
 
@@ -1059,9 +1061,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [stages]);
 
   const tagsByTicketId = useMemo(() => {
-    return createTagsByTicketIdMap(allTags);
-  }, [allTags]);
-  if (allTagsDetails.type === 'complete') logEntityTiming('tags');
+    const map = new Map<string, { id: string; name: string; ticketId: string }[]>();
+    if (!allProjectTickets) return map;
+    for (const ticket of allProjectTickets) {
+      if (ticket.tagMappings && ticket.tagMappings.length > 0) {
+        map.set(
+          ticket.id,
+          ticket.tagMappings.map(m => ({ id: m.tagId, name: m.tagName, ticketId: m.ticketId })),
+        );
+      }
+    }
+    return map;
+  }, [allProjectTickets]);
+  if (projectTagsDetails.type === 'complete') logEntityTiming('tags');
 
   // ============================================================================
   // FORM ENTITY VALUES — fetched as related data on tickets when fevFieldIds is non-empty.
@@ -1113,8 +1125,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Filter tickets based on view mode and filters.
   // NOTE: ALL filters including dynamic field filters are applied CLIENT-SIDE.
-  // formValuesByTicketId is populated when dynamic filters are active (via allFormEntityValuesForFiltering).
-  // Use deferred values to avoid blocking UI updates during board selection
   const deferredFilters = useDeferredValue(filters);
 
   const filteredTickets = useMemo(() => {
@@ -1163,7 +1173,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     showOverdueOnly,
   ]);
 
-  if (ticketsDetails.type === 'complete' && allTagsDetails.type === 'complete') {
+  if (ticketsDetails.type === 'complete' && projectTagsDetails.type === 'complete') {
     logEntityTiming('filteredTickets');
   }
 
@@ -1174,10 +1184,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [filteredTickets]);
 
   const availableTags = useMemo(() => {
-    if (!allTags || allTags.length === 0) return undefined;
-    const uniqueTags = new Set(allTags.map(tag => tag.name));
+    if (!projectTags || projectTags.length === 0) return undefined;
+    const uniqueTags = new Set(projectTags.map(tag => tag.name));
     return Array.from(uniqueTags).sort();
-  }, [allTags]);
+  }, [projectTags]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
@@ -1194,7 +1204,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [filteredTickets]);
 
-  const isTicketsSyncing = ticketsDetails.type !== 'complete' || allTagsDetails.type !== 'complete';
+  const isTicketsSyncing =
+    ticketsDetails.type !== 'complete' ||
+    (!!effectiveProjectId && projectTagsDetails.type !== 'complete');
 
   // Create a map of user ID to user name for display
   const userNamesById = useMemo(() => {

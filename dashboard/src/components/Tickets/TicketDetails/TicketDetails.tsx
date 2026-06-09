@@ -131,11 +131,6 @@ const PRIORITY_OPTIONS: TicketPriority[] = [
   TicketPriority.CRITICAL,
 ];
 
-interface TicketTag {
-  id: string;
-  name: string;
-}
-
 interface TicketReferenceWithTicket extends TicketReferenceMapping {
   targetTicket?: {
     id?: string;
@@ -366,7 +361,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
 
   // Query ticket data
-  const [ticket] = useCachedQuery(queries.ticketDetailsById({ ticketId: ticketId }));
+  const [ticket] = useCachedQuery(queries.ticketDetailsByIdV2({ ticketId: ticketId }));
   const [ticketTypeDropdownOpened, setTicketTypeDropdownOpened] = useState(false);
   const [ticketTypeLookupResult, ticketTypeLookupDetails] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
@@ -512,10 +507,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   );
   const isEmailDeskTicket = !!emailChannelPreference;
 
-  // Query all tickets in the project to extract available tags
+  // Query all tickets in the project for reference picker
   const [projectTickets] = useCachedQuery(
-    queries.ticketsByProject({ projectId: ticket?.projectId ?? '' }),
+    queries.ticketsByProjectV2({ projectId: ticket?.projectId ?? '' }),
     { enabled: !!ticket?.projectId },
+  );
+
+  // Project-level tags — lazy-loaded when tag dropdown is opened
+  const [projectTags] = useCachedQuery(
+    queries.projectTagsByProjectId({ projectId: ticket?.projectId ?? '' }),
+    { enabled: !!ticket?.projectId && showTagDropdown },
   );
 
   const [boards] = useCachedQuery(
@@ -734,26 +735,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     return result;
   }, [ticket?.ticketStageRequests, formEntityValues, stagesWithFormInfo, ticket?.stageName]);
 
-  const tags = ticket?.tags;
-  // Extract unique tags from all project tickets
+  const tags = ticket?.tagMappings;
+  // Available tags from project_tags
   const availableTags = useMemo(() => {
-    if (!projectTickets) return [];
+    if (!projectTags) return [];
 
     const tagSet = new Set<string>();
-    projectTickets.forEach(t => {
-      // Type guard to safely check for tags property
-      if ('tags' in t && Array.isArray(t.tags)) {
-        const ticketTags = t.tags as TicketTag[];
-        ticketTags.forEach(tag => {
-          if (tag?.name) {
-            tagSet.add(tag.name);
-          }
-        });
+    projectTags.forEach(t => {
+      if (t?.name) {
+        tagSet.add(t.name);
       }
     });
 
     return Array.from(tagSet).sort();
-  }, [projectTickets]);
+  }, [projectTags]);
 
   const priorityItems = useMemo(
     () => PRIORITY_OPTIONS.map(priority => ({ id: priority, name: priority })),
@@ -766,7 +761,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       tagName.toLowerCase().includes(tagSearchQuery.toLowerCase()),
     );
   }, [availableTags, tagSearchQuery]);
-  const selectedTagNames = useMemo(() => new Set(tags?.map(t => t.name)), [tags]);
+  const selectedTagNames = useMemo(() => new Set(tags?.map(t => t.tagName)), [tags]);
 
   const referencesOut = useMemo<TicketReferenceWithTicket[]>(
     () =>
@@ -785,11 +780,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const referenceBoardIds = useMemo(() => {
     if (!ticket) return [];
     const boardIds = new Set<string>();
-
-    // Add ticket's own board
-    if (ticket.boardId) {
-      boardIds.add(ticket.boardId);
-    }
 
     referencesOut.forEach(reference => {
       if (reference.targetTicket?.boardId) {
@@ -810,6 +800,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
     });
 
+    // Exclude ticket's own board — stagesByBoard already covers it
+    if (ticket.boardId) {
+      boardIds.delete(ticket.boardId);
+    }
+
     return Array.from(boardIds);
   }, [referencesOut, referencesIn, ticket, subTickets]);
   const [referenceStages] = useCachedQuery(
@@ -820,25 +815,39 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   );
   const stagesByBoardId = useMemo(() => {
     const stageMap = new Map<string, StageInfo[]>();
-    if (!referenceStages) {
-      return stageMap;
+
+    // Include current board's stages from the stagesByBoard query
+    if (stages && ticket?.boardId) {
+      stageMap.set(
+        ticket.boardId,
+        stages.map(s => ({
+          id: s.id,
+          boardId: ticket.boardId,
+          name: s.name,
+          sequenceNumber: s.sequenceNumber,
+          defaultTicketStatusV2: s.defaultTicketStatusV2,
+          eta: s.eta ?? null,
+        })),
+      );
     }
 
-    referenceStages.forEach(stage => {
-      const existing = stageMap.get(stage.boardId) ?? [];
-      existing.push({
-        id: stage.id,
-        boardId: stage.boardId,
-        name: stage.name,
-        sequenceNumber: stage.sequenceNumber,
-        defaultTicketStatusV2: stage.defaultTicketStatusV2,
-        eta: stage.eta ?? null,
+    if (referenceStages) {
+      referenceStages.forEach(stage => {
+        const existing = stageMap.get(stage.boardId) ?? [];
+        existing.push({
+          id: stage.id,
+          boardId: stage.boardId,
+          name: stage.name,
+          sequenceNumber: stage.sequenceNumber,
+          defaultTicketStatusV2: stage.defaultTicketStatusV2,
+          eta: stage.eta ?? null,
+        });
+        stageMap.set(stage.boardId, existing);
       });
-      stageMap.set(stage.boardId, existing);
-    });
+    }
 
     return stageMap;
-  }, [referenceStages]);
+  }, [referenceStages, stages, ticket?.boardId]);
   const {
     referenceError,
     isReferenceSaving,
@@ -1364,21 +1373,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleToggleTag = (tagName: string): void => {
-    const existingTag = tags?.find(t => t.name === tagName);
+    const existingTag = tags?.find(t => t.tagName === tagName);
 
     if (existingTag) {
-      // Unassign tag (remove only from ticket)
       zero.mutate(
-        mutators.ticketTag.delete({
+        mutators.ticketTagV2.delete({
           tagId: existingTag.id,
+          mappingId: existingTag.id,
         }),
       );
     } else {
-      // Assign tag
       zero.mutate(
-        mutators.ticketTag.create({
+        mutators.ticketTagV2.create({
           ticketId: ticket.id,
           tagId: uuidv4(),
+          projectTagId: uuidv4(),
+          mappingId: uuidv4(),
+          projectId: ticket.projectId,
           tagName: tagName.trim(),
         }),
       );
@@ -1389,8 +1400,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const handleRemoveTag = (tagId: string): void => {
     zero.mutate(
-      mutators.ticketTag.delete({
+      mutators.ticketTagV2.delete({
         tagId,
+        mappingId: tagId,
       }),
     );
   };
@@ -2085,7 +2097,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           >
                             {/* <Tag size={14} className={color.icon} /> */}
                             <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
-                            {tag.name}
+                            {tag.tagName}
                             {
                               <button
                                 onClick={() => void handleRemoveTag(tag.id)}
@@ -2095,7 +2107,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 data-track-name='RemoveTag'
                                 data-track-metadata={JSON.stringify({
                                   tagId: tag.id,
-                                  tagName: tag.name,
+                                  tagName: tag.tagName,
                                 })}
                               >
                                 <X size={12} />

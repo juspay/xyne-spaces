@@ -392,7 +392,8 @@ export const queries = defineQueries({
   // NOTE: Dynamic field filtering is done CLIENT-SIDE via applyTicketFilters.
   // When formEntityValueFieldIds is provided, formEntityValues are fetched as a related query
   // filtered by those fieldIds, and filtering is applied client-side.
-  ticketsQuery: defineQuery(
+  // V2: includes .related('tagMappings') for per-ticket tag display from new data model
+  ticketsQueryV2: defineQuery(
     z.object({
       viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
       projectId: z.string().optional(),
@@ -467,7 +468,8 @@ export const queries = defineQueries({
       let finalQuery = query
         .orderBy('createdAt', 'desc')
         .related('assignments')
-        .related('stageEtaEntries');
+        .related('stageEtaEntries')
+        .related('tagMappings');
 
       // Conditionally add formEntityValues related query when fieldIds are provided
       // All dynamic field filtering is done client-side via applyTicketFilters
@@ -561,49 +563,20 @@ export const queries = defineQueries({
       return query.limit(limit).related('ticket');
     },
   ),
-  ticketsForEmailChannels: defineQuery(() => {
+  ticketsForEmailChannelsV2: defineQuery(() => {
     return zql.tickets
       .whereExists('conversation', conversation =>
         conversation.whereExists('channel', channel => channel.where('type', ChannelType.EMAIL)),
       )
       .orderBy('createdAt', 'desc')
       .related('project')
-      .related('tags')
+      .related('tagMappings')
       .related('entity')
       .related('conversation');
   }),
   // Unified query for Xyne Desk: tickets scoped to a single channel.
   // channelId + isMember are required and forwarded to TicketsACL for membership gating.
-  supportTicketsFiltered: defineQuery(
-    z.object({
-      channelId: z.string().optional(),
-      merchantMid: z.string().optional(),
-    }).optional(),
-    ({ args }) => {
-      let query = zql.tickets;
-
-      // If specific channelId provided (from email channels dropdown), use direct filter
-      // Otherwise, filter by EMAIL channel type to get all email support tickets
-      if (args?.channelId) {
-        query = query.where('channelId', args.channelId);
-      } else {
-        query = query.whereExists('channel', (channel) => channel.where('type', ChannelType.EMAIL));
-      }
-
-      // Apply merchant filter using direct merchantId field
-      if (args?.merchantMid) {
-        query = query.where('merchantId', args.merchantMid);
-      }
-
-      return query
-        .orderBy('createdAt', 'desc')
-        .related('project')
-        .related('tags')
-        .related('entity')
-        .related('conversation', c => c.related('channel'));
-    },
-  ),
-  supportTicketsFilteredV2: defineQuery(
+  supportTicketsFilteredV3: defineQuery(
     z.object({
       channelId: z.string(),
       isMember: z.boolean(),
@@ -611,10 +584,8 @@ export const queries = defineQueries({
       assignedTo: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
-      aiCategory: z.array(z.string()).optional(),
-      hasAiDraft: z.boolean().optional(),
     }),
-    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft } }) => {
+    ({ args: { channelId, merchantMid, assignedTo, priority, stageName } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
@@ -633,20 +604,10 @@ export const queries = defineQueries({
         query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
       }
 
-      if (aiCategory && aiCategory.length > 0) {
-        query = query.where(({ or, cmp }) => or(...aiCategory.map((c) => cmp('aiCategory', c))));
-      }
-
-      if (hasAiDraft) {
-        query = query.where(({ exists }) =>
-          exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
-        );
-      }
-
       return query
         .orderBy('createdAt', 'desc')
         .related('project')
-        .related('tags')
+        .related('tagMappings')
         .related('entity')
         .related('conversation', c => c.related('channel'));
     },
@@ -654,23 +615,13 @@ export const queries = defineQueries({
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
   // channelId + isMember are forwarded to TicketsACL for membership gating.
   // emailDrafts is scoped to the current user (drafts are per-user private).
-  supportTicketRow: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
-    return zql.tickets
-      .where('id', id)
-      .related('project')
-      .related('tags')
-      .related('entity')
-      .related('emails')
-      .related('conversation')
-      .one();
-  }),
-  supportTicketRowV2: defineQuery(
+  supportTicketRowV3: defineQuery(
     z.object({ id: z.string(), channelId: z.string(), isMember: z.boolean() }),
     ({ ctx, args: { id } }) => {
       return zql.tickets
         .where('id', id)
         .related('project')
-        .related('tags')
+        .related('tagMappings')
         .related('entity')
         .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q =>
@@ -683,46 +634,14 @@ export const queries = defineQueries({
         .one();
     },
   ),
-  supportTicketByXyneId: defineQuery(
-    z.object({ xyneId: z.string() }),
-    ({ args: { xyneId } }) => {
-      return zql.tickets
-        .where('xyneId', xyneId)
-        .related('project')
-        .related('tags')
-        .related('entity')
-        .related('emails')
-        .related('conversation')
-        .one();
-    },
-  ),
-  supportTicketByXyneIdV2: defineQuery(
-    z.object({ xyneId: z.string(), channelId: z.string(), isMember: z.boolean() }),
-    ({ ctx, args: { xyneId } }) => {
-      return zql.tickets
-        .where('xyneId', xyneId)
-        .related('project')
-        .related('tags')
-        .related('entity')
-        .related('emails', q => q.related('attachments'))
-        .related('emailDrafts', q =>
-          q.where(({ or, cmp }) =>
-            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
-          ),
-        )
-        .related('emailReads', q => q.where('userId', ctx.userID))
-        .related('conversation')
-        .one();
-    },
-  ),
-  supportTicketByXyneIdV3: defineQuery(
+  supportTicketByXyneIdV4: defineQuery(
     z.object({ xyneId: z.string(), workspaceId: z.string(), channelId: z.string(), isMember: z.boolean() }),
     ({ ctx, args: { xyneId, workspaceId } }) => {
       return zql.tickets
         .where('xyneId', xyneId)
         .where('workspaceId', workspaceId)
         .related('project')
-        .related('tags')
+        .related('tagMappings')
         .related('entity')
         .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q =>
@@ -763,98 +682,6 @@ export const queries = defineQueries({
   // Paginated variant of supportTicketsFiltered for use with @rocicorp/zero-virtual.
   // Cursor = (lastEmailAt, id) matching the orderBy. Active threads bubble up.
   // channelId + isMember are forwarded to TicketsACL for membership gating.
-  supportTicketsPage: defineQuery(
-    z.object({
-      channelId: z.string().optional(),
-      assignedTo: z.string().optional(),
-      limit: z.number(),
-      start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
-      dir: z.literal('forward').or(z.literal('backward')),
-    }),
-    ({ args: { channelId, assignedTo, limit, start, dir } }) => {
-      let query = zql.tickets;
-
-      if (channelId) {
-        query = query.where('channelId', channelId);
-      } else {
-        query = query.whereExists('channel', (channel) => channel.where('type', ChannelType.EMAIL));
-      }
-
-      if (assignedTo) {
-        query = query.where('assignedTo', assignedTo);
-      }
-
-      const orderDirection = dir === 'forward' ? 'desc' : 'asc';
-      query = query.orderBy('createdAt', orderDirection);
-
-      if (start) {
-        query = query.start(
-          { createdAt: start.createdAt, id: start.id },
-          { inclusive: false },
-        );
-      }
-
-      return query
-        .limit(limit)
-        .related('project')
-        .related('tags')
-        .related('entity')
-        .related('emails')
-        .related('conversation');
-    },
-  ),
-  supportTicketsPageV2: defineQuery(
-    z.object({
-      channelId: z.string(),
-      isMember: z.boolean(),
-      assignedTo: z.array(z.string()).optional(),
-      priority: z.array(z.nativeEnum(TicketPriority)).optional(),
-      stageName: z.array(z.string()).optional(),
-      limit: z.number(),
-      start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
-      dir: z.literal('forward').or(z.literal('backward')),
-    }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, limit, start, dir } }) => {
-      let query = zql.tickets.where('channelId', channelId);
-
-      if (assignedTo && assignedTo.length > 0) {
-        query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
-      }
-
-      if (priority && priority.length > 0) {
-        query = query.where(({ or, cmp }) => or(...priority.map((p) => cmp('priority', p))));
-      }
-
-      if (stageName && stageName.length > 0) {
-        query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
-      }
-
-      const orderDirection = dir === 'forward' ? 'desc' : 'asc';
-      query = query.orderBy('lastEmailAt', orderDirection);
-
-      if (start) {
-        query = query.start(
-          { lastEmailAt: start.lastEmailAt, id: start.id },
-          { inclusive: false },
-        );
-      }
-
-      return query
-        .limit(limit)
-        .related('project')
-        .related('tags')
-        .related('entity')
-        .related('emails', q => q.related('attachments'))
-        .related('emailDrafts', q =>
-          q.where(({ or, cmp }) =>
-            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
-          ),
-        )
-        .related('emailReads', q => q.where('userId', ctx.userID))
-        .related('conversation');
-    },
-  ),
-
   supportTicketsPageV3: defineQuery(
     z.object({
       channelId: z.string(),
@@ -911,6 +738,57 @@ export const queries = defineQueries({
           ),
         )
         .related('emailReads', q => q.where('userId', ctx.userID));
+    },
+  ),
+  supportTicketsPageV4: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      assignedTo: z.array(z.string()).optional(),
+      priority: z.array(z.nativeEnum(TicketPriority)).optional(),
+      stageName: z.array(z.string()).optional(),
+      limit: z.number(),
+      start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
+      dir: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, limit, start, dir } }) => {
+      let query = zql.tickets.where('channelId', channelId);
+
+      if (assignedTo && assignedTo.length > 0) {
+        query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
+      }
+
+      if (priority && priority.length > 0) {
+        query = query.where(({ or, cmp }) => or(...priority.map((p) => cmp('priority', p))));
+      }
+
+      if (stageName && stageName.length > 0) {
+        query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
+      }
+
+      const orderDirection = dir === 'forward' ? 'desc' : 'asc';
+      query = query.orderBy('lastEmailAt', orderDirection);
+
+      if (start) {
+        query = query.start(
+          { lastEmailAt: start.lastEmailAt, id: start.id },
+          { inclusive: false },
+        );
+      }
+
+      return query
+        .limit(limit)
+        .related('project')
+        .related('tagMappings')
+        .related('entity')
+        .related('emails', q => q.related('attachments'))
+        .related('emailDrafts', q =>
+          q.where(({ or, cmp }) =>
+            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+          ),
+        )
+        .related('emailReads', q => q.where('userId', ctx.userID))
+        .related('conversation');
     },
   ),
 
@@ -972,11 +850,11 @@ export const queries = defineQueries({
   getCurrentUserPreference: defineQuery(z.object({}), ({ ctx }) => {
     return zql.user_preferences.where('userId', ctx.userID).one();
   }),
-  ticketById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+  ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
       .related('project')
-      .related('tags')
+      .related('tagMappings')
       .related('assignments')
       .related('referencesOut', ref => ref.related('targetTicket'))
       .related('referencesIn', ref => ref.related('sourceTicket'))
@@ -986,11 +864,11 @@ export const queries = defineQueries({
       .related('ticketStageRequests', a => a.related('form'))
       .one();
   }),
-  ticketDetailsById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+  ticketDetailsByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
       .related('project')
-      .related('tags')
+      .related('tagMappings')
       .related('assignments')
       .related('referencesOut', ref => ref.related('targetTicket'))
       .related('referencesIn', ref => ref.related('sourceTicket'))
@@ -1001,23 +879,12 @@ export const queries = defineQueries({
       .related('ticketStageRequests', a => a.related('form'))
       .one();
   }),
-  ticketByXyneId: defineQuery(z.object({ xyneId: z.string() }), ({ args: { xyneId } }) => {
-    return zql.tickets
-      .where('xyneId', xyneId)
-      .related('project')
-      .related('tags')
-      .related('referencesOut', ref => ref.related('targetTicket'))
-      .related('referencesIn', ref => ref.related('sourceTicket'))
-      .related('entity')
-      .related('conversation')
-      .one();
-  }),
-  ticketByXyneIdV2: defineQuery(z.object({ xyneId: z.string(), workspaceId: z.string() }), ({ args: { xyneId, workspaceId } }) => {
+  ticketByXyneIdV3: defineQuery(z.object({ xyneId: z.string(), workspaceId: z.string() }), ({ args: { xyneId, workspaceId } }) => {
     return zql.tickets
       .where('xyneId', xyneId)
       .where('workspaceId', workspaceId)
       .related('project')
-      .related('tags')
+      .related('tagMappings')
       .related('referencesOut', ref => ref.related('targetTicket'))
       .related('referencesIn', ref => ref.related('sourceTicket'))
       .related('entity')
@@ -1786,13 +1653,12 @@ export const queries = defineQueries({
     },
   ),
 
-  
-  ticketsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
+  ticketsByProjectV2: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
     return zql.tickets
       .where('projectId', projectId)
       .where('isArchived', false)
       .where(helpers => helpers.cmp('ticketType', '!=', BaseTicketType.Support))
-      .related('tags')
+      .related('tagMappings')
       .orderBy('createdAt', 'desc');
   }),
   stagesByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
@@ -2416,10 +2282,15 @@ export const queries = defineQueries({
   getAllTicketEntityMappings: defineQuery(() => {
     return zql.ticket_entity_mappings;
   }),
-  // Query for all ticket tags
-  getAllTicketTags: defineQuery(() => {
-    return zql.ticket_tags;
-  }),
+  // Query for project tags by project ID
+  projectTagsByProjectId: defineQuery(
+    z.object({ projectId: z.string() }),
+    ({ args: { projectId } }) => {
+      return zql.project_tags
+        .where('projectId', projectId)
+        .orderBy('name', 'asc');
+    },
+  ),
   // Query for ticket entity mappings by ticket ID
   getTicketEntityMappingsByTicketId: defineQuery(
     z.object({ ticketId: z.string() }),

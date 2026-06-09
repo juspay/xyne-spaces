@@ -235,13 +235,22 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     const toRemove = oldTagNames.filter(t => !newTags.includes(t));
 
     toAdd.forEach(tagName => {
-      zero.mutate(mutators.ticketTag.create({ ticketId: ticket.id, tagId: uuidv4(), tagName }));
+      zero.mutate(
+        mutators.ticketTagV2.create({
+          ticketId: ticket.id,
+          tagId: uuidv4(),
+          projectTagId: uuidv4(),
+          mappingId: uuidv4(),
+          projectId: ticket.projectId,
+          tagName,
+        }),
+      );
     });
 
     toRemove.forEach(tagName => {
-      const tagId = tags?.find(t => t.name === tagName)?.id;
-      if (tagId) {
-        zero.mutate(mutators.ticketTag.delete({ tagId }));
+      const tag = tags?.find(t => t.name === tagName);
+      if (tag?.id) {
+        zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id }));
       }
     });
   };

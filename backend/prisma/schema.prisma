@@ -644,6 +644,32 @@ model TicketTag {
   @@schema("public")
 }
 
+model ProjectTag {
+  id        String   @id @default(cuid())
+  name      String
+  projectId String
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, name])
+  @@index([projectId])
+  @@map("project_tags")
+  @@schema("public")
+}
+
+model TicketTagMapping {
+  id        String   @id @default(cuid())
+  ticketId  String
+  tagId     String
+  tagName   String   // Denormalized from ProjectTag.name for fast reads
+  createdAt DateTime @default(now())
+
+  @@unique([ticketId, tagId])
+  @@index([ticketId])
+  @@index([tagId])
+  @@map("ticket_tag_mappings")
+  @@schema("public")
+}
+
 model TicketReferenceMapping {
   id             String                   @id @default(cuid())
   sourceTicketId String                   // Ticket owning the reference

@@ -24,6 +24,7 @@ export interface TicketPreviewProps {
     createdBy?: string;
     channel?: string;
     tags?: Tag[] | string[];
+    tagMappings?: { tagName: string }[];
     userGroup?: string;
   };
   onClose?: () => void;

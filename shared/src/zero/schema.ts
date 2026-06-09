@@ -945,6 +945,25 @@ export const ticketTagTable = table('ticket_tags')
   })
   .primaryKey('id');
 
+export const projectTagTable = table('project_tags')
+  .columns({
+    id: string(),
+    name: string(),
+    projectId: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const ticketTagMappingTable = table('ticket_tag_mappings')
+  .columns({
+    id: string(),
+    ticketId: string(),
+    tagId: string(),
+    tagName: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 export const ticketReferenceMappingTable = table('ticket_reference_mappings')
   .columns({
     id: string(),
@@ -2598,6 +2617,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: rcaTable,
   }),
+  tagMappings: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketTagMappingTable,
+  }),
 }));
 
 export const subTicketTableRelationships = relationships(subTicketTable, ({ one, many }) => ({
@@ -2692,6 +2716,35 @@ export const ticketTagTableRelationships = relationships(ticketTagTable, ({ one 
   }),
 }));
 
+export const projectTagTableRelationships = relationships(projectTagTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  ticketMappings: many({
+    sourceField: ['id'],
+    destField: ['tagId'],
+    destSchema: ticketTagMappingTable,
+  }),
+}));
+
+export const ticketTagMappingTableRelationships = relationships(
+  ticketTagMappingTable,
+  ({ one }) => ({
+    ticket: one({
+      sourceField: ['ticketId'],
+      destField: ['id'],
+      destSchema: ticketTable,
+    }),
+    tag: one({
+      sourceField: ['tagId'],
+      destField: ['id'],
+      destSchema: projectTagTable,
+    }),
+  }),
+);
+
 export const ticketReferenceMappingTableRelationships = relationships(
   ticketReferenceMappingTable,
   ({ one }) => ({
@@ -2764,6 +2817,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     sourceField: ['id'],
     destField: ['projectId'],
     destSchema: canvasTable,
+  }),
+  projectTags: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: projectTagTable,
   }),
 }));
 
@@ -4289,6 +4347,8 @@ export const schema = createSchema({
     ticketActivityTable,
     ticketEntityMappingTable,
     ticketTagTable,
+    projectTagTable,
+    ticketTagMappingTable,
     ticketReferenceMappingTable,
     ticketStageEtaTable,
     projectTable,
@@ -4405,6 +4465,8 @@ export const schema = createSchema({
     ticketActivityTableRelationships,
     ticketEntityMappingTableRelationships,
     ticketTagTableRelationships,
+    projectTagTableRelationships,
+    ticketTagMappingTableRelationships,
     ticketReferenceMappingTableRelationships,
     ticketStageEtaTableRelationships,
     projectTableRelationships,
@@ -4517,6 +4579,8 @@ export type TicketSubTicketMapping = Row<typeof schema.tables.ticket_sub_ticket_
 export type TicketActivity = Row<typeof schema.tables.ticket_activities>;
 export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mappings>;
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
+export type ProjectTag = Row<typeof schema.tables.project_tags>;
+export type TicketTagMapping = Row<typeof schema.tables.ticket_tag_mappings>;
 export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;
 export type TicketStageEta = Row<typeof schema.tables.ticket_stage_eta>;

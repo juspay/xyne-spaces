@@ -221,7 +221,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
   const assigneeDropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch ticket
-  const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId || '' }), {
+  const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: ticketId || '' }), {
     enabled: !!ticketId,
   });
 

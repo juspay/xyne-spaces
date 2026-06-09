@@ -4255,6 +4255,53 @@ export const mutators = defineMutators({
       });
     }),
   },
+  ticketTagV2: {
+    create: defineMutator(
+      z.object({
+        ticketId: z.string(),
+        tagName: z.string(),
+        tagId: z.string(),
+        projectTagId: z.string(),
+        mappingId: z.string(),
+        projectId: z.string(),
+      }),
+      async ({ tx, args: { ticketId, tagName, tagId, projectTagId, mappingId, projectId } }) => {
+        // Write to old table for backward compat
+        await tx.mutate.ticket_tags.upsert({
+          id: tagId,
+          ticketId,
+          name: tagName,
+        });
+        // Write to new project_tags table (upsert by projectId+name)
+        await tx.mutate.project_tags.upsert({
+          id: projectTagId,
+          name: tagName,
+          projectId,
+          createdAt: Date.now(),
+        });
+        // Write to new ticket_tag_mappings table
+        await tx.mutate.ticket_tag_mappings.insert({
+          id: mappingId,
+          ticketId,
+          tagId: projectTagId,
+          tagName,
+          createdAt: Date.now(),
+        });
+      },
+    ),
+    delete: defineMutator(
+      z.object({
+        tagId: z.string(),
+        mappingId: z.string(),
+      }),
+      async ({ tx, args: { tagId, mappingId } }) => {
+        // Delete from old table
+        await tx.mutate.ticket_tags.delete({ id: tagId });
+        // Delete from new table
+        await tx.mutate.ticket_tag_mappings.delete({ id: mappingId });
+      },
+    ),
+  },
   ticketStageRequest: {
     upsert: defineMutator(
       z.object({

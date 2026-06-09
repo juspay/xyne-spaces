@@ -14,6 +14,7 @@ import { CanvasParticipantsSideEffectHandler } from './tables/canvas-participant
 import { ReactionsSideEffectHandler } from './tables/reactions-handler';
 import { DelayedMessagesSideEffectHandler } from './tables/delayed-messages-handler';
 import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
+import { TicketTagMappingsSideEffectHandler } from './tables/ticket-tag-mappings-handler';
 import { ChannelsSideEffectHandler } from './tables/channels-handler';
 import { EmailReadsSideEffectHandler } from './tables/email-reads-handler';
 import { ChannelUserStatusSideEffectHandler } from './tables/channel-user-status-handler';
@@ -52,6 +53,8 @@ export class SideEffectHandlerFactory {
 
       case 'ticket_tags':
         return new TicketTagsSideEffectHandler(ctx);
+      case 'ticket_tag_mappings':
+        return new TicketTagMappingsSideEffectHandler(ctx);
       case 'channels':
         return new ChannelsSideEffectHandler(ctx);
       case 'email_reads':

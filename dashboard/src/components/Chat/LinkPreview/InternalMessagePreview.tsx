@@ -213,7 +213,7 @@ const LiveTicketPreview: React.FC<{
   onNavigate: (event?: React.MouseEvent | React.KeyboardEvent) => void;
   onClose?: (() => void) | undefined;
 }> = ({ ticketSnapshot, channelName, onNavigate, onClose }) => {
-  const [liveTicket] = useCachedQuery(queries.ticketById({ ticketId: ticketSnapshot.id }));
+  const [liveTicket] = useCachedQuery(queries.ticketByIdV2({ ticketId: ticketSnapshot.id }));
   const ticket = (liveTicket ?? ticketSnapshotToTicket(ticketSnapshot)) as Ticket;
 
   return (

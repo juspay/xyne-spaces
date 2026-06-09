@@ -195,17 +195,6 @@ export const TicketFiltersDropdown = ({
     return allBoardsRaw;
   }, [allBoardsRaw, availableBoards, isMyTicketsMode]);
 
-  const [ticketTypesResult] = useCachedQuery(
-    queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
-  );
-
-  const availableTicketTypes = useMemo(() => {
-    if (ticketTypesResult && ticketTypesResult.length > 0) {
-      return ticketTypesResult.map(t => t.value).filter((value): value is string => Boolean(value));
-    }
-    return Object.values(BaseTicketType);
-  }, [ticketTypesResult]);
-
   // Derive selectedBoard from fetched boards
   const selectedBoard = useMemo(() => {
     const selectedBoards = filters.boards || [];
@@ -217,6 +206,18 @@ export const TicketFiltersDropdown = ({
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
+
+  const [ticketTypesResult] = useCachedQuery(
+    queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
+    { enabled: activeSubmenu === 'ticketTypes' },
+  );
+
+  const availableTicketTypes = useMemo(() => {
+    if (ticketTypesResult && ticketTypesResult.length > 0) {
+      return ticketTypesResult.map(t => t.value).filter((value): value is string => Boolean(value));
+    }
+    return Object.values(BaseTicketType);
+  }, [ticketTypesResult]);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [showSavePopover, setShowSavePopover] = useState(false);

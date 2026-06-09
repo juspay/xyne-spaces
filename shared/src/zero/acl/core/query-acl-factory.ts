@@ -44,6 +44,8 @@ import {
   TicketReferenceMappingsACL,
   TicketSubTicketMappingsACL,
   TicketTagsACL,
+  ProjectTagsACL,
+  TicketTagMappingsACL,
   TicketsACL,
   UserAssignmentStatesACL,
   UserExpertiseMappingsACL,
@@ -156,6 +158,10 @@ export class QueryACLFactory {
         return new TicketSubTicketMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_tags':
         return new TicketTagsACL(ctx) as BaseQueryACL<TTable>;
+      case 'project_tags':
+        return new ProjectTagsACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_tag_mappings':
+        return new TicketTagMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'tools':
         return new BaseQueryACL(ctx, table);
       case 'tickets':

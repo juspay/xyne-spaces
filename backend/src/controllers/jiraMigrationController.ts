@@ -802,6 +802,7 @@ export class JiraMigrationController {
           db.ticketAssignment.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticketEntityMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticketTag.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketTagMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticketStageEta.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
