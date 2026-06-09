@@ -1337,7 +1337,7 @@ export const ThreadMessages = ({
               {isMessagesLoaded && !conversation && !!derivedConversationId ? (
                 <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
                   <MessageCircle size={48} className='mb-2 opacity-40' />
-                  <p className='text-sm'>This thread is no longer available</p>
+                  <p className='text-sm'>No thread messages</p>
                 </div>
               ) : (
                 <>
@@ -1778,7 +1778,7 @@ export const ThreadMessages = ({
             {isMessagesLoaded && !conversation && !!derivedConversationId ? (
               <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
                 <MessageCircle size={48} className='mb-2 opacity-40' />
-                <p className='text-sm'>This thread is no longer available</p>
+                <p className='text-sm'>No thread messages</p>
               </div>
             ) : (
               <>

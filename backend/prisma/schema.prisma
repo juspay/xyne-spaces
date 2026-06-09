@@ -1166,8 +1166,15 @@ model UserPreference {
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
   channelSortOrder         ChannelSortOrder @default(RECENCY) // Sidebar channel sort
-  enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
+  enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
+
+  // Global notification settings
+  globalDesktopNotificationLevel  NotificationLevel @default(MENTIONS_ONLY) // Default level for all channels (desktop)
+  globalMobileNotificationLevel   NotificationLevel @default(MENTIONS_ONLY) // Default level for all channels (mobile)
+  threadReplyNotificationsEnabled Boolean           @default(true) // Receive thread reply notifications globally
+  channelWideMentionsEnabled      Boolean           @default(true) // Receive @channel and @here mention notifications
+
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
@@ -2006,8 +2013,10 @@ model ChannelUserStatus {
   lastSeenRecapDate         DateTime?   @db.Date // Last recap date the user has seen for this channel
   customRecapPrompt         String?     // Optional custom prompt for personalized recaps
 
-  desktopNotificationLevel  NotificationLevel     @default(ALL) // Channel notification preference (desktop)
-  mobileNotificationLevel   NotificationLevel    @default(ALL) // Channel notification preference (mobile)
+  desktopNotificationLevel  NotificationLevel?    // Channel notification preference (desktop); null = inherit UserPreference.globalDesktopNotificationLevel
+  mobileNotificationLevel   NotificationLevel?   // Channel notification preference (mobile); null = inherit UserPreference.globalMobileNotificationLevel
+  threadReplyNotificationsEnabled Boolean?       // Per-channel override: null = inherit UserPreference.threadReplyNotificationsEnabled
+  channelWideMentionsEnabled      Boolean?       // Per-channel override: null = inherit UserPreference.channelWideMentionsEnabled
 
   isDeleted                 Boolean     @default(false) // Soft delete flag
   updatedAt                 DateTime?   // No default, nullable, set manually in code 

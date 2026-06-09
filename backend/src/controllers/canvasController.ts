@@ -378,6 +378,7 @@ export class CanvasController {
           req.user?.workspaceId ?? '',
           channelName,
           blockId,
+          canvasChannelId ?? undefined,
         );
 
         slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
