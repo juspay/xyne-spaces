@@ -101,32 +101,22 @@ const useMeasure = ({ ref, observeResize = false }: UseMeasureProps): UseMeasure
     updateMeasurements();
   }, [updateMeasurements]);
 
+  // Handle window resize when no ref is provided
   useEffect(() => {
-    if (!observeResize) return;
+    if (!observeResize || ref) return;
 
-    if (!ref) {
-      window.addEventListener('resize', updateMeasurements);
-      return (): void => {
-        window.removeEventListener('resize', updateMeasurements);
-      };
-    }
-
-    if (ref.current === null) return;
-    const resizeObserver = new ResizeObserver((): void => {
-      updateMeasurements();
-    });
-
-    resizeObserver.observe(ref.current);
-
+    window.addEventListener('resize', updateMeasurements);
     return (): void => {
-      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateMeasurements);
     };
   }, [ref, observeResize, updateMeasurements]);
 
-  // Detect when ref.current changes (e.g. conditionally rendered elements)
-  // and re-attach the ResizeObserver to the new element
+  // Single ResizeObserver management: runs every render to detect ref.current
+  // changes, but only creates/destroys an observer when the element changes.
   useEffect(() => {
-    const currentElement = ref?.current ?? null;
+    if (!observeResize || !ref) return;
+
+    const currentElement = ref.current;
     if (currentElement === observedElementRef.current) return;
     observedElementRef.current = currentElement;
 
@@ -135,7 +125,7 @@ const useMeasure = ({ ref, observeResize = false }: UseMeasureProps): UseMeasure
 
     updateMeasurements();
 
-    if (observeResize && currentElement) {
+    if (currentElement) {
       const resizeObserver = new ResizeObserver((): void => {
         updateMeasurements();
       });
@@ -143,6 +133,14 @@ const useMeasure = ({ ref, observeResize = false }: UseMeasureProps): UseMeasure
       resizeObserverRef.current = resizeObserver;
     }
   });
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return (): void => {
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+    };
+  }, []);
 
   return size;
 };

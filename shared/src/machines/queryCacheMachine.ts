@@ -36,6 +36,7 @@ export interface RecordingsState {
 export interface CacheEntry<T> {
   data: QueryResult<T>;
   lastUpdatedAt?: number;
+  lastAccessedAt?: number;
 }
 
 export interface QueryCacheContext {
@@ -96,6 +97,7 @@ export const queryCacheMachine = setup({
       //eslint-disable-next-line @typescript-eslint/no-explicit-any
       const entry: CacheEntry<any> = {
         data: event.data,
+        lastAccessedAt: Date.now(),
       };
 
       if (resolvedLastUpdatedAt !== undefined) {
@@ -423,6 +425,9 @@ export const hydrateQueryCacheFromStorage = async (
     const conversationsData: Record<string, Conversation[]> = {};
     let callHistoryHydrated = false;
     let recordingsHydrated = false;
+    const staleKeys: string[] = [];
+    const CACHE_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+    const now = Date.now();
 
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
 
@@ -486,7 +491,16 @@ export const hydrateQueryCacheFromStorage = async (
         });
         recordingsHydrated = true;
       } else {
+        if (value === null || value === undefined) {
+          staleKeys.push(key);
+          continue;
+        }
         const entry = value as CacheEntry<unknown>;
+        const lastAccessed = (entry as { lastAccessedAt?: number }).lastAccessedAt ?? 0;
+        if (lastAccessed > 0 && now - lastAccessed > CACHE_TTL_MS) {
+          staleKeys.push(key);
+          continue;
+        }
         //eslint-disable-next-line @typescript-eslint/no-explicit-any
         cacheData[key] = entry as CacheEntry<any>;
       }
@@ -508,6 +522,16 @@ export const hydrateQueryCacheFromStorage = async (
       console.log(
         `Hydrated ${Object.keys(conversationsData).length} conversation caches from storage`,
       );
+    }
+
+    // Delete stale entries from storage
+    if (staleKeys.length > 0) {
+      console.log(`Evicting ${staleKeys.length} stale cache entries (older than 3 days)`);
+      for (const key of staleKeys) {
+        storage.saveContextProperty(key, null).catch(() => {
+          // Ignore deletion errors
+        });
+      }
     }
 
     return (

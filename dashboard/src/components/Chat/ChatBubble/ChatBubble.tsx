@@ -1144,9 +1144,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             />
           )}
           {/* Mobile Actions Drawer */}
-          {isMobile && !searchItemView && (
+          {isMobile && !searchItemView && isActionsDrawerOpen && (
             <MessageActionsDrawer
-              open={isActionsDrawerOpen}
+              open
               onOpenChange={handleActionsDrawerOpenChange}
               messageId={message.messageId}
               conversationId={conversation?.conversationId || message.conversationId}
@@ -1290,9 +1290,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       )}
 
       {/* SubTicket Modal for ticket threads */}
-      {conversation && context === 'thread' && isTicketThread && (
+      {conversation && context === 'thread' && isTicketThread && isSubTicketModalOpen && (
         <SubTicketModal
-          isOpen={isSubTicketModalOpen}
+          isOpen
           onClose={() => setIsSubTicketModalOpen(false)}
           ticketId={(() => {
             const initMsg =
@@ -1303,242 +1303,252 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         />
       )}
 
-      <Dialog
-        open={isReminderOptionsOpen}
-        onOpenChange={setIsReminderOptionsOpen}
-        title='Remind me'
-        description='Choose when to be reminded about this message'
-      >
-        <div className='p-6 space-y-2'>
-          <h2 className='text-lg font-semibold text-foreground mb-3'>Remind me</h2>
-          {MESSAGE_REMINDER_MENU_OPTIONS.map(option => (
-            <Button
-              key={option.option}
-              variant='ghost'
-              className='w-full justify-start'
-              onClick={e => handleReminderPresetSelect(option.option, e)}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
-      </Dialog>
-
-      <Dialog
-        open={isCustomReminderModalOpen}
-        onOpenChange={setIsCustomReminderModalOpen}
-        title='Reminder'
-        description='Set a reminder for this message'
-      >
-        <div className='p-6 space-y-4'>
-          <div className='flex items-center justify-between'>
-            <h3 className='text-lg font-semibold text-foreground'>Reminder</h3>
-            <button
-              type='button'
-              className='rounded-sm opacity-70 transition-opacity hover:opacity-100'
-              onClick={() => setIsCustomReminderModalOpen(false)}
-              data-track-category='CHAT_BUBBLE'
-              data-track-name='Close_Custom_Reminder_Modal'
-              data-track-metadata={JSON.stringify({ messageId: message.messageId })}
-            >
-              <X className='h-4 w-4' />
-              <span className='sr-only'>Close</span>
-            </button>
+      {isReminderOptionsOpen && (
+        <Dialog
+          open={isReminderOptionsOpen}
+          onOpenChange={setIsReminderOptionsOpen}
+          title='Remind me'
+          description='Choose when to be reminded about this message'
+        >
+          <div className='p-6 space-y-2'>
+            <h2 className='text-lg font-semibold text-foreground mb-3'>Remind me</h2>
+            {MESSAGE_REMINDER_MENU_OPTIONS.map(option => (
+              <Button
+                key={option.option}
+                variant='ghost'
+                className='w-full justify-start'
+                onClick={e => handleReminderPresetSelect(option.option, e)}
+              >
+                {option.label}
+              </Button>
+            ))}
           </div>
-          <div className='space-y-2'>
-            <label
-              htmlFor={customReminderDatePickerId}
-              className='text-sm font-medium text-foreground'
-            >
-              When
-            </label>
-            <DatePicker
-              id={customReminderDatePickerId}
-              selectedDate={customReminderDate}
-              onSelect={setCustomReminderDate}
-              placeholder='Select date'
-              minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-              inputClassName='w-full !h-9'
-              showClearButton={false}
-            />
-          </div>
+        </Dialog>
+      )}
 
-          <div className='space-y-2'>
-            <label
-              htmlFor={customReminderTimeSelectId}
-              className='text-sm font-medium text-foreground'
-            >
-              Time
-            </label>
-            <Select
-              value={customReminderTime}
-              onValueChange={value => setCustomReminderTime(value)}
-            >
-              <SelectTrigger id={customReminderTimeSelectId} className='w-full'>
-                <SelectValue placeholder='Select time' />
-              </SelectTrigger>
-              <SelectContent showScrollButtons={false}>
-                {REMINDER_TIME_OPTIONS.map(option => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className='flex justify-end gap-2 pt-2'>
-            <Button variant='outline' onClick={() => setIsCustomReminderModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
-              Save
-            </Button>
-          </div>
-        </div>
-      </Dialog>
-
-      <Dialog
-        open={showDeleteConfirm}
-        onOpenChange={setShowDeleteConfirm}
-        title='Delete message'
-        description='Are you sure you want to delete this message?'
-      >
-        <div>
-          {/* Header with title and close button */}
-          <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-border'>
-            <h2 className='text-lg font-semibold text-foreground'>Delete message</h2>
-            <button
-              className='rounded-sm text-foreground opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2 disabled:pointer-events-none'
-              onClick={() => setShowDeleteConfirm(false)}
-              data-track-category='CHAT_BUBBLE'
-              data-track-name='CLOSE_DELETE_CONFIRM_DIALOG'
-              data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
-            >
-              <X className='h-4 w-4' />
-              <span className='sr-only'>Close</span>
-            </button>
-          </div>
-
-          <div className='px-6 py-4 space-y-4'>
-            <p className='text-sm text-foreground'>
-              Are you sure you want to delete this message? This cannot be undone.
-            </p>
-
-            {/* Message Preview */}
-            <div className='bg-muted rounded-md p-3 border border-border'>
-              <div className='flex gap-3'>
-                <div className='flex-shrink-0'>
-                  <Avatar userId={message.senderId} size='md' />
-                </div>
-
-                <div className='flex-1 min-w-0'>
-                  <div className='flex items-baseline gap-2 mb-1'>
-                    <h4 className='text-sm font-semibold text-foreground'>
-                      {sender?.name || 'User'}
-                    </h4>
-                    <span className='text-xs text-muted-foreground'>
-                      {formatRelativeTimestamp(message.createdAt)}
-                    </span>
-                  </div>
-                  {/* Handle forwarded message preview */}
-                  {message.msgType === MessageType.FORWARDED ? (
-                    (() => {
-                      const forwardedData = parseForwardedMessageXml(message.content);
-                      return forwardedData ? (
-                        <div className='flex flex-col gap-2 overflow-auto max-h-[350px]'>
-                          {forwardedData.optionalText && (
-                            <div
-                              className={`text-foreground ${getEmojiFontSizeClass(forwardedData.optionalText)}`}
-                            >
-                              <RenderMessageWithHTML message={forwardedData.optionalText} />
-                            </div>
-                          )}
-                          <div className='border-l-4 border-border pl-3'>
-                            <div className='flex items-center gap-2 mb-1'>
-                              <span className='text-xs font-medium text-foreground'>
-                                {forwardedData.originalSenderName}
-                              </span>
-                              {forwardedData.originalCreatedAt && (
-                                <span className='text-xs text-muted-foreground'>
-                                  {formatRelativeTimestamp(forwardedData.originalCreatedAt)}
-                                </span>
-                              )}
-                            </div>
-                            <div
-                              className={`text-muted-foreground ${getEmojiFontSizeClass(forwardedData.content)}`}
-                            >
-                              <RenderMessageWithHTML message={forwardedData.content} />
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          className={`text-foreground overflow-auto max-h-[350px] ${getEmojiFontSizeClass(message.content)}`}
-                        >
-                          <RenderMessageWithHTML message={message.content} />
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    <div
-                      className={`text-foreground overflow-auto max-h-[350px] ${getEmojiFontSizeClass(message.content)}`}
-                    >
-                      <RenderMessageWithHTML message={message.content} />
-                    </div>
-                  )}
-                </div>
-              </div>
+      {isCustomReminderModalOpen && (
+        <Dialog
+          open={isCustomReminderModalOpen}
+          onOpenChange={setIsCustomReminderModalOpen}
+          title='Reminder'
+          description='Set a reminder for this message'
+        >
+          <div className='p-6 space-y-4'>
+            <div className='flex items-center justify-between'>
+              <h3 className='text-lg font-semibold text-foreground'>Reminder</h3>
+              <button
+                type='button'
+                className='rounded-sm opacity-70 transition-opacity hover:opacity-100'
+                onClick={() => setIsCustomReminderModalOpen(false)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='Close_Custom_Reminder_Modal'
+                data-track-metadata={JSON.stringify({ messageId: message.messageId })}
+              >
+                <X className='h-4 w-4' />
+                <span className='sr-only'>Close</span>
+              </button>
+            </div>
+            <div className='space-y-2'>
+              <label
+                htmlFor={customReminderDatePickerId}
+                className='text-sm font-medium text-foreground'
+              >
+                When
+              </label>
+              <DatePicker
+                id={customReminderDatePickerId}
+                selectedDate={customReminderDate}
+                onSelect={setCustomReminderDate}
+                placeholder='Select date'
+                minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                inputClassName='w-full !h-9'
+                showClearButton={false}
+              />
             </div>
 
-            <div className='flex justify-end gap-3 pt-2'>
-              <Button
-                variant='secondary'
-                onClick={() => setShowDeleteConfirm(false)}
-                disabled={isDeleting}
-                data-track-category='CHAT_BUBBLE'
-                data-track-name='CANCEL_DELETE_CONFIRM_DIALOG'
-                data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
+            <div className='space-y-2'>
+              <label
+                htmlFor={customReminderTimeSelectId}
+                className='text-sm font-medium text-foreground'
               >
+                Time
+              </label>
+              <Select
+                value={customReminderTime}
+                onValueChange={value => setCustomReminderTime(value)}
+              >
+                <SelectTrigger id={customReminderTimeSelectId} className='w-full'>
+                  <SelectValue placeholder='Select time' />
+                </SelectTrigger>
+                <SelectContent showScrollButtons={false}>
+                  {REMINDER_TIME_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className='flex justify-end gap-2 pt-2'>
+              <Button variant='outline' onClick={() => setIsCustomReminderModalOpen(false)}>
                 Cancel
               </Button>
-              <Button
-                variant='destructive'
-                onClick={() => {
-                  void handleConfirmDelete();
-                }}
-                loading={isDeleting}
-                disabled={isDeleting}
-                data-track-category='CHAT_BUBBLE'
-                data-track-name='CONFIRM_DELETE_MESSAGE'
-                data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
-              >
-                {isDeleting ? 'Deleting...' : 'Delete'}
+              <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+                Save
               </Button>
             </div>
           </div>
-        </div>
-      </Dialog>
+        </Dialog>
+      )}
 
-      <Dialog
-        open={isForwardModalOpen}
-        onOpenChange={setIsForwardModalOpen}
-        onOpenAutoFocus={event => event.preventDefault()}
-      >
-        <ForwardMessageForm
-          message={message}
+      {showDeleteConfirm && (
+        <Dialog
+          open={showDeleteConfirm}
+          onOpenChange={setShowDeleteConfirm}
+          title='Delete message'
+          description='Are you sure you want to delete this message?'
+        >
+          <div>
+            {/* Header with title and close button */}
+            <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-border'>
+              <h2 className='text-lg font-semibold text-foreground'>Delete message</h2>
+              <button
+                className='rounded-sm text-foreground opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2 disabled:pointer-events-none'
+                onClick={() => setShowDeleteConfirm(false)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='CLOSE_DELETE_CONFIRM_DIALOG'
+                data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
+              >
+                <X className='h-4 w-4' />
+                <span className='sr-only'>Close</span>
+              </button>
+            </div>
+
+            <div className='px-6 py-4 space-y-4'>
+              <p className='text-sm text-foreground'>
+                Are you sure you want to delete this message? This cannot be undone.
+              </p>
+
+              {/* Message Preview */}
+              <div className='bg-muted rounded-md p-3 border border-border'>
+                <div className='flex gap-3'>
+                  <div className='flex-shrink-0'>
+                    <Avatar userId={message.senderId} size='md' />
+                  </div>
+
+                  <div className='flex-1 min-w-0'>
+                    <div className='flex items-baseline gap-2 mb-1'>
+                      <h4 className='text-sm font-semibold text-foreground'>
+                        {sender?.name || 'User'}
+                      </h4>
+                      <span className='text-xs text-muted-foreground'>
+                        {formatRelativeTimestamp(message.createdAt)}
+                      </span>
+                    </div>
+                    {/* Handle forwarded message preview */}
+                    {message.msgType === MessageType.FORWARDED ? (
+                      (() => {
+                        const forwardedData = parseForwardedMessageXml(message.content);
+                        return forwardedData ? (
+                          <div className='flex flex-col gap-2 overflow-auto max-h-[350px]'>
+                            {forwardedData.optionalText && (
+                              <div
+                                className={`text-foreground ${getEmojiFontSizeClass(forwardedData.optionalText)}`}
+                              >
+                                <RenderMessageWithHTML message={forwardedData.optionalText} />
+                              </div>
+                            )}
+                            <div className='border-l-4 border-border pl-3'>
+                              <div className='flex items-center gap-2 mb-1'>
+                                <span className='text-xs font-medium text-foreground'>
+                                  {forwardedData.originalSenderName}
+                                </span>
+                                {forwardedData.originalCreatedAt && (
+                                  <span className='text-xs text-muted-foreground'>
+                                    {formatRelativeTimestamp(forwardedData.originalCreatedAt)}
+                                  </span>
+                                )}
+                              </div>
+                              <div
+                                className={`text-muted-foreground ${getEmojiFontSizeClass(forwardedData.content)}`}
+                              >
+                                <RenderMessageWithHTML message={forwardedData.content} />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            className={`text-foreground overflow-auto max-h-[350px] ${getEmojiFontSizeClass(message.content)}`}
+                          >
+                            <RenderMessageWithHTML message={message.content} />
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div
+                        className={`text-foreground overflow-auto max-h-[350px] ${getEmojiFontSizeClass(message.content)}`}
+                      >
+                        <RenderMessageWithHTML message={message.content} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className='flex justify-end gap-3 pt-2'>
+                <Button
+                  variant='secondary'
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={isDeleting}
+                  data-track-category='CHAT_BUBBLE'
+                  data-track-name='CANCEL_DELETE_CONFIRM_DIALOG'
+                  data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant='destructive'
+                  onClick={() => {
+                    void handleConfirmDelete();
+                  }}
+                  loading={isDeleting}
+                  disabled={isDeleting}
+                  data-track-category='CHAT_BUBBLE'
+                  data-track-name='CONFIRM_DELETE_MESSAGE'
+                  data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {isForwardModalOpen && (
+        <Dialog
+          open={isForwardModalOpen}
+          onOpenChange={setIsForwardModalOpen}
+          onOpenAutoFocus={event => event.preventDefault()}
+        >
+          <ForwardMessageForm
+            message={message}
+            channelId={channelId}
+            onCancel={() => setIsForwardModalOpen(false)}
+            onSuccess={() => setIsForwardModalOpen(false)}
+          />
+        </Dialog>
+      )}
+
+      {showParticipantsModal && (
+        <CallParticipantsSelectionModal
+          isOpen
+          onClose={() => setShowParticipantsModal(false)}
           channelId={channelId}
-          onCancel={() => setIsForwardModalOpen(false)}
-          onSuccess={() => setIsForwardModalOpen(false)}
+          conversationId={messageConversationId}
         />
-      </Dialog>
-
-      <CallParticipantsSelectionModal
-        isOpen={showParticipantsModal}
-        onClose={() => setShowParticipantsModal(false)}
-        channelId={channelId}
-        conversationId={messageConversationId}
-      />
+      )}
     </div>
   );
 };

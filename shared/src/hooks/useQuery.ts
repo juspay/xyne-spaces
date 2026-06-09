@@ -72,7 +72,8 @@ export function useQuery<
   const queryName = query.query.queryName || 'unknown';
   const args = query.args;
 
-  const startTime = useMemo(() => performance.now(), [queryName, JSON.stringify(args)]);
+  const argsKey = useMemo(() => JSON.stringify(args), [args]);
+  const startTime = useMemo(() => performance.now(), [queryName, argsKey]);
   const hasLoggedCompleteRef = useRef(false);
   const isEnabled = typeof options === 'boolean' ? options : options?.enabled !== false;
 
@@ -81,7 +82,7 @@ export function useQuery<
     hasLoggedCompleteRef.current = false;
     logger.info(Event.ZERO_QUERY_CALLED, { query: queryName, args: query.args });
     metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'start' });
-  }, [queryName, JSON.stringify(args), isEnabled]);
+  }, [queryName, argsKey, isEnabled]);
 
   const result = useQueryWithFallback(query, options);
   const [data, details] = result;
@@ -121,18 +122,22 @@ export function useRawQuery<
 ): QueryResult<TReturn> {
   const { logger, metrics } = useInstrumentation();
 
-  const startTime = useMemo(() => performance.now(), [queryName, JSON.stringify(query)]);
+  const queryKey = useMemo(() => JSON.stringify(query), [query]);
+  const startTime = useMemo(() => performance.now(), [queryName, queryKey]);
+  const hasLoggedCompleteRef = useRef(false);
 
   useEffect(() => {
+    hasLoggedCompleteRef.current = false;
     logger.info(Event.ZERO_QUERY_CALLED, { query: queryName });
     metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'start' });
-  }, [queryName, JSON.stringify(query)]);
+  }, [queryName, queryKey]);
 
   const result = zeroUseQuery(query, options);
   const [data, details] = result;
 
   useEffect(() => {
-    if (details.type === 'complete') {
+    if (details.type === 'complete' && !hasLoggedCompleteRef.current) {
+      hasLoggedCompleteRef.current = true;
       const latency = performance.now() - startTime;
       const skewed = wasInterrupted(startTime);
       if (!skewed) {
@@ -145,7 +150,7 @@ export function useRawQuery<
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'error' });
       logger.error(Event.ZERO_QUERY_FAILED, { query: queryName, error: details.error });
     }
-  }, [data, details, queryName, JSON.stringify(query)]);
+  }, [data, details, queryName]);
 
   return result;
 }

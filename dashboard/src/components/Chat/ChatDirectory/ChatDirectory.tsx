@@ -96,7 +96,7 @@ const ChatDirectory = ({
   const pendingScheduledCount = usePendingDelayedMessagesCount();
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
   const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
-    useChannelSort(channelData, allChannelsUserStatus, context.userID);
+    useChannelSort(channelData, allChannelsUserStatus, context.userID, activeChannelId);
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
 
   const { startWalkthrough } = useWalkthrough({

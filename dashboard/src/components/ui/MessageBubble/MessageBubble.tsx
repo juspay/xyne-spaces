@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import * as Popover from '@radix-ui/react-popover';
 import {
@@ -852,7 +852,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               >
                 {formatTime12HourNoAmPm(message.createdAt)}
                 {shouldShowPending && (
-                  <Tooltip content={'Sending message..'} side={TooltipSide.TOP}>
+                  <Tooltip content={'Sending message..'} side='top'>
                     <div className='inline-flex items-center'>
                       {' '}
                       <PendingIcon size={12} className='cursor-pointer' />{' '}
@@ -974,7 +974,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </span>
               )}
 
-              <Tooltip content={formatFullTimestamp(message.createdAt)} side={TooltipSide.TOP}>
+              <Tooltip content={formatFullTimestamp(message.createdAt)} side='top'>
                 <h3
                   className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-all duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
                 >
@@ -1463,7 +1463,7 @@ export const ReactionView = ({
           const tooltipContent = `${userNames} ${verb} reacted with ${displayEmojiName}`;
 
           return (
-            <Tooltip key={reaction.emojiName} content={tooltipContent} side={TooltipSide.TOP}>
+            <Tooltip key={reaction.emojiName} content={tooltipContent} side='top'>
               <button
                 type='button'
                 className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${

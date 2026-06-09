@@ -9,7 +9,6 @@ import ChatLock from '../../icons/ChatLock';
 import { useChannelHasActiveCall } from '../../../hooks/useCalls';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Avatar from '../../ui/Avatar/Avatar';
-import useMeasure from '../../../hooks/useMeasure';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -90,22 +89,14 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
     );
   };
 
-  const checkTruncation = (): void => {
+  useEffect(() => {
     const el = nameRef.current;
     if (!el) {
       setIsTruncated(false);
       return;
     }
-
-    const truncated = el.scrollWidth > el.clientWidth;
-    setIsTruncated(truncated);
-  };
-
-  const bounds = useMeasure({ ref: nameRef, observeResize: true });
-
-  useEffect(() => {
-    checkTruncation();
-  }, [bounds.width, displayName]);
+    setIsTruncated(el.scrollWidth > el.clientWidth);
+  }, [displayName]);
 
   return (
     <Tooltip
