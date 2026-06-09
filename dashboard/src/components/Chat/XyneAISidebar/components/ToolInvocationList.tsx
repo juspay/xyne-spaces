@@ -113,13 +113,28 @@ interface CitationListProps {
 }
 
 function CitationList({ citations }: CitationListProps): ReactElement {
+  const [expanded, setExpanded] = useState(false);
+  const MAX_VISIBLE = 3;
+  const hasOverflow = citations.length > MAX_VISIBLE;
+
   return (
     <div>
-      <div className='text-muted-foreground/70 mb-1 text-[10px] uppercase tracking-wide'>
-        Citations ({citations.length})
-      </div>
-      <ul className='space-y-1'>
-        {citations.map((citation, idx) => {
+      <button
+        onClick={() => hasOverflow && setExpanded(!expanded)}
+        className={`flex w-full items-center justify-between ${hasOverflow ? 'cursor-pointer hover:text-foreground' : ''} text-muted-foreground/70 mb-1 text-[10px] uppercase tracking-wide`}
+        type='button'
+        data-track-category='xyne-ai'
+        data-track-name='toggle-citations-expand'
+      >
+        <span>Citations ({citations.length})</span>
+        {hasOverflow && (
+          <span className='text-[10px]'>
+            {expanded ? 'Show less' : `Show all ${citations.length}`}
+          </span>
+        )}
+      </button>
+      <ul className={`space-y-1 ${expanded ? 'max-h-48 overflow-y-auto pr-1' : ''}`}>
+        {(expanded ? citations : citations.slice(0, MAX_VISIBLE)).map((citation, idx) => {
           const url = buildCitationUrl(citation);
           const label = getCitationLabel(citation);
 
@@ -140,6 +155,11 @@ function CitationList({ citations }: CitationListProps): ReactElement {
             </li>
           );
         })}
+        {!expanded && hasOverflow && (
+          <li className='text-[10px] text-muted-foreground/50 pl-4'>
+            +{citations.length - MAX_VISIBLE} more
+          </li>
+        )}
       </ul>
     </div>
   );

@@ -382,5 +382,7 @@ export interface Message {
     message: string;
     helpText?: string;
     retryable?: boolean;
+    /** Original error text from the backend for debugging / transparency */
+    rawError?: string;
   };
 }
