@@ -150,6 +150,13 @@ function parseBlockSegments(content: string): BlockSegment[] {
 
     // Code fence: line is exactly ``` (optionally with a language hint)
     if (/^```/.test(trimmed)) {
+      // Single-line fence: ```content``` — opening and closing ``` on the same line.
+      const singleLine = trimmed.match(/^```(.+)```$/);
+      if (singleLine) {
+        segments.push({ type: 'codeblock', code: singleLine[1] ?? '' });
+        i++;
+        continue;
+      }
       const codeLines: string[] = [];
       i++;
       while (i < lines.length && !/^```/.test((lines[i] ?? '').trim())) {

@@ -3,6 +3,7 @@ import { authenticateApp } from "@/apps/middelware/authenticator";
 import { repositories } from "@/database/repositories";
 import { logger } from "@/utils/logger";
 import { transformSlackError } from "./error-transformer";
+import { unifiedDMService } from "@/bots/unified/services/unified-dm-service";
 
 export function getSlackAuthContext(req: Request): {
 	userId: string;
@@ -36,6 +37,25 @@ export async function resolveSlackChannel(channel: string): Promise<string> {
 	if (byName) return byName.id;
 
 	throw new Error("Channel not found");
+}
+
+export async function resolveSlackChannelForUser(
+	channel: string,
+	botUserId: string,
+	workspaceId: string,
+): Promise<{ channelId: string; isDM: boolean }> {
+	const targetUser = await repositories.users.findById(channel);
+	if (targetUser) {
+		const dmChannel = await unifiedDMService.getOrCreateBotDM(
+			targetUser.id,
+			botUserId,
+			workspaceId,
+		);
+		return { channelId: dmChannel.id, isDM: true };
+	}
+
+	const channelId = await resolveSlackChannel(channel);
+	return { channelId, isDM: false };
 }
 
 function wrapSlackResponseAndAuth(
@@ -121,14 +141,21 @@ export function slackChannelValidation(source: "body" | "query") {
 				return;
 			}
 
-			const channelId = await resolveSlackChannel(channel);
 			const { userId } = getSlackAuthContext(req);
+			const workspaceId = req.user?.workspaceId ?? "";
+			const { channelId, isDM } = await resolveSlackChannelForUser(
+				channel,
+				userId,
+				workspaceId,
+			);
 
-			const isParticipant =
-				await repositories.channelParticipants.isParticipant(channelId, userId);
-			if (!isParticipant) {
-				res.status(200).json({ ok: false, error: "not_in_channel" });
-				return;
+			if (!isDM) {
+				const isParticipant =
+					await repositories.channelParticipants.isParticipant(channelId, userId);
+				if (!isParticipant) {
+					res.status(200).json({ ok: false, error: "not_in_channel" });
+					return;
+				}
 			}
 
 			req._resolvedChannelId = channelId;

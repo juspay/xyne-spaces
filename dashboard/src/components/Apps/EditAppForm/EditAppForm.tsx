@@ -181,7 +181,7 @@ const CommandFormInline = ({
         />
       </div>
       <div className='flex gap-4'>
-        <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
+        <label className='flex items-center gap-1.5 text-xs text-foreground cursor-pointer'>
           <input
             type='checkbox'
             checked={forChat}
@@ -193,7 +193,7 @@ const CommandFormInline = ({
           />
           Available in chat
         </label>
-        <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
+        <label className='flex items-center gap-1.5 text-xs text-foreground cursor-pointer'>
           <input
             type='checkbox'
             checked={forThread}
