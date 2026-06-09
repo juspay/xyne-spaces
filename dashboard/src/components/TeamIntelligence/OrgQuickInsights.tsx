@@ -42,7 +42,7 @@ const OrgQuickInsights = (): ReactElement => {
         <h3 className='text-lg font-semibold text-foreground'>Quick Metrics</h3>
       </div>
 
-      <div className='grid gap-3 grid-cols-2'>
+      <div className='grid gap-3 grid-cols-1 md:grid-cols-2'>
         <StatCard
           title='Development Velocity'
           value={totalPrMerged}

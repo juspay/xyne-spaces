@@ -2,7 +2,7 @@ import { ReactElement, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ChevronRight, PanelLeftOpenIcon } from 'lucide-react';
 import Button from '../ui/Button';
-import { cn } from '@/utils/classNames';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { TimeRange } from '@/utils/teamIntelligenceUtils';
 import { useMemberDetails, useTeams } from '@/hooks/useTeamIntelligence';
 
@@ -68,64 +68,52 @@ const TeamIntelligenceHeader = ({
   ];
 
   return (
-    <div className='w-full h-20 border-b p-4 flex items-center shrink-0 bg-background/70 backdrop-filter backdrop-blur-sm'>
-      {!isSidebarOpen ? (
+    <div className='w-full h-16 sm:h-20 p-3 sm:p-4 flex items-center shrink-0 bg-background gap-2'>
+      {!isSidebarOpen && (
         <Button
-          variant={'ghost'}
-          size={'iconLg'}
+          variant='ghost'
+          size='iconLg'
           onClick={() => setIsSidebarOpen(true)}
           data-track-category='team-intelligence'
-          data-track-name='expand-team-intelligence-sidebar'
-          className='rounded-md transition-colors text-muted-foreground'
+          data-track-name='open-team-intelligence-sidebar'
+          className='rounded-md transition-colors text-muted-foreground shrink-0'
           aria-label='Open sidebar'
         >
           <PanelLeftOpenIcon className='size-5' />
         </Button>
-      ) : null}
+      )}
 
-      <nav className='flex items-center gap-1 ml-3 mr-auto'>
+      <nav className='flex items-center gap-1 ml-3 mr-auto min-w-0'>
         {breadcrumbs.map((seg, i) => (
-          <div key={seg.label} className='flex items-center gap-1'>
+          <div key={seg.label} className='flex items-center gap-1 min-w-0'>
             {i > 0 && <ChevronRight className='size-3.5 text-muted-foreground shrink-0' />}
             {seg.path ? (
               <Link
                 to={seg.path}
-                className='text-sm text-muted-foreground hover:text-foreground transition-colors'
+                className='text-sm text-muted-foreground hover:text-foreground transition-colors truncate'
               >
                 {seg.label}
               </Link>
             ) : (
-              <span className='text-sm font-medium text-foreground'>{seg.label}</span>
+              <span className='text-sm font-medium text-foreground truncate'>{seg.label}</span>
             )}
           </div>
         ))}
       </nav>
 
-      <div
-        className='flex items-center gap-1 rounded-lg bg-muted p-1'
-        role='radiogroup'
-        aria-label='Select time range'
-      >
-        {timeRangeOptions.map(option => (
-          <Button
-            key={option.value}
-            onClick={() => setTimeRange(option.value)}
-            role='radio'
-            aria-checked={timeRange === option.value}
-            className={cn(
-              'transition-all',
-              timeRange === option.value
-                ? 'bg-action-accent text-action-primary-foreground hover:bg-action-accent shadow-sm'
-                : 'bg-muted hover:bg-muted text-muted-foreground hover:text-foreground',
-            )}
-            data-track-category='team-intelligence'
-            data-track-name='time-range-select'
-            data-track-value={option.value}
-          >
-            {option.label}
-          </Button>
-        ))}
-      </div>
+      {/* Time range — Select dropdown on mobile, pill buttons on sm+ */}
+      <Select value={timeRange} onValueChange={(value: string) => setTimeRange(value as TimeRange)}>
+        <SelectTrigger className='w-[130px] h-8 text-xs'>
+          <SelectValue placeholder='Select range' />
+        </SelectTrigger>
+        <SelectContent>
+          {timeRangeOptions.map(option => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 };

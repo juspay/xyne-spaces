@@ -1,5 +1,6 @@
 import { TeamHighlight } from '@/services/TeamIntelligence/teamIntelligenceService';
 import { cn } from '@/utils/classNames';
+import { formatReportDate } from '@/utils/teamIntelligenceUtils';
 import {
   AwardIcon,
   BookOpenIcon,
@@ -67,7 +68,9 @@ const HighlightCard = ({
             <Icon className='h-3 w-3' />
             {config.label}
           </span>
-          <span className='text-xs text-muted-foreground'>{highlight.reportDate}</span>
+          <span className='text-xs text-muted-foreground'>
+            {formatReportDate(highlight.reportDate)}
+          </span>
         </div>
         <h4 className='text-base font-medium text-foreground'>{title}</h4>
         <p className='text-sm leading-relaxed text-muted-foreground'>{highlight.bulletText}</p>

@@ -111,7 +111,15 @@ export const removeFormattedPrefix = (text: string): string => {
   return text.replace(/^\*\*\[[^\]]+\]:\*\*\s*/, '');
 };
 
-// Function to get start date and end date based on time range in YYYY-MM_DD format
+// Pretty-print an ISO date string (e.g. "2026-06-04") → "Jun 4, 2026"
+export const formatReportDate = (date: string): string => {
+  try {
+    return format(date, 'MMM d, yyyy');
+  } catch {
+    return date;
+  }
+};
+
 export const getDateRange = (timeRange: TimeRange): { from: string; to: string } => {
   const today = new Date();
 
