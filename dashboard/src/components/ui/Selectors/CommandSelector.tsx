@@ -52,7 +52,7 @@ export const CommandSelector: React.FC<CommandSelectorProps> = ({
     (item: CommandItem, _index: number, isSelected: boolean) => (
       <div
         className={`flex flex-col gap-1 p-3 transition-all duration-200 ease-in active:scale-[0.98] ${
-          isSelected ? 'bg-blue-50' : ''
+          isSelected ? 'bg-accent' : ''
         }`}
       >
         <div className='flex items-center gap-2'>

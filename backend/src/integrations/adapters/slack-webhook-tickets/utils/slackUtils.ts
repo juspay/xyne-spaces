@@ -104,6 +104,15 @@ export function parseMrkdwnBlocks<T>(content: string, handlers: MrkdwnBlockHandl
 
   for (const line of content.split('\n')) {
     if (/^```/.test(line.trim())) {
+      // Single-line fence: ```content``` — opening and closing ``` on the same line.
+      // Handle before the multi-line toggle so the content is never discarded.
+      const singleLine = line.trim().match(/^```(.+)```$/);
+      if (singleLine) {
+        if (codeLines !== null) flushCode();
+        else { flushRegular(); flushQuote(); flushList(); }
+        results.push(handlers.onCode([singleLine[1]]));
+        continue;
+      }
       if (codeLines !== null) {
         flushCode();
       } else {

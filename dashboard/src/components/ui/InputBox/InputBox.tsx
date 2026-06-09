@@ -64,7 +64,7 @@ import { TableExtensions } from '../TipTapExtensions';
 import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
 import { TextEmoticonExtension } from '../TipTapExtensions/TextEmoticonExtension';
 import type { InputBoxProps } from './InputBox.types';
-import { formatTypingMessage } from './InputBox.utils';
+import { formatTypingMessage, resolveCommandTextFromHtml } from './InputBox.utils';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
@@ -985,7 +985,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
       if (commandMatch && onCommandSelect) {
         const cmdName = commandMatch[1] ?? '';
-        const cmdText = commandMatch[2]?.trim() ?? '';
+        // Resolve mention spans from the HTML content so @user → <userid:xyneId>
+        // and @group → <groupid:xyneId> instead of bare display names.
+        const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
         const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
         if (matchedCmd) {
           editor.commands.setContent('');

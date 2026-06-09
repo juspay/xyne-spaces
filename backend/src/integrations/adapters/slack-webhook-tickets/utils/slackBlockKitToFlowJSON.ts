@@ -319,12 +319,13 @@ export function mrkdwnToFlowComponent(
   textObj: SlackTextObject | string,
   slackToXyneMap?: Map<string, string>,
   slackToXyneGroupMap?: Map<string, string>,
+  checkTables = false,
 ): FlowComponent {
   const raw      = typeof textObj === 'string' ? textObj : textObj.text;
   const isMrkdwn = typeof textObj === 'string' || textObj.type === 'mrkdwn';
   const content  = isMrkdwn ? normalizeSlackMentions(raw, slackToXyneMap, slackToXyneGroupMap) : raw;
   if (isMrkdwn) {
-    const structuredComponent = mrkdwnWithBlocksToFlowComponent(content);
+    const structuredComponent = mrkdwnWithBlocksToFlowComponent(content, checkTables);
     if (structuredComponent) return structuredComponent;
   }
   return { id: crypto.randomUUID(), type: 'text', props: { content } };
@@ -355,25 +356,30 @@ function parseMarkdownTable(content: string): FlowComponent | null {
   };
 }
 
-function mrkdwnWithBlocksToFlowComponent(content: string): FlowComponent | null {
-  // Check for GFM markdown table (may be preceded by other text lines)
+function mrkdwnWithBlocksToFlowComponent(content: string, checkTables = false): FlowComponent | null {
   const trimmed = content.trim();
   const lines = trimmed.split('\n');
-  const tableLineIndex = lines.findIndex(l => /^\|.+\|/.test(l.trim()));
-  if (tableLineIndex !== -1) {
-    const tableContent = lines.slice(tableLineIndex).join('\n').trim();
-    const table = parseMarkdownTable(tableContent);
-    if (table) {
-      const preText = lines.slice(0, tableLineIndex).join('\n').trim();
-      if (!preText) return table;
-      return {
-        id: crypto.randomUUID(),
-        type: 'column',
-        children: [
-          { id: crypto.randomUUID(), type: 'text', props: { content: preText } },
-          table,
-        ],
-      };
+
+  // GFM table detection — only enabled for block types that emit raw markdown
+  // (e.g. `markdown` blocks). `section`+`mrkdwn` blocks must NOT trigger this
+  // so that pipe-table content wrapped in ``` fences renders as a code block.
+  if (checkTables) {
+    const tableLineIndex = lines.findIndex(l => /^\|.+\|/.test(l.trim()));
+    if (tableLineIndex !== -1) {
+      const tableContent = lines.slice(tableLineIndex).join('\n').trim();
+      const table = parseMarkdownTable(tableContent);
+      if (table) {
+        const preText = lines.slice(0, tableLineIndex).join('\n').trim();
+        if (!preText) return table;
+        return {
+          id: crypto.randomUUID(),
+          type: 'column',
+          children: [
+            { id: crypto.randomUUID(), type: 'text', props: { content: preText } },
+            table,
+          ],
+        };
+      }
     }
   }
 
@@ -602,12 +608,13 @@ export function slackBlockToFlowComponent(
     }
 
     case 'markdown': {
-      // Non-standard but used by some Slack apps — treat `text` as mrkdwn.
-      // This also covers GFM markdown tables (| A | B |\n|---|---|\n| 1 | 2 |)
-      // which parseMarkdownTable inside mrkdwnToFlowComponent will detect.
+      // Non-standard but used by some Slack apps — treat `text` as raw GFM markdown.
+      // checkTables=true enables GFM pipe-table detection for this block type.
+      // `section`+`mrkdwn` blocks deliberately pass checkTables=false so that
+      // pipe-table content inside ``` fences renders as a code block, not a table.
       const mdBlock = block as SlackMarkdownBlock;
       if (!mdBlock.text) return null;
-      return mrkdwnToFlowComponent(mdBlock.text, slackToXyneMap, slackToXyneGroupMap);
+      return mrkdwnToFlowComponent(mdBlock.text, slackToXyneMap, slackToXyneGroupMap, true);
     }
 
     default:
@@ -724,8 +731,8 @@ export function slackAttachmentToFlowComponent(
 
   // Only add a left colour stripe when the attachment explicitly sets a color.
   // Attachments without color get a plain subtle border — NO left bar (matches Slack).
-  if (attachment.color) {
-    const color = resolveAttachmentColor(attachment.color);
+  if (attachment.color !== undefined) {
+    const color = resolveAttachmentColor(attachment.color as string | undefined);
     return withColorStripe(children, color);
   }
 
