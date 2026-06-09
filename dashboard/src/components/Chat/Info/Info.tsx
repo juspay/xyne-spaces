@@ -95,6 +95,7 @@ const Info = ({
   );
 
   const isParticipant = participants.some(p => p.userId === context.userID);
+  const isSelfDM = isDM && participants.length === 1 && participants[0]?.userId === context.userID;
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
 
   const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
@@ -412,7 +413,7 @@ const Info = ({
               Members {channel.channelStats?.participantCount || 0}
             </Tabs.Trigger>
           )}
-          {isParticipant && (
+          {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
             <Tabs.Trigger
               value='notifications'
               className={cn(
@@ -476,7 +477,7 @@ const Info = ({
             />
           </Tabs.Content>
         )}
-        {isParticipant && (
+        {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
           <Tabs.Content
             value='notifications'
             className='outline-none flex-1 min-h-0 overflow-y-auto'

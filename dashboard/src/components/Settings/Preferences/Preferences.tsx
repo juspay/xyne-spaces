@@ -14,7 +14,10 @@ import {
   ChevronRight,
   Calendar,
   Search,
+  Monitor,
+  Smartphone,
 } from 'lucide-react';
+import { NotificationLevel } from '@xyne/shared';
 import { format } from 'date-fns';
 
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -34,6 +37,7 @@ import { logger } from '../../../utils/logger';
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
+import { useGlobalNotificationSettings } from '../../../hooks/useGlobalNotificationSettings';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
@@ -119,12 +123,114 @@ const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 );
 
 // ─── Notifications ──────────────────────────────────────────────────────────
-const NotificationsSection: FC = () => (
-  <div className='space-y-4'>
-    <SectionHeader title='Notifications' subtitle='Manage your notification preferences' />
-    <MeetingDetectionToggle />
-  </div>
-);
+const GLOBAL_NOTIFICATION_LEVELS: Array<{ value: NotificationLevel; label: string }> = [
+  { value: NotificationLevel.ALL, label: 'Everything' },
+  { value: NotificationLevel.MENTIONS_ONLY, label: 'Mentions & DMs' },
+];
+
+const NotificationsSection: FC<{ state: PreferencesState }> = () => {
+  const settings = useGlobalNotificationSettings();
+  return (
+    <div className='space-y-4'>
+      <SectionHeader title='Notifications' subtitle='Manage your notification preferences' />
+
+      {/* Default notification levels */}
+      <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+        <p className='text-sm font-medium text-foreground'>Default notification level</p>
+        <p className='text-xs text-muted-foreground'>
+          Channel-level settings override these defaults.
+        </p>
+
+        {/* Desktop level */}
+        <div className='space-y-1.5'>
+          <div className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+            <Monitor className='size-3' />
+            Desktop
+          </div>
+          <div className='flex gap-2'>
+            {GLOBAL_NOTIFICATION_LEVELS.map(level => (
+              <button
+                key={level.value}
+                onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
+                data-track-category='PREFERENCES'
+                data-track-name={`SetGlobalDesktopLevel_${level.value}`}
+                className={cn(
+                  'flex-1 px-2 py-1.5 text-xs rounded-md border transition-colors',
+                  settings.globalDesktopNotificationLevel === level.value
+                    ? 'bg-muted text-foreground border-border font-medium'
+                    : 'bg-background text-muted-foreground border-border hover:bg-muted',
+                )}
+              >
+                {level.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Mobile level */}
+        <div className='space-y-1.5'>
+          <div className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+            <Smartphone className='size-3' />
+            Mobile
+          </div>
+          <div className='flex gap-2'>
+            {GLOBAL_NOTIFICATION_LEVELS.map(level => (
+              <button
+                key={level.value}
+                onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
+                data-track-category='PREFERENCES'
+                data-track-name={`SetGlobalMobileLevel_${level.value}`}
+                className={cn(
+                  'flex-1 px-2 py-1.5 text-xs rounded-md border transition-colors',
+                  settings.globalMobileNotificationLevel === level.value
+                    ? 'bg-muted text-foreground border-border font-medium'
+                    : 'bg-background text-muted-foreground border-border hover:bg-muted',
+                )}
+              >
+                {level.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Toggle settings */}
+      <div className='space-y-2'>
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>@channel and @here mentions</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Receive notifications for channel-wide mentions
+            </p>
+          </div>
+          <Switch
+            id='channel-wide-mentions'
+            checked={settings.channelWideMentionsEnabled}
+            onCheckedChange={checked => settings.update({ channelWideMentionsEnabled: checked })}
+          />
+        </div>
+
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Thread reply notifications</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Receive notifications for replies in threads you follow
+            </p>
+          </div>
+          <Switch
+            id='thread-reply-notifications'
+            checked={settings.threadReplyNotificationsEnabled}
+            onCheckedChange={checked =>
+              settings.update({ threadReplyNotificationsEnabled: checked })
+            }
+          />
+        </div>
+
+        <MeetingDetectionToggle />
+      </div>
+    </div>
+  );
+};
 
 // ─── Availability ───────────────────────────────────────────────────────────
 const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
@@ -452,7 +558,7 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
   const { isMobile } = usePlatform();
   const state = usePreferencesState(open);
   const navItems = useMemo(() => {
-    const electronOnly = new Set<PreferenceSection>(['notifications']);
+    const electronOnly = new Set<PreferenceSection>();
     return NAV_ITEMS.filter(item => {
       if (isMobile && item.desktopOnly) return false;
       if (!isElectronApp() && electronOnly.has(item.id)) return false;

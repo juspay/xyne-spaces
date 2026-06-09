@@ -1252,6 +1252,14 @@ export const queries = defineQueries({
   getAllChannelsUserStatus: defineQuery(({ ctx }) => {
     return zql.channel_user_status.where('userId', ctx.userID).where('isDeleted', false);
   }),
+  getChannelUserStatus: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) =>
+      zql.channel_user_status
+        .where('channelId', channelId)
+        .where('userId', ctx.userID)
+        .where('isDeleted', false),
+  ),
   getUsers: defineQuery(z.object({ updatedAt: z.number().optional() }).optional(), ({ args }) => {
     let query = zql.users;
     if (args?.updatedAt !== undefined) {

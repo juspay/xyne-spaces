@@ -35,6 +35,7 @@ import { getSlackRecipientEmails } from '@/utils/notificationHelper';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notificationFilterService';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
 const messageAttachmentRepository = new MessageAttachmentRepository();
@@ -281,13 +282,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const channelName = channel?.name || 'Unknown Channel';
     const senderName = sender?.name || 'Someone';
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
-    const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
+    const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
+    const isOneToOneDM = channel?.scopeType === ChannelScopeType.DM;
     const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
     const allowThreadBroadcastMentions = userPreference?.allowThreadBroadcastMentions ?? false;
-    // For FlowJSON messages, special mentions and user mentions live inside the
-    // JSON component tree.  extractSpecialMentions and extractMentionsFromContent
-    // both understand <broadcast:channel/here> and <userid:ID> tokens, so we
-    // pass the raw (uncleaned) flow text for mention scanning.
+
+    // For FlowJSON, scan raw flow text (tokens intact) not the HTML wrapper.
     const flowRawText = getFlowJsonRawTextForMentions(content);
     const contentForMentions = flowRawText ?? content;
     const specialMentions =
@@ -362,6 +362,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         .map(p => p.user.name || 'Unknown');
       const dmChannelName = formatDmChannelName(memberNames);
 
+      const dmPrefetchedData = channelParticipants.length > 0
+        ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId)
+        : undefined;
+
       await this.handleDMChannelMessage(
         messageId,
         conversationId,
@@ -378,7 +382,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         mentionType,
         message.createdAt,
         channel.scopeType,
-        message.hasAttachment
+        message.hasAttachment,
+        dmPrefetchedData,
       );
       return;
     }
@@ -492,6 +497,13 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // Uses isReply calculated earlier for thread context in notifications
     const mentionedUserIdSet = new Set(notificationUserIds);
 
+    // Pre-fetch channelUserStatus + userPresence + userPreference once for all
+    // channel participants. All notification calls below operate on disjoint subsets
+    // of channelParticipants, so this single round-trip replaces N×3 sequential fetches.
+    const prefetchedData = channelParticipants.length > 0
+      ? await prefetchFilterData(channelParticipants.map(p => p.userId), channelId)
+      : undefined;
+
     if (!isReply) {
       const channelMessageRecipientIds = channelParticipants
         .map(participant => participant.userId)
@@ -510,12 +522,16 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             cleanContent,
             this.ctx.workspaceId,
             sender?.picture ?? '',
+            prefetchedData,
           );
         } catch (error) {
           logger.error('[SIDE-EFFECT] Spaces channel message notifications failed', { error });
         }
       }
     }
+
+    // Track mention-delivered IDs to exclude from thread reply notifications.
+    let deliveredMentionUserIds: string[] = [];
 
     if (notificationUserIds.length > 0) {
       await handleUnreadCount(
@@ -547,11 +563,13 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           cleanContent,
           this.ctx.workspaceId,
           mentionType,
-          isDMChannel,
+          isOneToOneDM,
           !!isReply,
           sender?.picture ?? '',
+          prefetchedData,
         );
 
+        deliveredMentionUserIds = deliveredUserIds;
         slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
       } catch (error) {
         logger.error('[SIDE-EFFECT] Spaces mention notifications failed — sending Slack to all recipients', { error });
@@ -587,6 +605,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     );
 
     if (isReply && conversationId) {
+      // Exclude already-notified mention recipients from thread replies.
+      const replyExcludedUserIds = [
+        ...new Set([...finalMentionedUserIds, ...deliveredMentionUserIds]),
+      ];
       await this.createReplyActivity(
         conversationId,
         messageId,
@@ -598,6 +620,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         cleanContent,
         channelParticipants,
         sender?.picture ?? '',
+        isOneToOneDM,
+        prefetchedData,
+        false,
+        replyExcludedUserIds,
       );
     }
 
@@ -1080,6 +1106,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     cleanContent: string,
     channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>,
     senderPicture: string = '',
+    isDMChannel: boolean = false,
+    prefetchedData?: PrefetchedFilterData,
+    isGroupDM: boolean = false,
+    excludedUserIds: string[] = [],
   ): Promise<void> {
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
     const participants = await db.conversationParticipant.findMany({
@@ -1093,7 +1123,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const participantIds = participants
       .map(p => p.userId)
       .filter(userId => userId !== senderUserId)
-      .filter(userId => !mentionedUserIds.includes(userId));
+      .filter(userId => !mentionedUserIds.includes(userId))
+      .filter(userId => !excludedUserIds.includes(userId));
 
     const validParticipantIds = participantIds.filter(userId =>
       channelParticipantIds.has(userId)
@@ -1133,8 +1164,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         cleanContent,
         this.ctx.workspaceId,
-        false,
+        isDMChannel,
         senderPicture,
+        prefetchedData,
+        isGroupDM,
       );
 
       slackRecipientEmails = getSlackRecipientEmails(replyEmails, deliveredUserIds, userEmailMap);
@@ -1168,7 +1201,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     mentionType: '@channel' | '@here' | undefined,
     createdAt: Date,
     scopeType: ChannelScopeType,
-    hasAttachment: boolean
+    hasAttachment: boolean,
+    prefetchedData?: PrefetchedFilterData,
   ): Promise<void> {
     const isLargeGroupDm = channelParticipants.length > LARGE_GROUP_DM_THRESHOLD;
     const isReply = !!(initialMessageId && initialMessageId !== messageId);
@@ -1203,10 +1237,97 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     }
 
     if (isReply && conversationId) {
+      let groupDMThreadMentionedUserIds: string[] = [];
+      if (scopeType === ChannelScopeType.GROUP_DM) {
+        const recipientIds = channelParticipants
+          .map(p => p.userId)
+          .filter(id => id !== senderId);
+
+        if (mentionType) {
+          // @channel/@here in GROUP_DM thread: use 'thread_mention' context.
+          try {
+            const { deliveredUserIds } = await notificationService.createMentionNotifications(
+              recipientIds,
+              messageId,
+              conversationId,
+              channelId,
+              channelName,
+              senderId,
+              senderName,
+              cleanContent,
+              this.ctx.workspaceId,
+              mentionType,
+              false,
+              true,
+              senderPicture,
+              prefetchedData,
+              true, // isGroupDM
+            );
+            groupDMThreadMentionedUserIds = deliveredUserIds;
+          } catch (error) {
+            logger.error('[SIDE-EFFECT] GROUP_DM thread @channel/@here notifications failed', { error });
+          }
+        } else {
+          // @username mentions in GROUP_DM thread.
+          const flowRawText = getFlowJsonRawTextForMentions(htmlContent);
+          const contentForMentions = flowRawText ?? htmlContent;
+          const participantSet = new Set(channelParticipants.map(p => p.userId));
+          const mentioned = await extractAllUsersForNotification(
+            contentForMentions,
+            this.ctx.workspaceId,
+            channelId,
+          );
+          const groupDMThreadMentionedUsers = mentioned
+            .filter(u => (u.mentionSource === 'direct' || u.mentionSource === 'group')
+              && participantSet.has(u.userId) && u.userId !== senderId)
+            .map(u => ({ userId: u.userId, mentionSource: u.mentionSource as 'direct' | 'group' }));
+          groupDMThreadMentionedUserIds = groupDMThreadMentionedUsers.map(u => u.userId);
+
+          if (groupDMThreadMentionedUserIds.length > 0) {
+            try {
+              await notificationService.createMentionNotifications(
+                groupDMThreadMentionedUserIds,
+                messageId,
+                conversationId,
+                channelId,
+                channelName,
+                senderId,
+                senderName,
+                cleanContent,
+                this.ctx.workspaceId,
+                undefined,
+                false,
+                true,
+                senderPicture,
+                prefetchedData,
+                true, // isGroupDM
+              );
+            } catch (error) {
+              logger.error('[SIDE-EFFECT] GROUP_DM thread mention notifications failed', { error });
+            }
+
+            // Activity records for @mentioned users in GROUP_DM thread replies.
+            const mentionActivities = groupDMThreadMentionedUsers.map(u => ({
+              id: uuidv4(),
+              userId: u.userId,
+              actorId: senderId,
+              actorAction: u.mentionSource === 'direct' ? 'mentioned_user' : 'group_mention',
+              actionSource: 'message' as const,
+              actionSourceId: messageId,
+              messageId,
+              channelId,
+              isThreadActivity: true,
+              classification: ActivityClassification.PENDING,
+            }));
+            await activityService.createActivities(mentionActivities);
+          }
+        }
+      }
+
       await this.createReplyActivity(
         conversationId,
         messageId,
-        [],
+        groupDMThreadMentionedUserIds,
         senderId,
         channelId,
         channelName,
@@ -1214,6 +1335,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         cleanContent,
         channelParticipants,
         senderPicture,
+        scopeType === ChannelScopeType.DM,
+        prefetchedData,
+        scopeType === ChannelScopeType.GROUP_DM,
       );
     } else {
       if (!mentionType && !isLargeGroupDm) {
@@ -1233,28 +1357,122 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         .filter(p => p.userId !== senderId && p.user?.email)
         .map(p => p.user.email);
 
+      let allDeliveredUserIds: string[] = [];
       let slackRecipientEmails = recipientEmails;
-      try {
-        const { deliveredUserIds } = await notificationService.createDirectMessageNotifications(
-          recipientIds,
-          messageId,
-          conversationId,
-          channelId,
-          senderId,
-          senderName,
-          cleanContent,
-          this.ctx.workspaceId,
-          scopeType,
-          true,
-          senderPicture,
-          channelName,
-        );
 
-        slackRecipientEmails = getSlackRecipientEmails(recipientEmails, deliveredUserIds, userEmailMap);
-      } catch (error) {
-        logger.error('[SIDE-EFFECT] Spaces DM notifications failed — sending Slack to all recipients', { error });
+      if (scopeType === ChannelScopeType.GROUP_DM && mentionType) {
+        // Case 1: GROUP_DM @channel/@here — route through createMentionNotifications.
+        try {
+          const { deliveredUserIds } = await notificationService.createMentionNotifications(
+            recipientIds,
+            messageId,
+            conversationId,
+            channelId,
+            channelName,
+            senderId,
+            senderName,
+            cleanContent,
+            this.ctx.workspaceId,
+            mentionType,
+            false,
+            false,
+            senderPicture,
+            prefetchedData,
+            true, // isGroupDM
+          );
+          allDeliveredUserIds = deliveredUserIds;
+        } catch (error) {
+          logger.error('[SIDE-EFFECT] GROUP_DM @channel/@here mention notifications failed', { error });
+        }
+        } else {
+        // Case 2: GROUP_DM @username mentions + regular DM notifications.
+        let groupDMMentionedUserIds: string[] = [];
+        let groupDMMentionedUsers: Array<{ userId: string; mentionSource: 'direct' | 'group' }> = [];
+        if (scopeType === ChannelScopeType.GROUP_DM) {
+          const flowRawText = getFlowJsonRawTextForMentions(htmlContent);
+          const contentForMentions = flowRawText ?? htmlContent;
+          const participantSet = new Set(channelParticipants.map(p => p.userId));
+          const mentioned = await extractAllUsersForNotification(
+            contentForMentions,
+            this.ctx.workspaceId,
+            channelId,
+          );
+          groupDMMentionedUsers = mentioned
+            .filter(u => (u.mentionSource === 'direct' || u.mentionSource === 'group')
+              && participantSet.has(u.userId) && u.userId !== senderId)
+            .map(u => ({ userId: u.userId, mentionSource: u.mentionSource as 'direct' | 'group' }));
+          groupDMMentionedUserIds = groupDMMentionedUsers.map(u => u.userId);
+        }
+
+        // Mention notifications for explicitly @mentioned users.
+        if (groupDMMentionedUserIds.length > 0) {
+          try {
+            const { deliveredUserIds } = await notificationService.createMentionNotifications(
+              groupDMMentionedUserIds,
+              messageId,
+              conversationId,
+              channelId,
+              channelName,
+              senderId,
+              senderName,
+              cleanContent,
+              this.ctx.workspaceId,
+              undefined,
+              false,
+              false,
+              senderPicture,
+              prefetchedData,
+              true, // isGroupDM
+            );
+            allDeliveredUserIds = deliveredUserIds;
+          } catch (error) {
+            logger.error('[SIDE-EFFECT] GROUP_DM mention notifications failed', { error });
+          }
+
+          // Activity records for @mentioned users in GROUP_DM parent messages.
+          const mentionActivities = groupDMMentionedUsers.map(u => ({
+            id: uuidv4(),
+            userId: u.userId,
+            actorId: senderId,
+            actorAction: u.mentionSource === 'direct' ? 'mentioned_user' : 'group_mention',
+            actionSource: 'message' as const,
+            actionSourceId: messageId,
+            messageId,
+            channelId,
+            isThreadActivity: false,
+            classification: ActivityClassification.PENDING,
+          }));
+          await activityService.createActivities(mentionActivities);
+        }
+
+        // DM notifications for non-mentioned recipients only.
+        const mentionedSet = new Set(groupDMMentionedUserIds);
+        const dmRecipientIds = groupDMMentionedUserIds.length > 0
+          ? recipientIds.filter(id => !mentionedSet.has(id))
+          : recipientIds;
+
+        try {
+          const { deliveredUserIds } = await notificationService.createDirectMessageNotifications(
+            dmRecipientIds,
+            messageId,
+            conversationId,
+            channelId,
+            senderId,
+            senderName,
+            cleanContent,
+            this.ctx.workspaceId,
+            scopeType,
+            senderPicture,
+            channelName,
+            prefetchedData,
+          );
+          allDeliveredUserIds = [...allDeliveredUserIds, ...deliveredUserIds];
+        } catch (error) {
+          logger.error('[SIDE-EFFECT] Spaces DM notifications failed — sending Slack to all recipients', { error });
+        }
       }
 
+      slackRecipientEmails = getSlackRecipientEmails(recipientEmails, allDeliveredUserIds, userEmailMap);
       await slackService.sendDirectMessageNotifications(
         slackRecipientEmails,
         senderName,

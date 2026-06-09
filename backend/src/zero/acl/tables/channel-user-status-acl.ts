@@ -159,8 +159,9 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
   ): Promise<void> {
     const channel = await tx.run(zql.channels.where('id', '=', channelId).one());
     
-    // Disallowed notification levels apply to both DM and GROUP_DM channels
-    if (channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM) {
+    // Disallowed notification levels apply only to 1:1 DM channels.
+    // GROUP_DM uses the regular channel notification path and supports MENTIONS_ONLY.
+    if (channel?.scopeType === ChannelScopeType.DM) {
       if (desktopNotificationLevel && DISALLOWED_DM_NOTIFICATION_LEVELS.includes(desktopNotificationLevel as NotificationLevel)) {
         throw new MutationACLError(
           `Channel user status update failed: ${desktopNotificationLevel} notification level is not allowed for DM channels`,

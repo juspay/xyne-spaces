@@ -16,6 +16,7 @@ import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
 import * as notificationFilterService from './notificationFilterService';
+import type { PrefetchedFilterData } from './notificationFilterService';
 import { serializeInitialMessageMd, type InitialMessageSummary } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
@@ -212,6 +213,20 @@ class NotificationService {
         ? NotificationType.WORKFLOW_COMPLETION
         : NotificationType.WORKFLOW_FAILURE;
 
+      // Apply pause and channel-level filtering before delivering.
+      const { desktopUsers, mobileUsers } = ticket.channelId
+        ? await notificationFilterService.filterUsers([createdBy], ticket.channelId, false, 'mention', {
+            notificationType,
+          })
+        : await notificationFilterService.filterGlobalUsers([createdBy], notificationType, 'mention');
+
+      const receiveDesktop = desktopUsers.includes(createdBy);
+      const receiveMobile = mobileUsers.includes(createdBy);
+
+      if (!receiveDesktop && !receiveMobile) {
+        return;
+      }
+
       const title = isSuccess ? 'Workflow Completed' : 'Workflow Failed';
       const ticketIdDisplay = ticket.xyneId || ticket.id;
       const message = `Workflow for ticket ${ticketIdDisplay} has ${isSuccess ? 'completed successfully' : 'failed'}.`;
@@ -229,7 +244,7 @@ class NotificationService {
           xyneId: ticket.xyneId,
           status
         }
-      });
+      }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
       logger.info(`[Notification] Sent push notification to user ${createdBy} for workflow ${workflowId} completion.`);
 
       // Note: Slack notification functionality removed as slackChannelId/slackThreadId fields no longer exist on Ticket model
@@ -923,6 +938,7 @@ class NotificationService {
     cleanContent: string,
     workspaceId: string,
     senderPicture: string = '',
+    prefetchedData?: PrefetchedFilterData,
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
@@ -940,6 +956,8 @@ class NotificationService {
       channelId,
       false,
       'channel_message',
+      { notificationType: NotificationType.CHANNEL_MESSAGE },
+      prefetchedData,
     );
 
     logger.info(`[Notification] Filtered channel message recipients`, {
@@ -1027,6 +1045,8 @@ class NotificationService {
     isDMChannel: boolean = false,
     isThreadMessage: boolean = false,
     senderPicture: string = '',
+    prefetchedData?: PrefetchedFilterData,
+    isGroupDM: boolean = false,
   ): Promise<{ deliveredUserIds: string[] }> {
     const title = mentionType
       ? `${mentionType} in #${channelName}`
@@ -1045,7 +1065,13 @@ class NotificationService {
       recipientIds,
       channelId,
       isDMChannel,
-      notificationContext
+      notificationContext,
+      {
+        notificationType: NotificationType.MENTION,
+        mentionType: (mentionType === '@channel' || mentionType === '@here') ? mentionType : undefined,
+      },
+      prefetchedData,
+      isGroupDM,
     );
 
     logger.info(`[Notification] Filtered mention recipients`, {
@@ -1119,6 +1145,7 @@ class NotificationService {
   /**
    * Send mention notifications for canvas mentions.
    * Mirrors message mention flow: when canvas is in a channel, use "You were mentioned in #channelName".
+   * Respects global pause and channel notification level (NONE = silenced).
    */
   async createCanvasMentionNotifications(
     userIds: string[],
@@ -1129,30 +1156,28 @@ class NotificationService {
     workspaceId: string,
     channelName?: string,
     blockId?: string,
+    channelId?: string | null,
   ): Promise<{ deliveredUserIds: string[] }> {
-    logger.info(`[NOTIFICATION-SERVICE] createCanvasMentionNotifications called`, {
-      userIds,
-      canvasId,
-      canvasTitle,
-      senderId,
-      senderName,
-      channelName,
-    });
-
     const recipientIds = userIds.filter(id => id !== senderId);
-    logger.info(`[NOTIFICATION-SERVICE] Filtered recipient IDs (excluding sender)`, {
-      originalCount: userIds.length,
-      recipientCount: recipientIds.length,
-      recipientIds,
-      senderId,
-    });
-
     if (recipientIds.length === 0) {
       logger.info(`[NOTIFICATION-SERVICE] No recipients after filtering, skipping notification creation`);
       return { deliveredUserIds: [] };
     }
 
-    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
+    // Apply pause and channel-level filtering.
+    // If the canvas is in a channel, use channel-level settings; otherwise fall back to global pause only.
+    // Canvas mentions use 'mention' context — delivered unless channel is muted (NONE) or notifications are paused.
+    const { desktopUsers, mobileUsers } = channelId
+      ? await notificationFilterService.filterUsers(recipientIds, channelId, false, 'mention', {
+          notificationType: NotificationType.MENTION,
+        })
+      : await notificationFilterService.filterGlobalUsers(recipientIds, NotificationType.MENTION, 'mention');
+
+    if (desktopUsers.length === 0 && mobileUsers.length === 0) {
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(desktopUsers.length + mobileUsers.length, { platform: 'desktop', message_type: 'channel' });
 
     // Mirror message mentions: "You were mentioned in #channelName" when canvas is in a channel
     const title = channelName
@@ -1162,57 +1187,64 @@ class NotificationService {
       ? `${senderName} mentioned you in #${channelName}`
       : `${senderName} mentioned you in a canvas`;
 
-    logger.info(`[NOTIFICATION-SERVICE] Creating ${recipientIds.length} canvas mention notifications`, {
+    const notificationData = {
       title,
       message,
-      recipientIds,
-    });
+      type: NotificationType.MENTION,
+      relatedEntityType: 'canvas' as const,
+      relatedEntityId: canvasId,
+      metadata: {
+        canvasId,
+        canvasTitle,
+        senderId,
+        senderName,
+        workspaceId,
+        ...(blockId ? { blockId } : {}),
+      },
+    };
 
-    const results = await Promise.allSettled(
-      recipientIds.map(async userId => {
-        const actionUrl = blockId
-          ? `/${workspaceId}/chat/canvas/${canvasId}?blockId=${encodeURIComponent(blockId)}`
-          : `/${workspaceId}/chat/canvas/${canvasId}`;
-        const result = await this.createNotification(userId, {
-          title,
-          message,
-          type: NotificationType.MENTION,
-          relatedEntityType: 'canvas',
-          relatedEntityId: canvasId,
-          actionUrl,
-          metadata: {
-            canvasId,
-            canvasTitle,
-            senderId,
-            senderName,
-            workspaceId,
-            ...(blockId ? { blockId } : {}),
-          },
-        });
+    const actionUrl = blockId
+      ? `/${workspaceId}/chat/canvas/${canvasId}?blockId=${encodeURIComponent(blockId)}`
+      : `/${workspaceId}/chat/canvas/${canvasId}`;
+
+    // Send desktop-only notifications
+    getNotificationJobsExpected().add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
+    const desktopResults = await Promise.allSettled(
+      desktopUsers.map(async userId => {
+        const result = await this.createNotification(
+          userId,
+          { ...notificationData, actionUrl },
+          { sendDesktop: true, sendMobile: false },
+        );
         return { userId, deliveredViaApp: result.deliveredViaApp };
       })
     );
 
-    const successCount = results.filter(r => r.status === 'fulfilled').length;
-    const failureCount = results.filter(r => r.status === 'rejected').length;
-    const deliveredUserIds = results
-      .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
-      .filter(r => r.value.deliveredViaApp)
-      .map(r => r.value.userId);
+    // Send mobile-only notifications
+    getNotificationJobsExpected().add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
+    const mobileResults = await Promise.allSettled(
+      mobileUsers.map(async userId => {
+        const result = await this.createNotification(
+          userId,
+          { ...notificationData, actionUrl },
+          { sendDesktop: false, sendMobile: true },
+        );
+        return { userId, deliveredViaApp: result.deliveredViaApp };
+      })
+    );
 
-    logger.info(`[NOTIFICATION-SERVICE] Canvas mention notification creation completed`, {
-      total: recipientIds.length,
-      success: successCount,
-      failures: failureCount,
-      deliveredViaApp: deliveredUserIds.length,
-      results: results.map((r, idx) => ({
-        userId: recipientIds[idx],
-        status: r.status,
-        error: r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : undefined,
-      })),
-    });
+    const deliveredUserIds = [
+      ...desktopResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+      ...mobileResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+    ];
 
-    return { deliveredUserIds };
+    return { deliveredUserIds: [...new Set(deliveredUserIds)] };
   }
 
   async createCanvasSharedNotifications(
@@ -1224,20 +1256,9 @@ class NotificationService {
     role: string,
     actorAction: 'canvas_shared' | 'canvas_role_changed' | 'canvas_access_revoked',
   ): Promise<{ deliveredUserIds: string[] }> {
-    logger.info(`[NOTIFICATION-SERVICE] createCanvasSharedNotifications called`, {
-      recipientUserIds,
-      canvasId,
-      canvasTitle,
-      actorId,
-      actorName,
-      role,
-      actorAction,
-    });
-
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
     if (recipientIds.length === 0) {
-      logger.info(`[NOTIFICATION-SERVICE] No recipients after filtering, skipping canvas shared notification creation`);
       return { deliveredUserIds: [] };
     }
 
@@ -1253,12 +1274,6 @@ class NotificationService {
       : actorAction === 'canvas_access_revoked'
         ? `Your access to "${canvasTitle}" was revoked by ${actorName}`
         : `${actorName} changed your role to ${role} on "${canvasTitle}"`;
-
-    logger.info(`[NOTIFICATION-SERVICE] Creating ${recipientIds.length} canvas shared notifications`, {
-      title,
-      message,
-      recipientIds,
-    });
 
     const results = await Promise.allSettled(
       recipientIds.map(async userId => {
@@ -1284,16 +1299,6 @@ class NotificationService {
       .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
       .map(r => r.value);
 
-    const successCount = results.filter(r => r.status === 'fulfilled').length;
-    const failureCount = results.filter(r => r.status === 'rejected').length;
-
-    logger.info(`[NOTIFICATION-SERVICE] Canvas shared notification creation completed`, {
-      total: recipientIds.length,
-      success: successCount,
-      failures: failureCount,
-      deliveredUserIds,
-    });
-
     return { deliveredUserIds };
   }
 
@@ -1309,6 +1314,8 @@ class NotificationService {
     workspaceId: string,
     isDMChannel: boolean = false,
     senderPicture: string = '',
+    prefetchedData?: PrefetchedFilterData,
+    isGroupDM: boolean = false,
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
@@ -1320,7 +1327,10 @@ class NotificationService {
       recipientIds,
       channelId,
       isDMChannel,
-      'thread_reply'
+      'thread_reply',
+      { notificationType: NotificationType.THREAD_REPLY },
+      prefetchedData,
+      isGroupDM,
     );
 
     logger.info(`[Notification] Filtered thread reply recipients`, {
@@ -1395,24 +1405,35 @@ class NotificationService {
     cleanContent: string,
     workspaceId: string,
     scopeType: ChannelScopeType,
-    isDMChannel: boolean = true,
     senderPicture: string = '',
     channelName?: string,
+    prefetchedData?: PrefetchedFilterData,
   ): Promise<{ deliveredUserIds: string[] }> {
     if (recipientIds.length === 0) return { deliveredUserIds: [] };
 
+    // 1:1 DMs use the DM shortcut path (NONE check only — level picker does not apply).
+    // GROUP_DMs go through the regular channel path but skip the global preference
+    // and default to ALL, matching 1:1 DM semantics for the system-level default.
+    const isOneToOneDM = scopeType === ChannelScopeType.DM;
+    const isGroupDM    = scopeType === ChannelScopeType.GROUP_DM;
+
     getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'dm' });
-    // For DM channels, only apply device filter (skips pause and notification level checks)
     const { desktopUsers, mobileUsers } = await notificationFilterService.filterUsers(
       recipientIds,
       channelId,
-      isDMChannel
+      isOneToOneDM,
+      isOneToOneDM ? 'mention' : 'channel_message',
+      {},
+      prefetchedData,
+      isGroupDM,
     );
 
     logger.info(`[Notification] Filtered DM recipients`, {
       original: recipientIds.length,
       desktopUsers: desktopUsers.length,
       mobileUsers: mobileUsers.length,
+      desktopUserIds: desktopUsers,
+      mobileUserIds: mobileUsers,
       channelId,
     });
 
@@ -1757,6 +1778,20 @@ class NotificationService {
         return;
       }
 
+      // Apply pause and channel-level filtering before delivering.
+      const { desktopUsers, mobileUsers } = ticket.channelId
+        ? await notificationFilterService.filterUsers([assignedTo], ticket.channelId, false, 'mention', {
+            notificationType: NotificationType.TICKET_ASSIGNMENT,
+          })
+        : await notificationFilterService.filterGlobalUsers([assignedTo], NotificationType.TICKET_ASSIGNMENT, 'mention');
+
+      const receiveDesktop = desktopUsers.includes(assignedTo);
+      const receiveMobile = mobileUsers.includes(assignedTo);
+
+      if (!receiveDesktop && !receiveMobile) {
+        return;
+      }
+
       const actionUrl = ticket.channelId && ticket.conversationId
         ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
         : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
@@ -1774,7 +1809,7 @@ class NotificationService {
           channelId: ticket.channelId,
           conversationId: ticket.conversationId,
         },
-      });
+      }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
     } catch (error) {
       logger.error('Failed to send ticket assignment notification:', error);
     }

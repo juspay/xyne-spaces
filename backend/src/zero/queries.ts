@@ -1220,6 +1220,15 @@ export const queries = defineQueries({
     return zql.channel_user_status.where('userId', ctx.userID).where('isDeleted', false);
   }),
 
+  getChannelUserStatus: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) =>
+      zql.channel_user_status
+        .where('channelId', channelId)
+        .where('userId', ctx.userID)
+        .where('isDeleted', false),
+  ),
+
   userActiveCalls: defineQuery(() => {
     return zql.calls
       .where('status', CallStatus.ACTIVE)

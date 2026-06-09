@@ -110,7 +110,8 @@ export class CanvasSideEffectHandler extends BaseSideEffectHandler {
           senderName,
           this.ctx.workspaceId,
           channelName,
-          undefined // no specific blockId for AI-generated content
+          undefined, // no specific blockId for AI-generated content
+          canvas.channelId ?? undefined,
         ),
       ]).then(() => {
         logger.info(`[CanvasSideEffectHandler] Successfully created activities and notifications for canvas ${canvasId}`);

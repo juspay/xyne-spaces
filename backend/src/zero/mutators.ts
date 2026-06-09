@@ -11,6 +11,7 @@ import {
   CallOrigin,
   InvitationResponse,
   MeetingStatus,
+  NotificationLevel,
   Schema,
   ChannelScopeType,
   ChannelAddUserPolicy,
@@ -614,44 +615,41 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
   return defineMutators({
     notificationSettings: {
-      setChannelNotificationLevel: defineMutator(
-        z.object({
-          channelId: z.string(),
-          desktopNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
-          mobileNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args: { channelId, desktopNotificationLevel, mobileNotificationLevel, timestamp } }) => {
-          // Get channel user status
-          const userStatus = await tx.run(
-            zql.channel_user_status
-              .where('channelId', channelId)
-              .where('isDeleted', false)
-              .where('userId', authData.sub)
-              .one()
-          );
+       setChannelNotificationLevel: defineMutator(
+         z.object({
+           channelId: z.string(),
+           desktopNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).nullable().optional(),
+           mobileNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).nullable().optional(),
+           threadReplyNotificationsEnabled: z.boolean().nullable().optional(),
+           channelWideMentionsEnabled: z.boolean().nullable().optional(),
+           timestamp: z.number(),
+         }),
+         async ({ tx, args: { channelId, desktopNotificationLevel, mobileNotificationLevel, threadReplyNotificationsEnabled, channelWideMentionsEnabled, timestamp } }) => {
+           // Get channel user status
+           const userStatus = await tx.run(
+             zql.channel_user_status
+               .where('channelId', channelId)
+               .where('isDeleted', false)
+               .where('userId', authData.sub)
+               .one()
+           );
 
-          if (!userStatus) {
-            throw new Error('Not a channel participant');
-          }
+           if (!userStatus) {
+             throw new Error('Not a channel participant');
+           }
 
-          logger.info(`[NOTIFICATION-SETTINGS] Setting channel notification for user ${authData.sub} in channel ${channelId}`, {
-            desktopNotificationLevel,
-            mobileNotificationLevel,
-            timestamp,
-            userId: authData.sub,
-            channelId,
-          });
-
-          await tx.mutate.channel_user_status.update({
-            id: userStatus.id,
-            ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel }),
-            ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel }),
-            updatedAt: timestamp,
-          });
-        }
-      ),
-    },
+            await tx.mutate.channel_user_status.update({
+             id: userStatus.id,
+             // undefined = not provided (don't touch), null = reset to inherit global, value = explicit override
+             ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel: desktopNotificationLevel ?? null }),
+             ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel: mobileNotificationLevel ?? null }),
+             ...(threadReplyNotificationsEnabled !== undefined && { threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? null }),
+             ...(channelWideMentionsEnabled !== undefined && { channelWideMentionsEnabled: channelWideMentionsEnabled ?? null }),
+             updatedAt: timestamp,
+           });
+         }
+       ),
+     },
     channel: {
       joinChannel: defineMutator(
         z.object({
@@ -11512,6 +11510,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               channelSortOrder,
               enterSendsMessage: true,
               allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -11541,6 +11543,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               channelSortOrder: ChannelSortOrder.RECENCY,
               enterSendsMessage,
               allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -11554,10 +11560,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           timestamp: z.number(),
         }),
         async ({ tx, args: { id, allowThreadBroadcastMentions, timestamp } }) => {
-          logger.info('[PREFERENCE] allowThreadBroadcastMentions changed', {
-            userId: authData.sub,
-            allowThreadBroadcastMentions,
-          });
           const existing = await tx.run(
             zql.user_preferences.where('userId', authData.sub).one(),
           );
@@ -11574,6 +11576,59 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               channelSortOrder: ChannelSortOrder.RECENCY,
               enterSendsMessage: true,
               allowThreadBroadcastMentions,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      setGlobalNotificationSettings: defineMutator(
+        z.object({
+          id: z.string(),
+          globalDesktopNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
+          globalMobileNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
+          threadReplyNotificationsEnabled: z.boolean().optional(),
+          channelWideMentionsEnabled: z.boolean().optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: {
+            id,
+            globalDesktopNotificationLevel,
+            globalMobileNotificationLevel,
+            threadReplyNotificationsEnabled,
+            channelWideMentionsEnabled,
+            timestamp,
+          },
+        }) => {
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', authData.sub).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              ...(globalDesktopNotificationLevel !== undefined && { globalDesktopNotificationLevel: globalDesktopNotificationLevel as NotificationLevel }),
+              ...(globalMobileNotificationLevel !== undefined && { globalMobileNotificationLevel: globalMobileNotificationLevel as NotificationLevel }),
+              ...(threadReplyNotificationsEnabled !== undefined && { threadReplyNotificationsEnabled }),
+              ...(channelWideMentionsEnabled !== undefined && { channelWideMentionsEnabled }),
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: (globalDesktopNotificationLevel ?? NotificationLevel.MENTIONS_ONLY) as NotificationLevel,
+              globalMobileNotificationLevel: (globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY) as NotificationLevel,
+              threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
+              channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
               createdAt: timestamp,
               updatedAt: timestamp,
             });

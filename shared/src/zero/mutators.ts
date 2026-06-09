@@ -205,13 +205,6 @@ const buildCompletedBookmarkMetadata = (
   return nextMetadata as ReadonlyJSONValue;
 };
 
-function getDefaultChannelNotificationLevel(
-  scopeType?: ChannelScopeType | null,
-): NotificationLevel {
-  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM
-    ? NotificationLevel.ALL
-    : NotificationLevel.THREADS_ONLY;
-}
 async function assertCanvasChannelNotArchived(
   tx: Transaction<Schema>,
   channelId: string | null | undefined,
@@ -279,42 +272,56 @@ async function resolveDashboardIdForQuery(
 
 export const mutators = defineMutators({
   notificationSettings: {
-    setChannelNotificationLevel: defineMutator(
-      z.object({
-        channelId: z.string(),
-        desktopNotificationLevel: z
-          .enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE'])
-          .optional(),
-        mobileNotificationLevel: z
-          .enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE'])
-          .optional(),
-        timestamp: z.number(),
-      }),
-      async ({
-        tx,
-        ctx,
-        args: { channelId, desktopNotificationLevel, mobileNotificationLevel, timestamp },
-      }) => {
-        const userStatus = await tx.run(
-          zql.channel_user_status
-            .where('channelId', channelId)
-            .where('userId', ctx.userID)
-            .where('isDeleted', false)
-            .one(),
-        );
+      setChannelNotificationLevel: defineMutator(
+       z.object({
+         channelId: z.string(),
+         desktopNotificationLevel: z
+           .enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE'])
+           .nullable()
+           .optional(),
+         mobileNotificationLevel: z
+           .enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE'])
+           .nullable()
+           .optional(),
+         threadReplyNotificationsEnabled: z.boolean().nullable().optional(),
+         channelWideMentionsEnabled: z.boolean().nullable().optional(),
+         timestamp: z.number(),
+       }),
+       async ({
+         tx,
+         ctx,
+         args: {
+           channelId,
+           desktopNotificationLevel,
+           mobileNotificationLevel,
+           threadReplyNotificationsEnabled,
+           channelWideMentionsEnabled,
+           timestamp,
+         },
+       }) => {
+         const userStatus = await tx.run(
+           zql.channel_user_status
+             .where('channelId', channelId)
+             .where('userId', ctx.userID)
+             .where('isDeleted', false)
+             .one(),
+         );
 
-        if (!userStatus) {
-          throw new Error('Not a channel participant');
-        }
+          if (!userStatus) {
+           throw new Error('Not a channel participant');
+         }
 
-        await tx.mutate.channel_user_status.update({
-          id: userStatus.id,
-          ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel }),
-          ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel }),
-          updatedAt: timestamp,
-        });
-      },
-    ),
+         await tx.mutate.channel_user_status.update({
+           id: userStatus.id,
+           // undefined = not provided (don't touch), null = reset to inherit global, value = explicit override
+           ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel: desktopNotificationLevel ?? null }),
+           ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel: mobileNotificationLevel ?? null }),
+           ...(threadReplyNotificationsEnabled !== undefined && { threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? null }),
+           ...(channelWideMentionsEnabled !== undefined && { channelWideMentionsEnabled: channelWideMentionsEnabled ?? null }),
+           updatedAt: timestamp,
+         });
+       },
+     ),
   },
   channel: {
     joinChannel: defineMutator(
@@ -338,8 +345,6 @@ export const mutators = defineMutators({
         if (channel.visibility !== ChannelVisibility.PUBLIC) {
           throw new Error('Can only join public channels');
         }
-
-        const notificationLevel = getDefaultChannelNotificationLevel(channel.scopeType);
 
         // Check if user is already a participant
         const existingParticipant = await tx.run(
@@ -399,8 +404,9 @@ export const mutators = defineMutators({
             isClosed: false,
             unreadCount: 0,
             isRecapSubscribed: false,
-            desktopNotificationLevel: notificationLevel,
-            mobileNotificationLevel: notificationLevel,
+            // null = inherit from UserPreference.globalDesktopNotificationLevel
+            desktopNotificationLevel: null,
+            mobileNotificationLevel: null,
             isDeleted: false,
             updatedAt: timestamp,
           });
@@ -467,8 +473,6 @@ export const mutators = defineMutators({
           throw new Error('You are not allowed to add someone');
         }
 
-        const notificationLevel = getDefaultChannelNotificationLevel(channel.scopeType);
-
         const users = await Promise.all(userIds.map(id => tx.run(zql.users.where('id', id).one())));
         const validUsers = users.filter(user => user !== undefined);
         const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
@@ -515,8 +519,9 @@ export const mutators = defineMutators({
             isClosed: false,
             unreadCount: 0,
             isRecapSubscribed: false,
-            desktopNotificationLevel: notificationLevel,
-            mobileNotificationLevel: notificationLevel,
+            // null = inherit from UserPreference.globalDesktopNotificationLevel
+            desktopNotificationLevel: null,
+            mobileNotificationLevel: null,
             isDeleted: false,
             updatedAt: timestamp,
           });
@@ -1006,28 +1011,28 @@ export const mutators = defineMutators({
         });
       },
     ),
-    closeDm: defineMutator(
-      z.object({ channelId: z.string(), updatedAt: z.number() }),
-      async ({ tx, ctx, args: { channelId, updatedAt } }) => {
-        const participation = await tx.run(
-          zql.channel_user_status
-            .where('channelId', channelId)
-            .where('userId', ctx.userID)
-            .where('isDeleted', false)
-            .one(),
-        );
+     closeDm: defineMutator(
+       z.object({ channelId: z.string(), updatedAt: z.number() }),
+       async ({ tx, ctx, args: { channelId, updatedAt } }) => {
+         const participation = await tx.run(
+           zql.channel_user_status
+             .where('channelId', channelId)
+             .where('userId', ctx.userID)
+             .where('isDeleted', false)
+             .one(),
+         );
 
-        if (!participation) {
-          throw new Error('Not a channel participant');
-        }
+          if (!participation) {
+            throw new Error('Not a channel participant');
+          }
 
-        await tx.mutate.channel_user_status.update({
-          id: participation.id,
-          isClosed: true,
-          updatedAt,
-        });
-      },
-    ),
+          await tx.mutate.channel_user_status.update({
+            id: participation.id,
+            isClosed: true,
+            updatedAt,
+          });
+        },
+     ),
     reopenDm: defineMutator(
       z.object({ channelId: z.string(), updatedAt: z.number() }),
       async ({ tx, ctx, args: { channelId, updatedAt } }) => {
@@ -7569,6 +7574,10 @@ export const mutators = defineMutators({
             channelSortOrder,
             enterSendsMessage: true,
             allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7598,6 +7607,10 @@ export const mutators = defineMutators({
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage,
             allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7627,6 +7640,60 @@ export const mutators = defineMutators({
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage: true,
             allowThreadBroadcastMentions,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    setGlobalNotificationSettings: defineMutator(
+      z.object({
+        id: z.string(),
+        globalDesktopNotificationLevel: z.nativeEnum(NotificationLevel).optional(),
+        globalMobileNotificationLevel: z.nativeEnum(NotificationLevel).optional(),
+        threadReplyNotificationsEnabled: z.boolean().optional(),
+        channelWideMentionsEnabled: z.boolean().optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          id,
+          globalDesktopNotificationLevel,
+          globalMobileNotificationLevel,
+          threadReplyNotificationsEnabled,
+          channelWideMentionsEnabled,
+          timestamp,
+        },
+      }) => {
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            ...(globalDesktopNotificationLevel !== undefined && { globalDesktopNotificationLevel }),
+            ...(globalMobileNotificationLevel !== undefined && { globalMobileNotificationLevel }),
+            ...(threadReplyNotificationsEnabled !== undefined && { threadReplyNotificationsEnabled }),
+            ...(channelWideMentionsEnabled !== undefined && { channelWideMentionsEnabled }),
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: globalDesktopNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
+            channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
