@@ -104,6 +104,7 @@ interface EmailEditorProps {
   onSelectionRefine?: (selectedText: string) => void;
   /** Whether to show the selection refine popover (default: false) */
   showSelectionRefine?: boolean;
+  bubbleToolbar?: boolean;
 }
 
 export const EmailEditor = ({
@@ -125,6 +126,7 @@ export const EmailEditor = ({
   extraExtensions,
   onSelectionRefine,
   showSelectionRefine = false,
+  bubbleToolbar = false,
 }: EmailEditorProps): ReactElement => {
   const cb = useRef({
     onChange,
@@ -383,7 +385,7 @@ export const EmailEditor = ({
   return (
     <div ref={containerRef} className={`relative flex flex-col min-h-0 ${className}`}>
       {/* Selection refine popover */}
-      {selectionPopover && showSelectionRefine && !disabled && !readOnly && (
+      {!bubbleToolbar && selectionPopover && showSelectionRefine && !disabled && !readOnly && (
         <div
           className='absolute z-20 -translate-x-1/2'
           style={{ top: selectionPopover.top, left: selectionPopover.left }}
@@ -401,9 +403,13 @@ export const EmailEditor = ({
           </button>
         </div>
       )}
-      <div className='flex-shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
-        <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} />
-      </div>
+      {bubbleToolbar ? (
+        <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} bubble />
+      ) : (
+        <div className='flex-shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
+          <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} />
+        </div>
+      )}
       {/* Padding lives on the ProseMirror element (via editorProps class)
           so clicks anywhere in the visible area land on the editor and
           focus it natively — no wrapper-level click handler needed. */}

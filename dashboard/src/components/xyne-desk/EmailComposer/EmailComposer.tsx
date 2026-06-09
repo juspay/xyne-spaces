@@ -10,17 +10,23 @@ import React, {
 import type { Editor } from '@tiptap/react';
 import {
   ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  CornerUpLeft,
   Loader2,
   Minimize2,
   Paperclip,
   Pencil,
+  PencilLine,
   RefreshCw,
   ReplyAll,
   Signature,
+  Sparkles,
   Trash2,
   Wand2,
-  X,
 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -157,6 +163,7 @@ interface EmailComposerProps {
   ticketId?: string | null | undefined;
   replyToEmailId?: string | null;
   replyMode?: 'reply' | 'replyAll';
+  setReplyMode?: (mode: 'reply' | 'replyAll') => void;
   mode?: 'reply' | 'compose';
   /** Ticket title from Xyne Desk — sent as the reply subject so Gmail reflects the current ticket name. */
   ticketSubject?: string | null;
@@ -187,6 +194,7 @@ export const EmailComposer = ({
   ticketId,
   replyToEmailId,
   replyMode = 'reply',
+  setReplyMode,
   mode = 'reply',
   features: featureOverrides,
   composeDraftId,
@@ -245,6 +253,13 @@ export const EmailComposer = ({
     },
     [conversationId],
   );
+
+  const [aiPromptOpen, setAiPromptOpen] = useState<boolean>(false);
+  const [aiPromptText, setAiPromptText] = useState<string>('');
+  const aiPromptInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [aiPaneExpanded, setAiPaneExpanded] = useState<'ai' | 'yours'>('ai');
+  const lastAskInstructionRef = useRef<string | null>(null);
 
   const isInlineAIPanelOpen = aiPanelMode !== null;
   const setIsInlineAIPanelOpen = useCallback(
@@ -383,24 +398,6 @@ export const EmailComposer = ({
   const [showCc, setShowCc] = useState<boolean>(true);
   const [showBcc, setShowBcc] = useState<boolean>(false);
 
-  const persistRecipientsForDraft = useCallback(
-    (storageKey: string): void => {
-      try {
-        if (toEmails.length === 0 && ccEmails.length === 0 && bccEmails.length === 0) {
-          localStorage.removeItem(storageKey);
-          return;
-        }
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({ to: toEmails, cc: ccEmails, bcc: bccEmails }),
-        );
-      } catch {
-        /* ignore quota errors */
-      }
-    },
-    [toEmails, ccEmails, bccEmails],
-  );
-
   const clearRecipientsForDraft = useCallback(
     (storageKeys: Array<string | null | undefined>): void => {
       try {
@@ -445,43 +442,6 @@ export const EmailComposer = ({
       }
     },
     [],
-  );
-
-  const persistReplyDraft = useCallback(
-    (content: string): string | null => {
-      if (isComposeMode) return null;
-      if (!conversationId) return null;
-      // Extract attachmentIds from attachments state to save with draft
-      const attachmentIds = attachments
-        .map(att => att.attachmentId)
-        .filter((id): id is string => !!id);
-      const nextDraftId = saveDraft(content, attachmentIds.length > 0 ? attachmentIds : undefined);
-      if (nextDraftId) {
-        persistRecipientsForDraft(`xyne:emailDraft:recipients:${conversationId}`);
-        // Persist full metadata (id + name + mimeType) so the extension badge
-        // renders correctly when the draft is restored.
-        const persistedAttachments = attachments
-          .filter(att => att.attachmentId)
-          .map(att => ({
-            id: att.attachmentId!,
-            name: isBrowserFile(att.file) ? att.file.name : att.file.originalName,
-            mimeType: isBrowserFile(att.file) ? att.file.type : att.file.mimeType,
-          }));
-        persistAttachmentsForDraft(
-          `xyne:emailDraft:attachments:${conversationId}`,
-          persistedAttachments,
-        );
-      }
-      return nextDraftId;
-    },
-    [
-      isComposeMode,
-      conversationId,
-      saveDraft,
-      persistRecipientsForDraft,
-      persistAttachmentsForDraft,
-      attachments,
-    ],
   );
 
   const currentUserEmail = users?.find(u => u.id === userID)?.email ?? null;
@@ -572,7 +532,22 @@ export const EmailComposer = ({
   } = useComposerResize({
     enabled: isExpanded && !isSending,
     useTallMinHeight: aiDraft.isDraftActive || isInlineAIPanelOpen,
+    initialHeight: 480,
+    defaultMinHeight: 360,
   });
+
+  const runAskAIRefine = useCallback(
+    (instruction: string): void => {
+      lastAskInstructionRef.current = instruction;
+      setAiPaneExpanded('ai');
+      aiDraft.askAIRefine(instruction, stripHtml(emailContent));
+    },
+    [aiDraft, emailContent],
+  );
+
+  useEffect(() => {
+    if (aiDraft.isStreaming) setAiPaneExpanded('ai');
+  }, [aiDraft.isStreaming]);
 
   // Drag-and-drop chips between To / Cc / Bcc.
   const [dragOverField, setDragOverField] = useState<RecipientField | null>(null);
@@ -1318,8 +1293,6 @@ export const EmailComposer = ({
           // persisted even when the editor never re-blurs (the most common
           // case: user clicks the attachment button → editor blurs before any
           // file is attached → file selected → upload completes → no blur fires).
-          // We bypass persistReplyDraft because its `attachments` closure is
-          // stale at this point (setAttachments above hasn't re-rendered yet).
           if (!isComposeMode && allAttachmentIds.length > 0 && conversationId) {
             const nextDraftId = saveDraft(emailContent, allAttachmentIds);
             if (nextDraftId) {
@@ -1548,7 +1521,7 @@ export const EmailComposer = ({
           if (!activeSig) return null;
           const sigName = activeSig.name?.trim() || 'Default';
           return (
-            <div className='px-4 pb-3'>
+            <div className='px-3 pb-1'>
               <Popover
                 trigger={
                   <button
@@ -1593,15 +1566,15 @@ export const EmailComposer = ({
 
   return (
     <div
-      className={cn('w-full', features.showCardWrap ? 'p-4' : 'h-full flex flex-col')}
+      className={cn('w-full', features.showCardWrap ? 'px-4 py-3' : 'h-full flex flex-col')}
       ref={composerRef}
     >
       <div
         ref={resizeTargetRef}
         className={cn(
-          'relative flex flex-col overflow-hidden',
-          features.showCardWrap ? 'border border-border rounded-xl' : 'flex-1 min-h-0',
-          isSending && 'opacity-60 pointer-events-none',
+          'relative flex flex-col overflow-hidden bg-background',
+          features.showCardWrap ? 'rounded-2xl border border-border shadow-lg' : 'flex-1 min-h-0',
+          isSending && 'pointer-events-none',
         )}
         style={isExpanded && features.showCardWrap ? { height: `${composerHeight}px` } : undefined}
         {...dragHandlers}
@@ -1625,7 +1598,7 @@ export const EmailComposer = ({
             <div className='h-1 w-14 rounded-full bg-muted-foreground/30' />
           </div>
         )}
-        <div className='px-4 pt-3 pb-2 border-b border-border'>
+        <div className='px-3 pb-1'>
           {!isExpanded ? (
             <button
               type='button'
@@ -1673,8 +1646,66 @@ export const EmailComposer = ({
             </button>
           ) : (
             <>
+              {!isComposeMode && setReplyMode && (
+                <div className='flex items-center mb-1'>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type='button'
+                        className='flex items-center gap-2 pb-1 pt-1 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors'
+                        aria-label={`Switch reply mode. Current: ${replyMode === 'replyAll' ? 'Reply all' : 'Reply'}`}
+                        data-track-category='SUPPORT'
+                        data-track-name='ComposerReplyModeDropdown'
+                      >
+                        <div className='flex items-center gap-1'>
+                          {replyMode === 'replyAll' ? (
+                            <ReplyAll size={16} className='text-foreground' />
+                          ) : (
+                            <CornerUpLeft size={16} className='text-foreground' />
+                          )}
+                          <span className='font-medium text-[13px] leading-[18px] text-foreground whitespace-nowrap'>
+                            {replyMode === 'replyAll' ? 'Reply all' : 'Reply'}
+                          </span>
+                        </div>
+                        <ChevronDown size={14} className='text-foreground shrink-0' />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align='start'
+                      side='bottom'
+                      sideOffset={6}
+                      className='min-w-[160px]'
+                    >
+                      <DropdownMenuItem
+                        onSelect={e => {
+                          e.preventDefault();
+                          setReplyMode('reply');
+                        }}
+                        className='flex items-center gap-2 cursor-pointer'
+                      >
+                        <CornerUpLeft size={14} className='text-muted-foreground' />
+                        <span className='flex-1'>Reply</span>
+                        {replyMode === 'reply' && <Check size={14} className='text-foreground' />}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={e => {
+                          e.preventDefault();
+                          setReplyMode('replyAll');
+                        }}
+                        className='flex items-center gap-2 cursor-pointer'
+                      >
+                        <ReplyAll size={14} className='text-muted-foreground' />
+                        <span className='flex-1'>Reply all</span>
+                        {replyMode === 'replyAll' && (
+                          <Check size={14} className='text-foreground' />
+                        )}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
               <div className='flex items-start gap-2'>
-                {features.showCollapseIcon && (
+                {features.showCollapseIcon && !setReplyMode && (
                   <button
                     type='button'
                     onClick={() => setIsExpanded(false)}
@@ -1803,6 +1834,70 @@ export const EmailComposer = ({
                       Bcc
                     </button>
                   )}
+                  {onClose && features.showDiscardButton && (
+                    <button
+                      type='button'
+                      onMouseDown={() => {
+                        if (!isComposeMode) suppressNextReplyAutosaveRef.current = true;
+                      }}
+                      onClick={() => {
+                        if (!isComposeMode && draftId) {
+                          deleteDraft();
+                          clearRecipientsForDraft([
+                            conversationId ? `xyne:emailDraft:recipients:${conversationId}` : null,
+                            `xyne:emailDraft:recipients:${draftId}`,
+                          ]);
+                          clearAttachmentsForDraft([
+                            conversationId ? `xyne:emailDraft:attachments:${conversationId}` : null,
+                            `xyne:emailDraft:attachments:${draftId}`,
+                          ]);
+                        }
+                        if (!isComposeMode && !draftId) {
+                          clearRecipientsForDraft([
+                            conversationId ? `xyne:emailDraft:recipients:${conversationId}` : null,
+                          ]);
+                          clearAttachmentsForDraft([
+                            conversationId ? `xyne:emailDraft:attachments:${conversationId}` : null,
+                          ]);
+                          setEmailContent('');
+                          setAttachments([]);
+                          setToEmails([]);
+                          setCcEmails([]);
+                          setBccEmails([]);
+                          onClose();
+                          return;
+                        }
+                        if (isComposeMode) {
+                          deleteDraft();
+                        }
+                        if (composeDraftKey) {
+                          try {
+                            localStorage.removeItem(composeDraftKey);
+                          } catch {
+                            /* ignore quota/access errors */
+                          }
+                        }
+                        setEmailContent('');
+                        setAttachments([]);
+                        setToEmails([]);
+                        setCcEmails([]);
+                        setBccEmails([]);
+                        if (isComposeMode) {
+                          onDiscard?.();
+                        } else {
+                          onClose?.();
+                        }
+                      }}
+                      disabled={isSending}
+                      className='size-6 ml-0.5 flex items-center justify-center rounded-md text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 transition-colors disabled:opacity-50'
+                      aria-label='Discard draft'
+                      title='Discard draft'
+                      data-track-category='Support'
+                      data-track-name='DiscardComposerDraft'
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                   {onClose && features.showMinimizeButton && (
                     <button
                       type='button'
@@ -1811,21 +1906,20 @@ export const EmailComposer = ({
                         onClose();
                       }}
                       disabled={isSending}
-                      className='size-6 ml-1 flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50'
-                      aria-label='Close reply'
-                      title='Close (keeps draft)'
+                      className='size-6 ml-0.5 flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50'
+                      aria-label='Minimize reply'
+                      title='Minimize (keeps draft)'
                       data-track-category='Support'
-                      data-track-name='CloseReplyComposer'
+                      data-track-name='MinimizeReplyComposer'
                     >
-                      <X size={14} />
+                      <Minimize2 size={14} />
                     </button>
                   )}
                 </div>
               </div>
 
               {showCc && (
-                <div className='flex items-start gap-2 mt-1'>
-                  {features.showCollapseIcon && <div className='w-[20px] flex-shrink-0' />}
+                <div className='flex items-start gap-2 mt-0.5'>
                   <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>Cc</span>
                   <div
                     ref={ccRowRef}
@@ -1906,8 +2000,7 @@ export const EmailComposer = ({
               )}
 
               {showBcc && (
-                <div className='flex items-start gap-2 mt-1'>
-                  {features.showCollapseIcon && <div className='w-[20px] flex-shrink-0' />}
+                <div className='flex items-start gap-2 mt-0.5'>
                   <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>
                     Bcc
                   </span>
@@ -1991,7 +2084,8 @@ export const EmailComposer = ({
         </div>
 
         {features.showSubject && (
-          <div className='flex items-center gap-2 px-4 py-2 border-b border-border'>
+          <div className='flex items-center gap-2 px-3 py-1.5'>
+            <span className='text-sm text-foreground font-medium flex-shrink-0'>Subject</span>
             <input
               type='text'
               value={composeSubject}
@@ -2040,9 +2134,7 @@ export const EmailComposer = ({
 
         <div className='flex-1 min-h-0 flex flex-col'>
           {((): ReactElement => {
-            const sideBySide =
-              isInlineAIPanelOpen || ((hasEmailBody || isComposeMode) && aiDraft.isDraftActive);
-            const aiOnlyFull = aiDraft.isDraftActive && !hasEmailBody && !isComposeMode;
+            const draftActive = aiDraft.isDraftActive;
             const toolbarRightSlot = isAutoDraftGenerating ? (
               <Tooltip delayDuration={300} content='Generating AI draft…'>
                 <span
@@ -2055,7 +2147,7 @@ export const EmailComposer = ({
               </Tooltip>
             ) : undefined;
 
-            const draftCard = aiDraft.isDraftActive ? (
+            const draftCard = draftActive ? (
               <DraftCard
                 draftContent={aiDraft.draftContent}
                 isStreaming={aiDraft.isStreaming}
@@ -2073,87 +2165,134 @@ export const EmailComposer = ({
                 onRefine={(instruction: string, options?: { selectedText?: string }) => {
                   void aiDraft.refineDraft(instruction, options);
                 }}
+                onRecreate={() => {
+                  const instruction = lastAskInstructionRef.current;
+                  if (instruction) runAskAIRefine(instruction);
+                  else aiDraft.triggerDraft();
+                }}
+                onQuickRefine={action => {
+                  void aiDraft.quickRewrite(action, aiDraft.draftContent);
+                }}
                 selectedTextForRefine={aiDraft.selectedTextForRefine}
                 onClearSelectedText={aiDraft.clearSelectedTextForRefine}
               />
             ) : null;
 
-            const aiPanel =
-              aiPanelMode !== null ? (
-                <AIComposerPanel
-                  disabled={aiDraft.isStreaming}
-                  onAskAISubmit={instruction => {
-                    aiDraft.askAIRefine(instruction, stripHtml(emailContent));
-                  }}
-                  {...((onOpenAskAISidebarFresh || onToggleAIPanel) && {
-                    onOpenAskAISidebar: (): void => {
-                      if (onOpenAskAISidebarFresh) {
-                        onOpenAskAISidebarFresh();
-                      } else {
-                        onToggleAIPanel?.();
-                      }
-                      setAIPanelMode(null);
-                    },
-                  })}
-                  onClose={() => setAIPanelMode(null)}
-                />
-              ) : null;
-
-            if (sideBySide) {
+            if (draftActive) {
               return (
-                <div className='flex flex-row gap-3 items-stretch flex-1 min-h-0 px-4 pt-2 pb-3'>
-                  <div className='flex-1 min-w-0 flex flex-col border border-border rounded-xl bg-background overflow-hidden'>
-                    <div className='flex items-center gap-2 px-4 py-2.5 min-h-[3rem] border-b border-border bg-muted/30 flex-shrink-0'>
-                      <Pencil size={14} className='text-muted-foreground' />
-                      <span className='text-sm font-medium text-foreground'>Your draft</span>
+                <div className='flex-1 min-h-0 flex flex-col gap-2 px-4 pt-2 pb-3'>
+                  {aiPaneExpanded === 'yours' ? (
+                    <div className='flex-1 min-h-0 flex flex-col border border-border rounded-xl bg-background overflow-hidden'>
+                      <button
+                        type='button'
+                        onClick={() => setAiPaneExpanded('ai')}
+                        className='flex items-center gap-2 px-4 py-2.5 min-h-[3rem] border-b border-border bg-muted/30 flex-shrink-0 text-left hover:bg-muted/50 transition-colors'
+                        aria-label='Collapse your draft'
+                        data-track-category='Support'
+                        data-track-name='CollapseYourDraft'
+                      >
+                        <Pencil size={14} className='text-muted-foreground' />
+                        <span className='text-sm font-medium text-foreground'>Your draft</span>
+                        <ChevronUp size={14} className='ml-auto text-muted-foreground' />
+                      </button>
+                      <EmailEditor
+                        value={emailContent}
+                        onChange={handleEditorChange}
+                        onAddFiles={addFilesToAttachments}
+                        uploadAndInsertInlineImages={uploadAndInsertInlineImages}
+                        onEditorReady={editor => {
+                          editorRef.current = editor;
+                        }}
+                        onSendShortcut={() => {
+                          const canSend = isComposeMode
+                            ? !!channelId && composeSubject.trim().length > 0
+                            : !!conversationId;
+                          if (
+                            (hasEmailBody || attachments.length > 0) &&
+                            canSend &&
+                            !isSending &&
+                            toEmails.length > 0
+                          ) {
+                            void handleSendEmail();
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
+                        }}
+                        onCitationClick={effectiveCitationClick}
+                        {...(onCitationOrderChange && { onCitationOrderChange })}
+                        readOnly={aiDraft.isDraftActive && !aiDraft.isStreaming}
+                        disabled={isSending}
+                        className='flex-1 min-h-0'
+                        footerSlot={composerFooter}
+                        toolbarRightSlot={toolbarRightSlot}
+                        showSelectionRefine={features.showAI && !aiDraft.isStreaming && !isSending}
+                        onSelectionRefine={selectedText => {
+                          aiDraft.prepareRefineFromExternal(emailContent, selectedText);
+                          setAiPaneExpanded('ai');
+                        }}
+                      />
                     </div>
-                    <EmailEditor
-                      value={emailContent}
-                      onChange={handleEditorChange}
-                      onAddFiles={addFilesToAttachments}
-                      uploadAndInsertInlineImages={uploadAndInsertInlineImages}
-                      onEditorReady={editor => {
-                        editorRef.current = editor;
-                      }}
-                      onSendShortcut={() => {
-                        const canSend = isComposeMode
-                          ? !!channelId && composeSubject.trim().length > 0
-                          : !!conversationId;
-                        if (
-                          (hasEmailBody || attachments.length > 0) &&
-                          canSend &&
-                          !isSending &&
-                          toEmails.length > 0
-                        ) {
-                          void handleSendEmail();
-                        }
-                      }}
-                      onBlur={() => {
-                        if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
-                      }}
-                      onCitationClick={effectiveCitationClick}
-                      {...(onCitationOrderChange && { onCitationOrderChange })}
-                      readOnly={aiDraft.isDraftActive && !aiDraft.isStreaming}
-                      disabled={isSending}
-                      className='flex-1 min-h-0'
-                      footerSlot={composerFooter}
-                      toolbarRightSlot={toolbarRightSlot}
-                      showSelectionRefine={features.showAI && !aiDraft.isStreaming && !isSending}
-                      onSelectionRefine={selectedText => {
-                        aiDraft.prepareRefineFromExternal(emailContent, selectedText);
-                      }}
-                    />
-                  </div>
-                  <div className='flex-1 min-w-0 flex flex-col min-h-0'>{draftCard ?? aiPanel}</div>
+                  ) : (
+                    <button
+                      type='button'
+                      onClick={() => setAiPaneExpanded('yours')}
+                      className='flex items-center gap-2 self-start px-3 py-1.5 rounded-full border border-border bg-background hover:bg-muted transition-colors flex-shrink-0'
+                      aria-label='Open your draft'
+                      data-track-category='Support'
+                      data-track-name='ExpandYourDraft'
+                    >
+                      <Pencil size={13} className='text-muted-foreground' />
+                      <span className='text-[13px] font-medium text-foreground'>Your draft</span>
+                      <ChevronDown size={13} className='text-muted-foreground' />
+                    </button>
+                  )}
+
+                  {aiPaneExpanded === 'ai' ? (
+                    <div className='flex-1 min-h-0'>{draftCard}</div>
+                  ) : (
+                    <button
+                      type='button'
+                      onClick={() => setAiPaneExpanded('ai')}
+                      className='flex items-center gap-2 self-start pl-1 pr-3 py-1 rounded-full border border-border bg-background hover:bg-muted transition-colors flex-shrink-0'
+                      aria-label='Open AI draft'
+                      data-track-category='Support'
+                      data-track-name='ExpandAIDraft'
+                    >
+                      <span
+                        className='flex items-center justify-center w-5 h-5 rounded-md'
+                        style={{ background: '#F87171' }}
+                      >
+                        <Sparkles size={11} className='text-white' />
+                      </span>
+                      <span className='text-[13px] font-medium text-foreground'>AI Draft</span>
+                      <ChevronDown size={13} className='text-muted-foreground' />
+                    </button>
+                  )}
                 </div>
               );
             }
 
-            if (aiOnlyFull) {
+            if (aiPanelMode !== null) {
               return (
                 <div className='flex-1 min-h-0 flex flex-col px-4 pt-2 pb-3'>
-                  {draftCard}
-                  {composerFooter}
+                  <AIComposerPanel
+                    disabled={aiDraft.isStreaming}
+                    onAskAISubmit={instruction => {
+                      runAskAIRefine(instruction);
+                    }}
+                    {...((onOpenAskAISidebarFresh || onToggleAIPanel) && {
+                      onOpenAskAISidebar: (): void => {
+                        if (onOpenAskAISidebarFresh) {
+                          onOpenAskAISidebarFresh();
+                        } else {
+                          onToggleAIPanel?.();
+                        }
+                        setAIPanelMode(null);
+                      },
+                    })}
+                    onClose={() => setAIPanelMode(null)}
+                  />
                 </div>
               );
             }
@@ -2189,12 +2328,85 @@ export const EmailComposer = ({
                 className='flex-1 min-h-0'
                 footerSlot={composerFooter}
                 toolbarRightSlot={toolbarRightSlot}
+                bubbleToolbar
               />
             );
           })()}
         </div>
 
-        <div className='px-3 py-1.5 flex items-center justify-between'>
+        {aiPromptOpen && !aiDraft.isDraftActive && !aiDraft.isStreaming && (
+          <div className='px-3 pb-2 pt-1'>
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className='xyne-ai-prompt-border-wrap'
+            >
+              <div className='flex items-center gap-3 h-12 pl-4 pr-2 rounded-full bg-muted'>
+                <PencilLine size={16} className='text-muted-foreground shrink-0' />
+                <input
+                  ref={aiPromptInputRef}
+                  type='text'
+                  value={aiPromptText}
+                  onChange={e => setAiPromptText(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && aiPromptText.trim().length > 0) {
+                      e.preventDefault();
+                      const instruction = aiPromptText.trim();
+                      runAskAIRefine(instruction);
+                      setAiPromptOpen(false);
+                      setAiPromptText('');
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setAiPromptOpen(false);
+                      setAiPromptText('');
+                    }
+                  }}
+                  placeholder='Tell AI what to write…'
+                  className='flex-1 min-w-0 bg-transparent outline-none text-[15px] text-foreground placeholder:text-muted-foreground/70'
+                  data-track-category='Support'
+                  data-track-name='AIPromptInput'
+                  aria-label='Tell AI what to write'
+                />
+                <button
+                  type='button'
+                  onClick={() => {
+                    setAiPromptOpen(false);
+                    setAiPromptText('');
+                  }}
+                  className='text-[14px] text-muted-foreground hover:text-foreground font-medium px-3 py-1.5 rounded-full transition-colors'
+                  data-track-category='Support'
+                  data-track-name='AIPromptCancel'
+                >
+                  Cancel
+                </button>
+                <button
+                  type='button'
+                  onClick={() => {
+                    if (aiPromptText.trim().length === 0) return;
+                    const instruction = aiPromptText.trim();
+                    runAskAIRefine(instruction);
+                    setAiPromptOpen(false);
+                    setAiPromptText('');
+                  }}
+                  disabled={aiPromptText.trim().length === 0}
+                  className={cn(
+                    'h-8 px-4 rounded-full text-[14px] font-medium transition-colors',
+                    aiPromptText.trim().length === 0
+                      ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                      : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                  )}
+                  data-track-category='Support'
+                  data-track-name='AIPromptCreate'
+                >
+                  Create
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        <div className='px-2 py-1.5 flex items-center justify-between'>
           <div className='flex items-center gap-0.5'>
             {/* Attachment button */}
             <div>
@@ -2206,7 +2418,7 @@ export const EmailComposer = ({
                 onChange={handleFileSelect}
                 disabled={isSending || isUploadingAttachments}
               />
-              <Tooltip content='Attach files' side='bottom' delayDuration={300}>
+              <Tooltip content='Attach files' side='top' delayDuration={300}>
                 <button
                   type='button'
                   onClick={() => fileInputRef.current?.click()}
@@ -2272,7 +2484,7 @@ export const EmailComposer = ({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : features.showSignature ? (
-              <Tooltip content='Add signature' side='bottom' delayDuration={300}>
+              <Tooltip content='Add signature' side='top' delayDuration={300}>
                 <button
                   type='button'
                   onClick={() => {
@@ -2289,111 +2501,24 @@ export const EmailComposer = ({
               </Tooltip>
             ) : null}
           </div>
-          <div className='flex items-center gap-0.5'>
+          <div className='flex items-center gap-1.5'>
             {features.showAI && (
               <AIRefineDropdown
                 onQuickRewrite={action => {
                   const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
                   void aiDraft.quickRewrite(action, source);
                 }}
-                onAskAI={() => setAIPanelMode('ask-ai')}
+                onAskAI={() => {
+                  setAIPanelMode(null);
+                  setAiPromptOpen(true);
+                  requestAnimationFrame(() => aiPromptInputRef.current?.focus());
+                }}
+                showQuickRewrite={hasEmailBody || aiDraft.isDraftActive}
                 disabled={aiDraft.isStreaming}
               />
             )}
-
-            {onClose && features.showDiscardButton && (
-              <>
-                <div className='w-px h-4 bg-border mx-1' />
-                {features.showMinimizeButton && (
-                  <button
-                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                    onClick={() => {
-                      if (hasEmailBody || attachments.length > 0) {
-                        if (isComposeMode) saveDraft(emailContent);
-                        else persistReplyDraft(emailContent);
-                      }
-                      onClose();
-                    }}
-                    disabled={isSending}
-                    aria-label='Minimize reply'
-                    title='Minimize (keeps draft)'
-                    data-track-category='Support'
-                    data-track-name='MinimizeReplyComposer'
-                  >
-                    <Minimize2 size={14} />
-                  </button>
-                )}
-                {features.showDiscardButton && (
-                  <button
-                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors'
-                    onMouseDown={() => {
-                      if (!isComposeMode) suppressNextReplyAutosaveRef.current = true;
-                    }}
-                    onClick={() => {
-                      if (!isComposeMode && draftId) {
-                        deleteDraft();
-                        clearRecipientsForDraft([
-                          conversationId ? `xyne:emailDraft:recipients:${conversationId}` : null,
-                          `xyne:emailDraft:recipients:${draftId}`,
-                        ]);
-                        clearAttachmentsForDraft([
-                          conversationId ? `xyne:emailDraft:attachments:${conversationId}` : null,
-                          `xyne:emailDraft:attachments:${draftId}`,
-                        ]);
-                      }
-                      if (!isComposeMode && !draftId) {
-                        clearRecipientsForDraft([
-                          conversationId ? `xyne:emailDraft:recipients:${conversationId}` : null,
-                        ]);
-                        clearAttachmentsForDraft([
-                          conversationId ? `xyne:emailDraft:attachments:${conversationId}` : null,
-                        ]);
-                        setEmailContent('');
-                        setAttachments([]);
-                        setToEmails([]);
-                        setCcEmails([]);
-                        setBccEmails([]);
-                        onClose();
-                        return;
-                      }
-                      if (isComposeMode) {
-                        deleteDraft();
-                      }
-                      // For compose mode, also remove the localStorage draft so
-                      // the parent's onClose handler treats this as a discard
-                      // (no content → silent delete) rather than saving as draft.
-                      if (composeDraftKey) {
-                        try {
-                          localStorage.removeItem(composeDraftKey);
-                        } catch {
-                          /* ignore quota/access errors */
-                        }
-                      }
-                      setEmailContent('');
-                      setAttachments([]);
-                      setToEmails([]);
-                      setCcEmails([]);
-                      setBccEmails([]);
-                      if (isComposeMode) {
-                        onDiscard?.();
-                      } else {
-                        onClose?.();
-                      }
-                    }}
-                    disabled={isSending}
-                    aria-label='Discard draft'
-                    title='Discard draft'
-                    data-track-category='Support'
-                    data-track-name='DiscardComposerDraft'
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </>
-            )}
-            <div className='w-px h-4 bg-border mx-1' />
             <button
-              className='size-7 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
+              className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
               onClick={() => void handleSendEmail()}
               disabled={
                 (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
@@ -2413,7 +2538,7 @@ export const EmailComposer = ({
                 attachmentCount: attachments.length,
               })}
             >
-              {isSending ? <RefreshCw size={14} className='animate-spin' /> : <ArrowUp size={14} />}
+              {isSending ? <RefreshCw size={16} className='animate-spin' /> : <ArrowUp size={16} />}
             </button>
           </div>
         </div>

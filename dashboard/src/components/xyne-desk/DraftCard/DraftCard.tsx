@@ -7,7 +7,21 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Check, X, Sparkles, Loader2, Square, Quote } from 'lucide-react';
+import {
+  X,
+  Sparkles,
+  Loader2,
+  Square,
+  Quote,
+  RefreshCw,
+  ChevronDown,
+  Wand2,
+  Pencil,
+  AlignLeft,
+  CheckCheck,
+  Maximize2,
+  Minimize2,
+} from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -15,8 +29,20 @@ import rehypeRaw from 'rehype-raw';
 import { RefineInput } from '../RefineInput/RefineInput';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
+import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
 
 const DRAFT_SELECTION_HIGHLIGHT_KEY = 'desk-ai-draft-selection';
+
+const REFINE_PRESETS: ReadonlyArray<{
+  id: AIRefineQuickAction;
+  label: string;
+  icon: ReactElement;
+}> = [
+  { id: 'polish', label: 'Polish', icon: <AlignLeft size={14} /> },
+  { id: 'formalise', label: 'Formalize', icon: <CheckCheck size={14} /> },
+  { id: 'elaborate', label: 'Elaborate', icon: <Maximize2 size={14} /> },
+  { id: 'shorten', label: 'Shorten', icon: <Minimize2 size={14} /> },
+];
 
 interface DraftCardProps {
   draftContent: string;
@@ -24,6 +50,10 @@ interface DraftCardProps {
   onAccept: () => void;
   onReject: () => void;
   onRefine: (instruction: string, options?: { selectedText?: string }) => void;
+  /** Regenerate the draft from the original request. Hidden when omitted. */
+  onRecreate?: () => void;
+  /** Apply a one-tap rewrite preset (Polish / Formalize / Elaborate / Shorten) to the draft. */
+  onQuickRefine?: (action: AIRefineQuickAction) => void;
   /** Selected text for refinement (can come from AI Draft selection or external "Your Draft" selection) */
   selectedTextForRefine?: string;
   /** Clear the selected text for refinement */
@@ -51,6 +81,8 @@ export const DraftCard = ({
   onAccept,
   onReject,
   onRefine,
+  onRecreate,
+  onQuickRefine,
   selectedTextForRefine,
   onClearSelectedText,
 }: DraftCardProps): ReactElement => {
@@ -58,8 +90,11 @@ export const DraftCard = ({
   const cardRef = useRef<HTMLDivElement>(null);
   const selectedRangeRef = useRef<Range | null>(null);
   const refineInputRef = useRef<HTMLInputElement>(null);
+  const refineMenuRef = useRef<HTMLDivElement>(null);
   const [selectionPopover, setSelectionPopover] = useState<SelectionPopoverState | null>(null);
   const [localSelectedText, setLocalSelectedText] = useState('');
+  const [showCustomRefine, setShowCustomRefine] = useState(false);
+  const [refineMenuOpen, setRefineMenuOpen] = useState(false);
 
   // Use external selectedTextForRefine if provided, otherwise use local state
   const selectedText = selectedTextForRefine || localSelectedText;
@@ -109,6 +144,16 @@ export const DraftCard = ({
       }, 0);
     }
   }, [selectedTextForRefine]);
+
+  // Close the Refine ▾ menu on outside click.
+  useEffect(() => {
+    if (!refineMenuOpen) return;
+    const onDocMouseDown = (event: MouseEvent): void => {
+      if (!refineMenuRef.current?.contains(event.target as Node)) setRefineMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [refineMenuOpen]);
 
   useEffect(() => {
     const handleWindowSelectionChange = (): void => {
@@ -213,14 +258,7 @@ export const DraftCard = ({
   return (
     <div
       ref={cardRef}
-      className='relative rounded-2xl p-px overflow-hidden flex flex-col h-full min-h-0'
-      style={{
-        background: isStreaming
-          ? 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0, #FFB3B3)'
-          : 'linear-gradient(135deg, rgba(255,179,179,0.3), rgba(255,206,206,0.15), rgba(255,179,179,0.3))',
-        backgroundSize: isStreaming ? '300% 300%' : '100% 100%',
-        animation: isStreaming ? 'gradient-xy 3s ease infinite' : 'none',
-      }}
+      className='relative flex flex-col h-full min-h-0 rounded-2xl border border-border bg-background overflow-hidden'
     >
       {selectionPopover && !isStreaming && (
         <div
@@ -240,9 +278,8 @@ export const DraftCard = ({
           </button>
         </div>
       )}
-      <div className='rounded-[calc(1rem-1px)] bg-background/95 dark:bg-background/90 backdrop-blur-xl overflow-hidden flex flex-col h-full min-h-0'>
-        {/* Header */}
-        <div className='flex items-center justify-between px-4 py-2.5 min-h-[3rem] flex-shrink-0'>
+      <div className='flex flex-col h-full min-h-0'>
+        <div className='flex items-center justify-between px-4 py-2.5 min-h-[3rem] flex-shrink-0 border-b border-border'>
           <div className='flex items-center gap-2.5'>
             <div
               className='relative flex items-center justify-center w-6 h-6 rounded-lg'
@@ -250,54 +287,37 @@ export const DraftCard = ({
             >
               <Sparkles size={12} className='text-white' />
             </div>
-            <span className='text-sm font-bold text-foreground'>AI Draft</span>
+            <span className='text-sm font-semibold text-foreground'>AI Draft</span>
             {isStreaming && <Loader2 size={12} className='animate-spin text-muted-foreground' />}
           </div>
-          <div className='flex items-center gap-1'>
-            {isStreaming ? (
-              <button
-                type='button'
-                onClick={onReject}
-                className='inline-flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors'
-                aria-label='Stop generating'
-                title='Stop generating'
-                data-track-category='AIDraft'
-                data-track-name='StopDraft'
-              >
-                <Square size={11} className='fill-current' />
-                <span>Stop</span>
-              </button>
-            ) : (
-              <>
-                <button
-                  type='button'
-                  onClick={onReject}
-                  className='size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors'
-                  aria-label='Reject draft'
-                  title='Reject draft'
-                  data-track-category='AIDraft'
-                  data-track-name='RejectDraft'
-                >
-                  <X size={14} />
-                </button>
-                <button
-                  type='button'
-                  onClick={onAccept}
-                  disabled={!draftContent}
-                  className='size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-green-600 hover:bg-green-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-                  aria-label='Accept draft'
-                  title='Accept draft'
-                  data-track-category='AIDraft'
-                  data-track-name='AcceptDraft'
-                >
-                  <Check size={14} />
-                </button>
-              </>
-            )}
-          </div>
+          {isStreaming ? (
+            <button
+              type='button'
+              onClick={onReject}
+              className='inline-flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors dark:hover:bg-red-950/40 dark:hover:text-red-400'
+              aria-label='Stop generating'
+              title='Stop generating'
+              data-track-category='AIDraft'
+              data-track-name='StopDraft'
+            >
+              <Square size={11} className='fill-current' />
+              <span>Stop</span>
+            </button>
+          ) : (
+            <button
+              type='button'
+              onClick={onReject}
+              className='size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+              aria-label='Discard draft'
+              title='Discard draft'
+              data-track-category='AIDraft'
+              data-track-name='RejectDraft'
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
 
-        {/* Draft content */}
         <div
           ref={contentRef}
           className='px-4 py-3 flex-1 min-h-0 overflow-y-auto select-text selection:bg-red-400/30'
@@ -321,45 +341,133 @@ export const DraftCard = ({
           )}
         </div>
 
-        {/* Refine input - always present */}
-        <div className='px-4 pb-3 flex-shrink-0'>
-          {selectedText && (
-            <div className='mb-2 rounded-xl border border-red-200/70 bg-red-50/60 px-3 py-2 text-left dark:border-red-900/60 dark:bg-red-950/20'>
-              <div className='flex items-start justify-between gap-3'>
-                <div className='min-w-0'>
-                  <div className='text-[11px] font-semibold uppercase tracking-[0.08em] text-red-700 dark:text-red-300'>
-                    Refining selected text
+        {(!!selectedText || showCustomRefine) && (
+          <div className='px-4 pb-2 flex-shrink-0'>
+            {selectedText && (
+              <div className='mb-2 rounded-xl border border-red-200/70 bg-red-50/60 px-3 py-2 text-left dark:border-red-900/60 dark:bg-red-950/20'>
+                <div className='flex items-start justify-between gap-3'>
+                  <div className='min-w-0'>
+                    <div className='text-[11px] font-semibold uppercase tracking-[0.08em] text-red-700 dark:text-red-300'>
+                      Refining selected text
+                    </div>
+                    <p className={cn('mt-1 text-sm text-foreground/90 break-words')}>
+                      &ldquo;{selectedTextPreview}&rdquo;
+                    </p>
                   </div>
-                  <p className={cn('mt-1 text-sm text-foreground/90 break-words')}>
-                    &ldquo;{selectedTextPreview}&rdquo;
-                  </p>
+                  <button
+                    type='button'
+                    onClick={clearSelectedText}
+                    className='mt-0.5 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-red-100 hover:text-foreground transition-colors dark:hover:bg-red-900/40'
+                    aria-label='Clear selected text'
+                    title='Clear selected text'
+                    data-track-category='AIDraft'
+                    data-track-name='ClearSelectedText'
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
+              </div>
+            )}
+            <RefineInput
+              ref={refineInputRef}
+              onSubmit={instruction => {
+                onRefine(instruction, selectedText ? { selectedText } : undefined);
+                setShowCustomRefine(false);
+              }}
+              disabled={isStreaming}
+              placeholder={
+                selectedText
+                  ? 'Refine the selected text (e.g., make it warmer, clearer...)'
+                  : 'Tell AI how to refine this draft...'
+              }
+            />
+          </div>
+        )}
+
+        <div className='flex items-center gap-1.5 px-3 py-2.5 border-t border-border flex-shrink-0'>
+          {onRecreate && (
+            <button
+              type='button'
+              onClick={onRecreate}
+              disabled={isStreaming}
+              className='inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+              data-track-category='AIDraft'
+              data-track-name='RecreateDraft'
+            >
+              <RefreshCw size={14} />
+              <span>Recreate</span>
+            </button>
+          )}
+          <div className='relative' ref={refineMenuRef}>
+            <button
+              type='button'
+              onClick={() => setRefineMenuOpen(open => !open)}
+              disabled={isStreaming}
+              className='inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+              aria-haspopup='menu'
+              aria-expanded={refineMenuOpen}
+              data-track-category='AIDraft'
+              data-track-name='ToggleRefineMenu'
+            >
+              <Wand2 size={14} />
+              <span>Refine</span>
+              <ChevronDown size={13} />
+            </button>
+            {refineMenuOpen && (
+              <div
+                role='menu'
+                className='absolute bottom-full left-0 mb-1.5 z-50 w-52 rounded-xl border border-border bg-popover shadow-lg overflow-hidden py-1'
+              >
+                {REFINE_PRESETS.map(preset => (
+                  <button
+                    key={preset.id}
+                    type='button'
+                    role='menuitem'
+                    disabled={!onQuickRefine}
+                    onClick={() => {
+                      onQuickRefine?.(preset.id);
+                      setRefineMenuOpen(false);
+                    }}
+                    className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
+                    data-track-category='AIDraft'
+                    data-track-name='QuickRefine'
+                    data-track-metadata={JSON.stringify({ action: preset.id })}
+                  >
+                    <span className='text-muted-foreground'>{preset.icon}</span>
+                    <span>{preset.label}</span>
+                  </button>
+                ))}
+                <div className='border-t border-border my-1' />
                 <button
                   type='button'
-                  onClick={clearSelectedText}
-                  className='mt-0.5 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-red-100 hover:text-foreground transition-colors dark:hover:bg-red-900/40'
-                  aria-label='Clear selected text'
-                  title='Clear selected text'
+                  role='menuitem'
+                  onClick={() => {
+                    setRefineMenuOpen(false);
+                    setShowCustomRefine(true);
+                    setTimeout(() => refineInputRef.current?.focus(), 0);
+                  }}
+                  className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors'
                   data-track-category='AIDraft'
-                  data-track-name='ClearSelectedText'
+                  data-track-name='OpenCustomRefine'
                 >
-                  <X size={14} />
+                  <Pencil size={14} className='text-muted-foreground' />
+                  <span>Custom instructions…</span>
                 </button>
               </div>
-            </div>
-          )}
-          <RefineInput
-            ref={refineInputRef}
-            onSubmit={instruction =>
-              onRefine(instruction, selectedText ? { selectedText } : undefined)
-            }
-            disabled={isStreaming}
-            placeholder={
-              selectedText
-                ? 'Refine the selected text (e.g., make it warmer, clearer...)'
-                : 'Refine: make it shorter, add context...'
-            }
-          />
+            )}
+          </div>
+          <button
+            type='button'
+            onClick={onAccept}
+            disabled={!draftContent || isStreaming}
+            className='ml-auto inline-flex items-center justify-center h-8 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+            aria-label='Insert draft into your reply'
+            title='Insert into your draft'
+            data-track-category='AIDraft'
+            data-track-name='AcceptDraft'
+          >
+            Insert
+          </button>
         </div>
       </div>
     </div>

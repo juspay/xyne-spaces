@@ -99,7 +99,9 @@ import { AssigneePicker } from '../../components/Tickets/TicketListView/Assignee
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
 import { PriorityPicker } from '../../components/Tickets/TicketListView/PriorityPicker';
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
+import { ReplyPill } from '../../components/xyne-desk/EmailComposer/ReplyPill';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
+import { AnimatePresence, motion } from 'framer-motion';
 import { DraftSourcesPanel } from '../../components/xyne-desk/DraftSourcesPanel/DraftSourcesPanel';
 import { AutoDraftReasoningPanel } from '../../components/xyne-desk/AutoDraftReasoningPanel/AutoDraftReasoningPanel';
 import type { DraftSource } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -2464,18 +2466,34 @@ const SupportTicketDetail = ({
       enabled: emailCollapseState.canToggleAll,
     },
   );
-  useShortcut('r', () => setComposerOpen(true), {
-    scope: 'global',
-    description: 'Reply',
-    category: 'Support',
-    enabled: !composerOpen,
-  });
-  useShortcut('a', () => setComposerOpen(true), {
-    scope: 'global',
-    description: 'Reply all',
-    category: 'Support',
-    enabled: !composerOpen,
-  });
+  useShortcut(
+    'r',
+    () => {
+      setReplyToEmailId(null);
+      setReplyMode('reply');
+      setComposerOpen(true);
+    },
+    {
+      scope: 'global',
+      description: 'Reply',
+      category: 'Support',
+      enabled: !composerOpen,
+    },
+  );
+  useShortcut(
+    'a',
+    () => {
+      setReplyToEmailId(null);
+      setReplyMode('replyAll');
+      setComposerOpen(true);
+    },
+    {
+      scope: 'global',
+      description: 'Reply all',
+      category: 'Support',
+      enabled: !composerOpen,
+    },
+  );
 
   // ── Email thread summary ──
   const [emailSummaryState, setEmailSummaryState] = useState<'idle' | 'loading' | 'done' | 'error'>(
@@ -2492,6 +2510,18 @@ const SupportTicketDetail = ({
       threadScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     });
   };
+
+  const composerOverlayRef = useRef<HTMLDivElement>(null);
+  const [composerOverlayHeight, setComposerOverlayHeight] = useState<number>(96);
+  useEffect(() => {
+    const el = composerOverlayRef.current;
+    if (!el) return undefined;
+    const update = (): void => setComposerOverlayHeight(el.offsetHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Reset summary when conversation changes or new emails arrive
   const emailCount = emails.length;
@@ -2845,7 +2875,14 @@ const SupportTicketDetail = ({
                 </div>
               </div>
             </div>
-            <div ref={threadScrollRef} className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'>
+            <div
+              ref={threadScrollRef}
+              className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'
+              style={{
+                paddingBottom: composerOverlayHeight + 12,
+                transition: 'padding-bottom 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+            >
               {showEmailSummary &&
                 (emailSummaryState === 'loading' ||
                   emailSummaryState === 'done' ||
@@ -3065,97 +3102,80 @@ const SupportTicketDetail = ({
                 </div>
               )}
             </div>
-            <div className='sticky bottom-0 w-full flex-shrink-0 bg-background'>
+            <div className='absolute inset-x-0 bottom-0 z-20' ref={composerOverlayRef}>
               {channel?.type === ChannelType.SLACK ? (
                 conversationId ? (
                   <SlackComposer conversationId={conversationId} />
                 ) : null
-              ) : composerOpen ? (
-                <EmailComposer
-                  conversationId={conversationId}
-                  emails={ticket?.emails}
-                  onClose={() => {
-                    setComposerOpen(false);
-                    setReplyToEmailId(null);
-                  }}
-                  isAIPanelOpen={isAIPanelOpen}
-                  onToggleAIPanel={() => {
-                    if (isAIPanelOpen) {
-                      xyneAIActor.send({ type: 'CLOSE' });
-                    } else {
-                      xyneAIActor.send({ type: 'OPEN' });
-                    }
-                  }}
-                  onOpenAskAISidebarFresh={() => {
-                    xyneAIActor.send({ type: 'OPEN' });
-                  }}
-                  onCitationClick={(ref): void => {
-                    setActiveTab('sources');
-                    setHighlightedSourceRef(ref);
-                  }}
-                  channelId={channelId}
-                  ticketId={ticketId}
-                  replyToEmailId={replyToEmailId}
-                  replyMode={replyMode}
-                  ticketSubject={title}
-                />
               ) : (
-                <div className='px-6 py-3 flex items-center gap-2'>
-                  <Tooltip
-                    side='top'
-                    delayDuration={300}
-                    content={
-                      <span className='flex items-center gap-2'>
-                        Reply
-                        <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                          R
-                        </kbd>
-                      </span>
-                    }
-                  >
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setReplyToEmailId(null);
-                        setReplyMode('reply');
-                        setComposerOpen(true);
-                      }}
-                      data-track-category='Support'
-                      data-track-name='OpenReplyComposer'
-                      className='inline-flex items-center justify-center h-9 min-w-[104px] pl-3 pr-4 rounded-full border border-border bg-transparent text-sm font-medium text-muted-foreground hover:bg-muted active:bg-accent transition-colors cursor-pointer select-none'
+                <AnimatePresence mode='popLayout' initial={false}>
+                  {composerOpen ? (
+                    <motion.div
+                      key='composer'
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
                     >
-                      <ArrowUp size={16} className='rotate-[-90deg] mr-2' />
-                      Reply
-                    </button>
-                  </Tooltip>
-                  <Tooltip
-                    side='top'
-                    delayDuration={300}
-                    content={
-                      <span className='flex items-center gap-2'>
-                        Reply all
-                        <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                          A
-                        </kbd>
-                      </span>
-                    }
-                  >
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setReplyToEmailId(null);
-                        setReplyMode('replyAll');
-                        setComposerOpen(true);
-                      }}
-                      data-track-category='Support'
-                      data-track-name='OpenReplyAllComposer'
-                      className='inline-flex items-center justify-center h-9 min-w-[104px] pl-3 pr-4 rounded-full border border-border bg-transparent text-sm font-medium text-muted-foreground hover:bg-muted active:bg-accent transition-colors cursor-pointer select-none'
+                      <EmailComposer
+                        conversationId={conversationId}
+                        emails={ticket?.emails}
+                        onClose={() => {
+                          setComposerOpen(false);
+                          setReplyToEmailId(null);
+                        }}
+                        isAIPanelOpen={isAIPanelOpen}
+                        onToggleAIPanel={() => {
+                          if (isAIPanelOpen) {
+                            xyneAIActor.send({ type: 'CLOSE' });
+                          } else {
+                            xyneAIActor.send({ type: 'OPEN' });
+                          }
+                        }}
+                        onOpenAskAISidebarFresh={() => {
+                          xyneAIActor.send({ type: 'OPEN' });
+                        }}
+                        onCitationClick={(ref): void => {
+                          setActiveTab('sources');
+                          setHighlightedSourceRef(ref);
+                        }}
+                        channelId={channelId}
+                        ticketId={ticketId}
+                        replyToEmailId={replyToEmailId}
+                        replyMode={replyMode}
+                        setReplyMode={mode => {
+                          clearStoredRecipients(conversationId);
+                          setReplyMode(mode);
+                        }}
+                        ticketSubject={title}
+                      />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key='pill'
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                      className='px-6 py-3'
                     >
-                      <ReplyAll size={16} className='mr-2' />
-                      Reply all
-                    </button>
-                  </Tooltip>
-                </div>
+                      <ReplyPill
+                        emails={emails}
+                        deskEmail={deskEmail}
+                        replyMode={replyMode}
+                        setReplyMode={mode => {
+                          clearStoredRecipients(conversationId);
+                          setReplyMode(mode);
+                        }}
+                        onOpen={mode => {
+                          setReplyToEmailId(null);
+                          setReplyMode(mode);
+                          setComposerOpen(true);
+                        }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               )}
             </div>
           </div>

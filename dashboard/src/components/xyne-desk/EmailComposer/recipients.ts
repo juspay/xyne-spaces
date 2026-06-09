@@ -214,3 +214,60 @@ export const makeRecipientKeyDownHandler = (
     }
   };
 };
+
+export const extractEmail = (raw: string): string => {
+  const m = raw.match(/<([^>]+)>/);
+  return (m ? (m[1] ?? raw) : raw).trim();
+};
+
+interface PreviewEmail {
+  id: string;
+  from?: string | null;
+  to?: ReadonlyArray<string> | null;
+  cc?: ReadonlyArray<string> | null;
+  createdAt?: number | null;
+}
+
+export const computePreviewRecipients = (
+  emails: ReadonlyArray<PreviewEmail>,
+  mode: 'reply' | 'replyAll',
+  selfAddresses: ReadonlyArray<string>,
+): string[] => {
+  if (emails.length === 0) return [];
+  const sortedDesc = [...emails].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  const target = sortedDesc[0];
+  if (!target) return [];
+
+  const selfSet = new Set(
+    selfAddresses.filter((s): s is string => !!s).map(s => s.trim().toLowerCase()),
+  );
+  const isSelf = (addr: string): boolean => selfSet.has(extractEmail(addr).toLowerCase());
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (list: ReadonlyArray<string> | null | undefined): void => {
+    if (!list) return;
+    for (const addr of list) {
+      if (!addr) continue;
+      if (isSelf(addr)) continue;
+      const key = extractEmail(addr).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(addr);
+    }
+  };
+
+  if (mode === 'replyAll') {
+    if (target.from) push([target.from]);
+    push(target.to);
+    push(target.cc);
+  } else {
+    const senderIsSelf = !!target.from && isSelf(target.from);
+    if (senderIsSelf) {
+      push((target.to || []).filter(addr => !isSelf(addr)));
+    } else if (target.from) {
+      push([target.from]);
+    }
+  }
+  return out;
+};

@@ -98,7 +98,7 @@ export const ComposeEmailModal = ({
 
   return (
     <div
-      className='flex-shrink-0 pointer-events-auto bg-background border border-border rounded-t-xl shadow-2xl flex flex-col self-end transition-[width] duration-200'
+      className='flex-shrink-0 pointer-events-auto bg-background border border-border rounded-t-2xl shadow-xl flex flex-col self-end transition-[width] duration-200'
       style={{
         width: minimized ? '260px' : `${COMPOSE_WINDOW_WIDTH_PX}px`,
         ...(minimized ? {} : { height: `${heightVh}vh` }),
@@ -126,7 +126,7 @@ export const ComposeEmailModal = ({
       )}
       {/* Header bar — clicking it expands a minimized modal */}
       <div
-        className={`flex items-center justify-between px-4 py-2 bg-muted/40 border-b border-border rounded-t-xl ${minimized ? 'cursor-pointer' : ''}`}
+        className={`flex items-center justify-between px-4 py-2.5 bg-background ${minimized ? 'cursor-pointer' : ''}`}
         onClick={() => {
           if (minimized) setMinimized(false);
         }}
