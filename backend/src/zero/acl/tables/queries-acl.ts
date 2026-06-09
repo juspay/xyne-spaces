@@ -1,4 +1,4 @@
-import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
+import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
 import { DashboardRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
@@ -56,5 +56,9 @@ export class QueriesACL extends BaseACL<'queries'> {
 
   async canDelete(_args: DeleteID<TableSchema<'queries'>>, _tx: Transaction<Schema>): Promise<void> {
     // Gated at the mapping delete (which runs first in the cascade).
+  }
+
+  async canUpsert(args: UpsertValue<TableSchema<'queries'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.requireEditAccessIfMapped(args.id, tx);
   }
 }
