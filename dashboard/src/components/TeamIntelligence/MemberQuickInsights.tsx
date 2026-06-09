@@ -24,7 +24,7 @@ const MemberQuickInsights = ({ member }: { member: UserProductivity }): ReactEle
         <h3 className='text-lg font-semibold text-foreground'>User Metrics</h3>
       </div>
 
-      <div className='grid gap-3 grid-cols-2'>
+      <div className='grid gap-3 grid-cols-1 sm:grid-cols-2'>
         <StatCard
           title='Development Velocity'
           value={mergedPrCount}

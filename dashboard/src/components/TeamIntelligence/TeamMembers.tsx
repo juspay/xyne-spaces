@@ -17,12 +17,14 @@ const TeamMembers = ({ teamMembers }: { teamMembers: TeamMembersResponse }): Rea
 
   return (
     <section className='space-y-4'>
-      <div className='flex items-center gap-3'>
-        <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10'>
-          <UserIcon className='h-4 w-4 text-blue-500' />
+      <div className='flex items-center gap-3 flex-wrap'>
+        <div className='flex items-center gap-3'>
+          <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10'>
+            <UserIcon className='h-4 w-4 text-blue-500' />
+          </div>
+          <h3 className='text-lg font-semibold text-foreground whitespace-nowrap'>Meet the Team</h3>
         </div>
-        <h3 className='text-lg font-semibold text-foreground'>Meet the Team</h3>
-        <div className='ml-auto flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 focus-within:border-action-accent/50 focus-within:bg-background transition-colors'>
+        <div className='ml-auto flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 focus-within:border-action-accent/50 focus-within:bg-background transition-colors w-full max-w-sm'>
           <SearchIcon className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
           <Input
             type='text'

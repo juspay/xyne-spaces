@@ -1,7 +1,7 @@
 import { AwardIcon } from 'lucide-react';
 import { ReactElement } from 'react';
 import { UserProductivity } from '@/services/TeamIntelligence/teamIntelligenceService';
-import { getTeamColor } from '@/utils/teamIntelligenceUtils';
+import { formatReportDate, getTeamColor } from '@/utils/teamIntelligenceUtils';
 
 const MemberAchievements = ({ member }: { member: UserProductivity }): ReactElement => {
   return (
@@ -31,7 +31,9 @@ const MemberAchievements = ({ member }: { member: UserProductivity }): ReactElem
                     ></span>
                     <h4 className='text-base font-medium text-foreground'>{insight.teamName}</h4>
                   </div>
-                  <span className='text-xs text-muted-foreground'>{insight.reportDate}</span>
+                  <span className='text-xs text-muted-foreground'>
+                    {formatReportDate(insight.reportDate)}
+                  </span>
                 </div>
 
                 <p className='text-sm leading-relaxed text-muted-foreground'>{insight.insight}</p>

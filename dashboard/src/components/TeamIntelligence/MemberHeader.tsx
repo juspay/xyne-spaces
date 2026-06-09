@@ -11,7 +11,7 @@ const MemberHeader = ({ member }: { member: TeamMember }): ReactElement => {
     <section className='space-y-6'>
       <div className='flex items-start gap-6'>
         <div
-          className='flex h-20 w-20 items-center justify-center rounded-full bg-secondary text-2xl font-medium text-foreground'
+          className='flex h-20 w-20 items-center justify-center rounded-full bg-secondary text-2xl font-medium text-foreground shrink-0'
           role='img'
           aria-label={`Avatar for ${member.name}`}
         >

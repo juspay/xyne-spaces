@@ -3,6 +3,7 @@ import { useOrgHighlights } from '@/hooks/useTeamIntelligence';
 import { useOutletContext } from 'react-router-dom';
 import { TeamIntelligenceOutletContext } from '@/routes/TeamIntelligenceScreen/TeamIntelligenceScreen';
 import { getHighlightTypeConfig } from './HighlightCard';
+import { formatReportDate } from '@/utils/teamIntelligenceUtils';
 import { RocketIcon } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 
@@ -49,7 +50,9 @@ const OrgHighlights = (): ReactElement => {
                       <Icon className='h-3 w-3' />
                       {config.label}
                     </span>
-                    <span className='text-xs text-muted-foreground'>{highlight.reportDate}</span>
+                    <span className='text-xs text-muted-foreground'>
+                      {formatReportDate(highlight.reportDate)}
+                    </span>
                   </div>
                   <h4 className='text-base font-medium text-foreground'>{highlight.bulletTitle}</h4>
                   <p className='text-sm leading-relaxed text-muted-foreground'>
