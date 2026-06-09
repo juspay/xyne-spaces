@@ -168,17 +168,18 @@ export const AIComposerPanel = ({
   );
 };
 
-// Unified dropdown menu component used in the composer toolbar
 interface AIRefineDropdownProps {
   onQuickRewrite: (action: AIRefineQuickAction) => void;
   onAskAI: () => void;
   disabled?: boolean;
+  showQuickRewrite?: boolean;
 }
 
 export const AIRefineDropdown = ({
   onQuickRewrite,
   onAskAI,
   disabled = false,
+  showQuickRewrite = true,
 }: AIRefineDropdownProps): ReactElement => {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -205,7 +206,11 @@ export const AIRefineDropdown = ({
         type='button'
         onClick={() => setOpen(prev => !prev)}
         disabled={disabled}
-        className='size-7 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+        className={`size-7 flex items-center justify-center rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+          open
+            ? 'bg-destructive/10 text-destructive'
+            : 'text-primary hover:bg-destructive/10 hover:text-destructive'
+        }`}
         aria-label='Refine'
         aria-expanded={open}
         data-track-category='Support'
@@ -223,35 +228,36 @@ export const AIRefineDropdown = ({
             exit={{ opacity: 0, scale: 0.96, y: 4 }}
             transition={{ duration: 0.12 }}
           >
-            {/* Quick rewrite section */}
-            <div className='px-3 pt-2.5 pb-1'>
-              <p className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'>
-                Quick rewrite
-              </p>
-            </div>
-            {QUICK_REWRITE_ACTIONS.map(action => (
-              <button
-                key={action.id}
-                type='button'
-                disabled={disabled}
-                onClick={() => {
-                  onQuickRewrite(action.id);
-                  setOpen(false);
-                }}
-                className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
-                data-track-category='Support'
-                data-track-name='QuickRewrite'
-                data-track-metadata={JSON.stringify({ action: action.id })}
-              >
-                <span className='text-muted-foreground'>{action.icon}</span>
-                <span>{action.label}</span>
-              </button>
-            ))}
+            {showQuickRewrite && (
+              <>
+                <div className='px-3 pt-2.5 pb-1'>
+                  <p className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'>
+                    Quick rewrite
+                  </p>
+                </div>
+                {QUICK_REWRITE_ACTIONS.map(action => (
+                  <button
+                    key={action.id}
+                    type='button'
+                    disabled={disabled}
+                    onClick={() => {
+                      onQuickRewrite(action.id);
+                      setOpen(false);
+                    }}
+                    className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
+                    data-track-category='Support'
+                    data-track-name='QuickRewrite'
+                    data-track-metadata={JSON.stringify({ action: action.id })}
+                  >
+                    <span className='text-muted-foreground'>{action.icon}</span>
+                    <span>{action.label}</span>
+                  </button>
+                ))}
 
-            {/* Separator */}
-            <div className='border-t border-border my-1' />
+                <div className='border-t border-border my-1' />
+              </>
+            )}
 
-            {/* Ask AI section */}
             <div className='px-3 pt-1 pb-1'>
               <p className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'>
                 Ask AI
