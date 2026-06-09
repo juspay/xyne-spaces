@@ -1,3 +1,10 @@
+## [1.159.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.159.0...v1.159.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* show recurring calls per day and fit calendar to viewport ([f6ad4e8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f6ad4e8d3cd06fd8dcd96b9c762a07f789f01c14)), closes [#7202](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7202)
+
 ## [1.159.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.158.0...v1.159.0) (2026-06-08)
 
 
