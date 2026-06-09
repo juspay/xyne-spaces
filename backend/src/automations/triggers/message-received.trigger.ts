@@ -84,11 +84,13 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
       if (!cfg.messageTypes.includes(p.msgType)) return false;
     }
 
-    if (cfg.channelIds && cfg.channelIds.length > 0) {
-      if (!cfg.channelIds.includes(p.channelId)) return false;
+    const channelIds = (cfg.channelIds ?? []).map(id => id?.trim()).filter((id): id is string => !!id);
+    const fromUserIds = (cfg.fromUserIds ?? []).map(id => id?.trim()).filter((id): id is string => !!id);
+    if (channelIds.length > 0) {
+      if (!channelIds.includes(p.channelId)) return false;
     }
-    if (cfg.fromUserIds && cfg.fromUserIds.length > 0) {
-      if (!cfg.fromUserIds.includes(p.authorId)) return false;
+    if (fromUserIds.length > 0) {
+      if (!fromUserIds.includes(p.authorId)) return false;
     }
     if (cfg.contentContains && cfg.contentContains.length > 0) {
       if (!p.message.content) return false;

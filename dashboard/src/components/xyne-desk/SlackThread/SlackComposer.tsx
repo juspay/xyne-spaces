@@ -1,4 +1,4 @@
-import { ReactElement, useState, useCallback } from 'react';
+import { ReactElement, useEffect, useRef, useState, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -8,9 +8,12 @@ import { all, createLowlight } from 'lowlight';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { EmojiClickData } from 'emoji-picker-react';
+import { AutoDraftStatus } from '@xyne/shared';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { useSlackUserAuth, useDisconnectSlackUser } from '../../../hooks/useSlackUserAuth';
 import { useSlackUsers } from '../../../hooks/useSlackUsers';
+import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailDraft';
+import Tooltip from '../../ui/Tooltip';
 import { EditorToolbar, EmojiPickerButton } from '../../ui/EditorToolbar';
 import { MentionExtension, mentionPluginKey } from '../../ui/TipTapExtensions';
 import { MentionSelector } from '../../ui/Selectors';
@@ -19,15 +22,20 @@ const lowlight = createLowlight(all);
 
 interface SlackComposerProps {
   conversationId: string;
+  channelId?: string | null;
 }
 
-const SlackComposer = ({ conversationId }: SlackComposerProps): ReactElement => {
+const SlackComposer = ({ conversationId, channelId }: SlackComposerProps): ReactElement => {
   const [sending, setSending] = useState(false);
   const [content, setContent] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const { data: slackAuth, isLoading: authLoading } = useSlackUserAuth();
   const disconnectMutation = useDisconnectSlackUser();
   const { filteredUsers, searchUsers } = useSlackUsers();
+  const draft = useEmailDraft(conversationId);
+  const { deleteDraft } = useEmailDraftOperations(conversationId, channelId);
+  const isAutoDraftGenerating = draft?.autoDraftStatus === AutoDraftStatus.GENERATING;
+  const lastLoadedDraftRef = useRef<string>('');
 
   const editor = useEditor({
     extensions: [
@@ -136,12 +144,23 @@ const SlackComposer = ({ conversationId }: SlackComposerProps): ReactElement => 
       });
       editor.commands.setContent('');
       setContent('');
+      lastLoadedDraftRef.current = '';
+      deleteDraft();
     } catch {
       toast.error('Failed to send message');
     } finally {
       setSending(false);
     }
-  }, [editor, sending, conversationId]);
+  }, [editor, sending, conversationId, deleteDraft]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const next = draft?.draftContent ?? '';
+    if (next === lastLoadedDraftRef.current) return;
+    lastLoadedDraftRef.current = next;
+    editor.commands.setContent(next || '');
+    setContent(editor.getText().trim());
+  }, [editor, draft?.draftContent]);
 
   const handleConnect = () => {
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
@@ -220,8 +239,25 @@ const SlackComposer = ({ conversationId }: SlackComposerProps): ReactElement => 
           onMentionSearch={searchUsers}
         />
 
-        {/* Formatting toolbar */}
-        <EditorToolbar editor={editor} />
+        {/* Formatting toolbar — the autodraft indicator is overlaid (absolute)
+            so it doesn't wrap the toolbar in a flex container, which would break
+            the toolbar's own pill layout. */}
+        <div className='relative'>
+          <EditorToolbar editor={editor} />
+          {isAutoDraftGenerating && (
+            <div className='absolute right-3 top-1/2 -translate-y-1/2'>
+              <Tooltip delayDuration={300} content='Generating AI draft…'>
+                <span
+                  className='inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-violet-100 text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
+                  aria-label='Generating AI draft'
+                >
+                  <Loader2 size={10} className='animate-spin' />
+                  Drafting…
+                </span>
+              </Tooltip>
+            </div>
+          )}
+        </div>
 
         {/* Editor area */}
         <div className='relative py-2 px-3'>

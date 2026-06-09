@@ -98,8 +98,11 @@ export class TicketCommentedTrigger extends BaseTrigger<typeof TicketCommentedCo
       if (!p.message.content) return false;
       if (!p.message.content.toLowerCase().includes(cfg.contentContains.toLowerCase())) return false;
     }
-    if (cfg.fromUserIds && cfg.fromUserIds.length > 0) {
-      if (!cfg.fromUserIds.includes(p.authorId)) return false;
+    const fromUserIds = (cfg.fromUserIds ?? [])
+      .map(id => id?.trim())
+      .filter((id): id is string => !!id);
+    if (fromUserIds.length > 0) {
+      if (!fromUserIds.includes(p.authorId)) return false;
     }
     if (cfg.performedByMembership && cfg.performedByMembership.length > 0) {
       if (!cfg.performedByMembership.includes(p.performedBy.membership)) return false;

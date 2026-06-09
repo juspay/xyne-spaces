@@ -47,6 +47,7 @@ export class SendMessageStep extends BaseActionStep<typeof SendMessageConfigSche
       msgType:
         config.senderId === undefined ? MessageType.BOT : MessageType.USER,
       isBot: config.senderId === undefined,
+      isMarkdown: true,
     });
 
     return {
