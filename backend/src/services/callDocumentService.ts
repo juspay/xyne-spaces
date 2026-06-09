@@ -607,8 +607,7 @@ export class CallDocumentService {
             config: {
               apiKey,
               baseUrl,
-              timeout: 180000, // 3 minutes for document generation
-              retries: 2,
+              timeout: 300000,
             },
           },
           defaultModel: config.llm.callLitellmModel || 'glm-latest',
@@ -616,16 +615,17 @@ export class CallDocumentService {
         tools: {
           enabled: [],
           config: {},
-          execution: { timeout: 60000 },
+          execution: { timeout: 300000 },
         },
         execution: {
           maxTurns: 1,
           mode: 'single',
-          timeouts: { llm: 180000 },
+          timeouts: { llm: 300000 },
           limits: {},
           errorHandling: {
             maxRetries: 5,
             retryDelay: 120000,
+            maxDelay: 960000,
           },
         },
         events: {
