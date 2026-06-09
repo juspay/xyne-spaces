@@ -104,6 +104,7 @@ import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
 import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
 import dashboardWorkspaceIdBackfillRoutes from '@/routes/dashboardWorkspaceIdBackfill';
+import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
@@ -379,6 +380,8 @@ export class App {
     // Product insights recluster route (admin-only)
     this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
     this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
+    this.app.use('/migrate/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
+    this.app.use('/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
 
     // Application backfill admin routes (auth required)
     this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);
