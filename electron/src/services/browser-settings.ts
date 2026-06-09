@@ -2,10 +2,12 @@ import Store from 'electron-store';
 
 export interface BrowserSettings {
   popups: boolean;
+  openLinksExternally: boolean;
 }
 
 const defaultSettings: BrowserSettings = {
   popups: true,
+  openLinksExternally: false,
 };
 
 class BrowserSettingsService {

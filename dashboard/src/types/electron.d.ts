@@ -77,8 +77,10 @@ export interface ElectronAPI {
   setUserEmail: (email: string) => void;
   getClientSessionId: () => Promise<string>;
   toggleCompactMode: () => void;
-  getBrowserSettings: () => Promise<{ popups: boolean }>;
-  setBrowserSettings: (settings: Partial<{ popups: boolean }>) => Promise<{ popups: boolean }>;
+  getBrowserSettings: () => Promise<{ popups: boolean; openLinksExternally: boolean }>;
+  setBrowserSettings: (
+    settings: Partial<{ popups: boolean; openLinksExternally: boolean }>,
+  ) => Promise<{ popups: boolean; openLinksExternally: boolean }>;
   clearSiteData: () => Promise<{ success: boolean }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;

@@ -21,8 +21,16 @@ export const subscribeLinkOpenPref = (listener: () => void): (() => void) => {
 export const getLinkOpenExternalDefault = (): boolean =>
   localStorage.getItem(LINK_OPEN_EXTERNAL_KEY) === 'true';
 
+const syncLinkOpenPrefToMain = (value: boolean): void => {
+  if (!isElectronApp()) return;
+  void window.electronAPI?.setBrowserSettings?.({ openLinksExternally: value });
+};
+
+syncLinkOpenPrefToMain(getLinkOpenExternalDefault());
+
 export const setLinkOpenExternalDefault = (value: boolean): void => {
   localStorage.setItem(LINK_OPEN_EXTERNAL_KEY, String(value));
+  syncLinkOpenPrefToMain(value);
   notify();
 };
 
