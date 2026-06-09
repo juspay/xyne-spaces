@@ -1,5 +1,8 @@
 {
   "appId": "com.xyne.spaces",
+  "extraMetadata": {
+    "SENTRY_DSN": "https://4ec5e3164a31edeb0db87ecf7c0978f3@o4507576052023296.ingest.us.sentry.io/4511031818846208"
+  },
   "productName": "Xyne Spaces",
     "directories": {
       "output": "release/prod"

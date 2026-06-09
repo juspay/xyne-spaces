@@ -6,11 +6,49 @@ import { existsSync, mkdirSync } from 'fs';
 import Logger from 'electron-log';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import { showScreenPicker } from './screen-picker';
+import Store from 'electron-store';
 
 let mainWindow: BrowserWindow | null = null;
+const store = new Store();
 
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindow = window;
+}
+
+let cachedUserEmail: string | null = null;
+
+/**
+ * Called from the IPC handler when the user logs in (covers fresh-login path).
+ */
+export function setCachedUser(email: string): void {
+  cachedUserEmail = email;
+}
+
+/**
+ * Called once at startup. Reads the persisted JWT cookie so the email is
+ * available even when the user never re-logs in after an app update/restart.
+ */
+export async function hydrateCachedUserFromCookies(): Promise<void> {
+  try {
+    const workspaceCookies = await session.defaultSession.cookies.get({ name: 'xyne_last_workspace' });
+    const workspaceId = workspaceCookies[0]?.value;
+    if (!workspaceId) return;
+
+    const tokenCookies = await session.defaultSession.cookies.get({ name: `xyne_ws_${workspaceId}_token` });
+    const token = tokenCookies[0]?.value;
+    if (!token) return;
+
+    // Decode JWT payload (no verification needed — trusted main process)
+    const payloadB64 = token.split('.')[1];
+    if (!payloadB64) return;
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as Record<string, unknown>;
+    if (typeof payload.email === 'string' && payload.email) {
+      cachedUserEmail = payload.email;
+      Logger.info('[RequestInterceptor] Hydrated user email from JWT cookie');
+    }
+  } catch (err) {
+    Logger.warn('[RequestInterceptor] Could not hydrate user from cookies', { error: String(err) });
+  }
 }
 
 /**
@@ -82,17 +120,17 @@ export function setupXyneSpacesInterceptor(): void {
         .replace(/\s+/g, ' ')
         .trim();
 
-      if (cleanedUa === ua) {
-        callback({ requestHeaders: details.requestHeaders });
-        return;
+      const headers: Record<string, string> = {
+        ...details.requestHeaders,
+        ...(cleanedUa !== ua ? { 'User-Agent': cleanedUa } : {}),
+      };
+
+      const preProdEnabled = store.get(config.preProdKey);
+      if (preProdEnabled === true) {
+        headers['x-route-env'] = 'playground';
       }
 
-      callback({
-        requestHeaders: {
-          ...details.requestHeaders,
-          'User-Agent': cleanedUa,
-        },
-      });
+      callback({ requestHeaders: headers });
     }
   );
 }
@@ -105,9 +143,18 @@ export function setupRequestInterceptor(): void {
   setupDownloadHandler();
   
   session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: [`${config.BACKEND_URL}/*`] },
+    { urls: [
+      `${config.BACKEND_URL}/*`,
+      `${config.FRONTEND_URL}/*`,
+      config.BACKEND_URL.replace(/^https/, 'wss') + '/*',
+      ], 
+    },
     (details, callback) => {
       details.requestHeaders['X-Platform'] = 'electron';
+      const preProdEnabled = store.get(config.preProdKey);
+      if (preProdEnabled === true) {
+        details.requestHeaders['x-route-env'] = 'playground';
+      }
       callback({ requestHeaders: details.requestHeaders });
     }
   );

@@ -43,6 +43,7 @@ interface LogEntry {
   hostname: string;
   event: EventType;
   serialNumber: string;
+  preProdEnabled: boolean;
   [key: string]: unknown;
 }
 
@@ -65,11 +66,14 @@ class LoggerService {
   private isEnabled: boolean = true;
   private store: Store;
   private consecutiveFailures: number = 0;
-  private droppedLogsCount: number = 0;
+  private droppedLogsCount: number = 0; 
+  private preProdEnabled: boolean = false;
 
   constructor() {
     this.store = new Store();
     this.clientSessionId = this.getOrCreateClientSessionId();
+    this.emailId = (this.store.get('userEmail') as string | undefined) ?? null;
+    this.preProdEnabled = this.store.get(config.preProdKey) === true;
     this.electronVersion = app.getVersion();
     this.platformName = 
       os.platform() === 'win32' ? 'windows' : 
@@ -105,10 +109,11 @@ class LoggerService {
   }
 
   /**
-   * Set email ID for the user
+   * Set email ID for the user (persisted to disk so it survives restarts)
    */
   setEmailId(email: string): void {
     this.emailId = email;
+    this.store.set('userEmail', email);
   }
 
   /**
@@ -177,6 +182,7 @@ class LoggerService {
       clientSessionId: this.clientSessionId,
       platformName: this.platformName,
       electronVersion: this.electronVersion,
+      preProdEnabled: this.preProdEnabled,
       emailId: this.emailId,
       timestamp: new Date().toISOString(),
       level,
