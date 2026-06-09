@@ -38,7 +38,7 @@ import {
   FileText,
   Clock,
 } from 'lucide-react';
-import { Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import Tooltip from '../Tooltip/Tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -260,6 +260,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [],
     );
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Cleanup debounce timer on unmount to prevent post-unmount callbacks
+    useEffect(() => {
+      return () => {
+        if (debouncedUpdateTimer.current) {
+          clearTimeout(debouncedUpdateTimer.current);
+        }
+      };
+    }, []);
 
     const [sendMode, setSendMode] = useState<'message' | 'ticket'>('message');
     const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
@@ -1514,7 +1523,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   )}
 
                   {features.mentions && (
-                    <Tooltip content='Mention user (@)' side={TooltipSide.TOP}>
+                    <Tooltip
+                      content='Mention user (@)'
+                      side='top'
+                      delayDuration={1000}
+                      skipDelayDuration={1000}
+                    >
                       <button
                         type='button'
                         onClick={() => {
@@ -1530,7 +1544,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </Tooltip>
                   )}
 
-                  <Tooltip content='Mention channel (#)' side={TooltipSide.TOP}>
+                  <Tooltip
+                    content='Mention channel (#)'
+                    side='top'
+                    delayDuration={1000}
+                    skipDelayDuration={1000}
+                  >
                     <button
                       type='button'
                       onClick={() => {
@@ -1547,7 +1566,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
                 <div className='flex items-center gap-2'>
                   {onCancel && (
-                    <Tooltip content='Cancel editing' side={TooltipSide.TOP}>
+                    <Tooltip
+                      content='Cancel editing'
+                      side='top'
+                      delayDuration={1000}
+                      skipDelayDuration={1000}
+                    >
                       <button
                         type='button'
                         onClick={onCancel}
@@ -1581,7 +1605,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         >
                           <Tooltip
                             content={sendMode === 'message' ? 'Send message' : 'Create ticket'}
-                            side={TooltipSide.TOP}
+                            side='top'
+                            delayDuration={1000}
+                            skipDelayDuration={1000}
                           >
                             <button
                               type='button'
@@ -1690,7 +1716,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}
                         >
-                          <Tooltip content='Send message' side={TooltipSide.TOP}>
+                          <Tooltip
+                            content='Send message'
+                            side='top'
+                            delayDuration={1000}
+                            skipDelayDuration={1000}
+                          >
                             <button
                               type='button'
                               onClick={() => void handleSend()}
@@ -1747,7 +1778,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           </DropdownMenu>
                         </div>
                       ) : (
-                        <Tooltip content='Send message' side={TooltipSide.TOP}>
+                        <Tooltip
+                          content='Send message'
+                          side='top'
+                          delayDuration={1000}
+                          skipDelayDuration={1000}
+                        >
                           <button
                             type='button'
                             onClick={() => void handleSend()}

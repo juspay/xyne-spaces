@@ -27,7 +27,7 @@ import React, {
 import type { Editor } from '@tiptap/react';
 import { Mic, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import Tooltip from '../Tooltip/Tooltip';
 import type { MentionResult } from '../Selectors/Selectors.types';
 import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
 
@@ -396,7 +396,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
               ? 'Stop voice input'
               : 'Start voice input'
         }
-        side={TooltipSide.TOP}
+        side='top'
       >
         <button
           type='button'

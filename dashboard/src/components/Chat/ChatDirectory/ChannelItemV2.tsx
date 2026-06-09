@@ -12,8 +12,8 @@ import { useChannelHasActiveCall } from '../../../hooks/useCalls';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
-import useMeasure from '../../../hooks/useMeasure';
 import Tooltip from '../../ui/Tooltip';
+import { stripHtml } from '../../xyne-desk/EmailComposer/helpers';
 import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
@@ -29,15 +29,6 @@ interface ChannelItemV2Props {
   unreadCount?: number;
   isActive?: boolean;
 }
-
-const stripHtml = (html: string): string => {
-  if (!html) return '';
-  if (typeof document === 'undefined') return html;
-
-  const tmp = document.createElement('DIV');
-  tmp.innerHTML = html;
-  return tmp.textContent || tmp.innerText || '';
-};
 
 const ChannelItemV2 = memo(
   ({ channel, unreadCount = 0, isActive = false }: ChannelItemV2Props): ReactElement => {
@@ -125,27 +116,20 @@ const ChannelItemV2 = memo(
       );
     };
 
-    const checkTruncation = (): void => {
-      const el = nameRef.current;
-      if (!el) {
-        setIsTruncated(false);
-        return;
-      }
-
-      const truncated = el.scrollWidth > el.clientWidth;
-      setIsTruncated(truncated);
-    };
     const handleChannelClick = (e: React.MouseEvent<HTMLAnchorElement>): void => {
       e.preventDefault();
       e.stopPropagation();
       standaloneNavigate(navigate, `/chat/dir/${channel.id}`, { event: e });
     };
 
-    const bounds = useMeasure({ ref: nameRef, observeResize: true });
-
     useEffect(() => {
-      checkTruncation();
-    }, [bounds.width, displayName]);
+      const el = nameRef.current;
+      if (!el) {
+        setIsTruncated(false);
+        return;
+      }
+      setIsTruncated(el.scrollWidth > el.clientWidth);
+    }, [displayName]);
 
     const draftTooltipContent = (
       <div className='flex flex-col items-center'>

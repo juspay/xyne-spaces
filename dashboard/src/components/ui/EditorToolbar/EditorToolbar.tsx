@@ -255,7 +255,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       {/* Link Hover Tooltip */}
       <div className='border-border p-1'>
         <div className='flex items-center gap-1 px-3 py-2 bg-muted rounded-xl'>
-          <Tooltip content='Bold (⌘B)'>
+          <Tooltip content='Bold (⌘B)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleBold}
@@ -267,7 +267,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Italic (⌘I)'>
+          <Tooltip content='Italic (⌘I)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleItalic}
@@ -279,7 +279,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Strikethrough (⌘⇧X)'>
+          <Tooltip content='Strikethrough (⌘⇧X)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleStrikethrough}
@@ -291,7 +291,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Underline (⌘U)'>
+          <Tooltip content='Underline (⌘U)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleUnderline}
@@ -303,7 +303,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Inline Code (⌘E)'>
+          <Tooltip content='Inline Code (⌘E)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleCode}
@@ -315,7 +315,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Code Block (⌘⇧E)'>
+          <Tooltip content='Code Block (⌘⇧E)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleCodeBlock}
@@ -331,7 +331,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             open={open}
             onOpenChange={setOpen}
             trigger={
-              <Tooltip content='Insert Link (⌘K)'>
+              <Tooltip content='Insert Link (⌘K)' delayDuration={1000} skipDelayDuration={1000}>
                 <button
                   type='button'
                   onClick={handleLink}
@@ -420,7 +420,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 className='hidden'
                 onChange={handleImageFileChange}
               />
-              <Tooltip content='Insert Image'>
+              <Tooltip content='Insert Image' delayDuration={1000} skipDelayDuration={1000}>
                 <button
                   type='button'
                   onClick={() => {
@@ -491,7 +491,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </div>
           )}
 
-          <Tooltip content='Blockquote (⌘⇧B)'>
+          <Tooltip content='Blockquote (⌘⇧B)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleBlockquote}
@@ -503,7 +503,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Bullet List'>
+          <Tooltip content='Bullet List' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleBulletList}
@@ -515,7 +515,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Numbered List'>
+          <Tooltip content='Numbered List' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleOrderedList}

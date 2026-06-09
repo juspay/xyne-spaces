@@ -15,10 +15,13 @@ interface UseChannelSortResult {
   setChannelSortOrder: (order: ChannelSortOrder) => void;
 }
 
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
 export const useChannelSort = (
   channelData: VisibleChannel[] | undefined,
   allChannelsUserStatus: ChannelUserStatus[],
   currentUserId: string,
+  activeChannelId?: string,
 ): UseChannelSortResult => {
   const zero = useZero();
   const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
@@ -84,12 +87,24 @@ export const useChannelSort = (
       return sortByActivity(list);
     };
 
+    // Limit DMs to: active channel, unread, or activity within last 7 days
+    const now = Date.now();
+    const recentDms = grouped.directMessages.filter(channel => {
+      if (channel.id === activeChannelId) return true;
+      const status = allChannelsUserStatus.find(
+        s => s.channelId === channel.id && s.userId === currentUserId,
+      );
+      if ((status?.unreadCount ?? 0) > 0) return true;
+      const lastActivity = channel.channelStats?.lastActivityAt ?? 0;
+      return now - lastActivity < SEVEN_DAYS_MS;
+    });
+
     return {
       starred: sortByUnreadAndActivity(grouped.starred),
       channels: sortChannels(grouped.channels),
-      directMessages: sortByUnreadAndActivity(grouped.directMessages),
+      directMessages: sortByUnreadAndActivity(recentDms),
     };
-  }, [channelData, allChannelsUserStatus, currentUserId, channelSortOrder]);
+  }, [channelData, allChannelsUserStatus, currentUserId, channelSortOrder, activeChannelId]);
 
   return { starred, channels, directMessages, channelSortOrder, setChannelSortOrder };
 };

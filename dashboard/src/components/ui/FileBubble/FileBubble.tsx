@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import Tooltip from '../Tooltip/Tooltip';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
@@ -71,7 +71,7 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
           <div className='flex flex-col'>
             <div className='font-medium'>{attachment.originalFilename}</div>
 
-            <Tooltip content={formatFullTimestamp(createdAt)} side={TooltipSide.TOP}>
+            <Tooltip content={formatFullTimestamp(createdAt)} side='top'>
               <div className='text-xs text-muted-foreground'>
                 Shared by {user?.name} on{' '}
                 {new Date(createdAt).toLocaleDateString(undefined, {

@@ -10,7 +10,6 @@ import { useChannelHasActiveCall } from '../../../hooks/useCalls';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
-import useMeasure from '../../../hooks/useMeasure';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
@@ -80,22 +79,14 @@ const ChannelItem = ({
   const nameRef = useRef<HTMLSpanElement>(null);
   const [isTruncated, setIsTruncated] = useState(false);
 
-  const checkTruncation = (): void => {
+  useEffect(() => {
     const el = nameRef.current;
     if (!el) {
       setIsTruncated(false);
       return;
     }
-
-    const truncated = el.scrollWidth > el.clientWidth;
-    setIsTruncated(truncated);
-  };
-
-  const bounds = useMeasure({ ref: nameRef, observeResize: true });
-
-  useEffect(() => {
-    checkTruncation();
-  }, [bounds.width, displayName]);
+    setIsTruncated(el.scrollWidth > el.clientWidth);
+  }, [displayName]);
 
   return (
     <Tooltip

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Popover, Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import { Popover } from '@juspay/blend-design-system';
+import Tooltip from '../Tooltip/Tooltip';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { Smile, X, Image as ImageIcon } from 'lucide-react';
 import type { EmojiPickerButtonProps } from './EditorToolbar.types';
@@ -186,7 +187,12 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
           emojiOpen ? (
             buttonElement
           ) : (
-            <Tooltip content='Insert emoji' side={TooltipSide.TOP}>
+            <Tooltip
+              content='Insert emoji'
+              side='top'
+              delayDuration={1000}
+              skipDelayDuration={1000}
+            >
               {buttonElement}
             </Tooltip>
           )
