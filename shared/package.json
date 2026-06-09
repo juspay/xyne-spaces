@@ -82,7 +82,7 @@
     "prepare": "npm run build"
   },
   "dependencies": {
-    "@rocicorp/zero": "0.26.1",
+    "@rocicorp/zero": "1.6.1",
     "fast-xml-parser": "^5.3.3",
     "fuse.js": "^7.1.0",
     "xstate": "^5.24.0",

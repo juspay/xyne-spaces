@@ -67,7 +67,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "@rocicorp/zero": "0.26.1",
+    "@rocicorp/zero": "1.6.1",
     "@rocicorp/zero-virtual": "^0.4.2",
     "@tanstack/react-form": "^1.25.0",
     "@tanstack/react-query": "^5.90.9",
