@@ -239,7 +239,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
         where: { id: channelId },
-        select: { name: true, scopeType: true, projectId: true, project: { select: { name: true } } }
+        select: { name: true, scopeType: true, projectId: true }
       }),
       db.user.findUnique({
         where: { id: senderId },
@@ -254,6 +254,13 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         select: { allowThreadBroadcastMentions: true },
       }),
     ]);
+
+    const channelProject = channel?.projectId
+      ? await db.project.findUnique({
+          where: { id: channel.projectId },
+          select: { name: true },
+        })
+      : null;
 
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
     const users = await db.user.findMany({
@@ -412,7 +419,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelId,
         channelName: channel?.name ?? channelId,
         ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-        ...(channel?.project?.name ? { projectName: channel.project.name } : {}),
+        ...(channelProject?.name ? { projectName: channelProject.name } : {}),
         ...(attachments.length > 0 && {
           attachments: attachments.map(att => ({
             attachmentId: att.id,
@@ -443,7 +450,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelId,
         channelName: channel?.name ?? channelId,
         ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-        ...(channel?.project?.name ? { projectName: channel.project.name } : {}),
+        ...(channelProject?.name ? { projectName: channelProject.name } : {}),
         mentionedUserIds: nonAppMentionedUserIds,
       }, observerAppUserIds);
     }
