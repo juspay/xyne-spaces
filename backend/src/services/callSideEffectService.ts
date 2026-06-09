@@ -123,6 +123,9 @@ class CallSideEffectService {
      */
     async handleParticipantInvited(participantId: string): Promise<void> {
         this.logger.info(`Handling Participant Invited: ${participantId}`);
+        // Hoist so the affected user ID is available in the catch block even if the
+        // error occurs after participant lookup but before the push is sent.
+        let affectedUserId: string | undefined;
 
         try {
             const participant = await db.callParticipant.findUnique({
@@ -145,6 +148,7 @@ class CallSideEffectService {
             }
 
             const { callId, userId: recipientId, invitedBy } = participant;
+            affectedUserId = recipientId;
             if (!callId || !recipientId || !invitedBy) {
                 this.logger.warn(`Missing callId/recipientId/invitedBy for participant ${participantId} — skipping invite side effects`, {
                     callId,
@@ -237,7 +241,15 @@ class CallSideEffectService {
                 }
             });
         } catch (error) {
-            this.logger.error(`Failed to handle participant invited for ${participantId}:`, error);
+            this.logger.error(
+                'invitee_notification_failed',
+                {
+                    participant_id: participantId,
+                    affected_user_id: affectedUserId ?? 'unknown',
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined,
+                }
+            );
         }
     }
 

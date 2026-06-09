@@ -281,6 +281,8 @@ export class CallController {
   initiateCall = async (req: Request, res: Response): Promise<void> => {
     const correlationId = uuidv4();
     let callExternalId: string | undefined;
+    // Tracks which stage was active when an error is thrown; used in catch log.
+    let stage = 'setup';
 
     try {
       const { callType = 'AUDIO', channelId, invitedUserIds, isHeadless, sttModel, conversationId } = req.body;
@@ -299,7 +301,9 @@ export class CallController {
 
       // Handle headless recording - create DM with bot
       if (isHeadless && !channelId && !invitedUserIds) {
+        stage = 'bot_user_lookup';
         const botUser = await this.getOrCreateBotUser(req.user!.workspaceId!);
+        stage = 'dm_channel_resolution';
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           [botUser.id],
@@ -309,6 +313,7 @@ export class CallController {
       }
       // If no channelId but invitedUserIds is provided, find or create channel
       else if (!channelId && invitedUserIds && invitedUserIds.length > 0) {
+        stage = 'dm_channel_resolution';
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           invitedUserIds,
@@ -332,6 +337,7 @@ export class CallController {
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
       logger.info(`[${correlationId}] existing_call_check | channel_id=${finalChannelId}, conversation_id=${conversationId || 'none'}`);
+      stage = 'existing_call_lookup';
       // If conversationId is provided, check for calls matching both channelId and conversationId
       // Otherwise, check for calls matching only channelId
       const existingCall = isHeadless
@@ -341,6 +347,7 @@ export class CallController {
           : await repositories.calls.findActiveCallByChannelId(finalChannelId);
 
       // Fetch channel to get scopeType (needed for existing call path)
+      stage = 'channel_lookup';
       const channel = await repositories.channels.findById(finalChannelId);
       if (!channel) {
         res.status(404).json({ success: false, error: 'Channel not found' });
@@ -349,11 +356,14 @@ export class CallController {
 
       if (existingCall) {
         // Verify the LiveKit room still exists
+        stage = 'existing_room_check';
         const roomInfo = await livekitService.getRoomInfo(existingCall.externalId);
 
         if (roomInfo) {
           // Room exists, generate token to join the existing call
+          stage = 'user_lookup_existing_call';
           const user = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
+          stage = 'token_generation_existing_call';
           const token = await livekitService.generateAccessToken({
             userIdentity: userId,
             roomName: existingCall.externalId,
@@ -382,6 +392,7 @@ export class CallController {
         } else {
           // Room doesn't exist but call is marked as active - mark it as ended
           logger.info(`[${existingCall.externalId}] existing_call_room_stale | marked_as=${existingCall.status}, room_exists=false`);
+          stage = 'stale_room_cleanup';
           await repositories.calls.update(existingCall.id, {
             status: CallStatus.ENDED,
             endedAt: new Date(),
@@ -420,6 +431,7 @@ export class CallController {
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
       });
 
+      stage = 'livekit_room_creation';
       await livekitService.createRoom({
         name: callExternalId,
         maxParticipants: 100,
@@ -447,7 +459,9 @@ export class CallController {
       }, 30000);
 
       // Generate access token for initiator
+      stage = 'initiator_user_lookup';
       const initiator = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
+      stage = 'token_generation_new_call';
       const token = await livekitService.generateAccessToken({
         userIdentity: userId,
         roomName: callExternalId,
@@ -472,7 +486,13 @@ export class CallController {
         scopeType: channel.scopeType, // Add scopeType for CallKit filtering
       });
     } catch (error) {
-      logger.error(`[${callExternalId || 'unknown'}] call_initiation_failed | error=${error}`);
+      const callIdForLog = callExternalId ?? correlationId;
+      logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+      // If room was already created but token generation failed, the LiveKit room is now
+      // orphaned. It will auto-close after emptyTimeout=120s, but this log makes it searchable.
+      if (callExternalId && stage === 'token_generation_new_call') {
+        logger.error(`[${callExternalId}] livekit_room_orphaned`, { reason: 'token_generation_failed_after_room_created', room_will_timeout_in: '120s' });
+      }
       res.status(500).json({ success: false, error: 'Failed to initiate call' });
     }
   };

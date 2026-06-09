@@ -40,16 +40,44 @@ class LiveKitWebhookController {
    * This is the authoritative source for room lifecycle events.
    */
   handleWebhook = async (req: Request, res: Response): Promise<void> => {
-    try {
+    // Verify the body was parsed as a raw Buffer by express.raw().
+    // If the content-type didn't match 'application/webhook+json', express skips the
+    // raw parser and req.body may be an empty object — signature verification would
+    // then silently fail on garbage input rather than giving a useful error.
+    if (!Buffer.isBuffer(req.body)) {
+      logger.error('[LiveKit Webhook] webhook_body_not_buffer', {
+        content_type: req.get('content-type'),
+        body_type: typeof req.body,
+        action: 'returning_400',
+        likely_cause: 'content_type_mismatch_or_missing_raw_middleware',
+      });
+      res.status(400).json({ error: 'Invalid webhook body — expected raw buffer' });
+      return;
+    }
 
-      // Verify webhook signature and parse event
-      // Note: req.body is a Buffer from express.raw() middleware
-      // WebhookReceiver.receive() expects the raw body as a string
-      const event = await this.receiver.receive(
+    logger.info('[LiveKit Webhook] webhook_received', { body_bytes: req.body.length });
+
+    // Separate the signature verification from handler errors so auth failures
+    // are distinguishable from processing errors in logs.
+    let event: WebhookEvent;
+    try {
+      event = await this.receiver.receive(
         req.body.toString('utf8'),
         req.get('Authorization')
       );
+    } catch (authError) {
+      logger.error('[LiveKit Webhook] webhook_auth_failed', {
+        content_type: req.get('content-type'),
+        error: authError instanceof Error ? authError.message : String(authError),
+        likely_cause: 'wrong_api_secret_or_tampered_body',
+      });
+      res.status(400).json({ error: 'Webhook signature verification failed' });
+      return;
+    }
 
+    logger.info('[LiveKit Webhook] webhook_parsed', { event: event.event, room: event.room?.name ?? 'none' });
+
+    try {
       // Handle different event types
       switch (event.event) {
         case 'room_started':
@@ -200,7 +228,19 @@ class LiveKitWebhookController {
         logger.info(`[LiveKit Webhook] First participant joined - creating call record for ${roomName}`);
 
         // Parse room metadata to get channel info
-        const roomMetadata = event.room?.metadata ? JSON.parse(event.room.metadata) : {};
+        // Unguarded JSON.parse would throw into the outer catch with no stage context.
+        let roomMetadata: Record<string, any>;
+        try {
+          roomMetadata = event.room?.metadata ? JSON.parse(event.room.metadata) : {};
+        } catch (parseError) {
+          logger.error('[LiveKit Webhook] metadata_parse_failed', {
+            stage: 'metadata_parse',
+            room: roomName,
+            raw_metadata: (event.room?.metadata ?? '').substring(0, 200),
+            error: parseError instanceof Error ? parseError.message : String(parseError),
+          });
+          return;
+        }
         const channelId = roomMetadata.channelId;
         const createdBy = roomMetadata.createdBy || participant.identity;
         const callType = roomMetadata.callType;
@@ -214,11 +254,23 @@ class LiveKitWebhookController {
         }
 
         // ACL Validation: Verify permissions for call creation
-        const aclCheck = await livekitWebhookACL.canCreateCall({
-          channelId,
-          createdBy,
-          joiningUserId: participant.identity,
-        });
+        // A DB timeout inside canCreateCall would fall into the outer catch with no stage label.
+        let aclCheck: Awaited<ReturnType<typeof livekitWebhookACL.canCreateCall>>;
+        try {
+          aclCheck = await livekitWebhookACL.canCreateCall({
+            channelId,
+            createdBy,
+            joiningUserId: participant.identity,
+          });
+        } catch (aclError) {
+          logger.error('[LiveKit Webhook] acl_check_failed', {
+            stage: 'acl_validation',
+            room: roomName,
+            channel: channelId,
+            error: aclError instanceof Error ? aclError.message : String(aclError),
+          });
+          return;
+        }
 
         if (!aclCheck.valid) {
           logger.error(`[LiveKit Webhook] ACL validation failed: ${aclCheck.reason}`);
@@ -236,7 +288,18 @@ class LiveKitWebhookController {
           }
         } else {
           // Use all channel participants (default behavior for channel calls)
-          participantsToInvite = await repositories.channelParticipants.getChannelParticipants(channelId);
+          // DB failure here is otherwise unguarded and falls into outer catch with no stage.
+          try {
+            participantsToInvite = await repositories.channelParticipants.getChannelParticipants(channelId);
+          } catch (participantsError) {
+            logger.error('[LiveKit Webhook] channel_participants_lookup_failed', {
+              stage: 'channel_participants_lookup',
+              room: roomName,
+              channel: channelId,
+              error: participantsError instanceof Error ? participantsError.message : String(participantsError),
+            });
+            return;
+          }
         }
 
         const now = new Date();
@@ -249,6 +312,9 @@ class LiveKitWebhookController {
         const roomLink = `${config.livekit.clientUrl}/call/${roomName}?type=${callType}`;
 
         // Use repository method to create call with all related records atomically
+        // If this transaction fails the LiveKit room is already live with no DB record — a
+        // "ghost room". Catch it specifically so the log contains the room name and explicit
+        // ghost_room_detected marker rather than the generic 'Error handling participant join'.
         const result = await repositories.calls.createCallWithParticipantsAndMessage({
           callId,
           roomName,
@@ -262,7 +328,23 @@ class LiveKitWebhookController {
           messageId,
           now,
           callOrigin,
+        }).catch((txError) => {
+          logger.error('[LiveKit Webhook] call_record_creation_failed', {
+            stage: 'call_record_creation',
+            room: roomName,
+            channel: channelId,
+            error: txError instanceof Error ? txError.message : String(txError),
+          });
+          logger.error('[LiveKit Webhook] ghost_room_detected', {
+            room: roomName,
+            livekit_room_is_live: true,
+            no_db_record: true,
+            action: 'manual_cleanup_may_be_required',
+          });
+          return null;
         });
+
+        if (!result) return;
 
         call = result.call;
 
@@ -276,7 +358,9 @@ class LiveKitWebhookController {
             if (egressId) {
               logger.info(`[LiveKit Webhook] Started recording for call ${roomName}, egressId=${egressId}`);
             } else {
-              logger.warn(`[LiveKit Webhook] Recording start returned no egressId for call ${roomName}`);
+              // Null egressId means startRecording caught an error internally and returned null.
+              // Log structured so we can distinguish "recording disabled" from "recording failed to start".
+              logger.error('[LiveKit Webhook] recording_start_failed', { call: roomName, reason: 'egressId_null', recording_disabled: false });
             }
           }
         } catch (recordingError) {
@@ -437,11 +521,33 @@ class LiveKitWebhookController {
       logger.info(`[LiveKit Webhook] ACL validation passed for participant leave: call=${callId}, user=${participant.identity}`);
 
       // Use repository method to handle participant leave atomically (includes system message update)
+      // If this DB call throws, shouldEndCall is never checked and stopRecording is never
+      // called — the egress auto-terminates without a graceful flush and the recording may be
+      // truncated. Catch it explicitly and still attempt stopRecording before returning.
       const result = await repositories.calls.handleParticipantLeave({
         callExternalId: callId,
         userId: participant.identity,
         leftAt: now,
+      }).catch(async (leaveError) => {
+        logger.error('[LiveKit Webhook] participant_leave_db_failed', {
+          stage: 'participant_leave_db_update',
+          call: callId,
+          user: participant.identity,
+          error: leaveError instanceof Error ? leaveError.message : String(leaveError),
+        });
+        // Still attempt to stop the recording so the egress can flush to GCS before the room tears down.
+        try {
+          if (callRecordingService.isRecordingEnabled()) {
+            await callRecordingService.stopRecording(callId);
+            logger.info('[LiveKit Webhook] recording_stop_attempted_after_db_error', { call: callId });
+          }
+        } catch (stopErr) {
+          logger.error('[LiveKit Webhook] recording_stop_failed_after_db_error', { call: callId, error: stopErr instanceof Error ? stopErr.message : String(stopErr) });
+        }
+        return null;
       });
+
+      if (!result) return;
 
       if (!result.call) {
         logger.warn(`[LiveKit Webhook] Call not found or participant not found for leave: ${callId}`);

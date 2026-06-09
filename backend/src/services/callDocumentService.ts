@@ -5,8 +5,9 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Agent, type AgentConfig, createUserMessage, type Message } from '@framework';
+import { Agent, type AgentConfig, createUserMessage } from '@framework';
 import { LogLevel } from '@framework';
+import { extractAgentContent } from '@/utils/agentUtils';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -678,26 +679,15 @@ export class CallDocumentService {
         messages: [createUserMessage(prompt)],
       });
 
-      if (result.status === 'error' || !result.messages.length) {
-        logger.error('[CallDocumentService] Agent execution failed for PRD');
-        return null;
-      }
-
-      const assistantMessages = result.messages.filter(
-        (msg: Message): msg is Extract<Message, { type: 'assistant' }> =>
-          msg.type === 'assistant'
-      );
-
-      const lastMessage = assistantMessages.pop();
-      if (!lastMessage?.content) {
-        logger.error('[CallDocumentService] No content in PRD response');
+      const extracted = extractAgentContent(result);
+      if (!extracted.ok) {
+        logger.error('[CallDocumentService] prd_generation_failed', { reason: extracted.reason, status: extracted.status ?? result.status });
         return null;
       }
 
       // Extract JSON from response
-      const jsonMatch = lastMessage.content.match(/\{[\s\S]*\}/);
+      const jsonMatch = extracted.content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        // Fallback: try to find JSON if wrapped in markdown code blocks that weren't caught
         logger.error('[CallDocumentService] Could not find JSON in PRD response');
         return null;
       }
@@ -751,19 +741,14 @@ export class CallDocumentService {
         messages: [createUserMessage(prompt)],
       });
 
-      if (result.status === 'error' || !result.messages.length) {
-        logger.error('[CallDocumentService] Agent execution failed for detailed summary');
+      const extracted = extractAgentContent(result);
+      if (!extracted.ok) {
+        logger.error('[CallDocumentService] detailed_summary_generation_failed', { reason: extracted.reason, status: extracted.status ?? result.status });
         return null;
       }
 
-      const last = result.messages.at(-1);
-      if (!last) return null;
-
-      const markdownContent = 'content' in last ? last.content?.trim() : null;
-      if (!markdownContent) return null;
-
       logger.info('[CallDocumentService] Successfully generated detailed summary');
-      return markdownContent;
+      return extracted.content;
     } catch (error) {
       logger.error('[CallDocumentService] Error generating detailed summary:', error);
       return null;

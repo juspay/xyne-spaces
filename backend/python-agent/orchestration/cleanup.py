@@ -39,25 +39,54 @@ class CleanupManager:
 
     async def run(self):
         """Execute full cleanup sequence with hard deadline"""
-        logger.info(f"cleanup_started | timeout=30s")
+        logger.info("cleanup_started", extra={"timeout_s": 30})
+        # Track which steps completed so the timeout log is actionable.
+        self._flush_completed = False
+        self._notify_completed = False
+        self._drain_completed = False
 
         try:
             await asyncio.wait_for(self._run_cleanup_steps(), timeout=30.0)
-            logger.info(f"cleanup_completed | success=true")
+            logger.info("cleanup_completed", extra={"success": True})
         except asyncio.TimeoutError:
-            logger.error(f"cleanup_timeout_exceeded | forcing_disconnect=true")
+            logger.error(
+                "cleanup_timeout_exceeded",
+                extra={
+                    "flush_completed": self._flush_completed,
+                    "notify_completed": self._notify_completed,
+                    "drain_completed": self._drain_completed,
+                    "forcing_disconnect": True,
+                    "transcript_may_be_lost": not self._notify_completed,
+                },
+            )
             await self._force_disconnect()
 
     async def _run_cleanup_steps(self):
         # 1. Upload transcript to GCS (what we have so far)
-        await self._flush_storage()
-        
+        # Track whether flush succeeded so we can warn if we notify with a failed flush.
+        flush_ok = await self._flush_storage()
+        self._flush_completed = True
+
         # 2. Send transcript to BE using S2S api
+        # Notify fires BEFORE drain, so the backend may receive a partial transcript.
+        # The second notify after drain (inside _drain_and_update_stt) will trigger a re-process.
+        if not flush_ok:
+            logger.warning(
+                "notify_after_failed_flush",
+                extra={
+                    "has_transcript_in_storage": False,
+                    "backend_will_attempt_download_on_unavailable_file": True,
+                },
+            )
+        else:
+            logger.info("notify_before_drain", extra={"partial_transcript_possible": True})
         await self._notify_backend()
-        
+        self._notify_completed = True
+
         # 3. If any pending STT are left, wait for completion and update transcript
         await self._drain_and_update_stt()
-        
+        self._drain_completed = True
+
         # 4. Delete REDIS entry
         await self._cleanup_state()
         
@@ -75,14 +104,14 @@ class CleanupManager:
         # Wait for pending tasks to complete (don't cancel immediately)
         pending_tasks = [t for t in self.stt_tasks.values() if not t.done()]
         if pending_tasks:
-            logger.info(f"stt_drain_started | pending_tasks={len(pending_tasks)}")
+            logger.info("stt_drain_started", extra={"pending_tasks": len(pending_tasks)})
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*pending_tasks, return_exceptions=True),
                     timeout=10.0,
                 )
             except asyncio.TimeoutError:
-                logger.warning(f"stt_drain_timeout | cancelling_remaining=true")
+                logger.warning("stt_drain_timeout", extra={"cancelling_remaining": True})
                 for task in pending_tasks:
                     if not task.done():
                         task.cancel()
@@ -90,9 +119,9 @@ class CleanupManager:
         # Flush any remaining transcripts from pending STT
         try:
             await self.storage.flush()
-            logger.info(f"storage_flush_completed | stage=post_stt_drain")
+            logger.info("storage_flush_completed", extra={"stage": "post_stt_drain"})
         except Exception:
-            logger.error(f"storage_flush_failed | stage=post_stt_drain", exc_info=True)
+            logger.error("storage_flush_failed", extra={"stage": "post_stt_drain"}, exc_info=True)
         
         # Notify backend again if we had pending STT (transcript updated)
         if pending_tasks:
@@ -102,10 +131,13 @@ class CleanupManager:
             except Exception:
                 logger.error(f"backend_webhook_failed | stage=retry", exc_info=True)
 
-    async def _flush_storage(self):
+    async def _flush_storage(self) -> bool:
+        """Returns True if the primary storage flush succeeded, False otherwise."""
+        flush_ok = False
         try:
             await self.storage.flush()
             logger.info(f"storage_flush_completed | stage=initial")
+            flush_ok = True
         except Exception:
             logger.error(f"storage_flush_failed | stage=initial", exc_info=True)
 
@@ -115,6 +147,8 @@ class CleanupManager:
                 logger.info(f"additional_storage_flush_completed | call_id={extra.call_id}")
             except Exception:
                 logger.error(f"additional_storage_flush_failed | call_id={extra.call_id}", exc_info=True)
+
+        return flush_ok
 
     async def _notify_backend(self):
         try:
