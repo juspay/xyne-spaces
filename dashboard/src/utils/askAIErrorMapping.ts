@@ -165,7 +165,7 @@ const ERROR_CLASS_MAPPINGS: ErrorClassMapping[] = [
     retryable: true,
   },
   {
-    keywords: ['readtimeout', 'timeout'],
+    keywords: ['readtimeout', 'timeout', 'terminated'],
     code: 'TIMEOUT',
     title: 'Request timed out',
     message: 'Ask AI took too long to complete this request.',
@@ -207,9 +207,18 @@ const ERROR_CLASS_MAPPINGS: ErrorClassMapping[] = [
   {
     keywords: ['exception'],
     code: 'EXCEPTION',
-    title: 'Ask AI couldn’t complete this request',
+    title: "Ask AI couldn't complete this request",
     message: 'Ask AI ran into an internal error while generating a response.',
     helpText: 'Please try again.',
+    retryable: true,
+  },
+  {
+    keywords: ['fetch failed', 'econnrefused', 'networkerror'],
+    code: 'NETWORK_ERROR',
+    title: 'Network error',
+    message: "Couldn't connect to the AI model service.",
+    helpText:
+      'This usually means the model service is unreachable. Check that the service is running and try again.',
     retryable: true,
   },
 ];
@@ -237,6 +246,7 @@ export function getAskAIErrorInfo(
         message: mapped.message,
         retryable: mapped.retryable,
         ...(mapped.helpText !== undefined && { helpText: mapped.helpText }),
+        ...(errorText && { rawError: errorText }),
       };
     }
     return {
@@ -246,6 +256,7 @@ export function getAskAIErrorInfo(
       helpText:
         'Try again. If this keeps happening, reduce context or contact a workspace administrator.',
       retryable: resolvedStatus >= 500 || resolvedStatus === 429,
+      ...(errorText && { rawError: errorText }),
     };
   }
 
@@ -271,6 +282,7 @@ export function getAskAIErrorInfo(
       helpText:
         'Try removing some channel context, long thread history, canvas selections, or attachments, then send the query again.',
       retryable: true,
+      ...(errorText && { rawError: errorText }),
     };
   }
 
@@ -285,14 +297,16 @@ export function getAskAIErrorInfo(
       message: matchedErrorClass.message,
       retryable: matchedErrorClass.retryable,
       ...(matchedErrorClass.helpText !== undefined && { helpText: matchedErrorClass.helpText }),
+      ...(errorText && { rawError: errorText }),
     };
   }
 
   return {
     code: 'UNKNOWN',
-    title: 'Ask AI couldn’t complete this request',
-    message: 'Something went wrong while generating a response.',
+    title: "Ask AI couldn't complete this request",
+    message: errorText || 'Something went wrong while generating a response.',
     helpText: 'Please try again. If this keeps happening, reduce the amount of context and retry.',
     retryable: true,
+    ...(errorText && { rawError: errorText }),
   };
 }

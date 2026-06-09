@@ -84,6 +84,7 @@ export interface ClawMessagesResponse {
   success: boolean;
   data: unknown;
   toolInvocations?: unknown[];
+  invocationsByMsgId?: Record<string, unknown[]>;
 }
 
 export interface ClawActionApprovalResult {
