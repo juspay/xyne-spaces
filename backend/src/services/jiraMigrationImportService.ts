@@ -3,6 +3,7 @@ import { config } from '@/config/env';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { encrypt } from '@/services/encryptionService';
+import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { logger } from '@/utils/logger';
 import {
   ActivityType,
@@ -596,11 +597,16 @@ export class JiraMigrationImportService {
         data: toAdd.map(name => ({ ticketId, name })),
         skipDuplicates: true,
       });
+      await dualWriteTicketTags(ticketId, toAdd);
     }
 
     if (toRemove.length > 0) {
       await db.ticketTag.deleteMany({
         where: { ticketId, name: { in: toRemove } },
+      });
+      // Dual-delete from new table
+      await db.ticketTagMapping.deleteMany({
+        where: { ticketId, tagName: { in: toRemove } },
       });
     }
 
@@ -3425,6 +3431,7 @@ export class JiraMigrationImportService {
                 })),
                 skipDuplicates: true,
               });
+              await dualWriteTicketTags(createdTicketId, uniqueTagNames);
             }
 
             importedTickets += 1;

@@ -89,6 +89,7 @@ import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
 import activityThreadBackfillRoutes from '@/routes/activityThreadBackfill';
 import appPermissionsBackfillRoutes from '@/routes/appPermissionsBackfill';
+import projectTagsBackfillRoutes from '@/routes/projectTagsBackfill';
 import externalSourceDisplayNameBackfillRoutes from '@/routes/externalSourceDisplayNameBackfill';
 import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
 import channelRecapBackfillRoutes from '@/routes/channelRecapBackfill';
@@ -344,6 +345,9 @@ export class App {
     // App permissions backfill — grant all permissions to all installed apps
     this.app.use('/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
     this.app.use('/migrate/api/admin/app-permissions-backfill', appPermissionsBackfillRoutes);
+    // Project tags + ticket_tag_mappings backfill from ticket_tags
+    this.app.use('/api/admin/project-tags-backfill', projectTagsBackfillRoutes);
+    this.app.use('/migrate/api/admin/project-tags-backfill', projectTagsBackfillRoutes);
     // ExternalSource displayName cleanup ("Microsoft (email)" → "email").
     this.app.use(
       '/api/admin/external-source-displayname-backfill',

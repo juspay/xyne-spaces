@@ -16,6 +16,7 @@ import { NetworkDocumentContext } from '../../types/workflow-enums';
 import { WorkflowType } from '../../types/workflow-enums';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { z } from 'zod';
 import { getStorageService } from '@/services/storage';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
@@ -240,6 +241,7 @@ async function createTicketForDocument(
         data: { name: tag, ticketId: ticket.id },
       });
     }
+    await dualWriteTicketTags(ticket.id, uniqueTags);
 
     logger.info(`[NETWORK_DOC] Created ticket ${ticket.xyneId} (${ticket.id})`);
     logger.info(`[NETWORK_DOC] Ticket linked to message: ${conversation.initialMessageId}`);

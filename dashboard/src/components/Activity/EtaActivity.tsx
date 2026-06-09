@@ -17,7 +17,7 @@ export const EtaActivity = ({
   isExpanded,
   isSelected,
 }: EtaActivityProps): ReactElement | null => {
-  const [ticket] = useQuery(queries.ticketById({ ticketId: activity.actionSourceId }));
+  const [ticket] = useQuery(queries.ticketByIdV2({ ticketId: activity.actionSourceId }));
   const ticketXyneId = ticket?.xyneId || activity.actionSourceId;
   const etaDate = ticket?.eta ? new Date(ticket.eta) : null;
   const formattedDueDate = etaDate ? format(etaDate, 'MMM d, yyyy') : 'N/A';

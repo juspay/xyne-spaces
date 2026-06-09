@@ -56,6 +56,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ticketService } from '@/services/ticketService';
+import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 
 
 const prisma = DatabaseClient.getInstance();
@@ -857,6 +858,7 @@ export class TicketController {
               ticketId: ticket.id,
             })),
           });
+          await dualWriteTicketTags(ticket.id, tags.map(t => t.trim()), prisma);
           logger.info(`[Ticket Creation] Created ${tags.length} tags for ticket ${ticket.id}`);
         } catch (error) {
           logger.error('[Ticket Creation] Error creating ticket tags:', error);

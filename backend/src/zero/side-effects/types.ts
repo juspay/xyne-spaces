@@ -116,6 +116,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   reactions: ['insert', 'delete'],
   messages: ['insert', 'delete', 'update'],
   ticket_tags: ['insert', 'delete'],
+  ticket_tag_mappings: ['insert', 'delete'],
   call_participants: ["insert", "update"],
   channel_participants: ['insert'],
   canvas_participants: ['insert', 'update', 'delete'],

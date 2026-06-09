@@ -86,7 +86,7 @@ export const SupportKanbanBoard = ({
   // immediately on first kanban visit; the board id is then derived from the
   // first row below.
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
-    queries.supportTicketsFilteredV2({
+    queries.supportTicketsFilteredV3({
       channelId,
       isMember,
       ...ticketFilter,

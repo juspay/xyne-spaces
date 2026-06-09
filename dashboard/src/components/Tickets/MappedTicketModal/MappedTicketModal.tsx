@@ -15,7 +15,7 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
   onClose,
   onNavigateToParent,
 }) => {
-  const [currentTicket] = useCachedQuery(queries.ticketById({ ticketId: mappedTicketId }), {
+  const [currentTicket] = useCachedQuery(queries.ticketByIdV2({ ticketId: mappedTicketId }), {
     enabled: !!mappedTicketId,
   });
 

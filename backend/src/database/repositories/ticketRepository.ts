@@ -10,6 +10,7 @@ import { generateKeyBetween } from 'fractional-indexing';
 import { eventRouter } from '@/automations/engine/event-router';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
 import { emitTicketUpdated, type TicketChanges } from '@/automations/triggers/ticket-updated.trigger';
+import { dualWriteTicketTag, dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -165,6 +166,7 @@ export class TicketRepository {
           name: 'hotfix'
         }
       })
+      await dualWriteTicketTag(ticket.id, 'hotfix');
       logger.info(`Hotfix tag added to ticket ${ticket.id}`);
     }
     // Track user activity using Redis Set - O(1) operation, no DB query
@@ -890,6 +892,7 @@ export class TicketRepository {
       data: toAdd.map(name => ({ ticketId, name })),
       skipDuplicates: true,
     });
+    await dualWriteTicketTags(ticketId, toAdd, prisma);
     return { added: toAdd, alreadyPresent };
   }
 }

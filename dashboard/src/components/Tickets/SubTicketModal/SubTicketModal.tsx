@@ -24,7 +24,7 @@ export const SubTicketModal = ({
   const zero = useZero();
 
   // Get ticket info to pass to CreateTicketModal
-  const [ticket] = useCachedQuery(queries.ticketById({ ticketId }));
+  const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId }));
 
   if (!isOpen) return null;
 

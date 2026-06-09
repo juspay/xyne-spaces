@@ -155,7 +155,7 @@ import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/Sched
 import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
 
 // Unified type for tickets from the supportTicketsFiltered query
-type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV2>[number];
+type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
 
 const ChannelInfoModal = ({
   channelId,

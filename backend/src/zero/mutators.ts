@@ -6499,6 +6499,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             name: trimmedTagName,
             ticketId,
           });
+
+          // Dual-write to new tables for backward compatibility
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          if (ticket?.projectId) {
+            const existingProjectTag = await tx.run(
+              zql.project_tags
+                .where('projectId', ticket.projectId)
+                .where('name', trimmedTagName)
+                .one(),
+            );
+            const projectTagId = existingProjectTag?.id || `pt_${tagId}`;
+            if (!existingProjectTag) {
+              await tx.mutate.project_tags.upsert({
+                id: projectTagId,
+                name: trimmedTagName,
+                projectId: ticket.projectId,
+                createdAt: Date.now(),
+              });
+            }
+            await tx.mutate.ticket_tag_mappings.insert({
+              id: `tm_${tagId}`,
+              ticketId,
+              tagId: projectTagId,
+              tagName: trimmedTagName,
+              createdAt: Date.now(),
+            });
+          }
         },
       ),
       delete: defineMutator(
@@ -6513,6 +6540,75 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Delete tag
           await tx.mutate.ticket_tags.delete({
             id: tagId,
+          });
+
+          // Dual-write: delete from new table
+          const mapping = await tx.run(
+            zql.ticket_tag_mappings
+              .where('ticketId', tag.ticketId)
+              .where('tagName', tag.name)
+              .one(),
+          );
+          if (mapping) {
+            await tx.mutate.ticket_tag_mappings.delete({ id: mapping.id });
+          }
+        },
+      ),
+    },
+    ticketTagV2: {
+      create: defineMutator(
+        z.object({
+          ticketId: z.string(),
+          tagName: z.string(),
+          tagId: z.string(),
+          projectTagId: z.string(),
+          mappingId: z.string(),
+          projectId: z.string(),
+        }),
+        async ({ tx, args: { ticketId, tagName, tagId, projectTagId, mappingId, projectId } }) => {
+          // Validate tag name
+          if (!tagName || !tagName.trim()) {
+            throw new Error('Tag name cannot be empty');
+          }
+
+          const trimmedTagName = tagName.trim();
+
+          // Dual-write: upsert into ticket_tags (old model)
+          await tx.mutate.ticket_tags.upsert({
+            id: tagId,
+            name: trimmedTagName,
+            ticketId,
+          });
+
+          // Dual-write: upsert into project_tags (new model)
+          await tx.mutate.project_tags.upsert({
+            id: projectTagId,
+            name: trimmedTagName,
+            projectId,
+            createdAt: Date.now(),
+          });
+
+          // Insert into ticket_tag_mappings (new model)
+          await tx.mutate.ticket_tag_mappings.insert({
+            id: mappingId,
+            ticketId,
+            tagId: projectTagId,
+            tagName: trimmedTagName,
+            createdAt: Date.now(),
+          });
+        },
+      ),
+      delete: defineMutator(
+        z.object({ tagId: z.string(), mappingId: z.string() }),
+        async ({ tx, args: { tagId, mappingId } }) => {
+          // Dual-write: delete from ticket_tags (old model)
+          await tx.mutate.ticket_tags.delete({
+            id: tagId,
+          });
+
+          // Delete from ticket_tag_mappings (new model)
+          await tx.mutate.ticket_tag_mappings.delete({
+            id: mappingId,
           });
         },
       ),

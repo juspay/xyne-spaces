@@ -52,7 +52,7 @@ const WorkflowScreen: React.FC = () => {
   const navigate = useNavigate();
 
   const [ticketData, ticketQueryDetails] = useCachedQuery(
-    queries.ticketById({ ticketId: ticketId ?? '' }),
+    queries.ticketByIdV2({ ticketId: ticketId ?? '' }),
     { enabled: !!ticketId },
   );
   const ticket = ticketData ?? undefined;

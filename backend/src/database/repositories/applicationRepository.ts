@@ -5,6 +5,7 @@ import { TicketIdService } from '@/services/ticketIdService';
 const prisma = DatabaseClient.getInstance();
 import { Application } from '@prisma/client';
 import { ActivityType, TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { dualWriteTicketTag } from '@/services/ticketTagDualWriteService';
 
 export class ApplicationRepository {
 
@@ -135,6 +136,7 @@ export class ApplicationRepository {
                 name: 'HotFix',
               }
             })
+            await dualWriteTicketTag(ticket.id, 'HotFix', tx);
           }
 
           // Create sub-ticket with mappedTicketId

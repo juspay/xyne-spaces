@@ -47,9 +47,9 @@ const ExpandedTicketView = ({
 }): ReactElement => {
   const navigate = useNavigate();
   const { buildChannelRoute } = useRouteContext();
-  const [ticket] = useCachedQuery(queries.ticketById({ ticketId }));
+  const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId }));
   const [allProjectTickets] = useCachedQuery(
-    queries.ticketsByProject({ projectId: ticket?.projectId ?? '' }),
+    queries.ticketsByProjectV2({ projectId: ticket?.projectId ?? '' }),
   );
 
   const filteredIds = useSelector(stateMachineActor, s => s.context.filteredTicketIds || []);

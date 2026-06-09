@@ -19,7 +19,7 @@ const TicketView = (): ReactElement => {
   const navigate = useNavigate();
 
   // Query ticket data to get xyneId and channelId
-  const [ticket] = useCachedQuery(queries.ticketById({ ticketId: ticketId || '' }), {
+  const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: ticketId || '' }), {
     enabled: !!ticketId,
   });
 

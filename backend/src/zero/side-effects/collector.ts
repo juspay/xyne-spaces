@@ -84,6 +84,15 @@ export async function collectSideEffectJobs(
       };
     }
   }
+  if (operation === 'delete' && table === 'ticket_tag_mappings') {
+    const mapping = await tx.run(zql.ticket_tag_mappings.where('id', entityId).one());
+    if (mapping) {
+      previousValue = {
+        tagName: mapping.tagName,
+        ticketId: mapping.ticketId,
+      };
+    }
+  }
 
   if (operation === 'delete' && table === 'canvas_participants') {
     const participant = await tx.run(zql.canvas_participants.where('id', entityId).one());
@@ -216,6 +225,8 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'ticket_entity_mappings':
     case 'ticket_reference_mappings':
     case 'ticket_tags':
+    case 'ticket_tag_mappings':
+    case 'project_tags':
     case 'projects':
     case 'boards':
     case 'stages':
@@ -257,6 +268,8 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'form_entity_values':
     case 'ticket_reference_mappings':
     case 'ticket_tags':
+    case 'ticket_tag_mappings':
+    case 'project_tags':
     case 'dashboards':
     case 'queries':
     case 'dashboard_queries_mapping':
