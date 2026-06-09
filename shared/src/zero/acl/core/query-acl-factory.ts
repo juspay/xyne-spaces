@@ -23,6 +23,7 @@ import {
   RecapsACL,
   ChannelParticipantsACL,
   ChannelsACL,
+  ChannelSectionsACL,
   ChannelStatsACL,
   ConversationParticipantsACL,
   ConversationsACL,
@@ -103,6 +104,8 @@ export class QueryACLFactory {
         return new ChannelParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_user_status':
         return new BaseQueryACL(ctx, table);
+      case 'channel_sections':
+        return new ChannelSectionsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_daily_recaps':
         return new ChannelDailyRecapsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_recaps':

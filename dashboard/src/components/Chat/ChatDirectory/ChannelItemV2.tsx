@@ -1,8 +1,14 @@
 import { memo, ReactElement, useRef, useState, useEffect } from 'react';
 import { withProfiler } from '../../../utils/withProfiler';
 import { Link, useNavigate } from 'react-router-dom';
-import { Hash, Pencil, Headphones, X } from 'lucide-react';
-import { ChannelVisibility, ChannelScopeType, ChannelType, NotificationLevel } from '@xyne/shared';
+import { Hash, Pencil, Headphones, X, MoreHorizontal, Check } from 'lucide-react';
+import {
+  ChannelVisibility,
+  ChannelScopeType,
+  ChannelType,
+  NotificationLevel,
+  ChannelSection,
+} from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
@@ -13,6 +19,16 @@ import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Tooltip from '../../ui/Tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+} from '../../ui/dropdown-menu';
 import { stripHtml } from '../../xyne-desk/EmailComposer/helpers';
 import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
@@ -28,11 +44,20 @@ interface ChannelItemV2Props {
   channel: VisibleChannel;
   unreadCount?: number;
   isActive?: boolean;
+  sections?: ChannelSection[];
+  onMoveToSection?: (channelId: string, sectionId: string | null) => void;
 }
 
 const ChannelItemV2 = memo(
-  ({ channel, unreadCount = 0, isActive = false }: ChannelItemV2Props): ReactElement => {
+  ({
+    channel,
+    unreadCount = 0,
+    isActive = false,
+    sections = [],
+    onMoveToSection,
+  }: ChannelItemV2Props): ReactElement => {
     const [isHovered, setIsHovered] = useState(false);
+    const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
     const zero = useZero();
     const context = useAuthContextValues();
     const navigate = useNavigate();
@@ -83,6 +108,9 @@ const ChannelItemV2 = memo(
         void navigate('/chat');
       }
     };
+
+    const currentSectionId = status?.sectionId ?? null;
+    const showSectionMenu = !isDM && (sections.length > 0 || !!currentSectionId);
 
     /**
      * Returns the icon for the channel type:
@@ -149,6 +177,7 @@ const ChannelItemV2 = memo(
       >
         <Link
           className=''
+          draggable={false}
           to={`/chat/dir/${channel.id}`}
           onClick={handleChannelClick}
           data-track-category='CHAT_SIDEBAR'
@@ -200,6 +229,75 @@ const ChannelItemV2 = memo(
               <Badge className='font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
                 {unreadCount > 9 ? '9+' : unreadCount}
               </Badge>
+            )}
+            {showSectionMenu && (
+              <DropdownMenu open={sectionMenuOpen} onOpenChange={setSectionMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={cn(
+                      'flex items-center justify-center p-1 rounded-md hover:bg-sidebar-item-hover shrink-0 transition-opacity',
+                      sectionMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                    )}
+                    onClick={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onPointerDown={e => e.stopPropagation()}
+                    aria-label='Channel section options'
+                    data-track-category='CHAT_SIDEBAR'
+                    data-track-name='CHANNEL_SECTION_MENU'
+                  >
+                    <MoreHorizontal size={14} className='shrink-0' />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align='end'
+                  onCloseAutoFocus={e => e.preventDefault()}
+                  className='min-w-[180px]'
+                >
+                  <div className='px-2 py-1.5 text-xs font-semibold text-sidebar-secondary-foreground truncate'>
+                    {displayName}
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>Move to section</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {sections.length === 0 ? (
+                        <DropdownMenuItem disabled>No sections yet</DropdownMenuItem>
+                      ) : (
+                        sections.map(section => (
+                          <DropdownMenuItem
+                            key={section.id}
+                            className='gap-2'
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onMoveToSection?.(channel.id, section.id);
+                            }}
+                          >
+                            {section.emoji && <span className='shrink-0'>{section.emoji}</span>}
+                            <span className='flex-1 truncate'>{section.name}</span>
+                            {currentSectionId === section.id && (
+                              <Check size={14} className='shrink-0' />
+                            )}
+                          </DropdownMenuItem>
+                        ))
+                      )}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  {currentSectionId && (
+                    <DropdownMenuItem
+                      onClick={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onMoveToSection?.(channel.id, null);
+                      }}
+                    >
+                      Remove from section
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             {shouldShowCloseButton && (
               <Tooltip content='Close conversation' side='top' sideOffset={6} delayDuration={500}>

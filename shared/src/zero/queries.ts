@@ -68,6 +68,9 @@ const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
 
 
 export const queries = defineQueries({
+  userChannelSections: defineQuery(z.object({}), () => {
+    return zql.channel_sections.where('isDeleted', false).orderBy('position', 'asc');
+  }),
   channelConversations: defineQuery(
     z.object({ channelId: z.string(), isMember: z.boolean() }),
     ({ ctx, args: { channelId } }) => {

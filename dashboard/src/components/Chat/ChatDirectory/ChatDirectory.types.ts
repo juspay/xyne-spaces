@@ -1,5 +1,5 @@
 import type { VisibleChannel } from '../../../machines/stateMachine';
-import { ChannelUserStatus } from '@xyne/shared';
+import { ChannelUserStatus, ChannelSection } from '@xyne/shared';
 
 export interface ChatDirectoryProps {
   channelData: VisibleChannel[] | undefined;
@@ -22,3 +22,8 @@ export const ChannelCategory = {
 } as const;
 
 export type ChannelCategory = (typeof ChannelCategory)[keyof typeof ChannelCategory];
+
+export interface SectionBucket {
+  section: ChannelSection;
+  channels: VisibleChannel[];
+}

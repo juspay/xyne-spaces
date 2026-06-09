@@ -46,6 +46,7 @@ import { EmailSignaturesACL } from '../tables/email-signatures-acl';
 import { EmailReadsACL } from '../tables/email-reads-acl';
 import { EmailChannelPreferencesACL } from '../tables/email-channel-preferences-acl';
 import { ChannelUserStatusACL } from '../tables/channel-user-status-acl';
+import { ChannelSectionsACL } from '../tables/channel-sections-acl';
 import { UserAssignmentStatesACL } from '../tables/user-assignment-states-acl';
 import { BoardComplexityScoresACL } from '../tables/board-complexity-scores-acl';
 import { UserWorkloadMappingsACL } from '../tables/user-workload-mappings-acl';
@@ -200,6 +201,8 @@ export class ACLFactory {
         return new WOrkflowsAcl(ctx);
       case 'channel_user_status': 
         return new ChannelUserStatusACL(ctx);
+      case 'channel_sections':
+        return new ChannelSectionsACL(ctx);
       case 'user_profiles':
         return new UserProfilesACL(ctx);
       case 'user_preferences':

@@ -7,6 +7,7 @@ import {
   Megaphone,
   ChevronRight,
   Plus,
+  FolderPlus,
   Search,
   CornerDownRight,
   Ticket,
@@ -21,6 +22,7 @@ import {
   ArrowDownAZ,
   Check,
   BellDot,
+  X,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -41,6 +43,8 @@ import {
 } from '../../../services/Chat/channelService';
 import { AddDmForm, CreateDmFormData } from '../AddDmForm/AddDmForm';
 import AddChannelForm from '../AddChannelForm/AddChannelForm';
+import AddSectionForm from '../AddSectionForm/AddSectionForm';
+import CreateSectionDialog from '../CreateSectionDialog/CreateSectionDialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import { useUnreadActivitiesCount } from '../../../hooks/useUnreadActivitiesCount';
 import Badge from '../../ui/Badge';
@@ -55,8 +59,14 @@ import {
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { useChannelSort } from '../../../hooks/useChannelSort';
-import { ChannelSortOrder } from '@xyne/shared';
+import { useChannelSectionDnd } from './useChannelSectionDnd';
+import { ChannelSortOrder, ChannelSection } from '@xyne/shared';
+import { DndContext, DragOverlay } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Accordion } from 'radix-ui';
+import { createPortal } from 'react-dom';
+import SortableSection from './SortableSection';
+import SortableChannelItem from './SortableChannelItem';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
 import ChannelCommandMenu from './ChannelCommandMenu';
@@ -89,6 +99,9 @@ const ChatDirectory = ({
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
+  const [showAddSectionForm, setShowAddSectionForm] = useState(false);
+  const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
+  const [sectionToDelete, setSectionToDelete] = useState<ChannelSection | null>(null);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
@@ -97,6 +110,44 @@ const ChatDirectory = ({
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
   const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
     useChannelSort(channelData, allChannelsUserStatus, context.userID, activeChannelId);
+  const {
+    channelSections,
+    sectioned,
+    sectionableChannels,
+    lastSectionPosition,
+    displaySectioned,
+    defaultDisplayChannels,
+    setDefaultDropRef,
+    activeOverlayChannel,
+    activeOverlaySection,
+    moveChannelToSection,
+    dndContextProps,
+  } = useChannelSectionDnd({
+    channels,
+    channelData,
+    allChannelsUserStatus,
+  });
+  // Base groups start open; each custom section adopts its persisted isCollapsed once.
+  const [openSidebarSections, setOpenSidebarSections] = useState<string[]>([
+    ChannelCategory.STARRED,
+    ChannelCategory.CHANNELS,
+    ChannelCategory.DIRECT_MESSAGES,
+  ]);
+  const initializedSectionIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const unseen = sectioned.filter(b => !initializedSectionIdsRef.current.has(b.section.id));
+    if (unseen.length === 0) return;
+    setOpenSidebarSections(prev => {
+      const next = new Set(prev);
+      for (const { section } of unseen) {
+        initializedSectionIdsRef.current.add(section.id);
+        if (!section.isCollapsed) {
+          next.add(section.id);
+        }
+      }
+      return Array.from(next);
+    });
+  }, [sectioned]);
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
 
   const { startWalkthrough } = useWalkthrough({
@@ -184,6 +235,46 @@ const ChatDirectory = ({
     createChannelMutation.mutate(data);
   };
 
+  // Persist collapse for custom sections (base groups stay local-only).
+  const handleSectionsOpenChange = (next: string[]): void => {
+    const nextSet = new Set(next);
+    for (const { section } of sectioned) {
+      const wasOpen = openSidebarSections.includes(section.id);
+      const isOpen = nextSet.has(section.id);
+      if (wasOpen !== isOpen) {
+        void zero.mutate(
+          mutators.channelSection.update({
+            id: section.id,
+            isCollapsed: !isOpen,
+            timestamp: Date.now(),
+          }),
+        );
+      }
+    }
+    setOpenSidebarSections(next);
+  };
+
+  const handleRenameSection = (data: { name: string; emoji?: string }): void => {
+    if (!sectionToRename) return;
+    void zero.mutate(
+      mutators.channelSection.update({
+        id: sectionToRename.id,
+        name: data.name,
+        emoji: data.emoji ?? null,
+        timestamp: Date.now(),
+      }),
+    );
+    setSectionToRename(null);
+  };
+
+  const handleConfirmDeleteSection = (): void => {
+    if (!sectionToDelete) return;
+    void zero.mutate(
+      mutators.channelSection.remove({ id: sectionToDelete.id, timestamp: Date.now() }),
+    );
+    setSectionToDelete(null);
+  };
+
   // j/k navigate through starred + channels + DMs as one continuous list when
   // focus is inside the sidebar list container. j/k appends ?nofocus=1 so the
   // chat input does NOT auto-focus (keyboard navigation should stay in the
@@ -232,7 +323,7 @@ const ChatDirectory = ({
       }
     };
     document.addEventListener('keydown', handler, true);
-    return () => document.removeEventListener('keydown', handler, true);
+    return (): void => document.removeEventListener('keydown', handler, true);
   }, [starred, channels, directMessages, location.pathname, navigate]);
 
   // only use drawer/modal for mobile view otherwise change route
@@ -509,11 +600,8 @@ const ChatDirectory = ({
         <Accordion.Root
           type='multiple'
           className='space-y-4'
-          defaultValue={[
-            ChannelCategory.STARRED,
-            ChannelCategory.CHANNELS,
-            ChannelCategory.DIRECT_MESSAGES,
-          ]}
+          value={openSidebarSections}
+          onValueChange={handleSectionsOpenChange}
         >
           {/* Starred  */}
           {starred.length > 0 && (
@@ -542,165 +630,247 @@ const ChatDirectory = ({
             </Accordion.Item>
           )}
 
-          {/* Channels  */}
-          <Accordion.Item value={ChannelCategory.CHANNELS}>
-            <Accordion.Trigger asChild>
-              <div className='group px-1 flex items-center justify-between gap-2 '>
-                <button className=' flex items-center justify-start gap-1 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
-                  <span className='text-left truncate block'>Channels</span>
-                  <span className='size-4 flex items-center justify-center shrink-0'>
-                    <ChevronRight
-                      strokeWidth={2.33}
-                      className='size-3 transition-transform duration-200 group-data-[state=open]:rotate-90'
-                    />
-                  </span>
-                </button>
-                <div
-                  className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSortDropdownOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                >
-                  <Tooltip content='Browse channels' side='top' sideOffset={0} delayDuration={500}>
-                    <button
-                      className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
-                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        void navigate('/chat/search?mode=channels');
-                      }}
-                      data-track-category='CHAT_SIDEBAR'
-                      data-track-name='BROWSE_CHANNELS'
-                    >
-                      <Search
-                        strokeWidth={2.33}
-                        className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
-                      />
-                    </button>
-                  </Tooltip>
-                  <Tooltip content='Create channel' side='top' sideOffset={0} delayDuration={500}>
-                    <button
-                      className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
-                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setShowAddChannelForm(true);
-                      }}
-                      data-testid='create-new-channel'
-                      data-track-event='BUTTON_CLICK'
-                      data-track-category='CHAT_SIDEBAR'
-                      data-track-name='CREATE_NEW_CHANNEL'
-                      data-track-metadata={JSON.stringify({ source: 'directory' })}
-                    >
-                      <Plus
-                        strokeWidth={2.33}
-                        className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
-                      />
-                    </button>
-                  </Tooltip>
-                  <DropdownMenu onOpenChange={setIsSortDropdownOpen}>
-                    <Tooltip content='Sort channels' side='top' sideOffset={0} delayDuration={500}>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1 focus:outline-none'
-                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                          data-track-category='CHAT_SIDEBAR'
-                          data-track-name='SORT_CHANNELS'
-                        >
-                          <ArrowUpDown
-                            strokeWidth={2.33}
-                            className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
-                          />
-                        </button>
-                      </DropdownMenuTrigger>
-                    </Tooltip>
-                    <DropdownMenuContent
-                      align='end'
-                      className='min-w-[160px]'
-                      onCloseAutoFocus={e => e.preventDefault()}
-                    >
-                      <DropdownMenuItem
-                        onClick={e => {
-                          e.stopPropagation();
-                          setChannelSortOrder(ChannelSortOrder.UNREAD);
-                        }}
-                        className='gap-2'
-                      >
-                        <BellDot className='size-3.5 shrink-0' />
-                        <span className='flex-1'>Unread & Activity</span>
-                        {channelSortOrder === ChannelSortOrder.UNREAD && (
-                          <Check className='size-3.5 shrink-0' />
-                        )}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={e => {
-                          e.stopPropagation();
-                          setChannelSortOrder(ChannelSortOrder.RECENCY);
-                        }}
-                        className='gap-2'
-                      >
-                        <Clock className='size-3.5 shrink-0' />
-                        <span className='flex-1'>By recency</span>
-                        {channelSortOrder === ChannelSortOrder.RECENCY && (
-                          <Check className='size-3.5 shrink-0' />
-                        )}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={e => {
-                          e.stopPropagation();
-                          setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
-                        }}
-                        className='gap-2'
-                      >
-                        <ArrowDownAZ className='size-3.5 shrink-0' />
-                        <span className='flex-1'>Alphabetical A-Z</span>
-                        {channelSortOrder === ChannelSortOrder.ALPHABETICAL && (
-                          <Check className='size-3.5 shrink-0' />
-                        )}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </Accordion.Trigger>
-            <Accordion.Content data-testid='channel-list'>
-              {channels.map(channel => (
-                <ChannelItemV2
-                  key={channel.id}
-                  channel={channel}
-                  unreadCount={unreadCounts[channel.id] ?? 0}
-                  isActive={activeChannelId === channel.id}
+          {/* Custom sections (per-user, drag to reorder) */}
+          <DndContext {...dndContextProps}>
+            <SortableContext
+              items={sectioned.map(b => b.section.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {displaySectioned.map(({ section, channels: sectionChannels }) => (
+                <SortableSection
+                  key={section.id}
+                  section={section}
+                  channels={sectionChannels}
+                  sections={channelSections ?? []}
+                  unreadCounts={unreadCounts}
+                  activeChannelId={activeChannelId}
+                  onRename={setSectionToRename}
+                  onDelete={setSectionToDelete}
+                  onCreateSection={() => setShowAddSectionForm(true)}
+                  onMoveChannelToSection={moveChannelToSection}
                 />
               ))}
-            </Accordion.Content>
-          </Accordion.Item>
+            </SortableContext>
+            {/* Portaled to <body> so a transformed ancestor can't offset the overlay. */}
+            {createPortal(
+              <DragOverlay dropAnimation={null}>
+                {activeOverlayChannel ? (
+                  <div className='rounded-md bg-sidebar-item-hover shadow-lg cursor-grabbing'>
+                    <ChannelItemV2
+                      channel={activeOverlayChannel}
+                      unreadCount={unreadCounts[activeOverlayChannel.id] ?? 0}
+                    />
+                  </div>
+                ) : activeOverlaySection ? (
+                  <div className='flex items-center gap-1 h-8 px-2 rounded-md bg-sidebar-item-hover text-xs font-medium text-sidebar-secondary-foreground shadow-lg cursor-grabbing'>
+                    {activeOverlaySection.emoji && <span>{activeOverlaySection.emoji}</span>}
+                    <span className='truncate'>{activeOverlaySection.name}</span>
+                  </div>
+                ) : null}
+              </DragOverlay>,
+              document.body,
+            )}
+
+            {/* Channels  */}
+            <Accordion.Item value={ChannelCategory.CHANNELS}>
+              <Accordion.Header asChild>
+                <div className='group px-1 flex items-center justify-between gap-2 '>
+                  <Accordion.Trigger asChild>
+                    <button className=' flex items-center justify-start gap-1 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
+                      <span className='text-left truncate block'>Channels</span>
+                      <span className='size-4 flex items-center justify-center shrink-0'>
+                        <ChevronRight
+                          strokeWidth={2.33}
+                          className='size-3 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                        />
+                      </span>
+                    </button>
+                  </Accordion.Trigger>
+                  <div
+                    className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSortDropdownOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                  >
+                    <Tooltip
+                      content='Browse channels'
+                      side='top'
+                      sideOffset={0}
+                      delayDuration={500}
+                    >
+                      <button
+                        className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
+                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void navigate('/chat/search?mode=channels');
+                        }}
+                        data-track-category='CHAT_SIDEBAR'
+                        data-track-name='BROWSE_CHANNELS'
+                      >
+                        <Search
+                          strokeWidth={2.33}
+                          className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
+                        />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content='Create channel' side='top' sideOffset={0} delayDuration={500}>
+                      <button
+                        className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
+                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setShowAddChannelForm(true);
+                        }}
+                        data-testid='create-new-channel'
+                        data-track-event='BUTTON_CLICK'
+                        data-track-category='CHAT_SIDEBAR'
+                        data-track-name='CREATE_NEW_CHANNEL'
+                        data-track-metadata={JSON.stringify({ source: 'directory' })}
+                      >
+                        <Plus
+                          strokeWidth={2.33}
+                          className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
+                        />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content='New section' side='top' sideOffset={0} delayDuration={500}>
+                      <button
+                        className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
+                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setShowAddSectionForm(true);
+                        }}
+                        data-track-category='CHAT_SIDEBAR'
+                        data-track-name='CREATE_NEW_SECTION'
+                      >
+                        <FolderPlus
+                          strokeWidth={2.33}
+                          className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
+                        />
+                      </button>
+                    </Tooltip>
+                    <DropdownMenu onOpenChange={setIsSortDropdownOpen}>
+                      <Tooltip
+                        content='Sort channels'
+                        side='top'
+                        sideOffset={0}
+                        delayDuration={500}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1 focus:outline-none'
+                            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            data-track-category='CHAT_SIDEBAR'
+                            data-track-name='SORT_CHANNELS'
+                          >
+                            <ArrowUpDown
+                              strokeWidth={2.33}
+                              className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
+                            />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </Tooltip>
+                      <DropdownMenuContent
+                        align='end'
+                        className='min-w-[160px]'
+                        onCloseAutoFocus={e => e.preventDefault()}
+                      >
+                        <DropdownMenuItem
+                          onClick={e => {
+                            e.stopPropagation();
+                            setChannelSortOrder(ChannelSortOrder.UNREAD);
+                          }}
+                          className='gap-2'
+                        >
+                          <BellDot className='size-3.5 shrink-0' />
+                          <span className='flex-1'>Unread & Activity</span>
+                          {channelSortOrder === ChannelSortOrder.UNREAD && (
+                            <Check className='size-3.5 shrink-0' />
+                          )}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={e => {
+                            e.stopPropagation();
+                            setChannelSortOrder(ChannelSortOrder.RECENCY);
+                          }}
+                          className='gap-2'
+                        >
+                          <Clock className='size-3.5 shrink-0' />
+                          <span className='flex-1'>By recency</span>
+                          {channelSortOrder === ChannelSortOrder.RECENCY && (
+                            <Check className='size-3.5 shrink-0' />
+                          )}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={e => {
+                            e.stopPropagation();
+                            setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
+                          }}
+                          className='gap-2'
+                        >
+                          <ArrowDownAZ className='size-3.5 shrink-0' />
+                          <span className='flex-1'>Alphabetical A-Z</span>
+                          {channelSortOrder === ChannelSortOrder.ALPHABETICAL && (
+                            <Check className='size-3.5 shrink-0' />
+                          )}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              </Accordion.Header>
+              <Accordion.Content data-testid='channel-list'>
+                <div ref={setDefaultDropRef} className='min-h-[4px]'>
+                  <SortableContext
+                    items={defaultDisplayChannels.map(c => c.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {defaultDisplayChannels.map(channel => (
+                      <SortableChannelItem
+                        key={channel.id}
+                        channel={channel}
+                        unreadCount={unreadCounts[channel.id] ?? 0}
+                        isActive={activeChannelId === channel.id}
+                        sections={channelSections ?? []}
+                        onMoveToSection={moveChannelToSection}
+                      />
+                    ))}
+                  </SortableContext>
+                </div>
+              </Accordion.Content>
+            </Accordion.Item>
+          </DndContext>
 
           {/* DMS  */}
           <Accordion.Item value={ChannelCategory.DIRECT_MESSAGES}>
-            <Accordion.Trigger asChild>
+            <Accordion.Header asChild>
               <div className='group px-1 flex items-center justify-between gap-2 '>
-                <button className='flex items-center justify-start gap-1 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
-                  <span className='text-left truncate block'>Direct Messages</span>
-                  <button
-                    onClick={e => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      startWalkthrough(true);
-                    }}
-                    className='ml-1 flex items-center justify-center p-0.5 rounded focus:outline-none'
-                    title='Replay Direct Messages Tour'
-                    aria-label='Replay Direct Messages Tour'
-                    data-track-category='CHAT_SIDEBAR'
-                    data-track-name='REPLAY_TOUR_DIRECTORY'
-                  >
-                    <HelpCircle className='size-3.5 text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground transition-colors' />
+                <Accordion.Trigger asChild>
+                  <button className='flex items-center justify-start gap-1 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
+                    <span className='text-left truncate block'>Direct Messages</span>
+                    <span className='size-3.5 flex items-center justify-center shrink-0'>
+                      <ChevronRight
+                        strokeWidth={2.33}
+                        className='size-3 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                      />
+                    </span>
                   </button>
-                  <span className='size-3.5 flex items-center justify-center shrink-0'>
-                    <ChevronRight
-                      strokeWidth={2.33}
-                      className='size-3 transition-transform duration-200 group-data-[state=open]:rotate-90'
-                    />
-                  </span>
+                </Accordion.Trigger>
+                <button
+                  onClick={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startWalkthrough(true);
+                  }}
+                  className='ml-1 flex items-center justify-center p-0.5 rounded focus:outline-none'
+                  title='Replay Direct Messages Tour'
+                  aria-label='Replay Direct Messages Tour'
+                  data-track-category='CHAT_SIDEBAR'
+                  data-track-name='REPLAY_TOUR_DIRECTORY'
+                >
+                  <HelpCircle className='size-3.5 text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground transition-colors' />
                 </button>
                 <Tooltip content='Add direct message' side='top' sideOffset={0} delayDuration={500}>
                   <button
@@ -724,7 +894,7 @@ const ChatDirectory = ({
                   </button>
                 </Tooltip>
               </div>
-            </Accordion.Trigger>
+            </Accordion.Header>
             <Accordion.Content data-testid='dm-list'>
               {directMessages.map(channel => (
                 <ChannelItemV2
@@ -776,6 +946,100 @@ const ChatDirectory = ({
           />
         </Dialog>
       )}
+
+      <Dialog
+        open={showAddSectionForm}
+        onOpenChange={setShowAddSectionForm}
+        testId='add-section-dialog'
+      >
+        {showAddSectionForm && (
+          <CreateSectionDialog
+            channels={sectionableChannels}
+            existingNames={(channelSections ?? []).map(s => s.name)}
+            lastSectionPosition={lastSectionPosition}
+            onClose={() => setShowAddSectionForm(false)}
+          />
+        )}
+      </Dialog>
+
+      <Dialog
+        open={!!sectionToRename}
+        onOpenChange={open => {
+          if (!open) setSectionToRename(null);
+        }}
+        testId='rename-section-dialog'
+      >
+        {sectionToRename && (
+          <div className='p-4'>
+            <AddSectionForm
+              initialName={sectionToRename.name}
+              initialEmoji={sectionToRename.emoji ?? ''}
+              existingNames={(channelSections ?? [])
+                .filter(s => s.id !== sectionToRename.id)
+                .map(s => s.name)}
+              submitLabel='Save'
+              title='Rename section'
+              onSubmit={handleRenameSection}
+              onCancel={() => setSectionToRename(null)}
+            />
+          </div>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={!!sectionToDelete}
+        onOpenChange={open => {
+          if (!open) setSectionToDelete(null);
+        }}
+        testId='delete-section-dialog'
+      >
+        <div className='p-4 space-y-4'>
+          <div className='flex items-start justify-between gap-2'>
+            <div className='text-xl font-medium text-foreground'>Delete this section?</div>
+            <button
+              type='button'
+              onClick={() => setSectionToDelete(null)}
+              aria-label='Close'
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='CLOSE_DELETE_SECTION'
+              className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+            >
+              <X className='size-5' />
+            </button>
+          </div>
+          <div className='space-y-3 text-sm text-foreground'>
+            <p>
+              Any channels you added to{' '}
+              <span className='font-semibold'>
+                {sectionToDelete?.emoji ? `${sectionToDelete.emoji} ` : ''}
+                {sectionToDelete?.name}
+              </span>{' '}
+              will move back to the Channels list.
+            </p>
+            <p className='text-foreground'>
+              Don’t worry — deleting this section won’t remove you from any channels.
+            </p>
+          </div>
+          <div className='flex justify-end gap-3 pt-2'>
+            <button
+              onClick={() => setSectionToDelete(null)}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='CANCEL_DELETE_SECTION'
+              className='inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors'
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmDeleteSection}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='CONFIRM_DELETE_SECTION'
+              className='inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors'
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 
