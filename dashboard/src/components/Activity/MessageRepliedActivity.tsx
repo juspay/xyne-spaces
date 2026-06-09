@@ -37,6 +37,7 @@ export const MessageRepliedActivity = ({
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>replied in</span>}
       targetPath={targetPath}
+      focusThread
       supportTargetPath={supportTargetPath}
       linkedItemCreatedAt={message.conversation.createdAt}
       useActivityCutoff

@@ -39,6 +39,7 @@ export const DirectMessageActivity = ({
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>sent you a DM in</span>}
       targetPath={targetPath}
+      focusThread={isThreadReply}
       linkedItemCreatedAt={message.conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}

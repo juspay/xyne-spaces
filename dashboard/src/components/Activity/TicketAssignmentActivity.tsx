@@ -84,6 +84,7 @@ export const TicketAssignmentActivity = ({
       badgeColorClass='bg-blue-100'
       description={description}
       targetPath={targetPath}
+      focusThread
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
       isSelected={isSelected}

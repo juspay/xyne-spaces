@@ -73,6 +73,7 @@ export const ReactionAddedActivityV2 = ({
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}
+      focusThread={isThreadReply}
       linkedItemCreatedAt={message.conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
