@@ -23,6 +23,7 @@ import { RunAgentStepForm } from './RunAgentStepForm';
 import { SendMessageStepForm } from './SendMessageStepForm';
 import { CreateEmailDraftStepForm } from './CreateEmailDraftStepForm';
 import { ReplyOnMessageStepForm } from './ReplyOnMessageStepForm';
+import { NotifyStepForm } from './NotifyStepForm';
 import type { StepCardProps } from './StepCard.types';
 
 export function StepCard({
@@ -222,6 +223,15 @@ export function StepCard({
                 />
               ) : step.type === 'REPLY_ON_MESSAGE' ? (
                 <ReplyOnMessageStepForm
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
+              ) : step.type === 'NOTIFY_USER' || step.type === 'NOTIFY_GROUP' ? (
+                <NotifyStepForm
+                  recipient={step.type === 'NOTIFY_USER' ? 'user' : 'group'}
                   value={step.config}
                   onChange={onConfigChange}
                   issues={issues ?? null}

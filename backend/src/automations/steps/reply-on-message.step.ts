@@ -52,6 +52,7 @@ export class ReplyOnMessageStep extends BaseActionStep<
       content: config.content as string,
       msgType: isBot ? MessageType.BOT : MessageType.USER,
       isBot,
+      metadata: { contentFormat: 'markdown' },
     });
 
     return {

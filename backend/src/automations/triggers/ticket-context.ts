@@ -337,14 +337,20 @@ export function matchTicketScopeFilters(
   cfg: TicketScopeFilter,
   ticket: TicketScopeRow | null | undefined,
 ): boolean {
-  if (cfg.boardIds && cfg.boardIds.length > 0) {
-    if (!ticket?.boardId || !cfg.boardIds.includes(ticket.boardId)) return false;
+  const clean = (ids: readonly string[] | undefined): string[] =>
+    (ids ?? []).map(id => id?.trim()).filter((id): id is string => !!id);
+  const boardIds = clean(cfg.boardIds);
+  const channelIds = clean(cfg.channelIds);
+  const projectIds = clean(cfg.projectIds);
+
+  if (boardIds.length > 0) {
+    if (!ticket?.boardId || !boardIds.includes(ticket.boardId)) return false;
   }
-  if (cfg.channelIds && cfg.channelIds.length > 0) {
-    if (!ticket?.channelId || !cfg.channelIds.includes(ticket.channelId)) return false;
+  if (channelIds.length > 0) {
+    if (!ticket?.channelId || !channelIds.includes(ticket.channelId)) return false;
   }
-  if (cfg.projectIds && cfg.projectIds.length > 0) {
-    if (!ticket?.projectId || !cfg.projectIds.includes(ticket.projectId)) return false;
+  if (projectIds.length > 0) {
+    if (!ticket?.projectId || !projectIds.includes(ticket.projectId)) return false;
   }
   return true;
 }

@@ -3105,7 +3105,7 @@ const SupportTicketDetail = ({
             <div className='absolute inset-x-0 bottom-0 z-20' ref={composerOverlayRef}>
               {channel?.type === ChannelType.SLACK ? (
                 conversationId ? (
-                  <SlackComposer conversationId={conversationId} />
+                  <SlackComposer conversationId={conversationId} channelId={channel?.id ?? null} />
                 ) : null
               ) : (
                 <AnimatePresence mode='popLayout' initial={false}>

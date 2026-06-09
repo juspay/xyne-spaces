@@ -6,12 +6,16 @@ import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
+import type { AutomationContext } from '../types/context';
+import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { buildNotifyActionUrl, NOTIFY_LINK_TYPES, type NotifyLinkType } from './notify-action-url';
 
 const NotifyGroupConfigSchema = z.object({
   groupId: variableRef(z.string().min(1)),
   title: variableRef(z.string().min(1)),
   message: variableRef(z.string().min(1)),
-  actionUrl: variableRef(z.string()).optional(),
+  linkType: z.enum(NOTIFY_LINK_TYPES).default('NONE'),
+  linkId: variableRef(z.string()).optional(),
 });
 
 const NotifyGroupOutputSchema = z.object({
@@ -40,11 +44,16 @@ export class NotifyGroupStep extends BaseActionStep<
 
   async execute(
     config: z.infer<typeof NotifyGroupConfigSchema>,
+    context: AutomationContext,
   ): Promise<NotifyGroupOutput> {
     const groupId = config.groupId as string;
     const title = config.title as string;
-    const message = config.message as string;
-    const actionUrl = config.actionUrl as string | undefined;
+    const message = extractPlainTextFromHtml(config.message as string);
+    const actionUrl = await buildNotifyActionUrl(
+      context.automation.workspaceId,
+      config.linkType as NotifyLinkType | undefined,
+      config.linkId as string | undefined,
+    );
 
     const group = await repositories.userGroups.findWithMappings(groupId);
     if (!group) {
