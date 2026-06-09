@@ -7,6 +7,7 @@ import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links'
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
 import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
 import { getBundledUIUrl } from '../services/custom-protocol';
+import { browserSettingsService } from '../services/browser-settings';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -134,15 +135,15 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 
 
 
-      // External URLs
       if (!isInternalUrl) {
-        if (details.disposition === 'foreground-tab') {
+        const prefExternal = browserSettingsService.getSettings().openLinksExternally;
+        const modifier = details.disposition === 'background-tab';
+        const wantExternal = prefExternal !== modifier;
+        if (wantExternal) {
+          shell.openExternal(url);
+        } else {
           mainWindow?.webContents.send('open-in-browser-panel', url);
         }
-        if (details.disposition === 'background-tab') {
-          shell.openExternal(url);
-        }
-        
         return { action: 'deny' };
       }
       
@@ -182,9 +183,12 @@ export async function createMainWindow(): Promise<BrowserWindow> {
         return;
       }
 
-      // External URL → route to side panel instead of replacing the app
       event.preventDefault();
-      mainWindow?.webContents.send('open-in-browser-panel', navUrl);
+      if (browserSettingsService.getSettings().openLinksExternally) {
+        shell.openExternal(navUrl);
+      } else {
+        mainWindow?.webContents.send('open-in-browser-panel', navUrl);
+      }
     } catch (err) {
       log.warn('[WindowManager] Failed to handle will-navigate:', navUrl, err);
     }
