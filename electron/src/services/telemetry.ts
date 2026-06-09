@@ -17,10 +17,11 @@ import Store from 'electron-store';
 
 // local storage service instance id
 const store = new Store<{deviceId: string}>({});
+const preProdEnabled = store.get(config.preProdKey, false) as boolean;
 
 // OpenTelemetry Configuration
 export const OTEL_METRICS_ENDPOINT = `${config.UNPROTECTED_URL}/godel/v1/metrics`;
-export const OTEL_SERVICE_NAME = 'xyne-spaces-desktop';
+export const OTEL_SERVICE_NAME = preProdEnabled ? 'xyne-spaces-desktop-preprod' : 'xyne-spaces-desktop';
 export const OTEL_EXPORT_INTERVAL_MS = 10000; // Default: 10 seconds
 
 // Track the meter provider instance for cleanup

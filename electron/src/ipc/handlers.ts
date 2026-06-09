@@ -12,7 +12,7 @@ import { Logger, errorLogger } from '../services/logger/Logger';
 import {
   requestAllMediaPermissions,
 } from '../services/media-permission';
-import { setCustomScreenPickerEnabled } from '../services/request-interceptor';
+import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
 import { showRecordingPill, hideRecordingPill } from '../services/recording-pill-window';
 import { meetingDetectorService } from '../services/meeting-detector';
@@ -78,6 +78,7 @@ export function setupIpcHandlers(): void {
     if (email && typeof email === 'string') {
       Sentry.setUser({ email });
       Logger.setEmailId(email);
+      setCachedUser(email);
     }
   });
 

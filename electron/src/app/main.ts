@@ -1,4 +1,4 @@
-import { app } from 'electron';
+import { app, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from './config';
@@ -8,6 +8,7 @@ import { createMainWindow, getMainWindow, setWindowReferences } from '../window/
 import {
   setupRequestInterceptor,
   setupXyneSpacesInterceptor,
+  hydrateCachedUserFromCookies,
 } from '../services/request-interceptor';
 import { setupMTLS } from '../services/mtls';
 import { docsPublishService } from '../services/docs-publish';
@@ -22,11 +23,11 @@ import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-
 import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
-import { browserSettingsService } from '../services/browser-settings';
-import { clearAllCookies } from '../services/cookies';
 import { setupWebviewShortcuts } from '../services/webview-shortcuts';
 import Sentry from "@sentry/electron/main";
+import Store from 'electron-store';
 
+const store = new Store();
 
 // Forward logs to renderer process for workflow IPC messages.
 (log.transports as any).forwardToRenderer = (message: any) => {
@@ -119,16 +120,69 @@ app.on('before-quit', async () => {
 
 
 
+function menuItemToTemplate(item: MenuItem): MenuItemConstructorOptions {
+  return {
+    label: item.label,
+    role: item.role || undefined,
+    type: item.type,
+    accelerator: item.accelerator,
+    checked: item.checked,
+    enabled: item.enabled,
+    visible: item.visible,
+    submenu: item.submenu ? item.submenu.items.map(menuItemToTemplate) : undefined,
+    click: item.click as MenuItemConstructorOptions['click'],
+    id: item.id,
+  };
+}
+
+function setupApplicationMenu(): void {
+  const existingMenu = Menu.getApplicationMenu();
+  const template: MenuItemConstructorOptions[] = existingMenu
+    ? existingMenu.items.map(menuItemToTemplate)
+    : [];
+
+  template.push({
+    label: 'Beta',
+    submenu: [
+      {
+        label: 'Enable pre-prod features',
+        type: 'checkbox',
+        checked: store.get(config.preProdKey, false) as boolean,
+        click: () => {
+          const currentValue = store.get(config.preProdKey, false) as boolean;
+          store.set(config.preProdKey, !currentValue);
+          log.info('[Menu] Pre-prod features toggled', store.get(config.preProdKey, false) as boolean);
+
+          dialog.showMessageBoxSync({
+            type: 'info',
+            message: `Experimental features have been ${!currentValue ? 'enabled' : 'disabled'}. The application will now restart to apply the changes.`,
+            buttons: ['OK'],
+          });
+
+          app.relaunch();
+          app.quit();        
+        },
+      },
+    ],
+  });
+
+  const newMenu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(newMenu);
+}
+
 async function initializeApp(): Promise<void> {
   // Setup custom protocol for bundled UI (must be after app.whenReady())
   if (config.useBundledUI) {
     setupCustomProtocol();
   }
+  // Setup application menu with Tools submenu
+  setupApplicationMenu();
 
   initializeTelemetry();
   setupMTLS();
   setupRequestInterceptor();
   setupXyneSpacesInterceptor();
+  void hydrateCachedUserFromCookies();
   setupIpcHandlers();
 
   // Clear network cache on app start to ensure fresh assets

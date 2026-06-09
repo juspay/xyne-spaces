@@ -34,6 +34,7 @@ export interface AppConfig {
     endpoint: string;
     method: string;
   };
+  preProdKey: string;
 }
 
 const devConfig: AppConfig = {
@@ -63,7 +64,8 @@ const devConfig: AppConfig = {
   agentInteract: {
     endpoint: "/api/query",
     method: "POST"
-  }
+  },
+  preProdKey: 'preProdFeaturesEnabled'
 };
 
 const prodConfig: AppConfig = {
@@ -95,6 +97,7 @@ const prodConfig: AppConfig = {
     endpoint: "/api/query",
     method: "POST"
   },
+  preProdKey: 'preProdFeaturesEnabled',
   ...(SENTRY_DSN ? { SENTRY_DSN } : {}),
 };
 
@@ -125,7 +128,8 @@ const sandboxConfig: AppConfig = {
   agentInteract: {
     endpoint: "/api/query",
     method: "POST"
-  }
+  },
+  preProdKey: 'preProdFeaturesEnabled'
 };
 
 
