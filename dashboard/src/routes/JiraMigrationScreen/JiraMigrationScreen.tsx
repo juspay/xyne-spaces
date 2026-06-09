@@ -1257,7 +1257,8 @@ const JiraMigrationScreen = (): ReactElement => {
     (filters.reporterAccountIds?.length ||
       filters.creatorAccountIds?.length ||
       filters.assigneeAccountIds?.length ||
-      filters.labels?.length)
+      filters.labels?.length ||
+      filters.epicKeys?.length)
       ? { filters }
       : {}),
     ...(nextPageToken ? { nextPageToken } : {}),
@@ -2676,7 +2677,8 @@ const JiraMigrationScreen = (): ReactElement => {
                             Ticket Filters
                           </p>
                           <p className='mt-2 text-sm font-medium text-foreground'>
-                            Apply assignee, reporter, creator, and label filters only when needed.
+                            Apply epic, assignee, reporter, creator, and label filters only when
+                            needed.
                           </p>
                           <p className='mt-1 text-xs text-muted-foreground'>
                             Filters are optional. If disabled, preview uses the standard Jira flow
@@ -2694,8 +2696,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         <div>
                           <p className='text-sm font-medium text-foreground'>Enable Filters</p>
                           <p className='mt-1 text-xs text-muted-foreground'>
-                            Turn this on only if you want to filter by assignee, reporter, creator,
-                            or labels.
+                            Turn this on only if you want to filter by epic, assignee, reporter,
+                            creator, or labels.
                           </p>
                         </div>
                         <input
@@ -2718,7 +2720,33 @@ const JiraMigrationScreen = (): ReactElement => {
 
                       {isFilterEnabled ? (
                         preview ? (
-                          <div className='mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4'>
+                          <div className='mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-5'>
+                            <div>
+                              <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                                Epic
+                              </p>
+                              <EntityMultiSelector
+                                options={preview.filterOptions.epics.map(epic => ({
+                                  value: epic.issueKey,
+                                  label: epic.issueKey,
+                                  subtitle: epic.summary,
+                                  icon: (
+                                    <LayoutTemplate className='w-4 h-4 text-muted-foreground' />
+                                  ),
+                                }))}
+                                selectedValues={filters.epicKeys || []}
+                                onMultiSelect={values =>
+                                  setFilters(previous => ({
+                                    ...previous,
+                                    epicKeys: values,
+                                  }))
+                                }
+                                placeholder='Search epics...'
+                                searchPlaceholder='Search epics...'
+                                width='100%'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                              />
+                            </div>
                             <div>
                               <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                                 Assignee
@@ -2814,8 +2842,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           </div>
                         ) : (
                           <div className='mt-4 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground'>
-                            Click Load Preview after enabling filters to fetch assignee, reporter,
-                            creator, and label options for this Jira project.
+                            Click Load Preview after enabling filters to fetch epic, assignee,
+                            reporter, creator, and label options for this Jira project.
                           </div>
                         )
                       ) : (

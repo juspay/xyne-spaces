@@ -19,6 +19,7 @@ export interface JiraMigrationFilters {
   creatorAccountIds?: string[];
   assigneeAccountIds?: string[];
   labels?: string[];
+  epicKeys?: string[];
 }
 
 export interface JiraMigrationPreviewResponse {
@@ -103,6 +104,10 @@ export interface JiraMigrationPreviewResponse {
       emailAddress?: string;
     }>;
     labels: string[];
+    epics: Array<{
+      issueKey: string;
+      summary: string;
+    }>;
   };
   appliedFilters: JiraMigrationFilters;
   filteredIssueCount: number;

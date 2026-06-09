@@ -100,7 +100,16 @@ export interface JiraFieldRecord {
   };
 }
 
-const JIRA_LIGHTWEIGHT_INDEX_FIELDS = ['summary', 'status', 'reporter', 'creator', 'assignee', 'labels'] as const;
+const JIRA_LIGHTWEIGHT_INDEX_FIELDS = [
+  'summary',
+  'status',
+  'reporter',
+  'creator',
+  'assignee',
+  'labels',
+  'issuetype',
+  'parent',
+] as const;
 
 export interface JiraAttachmentRecord {
   id: string;
@@ -347,13 +356,14 @@ export class JiraMigrationClient {
     requestPageToken?: string,
     maxResults: number = 100,
     dateFrom?: string,
+    fields: string[] = [...JIRA_LIGHTWEIGHT_INDEX_FIELDS],
   ) {
     const result = await this.fetchJson<JiraSearchResponse>('/rest/api/3/search/jql', {
       method: 'POST',
       body: JSON.stringify({
         jql: buildProjectJql(projectKey, dateFrom),
         maxResults,
-        fields: [...JIRA_LIGHTWEIGHT_INDEX_FIELDS],
+        fields,
         ...(requestPageToken ? { nextPageToken: requestPageToken } : {}),
       }),
     });

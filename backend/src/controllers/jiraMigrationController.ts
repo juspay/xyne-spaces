@@ -939,7 +939,7 @@ export class JiraMigrationController {
         nextPageToken?: string;
         maxResults?: number;
         dateFrom?: string;
-        filters?: { reporterAccountIds?: string[]; creatorAccountIds?: string[]; assigneeAccountIds?: string[]; labels?: string[] };
+        filters?: { reporterAccountIds?: string[]; creatorAccountIds?: string[]; assigneeAccountIds?: string[]; labels?: string[]; epicKeys?: string[] };
         loadFilterOptions?: boolean;
       };
 
@@ -965,6 +965,7 @@ export class JiraMigrationController {
           ...(Array.isArray(req.body.filters.creatorAccountIds) ? { creatorAccountIds: req.body.filters.creatorAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
           ...(Array.isArray(req.body.filters.assigneeAccountIds) ? { assigneeAccountIds: req.body.filters.assigneeAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
           ...(Array.isArray(req.body.filters.labels) ? { labels: req.body.filters.labels.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+          ...(Array.isArray(req.body.filters.epicKeys) ? { epicKeys: req.body.filters.epicKeys.filter((value: unknown): value is string => typeof value === 'string') } : {}),
         } : undefined,
       });
 
@@ -1021,7 +1022,7 @@ export class JiraMigrationController {
         skipCustomFieldIds?: string[];
         jiraStatusSequence?: string[];
         excludedStageNames?: string[];
-        filters?: { reporterAccountIds?: string[]; creatorAccountIds?: string[]; assigneeAccountIds?: string[]; labels?: string[] };
+        filters?: { reporterAccountIds?: string[]; creatorAccountIds?: string[]; assigneeAccountIds?: string[]; labels?: string[]; epicKeys?: string[] };
         userEmailMappings?: Record<string, string>;
       };
 
@@ -1052,6 +1053,7 @@ export class JiraMigrationController {
           ...(Array.isArray(req.body.filters.creatorAccountIds) ? { creatorAccountIds: req.body.filters.creatorAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
           ...(Array.isArray(req.body.filters.assigneeAccountIds) ? { assigneeAccountIds: req.body.filters.assigneeAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
           ...(Array.isArray(req.body.filters.labels) ? { labels: req.body.filters.labels.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+          ...(Array.isArray(req.body.filters.epicKeys) ? { epicKeys: req.body.filters.epicKeys.filter((value: unknown): value is string => typeof value === 'string') } : {}),
         } : undefined,
         statusV2Mappings:
           req.body.statusV2Mappings && typeof req.body.statusV2Mappings === 'object'
