@@ -92,7 +92,10 @@ class CallRecordingService {
   async stopRecording(callExternalId: string): Promise<void> {
     const egressId = this.activeEgress.get(callExternalId);
     if (!egressId) {
-      logger.debug(`[CallRecording] stopRecording: no active egress tracked for call ${callExternalId}`);
+      // Promote from debug to warn — this can happen when the backend process restarted
+      // between startRecording and stopRecording, losing the in-memory activeEgress map.
+      // In that case the egress auto-terminates and the recording file may be truncated.
+      logger.warn('[CallRecording] egress_tracking_lost', { call: callExternalId, reason: 'no_active_egress_tracked', possible_process_restart: true });
       return;
     }
     this.activeEgress.delete(callExternalId);
@@ -154,10 +157,14 @@ class CallRecordingService {
     // The egress_ended webhook can arrive before GCS propagation completes.
     const fileReady = await this.waitForFileExists(recordingPath);
     if (!fileReady) {
-      logger.error(
-        `[CallRecording] Recording file not found in storage after retries for call ${callExternalId}, ` +
-        `path=${recordingPath}. Skipping recordingUrl save and attachment creation.`
-      );
+      // Structured error so this is greppable/alertable — distinguishes GCS outage from
+      // a missing file. The recording is now permanently lost; no retry will be attempted.
+      logger.error('[CallRecording] recording_permanently_dropped', {
+        call: callExternalId,
+        path: recordingPath,
+        total_wait_seconds: 341,
+        reason: 'file_not_found_after_all_retries',
+      });
       return;
     }
 
@@ -175,7 +182,9 @@ class CallRecordingService {
 
       const callMessage = await repositories.messages.findHeadMessageByCallId(callExternalId);
       if (!callMessage) {
-        logger.warn(`[CallRecording] Could not find head message for call ${callExternalId}, skipping attachment creation`);
+        // recordingUrl IS saved at this point — the file exists and the download endpoint works.
+        // This log makes it greppable: "recording exists but will not appear inline in chat".
+        logger.warn('[CallRecording] recording_attachment_skipped', { call: callExternalId, reason: 'head_message_not_found', recording_url_set: true });
         return;
       }
 
@@ -183,18 +192,18 @@ class CallRecordingService {
       const callCreator = await repositories.users.findById(call.createdByUserId);
       
       if (!callCreator?.workspaceId) {
-        logger.warn(`[CallRecording] Could not find workspace for call creator ${call.createdByUserId}, skipping attachment creation`);
+        logger.warn('[CallRecording] recording_attachment_skipped', { call: callExternalId, reason: 'workspace_not_found', creator: call.createdByUserId, recording_url_set: true });
         return;
       }
       const workspaceId = callCreator.workspaceId;
 
       if (!call.channelId) {
-        logger.warn(`[CallRecording] Call ${callExternalId} has no channelId, skipping attachment creation`);
+        logger.warn('[CallRecording] recording_attachment_skipped', { call: callExternalId, reason: 'no_channelId', recording_url_set: true });
         return;
       }
       const channel = await repositories.channels.findById(call.channelId);
       if (!channel) {
-        logger.warn(`[CallRecording] Channel ${call.channelId} not found for call ${callExternalId}, skipping attachment creation`);
+        logger.warn('[CallRecording] recording_attachment_skipped', { call: callExternalId, reason: 'channel_not_found', channel_id: call.channelId, recording_url_set: true });
         return;
       }
 

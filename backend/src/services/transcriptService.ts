@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger';
 import { AttachmentEntityType, CallOrigin, CallType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage, createSystemMessage } from '@framework';
+import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessageType } from '@xyne/shared';
 import { db } from '@/database/client';
@@ -266,7 +267,7 @@ export class TranscriptService {
    */
   async postCallTranscript(callId: string, messageId: string): Promise<void> {
     try {
-      logger.info(`[${callId}] transcript_processing_started | message_id=${messageId}`);
+      logger.info(`[${callId}] transcript_processing_started`, { message_id: messageId });
 
       // 0. Check if transcript attachment already exists for this CALL (not just this message)
       // This handles cases where multiple messages might be created for the same call
@@ -287,9 +288,7 @@ export class TranscriptService {
         logger.error(`[${callId}] call_not_found`);
         return;
       }
-      logger.info(
-        `[${callId}] call_found | status=${call.status}, created_by=${call.createdByUserId}`
-      );
+      logger.info(`[${callId}] call_found`, { call_status: call.status, created_by: call.createdByUserId });
 
       // Get channel for workspaceId
       if (!call.channelId) {
@@ -298,7 +297,7 @@ export class TranscriptService {
       }
       const channel = await repositories.channels.findById(call.channelId);
       if (!channel) {
-        logger.error(`[${callId}] channel_not_found | channel_id=${call.channelId}`);
+        logger.error(`[${callId}] channel_not_found`, { channel_id: call.channelId });
         return;
       }
 
@@ -306,15 +305,13 @@ export class TranscriptService {
       // which means all users have left (agent is always the last to leave)
 
       // 2. Get the call message to retrieve conversationId
-      logger.info(`[${callId}] message_lookup_started | message_id=${messageId}`);
+      logger.info(`[${callId}] message_lookup_started`, { message_id: messageId });
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
-        logger.warn(`[${callId}] message_not_found | message_id=${messageId}`);
+        logger.warn(`[${callId}] message_not_found`, { message_id: messageId });
         return;
       }
-      logger.info(
-        `[${callId}] message_found | message_id=${messageId}, conversation_id=${callMessage.conversationId}`
-      );
+      logger.info(`[${callId}] message_found`, { message_id: messageId, conversation_id: callMessage.conversationId });
 
       // 3. Retrieve transcript from GCS or local file
       const transcriptContent = await this.retrieveTranscript(callId);
@@ -328,20 +325,16 @@ export class TranscriptService {
       logger.info(`[${callId}] transcript_parsing_started`);
       const entries = this.parseTranscriptEntries(transcriptContent);
       if (entries.length === 0) {
-        logger.error(`[${callId}] transcript_parsing_failed | entries_count=0`);
+        logger.error(`[${callId}] transcript_parsing_failed`, { entries_count: 0 });
         throw new Error(`No valid transcript entries found for call: ${callId}`);
       }
       const uniqueSpeakers = new Set(entries.map((e) => e.user)).size;
-      logger.info(
-        `[${callId}] transcript_parsed | entries_count=${entries.length}, speakers_count=${uniqueSpeakers}`
-      );
+      logger.info(`[${callId}] transcript_parsed`, { entries_count: entries.length, speakers_count: uniqueSpeakers });
 
       // 5. Format as plain text (usernames are already included in transcript entries)
-      logger.info(`[${callId}] transcript_formatting_started | format=plain_text`);
+      logger.info(`[${callId}] transcript_formatting_started`, { format: 'plain_text' });
       const formattedTranscript = this.formatTranscript(entries, callId);
-      logger.info(
-        `[${callId}] transcript_formatted | format=plain_text, characters_count=${formattedTranscript.length}`
-      );
+      logger.info(`[${callId}] transcript_formatted`, { format: 'plain_text', characters_count: formattedTranscript.length });
 
       // 6. Upload raw formatted transcript immediately (no translation yet - non-blocking)
       const txtStoragePath = await this.uploadFormattedTranscript(callId, formattedTranscript);
@@ -381,9 +374,7 @@ export class TranscriptService {
         });
         logger.info(`Updated transcript attachment ${existingTranscriptAttachment.id} to version ${currentVersion + 1}, linked to message ${messageId}`);
       } else {
-        logger.info(
-          `[${callId}] attachment_creation_started | message_id=${messageId}, attachment_type=transcript`
-        );
+        logger.info(`[${callId}] attachment_creation_started`, { message_id: messageId, attachment_type: 'transcript' });
         const attachment = await repositories.messageAttachments.create({
           entityId: messageId,
           entityType: AttachmentEntityType.CHAT,
@@ -406,28 +397,26 @@ export class TranscriptService {
             entryCount: entries.length,
           },
         });
-        logger.info(
-          `[${callId}] attachment_created | attachment_id=${attachment.id}, path=${storagePath}`
-        );
+        logger.info(`[${callId}] attachment_created`, { attachment_id: attachment.id, path: storagePath });
       }
 
       // 11. Save transcript URL to Call record for easier access (used by recordings feature)
       await repositories.calls.update(call.id, {
         transcript: storagePath,
       });
-      logger.info(`[${callId}] call_record_updated | fields_updated=transcript`);
+      logger.info(`[${callId}] call_record_updated`, { fields_updated: 'transcript' });
 
       // 12. Update the call message to indicate it has an attachment
       await repositories.messages.update(messageId, {
         hasAttachment: true,
       });
 
-      logger.info(`[${callId}] transcript_processing_completed | message_id=${messageId}`);
+      logger.info(`[${callId}] transcript_processing_completed`, { message_id: messageId });
 
       // 13. Fire-and-forget: Translate transcript asynchronously in background
       // This updates the same GCS file without blocking the response
       this.translateTranscriptAsync(callId, txtStoragePath).catch((err) => {
-        logger.error(`[${callId}] background_translation_failed | error=${err}`);
+        logger.error(`[${callId}] background_translation_failed`, { error: err instanceof Error ? err.message : String(err) });
       });
 
       // 14. Attach identified transcript (real-name labelled) as a second attachment when available.
@@ -435,10 +424,7 @@ export class TranscriptService {
       // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
       void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, channel.workspaceId);
     } catch (error) {
-      logger.error(
-        `[${callId}] transcript_processing_failed | message_id=${messageId}, error=${error instanceof Error ? error.message : JSON.stringify(error)}`,
-        error
-      );
+      logger.error(`[${callId}] transcript_processing_failed`, { message_id: messageId, error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
       // Throw error to allow controller to return proper error response
       throw error;
     }
@@ -453,24 +439,22 @@ export class TranscriptService {
   private async retrieveTranscript(callId: string): Promise<string | null> {
     const storagePath = `transcriptions/${callId}.jsonl`;
     try {
-      logger.info(`[${callId}] transcript_fetch_started | path=${storagePath}`);
+      logger.info(`[${callId}] transcript_fetch_started`, { path: storagePath });
 
       const exists = await this.transcriptStorage.fileExists(storagePath);
 
       if (!exists) {
-        logger.error(`[${callId}] transcript_download_failed | error=file_not_found, path=${storagePath}`);
+        logger.error(`[${callId}] transcript_download_failed`, { error: 'file_not_found', path: storagePath });
         throw new Error(`Transcript file not found: ${storagePath}`);
       }
 
       logger.info(`[${callId}] transcript_download_started`);
       const downloadStart = Date.now();
       const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
-      logger.info(
-        `[${callId}] transcript_download_completed | bytes_downloaded=${buffer.length}, duration_ms=${Date.now() - downloadStart}`
-      );
+      logger.info(`[${callId}] transcript_download_completed`, { bytes_downloaded: buffer.length, duration_ms: Date.now() - downloadStart });
       return buffer.toString('utf-8');
     } catch (error) {
-      logger.error(`[${callId}] transcript_download_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}, path=${storagePath}`, error);
+      logger.error(`[${callId}] transcript_download_failed`, { error: error instanceof Error ? error.message : String(error), path: storagePath, stack: error instanceof Error ? error.stack : undefined });
       throw error;
     }
   }
@@ -530,9 +514,7 @@ export class TranscriptService {
     // Don't forget the last entry
     consolidated.push(currentEntry);
 
-    logger.info(
-      `[${callId}] transcript_consolidated | original_entries=${entries.length}, consolidated_entries=${consolidated.length}`
-    );
+    logger.info(`[${callId}] transcript_consolidated`, { original_entries: entries.length, consolidated_entries: consolidated.length });
     return consolidated;
   }
 
@@ -568,7 +550,7 @@ export class TranscriptService {
     const filepath = `attachments/${callId}_formatted.txt`;
     const buffer = Buffer.from(content, 'utf-8');
 
-    logger.info(`[${callId}] transcript_upload_started | type=formatted_transcript, path=${filepath}`);
+    logger.info(`[${callId}] transcript_upload_started`, { type: 'formatted_transcript', path: filepath });
 
     await this.transcriptStorage.uploadFileV2(buffer, {
       path: filepath,
@@ -576,7 +558,7 @@ export class TranscriptService {
       metadata: { callId, type: 'transcript' },
     });
 
-    logger.info(`[${callId}] transcript_upload_completed | type=formatted_transcript, path=${filepath}`);
+    logger.info(`[${callId}] transcript_upload_completed`, { type: 'formatted_transcript', path: filepath });
     return filepath;
   }
 
@@ -600,14 +582,14 @@ export class TranscriptService {
     try {
       const speakerIdentificationEnabled = await this.isSpeakerIdentificationEnabled();
       if (!speakerIdentificationEnabled) {
-        logger.info(`[${callId}] identified_transcript_skipped | reason=speaker_identification_disabled`);
+        logger.info(`[${callId}] identified_transcript_skipped`, { reason: 'speaker_identification_disabled' });
         return;
       }
 
       const identifiedGcsPath = `transcriptions/${callId}_identified.jsonl`;
       const exists = await this.transcriptStorage.fileExists(identifiedGcsPath);
       if (!exists) {
-        logger.info(`[${callId}] identified_transcript_not_found | skipping_attachment`);
+        logger.info(`[${callId}] identified_transcript_not_found`, { action: 'skip_attachment' });
         return;
       }
 
@@ -647,7 +629,7 @@ export class TranscriptService {
             entryCount: entries.length,
           },
         });
-        logger.info(`[${callId}] identified_transcript_attachment_updated | attachment_id=${existing.id}`);
+        logger.info(`[${callId}] identified_transcript_attachment_updated`, { attachment_id: existing.id });
       } else {
         const attachment = await repositories.messageAttachments.create({
           entityId: messageId,
@@ -671,15 +653,15 @@ export class TranscriptService {
             entryCount: entries.length,
           },
         });
-        logger.info(`[${callId}] identified_transcript_attachment_created | attachment_id=${attachment.id}`);
+        logger.info(`[${callId}] identified_transcript_attachment_created`, { attachment_id: attachment.id });
       }
 
       // Apply the same background translation as the plain transcript
       this.translateIdentifiedTranscriptAsync(callId, formattedPath).catch((err) => {
-        logger.error(`[${callId}] identified_background_translation_failed | error=${err}`);
+        logger.error(`[${callId}] identified_background_translation_failed`, { error: err instanceof Error ? err.message : String(err) });
       });
     } catch (err) {
-      logger.error(`[${callId}] identified_transcript_attach_failed | error=${err}`);
+      logger.error(`[${callId}] identified_transcript_attach_failed`, { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -855,7 +837,7 @@ export class TranscriptService {
 
       logger.info(`[${callId}] identified_translation_completed`);
     } catch (error) {
-      logger.error(`[${callId}] identified_translation_failed | error=${error}`);
+      logger.error(`[${callId}] identified_translation_failed`, { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -901,20 +883,14 @@ Output ONLY the processed transcript, nothing else.`;
           messages: [createSystemMessage(systemInstructions), createUserMessage(transcript)],
         });
 
-        if (!['completed', 'max_turns'].includes(result.status as string)) {
-          logger.warn('Failed to post-process transcript, using original');
+        const extracted = extractAgentContent(result);
+        if (!extracted.ok) {
+          logger.warn(`post_process_transcript_failed | reason=${extracted.reason} | status=${extracted.status ?? ''} | using_original=true`);
           return transcript;
         }
 
-        const last = result.messages.at(-1);
-        if (!last || !('content' in last) || !last.content) {
-          logger.warn('No content in post-processing result, using original');
-          return transcript;
-        }
-
-        const processedTranscript = last.content.trim();
         logger.info('Successfully post-processed transcript (translation)');
-        return processedTranscript;
+        return extracted.content;
       }
 
       // For long transcripts, process in chunks CONCURRENTLY
@@ -947,19 +923,14 @@ Output ONLY the processed transcript, nothing else.`;
               messages: [createSystemMessage(systemInstructions), createUserMessage(chunkText)],
             });
 
-            if (!['completed', 'max_turns'].includes(result.status as string)) {
-              logger.warn(`Failed to process chunk ${chunkIndex}, using original`);
-              return chunkText;
-            }
-
-            const last = result.messages.at(-1);
-            if (!last || !('content' in last) || !last.content) {
-              logger.warn(`No content in chunk ${chunkIndex}, using original`);
+            const extracted = extractAgentContent(result);
+            if (!extracted.ok) {
+              logger.warn(`post_process_chunk_failed | chunk=${chunkIndex}/${totalChunks} | reason=${extracted.reason} | status=${extracted.status ?? ''} | using_original=true`);
               return chunkText;
             }
 
             logger.info(`Chunk ${chunkIndex}/${totalChunks} completed`);
-            return last.content.trim();
+            return extracted.content;
           } catch (error) {
             logger.error(`Error processing chunk ${chunkIndex}:`, error);
             return chunkText;
@@ -993,9 +964,7 @@ Output ONLY the processed transcript, nothing else.`;
     const logCallId = callId || 'unknown';
     if (!agent) return null;
 
-    logger.info(
-      `[${logCallId}] ai_summary_generation_started | summary_type=call_summary, model=${config.llm.callLitellmModel || 'glm-latest'}`
-    );
+    logger.info(`[${logCallId}] ai_summary_generation_started`, { summary_type: 'call_summary', model: config.llm.callLitellmModel || 'glm-latest' });
     const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
 
     const summaryStart = Date.now();
@@ -1004,35 +973,16 @@ Output ONLY the processed transcript, nothing else.`;
         messages: [createUserMessage(prompt)],
       });
 
-      if (result.status === 'error' || !result.messages.length) {
-        logger.error(
-          `[${logCallId}] ai_summary_generation_failed | status=${result.status}, messages_count=${result.messages.length}, result=${JSON.stringify(result)}`
-        );
+      const extracted = extractAgentContent(result);
+      if (!extracted.ok) {
+        logger.error(`[${logCallId}] ai_summary_generation_failed`, { reason: extracted.reason, status: extracted.status ?? result.status, duration_ms: Date.now() - summaryStart });
         return null;
       }
 
-      const last = result.messages.at(-1);
-      if (!last) {
-        logger.error(`[${logCallId}] ai_summary_generation_failed | error=no_last_message, messages_count=${result.messages.length}`);
-        return null;
-      }
-
-      const markdownContent = 'content' in last ? last.content?.trim() : null;
-      if (!markdownContent) {
-        logger.error(`[${logCallId}] ai_summary_generation_failed | error=empty_content, last_message=${JSON.stringify(last)}`);
-        return null;
-      }
-
-      logger.info(
-        `[${logCallId}] ai_summary_generated | summary_length=${markdownContent.length}, duration_ms=${Date.now() - summaryStart}`
-      );
-      // Return raw markdown - no sanitization needed for markdown
-      return markdownContent;
+      logger.info(`[${logCallId}] ai_summary_generated`, { summary_length: extracted.content.length, duration_ms: Date.now() - summaryStart });
+      return extracted.content;
     } catch (error) {
-      logger.error(
-        `[${logCallId}] ai_summary_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}, duration_ms=${Date.now() - summaryStart}`,
-        error
-      );
+      logger.error(`[${logCallId}] ai_summary_generation_failed`, { error: error instanceof Error ? error.message : String(error), duration_ms: Date.now() - summaryStart, stack: error instanceof Error ? error.stack : undefined });
       return null;
     }
   }
@@ -1052,17 +1002,14 @@ Output ONLY the processed transcript, nothing else.`;
       messages: [createUserMessage(prompt)],
     });
 
-    if (!['completed', 'max_turns'].includes(result.status as string)) {
+    const extracted = extractAgentContent(result);
+    if (!extracted.ok) {
+      logger.error(`generate_call_title_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
       return null;
     }
 
-    const last = result.messages.at(-1);
-    if (!last || !('content' in last)) return null;
-
-    const title = last.content?.trim() || null;
-
     // Truncate to 100 chars max
-    return title ? title.substring(0, 100) : null;
+    return extracted.content.substring(0, 100);
   }
 
   /**
@@ -1127,18 +1074,13 @@ Output ONLY the processed transcript, nothing else.`;
         messages: [createUserMessage(prompt)],
       });
 
-      if (!['completed', 'max_turns'].includes(result.status as string)) {
-        logger.error(`ticket_suggestions_generation_failed | status=${result.status}, messages_count=${result.messages.length}, result=${JSON.stringify(result)}`);
+      const extracted = extractAgentContent(result);
+      if (!extracted.ok) {
+        logger.error(`ticket_suggestions_generation_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
         return [];
       }
 
-      const last = result.messages.at(-1);
-      if (!last || !('content' in last) || !last.content) {
-        logger.error(`ticket_suggestions_generation_failed | error=empty_content, last_message=${JSON.stringify(last)}`);
-        return [];
-      }
-
-      let jsonContent = last.content.trim();
+      let jsonContent = extracted.content;
 
       // Strip markdown code fences if present (```json...``` or ```...```)
       const codeBlockMatch = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
@@ -1210,18 +1152,13 @@ Output ONLY the processed transcript, nothing else.`;
     try {
       const result = await agent.execute({ messages: [createUserMessage(prompt)] });
 
-      if (!['completed', 'max_turns'].includes(result.status as string)) {
-        logger.error(`[Pulse] generatePulseData_failed | status=${result.status}, messages_count=${result.messages.length}, result=${JSON.stringify(result)}`);
+      const extracted = extractAgentContent(result);
+      if (!extracted.ok) {
+        logger.error(`[Pulse] generatePulseData_failed`, { reason: extracted.reason, status: extracted.status ?? result.status });
         return [];
       }
 
-      const last = result.messages.at(-1);
-      if (!last || !('content' in last) || !last.content) {
-        logger.error(`[Pulse] generatePulseData_failed | error=empty_content, last_message=${JSON.stringify(last)}`);
-        return [];
-      }
-
-      let jsonContent = last.content.trim();
+      let jsonContent = extracted.content;
       const fence = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
       if (fence) jsonContent = fence[1].trim();
 
@@ -1464,26 +1401,32 @@ Output ONLY the processed transcript, nothing else.`;
   ): Promise<void> {
     try {
       if (!hasTranscript) {
-        logger.warn(`transcript_processing_skipped | call_id=${callId} reason=agent_reported_no_transcript`);
+        logger.warn('transcript_processing_skipped', { call_id: callId, reason: 'agent_reported_no_transcript' });
         return;
       }
 
       // First, process the transcript (existing functionality)
-      await this.postCallTranscript(callId, messageId);
+      // Wrap individually so a GCS/DB failure here produces a stage-labelled log rather
+      // than the generic process_call_with_summary_failed from the outer catch.
+      try {
+        await this.postCallTranscript(callId, messageId);
+      } catch (transcriptError) {
+        logger.error(`[${callId}] post_transcript_failed`, { stage: 'post_call_transcript', error: transcriptError instanceof Error ? transcriptError.message : String(transcriptError), stack: transcriptError instanceof Error ? transcriptError.stack : undefined });
+        // Don't rethrow — retrieveTranscript below fetches raw content from GCS directly and
+        // may still succeed even if the DB-side attachment step inside postCallTranscript failed.
+      }
 
       // Get call details for summary generation
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
-        logger.error(`[${callId}] call_not_found | context=summary_generation`);
+        logger.error(`[${callId}] call_not_found`, { context: 'summary_generation' });
         return;
       }
 
       // Get the call message to retrieve conversationId for the reply
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
-        logger.error(
-          `[${callId}] message_not_found | message_id=${messageId}, context=summary_generation`
-        );
+        logger.error(`[${callId}] message_not_found`, { message_id: messageId, context: 'summary_generation' });
         return;
       }
 
@@ -1497,16 +1440,16 @@ Output ONLY the processed transcript, nothing else.`;
       if (speakerIdentificationEnabled && isHeadless) {
         transcriptContent = await this.getIdentifiedTranscriptContent(callId);
         if (transcriptContent) {
-          logger.info(`[${callId}] using_identified_transcript_for_summary | reason=headless_call`);
+          logger.info(`[${callId}] using_identified_transcript_for_summary`, { reason: 'headless_call' });
         } else {
-          logger.warn(`[${callId}] identified_transcript_unavailable | falling_back_to_plain`);
+          logger.warn(`[${callId}] identified_transcript_unavailable`, { action: 'fallback_to_plain' });
         }
       }
       if (!transcriptContent) {
         transcriptContent = await this.retrieveTranscript(callId);
       }
       if (!transcriptContent) {
-        logger.warn(`[${callId}] ai_summary_skipped | reason=no_transcript_content`);
+        logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_content' });
         return;
       }
 
@@ -1519,7 +1462,7 @@ Output ONLY the processed transcript, nothing else.`;
       } else {
         const entries = this.parseTranscriptEntries(transcriptContent);
         if (entries.length === 0) {
-          logger.warn(`[${callId}] ai_summary_skipped | reason=no_transcript_entries`);
+          logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
           return;
         }
         formattedTranscript = this.formatTranscript(entries, callId);
@@ -1539,19 +1482,19 @@ Output ONLY the processed transcript, nothing else.`;
       // Skip title generation for HEADLESS recordings - users set title manually via recordings UI
       const skipTitleGeneration = call.callType === CallType.HEADLESS;
       if (skipTitleGeneration) {
-        logger.info(`[${callId}] title_generation_skipped | reason=headless_recording`);
+        logger.info(`[${callId}] title_generation_skipped`, { reason: 'headless_recording' });
       }
       const [summary, title, ticketSuggestions] = await Promise.all([
         this.generateCallSummary(formattedTranscript, callId).catch((err) => {
-          logger.error(`[${callId}] generate_summary_threw | error=${err instanceof Error ? err.message : JSON.stringify(err)}`, err);
+          logger.error(`[${callId}] generate_summary_threw`, { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
           return null;
         }),
         skipTitleGeneration ? Promise.resolve(null) : this.generateCallTitle(titleInput).catch((err) => {
-          logger.error(`[${callId}] generate_title_threw | error=${err instanceof Error ? err.message : JSON.stringify(err)}`, err);
+          logger.error(`[${callId}] generate_title_threw`, { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
           return null;
         }),
         this.generateTicketSuggestions(formattedTranscript).catch((err) => {
-          logger.error(`[${callId}] generate_ticket_suggestions_threw | error=${err instanceof Error ? err.message : JSON.stringify(err)}`, err);
+          logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
           return [];
         }),
       ]);
@@ -1561,24 +1504,33 @@ Output ONLY the processed transcript, nothing else.`;
         `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`
       );
 
+      // If ALL three AI calls failed, escalate from per-call warns to a single error so
+      // an LLM outage affecting every call is immediately visible rather than buried in warns.
+      const aiFullyFailed = !summary && !title && ticketSuggestions.length === 0;
+      if (aiFullyFailed) {
+        logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, tickets: 0 });
+      }
+
       if (summary) {
         // Save summary and title to call record.
         // Skip title update for HEADLESS recordings to preserve user-provided title.
         // Only set title from AI if the call doesn't already have one (scheduled calls have a pre-set title).
+        // Wrap individually so a DB failure here is distinguishable from a transcript
+        // post failure or a summary-post failure in the outer catch.
         try {
           await repositories.calls.update(call.id, {
             aiSummary: summary,
             ...(title && !call.title ? { title } : {}),
           });
-        } catch (updateErr) {
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
+        } catch (updateError) {
           // P2025: call was deleted while summary was being generated — ignore gracefully
-          if (updateErr instanceof Prisma.PrismaClientKnownRequestError && updateErr.code === 'P2025') {
+          if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
             logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
             return;
           }
-          throw updateErr;
+          logger.error(`[${callId}] call_record_update_failed`, { stage: 'call_record_update', error: updateError instanceof Error ? updateError.message : String(updateError), stack: updateError instanceof Error ? updateError.stack : undefined });
         }
-        logger.info(`[${callId}] call_record_updated | fields_updated=aiSummary`);
 
         // Update the call system message with the title (if generated)
         if (title && !skipTitleGeneration) {
@@ -1615,14 +1567,19 @@ Output ONLY the processed transcript, nothing else.`;
           }
         }
 
-        // Post summary + Xyne ticket suggestions as a reply in the chat
-        await this.postSummaryAsReply(
-          callMessage.conversationId,
-          callId,
-          summary,
-          call.createdByUserId,
-          ticketSuggestions
-        );
+        // Wrap individually — a bot-user-not-found or DB error here produces
+        // post_summary_reply_failed rather than the generic process_call_with_summary_failed.
+        try {
+          await this.postSummaryAsReply(
+            callMessage.conversationId,
+            callId,
+            summary,
+            call.createdByUserId,
+            ticketSuggestions
+          );
+        } catch (replyError) {
+          logger.error(`[${callId}] post_summary_reply_failed`, { stage: 'post_summary_reply', error: replyError instanceof Error ? replyError.message : String(replyError), stack: replyError instanceof Error ? replyError.stack : undefined });
+        }
 
         // Pulse block — completely separate from Xyne tickets.
         // Only activates when the call's channel is in PULSE_ENABLED_CHANNELS.
@@ -1686,10 +1643,12 @@ Output ONLY the processed transcript, nothing else.`;
           );
           logger.info(`Auto-generated detailed summary for call: ${callId}`);
         } catch (error) {
-          logger.error(`Failed to auto-generate detailed summary for call ${callId}:`, error);
+          // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
+          logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
         }
       } else {
-        logger.warn(`[${callId}] ai_summary_skipped | reason=generation_failed`);
+        // Use error (not warn) so LLM-down conditions generate alertable signal.
+        logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
       }
     // Queue Vespa indexing for the transcript (using call.id as the identifier)
       try {
@@ -1710,7 +1669,7 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
     } catch (error) {
-      logger.error(`[${callId}] process_call_with_summary_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
+      logger.error(`[${callId}] process_call_with_summary_failed`, { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
       // Don't re-throw - the transcript was already processed successfully
     }
   }
