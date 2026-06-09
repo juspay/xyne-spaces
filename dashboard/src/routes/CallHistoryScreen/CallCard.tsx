@@ -376,7 +376,7 @@ export const CallCard = ({
                         }}
                         className='text-sm font-medium rounded-lg'
                       >
-                        Join Call
+                        Start Call
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -437,7 +437,7 @@ export const CallCard = ({
                         </button>
                       </span>
                     </Tooltip>
-                    <Tooltip content='Join Call' delayDuration={300}>
+                    <Tooltip content='Start Call' delayDuration={300}>
                       <button
                         onClick={e => {
                           e.stopPropagation();

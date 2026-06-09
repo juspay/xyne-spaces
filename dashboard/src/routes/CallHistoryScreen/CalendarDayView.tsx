@@ -439,7 +439,7 @@ const CalendarDayView = ({
       onDragEnd={onDragEnd}
       onDragCancel={onDragCancel}
     >
-      <div className='w-full flex flex-col border border-border rounded-xl overflow-hidden'>
+      <div className='w-full h-full flex flex-col border border-border rounded-xl overflow-hidden'>
         {/* Day header */}
         <div className='flex shrink-0 border-b border-border bg-background'>
           {!isMultiPerson ? (
