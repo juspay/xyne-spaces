@@ -30,7 +30,9 @@ import {
   ArrowLeft,
   ClipboardCheck,
   Link2,
+  Hash,
 } from 'lucide-react';
+import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import CompactActionsMenu, { ActionMenuItem } from '../ui/CompactActionsMenu';
 import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
@@ -175,6 +177,8 @@ export const ThreadMessages = ({
     ? (selectedTabParam as TabType)
     : 'thread';
 
+  const isFocusedThread = searchParams.get('focusThread') === '1';
+
   const participationStatus = useGetChannelUserStatus(derivedChannelId);
   const isMember = !!participationStatus;
 
@@ -238,6 +242,9 @@ export const ThreadMessages = ({
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
+  const { displayName: channelDisplayName } = useChannelDisplayName(channel, currentUser?.id ?? '');
+  const isDmThread =
+    channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
 
   // Tab state - default to 'details' when opening from a ticket card
   const [activeTab, setActiveTab] = useState<TabType>(selectedTab);
@@ -668,6 +675,39 @@ export const ThreadMessages = ({
     }
   };
 
+  // From a focused thread, load the full channel (with this thread still open).
+  // Drops focusThread but preserves the origin/messageId hash so the channel list
+  // anchors to the right message.
+  const handleOpenInChannel = (): void => {
+    const params = new URLSearchParams(location.search);
+    params.delete('focusThread');
+    const qs = params.toString();
+    void navigate(
+      `${baseRoute}/${derivedChannelId}/${derivedConversationId}${qs ? `?${qs}` : ''}${location.hash}`,
+    );
+  };
+
+  const focusedChannelBreadcrumb =
+    isFocusedThread && !isStandaloneWindow() && channel ? (
+      <Tooltip content={`Open ${isDmThread ? '' : '#'}${channelDisplayName}`}>
+        <button
+          type='button'
+          onClick={handleOpenInChannel}
+          aria-label={`Open ${channelDisplayName}`}
+          data-track-category='THREAD_PANEL'
+          data-track-name='OPEN_IN_CHANNEL_FROM_FOCUS'
+          className='group/chan flex shrink-0 items-center gap-1 max-w-[180px] rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+        >
+          {!isDmThread && (
+            <Hash className='size-3.5 shrink-0 opacity-60 transition-opacity group-hover/chan:opacity-100' />
+          )}
+          <span className='truncate text-sm font-medium group-hover/chan:underline'>
+            {channelDisplayName}
+          </span>
+        </button>
+      </Tooltip>
+    ) : null;
+
   const openTicketDetailsExpandedView = (): void => {
     if (!ticket) return;
 
@@ -1077,9 +1117,10 @@ export const ThreadMessages = ({
               <span className='text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded flex-shrink-0'>
                 {ticket.xyneId}
               </span>
-              <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 text-foreground'>
+              <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0 text-foreground'>
                 {ticket.title}
               </h3>
+              {focusedChannelBreadcrumb}
             </div>
             <div ref={headerActionsRef} className='flex gap-x-2 shrink-0'>
               {!isHeaderCompact && derivedConversationId && (
@@ -1439,8 +1480,9 @@ export const ThreadMessages = ({
                       </Button>
                     </Tooltip>
                   )}
-                  {/* Show icon only when thread summary is active (non-simpleView) */}
-                  {!simpleView && isThreadSummaryActive && (
+                  {/* Thread indicator — shown when summarizing, or in focused mode so the
+                      header reads like Slack's "↳ Thread #channel". */}
+                  {!simpleView && (isThreadSummaryActive || isFocusedThread) && (
                     <CornerDownRight className='w-4 h-4 text-muted-foreground' />
                   )}
 
@@ -1583,10 +1625,11 @@ export const ThreadMessages = ({
                   ) : (
                     /* Regular View: Title and action buttons */
                     <>
-                      <div ref={headerTitleRef} className='flex-1 min-w-0'>
-                        <h3 className='font-semibold text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+                      <div ref={headerTitleRef} className='flex items-center gap-2 flex-1 min-w-0'>
+                        <h3 className='font-semibold text-foreground whitespace-nowrap shrink-0'>
                           {isTicketThread && ticket ? ticket.title : 'Thread message'}
                         </h3>
+                        {focusedChannelBreadcrumb}
                       </div>
                       <div ref={headerActionsRef} className='flex items-center gap-2 shrink-0'>
                         {!isHeaderCompact && (

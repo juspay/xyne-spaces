@@ -71,6 +71,7 @@ export const EtaActivity = ({
       badgeColorClass={isWarning ? 'bg-yellow-100' : isStageBreach ? 'bg-orange-100' : 'bg-red-100'}
       description={<span className='text-muted-foreground text-sm'>ticket in</span>}
       targetPath={targetPath}
+      focusThread
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
       isSelected={isSelected}

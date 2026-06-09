@@ -42,6 +42,7 @@ export const ReactionAddedActivity = ({
         </>
       }
       targetPath={targetPath}
+      focusThread={isThreadReply}
       linkedItemCreatedAt={message.conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}

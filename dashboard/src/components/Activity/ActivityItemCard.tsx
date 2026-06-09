@@ -44,6 +44,7 @@ interface ActivityItemCardProps {
   showUnreadDot?: boolean;
   linkedItemCreatedAt?: number;
   useActivityCutoff?: boolean;
+  focusThread?: boolean;
 }
 
 export const ActivityItemCard = ({
@@ -64,6 +65,7 @@ export const ActivityItemCard = ({
   showUnreadDot = false,
   linkedItemCreatedAt,
   useActivityCutoff = true,
+  focusThread = false,
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
@@ -89,6 +91,16 @@ export const ActivityItemCard = ({
     return `${base}${sep}selectedActivity=${activity.id}${hash}`;
   };
 
+  // Appends ?focusThread=1 to path, preserving existing hash — signals ChatView to
+  // open the thread directly without mounting the channel list (perf).
+  const appendFocusThread = (path: string): string => {
+    const hashIdx = path.indexOf('#');
+    const base = hashIdx >= 0 ? path.slice(0, hashIdx) : path;
+    const hash = hashIdx >= 0 ? path.slice(hashIdx) : '';
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}focusThread=1${hash}`;
+  };
+
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     // Always mark as read on any click (including URL clicks per FR-4)
     if (!activity.isRead) {
@@ -107,7 +119,10 @@ export const ActivityItemCard = ({
       : targetPath;
 
     if (path) {
-      const pathWithActivityId = appendSelectedActivity(path);
+      const pathWithActivityId =
+        focusThread && !isDeskChannel
+          ? appendFocusThread(appendSelectedActivity(path))
+          : appendSelectedActivity(path);
       const state = {
         activityNavigationNonce: Date.now(),
         ...(linkedItemCreatedAt !== undefined ? { linkedItemCreatedAt } : {}),

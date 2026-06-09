@@ -167,6 +167,7 @@ export const TicketUpdateActivity = ({
       badgeColorClass={config.badgeColor}
       description={<span className='text-muted-foreground text-sm'>{config.description}</span>}
       targetPath={targetPath}
+      focusThread
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
       isSelected={isSelected}

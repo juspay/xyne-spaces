@@ -66,7 +66,7 @@ const buildChatActionUrl = (notification: NotificationData['notification']): str
     if (isDirectMessage) {
       return `${routeBase}#origin=${conversationId}&messageId=${messageId}`;
     }
-    return `${routeBase}/${conversationId}#origin=${conversationId}&messageId=${messageId}`;
+    return `${routeBase}/${conversationId}?focusThread=1#origin=${conversationId}&messageId=${messageId}`;
   }
   if (conversationId) {
     return `${routeBase}#origin=${conversationId}`;

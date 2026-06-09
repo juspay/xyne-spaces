@@ -168,6 +168,7 @@ const ChatView = (): ReactElement => {
   const isExternalChatActive = !!externalChatCallId;
 
   const isThreadActive = !!conversationId;
+  const isFocusThread = isThreadActive && searchParams.get('focusThread') === '1';
   const isProfileActive = !!userId;
   const showSecondaryPanel =
     isThreadActive ||
@@ -224,6 +225,18 @@ const ChatView = (): ReactElement => {
         ticketId={ticketId}
         showHeader={false}
       />
+    );
+  }
+
+  if (isFocusThread) {
+    return (
+      <div
+        ref={chatViewContainerRef}
+        data-component='ChatView'
+        className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-lg'}`}
+      >
+        <Outlet />
+      </div>
     );
   }
 
