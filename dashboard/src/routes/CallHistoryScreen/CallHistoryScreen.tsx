@@ -536,15 +536,7 @@ const CallHistoryScreen = (): ReactElement => {
 
   const limitedScheduledCalls = useMemo(() => {
     if (!filteredScheduledCalls) return filteredScheduledCalls;
-    const seenSeries = new Set<string>();
-    return filteredScheduledCalls.filter(call => {
-      if (isExternalCalendarEvent(call)) return false;
-      if (call.recurringSeriesId) {
-        if (seenSeries.has(call.recurringSeriesId)) return false;
-        seenSeries.add(call.recurringSeriesId);
-      }
-      return true;
-    });
+    return filteredScheduledCalls.filter(call => !isExternalCalendarEvent(call));
   }, [filteredScheduledCalls]);
 
   const filteredRecentCalls = searchQuery.trim()
@@ -622,7 +614,12 @@ const CallHistoryScreen = (): ReactElement => {
         viewMode === 'calendar' ? 'overflow-hidden' : 'overflow-y-auto',
       )}
     >
-      <div className='w-full flex flex-col items-center px-4'>
+      <div
+        className={cn(
+          'w-full flex flex-col items-center px-4',
+          viewMode === 'calendar' && 'flex-1 min-h-0',
+        )}
+      >
         {/* Sticky header */}
         <div className='max-w-[860px] w-full sticky top-0 bg-background z-50 flex flex-col gap-3 pt-4 pb-6 sm:pb-3'>
           {/* Row 1: Title + calendar sync */}
@@ -945,7 +942,7 @@ const CallHistoryScreen = (): ReactElement => {
                 currentUserId={user?.id}
               />
             ) : (
-              <div className='flex-1 min-h-0 overflow-hidden pb-20 md:pb-4'>
+              <div className='flex-1 min-h-0 overflow-hidden pb-3'>
                 {calendarSubView === 'month' && (
                   <CalendarMonthView
                     calls={calendarCalls}

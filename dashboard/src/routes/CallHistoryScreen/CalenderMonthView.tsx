@@ -169,7 +169,7 @@ const CalendarMonthView = ({
   }
 
   return (
-    <div className='w-full border border-border rounded-xl overflow-hidden'>
+    <div className='w-full  flex flex-col border border-border rounded-xl overflow-hidden'>
       {/* Day-of-week header */}
       <div className='grid grid-cols-7 bg-muted/20 border-b border-border shrink-0'>
         {DAYS_OF_WEEK.map(day => (
