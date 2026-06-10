@@ -162,6 +162,13 @@ const normalizeSubTicketDrafts = (
     .filter(item => item.title.length > 0);
 };
 
+const newLocalFileId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `file-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+};
+
 export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   isOpen,
   onClose,
@@ -252,8 +259,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   >({});
   const [dynamicFieldOpenStates, setDynamicFieldOpenStates] = useState<Record<string, boolean>>({});
 
-  // Local state for files when creating from Tickets tab (no DB storage)
-  const [ticketLocalFiles, setTicketLocalFiles] = useState<File[]>([]);
+  const [ticketLocalFiles, setTicketLocalFiles] = useState<Array<{ id: string; file: File }>>([]);
 
   // Load attachments from DraftProvider (conversation case) or use local state (tickets tab)
   const [attachmentsMap, setAttachmentsMap] = useState<Map<string, File | UploadedFile>>(new Map());
@@ -291,7 +297,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         await providerAddDroppedFiles(file, channelId, sourceConversation?.conversationId);
       } else {
         // Use local state (memory only)
-        setTicketLocalFiles(prev => [...prev, file]);
+        setTicketLocalFiles(prev => [...prev, { id: newLocalFileId(), file }]);
       }
     },
     [isFromTicketsTab, providerAddDroppedFiles, channelId, sourceConversation],
@@ -304,9 +310,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         // Use DraftProvider
         await providerRemoveDroppedFile(attachmentId);
       } else {
-        // Use local state - note: _file parameter is not used for tickets tab since we filter by attachmentId from DraftProvider
-        // For tickets tab, we currently don't use the file param but could implement proper filtering in future
-        setTicketLocalFiles(prev => prev.filter(() => false)); // Clear handled differently via clearFiles on close
+        // Use local state — remove only the entry matching the stable random id
+        setTicketLocalFiles(prev => prev.filter(entry => entry.id !== attachmentId));
       }
     },
     [isFromTicketsTab, providerRemoveDroppedFile],
@@ -590,8 +595,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       });
     } else {
       // From local state (memory only)
-      ticketLocalFiles.forEach(file => {
+      ticketLocalFiles.forEach(({ id, file }) => {
         result.push({
+          id,
           name: file.name,
           file,
           isFromChat: false,
@@ -952,7 +958,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       // Get files to send - combine both sources
       const draftFiles = !isFromTicketsTab
         ? Array.from(attachmentsMap.values()).filter((f): f is File => f instanceof File)
-        : ticketLocalFiles;
+        : ticketLocalFiles.map(entry => entry.file);
 
       // 2. PROCEED WITH TICKET CREATION
       let response;
@@ -1621,10 +1627,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               }}
             >
               {field => {
-                // AI is checking — no grey background yet, just the shimmer chip
+                // AI is checking — compact shimmer chip with an inline X to stop and pick manually
                 if (isCheckingBoard && !boardAISuggestionSuppressed) {
                   return (
-                    <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-0.5 h-8 w-fit overflow-hidden text-sm'>
+                    <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background pl-2 pr-1 py-0.5 h-8 w-fit overflow-hidden text-sm'>
                       <SquareKanban
                         className='size-3.5 text-muted-foreground shrink-0'
                         strokeWidth={2.33}
@@ -1632,6 +1638,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       <span className='text-sm whitespace-nowrap text-muted-foreground animate-pulse'>
                         Suggesting board...
                       </span>
+                      <button
+                        type='button'
+                        className='flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-none focus-visible:text-foreground focus-visible:bg-accent transition-colors shrink-0'
+                        title='Stop and select manually'
+                        aria-label='Stop and select manually'
+                        onClick={() => {
+                          setBoardAISuggestionSuppressed(true);
+                          resetBoardSuggestionState();
+                          setTimeout(() => setBoardSelectorOpen(true), 0);
+                        }}
+                        data-track-category='TICKETS'
+                        data-track-name='CancelAISuggestedBoard'
+                      >
+                        <X className='size-3.5 shrink-0' strokeWidth={2.33} />
+                      </button>
                     </div>
                   );
                 }
