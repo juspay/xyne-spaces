@@ -104,6 +104,18 @@
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
     --ticket-accent: #445bb2;
+
+    /* Desk Settings tokens */
+    --desk-helper-foreground: #a0a7ab;
+    --desk-muted-foreground: #9da4a8;
+    --desk-border: #e4e6e7;
+    --desk-accent: #6276be;
+    --desk-accent-hover: #4f62a8;
+    --desk-accent-subtle: color-mix(in srgb, #6276be 20%, transparent);
+    --desk-accent-foreground: #6276be;
+    --desk-accent-badge-bg: #eef0fb;
+    --desk-destructive: #ff4b4b;
+    --desk-switch-track-off: #cdd1d6;
   }
 
   /* Classic theme - default theme with current design */
@@ -191,6 +203,18 @@
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
     --ticket-accent: #445bb2;
+
+    /* Desk Settings tokens */
+    --desk-helper-foreground: #a0a7ab;
+    --desk-muted-foreground: #9da4a8;
+    --desk-border: #e4e6e7;
+    --desk-accent: #6276be;
+    --desk-accent-hover: #4f62a8;
+    --desk-accent-subtle: color-mix(in srgb, #6276be 20%, transparent);
+    --desk-accent-foreground: #6276be;
+    --desk-accent-badge-bg: #eef0fb;
+    --desk-destructive: #ff4b4b;
+    --desk-switch-track-off: #cdd1d6;
   }
 
   /* Midnight theme - dark theme variant */
@@ -283,6 +307,18 @@
 
     /* Ticket accent color - lighter for dark mode visibility */
     --ticket-accent: #5b7ce6;
+
+    /* Desk Settings tokens */
+    --desk-helper-foreground: #b0b4ba;
+    --desk-muted-foreground: #b0b4ba;
+    --desk-border: #363a3f;
+    --desk-accent: #7b8fd4;
+    --desk-accent-hover: #6276be;
+    --desk-accent-subtle: color-mix(in srgb, #7b8fd4 20%, transparent);
+    --desk-accent-foreground: #9ab0f0;
+    --desk-accent-badge-bg: rgba(98, 118, 190, 0.2);
+    --desk-destructive: #ff6b6b;
+    --desk-switch-track-off: #43484e;
   }
 }
 
@@ -329,6 +365,22 @@
 }
 
 @layer components {
+  .text-desk-label {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.1px;
+    color: hsl(var(--foreground));
+  }
+
+  .text-desk-helper {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 18px;
+    letter-spacing: -0.02em;
+    color: var(--desk-helper-foreground);
+  }
+
   .animate-gradient-x {
     background-size: 400% 400%;
     animation: gradient-x 15s ease infinite;
@@ -435,6 +487,17 @@
   }
   .email-composer-editor.ProseMirror a:hover {
     color: var(--link-hover-color);
+  }
+
+  /* Signature editor placeholder fix - line-height to match paragraph leading-6 */
+  .signature-editor p.is-editor-empty:first-child::before,
+  .signature-editor p.is-empty::before {
+    @apply text-gray-500 text-sm;
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    line-height: 1.5rem;
+    pointer-events: none;
   }
 
   /* Chat Input Field - Base editor styles */

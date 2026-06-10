@@ -80,6 +80,20 @@ export default {
           accent: 'hsl(var(--action-accent) / <alpha-value>)',
           'primary-foreground': 'var(--action-primary-foreground)',
         },
+        desk: {
+          helper: 'var(--desk-helper-foreground)',
+          muted: 'var(--desk-muted-foreground)',
+          border: 'var(--desk-border)',
+          accent: {
+            DEFAULT: 'var(--desk-accent)',
+            hover: 'var(--desk-accent-hover)',
+            foreground: 'var(--desk-accent-foreground)',
+            subtle: 'var(--desk-accent-subtle)',
+            badge: 'var(--desk-accent-badge-bg)',
+          },
+          destructive: 'var(--desk-destructive)',
+          'switch-off': 'var(--desk-switch-track-off)',
+        },
         status: {
           new: 'var(--status-new)',
           pending: 'var(--status-pending)',

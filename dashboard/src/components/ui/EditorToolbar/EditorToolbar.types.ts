@@ -5,6 +5,7 @@ export interface EditorToolbarProps {
   editor: Editor | null;
   showImageUpload?: boolean;
   rightSlot?: React.ReactNode;
+  variant?: 'default' | 'compact';
 }
 
 export interface EmojiPickerButtonProps {

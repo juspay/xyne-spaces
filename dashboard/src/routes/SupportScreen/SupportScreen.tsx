@@ -127,7 +127,7 @@ interface BotMessageBrief {
   timestamp: number;
   sources: DraftSource[];
 }
-import { InboxSettingsPanel } from '../../components/xyne-desk/InboxSettings/InboxSettingsPanel';
+import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import {
   useChannelConnectedEmail,
   clearChannelConnectedEmailCache,
@@ -1819,13 +1819,12 @@ const SupportScreen = (): ReactElement => {
                   </div>
                 </div>
               </div>
-              {isSettingsOpen && (
-                <InboxSettingsPanel
-                  channelId={selectedChannelId}
-                  userID={userID}
-                  onClose={() => void navigate(-1)}
-                />
-              )}
+              <DeskSettings
+                open={isSettingsOpen}
+                onClose={() => void navigate(-1)}
+                channelId={selectedChannelId}
+                userID={userID}
+              />
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                 {!selectedChannelId ? (
                   <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>

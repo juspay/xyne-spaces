@@ -1,6 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { toast } from 'sonner';
-import { Mail, Plug, Unplug, AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Plug, Unplug } from 'lucide-react';
 import {
   disconnectDeskIntegration,
   initDeskIntegrationReconnect,
@@ -12,6 +12,7 @@ import {
 import { clearDeskContactsCache } from '../../../hooks/useDeskContacts';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
+import { cn } from '../../../utils/classNames';
 
 interface DeskIntegrationCardProps {
   channelId: string;
@@ -67,12 +68,11 @@ export const DeskIntegrationCard = ({
   };
 
   return (
-    <div className='bg-card p-3 rounded-xl border border-border'>
-      <div className='flex flex-col gap-y-2'>
-        <p className='text-sm font-medium text-foreground'>Email integration</p>
-        <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-          <Mail size={14} className='flex-shrink-0' />
-          <span className='truncate font-mono text-xs' title={connectedEmail}>
+    <div className='flex flex-col gap-[8px]'>
+      <div className='flex items-center justify-between gap-4'>
+        <div className='flex flex-col gap-[4px] min-w-0 flex-1'>
+          <span className='text-desk-label shrink-0'>Connected Email</span>
+          <span className='text-sm text-muted-foreground truncate' title={connectedEmail}>
             {connectedEmail}
           </span>
         </div>
@@ -82,36 +82,39 @@ export const DeskIntegrationCard = ({
             reconnect endpoints is the authoritative gate; this is purely
             visual cleanup so the panel doesn't advertise actions the
             user can't take. */}
-        {canManage && (
-          <div className='flex items-center gap-2 pt-1'>
-            <Button
-              variant='secondary'
-              size='sm'
-              onClick={() => void handleReconnect()}
-              disabled={isReconnecting || isDisconnecting}
-              data-track-category='desk-integration'
-              data-track-name='reconnect'
-            >
-              <Plug size={14} className='mr-1.5' />
-              {isReconnecting ? 'Redirecting…' : isConnected ? 'Reconnect' : 'Reconnect mailbox'}
-            </Button>
-            {isConnected && (
-              <Button
-                variant='destructive'
-                size='sm'
-                onClick={() => setShowDisconnectConfirm(true)}
-                disabled={isReconnecting || isDisconnecting}
-                data-track-category='desk-integration'
-                data-track-name='open-disconnect-confirm'
-              >
-                <Unplug size={14} className='mr-1.5' />
-                Disconnect
-              </Button>
+        {canManage && isConnected && (
+          <button
+            type='button'
+            onClick={() => setShowDisconnectConfirm(true)}
+            disabled={isDisconnecting}
+            className={cn(
+              'inline-flex h-[32px] shrink-0 items-center gap-1.5 px-[10px] py-1.5 text-desk-label',
+              'text-desk-destructive border rounded-[10px] shadow-sm',
+              'hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
             )}
-            {!isConnected && (
-              <span className='text-xs text-muted-foreground'>Currently disconnected</span>
+            data-track-category='desk-integration'
+            data-track-name='open-disconnect-confirm'
+          >
+            <Unplug size={14} className='shrink-0' />
+            Disconnect
+          </button>
+        )}
+        {canManage && !isConnected && (
+          <button
+            type='button'
+            onClick={() => void handleReconnect()}
+            disabled={isReconnecting || isDisconnecting}
+            className={cn(
+              'inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium',
+              'text-foreground border border-border rounded-[10px] bg-background shadow-sm',
+              'hover:bg-desk-accent-subtle transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
             )}
-          </div>
+            data-track-category='desk-integration'
+            data-track-name='connect'
+          >
+            <Plug size={14} className='shrink-0' />
+            {isReconnecting ? 'Redirecting…' : 'Connect'}
+          </button>
         )}
       </div>
 
@@ -120,7 +123,7 @@ export const DeskIntegrationCard = ({
         onOpenChange={open => !open && setShowDisconnectConfirm(false)}
         title='Disconnect email integration'
       >
-        <div className='p-5 flex flex-col gap-3'>
+        <div className='p-5 flex flex-col gap-3 rounded-[16px]'>
           <div className='flex gap-3'>
             <AlertTriangle size={18} className='flex-shrink-0 text-amber-500 mt-0.5' />
             <div className='flex flex-col gap-2 text-sm'>
