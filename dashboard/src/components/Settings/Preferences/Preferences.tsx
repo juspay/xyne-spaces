@@ -16,6 +16,7 @@ import {
   Search,
   Monitor,
   Smartphone,
+  LayoutGrid,
 } from 'lucide-react';
 import { NotificationLevel } from '@xyne/shared';
 import { format } from 'date-fns';
@@ -40,6 +41,9 @@ import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal'
 import { useGlobalNotificationSettings } from '../../../hooks/useGlobalNotificationSettings';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
+import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
+import { useToolbarItems } from '../../../hooks/useToolbarItems';
+import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -56,6 +60,12 @@ const NAV_ITEMS: NavItem[] = [
   },
   { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
   { id: 'search', label: 'Search', icon: <Search className='size-4' /> },
+  {
+    id: 'toolbar',
+    label: 'Toolbar',
+    icon: <LayoutGrid className='size-4' />,
+    desktopOnly: true,
+  },
   { id: 'calendar', label: 'Calendar', icon: <Calendar className='size-4' /> },
   { id: 'developer', label: 'Developer', icon: <Code2 className='size-4' /> },
 ];
@@ -538,6 +548,50 @@ const SearchSection: FC<{ state: PreferencesState }> = ({ state }) => (
   </div>
 );
 
+// ─── Toolbar ────────────────────────────────────────────────────────────────
+const ToolbarSection: FC<{ state: PreferencesState }> = () => {
+  const items = useVisibleNavigationItems();
+  const { toolbarPaths, setInToolbar } = useToolbarItems();
+
+  return (
+    <div className='space-y-4'>
+      <SectionHeader
+        title='Toolbar'
+        subtitle='Choose which items appear in your sidebar. Hidden items stay available under “More”.'
+      />
+      <div className='flex flex-col gap-1.5'>
+        {items.map(item => {
+          const Icon = item.icon;
+          const required = isRequiredToolbarPath(item.path);
+          const checked = required || toolbarPaths.has(item.path);
+          return (
+            <div
+              key={item.path}
+              className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'
+            >
+              <div className='flex items-center gap-3 min-w-0'>
+                <div className='flex items-center justify-center size-8 rounded-md bg-muted border border-border shrink-0 text-muted-foreground'>
+                  <Icon className='size-4' />
+                </div>
+                <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
+              </div>
+              <div className='flex items-center gap-2.5 shrink-0'>
+                {required && <span className='text-xs text-muted-foreground'>Always on</span>}
+                <Switch
+                  aria-label={`Show ${item.label} in toolbar`}
+                  checked={checked}
+                  disabled={required}
+                  onCheckedChange={value => setInToolbar(item.path, value)}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // ─── Section registry ───────────────────────────────────────────────────────
 const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   appearance: AppearanceSection,
@@ -547,6 +601,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   messaging: MessagingSection,
   launch: LaunchSection,
   search: SearchSection,
+  toolbar: ToolbarSection,
   calendar: CalendarSection,
   developer: DeveloperSection,
 };

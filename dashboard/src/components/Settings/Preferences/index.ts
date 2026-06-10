@@ -8,6 +8,7 @@ export type PreferenceSection =
   | 'messaging'
   | 'launch'
   | 'search'
+  | 'toolbar'
   | 'calendar'
   | 'developer';
 
