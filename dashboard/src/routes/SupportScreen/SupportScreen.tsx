@@ -203,6 +203,7 @@ interface ComposeInstance {
   minimized: boolean;
   /** Incremented to force-remount the inner EmailComposer when needed. */
   key: number;
+  initialTo?: string[] | undefined;
 }
 
 /** Persisted shape — only the stable fields, no ephemeral UI state. */
@@ -647,9 +648,15 @@ const SupportScreen = (): ReactElement => {
 
   /** Add a new compose window for the given channel. */
   const openNewCompose = useCallback(
-    (channelId: string): void => {
+    (channelId: string, initialTo?: string[]): void => {
       const id = uuidv4();
-      const next: ComposeInstance = { id, channelId, minimized: false, key: 0 };
+      const next: ComposeInstance = {
+        id,
+        channelId,
+        minimized: false,
+        key: 0,
+        initialTo: initialTo ?? [],
+      };
       setComposeInstances(prev => [...prev, next]);
       if (userID) {
         const persisted = readPersistedInstances(userID);
@@ -657,6 +664,14 @@ const SupportScreen = (): ReactElement => {
       }
     },
     [userID],
+  );
+
+  const handleMailtoClick = useCallback(
+    (email: string): void => {
+      if (!selectedChannelId) return;
+      openNewCompose(selectedChannelId, [email]);
+    },
+    [openNewCompose, selectedChannelId],
   );
 
   /** Close (save as draft) a compose window by instance ID. */
@@ -1947,7 +1962,11 @@ const SupportScreen = (): ReactElement => {
         {ticketId && (
           <Panel defaultSize={100} minSize={100} order={3}>
             <div className='h-full overflow-hidden'>
-              <SupportTicketDetail ticketFilter={ticketFilter} isMember={isSelectedChannelJoined} />
+              <SupportTicketDetail
+                ticketFilter={ticketFilter}
+                isMember={isSelectedChannelJoined}
+                onMailtoClick={handleMailtoClick}
+              />
             </div>
           </Panel>
         )}
@@ -2008,7 +2027,6 @@ const SupportScreen = (): ReactElement => {
           scrolls left to reveal older windows. pointer-events-none on the strip
           itself prevents it from blocking clicks on the ticket list beneath. */}
       {isSelectedChannelJoined &&
-        !ticketId &&
         composeInstances.filter(inst => inst.channelId === selectedChannelId).length > 0 && (
           <div
             className='fixed bottom-0 left-0 right-0 z-50 flex flex-row-reverse items-end gap-3 overflow-x-auto pointer-events-none pr-6'
@@ -2025,6 +2043,7 @@ const SupportScreen = (): ReactElement => {
                   draftId={inst.id}
                   resetKey={inst.key}
                   minimized={inst.minimized}
+                  initialTo={inst.initialTo}
                   onMinimizedChange={next => setComposeMinimized(inst.id, next)}
                   onClose={() => closeCompose(inst.id)}
                   onDiscard={() => discardCompose(inst.id)}
@@ -2092,11 +2111,13 @@ type SupportTicketDetailProps = {
     hasAiDraft: boolean | undefined;
   };
   isMember: boolean;
+  onMailtoClick: (email: string) => void;
 };
 
 const SupportTicketDetail = ({
   ticketFilter,
   isMember,
+  onMailtoClick,
 }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
@@ -3096,6 +3117,7 @@ const SupportTicketDetail = ({
                         setComposerOpen(true);
                       }}
                       deskEmail={deskEmail}
+                      onMailtoClick={onMailtoClick}
                     />
                   )}
                 </div>
@@ -3566,6 +3588,7 @@ const EmailThread = ({
   emailReads,
   onReplyToEmail,
   deskEmail,
+  onMailtoClick,
 }: {
   collapseState: EmailCollapseState;
   ticketId?: string | null | undefined;
@@ -3573,6 +3596,7 @@ const EmailThread = ({
   emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }> | undefined;
   onReplyToEmail?: (emailId: string, mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
+  onMailtoClick: (email: string) => void;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
   const rootEmail = sortedEmails[0];
@@ -3610,6 +3634,7 @@ const EmailThread = ({
             })}
           deskEmail={deskEmail}
           rootEmail={rootEmail}
+          onMailtoClick={onMailtoClick}
         />
       ))}
     </div>
@@ -3626,6 +3651,7 @@ const EmailThreadItem = ({
   deskEmail,
   rootEmail,
   threadAttachments,
+  onMailtoClick,
 }: {
   email: Email;
   isCollapsed?: boolean;
@@ -3636,6 +3662,7 @@ const EmailThreadItem = ({
   deskEmail?: string | null | undefined;
   rootEmail: Email | undefined;
   threadAttachments?: NonNullable<Email['attachments']>;
+  onMailtoClick: (email: string) => void;
 }): ReactElement => {
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
@@ -3772,6 +3799,7 @@ const EmailThreadItem = ({
                   body={email.body}
                   emailId={email.id}
                   attachments={threadAttachments ?? email.attachments}
+                  onMailtoClick={onMailtoClick}
                 />
               ) : (
                 <span className='text-muted-foreground italic'>No content</span>

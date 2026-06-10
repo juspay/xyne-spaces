@@ -489,6 +489,42 @@
     color: var(--link-hover-color);
   }
 
+  .email-composer-editor.ProseMirror .email-recipient-pill,
+  .email-composer-editor.ProseMirror .recipient-pill-node-wrapper .email-recipient-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    vertical-align: baseline;
+    margin: 0 0.125rem;
+    padding: 0.125rem 0.375rem 0.125rem 0.125rem;
+    border-radius: 0.375rem;
+    background-color: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .email-composer-editor.ProseMirror .email-recipient-pill-label {
+    line-height: 1.25rem;
+  }
+
+  .email-composer-editor.ProseMirror .email-recipient-pill-initial {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+    border-radius: 0.25rem;
+    background-color: hsl(var(--border));
+    font-size: 0.625rem;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+  }
+
   /* Signature editor placeholder fix - line-height to match paragraph leading-6 */
   .signature-editor p.is-editor-empty:first-child::before,
   .signature-editor p.is-empty::before {

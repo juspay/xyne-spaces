@@ -68,7 +68,9 @@ import { EmailTagWithAvatar } from '../EmailTagWithAvatar/EmailTagWithAvatar';
 import { RecipientSuggestionsDropdown } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
 import { AIComposerPanel, AIRefineDropdown } from '../AIComposerPanel/AIComposerPanel';
 import { stripCitationMarks } from '../../ui/TipTapExtensions/CitationMark';
+import { RecipientPillExtension } from '../../ui/TipTapExtensions';
 import { Popover } from '../../ui/Popover/Popover';
+import { RecipientMentionSelector } from './RecipientMentionSelector';
 
 import {
   buildContactPool,
@@ -180,6 +182,8 @@ interface EmailComposerProps {
   onDraftSourcesChange?: (sources: DraftSource[]) => void;
   onCitationClick?: (ref: string) => void;
   onCitationOrderChange?: (orderedRefs: string[]) => void;
+  /** Pre-fill the To field when the composer mounts (draft restoration takes precedence). */
+  initialTo?: string[];
 }
 
 export const EmailComposer = ({
@@ -202,6 +206,7 @@ export const EmailComposer = ({
   onDraftSourcesChange,
   onCitationClick,
   onCitationOrderChange,
+  initialTo,
 }: EmailComposerProps): ReactElement => {
   const isComposeMode = mode === 'compose';
   const features = resolveFeatures(mode, featureOverrides);
@@ -342,6 +347,29 @@ export const EmailComposer = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
+  const [bodyEditor, setBodyEditor] = useState<Editor | null>(null);
+  // Body pill → To sync only. To chip add/remove does not touch the editor body.
+  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => {});
+  onRemoveRecipientFromBodyRef.current = (email: string): void => {
+    const lower = email.toLowerCase().trim();
+    setToEmails(prev => prev.filter(e => e.toLowerCase().trim() !== lower));
+  };
+  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => {});
+  onAddRecipientToFromBodyRef.current = (email: string): void => {
+    const lower = email.toLowerCase().trim();
+    setToEmails(prev => {
+      if (prev.some(e => e.toLowerCase().trim() === lower)) return prev;
+      return [...prev, email];
+    });
+  };
+  const recipientExtensions = useMemo(
+    () => [
+      RecipientPillExtension.configure({
+        onRemoveRecipient: (email: string) => onRemoveRecipientFromBodyRef.current(email),
+      }),
+    ],
+    [],
+  );
   // Tracks the conversation draft for which we have already performed the initial
   // attachment restore. Prevents subsequent Zero reactive updates (e.g. after
   // an autosave changes `updatedAt`) from re-running the restore and clearing
@@ -392,7 +420,7 @@ export const EmailComposer = ({
   const [bccInputValue, setBccInputValue] = useState<string>('');
 
   // Recipient state
-  const [toEmails, setToEmails] = useState<string[]>([]);
+  const [toEmails, setToEmails] = useState<string[]>(initialTo ?? []);
   const [ccEmails, setCcEmails] = useState<string[]>([]);
   const [bccEmails, setBccEmails] = useState<string[]>([]);
   const [showCc, setShowCc] = useState<boolean>(true);
@@ -462,6 +490,16 @@ export const EmailComposer = ({
   useEffect(() => {
     onDraftSourcesChange?.(aiDraft.draftSources);
   }, [aiDraft.draftSources, onDraftSourcesChange]);
+
+  // Clear stale editor ref when the body EmailEditor unmounts (e.g. draft pane collapsed).
+  useEffect(() => {
+    const bodyEditorMounted =
+      (!aiDraft.isDraftActive && aiPanelMode === null) ||
+      (aiDraft.isDraftActive && aiPaneExpanded === 'yours');
+    if (!bodyEditorMounted) {
+      setBodyEditor(null);
+    }
+  }, [aiDraft.isDraftActive, aiPaneExpanded, aiPanelMode]);
 
   const [composeSources, setComposeSources] = useState<DraftSource[]>([]);
 
@@ -1425,6 +1463,21 @@ export const EmailComposer = ({
     return { visibleEmails, remainingCount: remainingCount > 0 ? remainingCount : 0 };
   }, [toEmails, ccEmails, bccEmails]);
 
+  const handleBodyEditorReady = useCallback((editor: Editor): void => {
+    editorRef.current = editor;
+    setBodyEditor(editor);
+  }, []);
+
+  const recipientMentionPicker = (
+    <RecipientMentionSelector
+      editor={bodyEditor}
+      contactPool={contactPool}
+      users={users}
+      toEmails={toEmails}
+      onAddToRecipient={email => onAddRecipientToFromBodyRef.current(email)}
+    />
+  );
+
   const handleCcKeyDown = makeRecipientKeyDownHandler({
     field: 'cc',
     inputValue: ccInputValue,
@@ -2200,9 +2253,8 @@ export const EmailComposer = ({
                         onChange={handleEditorChange}
                         onAddFiles={addFilesToAttachments}
                         uploadAndInsertInlineImages={uploadAndInsertInlineImages}
-                        onEditorReady={editor => {
-                          editorRef.current = editor;
-                        }}
+                        extraExtensions={recipientExtensions}
+                        onEditorReady={handleBodyEditorReady}
                         onSendShortcut={() => {
                           const canSend = isComposeMode
                             ? !!channelId && composeSubject.trim().length > 0
@@ -2232,6 +2284,7 @@ export const EmailComposer = ({
                           setAiPaneExpanded('ai');
                         }}
                       />
+                      {recipientMentionPicker}
                     </div>
                   ) : (
                     <button
@@ -2298,38 +2351,40 @@ export const EmailComposer = ({
             }
 
             return (
-              <EmailEditor
-                value={emailContent}
-                onChange={handleEditorChange}
-                onAddFiles={addFilesToAttachments}
-                uploadAndInsertInlineImages={uploadAndInsertInlineImages}
-                onEditorReady={editor => {
-                  editorRef.current = editor;
-                }}
-                onSendShortcut={() => {
-                  const canSend = isComposeMode
-                    ? !!channelId && composeSubject.trim().length > 0
-                    : !!conversationId;
-                  if (
-                    (hasEmailBody || attachments.length > 0) &&
-                    canSend &&
-                    !isSending &&
-                    toEmails.length > 0
-                  ) {
-                    void handleSendEmail();
-                  }
-                }}
-                onBlur={() => {
-                  if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
-                }}
-                onCitationClick={effectiveCitationClick}
-                {...(onCitationOrderChange && { onCitationOrderChange })}
-                disabled={isSending}
-                className='flex-1 min-h-0'
-                footerSlot={composerFooter}
-                toolbarRightSlot={toolbarRightSlot}
-                bubbleToolbar
-              />
+              <>
+                <EmailEditor
+                  value={emailContent}
+                  onChange={handleEditorChange}
+                  onAddFiles={addFilesToAttachments}
+                  uploadAndInsertInlineImages={uploadAndInsertInlineImages}
+                  extraExtensions={recipientExtensions}
+                  onEditorReady={handleBodyEditorReady}
+                  onSendShortcut={() => {
+                    const canSend = isComposeMode
+                      ? !!channelId && composeSubject.trim().length > 0
+                      : !!conversationId;
+                    if (
+                      (hasEmailBody || attachments.length > 0) &&
+                      canSend &&
+                      !isSending &&
+                      toEmails.length > 0
+                    ) {
+                      void handleSendEmail();
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
+                  }}
+                  onCitationClick={effectiveCitationClick}
+                  {...(onCitationOrderChange && { onCitationOrderChange })}
+                  disabled={isSending}
+                  className='flex-1 min-h-0'
+                  footerSlot={composerFooter}
+                  toolbarRightSlot={toolbarRightSlot}
+                  bubbleToolbar
+                />
+                {recipientMentionPicker}
+              </>
             );
           })()}
         </div>

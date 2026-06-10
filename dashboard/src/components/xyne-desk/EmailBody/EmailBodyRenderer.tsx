@@ -12,6 +12,8 @@ interface EmailBodyRendererProps {
   emailId?: string;
   /** Email attachments (loaded via Zero relation) — used to resolve cid: refs */
   attachments?: ReadonlyArray<{ id: string; metadata?: unknown }>;
+  /** Called when a mailto link inside the email body is clicked */
+  onMailtoClick?: ((email: string) => void) | undefined;
 }
 
 const TRANSPARENT_PIXEL =
@@ -129,6 +131,44 @@ const IFRAME_STYLES = `
     padding: 8px 12px;
     color: #5f6368;
   }
+  a.email-recipient-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: baseline;
+    margin: 0 2px;
+    padding: 2px 6px 2px 2px;
+    border-radius: 6px;
+    background: #f1f3f4;
+    color: #202124;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+    white-space: nowrap;
+    text-decoration: none !important;
+    cursor: pointer;
+    user-select: none;
+  }
+  a.email-recipient-pill:hover {
+    background: #e8eaed;
+    color: #202124;
+  }
+  a.email-recipient-pill .email-recipient-pill-initial {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    border-radius: 4px;
+    background: #dadce0;
+    font-size: 10px;
+    font-weight: 500;
+    color: #5f6368;
+  }
+  a.email-recipient-pill .email-recipient-pill-label {
+    line-height: 20px;
+  }
 `;
 
 const wrapQuotesInDetails = (doc: Document): void => {
@@ -149,6 +189,109 @@ const wrapQuotesInDetails = (doc: Document): void => {
     details.appendChild(body);
     wrapper.appendChild(details);
     wrapper.setAttribute('data-xd-wrapped', 'true');
+  });
+};
+
+interface RecipientPillData {
+  email: string;
+  name: string;
+  userId?: string;
+  picture?: string;
+}
+
+const parseMailtoEmail = (href: string): string | null => {
+  if (!href.toLowerCase().startsWith('mailto:')) return null;
+  let remainder = href.slice(7);
+  const queryIdx = remainder.indexOf('?');
+  if (queryIdx >= 0) remainder = remainder.slice(0, queryIdx);
+  const angleMatch = remainder.match(/<([^>]+)>/);
+  if (angleMatch && angleMatch[1]) return angleMatch[1].trim();
+  return remainder.trim() || null;
+};
+
+const extractMentionName = (text: string, fallbackEmail?: string): string => {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('+')) {
+    const name = trimmed.slice(1).trim();
+    if (name) return name;
+  }
+  if (trimmed) return trimmed;
+  if (fallbackEmail) {
+    const local = fallbackEmail.split('@')[0]?.trim();
+    if (local) return local;
+  }
+  return fallbackEmail || 'Recipient';
+};
+
+const isIngestedMentionAnchor = (anchor: Element): boolean => {
+  if (anchor.hasAttribute('data-recipient-pill')) return false;
+  if (anchor.classList.contains('email-recipient-pill')) return false;
+  const href = anchor.getAttribute('href') || '';
+  if (!parseMailtoEmail(href)) return false;
+  return (anchor.textContent || '').trim().startsWith('+');
+};
+
+const isRecipientMentionLink = (anchor: Element): boolean =>
+  anchor.hasAttribute('data-recipient-pill') || anchor.classList.contains('email-recipient-pill');
+
+const buildRecipientPillAnchor = (doc: Document, data: RecipientPillData): HTMLAnchorElement => {
+  const anchor = doc.createElement('a');
+  anchor.href = `mailto:${data.email}`;
+  anchor.className = 'email-recipient-pill';
+  anchor.setAttribute('data-recipient-pill', '');
+  anchor.setAttribute('data-recipient-email', data.email);
+  anchor.setAttribute('data-recipient-name', data.name);
+  if (data.userId) anchor.setAttribute('data-user-id', data.userId);
+  if (data.picture) anchor.setAttribute('data-user-picture', data.picture);
+
+  const initial = doc.createElement('span');
+  initial.className = 'email-recipient-pill-initial';
+  initial.textContent = (data.name.charAt(0) || data.email.charAt(0) || '?').toUpperCase();
+
+  const label = doc.createElement('span');
+  label.className = 'email-recipient-pill-label';
+  label.textContent = `+${data.name}`;
+
+  anchor.appendChild(initial);
+  anchor.appendChild(label);
+  return anchor;
+};
+
+const replaceWithRecipientPill = (
+  element: Element,
+  doc: Document,
+  data: RecipientPillData,
+): void => {
+  const anchor = buildRecipientPillAnchor(doc, data);
+  element.parentNode?.replaceChild(anchor, element);
+};
+
+/** Unify platform pills and ingested Gmail / third-party mention mailto links. */
+const normalizeRecipientMentions = (root: HTMLElement, doc: Document): void => {
+  root.querySelectorAll('span[data-recipient-pill]').forEach(pill => {
+    const email = pill.getAttribute('data-recipient-email');
+    if (!email) return;
+    const name =
+      pill.getAttribute('data-recipient-name') || extractMentionName(pill.textContent || '', email);
+    const pillData: RecipientPillData = { email, name };
+    const userId = pill.getAttribute('data-user-id');
+    const picture = pill.getAttribute('data-user-picture');
+    if (userId) pillData.userId = userId;
+    if (picture) pillData.picture = picture;
+    replaceWithRecipientPill(pill, doc, pillData);
+  });
+
+  const ingestedMentions: Element[] = [];
+  root.querySelectorAll('a[href]').forEach(anchor => {
+    if (isIngestedMentionAnchor(anchor)) ingestedMentions.push(anchor);
+  });
+  ingestedMentions.forEach(chip => {
+    const href = chip.getAttribute('href') || '';
+    const email = parseMailtoEmail(href);
+    if (!email) return;
+    const name =
+      chip.getAttribute('data-recipient-name') || extractMentionName(chip.textContent || '', email);
+    replaceWithRecipientPill(chip, doc, { email, name });
   });
 };
 
@@ -200,6 +343,7 @@ const buildIframeSrcdoc = (
 
   collapseQuotedHistory(root, doc);
   wrapQuotesInDetails(doc);
+  normalizeRecipientMentions(root, doc);
 
   let blockedCount = 0;
   if (!showRemoteImages) {
@@ -225,8 +369,11 @@ export const EmailBodyRenderer = ({
   body,
   emailId,
   attachments,
+  onMailtoClick,
 }: EmailBodyRendererProps): JSX.Element => {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const onMailtoClickRef = useRef(onMailtoClick);
+  onMailtoClickRef.current = onMailtoClick;
   const [height, setHeight] = useState<number>(24);
   const [showRemoteImages, setShowRemoteImages] = useState<boolean>(false);
 
@@ -326,6 +473,14 @@ export const EmailBodyRenderer = ({
           if (!href) return;
           e.preventDefault();
           e.stopPropagation();
+          const mailtoEmail = parseMailtoEmail(href);
+          if (mailtoEmail && isRecipientMentionLink(anchor)) {
+            const onMentionClick = onMailtoClickRef.current;
+            if (onMentionClick) {
+              onMentionClick(mailtoEmail);
+              return;
+            }
+          }
           const text = (anchor.textContent || '').trim();
           const isCopyLink = anchor.getAttribute('data-action') === 'copy-link' || text === href;
           if (isCopyLink) {

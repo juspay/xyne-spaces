@@ -25,8 +25,10 @@ export {
   detectCommandTrigger,
   detectChannelTrigger,
   detectEmojiTrigger,
+  detectRecipientTrigger,
   getPopoverPosition,
   getAbsolutePosition,
   getTextBeforeCursor,
+  createVirtualAnchor,
 } from './Selectors.utils';
 export type { TriggerMatch, EditorPosition, VirtualElement } from './Selectors.utils';

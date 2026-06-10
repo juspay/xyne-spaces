@@ -17,6 +17,7 @@ interface ComposeEmailModalProps {
    * channelId (legacy single-compose behaviour).
    */
   draftId?: string;
+  initialTo?: string[] | undefined;
 }
 
 const COMPOSE_HEIGHT_KEY = 'support-compose-height-vh';
@@ -49,6 +50,7 @@ export const ComposeEmailModal = ({
   onClose,
   onDiscard,
   draftId,
+  initialTo,
 }: ComposeEmailModalProps): ReactElement | null => {
   const [internalMinimized, setInternalMinimized] = useState(false);
   const isControlled = typeof minimizedProp === 'boolean';
@@ -181,6 +183,7 @@ export const ComposeEmailModal = ({
             mode='compose'
             channelId={channelId}
             onClose={onClose}
+            {...(initialTo ? { initialTo } : {})}
             {...(onDiscard ? { onDiscard } : {})}
             {...(draftId ? { composeDraftId: draftId } : {})}
           />

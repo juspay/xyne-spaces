@@ -7,6 +7,13 @@ export type { CommandPluginState } from './CommandsExtension';
 export { EmojiSelectorExtension, emojiSelectorPluginKey } from './EmojiSelectorExtension';
 export type { EmojiSelectorPluginState } from './EmojiSelectorExtension';
 
+export { RecipientPillExtension, recipientSelectorPluginKey } from './RecipientPillExtension';
+export type {
+  RecipientPillOptions,
+  RecipientSelectorItem,
+  RecipientSelectorPluginState,
+} from './RecipientPillExtension';
+
 export { ChannelMentionExtension, channelMentionPluginKey } from './ChannelMentionExtension';
 export type {
   ChannelMentionOptions,
