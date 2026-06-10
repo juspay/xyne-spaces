@@ -9,6 +9,7 @@ import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
 import { isDeskChannelType } from '../utils/channel.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
+import { useCachedQuery } from './useCachedQuery';
 import type { QueryResultType } from '@rocicorp/zero';
 
 export { type VisibleChannel } from '../machines/stateMachine.js';
@@ -220,6 +221,16 @@ export const useGetChannelUserStatus = (channelId: string): ChannelUserStatus | 
   return useSelector(stateMachineActor, state =>
     getChannelUserStatusMap(state.context.userChannelStatuses).get(channelId),
   );
+};
+
+export const useChannelParticipation = (
+  channelId: string,
+): ChannelUserStatus | undefined => {
+  const statusFromHook = useGetChannelUserStatus(channelId);
+  const [statusFromQuery] = useCachedQuery(queries.getChannelUserStatus({ channelId }), {
+    enabled: statusFromHook === undefined && channelId !== '',
+  });
+  return statusFromHook ?? statusFromQuery;
 };
 
 export const useGetChannelConversations = (channelId: string): Conversation[] => {

@@ -12,6 +12,7 @@ export {
   useChannelsByProjectId,
   useUserChannelStatuses,
   useGetChannelUserStatus,
+  useChannelParticipation,
   useGetChannelConversations,
   useGetLatestConversation,
   useVisibleChannel,

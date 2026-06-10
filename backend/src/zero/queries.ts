@@ -1505,7 +1505,8 @@ export const queries = defineQueries({
       zql.channel_user_status
         .where('channelId', channelId)
         .where('userId', ctx.userID)
-        .where('isDeleted', false),
+        .where('isDeleted', false)
+        .one(),
   ),
 
   userActiveCalls: defineQuery(() => {
