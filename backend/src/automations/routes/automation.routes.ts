@@ -11,6 +11,7 @@ import {
 } from '../services/webhook-secret.service';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
 import type { AutomationConfig } from '../types/automation-config';
+import { AutomationRunStatus } from '../types/status';
 import { clawClient } from '../services/claw-client';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
@@ -144,6 +145,16 @@ router.get('/claw/agents', async (_req: Request, res: Response) => {
   }
 });
 
+const RUN_STATUS_FILTER_VALUES: ReadonlySet<string> = new Set(
+  Object.values(AutomationRunStatus),
+);
+
+function parseEpochMsParam(value: unknown): Date | null {
+  if (typeof value !== 'string' || value === '') return null;
+  const ms = Number.parseInt(value, 10);
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms) : null;
+}
+
 router.get(
   '/:automationId/runs',
   async (req: Request<{ automationId: string }>, res: Response) => {
@@ -151,6 +162,11 @@ router.get(
     const limitRaw = req.query['limit'];
     const limit = Math.min(Math.max(Number.parseInt(String(limitRaw ?? 50), 10) || 50, 1), 200);
     const cursor = typeof req.query['cursor'] === 'string' ? (req.query['cursor'] as string) : null;
+    const statusRaw = req.query['status'];
+    const status =
+      typeof statusRaw === 'string' && RUN_STATUS_FILTER_VALUES.has(statusRaw) ? statusRaw : null;
+    const from = parseEpochMsParam(req.query['from']);
+    const to = parseEpochMsParam(req.query['to']);
 
     const workflow = await db.workflow.findUnique({ where: { id: automationId } });
     if (!workflow || workflow.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
@@ -159,7 +175,13 @@ router.get(
     }
 
     const rows = await db.workflowExecution.findMany({
-      where: { workflowId: automationId },
+      where: {
+        workflowId: automationId,
+        ...(status ? { status } : {}),
+        ...(from || to
+          ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
+          : {}),
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
