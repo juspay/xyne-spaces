@@ -16,15 +16,22 @@ import { clawClient } from '../services/claw-client';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { AutomationStatus } from '../types/status';
 import {
   workflowExecutionToRun,
   AUTOMATION_WORKFLOW_TYPE,
+  buildAutomationMetadata,
+  triggerTypeToEventType,
+  workflowToAutomation,
 } from '../types/workflow-adapter';
 import {
   getAutomationPauseState,
   getExecutionState,
   stitchExecutionStateMany,
 } from '@/database/repositories/workflowExecutionStateUtils';
+import { approvalService, ApprovalError } from '../services/approval.service';
+import { notifyAdminsOfArchiveRequest } from '../services/approval-notifications';
+import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
 
 const router = Router();
 
@@ -46,6 +53,73 @@ const OPERATOR_METADATA: Record<
   [ConditionOperator.LTE]: { label: 'is less than or equal to', valueType: 'number' },
   [ConditionOperator.EXISTS]: { label: 'exists', valueType: 'none' },
 };
+
+const AutomationPayloadSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  description: z.string().nullable().optional(),
+  config: z.custom<AutomationConfig>().optional(),
+});
+
+const CreateAutomationPayloadSchema = AutomationPayloadSchema.extend({
+  name: z.string().trim().min(1),
+  config: z.custom<AutomationConfig>(),
+});
+
+function getAuthContext(req: Request): { userId: string; workspaceId: string } | null {
+  const userId = req.user?.id;
+  const workspaceId = req.user?.workspaceId;
+  if (!userId || !workspaceId) return null;
+  return { userId, workspaceId };
+}
+
+function sendUnauthorized(res: Response): void {
+  res.status(401).json({ success: false, error: 'Unauthorized' });
+}
+
+function prepareConfigForSave(
+  config: AutomationConfig,
+  res: Response,
+): { config: AutomationConfig; context: string; eventType: ReturnType<typeof triggerTypeToEventType> } | null {
+  const validation = automationService.validateConfig(config);
+  if (!validation.valid) {
+    res.status(400).json({ success: false, error: 'Invalid automation config', data: validation });
+    return null;
+  }
+
+  const configToSave = JSON.parse(JSON.stringify(config)) as AutomationConfig;
+  encryptWebhookStepHeaders(configToSave.steps);
+  return {
+    config: configToSave,
+    context: JSON.stringify(configToSave),
+    eventType: triggerTypeToEventType(configToSave.trigger.type),
+  };
+}
+
+function parseListLimit(raw: unknown): number {
+  const parsed = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 50;
+  return Math.min(parsed, 100);
+}
+
+function encodeAutomationListCursor(row: { id: string; createdAt: Date }): string {
+  return Buffer.from(JSON.stringify({ id: row.id, createdAt: row.createdAt.toISOString() })).toString('base64url');
+}
+
+function decodeAutomationListCursor(raw: unknown): { id: string; createdAt: Date } | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
+      id?: unknown;
+      createdAt?: unknown;
+    };
+    if (typeof parsed.id !== 'string' || typeof parsed.createdAt !== 'string') return null;
+    const createdAt = new Date(parsed.createdAt);
+    if (Number.isNaN(createdAt.getTime())) return null;
+    return { id: parsed.id, createdAt };
+  } catch {
+    return null;
+  }
+}
 
 router.get('/schema/operators', (_req, res) => {
   const list = Object.entries(OPERATOR_METADATA).map(([value, meta]) => ({ value, ...meta }));
@@ -128,6 +202,272 @@ router.post('/validate', (req: Request, res: Response) => {
   res.json({ success: true, data: result, timestamp: new Date().toISOString() });
 });
 
+// POST / — create a new automation as DRAFT (no activation)
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const parsed = CreateAutomationPayloadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.flatten() });
+      return;
+    }
+
+    const prepared = prepareConfigForSave(parsed.data.config, res);
+    if (!prepared) return;
+
+    const workflow = await db.workflow.create({
+      data: {
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workflowName: parsed.data.name,
+        workspaceId: auth.workspaceId,
+        status: AutomationStatus.DRAFT,
+        eventType: prepared.eventType,
+        context: prepared.context,
+        metadata: buildAutomationMetadata({
+          description: parsed.data.description ?? null,
+          createdById: auth.userId,
+        }),
+      },
+    });
+    res.status(201).json({
+      success: true,
+      data: { automation: workflowToAutomation(workflow) },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error('[automations] create failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to create automation' });
+  }
+});
+
+// GET / — list automations using the same base query as Zero automationsList
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const limit = parseListLimit(req.query.limit);
+    const cursor = decodeAutomationListCursor(req.query.cursor);
+
+    const workflows = await db.workflow.findMany({
+      where: {
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workspaceId: auth.workspaceId,
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+    });
+    const hasMore = workflows.length > limit;
+    const page = hasMore ? workflows.slice(0, limit) : workflows;
+    res.json({
+      success: true,
+      data: page.map(workflowToAutomation),
+      pagination: {
+        limit,
+        nextCursor: hasMore && page.length > 0 ? encodeAutomationListCursor(page[page.length - 1]) : null,
+        hasMore,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error('[automations] list failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to list automations' });
+  }
+});
+
+// GET /:id — fetch a single automation
+router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const workflow = await db.workflow.findFirst({
+      where: {
+        id: req.params.id,
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workspaceId: auth.workspaceId,
+        status: { not: AutomationStatus.ARCHIVED },
+      },
+    });
+    if (!workflow) {
+      res.status(404).json({ success: false, error: 'Automation not found' });
+      return;
+    }
+    res.json({ success: true, data: workflowToAutomation(workflow), timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error('[automations] get failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to get automation' });
+  }
+});
+
+// PUT /:id — create a new DRAFT version in the same lineage (automationSeriesId preserved)
+router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const parsed = AutomationPayloadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.flatten() });
+      return;
+    }
+
+    const existing = await db.workflow.findFirst({
+      where: {
+        id: req.params.id,
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workspaceId: auth.workspaceId,
+        status: { not: AutomationStatus.ARCHIVED },
+      },
+    });
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Automation not found' });
+      return;
+    }
+
+    const existingAutomation = workflowToAutomation(existing);
+    const prepared = parsed.data.config !== undefined
+      ? prepareConfigForSave(parsed.data.config, res)
+      : null;
+    if (parsed.data.config !== undefined && !prepared) return;
+
+    const metadata = buildAutomationMetadata({
+      description: parsed.data.description !== undefined
+        ? parsed.data.description
+        : (existingAutomation.description ?? null),
+      createdById: existing.status === AutomationStatus.DRAFT && existingAutomation.createdById === auth.userId
+        ? existingAutomation.createdById
+        : auth.userId,
+    });
+
+    if (existing.status === AutomationStatus.DRAFT && existingAutomation.createdById === auth.userId) {
+      const updated = await db.workflow.update({
+        where: { id: existing.id },
+        data: {
+          ...(parsed.data.name !== undefined && { workflowName: parsed.data.name }),
+          ...(prepared && {
+            context: prepared.context,
+            eventType: prepared.eventType,
+          }),
+          metadata,
+          updatedAt: new Date(),
+        },
+      });
+      res.json({
+        success: true,
+        data: { automation: workflowToAutomation(updated) },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    // Create a new DRAFT version in the same lineage; do not mutate approved/live rows.
+    const seriesId = existing.automationSeriesId ?? existing.id;
+    const newVersion = await db.workflow.create({
+      data: {
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workflowName: parsed.data.name ?? existing.workflowName,
+        workspaceId: auth.workspaceId,
+        status: AutomationStatus.DRAFT,
+        automationSeriesId: seriesId,
+        context: prepared ? prepared.context : existing.context,
+        ...(prepared && { eventType: prepared.eventType }),
+        metadata,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      data: { automation: workflowToAutomation(newVersion) },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error('[automations] update failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to create automation version' });
+  }
+});
+
+// POST /:id/submit — submit DRAFT for approval; DMs all AUTOMATIONS admins
+router.post('/:id/submit', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const view = await approvalService.submitForApproval(req.params.id, auth.userId);
+    res.json({ success: true, data: { automation: view }, timestamp: new Date().toISOString() });
+  } catch (err) {
+    if (err instanceof ApprovalError) {
+      const status = err.code === 'not-found' ? 404
+        : err.code === 'not-owner' || err.code === 'not-admin' ? 403
+        : 409;
+      res.status(status).json({ success: false, error: err.message });
+      return;
+    }
+    logger.error('[automations] submit failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to submit automation for approval' });
+  }
+});
+
+// DELETE /:id — raise an archive request to admins via DM; does not archive directly
+router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const existing = await db.workflow.findFirst({
+      where: {
+        id: req.params.id,
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workspaceId: auth.workspaceId,
+        status: { not: AutomationStatus.ARCHIVED },
+      },
+    });
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Automation not found' });
+      return;
+    }
+
+    void notifyAdminsOfArchiveRequest(workflowToAutomation(existing), auth.userId).catch(err =>
+      logger.error('[automations] notifyAdminsOfArchiveRequest failed', err),
+    );
+    res.json({
+      success: true,
+      data: { message: 'Archive request submitted to admins.' },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error('[automations] delete failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to submit archive request' });
+  }
+});
 
 router.get('/claw/agents', async (_req: Request, res: Response) => {
   try {
