@@ -39,7 +39,7 @@ export function VariablePicker({
       }
       return true;
     };
-    return allGroups
+    const matching = allGroups
       .map(group => ({
         ...group,
         entries: group.entries
@@ -47,6 +47,7 @@ export function VariablePicker({
           .filter(({ entries }) => entries.length > 0),
       }))
       .filter(group => group.entries.length > 0);
+    return matching.length > 0 ? matching : allGroups;
   }, [allGroups, targetEntityKind, targetLeafType]);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => defaultExpanded(groups));

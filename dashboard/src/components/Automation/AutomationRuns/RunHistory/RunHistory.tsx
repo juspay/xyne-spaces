@@ -69,30 +69,25 @@ export function RunHistory({
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, refetch } =
     useInfiniteQuery({
-      queryKey: ['automation-runs', automationId],
-      queryFn: ({ pageParam }) =>
-        fetchAutomationRuns(automationId, { limit: PAGE_SIZE, cursor: pageParam ?? null }),
+      queryKey: ['automation-runs', automationId, statusFilter, datePreset],
+      queryFn: ({ pageParam }) => {
+        const { from, to } = datePresetToRange(datePreset);
+        return fetchAutomationRuns(automationId, {
+          limit: PAGE_SIZE,
+          cursor: pageParam ?? null,
+          status: statusFilter === 'all' ? null : statusFilter,
+          from,
+          to,
+        });
+      },
       initialPageParam: null as string | null,
       getNextPageParam: lastPage => lastPage.nextCursor,
       refetchOnWindowFocus: true,
     });
 
-  const allRows = useMemo<AutomationRun[]>(() => {
+  const filtered = useMemo<AutomationRun[]>(() => {
     return data?.pages.flatMap(p => p.runs) ?? [];
   }, [data]);
-
-  // Client-side filtering on the already-fetched pages. Cheap for typical
-  // page volumes; if needed later we'll push these to the REST endpoint.
-  const filtered = useMemo<AutomationRun[]>(() => {
-    const { from, to } = datePresetToRange(datePreset);
-    return allRows.filter(r => {
-      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
-      if (from !== null && from !== undefined && new Date(r.startedAt).getTime() < from)
-        return false;
-      if (to !== null && to !== undefined && new Date(r.startedAt).getTime() > to) return false;
-      return true;
-    });
-  }, [allRows, statusFilter, datePreset]);
 
   const hasActiveFilters = statusFilter !== 'all' || datePreset !== 'all';
   const rowsEmpty = !isLoading && filtered.length === 0;

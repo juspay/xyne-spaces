@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { VariableRefField } from '../SchemaForm/VariableRefField';
+import { EntityVariableField } from '../SchemaForm/EntityVariableField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
 import { SendMessageRichTextField } from '../SchemaForm/SendMessageRichTextField';
 import {
@@ -91,21 +92,21 @@ export function NotifyStepForm({
     <div className='flex flex-col gap-5'>
       {recipient === 'user' ? (
         <FieldRow label='User' required error={issuesAt.get('userId')}>
-          <VariableRefField
+          <EntityVariableField
             value={cfg.userId}
             onChange={next => setField('userId', next)}
             variableSources={variableSources}
-            targetEntityKind={EntityKind.USER}
+            entityKind={EntityKind.USER}
             placeholder='Pick a user'
           />
         </FieldRow>
       ) : (
         <FieldRow label='User group' required error={issuesAt.get('groupId')}>
-          <VariableRefField
+          <EntityVariableField
             value={cfg.groupId}
             onChange={next => setField('groupId', next)}
             variableSources={variableSources}
-            targetEntityKind={EntityKind.USER_GROUP}
+            entityKind={EntityKind.USER_GROUP}
             placeholder='Pick a user group'
           />
         </FieldRow>

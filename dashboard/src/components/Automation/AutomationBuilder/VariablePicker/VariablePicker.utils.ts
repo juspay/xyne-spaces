@@ -42,14 +42,13 @@ export function findSoleMatchingVariable(
   if (matches.length === 1) return matches[0]!;
 
   if (targetEntityKind) {
-    const preferred = PREFERRED_PATHS_BY_KIND[targetEntityKind];
-    if (preferred) {
-      for (const path of preferred) {
-        const hit = matches.find(m => m.path === path);
-        if (hit) return hit;
-      }
+    const preferred = PREFERRED_PATHS_BY_KIND[targetEntityKind] ?? [];
+    for (const path of preferred) {
+      const hit = matches.find(m => m.path === path);
+      if (hit) return hit;
     }
-    return matches[0]!;
+    const sourceKeys = new Set(matches.map(m => `${m.sourceKey}:${m.role}`));
+    if (sourceKeys.size === 1) return matches[0]!;
   }
   return null;
 }

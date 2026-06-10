@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { marked } from 'marked';
 import type { AutomationContext } from '../types/context';
 import { tokenize, isPureRef, extractRefPath } from '../util/variable-ref';
 
@@ -63,16 +64,35 @@ export class VariableResolver {
     }
 
     const tokens = tokenize(value);
-    let result = '';
-    for (const token of tokens) {
-      if (token.kind === 'literal') {
-        result += token.text;
-      } else {
+    return tokens
+      .map((token, i) => {
+        if (token.kind === 'literal') return token.text;
         const resolved = resolvePath(context, token.path);
-        result += stringifyForTemplate(resolved);
-      }
-    }
-    return result;
+        return isRichTextSlot(tokens[i - 1])
+          ? markdownToHtml(stringifyForTemplate(resolved))
+          : stringifyForTemplate(resolved);
+      })
+      .join('');
+  }
+}
+
+const RICH_TEXT_SPAN_TAIL = /<span\b[^>]*\bdata-variable-ref\b[^>]*>[\s\u200B]*$/i;
+const LOOKS_LIKE_HTML = /<\/?[a-z][^>]*>/i;
+const MARKED_OPTIONS = { async: false, gfm: true, breaks: true } as const;
+
+function isRichTextSlot(prev: { kind: string; text?: string } | undefined): boolean {
+  return prev?.kind === 'literal' && RICH_TEXT_SPAN_TAIL.test(prev.text ?? '');
+}
+
+function markdownToHtml(text: string): string {
+  if (!text || LOOKS_LIKE_HTML.test(text)) return text;
+  try {
+    const html = text.includes('\n')
+      ? marked.parse(text, MARKED_OPTIONS)
+      : marked.parseInline(text, MARKED_OPTIONS);
+    return (html as string).trim();
+  } catch {
+    return text;
   }
 }
 

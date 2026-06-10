@@ -327,11 +327,20 @@ export interface RunsListPage {
 
 export function fetchAutomationRuns(
   automationId: string,
-  opts: { limit?: number; cursor?: string | null } = {},
+  opts: {
+    limit?: number;
+    cursor?: string | null;
+    status?: string | null;
+    from?: number | null;
+    to?: number | null;
+  } = {},
 ): Promise<RunsListPage> {
   const params = new URLSearchParams();
   if (opts.limit !== null && opts.limit !== undefined) params.set('limit', String(opts.limit));
   if (opts.cursor) params.set('cursor', opts.cursor);
+  if (opts.status) params.set('status', opts.status);
+  if (opts.from !== null && opts.from !== undefined) params.set('from', String(opts.from));
+  if (opts.to !== null && opts.to !== undefined) params.set('to', String(opts.to));
   const qs = params.toString();
   return unwrap(
     apiInstance.get<SuccessEnvelope<RunsListPage>>(
