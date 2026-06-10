@@ -82,6 +82,29 @@ export const detectEmojiTrigger = (editor: Editor): TriggerMatch | null => {
   return detectTrigger(editor, /(?:^|[\s\u200B]):(\w{2,})$/);
 };
 
+/**
+ * Detects `+query` in the email body for recipient autocomplete.
+ * Requires at least one query character after `+` so bare `+` or `C++` do not open the picker.
+ */
+export const detectRecipientTrigger = (editor: Editor): TriggerMatch | null => {
+  const { from } = editor.state.selection;
+  const textBefore = getTextBeforeCursor(editor);
+  const recipientMatch = textBefore.match(/(?:^|[\s\u200B])\+([\w][\w\s.@-]*)$/);
+
+  if (textBefore.match(/\+ $/) || textBefore.match(/\+[\w\s.@-]* {2}$/)) {
+    return null;
+  }
+
+  if (!recipientMatch || recipientMatch[1] === undefined) return null;
+
+  return {
+    query: recipientMatch[1],
+    match: recipientMatch,
+    triggerStart: from - recipientMatch[0].length,
+    triggerEnd: from,
+  };
+};
+
 export const getAbsolutePosition = (editor: Editor, pos: number): EditorPosition | null => {
   const { view } = editor;
   const coords = view.coordsAtPos(pos);
