@@ -10,46 +10,24 @@ import {
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { useAuth } from '../../hooks/useAuth';
-import { usePermissions } from '../../hooks/usePermissions';
 import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
-import { isElectronApp } from '../../utils/electronApp';
 import {
   ChartSpline,
   Settings,
-  BookOpen,
-  Ticket,
-  FolderKanban,
-  UsersIcon,
-  Folder,
-  Inbox,
   Phone,
   Home,
   Bell,
   MessageCircle,
-  LifeBuoy,
-  Clipboard,
   ClipboardCheck,
-  PieChart,
   FileText,
   Mic,
-  CalendarClock,
-  EllipsisVertical,
+  Ellipsis,
   Bookmark,
-  Globe,
-  ShieldUser,
-  Brain,
   Sparkles,
   LayoutDashboard,
-  ArrowRightLeft,
-  AppWindow,
-  SearchCode,
   CircleHelp,
-  Building2,
   AlertCircle,
-  Zap,
-  type LucideIcon,
-  Atom,
 } from 'lucide-react';
 
 import Avatar from '../ui/Avatar/Avatar';
@@ -66,47 +44,15 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
-import { PATH_TO_RESOURCE } from './utils/resourceMapping';
+import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
+import { useToolbarItems } from '../../hooks/useToolbarItems';
+import type { NavigationItem } from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
-
-const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize?: number }[] = [
-  { path: '/chat/dir', label: 'Chat', icon: Inbox },
-  { path: '/chat/dm', label: 'DMs', icon: MessageCircle },
-  { path: '/calls', label: 'Calls', icon: Phone },
-  { path: '/recordings', label: 'Recordings', icon: Mic },
-  { path: '/tickets', label: 'Tickets', icon: Ticket },
-  { path: '/product-insights', label: 'Insights', icon: PieChart },
-  { path: '/knowledge-base', label: 'Knowledge Base', icon: BookOpen },
-  { path: '/memory', label: 'Context', icon: Brain },
-  { path: '/analytics', label: 'Analytics', icon: ChartSpline },
-  { path: '/dashboards', label: 'Dashboards', icon: LayoutDashboard },
-  { path: '/projects', label: 'Projects Board', icon: FolderKanban },
-  { path: '/user-groups', label: 'User Groups', icon: UsersIcon },
-  { path: '/listProjects', label: 'List Projects', icon: Folder },
-  { path: '/resource-access', label: 'User Management', icon: ShieldUser, iconSize: 18 },
-  { path: '/jira-migration', label: 'Jira Migration', icon: ArrowRightLeft, iconSize: 18 },
-  { path: '/migration/confluence', label: 'Confluence Migration', icon: BookOpen, iconSize: 18 },
-  { path: '/support', label: 'Support', icon: LifeBuoy },
-  { path: '/browser', label: 'Browser', icon: Globe },
-  { path: '/forms', label: 'Forms', icon: Clipboard },
-  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarClock },
-  { path: '/automations', label: 'Automations', icon: Zap },
-  { path: '/apps', label: 'Apps', icon: AppWindow },
-  { path: '/inspector', label: 'Inspector', icon: SearchCode },
-  { path: '/guide', label: 'User Guide', icon: CircleHelp },
-  { path: '/workspace-management', label: 'Workspace Management', icon: Settings },
-  { path: '/organisations', label: 'Organisations', icon: Building2 },
-  {
-    path: '/team-intelligence',
-    label: 'Team Intelligence',
-    icon: Atom,
-  },
-];
 
 const mobileNavigationItems = [
   {
@@ -188,7 +134,8 @@ const AppSidebar = (): ReactElement => {
   const { user } = useAuth();
   const { aiLandingDefault } = useAILandingDefault();
   const currentUser = useSelf();
-  const permissions = usePermissions();
+  const visibleNavigationItems = useVisibleNavigationItems();
+  const { toolbarPaths } = useToolbarItems();
   const missedCallCount = useMissedCallCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
@@ -217,6 +164,7 @@ const AppSidebar = (): ReactElement => {
 
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const [preferencesInitialSection, setPreferencesInitialSection] = useState<
     PreferenceSection | undefined
@@ -269,30 +217,24 @@ const AppSidebar = (): ReactElement => {
     location.pathname.includes('threadId') ||
     location.hash.includes('threadId');
 
-  const filteredNavigationItems = useMemo(() => {
-    return navigationItems.filter(item => {
-      const resourceName = PATH_TO_RESOURCE[item.path];
-      const requiresAccess = resourceName !== undefined;
+  // Split the visible items into the toolbar (rendered in the rail) and the
+  // "More" overflow menu, based on the user's customized toolbar selection.
+  const toolbarItems = useMemo(
+    () => visibleNavigationItems.filter(item => toolbarPaths.has(item.path)),
+    [visibleNavigationItems, toolbarPaths],
+  );
+  const moreItems = useMemo(
+    () => visibleNavigationItems.filter(item => !toolbarPaths.has(item.path)),
+    [visibleNavigationItems, toolbarPaths],
+  );
+  const isMoreActive = moreItems.some(item => item.path === activeRoute);
 
-      let hasAccess = true;
-      if (requiresAccess) {
-        if (resourceName === 'USER-GROUPS') {
-          hasAccess = permissions.some(
-            p =>
-              p.resourceName === resourceName &&
-              (p.accessType === 'ADMIN' || p.accessType === 'WRITE'),
-          );
-        } else {
-          hasAccess = permissions.some(
-            p => p.resourceName === resourceName && p.accessType === 'ADMIN',
-          );
-        }
-      }
-
-      if (item.path === '/browser' && !isElectronApp()) return false;
-      return hasAccess;
-    });
-  }, [permissions]);
+  const handleCustomizeToolbar = (): void => {
+    setIsMoreOpen(false);
+    window.dispatchEvent(
+      new CustomEvent('xyne-open-preferences', { detail: { section: 'toolbar' } }),
+    );
+  };
 
   const hasPendingDirectMessages = useMemo(() => {
     return visibleChannels.some(
@@ -304,13 +246,28 @@ const AppSidebar = (): ReactElement => {
     mixpanelService.track(EVENTS.NAVIGATION, { item: label });
   };
 
+  const handleMoreNavigate = (label: string): void => {
+    setIsMoreOpen(false);
+    handleNavigationClick(label);
+  };
+
+  // Keep focus on the trigger when the menu opens so no item shows a focus ring.
+  const handleMorePopoverAutoFocus = (e: Event): void => {
+    e.preventDefault();
+  };
+
   const updateActiveMarker = useCallback((): void => {
     if (window.innerWidth < 500) return;
     const listEl = navListRef.current;
     if (!listEl) return;
 
     const activeItemEl = navItemRefs.current[activeRoute];
-    if (!activeItemEl) return;
+    // Active route isn't a rail item (e.g. it lives in the "More" menu) — hide
+    // the sliding marker so only the "More" button reads as active.
+    if (!activeItemEl) {
+      setActiveMarkerY(null);
+      return;
+    }
 
     const containerRect = listEl.getBoundingClientRect();
     const itemRect = activeItemEl.getBoundingClientRect();
@@ -331,7 +288,7 @@ const AppSidebar = (): ReactElement => {
 
   useLayoutEffect(() => {
     updateActiveMarker();
-  }, [updateActiveMarker, filteredNavigationItems, windowWidth]);
+  }, [updateActiveMarker, toolbarItems, windowWidth]);
 
   if (isMobile || windowWidth < 500) {
     return (
@@ -388,7 +345,7 @@ const AppSidebar = (): ReactElement => {
               </li>
             )}
 
-            {filteredNavigationItems.map(item => {
+            {toolbarItems.map(item => {
               const isActive = activeRoute === item.path;
               const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
               const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
@@ -438,6 +395,45 @@ const AppSidebar = (): ReactElement => {
                 </li>
               );
             })}
+
+            {/* More menu — overflow items + customize toolbar (Slack-style) */}
+            <li className='relative z-10'>
+              <Popover
+                open={isMoreOpen}
+                onOpenChange={setIsMoreOpen}
+                side='right'
+                align='start'
+                sideOffset={8}
+                collisionPadding={12}
+                onOpenAutoFocus={handleMorePopoverAutoFocus}
+                className='p-1.5 w-64 max-h-[80vh] overflow-y-auto rounded-xl'
+                trigger={
+                  <button
+                    type='button'
+                    aria-label='More'
+                    data-testid='nav-more'
+                    data-track-category='App_Sidebar'
+                    data-track-name='Sidebar_More_Toggle'
+                    className={cn(
+                      'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                      isMoreActive || isMoreOpen
+                        ? 'bg-appSidebar-active text-appSidebar-activeIcon'
+                        : 'bg-transparent text-appSidebar-activeForeground',
+                    )}
+                  >
+                    <Ellipsis size={16} />
+                  </button>
+                }
+              >
+                <SidebarMoreMenu
+                  items={moreItems}
+                  activeRoute={activeRoute}
+                  prefixWs={prefixWs}
+                  onNavigate={handleMoreNavigate}
+                  onCustomize={handleCustomizeToolbar}
+                />
+              </Popover>
+            </li>
           </ul>
         </nav>
       </div>
@@ -542,6 +538,72 @@ const AppSidebar = (): ReactElement => {
         }
       />
     </aside>
+  );
+};
+
+const SidebarMoreMenu = ({
+  items,
+  activeRoute,
+  prefixWs,
+  onNavigate,
+  onCustomize,
+}: {
+  items: NavigationItem[];
+  activeRoute: string;
+  prefixWs: (path: string) => string;
+  onNavigate: (label: string) => void;
+  onCustomize: () => void;
+}): ReactElement => {
+  return (
+    <div className='flex flex-col'>
+      <p className='px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>More</p>
+      {items.length > 0 ? (
+        <ul className='flex flex-col'>
+          {items.map(item => {
+            const Icon = item.icon;
+            const isActive = activeRoute === item.path;
+            return (
+              <li key={item.path}>
+                <Link
+                  to={prefixWs(item.path)}
+                  onClick={() => onNavigate(item.label)}
+                  data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+                  data-track-category='App_Sidebar'
+                  data-track-name='Sidebar_More_Item'
+                  data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+                  className={cn(
+                    'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors',
+                    isActive
+                      ? 'bg-accent text-accent-foreground font-medium'
+                      : 'text-popover-foreground hover:bg-accent hover:text-accent-foreground',
+                  )}
+                >
+                  <span className='flex size-5 shrink-0 items-center justify-center'>
+                    <Icon size={16} />
+                  </span>
+                  <span className='truncate'>{item.label}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className='px-2.5 py-2 text-sm text-muted-foreground'>All items are in your toolbar.</p>
+      )}
+
+      <div className='my-1 border-t border-border' />
+
+      <button
+        type='button'
+        onClick={onCustomize}
+        data-testid='more-customize-toolbar'
+        data-track-category='App_Sidebar'
+        data-track-name='Sidebar_Customize_Toolbar'
+        className='block w-full rounded-md px-2.5 py-2 text-left text-sm font-medium text-[color:var(--mention-color)] transition-colors hover:bg-accent'
+      >
+        Customize toolbar
+      </button>
+    </div>
   );
 };
 
@@ -690,7 +752,7 @@ const MobileNavbar = ({
               className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer relative'
             >
               <div className='size-[24px] flex items-center justify-center'>
-                <EllipsisVertical
+                <Ellipsis
                   size={20}
                   className={isMoreActive ? 'text-foreground' : 'text-muted-foreground'}
                 />
