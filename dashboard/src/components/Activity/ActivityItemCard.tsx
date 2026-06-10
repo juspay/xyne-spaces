@@ -23,7 +23,7 @@ import { UserHoverWrapper } from '../ui/UserMentionPopover/UserMentionPopover';
 import { cn } from '../../utils/classNames';
 import { Button } from '../ui/Button';
 import { GenericMentionHoverPopover } from '../ui/GenericMentionPopover/GenericMentionPopover';
-import { CircleDot } from 'lucide-react';
+import { CheckCircle, CircleDot } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 
 interface ActivityItemCardProps {
@@ -181,6 +181,26 @@ export const ActivityItemCard = ({
     }
   };
 
+  const doMarkAsRead = () => {
+    if (!activity.isRead) {
+      void zero.mutate(mutators.activities.markAsRead({ activityId: activity.id }));
+    }
+  };
+
+  const handleMarkAsRead = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    doMarkAsRead();
+  };
+
+  const handleMarkAsReadKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.stopPropagation();
+      e.preventDefault();
+      doMarkAsRead();
+    }
+  };
+
   const getTimestampDisplay = (date: number | Date) => {
     const dateObj = typeof date === 'number' ? new Date(date) : date;
     if (isToday(dateObj)) {
@@ -287,6 +307,30 @@ export const ActivityItemCard = ({
           </div>
 
           <div className='flex items-center gap-1 flex-shrink-0 ml-auto sm:ml-2'>
+            {!isMobile &&
+              !activity.isRead &&
+              !['reacted', 'removed'].includes(activity.actorAction) &&
+              !isDeskChannelType(channel?.type) &&
+              channel?.type !== ChannelType.SUPPORT && (
+                <Tooltip content='Mark as read' delayDuration={0} side='top'>
+                  <div
+                    role='button'
+                    tabIndex={0}
+                    onClick={handleMarkAsRead}
+                    onKeyDown={handleMarkAsReadKeyDown}
+                    className='opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-accent/50 cursor-pointer'
+                    aria-label='Mark as read'
+                    data-track-category='ACTIVITY'
+                    data-track-name='MARK_AS_READ'
+                    data-track-metadata={JSON.stringify({
+                      activityId: activity.id,
+                      actorAction: activity.actorAction,
+                    })}
+                  >
+                    <CheckCircle className='w-3.5 h-3.5 text-muted-foreground hover:text-foreground' />
+                  </div>
+                </Tooltip>
+              )}
             {!isMobile &&
               activity.isRead &&
               !['reacted', 'removed'].includes(activity.actorAction) &&
