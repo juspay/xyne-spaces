@@ -61,6 +61,7 @@ const ThreadList = ({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
   const hasAppliedInitialScrollRef = useRef(false);
+  const scrollIdleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isEventFromThreadInput = useCallback(
     (event: KeyboardEvent): boolean => isEventFromEmptyInput(event, conversationId),
@@ -120,6 +121,7 @@ const ThreadList = ({
   const [isNearBottom, setIsNearBottom] = useState(false);
   const [isNearTop, setIsNearTop] = useState(true);
   const [hasOverflow, setHasOverflow] = useState(false);
+  const [isScrolling, setIsScrolling] = useState(false);
 
   const {
     firstUnreadIndex,
@@ -133,7 +135,11 @@ const ThreadList = ({
 
   const showFab = enableJumpFab && hasOverflow && !isNearBottom && threadMessages.length > 0;
   const showScrollToTopFab =
-    enableJumpFab && hasOverflow && !isNearTop && threadMessages.length > 0;
+    enableJumpFab &&
+    hasOverflow &&
+    !isNearTop &&
+    threadMessages.length > 0 &&
+    (!isNearBottom || isScrolling);
 
   const handleJumpToLatest = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -169,6 +175,7 @@ const ThreadList = ({
     setIsNearBottom(false);
     setIsNearTop(true);
     setHasOverflow(false);
+    setIsScrolling(false);
   }, [conversationId, location.key, location.hash, activityNavigationNonce]);
 
   useThreadListInitialScroll({
@@ -320,6 +327,14 @@ const ThreadList = ({
       setIsNearBottom(distanceFromBottom < 150);
       setIsNearTop(container.scrollTop < 150);
 
+      setIsScrolling(true);
+      if (scrollIdleTimeoutRef.current) {
+        clearTimeout(scrollIdleTimeoutRef.current);
+      }
+      scrollIdleTimeoutRef.current = setTimeout(() => {
+        setIsScrolling(false);
+      }, 1000);
+
       if (onScrollPositionChange) {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {
@@ -335,6 +350,9 @@ const ThreadList = ({
     return (): void => {
       container.removeEventListener('scroll', handleScroll);
       clearTimeout(timeoutId);
+      if (scrollIdleTimeoutRef.current) {
+        clearTimeout(scrollIdleTimeoutRef.current);
+      }
     };
   }, [onScrollPositionChange, saveScrollPosition]);
 
