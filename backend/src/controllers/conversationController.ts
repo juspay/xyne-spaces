@@ -1770,6 +1770,123 @@ export class ConversationController {
   };
 
   /**
+   * Clear every in-flight agent-progress signal for a conversation and broadcast
+   * `done` to all subscribers, so the "agent working" pill / Stop button disappears
+   * immediately and in sync across every open view of the thread.
+   *
+   * The Assistant spinner's `done` is otherwise only emitted when the orchestrator
+   * stream finishes naturally (mutators.ts `broadcastBotProgress` finally block), so
+   * a cancel must drive this itself — the upstream run can take seconds to unwind.
+   * Keyed by agentUserId (the Redis hash field), reusing each stored payload so the
+   * client computes the same key and drops the matching entry.
+   */
+  private clearConversationAgentProgress = async (conversationId: string): Promise<void> => {
+    try {
+      const conversation = await this.conversationRepository.findById(conversationId);
+      const channelId = conversation?.channelId;
+      if (!channelId) return;
+
+      const key = `agent_progress:conversation:${conversationId}`;
+      const raw = await redisService.getAllHashFields(key);
+      const fields = Object.keys(raw);
+      if (fields.length === 0) return;
+
+      for (const agentUserId of fields) {
+        let stored: Record<string, unknown> = {};
+        try {
+          stored = JSON.parse(raw[agentUserId]) as Record<string, unknown>;
+        } catch {
+          /* malformed field — still broadcast a best-effort done below */
+        }
+        // Write the session-scoped tombstone so any straggler `working` events from
+        // this cancelled run are suppressed by the agentProgress endpoint and never
+        // repopulate the hash (which would cause a ghost spinner on the next rehydrate).
+        const storedSessionId = typeof stored.sessionId === 'string' ? stored.sessionId : null;
+        if (storedSessionId) {
+          await redisService.set(`agent_progress_done_session:${storedSessionId}`, new Date().toISOString(), 120);
+        }
+        const payload = { ...stored, conversationId, channelId, agentUserId, status: 'done', timestamp: new Date().toISOString() };
+        await redisService.broadcastMessageToSession(channelId, {
+          messageId: `agent_progress_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          conversationId,
+          senderId: agentUserId,
+          senderName: String(stored.agentSlug ?? ''),
+          content: JSON.stringify({ type: 'agent_progress', data: payload }),
+          msgType: 'SYSTEM',
+          createdAt: new Date(),
+        });
+      }
+      await redisService.deleteHashField(key, fields);
+    } catch (error) {
+      logger.error('[clearConversationAgentProgress] failed:', error);
+      throw error;
+    }
+  };
+
+  /**
+   * Cancel an in-flight agent run for the given conversation.
+   * Proxies to xyne-claw-auth's cancel endpoint using conversationId lookup.
+   * POST /api/conversations/:conversationId/agent-cancel
+   */
+  cancelAgentRun = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId } = req.params;
+      const { agentSlug } = req.body as { agentSlug?: string };
+      const userId = req.user?.id;
+
+      if (!conversationId || !agentSlug || !userId) {
+        res.status(400).json({ success: false, error: 'conversationId, agentSlug, and auth are required' });
+        return;
+      }
+
+      const clawAuthUrl = `${config.xyneClaw.authUrl}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/cancel`;
+      const cancelRes = await fetch(clawAuthUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+          ...(config.xyneClaw.s2sKey ? { 'x-s2s-key': config.xyneClaw.s2sKey } : {}),
+        },
+        body: JSON.stringify({ conversationId }),
+      });
+
+      if (!cancelRes.ok) {
+        const body = (await cancelRes.json().catch(() => ({}))) as { error?: string };
+        // Never forward a 401 from claw-auth to the client — apiClient.ts fires
+        // clearAuthTokens + redirects to /auth on 401, which would log the user out.
+        // 403 is safe to forward: the frontend interceptor only acts on 401, not 403.
+        if (cancelRes.status === 401 || cancelRes.status === 403) {
+          logger.warn('[cancelAgentRun] authorization failure from claw-auth', {
+            originalStatus: cancelRes.status,
+            conversationId,
+            userId,
+          });
+        }
+        const statusToSend = cancelRes.status === 401 ? 500 : cancelRes.status;
+        res.status(statusToSend).json({ success: false, error: body.error ?? `Cancel failed: HTTP ${cancelRes.status}` });
+        return;
+      }
+
+      // Clear the spinner only after cancel is confirmed — clears both channel and
+      // thread views together. Doing this before would wipe the indicator even when
+      // a non-owner's request is rejected upstream.
+      try {
+        await this.clearConversationAgentProgress(conversationId);
+      } catch (cleanupError) {
+        logger.error('[cancelAgentRun] progress cleanup failed after successful cancel:', cleanupError);
+        res.status(500).json({ success: false, error: 'Cancel succeeded but progress state cleanup failed' });
+        return;
+      }
+
+      const data = await cancelRes.json() as unknown;
+      res.status(200).json(data);
+    } catch (error) {
+      logger.error('[cancelAgentRun] error:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
+
+  /**
    * Snapshot of in-flight agent-progress signals for this conversation.
    * Read-only view of the Redis hash written by xyne-claw-auth's agentProgress publisher.
    * Used by the dashboard when the thread panel opens so spinners re-hydrate after
@@ -1785,15 +1902,45 @@ export class ConversationController {
       }
       const key = `agent_progress:conversation:${conversationId}`;
       const raw = await redisService.getAllHashFields(key);
-      const data = Object.values(raw)
-        .map((v) => {
-          try {
-            return JSON.parse(v) as unknown;
-          } catch {
-            return null;
-          }
-        })
-        .filter((v): v is Record<string, unknown> => v !== null);
+
+      // Parse all entries first, separating malformed ones immediately.
+      const parsed: Array<{ field: string; entry: Record<string, unknown> }> = [];
+      const staleFields: string[] = [];
+      for (const [field, v] of Object.entries(raw)) {
+        try {
+          parsed.push({ field, entry: JSON.parse(v) as Record<string, unknown> });
+        } catch {
+          staleFields.push(field);
+        }
+      }
+
+      // Tombstone check — batch all Redis GETs in parallel (1 RTT regardless of N agents).
+      // Tombstone is set BEFORE hash-delete and BEFORE the done WebSocket event is broadcast,
+      // so any GET that fires after a done sees an authoritative empty/filtered result.
+      // This prevents the rehydrate GET from resurrecting a spinner when the hook remounts
+      // mid-transition (e.g. conversation object lazy-loads and sessionId changes).
+      const tombstoneResults = await Promise.all(
+        parsed.map(({ entry }) => {
+          const sid = typeof entry.sessionId === 'string' ? entry.sessionId : null;
+          return sid
+            ? redisService.get(`agent_progress_done_session:${sid}`)
+            : Promise.resolve(null);
+        }),
+      );
+
+      const data: Record<string, unknown>[] = [];
+      for (let i = 0; i < parsed.length; i++) {
+        if (tombstoneResults[i]) {
+          staleFields.push(parsed[i].field); // done — proactively clean up
+        } else {
+          data.push(parsed[i].entry);
+        }
+      }
+
+      // Proactively delete stale fields so they don't accumulate in the hash.
+      if (staleFields.length > 0) {
+        await redisService.deleteHashField(key, staleFields).catch(() => { /* non-fatal */ });
+      }
       res.status(200).json({ success: true, data });
     } catch (error) {
       logger.error('[agentProgress/get] error:', error);

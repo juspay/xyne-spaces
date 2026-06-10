@@ -208,6 +208,17 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     );
 
     const currentSessionId = conversationId ?? channelId;
+    // The first message in a channel creates a conversation client-side, but the
+    // `conversationId` prop only updates once the view switches into that thread.
+    // Agent-progress events are scoped to the new conversationId, so without this
+    // the spinner/Stop button is dropped on the first run and only shows from the
+    // second message onward. Remember the id we just created so the progress
+    // indicator can subscribe to it immediately.
+    const [pendingConversationId, setPendingConversationId] = useState<string | null>(null);
+    useEffect(() => {
+      setPendingConversationId(null);
+    }, [channelId, conversationId]);
+    const agentProgressConversationId = conversationId ?? pendingConversationId ?? undefined;
     const { handleTyping, stopTyping } = useTypingIndicator(currentSessionId);
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
@@ -460,6 +471,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           throw new Error('offline');
         }
 
+        console.info(
+          `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
+        );
+
         const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
         const hasFiles = files && files.length > 0;
         const hasThreadBroadcastMention =
@@ -659,6 +674,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             const messageCreatedAt = Date.now();
             const newConversationId = uuidv4();
             const newMessageId = uuidv4();
+            // Scope the agent-progress spinner to this new conversation right away,
+            // before the `conversationId` prop catches up (see pendingConversationId).
+            setPendingConversationId(newConversationId);
             const result = zero.mutate(
               mutators.conversations.send({
                 channelId,
@@ -807,7 +825,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           </div>
         ) : (
           <>
-            <AgentProgressIndicator sessionId={currentSessionId} />
+            <div className='mb-2'>
+              <AgentProgressIndicator
+                sessionId={agentProgressConversationId ?? currentSessionId}
+                conversationId={agentProgressConversationId}
+              />
+            </div>
             {showOfflineBanner && (
               <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
                 <div className='flex items-center gap-1.5'>

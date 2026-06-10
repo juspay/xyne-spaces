@@ -17,6 +17,9 @@ router.get('/by-message/:messageId', conversationController.getConversationByMes
 // Read current ephemeral agent-progress signals for a conversation (dashboard rehydrate on thread open)
 router.get('/:conversationId/agent-progress', conversationController.getAgentProgress);
 
+// Cancel an in-flight agent run for the given conversation
+router.post('/:conversationId/agent-cancel', conversationController.cancelAgentRun);
+
 // Update message content (for ticket suggestion → ticket created flow)
 router.put('/:conversationId/messages/:messageId/ticket-suggestion', conversationController.updateTicketSuggestion);
 

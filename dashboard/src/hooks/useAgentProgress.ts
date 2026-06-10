@@ -21,6 +21,8 @@ export interface ActiveAgent {
   agentSlug: string | null;
   agentUserId: string | null;
   toolLabel: string | null;
+  /** Human who started the run — only this user may stop it (gates the Stop button). */
+  triggeredByUserId: string | null;
   /** Rotates whenever toolLabel changes — stays stable across heartbeats of the same label. */
   variant: AgentSpinnerVariant;
   at: number; // last-seen timestamp (ms), used to drop stale entries
@@ -33,8 +35,11 @@ interface AgentProgressData {
     channelId?: string;
     agentSlug?: string | null;
     agentUserId?: string | null;
+    /** Run id. Scopes done-suppression so a straggler from a finished run can't resurrect the spinner. */
+    sessionId?: string | null;
     toolLabel?: string | null;
     status?: 'working' | 'done';
+    triggeredByUserId?: string | null;
   };
 }
 
@@ -57,16 +62,24 @@ interface SessionActivityEvent {
   };
 }
 
-export function useAgentProgress(sessionId: string | undefined): ActiveAgent[] {
+export interface UseAgentProgressResult {
+  agents: ActiveAgent[];
+  clearAll: () => void;
+}
+
+export function useAgentProgress(sessionId: string | undefined): UseAgentProgressResult {
   const [active, setActive] = useState<Map<string, ActiveAgent>>(new Map());
-  // Tracks agent-keys for which a `done` arrived, so a late-arriving rehydrate
-  // response can't resurrect them (race: live event fires while rehydrate is in flight).
-  const doneKeysRef = useRef<Set<string>>(new Set());
+  // Tracks run sessionIds for which a `done` arrived. A late `working` from a
+  // finished run — a straggler racing the terminal `done` across the multi-hop
+  // async chain (claw → claw-auth → spaces → redis) — carries that done sessionId
+  // and is dropped forever; a brand-new run has a fresh sessionId and is shown
+  // immediately. Deterministic: no timers, and never blocks an immediate re-run.
+  const doneSessionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!sessionId) return;
 
-    doneKeysRef.current = new Set();
+    doneSessionsRef.current = new Set();
 
     // Rehydrate from the server-side Redis hash on mount so reopening the thread
     // mid-run still shows the spinner (pub/sub doesn't replay past events).
@@ -76,8 +89,10 @@ export function useAgentProgress(sessionId: string | undefined): ActiveAgent[] {
         data?: Array<{
           agentSlug?: string | null;
           agentUserId?: string | null;
+          sessionId?: string | null;
           toolLabel?: string | null;
           conversationId?: string;
+          triggeredByUserId?: string | null;
         }>;
       }>(`/conversations/${encodeURIComponent(sessionId)}/agent-progress`)
       .then(res => {
@@ -90,11 +105,12 @@ export function useAgentProgress(sessionId: string | undefined): ActiveAgent[] {
             if (d.conversationId && d.conversationId !== sessionId) continue;
             const key = d.agentUserId ?? d.agentSlug ?? 'unknown';
             if (next.has(key)) continue; // live socket event already placed it
-            if (doneKeysRef.current.has(key)) continue; // `done` already arrived live — don't resurrect
+            if (d.sessionId && doneSessionsRef.current.has(d.sessionId)) continue; // its run already ended live — don't resurrect
             next.set(key, {
               agentSlug: d.agentSlug ?? null,
               agentUserId: d.agentUserId ?? null,
               toolLabel: d.toolLabel ?? null,
+              triggeredByUserId: d.triggeredByUserId ?? null,
               variant: pickRandomAgentSpinnerVariant(),
               at: Date.now(),
             });
@@ -126,10 +142,13 @@ export function useAgentProgress(sessionId: string | undefined): ActiveAgent[] {
       setActive(prev => {
         const next = new Map(prev);
         if (d.status === 'done') {
-          doneKeysRef.current.add(key);
+          if (d.sessionId) doneSessionsRef.current.add(d.sessionId);
           next.delete(key);
           return next;
         }
+        // Drop a `working` straggler from a run that already emitted `done`.
+        // Keyed by run id (sessionId), so this never blocks a fresh re-run.
+        if (d.sessionId && doneSessionsRef.current.has(d.sessionId)) return prev;
         const existing = prev.get(key);
         const nextLabel = d.toolLabel ?? null;
         // Roll a new spinner variant only when the label actually changes, so a
@@ -142,6 +161,8 @@ export function useAgentProgress(sessionId: string | undefined): ActiveAgent[] {
           agentSlug: d.agentSlug ?? null,
           agentUserId: d.agentUserId ?? null,
           toolLabel: nextLabel,
+          // Tool-label updates may omit the triggerer; keep the first value seen.
+          triggeredByUserId: d.triggeredByUserId ?? existing?.triggeredByUserId ?? null,
           variant,
           at: Date.now(),
         });
@@ -157,10 +178,32 @@ export function useAgentProgress(sessionId: string | undefined): ActiveAgent[] {
     };
   }, [sessionId]);
 
-  // Auto-expire stale entries.
+  // Auto-expire stale entries + server-verify backstop.
+  //
+  // Two roles:
+  //   1. Local stale-entry sweep: drop entries we haven't heard a heartbeat from
+  //      in STALE_MS (crash-safety for runs that never emit done).
+  //   2. Server-verify (every ~5s while active): re-check the GET endpoint and
+  //      clear the local map if the server says no agents are running. This catches
+  //      the race where the WebSocket done event was emitted during the hook's
+  //      sessionId-transition window (cleanup → new mount) and was therefore missed.
+  //      The GET now filters tombstoned entries server-side, so an empty response is
+  //      authoritative proof that the run is over.
   useEffect(() => {
-    if (active.size === 0) return;
-    const id = setInterval(() => {
+    if (active.size === 0 || !sessionId) return;
+    // Server-verify: poll every 5 s while the spinner is active.
+    const verifyId = setInterval(() => {
+      void apiInstance
+        .get<{ data?: unknown[] }>(`/conversations/${encodeURIComponent(sessionId)}/agent-progress`)
+        .then(res => {
+          if ((res.data.data ?? []).length === 0) setActive(new Map());
+        })
+        .catch(() => {
+          /* non-fatal */
+        });
+    }, 5_000);
+    // Local stale-entry sweep: run every 30 s.
+    const staleId = setInterval(() => {
       setActive(prev => {
         const now = Date.now();
         let changed = false;
@@ -174,8 +217,26 @@ export function useAgentProgress(sessionId: string | undefined): ActiveAgent[] {
         return changed ? next : prev;
       });
     }, 30_000);
-    return (): void => clearInterval(id);
-  }, [active.size]);
+    return (): void => {
+      clearInterval(verifyId);
+      clearInterval(staleId);
+    };
+  }, [active.size, sessionId]);
 
-  return Array.from(active.values());
+  // When another AgentProgressIndicator instance (e.g. channel input vs thread input)
+  // successfully aborts the same conversationId, it dispatches this custom event so
+  // all sibling instances clear their state immediately without waiting for the socket.
+  useEffect(() => {
+    if (!sessionId) return;
+    const handle = (evt: Event): void => {
+      const { conversationId: clearedId } = (evt as CustomEvent<{ conversationId: string }>).detail;
+      if (clearedId === sessionId) setActive(new Map());
+    };
+    window.addEventListener('agent-progress-cleared', handle);
+    return (): void => window.removeEventListener('agent-progress-cleared', handle);
+  }, [sessionId]);
+
+  const clearAll = (): void => setActive(new Map());
+
+  return { agents: Array.from(active.values()), clearAll };
 }
