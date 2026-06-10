@@ -261,7 +261,7 @@ export class ChatController {
         conversationId,
         uploadedFiles,
         MessageType.BOT,
-        { contentFormat, ...metadata },
+        { ...(isMarkdown && { contentFormat: ContentFormat.MARKDOWN }), ...metadata },
       );
 
       res.status(201).json(result);

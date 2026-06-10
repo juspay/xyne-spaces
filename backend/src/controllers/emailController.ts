@@ -41,6 +41,7 @@ interface ReplyEmailRequest {
   replyToEmailId?: string;
   subject?: string;
   draftId?: string;
+  from?: string;
 }
 
 export class EmailController {
@@ -197,13 +198,16 @@ export class EmailController {
         return res.status(400).json({ error: 'Desk owner user not found or has no email.' });
       }
       // Resolution priority for the From address on outbound mail:
+      //   0. Caller-supplied `from` — explicit override, highest priority.
       //   1. Admin-configured Gmail send-as alias (`preference.sendAsEmail`) —
       //      explicit user intent, highest priority.
       //   2. The bound mailbox from the OAuth integration, with `extractEmailAddress`
       //      cleaning legacy displayName wrappers like "Microsoft (foo@bar.com)".
       //   3. Owner's user-account email — last-resort fallback when there's no
       //      integration or the displayName doesn't contain a parseable email.
+      const { from: requestedFrom } = req.body as ReplyEmailRequest;
       const fromEmailAddress =
+        requestedFrom ||
         preference.sendAsEmail ||
         extractEmailAddress(externalSource.displayName) ||
         owner.email;

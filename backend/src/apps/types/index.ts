@@ -111,6 +111,7 @@ export interface EmailEventPayload {
     parentId: string;
     id : string;
     ticketId: string;
+    channelName: string;
 }
 
 /**
