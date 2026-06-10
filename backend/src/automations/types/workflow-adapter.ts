@@ -53,6 +53,10 @@ export function parseAutomationMetadata(raw: string | null): AutomationMetadata 
   }
 }
 
+export function buildAutomationMetadata(input: AutomationMetadata): string {
+  return JSON.stringify(input);
+}
+
 export function workflowToAutomation(workflow: Workflow): AutomationView {
   const metadata = parseAutomationMetadata(workflow.metadata);
   return {

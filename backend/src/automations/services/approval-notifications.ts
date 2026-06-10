@@ -58,6 +58,12 @@ function deepLinkToProposal(proposal: AutomationView): string {
   return `${base}/${encodeURIComponent(proposal.workspaceId)}/automations/${encodeURIComponent(automationSeriesId)}?proposal=${encodeURIComponent(proposal.id)}`;
 }
 
+function deepLinkToAutomation(automation: AutomationView): string {
+  const base = (config.frontendUrl ?? '').replace(/\/$/, '');
+  const seriesId = automation.automationSeriesId ?? automation.id;
+  return `${base}/${encodeURIComponent(automation.workspaceId)}/automations/${encodeURIComponent(seriesId)}`;
+}
+
 async function dmToUser(
   fromUserId: string,
   toUserId: string,
@@ -111,6 +117,37 @@ export async function notifyAdminsOfSubmission(
   );
   logger.info(
     `[approval-notifications] submission DM fan-out OK proposal=${proposal.id} adminCount=${adminIds.length}`,
+  );
+}
+
+export async function notifyAdminsOfArchiveRequest(
+  automation: AutomationView,
+  requestedByUserId: string,
+): Promise<void> {
+  const botId = await getApprovalBotUserId(automation.workspaceId);
+  if (!botId) return;
+  const adminIds = await listAutomationsAdminUserIds();
+  if (adminIds.length === 0) {
+    logger.warn(
+      `[approval-notifications] no AUTOMATIONS admins to notify for archive request ${automation.id}`,
+    );
+    return;
+  }
+  const body =
+    `Archive requested for automation *${automation.name || automation.id}* by user \`${requestedByUserId}\`.\n` +
+    `Open: ${deepLinkToAutomation(automation)}`;
+
+  await Promise.allSettled(
+    adminIds.map(async adminId => {
+      try {
+        await dmToUser(botId, adminId, automation.workspaceId, body);
+      } catch (err) {
+        logger.warn(`[approval-notifications] archive DM to admin ${adminId} failed`, err);
+      }
+    }),
+  );
+  logger.info(
+    `[approval-notifications] archive request DM fan-out OK id=${automation.id} adminCount=${adminIds.length}`,
   );
 }
 
