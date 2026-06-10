@@ -10,6 +10,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
+import jwt from 'jsonwebtoken';
 
 export class InvitationController {
   /**
@@ -182,21 +183,31 @@ export class InvitationController {
         return;
       }
 
-      let pendingAuth: {
-        user: { email: string; googleId?: string; providerUserId?: string; name: string; picture?: string };
-        provider: string;
-        refreshToken: string | null;
-        accessToken: string | null;
-      };
+      let oauthUser: { email: string; googleId?: string; providerUserId?: string; name: string; picture?: string };
+      let provider: string;
 
       try {
-        pendingAuth = JSON.parse(pendingAuthRaw) as typeof pendingAuth;
+        const decoded = jwt.verify(pendingAuthRaw, process.env.JWT_SECRET!) as {
+          email?: string;
+          name?: string;
+          picture?: string;
+          googleId?: string;
+          providerUserId?: string;
+          provider?: string;
+        };
+        if (!decoded?.email) throw new Error('Invalid JWT payload');
+        oauthUser = {
+          email: decoded.email,
+          name: decoded.name || '',
+          picture: decoded.picture,
+          googleId: decoded.googleId,
+          providerUserId: decoded.providerUserId,
+        };
+        provider = decoded.provider || 'GOOGLE';
       } catch {
         res.status(401).json({ error: 'Invalid authentication session. Please login again.' });
         return;
       }
-
-      const { user: oauthUser, provider } = pendingAuth;
 
       // Support both Google (googleId) and Microsoft (providerUserId)
       const providerUserId = oauthUser.googleId || oauthUser.providerUserId;

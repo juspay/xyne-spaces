@@ -167,7 +167,7 @@ in
                 # If nodeModulesPath is provided, use it directly; otherwise use npx with explicit package
                 zeroCacheCmd = if config.nodeModulesPath != null
                   then "${config.nodeModulesPath}/.bin/zero-cache"
-                  else "${config.package}/bin/npx --yes -p @rocicorp/zero@0.26.1 zero-cache";
+                  else "${config.package}/bin/npx --yes -p @rocicorp/zero@1.6.1 zero-cache";
               in
               "${envExports} ${zeroCacheCmd}";
 

@@ -9,6 +9,7 @@ import { AuthProvider } from '@prisma/client';
 import '../types/express';
 import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
+import jwt from 'jsonwebtoken';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -608,16 +609,14 @@ export class MicrosoftAuthController {
       // This mirrors Google's exchangeElectronCode which always sets google_access_token (line 842).
       if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
         logger.info(`[${requestId}] User has no workspaces and no invitation - setting google_access_token and returning no-access`);
-        res.cookie('google_access_token', JSON.stringify({
-          user: {
-            providerUserId: profile.id,
-            email,
-            name: profile.displayName,
-            picture: undefined,
-          },
+        res.cookie('google_access_token', jwt.sign({
+          providerUserId: profile.id,
+          email,
+          name: profile.displayName,
+          picture: undefined,
           provider: 'microsoft',
           refreshToken: (token.refresh_token as string | undefined) ?? null,
-        }), {
+        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -646,16 +645,14 @@ export class MicrosoftAuthController {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
         // Use sameSite: 'lax' for Electron invitation flow - cookies need to be sent
         // from the renderer (localhost:5173) to backend (localhost:3001)
-        res.cookie('google_access_token', JSON.stringify({
-          user: {
-            providerUserId: profile.id,
-            email,
-            name: profile.displayName,
-            picture: undefined,
-          },
+        res.cookie('google_access_token', jwt.sign({
+          providerUserId: profile.id,
+          email,
+          name: profile.displayName,
+          picture: undefined,
           provider: 'microsoft',
           refreshToken: (token.refresh_token as string | undefined) ?? null,
-        }), {
+        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -775,16 +772,14 @@ export class MicrosoftAuthController {
           });
         }
 
-        res.cookie('google_access_token', JSON.stringify({
-          user: {
-            providerUserId: profile.id,
-            email,
-            name: profile.displayName,
-            picture: undefined,
-          },
+        res.cookie('google_access_token', jwt.sign({
+          providerUserId: profile.id,
+          email,
+          name: profile.displayName,
+          picture: undefined,
           provider: 'microsoft',
           refreshToken: refreshToken ?? null,
-        }), {
+        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -857,16 +852,14 @@ export class MicrosoftAuthController {
       }
 
       // Store pending auth data for later loginWorkspace / acceptInvitation call
-      res.cookie('google_access_token', JSON.stringify({
-        user: {
-          providerUserId: profile.id,
-          email,
-          name: profile.displayName,
-          picture: undefined,
-        },
+      res.cookie('google_access_token', jwt.sign({
+        providerUserId: profile.id,
+        email,
+        name: profile.displayName,
+        picture: undefined,
         provider: 'microsoft',
         refreshToken: refreshToken ?? null,
-      }), {
+      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'lax' as const,
