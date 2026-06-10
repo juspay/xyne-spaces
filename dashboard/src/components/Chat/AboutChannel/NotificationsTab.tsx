@@ -38,7 +38,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
     queries.getChannelUserStatus({ channelId: channel.id }),
     { enabled: statusFromHook === undefined },
   );
-  const channelUserStatus = statusFromHook ?? statusFromQuery?.[0] ?? null;
+  const channelUserStatus = statusFromHook ?? statusFromQuery ?? null;
   // Ready immediately when the hook has data; otherwise wait for the query.
   const settingsReady = statusFromHook !== undefined || statusDetails.type !== 'unknown';
 

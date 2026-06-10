@@ -26,6 +26,7 @@ export {
   useChannelsByProjectId,
   useUserChannelStatuses,
   useGetChannelUserStatus,
+  useChannelParticipation,
   useGetChannelConversations,
   useGetLatestConversation,
 } from './useChannels.js';

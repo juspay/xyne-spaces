@@ -2,7 +2,7 @@ import { withProfiler } from '../../../utils/withProfiler';
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useGetChannelUserStatus, useVisibleChannel } from '../../../hooks/useChannels';
+import { useChannelParticipation, useVisibleChannel } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
 import { activitySkipMarkAsReadChannelRef } from '../../Activity/activitySkipMarkAsRead';
 import { queries } from '../../../zero/queries';
@@ -239,7 +239,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const { baseRoute } = useRouteContext();
   const { editingMessageId, requestEdit } = useEditContext();
-  const channelParticipation = useGetChannelUserStatus(channelId);
+  const channelParticipation = useChannelParticipation(channelId);
   const isMember = !!channelParticipation;
   const channel = useVisibleChannel(channelId);
 
