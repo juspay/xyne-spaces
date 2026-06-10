@@ -101,6 +101,7 @@ import { PrismaClient } from '@prisma/client';
    export async function transformVespaResults(
      hits: VespaSearchHit[],
      prisma: PrismaClient,
+     includeDebugInfo = false,
    ): Promise<TransformedSearchResult[]> {
      if (!hits || hits.length === 0) {
        return [];
@@ -288,7 +289,7 @@ import { PrismaClient } from '@prisma/client';
        }
      }
      // Transform each hit
-     return hits.map((hit) => transformSingleHit(hit, userMap, collectionProjectMap, mailMap));
+     return hits.map((hit) => transformSingleHit(hit, userMap, collectionProjectMap, mailMap, includeDebugInfo));
    }
    
    /**
@@ -299,12 +300,13 @@ import { PrismaClient } from '@prisma/client';
      userMap: UserMap,
      collectionProjectMap: Record<string, { projectId: string; channelId: string }>,
      mailMap: MailMap,
+     includeDebugInfo = false,
 ): TransformedSearchResult {
      const doc = hit.fields;
      const docType = doc.docType as string;
-   
-   
-     const debugInfo = ('matchfeatures' in doc || 'rankfeatures' in doc) ? {
+
+
+     const debugInfo = includeDebugInfo && ('matchfeatures' in doc || 'rankfeatures' in doc) ? {
        matchfeatures: 'matchfeatures' in doc ? doc.matchfeatures : undefined,
        rankfeatures: 'rankfeatures' in doc ? doc.rankfeatures : undefined,
        prefixBoost: '_prefixBoost' in doc ? doc._prefixBoost as number:undefined,

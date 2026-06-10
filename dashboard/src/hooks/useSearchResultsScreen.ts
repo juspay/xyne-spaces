@@ -6,6 +6,7 @@ export interface SearchResultsFilters {
   sortBy: 'relevance' | 'newest' | 'oldest';
   includeBotMessages: boolean;
   onlyMyChannels: boolean;
+  rankProfile: string;
 }
 
 export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
@@ -16,4 +17,5 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   sortBy: 'relevance',
   includeBotMessages: false,
   onlyMyChannels: false,
+  rankProfile: '',
 };

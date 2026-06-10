@@ -1,7 +1,7 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
-import { Hash, Loader2, Mail, MessageCircle, Paperclip, X } from 'lucide-react';
+import { GitCompare, Hash, Loader2, Mail, MessageCircle, Paperclip, X } from 'lucide-react';
 import ThreadMessages from '../ThreadPannel';
 import { UserProfile } from '../../ui/UserProfile/UserProfile';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -20,6 +20,11 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { TabType, MentionType } from '../ChatDirectory/ChannelCommandMenu.types';
 import { navigateToSearchResult } from '../../../utils/searchNavigation';
 import Avatar from '../../ui/Avatar/Avatar';
+import { AnimatePresence, motion } from 'framer-motion';
+import { cn } from '../../../utils/classNames';
+import { CompareSelectRow } from './compare/CompareSelectRow';
+import { SearchCompareDialog } from './compare/SearchCompareDialog';
+import { hasRankingData } from './compare/rankingFeatures';
 
 type SidePanelState =
   | { kind: 'thread'; thread: SearchResultsThread }
@@ -70,6 +75,35 @@ const SearchResults = (): ReactElement => {
     };
   });
 
+  // —— Compare mode (ranking comparison) ——
+  const [compareMode, setCompareMode] = useState(false);
+  const [selected, setSelected] = useState<DisplaySearchResult[]>([]);
+  const [relevantIds, setRelevantIds] = useState<Set<string>>(() => new Set());
+  const [compareOpen, setCompareOpen] = useState(false);
+  const selectedIds = useMemo(() => new Set(selected.map(r => r.id)), [selected]);
+
+  const toggleSelect = useCallback((r: DisplaySearchResult) => {
+    setSelected(prev =>
+      prev.some(s => s.id === r.id) ? prev.filter(s => s.id !== r.id) : [...prev, r],
+    );
+  }, []);
+  const removeFromCompare = useCallback((id: string) => {
+    setSelected(prev => prev.filter(s => s.id !== id));
+  }, []);
+  const toggleRelevant = useCallback((id: string) => {
+    setRelevantIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const clearSelection = useCallback(() => {
+    setSelected([]);
+    setRelevantIds(() => new Set());
+  }, []);
+  const closeCompare = useCallback(() => setCompareOpen(false), []);
+
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchResults: backendResults,
@@ -79,6 +113,8 @@ const SearchResults = (): ReactElement => {
     setActiveTab,
     setSelectedMentions,
     setIncludeBotMessages,
+    setRankProfile,
+    setIncludeDebugInfo,
     loadMoreRef,
     paginationState,
   } = useSearchMetrics({ allChannels: [], mentionSearchType: null });
@@ -87,6 +123,8 @@ const SearchResults = (): ReactElement => {
   useEffect(() => {
     setText(query);
     setSelectedPanel(null);
+    setSelected([]);
+    setRelevantIds(() => new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
@@ -117,6 +155,26 @@ const SearchResults = (): ReactElement => {
     setIncludeBotMessages(filters.includeBotMessages);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.includeBotMessages]);
+
+  // Sync rankProfile filter → hook; clear selection so the matrix never mixes
+  // ranking data captured under different profiles
+  useEffect(() => {
+    setRankProfile(filters.rankProfile);
+    setSelected([]);
+    setRelevantIds(() => new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.rankProfile]);
+
+  // Compare mode → request ranking debug info; clear selection when leaving.
+  useEffect(() => {
+    setIncludeDebugInfo(compareMode);
+    if (!compareMode) {
+      setSelected([]);
+      setRelevantIds(() => new Set());
+      setCompareOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compareMode]);
 
   // Local channel filtering (channels are not in Vespa — use local data)
   const isChannelsMode = filters.docType === 'channels';
@@ -299,8 +357,8 @@ const SearchResults = (): ReactElement => {
     : (paginationState[currentTab]?.total ?? 0);
 
   const resultsColumn = (
-    <div className='flex flex-col h-full min-h-0'>
-      <div className='shrink-0 pl-20 pr-4'>
+    <div className='relative flex flex-col h-full min-h-0'>
+      <div className='shrink-0 px-4'>
         {query && (
           <p className='pt-4 text-base text-muted-foreground'>
             Results for: <span className='font-semibold text-foreground'>{query}</span>
@@ -309,13 +367,30 @@ const SearchResults = (): ReactElement => {
         <div className='mt-3'>
           <SearchFilterBar filters={filters} onFiltersChange={handleFiltersChange} />
         </div>
-        {query && totalCount > 0 && (
-          <p className='text-xs text-muted-foreground pb-2'>
-            {totalCount.toLocaleString()} results
-          </p>
+        {(results.length > 0 || (query && totalCount > 0)) && (
+          <div className='flex items-center justify-between gap-3 pb-2'>
+            <p className='text-xs text-muted-foreground tabular-nums'>
+              {(totalCount || results.length).toLocaleString()} results
+            </p>
+            <button
+              onClick={() => setCompareMode(v => !v)}
+              title='Compare how results ranked'
+              data-track-category='SEARCH_RESULTS'
+              data-track-name='TOGGLE_COMPARE'
+              className={cn(
+                'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
+                compareMode
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+              )}
+            >
+              <GitCompare size={13} />
+              Compare
+            </button>
+          </div>
         )}
       </div>
-      <div ref={scrollRef} className='flex-1 min-h-0 overflow-y-auto pl-20 pr-4'>
+      <div ref={scrollRef} className='flex-1 min-h-0 overflow-y-auto px-4'>
         <ResultsBody
           query={query}
           hasActiveFilters={
@@ -332,7 +407,47 @@ const SearchResults = (): ReactElement => {
           selectedPanel={selectedPanel}
           onSelectUser={handleSelectUser}
           channelData={allChannelsForNav}
+          compareMode={compareMode}
+          selectedIds={selectedIds}
+          relevantIds={relevantIds}
+          onToggleSelect={toggleSelect}
         />
+      </div>
+
+      <div className='pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center'>
+        <AnimatePresence>
+          {compareMode && selected.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
+              className='pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 backdrop-blur shadow-lg py-1.5 pl-4 pr-1.5'
+            >
+              <span className='text-xs text-foreground'>
+                <span className='font-semibold tabular-nums'>{selected.length}</span> selected
+              </span>
+              <button
+                onClick={clearSelection}
+                data-track-category='SEARCH_RESULTS'
+                data-track-name='CLEAR_COMPARE'
+                className='text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-full hover:bg-muted active:scale-[0.96] transition'
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setCompareOpen(true)}
+                disabled={selected.length < 2}
+                data-track-category='SEARCH_RESULTS'
+                data-track-name='OPEN_COMPARE'
+                className='inline-flex items-center gap-1.5 text-xs font-medium bg-primary text-primary-foreground px-3 py-1.5 rounded-full shadow-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.96] transition'
+              >
+                <GitCompare size={13} />
+                Compare in depth
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
@@ -358,6 +473,16 @@ const SearchResults = (): ReactElement => {
             />
           )}
         </div>
+
+        <SearchCompareDialog
+          open={compareOpen}
+          query={query}
+          results={selected}
+          relevantIds={relevantIds}
+          onToggleRelevant={toggleRelevant}
+          onRemove={removeFromCompare}
+          onClose={closeCompare}
+        />
       </div>
     </SearchResultsContext.Provider>
   );
@@ -377,6 +502,10 @@ interface ResultsBodyProps {
   selectedPanel: SidePanelState;
   onSelectUser: (userId: string) => void;
   channelData: ReturnType<typeof useAllChannels>;
+  compareMode: boolean;
+  selectedIds: Set<string>;
+  relevantIds: Set<string>;
+  onToggleSelect: (result: DisplaySearchResult) => void;
 }
 
 function ResultsBody({
@@ -390,6 +519,10 @@ function ResultsBody({
   selectedPanel,
   onSelectUser,
   channelData,
+  compareMode,
+  selectedIds,
+  relevantIds,
+  onToggleSelect,
 }: ResultsBodyProps): ReactElement {
   const navigate = useNavigate();
 
@@ -426,126 +559,143 @@ function ResultsBody({
 
   return (
     <div className='w-full space-y-2 pt-2 pb-6'>
-      {results.map(result => {
+      {results.map((result, index) => {
         const key = `${result.type}-${result.id}`;
-
-        // User card — opens profile panel
-        if (result.type === 'user') {
-          return (
-            <button
-              key={key}
-              onClick={() => onSelectUser(result.id)}
-              className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='OPEN_USER'
-            >
-              <Avatar userId={result.id} size='md' showActiveStatus={false} />
-              <div className='min-w-0'>
-                <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
-                {result.subtitle && (
-                  <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
-                )}
-              </div>
-            </button>
-          );
-        }
-
-        // Channel card
-        if (result.type === 'channel') {
-          const channelId = result.searchContext?.channelId ?? result.id;
-          return (
-            <button
-              key={key}
-              onClick={() => void navigate(`/chat/dir/${channelId}`)}
-              className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='OPEN_CHANNEL'
-            >
-              <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
-                <Hash className='size-4 text-muted-foreground' />
-              </div>
-              <div className='min-w-0'>
-                <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
-                {result.subtitle && result.subtitle !== 'Channel' && (
-                  <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
-                )}
-              </div>
-            </button>
-          );
-        }
-
-        // Attachment / file card
-        if (result.type === 'attachment') {
-          const icon =
-            result.searchContext?.subApp === 'DESK' ? (
-              <Mail className='size-4 text-muted-foreground' />
-            ) : (
-              <Paperclip className='size-4 text-muted-foreground' />
+        const el = ((): ReactElement | null => {
+          // User card — opens profile panel
+          if (result.type === 'user') {
+            return (
+              <button
+                key={key}
+                onClick={() => onSelectUser(result.id)}
+                className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
+                data-track-category='SEARCH_RESULTS'
+                data-track-name='OPEN_USER'
+              >
+                <Avatar userId={result.id} size='md' showActiveStatus={false} />
+                <div className='min-w-0'>
+                  <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
+                  {result.subtitle && (
+                    <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
+                  )}
+                </div>
+              </button>
             );
-          return (
-            <button
-              key={key}
-              onClick={() => void navigateToSearchResult(result, navigate, channelData)}
-              className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='OPEN_ATTACHMENT'
-            >
-              <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
-                {icon}
-              </div>
-              <div className='min-w-0'>
-                <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
-                {result.subtitle && (
-                  <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
-                )}
-              </div>
-            </button>
-          );
-        }
+          }
 
-        // Conversation message card (type === 'conversation')
-        // DESK mails navigate away; regular messages open in the side panel
-        if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
-          return (
-            <button
-              key={key}
-              onClick={() => void navigateToSearchResult(result, navigate, channelData)}
-              className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='OPEN_MAIL'
-            >
-              <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
+          // Channel card
+          if (result.type === 'channel') {
+            const channelId = result.searchContext?.channelId ?? result.id;
+            return (
+              <button
+                key={key}
+                onClick={() => void navigate(`/chat/dir/${channelId}`)}
+                className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
+                data-track-category='SEARCH_RESULTS'
+                data-track-name='OPEN_CHANNEL'
+              >
+                <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
+                  <Hash className='size-4 text-muted-foreground' />
+                </div>
+                <div className='min-w-0'>
+                  <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
+                  {result.subtitle && result.subtitle !== 'Channel' && (
+                    <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
+                  )}
+                </div>
+              </button>
+            );
+          }
+
+          // Attachment / file card
+          if (result.type === 'attachment') {
+            const icon =
+              result.searchContext?.subApp === 'DESK' ? (
                 <Mail className='size-4 text-muted-foreground' />
-              </div>
-              <div className='min-w-0'>
-                <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
-                {result.subtitle && (
-                  <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
-                )}
-              </div>
-            </button>
-          );
-        }
+              ) : (
+                <Paperclip className='size-4 text-muted-foreground' />
+              );
+            return (
+              <button
+                key={key}
+                onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+                className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
+                data-track-category='SEARCH_RESULTS'
+                data-track-name='OPEN_ATTACHMENT'
+              >
+                <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
+                  {icon}
+                </div>
+                <div className='min-w-0'>
+                  <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
+                  {result.subtitle && (
+                    <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
+                  )}
+                </div>
+              </button>
+            );
+          }
 
-        // Regular message card
-        const ctx = result.searchContext;
-        if (!ctx?.channelId || !ctx?.conversationId) return null;
+          // Conversation message card (type === 'conversation')
+          // DESK mails navigate away; regular messages open in the side panel
+          if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
+            return (
+              <button
+                key={key}
+                onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+                className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
+                data-track-category='SEARCH_RESULTS'
+                data-track-name='OPEN_MAIL'
+              >
+                <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
+                  <Mail className='size-4 text-muted-foreground' />
+                </div>
+                <div className='min-w-0'>
+                  <p className='text-sm font-medium text-foreground truncate'>{result.title}</p>
+                  {result.subtitle && (
+                    <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
+                  )}
+                </div>
+              </button>
+            );
+          }
+
+          // Regular message card
+          const ctx = result.searchContext;
+          if (!ctx?.channelId || !ctx?.conversationId) return null;
+          return (
+            <SearchResultMessageCard
+              key={key}
+              channelId={ctx.channelId}
+              conversationId={ctx.conversationId}
+              matchedMessageId={ctx.messageId ?? null}
+              {...(result.context && { searchSnippet: result.context })}
+              isSelected={
+                (selectedPanel?.kind === 'channel' &&
+                  selectedPanel.conversationId === ctx.conversationId &&
+                  selectedPanel.matchedMessageId === (ctx.messageId ?? null)) ||
+                (selectedPanel?.kind === 'thread' &&
+                  selectedPanel.thread.conversationId === ctx.conversationId &&
+                  selectedPanel.thread.matchedMessageId === (ctx.messageId ?? null))
+              }
+            />
+          );
+        })();
+
+        if (!el) return null;
+        if (!compareMode) return el;
         return (
-          <SearchResultMessageCard
+          <CompareSelectRow
             key={key}
-            channelId={ctx.channelId}
-            conversationId={ctx.conversationId}
-            matchedMessageId={ctx.messageId ?? null}
-            {...(result.context && { searchSnippet: result.context })}
-            isSelected={
-              (selectedPanel?.kind === 'channel' &&
-                selectedPanel.conversationId === ctx.conversationId &&
-                selectedPanel.matchedMessageId === (ctx.messageId ?? null)) ||
-              (selectedPanel?.kind === 'thread' &&
-                selectedPanel.thread.conversationId === ctx.conversationId &&
-                selectedPanel.thread.matchedMessageId === (ctx.messageId ?? null))
-            }
-          />
+            rank={index + 1}
+            score={result.relevanceScore}
+            selected={selectedIds.has(result.id)}
+            relevant={relevantIds.has(result.id)}
+            hasDebug={hasRankingData(result)}
+            onToggle={() => onToggleSelect(result)}
+          >
+            {el}
+          </CompareSelectRow>
         );
       })}
       {/* Sentinel for load-more (same mechanism as popup modal) */}
