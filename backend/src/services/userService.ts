@@ -697,7 +697,7 @@ export class UserService {
    * Called after temp token is verified
    */
   async createOrGetWorkspaceUser(userData: {
-    providerUserId: string;
+    providerUserId?: string | null;
     email: string;
     name: string;
     picture?: string | null;
@@ -705,15 +705,18 @@ export class UserService {
     authProvider?: string;
   }): Promise<{ user: User; isNewUser: boolean }> {
     try {
-      // Try to find existing workspace user by providerUserId
-      let workspaceUser = await this.prisma.user.findUnique({
-        where: {
-          providerUserId_workspaceId: {
-            providerUserId: userData.providerUserId,
-            workspaceId: userData.workspaceId
+      // Try to find existing workspace user by providerUserId (only when available)
+      let workspaceUser: User | null = null;
+      if (userData.providerUserId) {
+        workspaceUser = await this.prisma.user.findUnique({
+          where: {
+            providerUserId_workspaceId: {
+              providerUserId: userData.providerUserId,
+              workspaceId: userData.workspaceId
+            }
           }
-        }
-      });
+        });
+      }
 
       const normalizedAuthProvider = (userData.authProvider?.toUpperCase() as AuthProvider) || AuthProvider.GOOGLE;
 
@@ -725,7 +728,7 @@ export class UserService {
         return { user: workspaceUser, isNewUser: false };
       }
 
-      // Also check by email (for users created by seed script with different providerUserId)
+      // Also check by email (for users created by seed script or when providerUserId is unavailable)
       workspaceUser = await this.prisma.user.findUnique({
         where: {
           email_workspaceId: {
@@ -739,7 +742,7 @@ export class UserService {
         workspaceUser = await this.prisma.user.update({
           where: { id: workspaceUser.id },
           data: {
-            providerUserId: userData.providerUserId,
+            ...(userData.providerUserId ? { providerUserId: userData.providerUserId } : {}),
             authProvider: normalizedAuthProvider
           }
         });
@@ -790,6 +793,10 @@ export class UserService {
 
       if (!orgMember) {
         throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
+      }
+
+      if (!userData.providerUserId) {
+        throw new Error(`providerUserId is required to create a new workspace user for ${userData.email}`);
       }
 
       workspaceUser = await this.prisma.user.create({

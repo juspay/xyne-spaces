@@ -227,16 +227,7 @@ class AuthV2Middleware {
       // Set new cookie with updated lifespan
       const isProduction = process.env.NODE_ENV === 'production';
       const targetWorkspaceId = session.user.workspaceId;
-      
-      // Legacy cookie (backward compatibility)
-      res.cookie('google_access_token', customToken, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict',
-        path: '/',
-        maxAge: config.jwt.expirationSeconds * 1000,
-      });
-      
+
       // NEW: Multi-workspace cookies
       if (targetWorkspaceId) {
         res.cookie(`xyne_ws_${targetWorkspaceId}_token`, customToken, {
