@@ -183,6 +183,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       maxFiles = 10,
       onAlsoSendToChannelChange,
       alsoSendToChannelChecked = false,
+      isDMThread = false,
       onCreateTicket,
       onTranscriptSelect,
       onScheduleSend,
@@ -1427,7 +1428,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   htmlFor='also-send-to-channel'
                   className='text-xs text-muted-foreground cursor-pointer'
                 >
-                  Also send to channel
+                  Also send {isDMThread ? 'as direct message' : 'to channel'}
                 </label>
               </div>
             )}

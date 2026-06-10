@@ -893,6 +893,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 !messageId && {
                   onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
                   alsoSendToChannelChecked: alsoSendToChannel,
+                  isDMThread: !!isDM,
                 })}
               {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
                 canCreateTicket &&
