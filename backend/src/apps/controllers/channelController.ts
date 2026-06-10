@@ -1,10 +1,19 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { repositories } from '@/database/repositories';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { logger } from '@/utils/logger';
 import { ChannelsResponse, ChannelListItem, ChannelListResponse } from '../types';
 
 const GetChannelInfoBodySchema = z.object({
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
+}).refine(
+  data => !!data.channelId || !!data.channelName,
+  { message: 'Either channelId or channelName is required' }
+);
+
+const GetDeskConfigBodySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   channelName: z.string().min(1, 'Channel name is required').trim().optional(),
 }).refine(
@@ -73,6 +82,50 @@ export class ChannelController {
       res.status(500).json({ 
         error: 'Internal server error',
         code: 'INTERNAL_ERROR'
+      });
+    }
+  };
+
+  /**
+   * Get desk channel config (EmailChannelPreference)
+   * POST /api/apps/channel/deskConfig
+   */
+  getDeskConfig = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const bodyResult = GetDeskConfigBodySchema.safeParse(req.body);
+
+      if (!bodyResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: bodyResult.error.errors,
+        });
+        return;
+      }
+
+      const { channelId, channelName } = bodyResult.data;
+
+      const channel = channelId
+        ? await repositories.channels.findById(channelId)
+        : await repositories.channels.findByName(channelName!);
+
+      if (!channel) {
+        res.status(404).json({
+          error: 'Channel not found',
+          code: 'CHANNEL_NOT_FOUND',
+        });
+        return;
+      }
+
+      const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
+      const config = await emailChannelPreferenceRepo.findByChannelId(channel.id);
+
+      res.status(200).json({ config });
+    } catch (error) {
+      logger.error('[CHANNEL-CONTROLLER] Error getting desk config:', error);
+      res.status(500).json({
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
       });
     }
   };
