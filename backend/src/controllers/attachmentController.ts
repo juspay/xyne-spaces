@@ -310,14 +310,20 @@ export class AttachmentController {
         return;
       }
 
-      const fileExists = await storageService.fileExists(filePath);
+      // Route transcript/recording attachments to their dedicated bucket
+      const meta = attachment.metadata as { type?: string };
+      const service = meta?.type === 'transcript' || meta?.type === 'identified_transcript' || meta?.type === 'recording'
+        ? getStorageService(config.gcs.transcriptionBucketName)
+        : storageService;
+
+      const fileExists = await service.fileExists(filePath);
       if (!fileExists) {
         logger.error(`File not found in storage: ${filePath}`);
         res.status(404).json({ error: 'File not found in storage' });
         return;
       }
 
-      const metadata = await storageService.getFileMetadata(filePath);
+      const metadata = await service.getFileMetadata(filePath);
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
       // Parse Range header (e.g., "bytes=0-1023")
@@ -330,9 +336,15 @@ export class AttachmentController {
         res.setHeader('Content-Type', attachment.mimetype);
         res.setHeader('Content-Length', fileSize);
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Cache-Control', 'private, max-age=3600');
+        if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        } else {
+          res.setHeader('Cache-Control', 'private, max-age=3600');
+        }
 
-        const stream = await storageService.createReadStream(filePath);
+        const stream = await service.createReadStream(filePath);
         stream.pipe(res);
 
         stream.on('error', (error) => {
@@ -380,9 +392,15 @@ export class AttachmentController {
       res.setHeader('Content-Length', chunkSize);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
       res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Cache-Control', 'private, max-age=3600');
+      if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      } else {
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+      }
 
-      const stream = await storageService.createReadStream(filePath, { start, end });
+      const stream = await service.createReadStream(filePath, { start, end });
       stream.pipe(res);
 
       stream.on('error', (error) => {
