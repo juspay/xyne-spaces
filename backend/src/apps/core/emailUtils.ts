@@ -112,7 +112,10 @@ export async function dispatchEmailEventForEmailId(emailId: string): Promise<voi
     const appUserIds = appUsers.map(u => u.id);
     if (appUserIds.length === 0) return;
 
-    const ticket = await repositories.tickets.findFirstByConversationId(email.conversationId);
+    const [ticket, channel] = await Promise.all([
+      repositories.tickets.findFirstByConversationId(email.conversationId),
+      repositories.channels.findById(email.channelId),
+    ]);
 
     const payload: EmailEventPayload = {
       conversationId: email.conversationId,
@@ -124,6 +127,7 @@ export async function dispatchEmailEventForEmailId(emailId: string): Promise<voi
       parentId: email.id,
       id: email.id,
       ticketId: ticket?.id ?? '',
+      channelName: channel?.name ?? '',
     };
 
     const event: BaseAppEvent = {

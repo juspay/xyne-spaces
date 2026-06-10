@@ -514,6 +514,7 @@ export class ConversationService {
       replyBroadcast = false,
       lastActivityAt,
       isBot,
+      isMarkdown,
       createdAt,
       isAddingParticipant = true,
       isMigration = false,
@@ -580,7 +581,7 @@ export class ConversationService {
       hasAttachment: processedFiles.length > 0,
       showInChannel: replyBroadcast,
       childConversationId: childConversationId,
-      metadata: metadata,
+      metadata: { ...metadata, ...(isMarkdown && { contentFormat: 'markdown' }) },
       ...(createdAt && { createdAt }),
     };
 
