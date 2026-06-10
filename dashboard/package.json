@@ -95,6 +95,8 @@
     "@tiptap/extension-table-cell": "^3.20.0",
     "@tiptap/extension-table-header": "^3.20.0",
     "@tiptap/extension-table-row": "^3.20.0",
+    "@tiptap/extension-task-item": "3.15.3",
+    "@tiptap/extension-task-list": "3.15.3",
     "@tiptap/extension-text": "^3.8.0",
     "@tiptap/extension-text-align": "^3.23.1",
     "@tiptap/extension-text-style": "^3.23.1",

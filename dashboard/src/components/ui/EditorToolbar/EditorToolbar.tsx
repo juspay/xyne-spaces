@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tooltip } from '../Tooltip';
 import {
   Bold,
+  CheckSquare,
   Italic,
   Underline as UnderlineIcon,
   Code,
@@ -22,6 +23,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   editor,
   showImageUpload = false,
   rightSlot,
+  variant = 'default',
 }) => {
   const [isActive, setIsActive] = useState({
     bold: false,
@@ -34,6 +36,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     blockquote: false,
     bulletList: false,
     orderedList: false,
+    taskList: false,
   });
   const [linkUrl, setLinkUrl] = useState('');
   const [linkText, setLinkText] = useState('');
@@ -61,6 +64,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         blockquote: editor.isActive('blockquote'),
         bulletList: editor.isActive('bulletList'),
         orderedList: editor.isActive('orderedList'),
+        taskList: editor.isActive('taskList'),
       });
     };
 
@@ -215,6 +219,15 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     editor?.chain().focus().toggleOrderedList().run();
   }, [editor]);
 
+  const handleTaskList = useCallback(() => {
+    if (!editor?.extensionManager.extensions.some(ext => ext.name === 'taskList')) return;
+    editor.chain().focus().toggleTaskList().run();
+  }, [editor]);
+
+  const hasTaskListExtension = Boolean(
+    editor?.extensionManager.extensions.some(ext => ext.name === 'taskList'),
+  );
+
   const handleBlockquote = useCallback(() => {
     editor?.chain().focus().toggleBlockquote().run();
   }, [editor]);
@@ -246,15 +259,25 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   if (!editor) return null;
 
   const buttonClass = (active: boolean): string =>
-    `p-1.5 rounded transition-all duration-200 ease-in-out ${
-      active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
-    }`;
+    variant === 'compact'
+      ? `pt-[6px] pr-[8px] pb-[7px] pl-[8px] rounded transition-all duration-200 ease-in-out ${
+          active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
+        }`
+      : `p-1.5 rounded transition-all duration-200 ease-in-out ${
+          active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
+        }`;
 
   return (
     <>
       {/* Link Hover Tooltip */}
-      <div className='border-border p-1'>
-        <div className='flex items-center gap-1 px-3 py-2 bg-muted rounded-xl'>
+      <div className={variant === 'compact' ? 'border-border' : 'border-border p-1'}>
+        <div
+          className={
+            variant === 'compact'
+              ? 'flex items-center gap-[10px] px-3 py-2 rounded-xl'
+              : 'flex items-center gap-1 px-3 py-2 bg-muted rounded-xl'
+          }
+        >
           <Tooltip content='Bold (⌘B)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
@@ -279,18 +302,6 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Strikethrough (⌘⇧X)' delayDuration={1000} skipDelayDuration={1000}>
-            <button
-              type='button'
-              onClick={handleStrikethrough}
-              className={buttonClass(isActive.strike)}
-              aria-label='Strikethrough'
-              aria-pressed={isActive.strike}
-            >
-              <Strikethrough className='h-4 w-4' />
-            </button>
-          </Tooltip>
-
           <Tooltip content='Underline (⌘U)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
@@ -303,29 +314,47 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip content='Inline Code (⌘E)' delayDuration={1000} skipDelayDuration={1000}>
+          <Tooltip content='Strikethrough (⌘⇧X)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
-              onClick={handleCode}
-              className={buttonClass(isActive.code)}
-              aria-label='Inline code'
-              aria-pressed={isActive.code}
+              onClick={handleStrikethrough}
+              className={buttonClass(isActive.strike)}
+              aria-label='Strikethrough'
+              aria-pressed={isActive.strike}
             >
-              <Code className='h-4 w-4' />
+              <Strikethrough className='h-4 w-4' />
             </button>
           </Tooltip>
 
-          <Tooltip content='Code Block (⌘⇧E)' delayDuration={1000} skipDelayDuration={1000}>
-            <button
-              type='button'
-              onClick={handleCodeBlock}
-              className={buttonClass(isActive.codeBlock)}
-              aria-label='Code block'
-              aria-pressed={isActive.codeBlock}
-            >
-              <FileCode className='h-4 w-4' />
-            </button>
-          </Tooltip>
+          {variant === 'default' && (
+            <>
+              <Tooltip content='Inline Code (⌘E)' delayDuration={1000} skipDelayDuration={1000}>
+                <button
+                  type='button'
+                  onClick={handleCode}
+                  className={buttonClass(isActive.code)}
+                  aria-label='Inline code'
+                  aria-pressed={isActive.code}
+                >
+                  <Code className='h-4 w-4' />
+                </button>
+              </Tooltip>
+
+              <Tooltip content='Code Block (⌘⇧E)' delayDuration={1000} skipDelayDuration={1000}>
+                <button
+                  type='button'
+                  onClick={handleCodeBlock}
+                  className={buttonClass(isActive.codeBlock)}
+                  aria-label='Code block'
+                  aria-pressed={isActive.codeBlock}
+                >
+                  <FileCode className='h-4 w-4' />
+                </button>
+              </Tooltip>
+            </>
+          )}
+
+          {variant === 'compact' && <div className='w-px h-4 bg-border' />}
 
           <Dialog
             open={open}
@@ -491,17 +520,21 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </div>
           )}
 
-          <Tooltip content='Blockquote (⌘⇧B)' delayDuration={1000} skipDelayDuration={1000}>
-            <button
-              type='button'
-              onClick={handleBlockquote}
-              className={buttonClass(isActive.blockquote)}
-              aria-label='Quote'
-              aria-pressed={isActive.blockquote}
-            >
-              <TextQuote className='h-4 w-4' />
-            </button>
-          </Tooltip>
+          {variant === 'compact' && <div className='w-px h-4 bg-border' />}
+
+          {variant === 'default' && (
+            <Tooltip content='Blockquote (⌘⇧B)' delayDuration={1000} skipDelayDuration={1000}>
+              <button
+                type='button'
+                onClick={handleBlockquote}
+                className={buttonClass(isActive.blockquote)}
+                aria-label='Quote'
+                aria-pressed={isActive.blockquote}
+              >
+                <TextQuote className='h-4 w-4' />
+              </button>
+            </Tooltip>
+          )}
 
           <Tooltip content='Bullet List' delayDuration={1000} skipDelayDuration={1000}>
             <button
@@ -532,6 +565,34 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <div className='mx-1 h-4 w-px bg-border' />
               {rightSlot}
             </>
+          )}
+
+          {variant === 'compact' && hasTaskListExtension && (
+            <Tooltip content='Task List' delayDuration={1000} skipDelayDuration={1000}>
+              <button
+                type='button'
+                onClick={handleTaskList}
+                className={buttonClass(isActive.taskList)}
+                aria-label='Task list'
+                aria-pressed={isActive.taskList}
+              >
+                <CheckSquare className='h-4 w-4' />
+              </button>
+            </Tooltip>
+          )}
+
+          {variant === 'compact' && (
+            <Tooltip content='Blockquote (⌘⇧B)' delayDuration={1000} skipDelayDuration={1000}>
+              <button
+                type='button'
+                onClick={handleBlockquote}
+                className={buttonClass(isActive.blockquote)}
+                aria-label='Quote'
+                aria-pressed={isActive.blockquote}
+              >
+                <TextQuote className='h-4 w-4' />
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>

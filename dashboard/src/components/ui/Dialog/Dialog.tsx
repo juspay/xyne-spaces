@@ -124,7 +124,7 @@ export const Dialog = ({
             'w-full',
             'max-w-md',
             'bg-popover text-popover-foreground rounded-lg shadow-lg',
-            'focus:outline-none z-50',
+            'outline-none focus:outline-none z-50',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
