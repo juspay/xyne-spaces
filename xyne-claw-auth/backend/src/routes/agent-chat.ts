@@ -779,36 +779,58 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
 // POST /agents/:slug/chat/cancel — cancel an in-flight chat run
 router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
   try {
-    const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
-    if (!userId) {
-      res.status(400).json({ success: false, error: "userId or x-user-id header required" });
-      return;
-    }
-
     const { slug } = req.params;
-    const { sessionId } = req.body as { sessionId?: string };
-    if (!sessionId || typeof sessionId !== "string") {
-      res.status(400).json({ success: false, error: "sessionId is required" });
+    const { sessionId, conversationId } = req.body as { sessionId?: string; conversationId?: string };
+
+    if (!sessionId && !conversationId) {
+      res.status(400).json({ success: false, error: "sessionId or conversationId is required" });
       return;
     }
 
-    const run = await agentRunRepository.findBySessionId(sessionId);
-    if (!run || run.userId !== userId || run.agentSlug !== slug) {
+    let run;
+    if (sessionId && typeof sessionId === "string") {
+      run = await agentRunRepository.findBySessionId(sessionId);
+    } else if (conversationId && typeof conversationId === "string") {
+      run = await prisma.agentRun.findFirst({
+        where: { conversationId, status: "running", agentSlug: slug },
+        orderBy: { startedAt: "desc" },
+      });
+    }
+
+    if (!run || run.agentSlug !== slug) {
       res.status(404).json({ success: false, error: "Run not found" });
+      return;
+    }
+
+    // Only the user who started the run (run.userId is the human initiator,
+    // resolved from the message sender) — or a claw admin — may cancel it.
+    // In a shared/group conversation this stops anyone else from aborting
+    // someone's in-flight run.
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "x-user-id header is required to cancel a run" });
+      return;
+    }
+    if (run.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+      res.status(403).json({ success: false, error: "Not allowed to cancel another user's run" });
       return;
     }
 
     if (run.status !== "running") {
       res.json({
         success: true,
-        data: { sessionId, conversationId: run.conversationId, status: run.status },
+        data: { sessionId: run.sessionId, conversationId: run.conversationId, status: run.status },
       });
       return;
     }
 
-    const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/run/${encodeURIComponent(sessionId)}/cancel`, {
+    // Cancel via xyne-claw (the actual AI runner), not claw-auth itself
+    const cancelRes = await fetch(`${CONFIG.xyneClawUrl}/run/${encodeURIComponent(run.sessionId)}/cancel`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
     });
 
     if (!cancelRes.ok) {
@@ -819,7 +841,7 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
 
     res.json({
       success: true,
-      data: { sessionId, conversationId: run.conversationId, status: "cancelled" },
+      data: { sessionId: run.sessionId, conversationId: run.conversationId, status: "cancelled" },
     });
   } catch (err) {
     console.error("[agent-chat] cancel error:", err);

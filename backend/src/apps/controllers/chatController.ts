@@ -93,6 +93,8 @@ const AgentProgressBodySchema = z.object({
   agentSlug: z.string().min(1).trim().optional(),
   toolLabel: z.string().optional(),
   status: z.enum(['working', 'done']).default('working'),
+  triggeredByUserId: z.string().min(1).trim().optional(), // human who started the run — gates the Stop button
+  sessionId: z.string().min(1).trim().optional(),         // run id — scopes done-suppression so a straggler from a finished run can't resurrect the spinner
 });
 
 const ConversationRepliesQuerySchema = z.object({
@@ -372,10 +374,41 @@ export class ChatController {
         res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: parsed.error.errors });
         return;
       }
-      const { conversationId, channelId, userId, agentSlug, toolLabel, status } = parsed.data;
+      const { conversationId, channelId, userId, agentSlug, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;
 
       // Resolve channelId if only conversationId was given — dashboard subscribes on channel.
       const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+
+      const stateKey = `agent_progress:conversation:${conversationId}`;
+      const stateTtlSeconds = 10 * 60;
+      // Session-scoped done marker. The terminal `done` and a late tool-label
+      // `working` arrive as separate webhook requests and can race across the
+      // multi-hop async chain (claw → claw-auth → spaces → redis), sometimes by
+      // more than a few seconds. Keying the marker by sessionId (the run id) makes
+      // suppression deterministic: a straggler `working` from the finished run is
+      // always dropped, while a brand-new run (new sessionId) is never suppressed —
+      // unlike a time-window guard, which both misfires on slow stragglers and
+      // wrongly eats the early `working` of an immediate re-run.
+      const doneSessionKey = sessionId ? `agent_progress_done_session:${sessionId}` : null;
+      const doneSessionTtlSeconds = 120;
+
+      if (status !== 'done' && doneSessionKey && (await redisService.get(doneSessionKey))) {
+        res.status(200).json({ success: true, suppressed: true });
+        return;
+      }
+
+      // Tool-label updates from the runner don't carry the triggerer; carry it
+      // forward from the existing hash field so the Stop button stays visible to
+      // the initiator across the whole run (and after a thread reopen/rehydrate).
+      let resolvedTriggeredBy = triggeredByUserId ?? null;
+      if (!resolvedTriggeredBy && status !== 'done') {
+        const existingRaw = await redisService.getHashField(stateKey, userId);
+        if (existingRaw) {
+          try {
+            resolvedTriggeredBy = (JSON.parse(existingRaw) as { triggeredByUserId?: string }).triggeredByUserId ?? null;
+          } catch { /* ignore malformed */ }
+        }
+      }
 
       const now = new Date().toISOString();
       const payload = {
@@ -383,8 +416,10 @@ export class ChatController {
         channelId: resolvedChannelId,
         agentSlug,
         agentUserId: userId,
+        sessionId: sessionId ?? null,
         toolLabel: toolLabel ?? null,
         status,
+        triggeredByUserId: resolvedTriggeredBy,
         timestamp: now,
       };
 
@@ -392,9 +427,8 @@ export class ChatController {
       // (or reload) can rehydrate. TTL = 10 min matches the client's stale backstop;
       // a single tool step may run for minutes without emitting new progress events,
       // so anything shorter would vanish the spinner even though the agent is still working.
-      const stateKey = `agent_progress:conversation:${conversationId}`;
-      const stateTtlSeconds = 10 * 60;
       if (status === 'done') {
+        if (doneSessionKey) await redisService.set(doneSessionKey, now, doneSessionTtlSeconds);
         await redisService.deleteHashField(stateKey, userId);
       } else {
         await redisService.setHashField(stateKey, userId, JSON.stringify(payload), stateTtlSeconds);

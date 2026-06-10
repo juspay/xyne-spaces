@@ -1617,8 +1617,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               channelId: payload.channelId,
               agentSlug: agent.slug,
               userId: agent.spacesAppUserId,
+              sessionId: body.sessionId,
               toolLabel: "Working on it...",
               status: "working",
+              triggeredByUserId: payload.userId,
             }, agent.appToken);
           } else {
             const placeholderRes = (await spacesAppFetch("/chat/postMessage", {
@@ -2022,7 +2024,22 @@ router.post("/result", requireS2S, async (req: Request, res: Response) => {
               progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
             }),
           });
-          if (!runRes.ok) { console.error(`[webhook/result] Failure chain trigger HTTP ${runRes.status}`); return; }
+          if (!runRes.ok) {
+            console.error(`[webhook/result] Failure chain trigger HTTP ${runRes.status}`);
+            if (USE_EPHEMERAL_PROGRESS) {
+              spacesAppFetch("/chat/agentProgress", {
+                conversationId: ctx.conversationId,
+                channelId: ctx.channelId,
+                agentSlug: ctx.agentSlug,
+                userId: ctx.spacesAppUserId,
+                ...(sessionId ? { sessionId } : {}),
+                status: "done",
+              }, ctx.appToken).catch((err) =>
+                console.warn("[webhook/result] Failed to clear progress on chain-trigger failure:", err instanceof Error ? err.message : err),
+              );
+            }
+            return;
+          }
           const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
           if (runBody.success && runBody.sessionId && failureAgentRow?.spacesAppToken && failureAgentRow.spacesAppId) {
             const failureAppToken = decryptStoredField(failureAgentRow.spacesAppToken);
@@ -2072,6 +2089,18 @@ router.post("/result", requireS2S, async (req: Request, res: Response) => {
         console.error("[webhook/result] Failure chain error (non-fatal):", chainErr);
       }
     }
+    if (USE_EPHEMERAL_PROGRESS && ctx) {
+      spacesAppFetch("/chat/agentProgress", {
+        conversationId: ctx.conversationId,
+        channelId: ctx.channelId,
+        agentSlug: ctx.agentSlug,
+        userId: ctx.spacesAppUserId,
+        ...(sessionId ? { sessionId } : {}),
+        status: "done",
+      }, ctx.appToken).catch((err) =>
+        console.warn("[webhook/result] Failed to clear progress on non-complete:", err instanceof Error ? err.message : err),
+      );
+    }
     return;
   }
 
@@ -2087,11 +2116,12 @@ router.post("/result", requireS2S, async (req: Request, res: Response) => {
   // Only fires in the ephemeral path; the placeholder path clears naturally
   // when we edit the "⏳" message with the final result below.
   if (USE_EPHEMERAL_PROGRESS) {
-    spacesAppFetch("/chat/agentProgress", {
+    await spacesAppFetch("/chat/agentProgress", {
       conversationId: ctx.conversationId,
       channelId: ctx.channelId,
       agentSlug: ctx.agentSlug,
       userId: ctx.spacesAppUserId,
+      ...(sessionId ? { sessionId } : {}),
       status: "done",
     }, ctx.appToken).catch((err) =>
       log.warn("Failed to clear agent progress signal", { error: err instanceof Error ? err.message : String(err) }),
@@ -2835,6 +2865,7 @@ router.post("/progress", requireS2S, async (req: Request, res: Response) => {
         channelId: ctx.channelId,
         agentSlug: ctx.agentSlug,
         userId: ctx.spacesAppUserId,
+        sessionId,
         toolLabel,
         status: "working",
       }, ctx.appToken);
