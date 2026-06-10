@@ -178,6 +178,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const [useVespaSearch, setUseVespaSearch] = useState(true);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
   const [includeBotMessages, setIncludeBotMessages] = useState(false);
+  // Vespa rank profile, passed through to the search payload. '' => backend default.
+  const [rankProfile, setRankProfile] = useState('');
+  // Compare mode: request per-result matchfeatures/rankfeatures for ranking debug.
+  const [includeDebugInfo, setIncludeDebugInfo] = useState(false);
   // Load More Ref
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
@@ -835,6 +839,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               limit: limit,
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
+              ...(rankProfile && { rankProfile }),
+              ...(includeDebugInfo && { includeDebugInfo: true }),
               ...(priorityFilter && { priority: priorityFilter }),
               ...(boardFilter && { board: boardFilter }),
               ...(tagsFilter && { tags: tagsFilter }),
@@ -1109,20 +1115,31 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         resetSearchState();
       }
     },
-    [searchSessionId, markSearchStart, resetSearchState, includeBotMessages],
+    [
+      searchSessionId,
+      markSearchStart,
+      resetSearchState,
+      includeBotMessages,
+      rankProfile,
+      includeDebugInfo,
+    ],
   );
 
-  // Track the last search text, tab, mentions, and includeBotMessages to avoid duplicate calls
+  // Track the last search text, tab, mentions, includeBotMessages, and rankProfile to avoid duplicate calls
   const lastSearchedParamsRef = useRef<{
     text: string;
     activeTab: TabType;
     mentionsKey: string;
     includeBotMessages: boolean;
+    rankProfile: string;
+    includeDebugInfo: boolean;
   }>({
     text: '',
     activeTab: TabType.ALL,
     mentionsKey: '',
     includeBotMessages: false,
+    rankProfile: '',
+    includeDebugInfo: false,
   });
 
   // Debounced backend search with pagination reset
@@ -1148,7 +1165,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       activeTab === lastSearchedParamsRef.current.activeTab &&
       includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
-      includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
+      rankProfile === lastSearchedParamsRef.current.rankProfile &&
+      includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       normalizedText !== ''
     ) {
       return;
@@ -1159,6 +1177,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         text: normalizedText,
         activeTab,
         includeBotMessages,
+        rankProfile,
+        includeDebugInfo,
         mentionsKey: currentMentionsKey,
       };
       void performSearch(
@@ -1184,6 +1204,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     options.mentionSearchType,
     performSearch,
     includeBotMessages,
+    rankProfile,
+    includeDebugInfo,
   ]);
 
   /**
@@ -1241,6 +1263,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           limit: currentOffset + pageSize,
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
+          ...(rankProfile && { rankProfile }),
+          ...(includeDebugInfo && { includeDebugInfo: true }),
           ...(priorityFilter && { priority: priorityFilter }),
           ...(boardFilter && { board: boardFilter }),
           ...(tagsFilter && { tags: tagsFilter }),
@@ -1402,6 +1426,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     useVespaSearch,
     includeBotMessages,
+    rankProfile,
+    includeDebugInfo,
   ]);
 
   // Load more results wrapper for effect
@@ -1491,6 +1517,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setUseVespaSearch,
     includeBotMessages,
     setIncludeBotMessages,
+    rankProfile,
+    setRankProfile,
+    includeDebugInfo,
+    setIncludeDebugInfo,
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,

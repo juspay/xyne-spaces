@@ -1,6 +1,6 @@
 import { ReactElement, useState, useMemo, useRef, useCallback, KeyboardEvent } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { ChevronDown, Check, X, User, Hash, ArrowUpDown } from 'lucide-react';
+import { ChevronDown, Check, X, User, Hash, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { cn } from '../../../utils/classNames';
@@ -90,6 +90,52 @@ const SORT_OPTIONS = [
   { value: 'oldest' as const, label: 'Oldest' },
 ];
 
+// Hardcoded Vespa rank profiles, scoped to the schema(s) each docType resolves to.
+// '' means "send nothing" => backend default (default_native). Only profiles that exist
+// in every schema the type queries are listed, because Vespa rejects a rank profile that
+// is missing from any queried schema. Selecting a single type prunes the query's sources
+// to that one schema (see searchService.ts), which is what makes the chat-only and
+// mail-only profiles below valid.
+type RankProfileOption = { value: string; label: string };
+const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
+  Record<SearchResultsFilters['docType'], RankProfileOption[]>
+> = {
+  all: [
+    { value: '', label: 'default_native' },
+    { value: 'default_fuzzy', label: 'default_fuzzy' },
+  ],
+  messages: [
+    { value: '', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
+    { value: 'default_random', label: 'default_random' },
+    { value: 'default_fuzzy', label: 'default_fuzzy' },
+    ...Array.from({ length: 23 }, (_, i) => ({
+      value: `default_native_${i}`,
+      label: `default_native_${i}`,
+    })),
+  ],
+  files: [
+    { value: '', label: 'default_native' },
+    { value: 'default_fuzzy', label: 'default_fuzzy' },
+  ],
+  tickets: [
+    { value: '', label: 'default_native' },
+    { value: 'default_fuzzy', label: 'default_fuzzy' },
+    { value: 'semantic_ranking', label: 'semantic_ranking' },
+  ],
+  desk: [
+    { value: '', label: 'default_native' },
+    { value: 'default_fuzzy', label: 'default_fuzzy' },
+    { value: 'global_sorted', label: 'global_sorted' },
+    { value: 'default_bm25', label: 'default_bm25' },
+    { value: 'default_ai', label: 'default_ai' },
+  ],
+};
+
+function getRankProfileOptions(docType: SearchResultsFilters['docType']): RankProfileOption[] {
+  return RANK_PROFILE_OPTIONS_BY_TYPE[docType] ?? [];
+}
+
 function useListKeyNav(
   length: number,
   onSelect: (index: number) => void,
@@ -171,6 +217,7 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const [inOpen, setInOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
+  const [rankOpen, setRankOpen] = useState(false);
 
   const [fromQuery, setFromQuery] = useState('');
   const [inQuery, setInQuery] = useState('');
@@ -192,6 +239,12 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const isInActive = filters.inChannelIds.length > 0;
   const isAssigneeActive = filters.assigneeIds.length > 0;
   const isSortActive = filters.sortBy !== 'relevance';
+
+  const rankProfileOptions = getRankProfileOptions(filters.docType);
+  const showRankProfile = rankProfileOptions.length > 0;
+  const isRankActive = filters.rankProfile !== '';
+  const rankProfileLabel =
+    rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ?? 'default_native';
 
   const showFromIn = filters.docType !== 'channels' && filters.docType !== 'people';
   const showAssignee = filters.docType === 'tickets' || filters.docType === 'all';
@@ -227,6 +280,8 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
       onFiltersChange({
         ...filters,
         docType: opt.value,
+        // Rank profiles are schema-scoped; reset to backend default on type change.
+        rankProfile: '',
         ...(['channels', 'people'].includes(opt.value) && {
           fromUserIds: [],
           inChannelIds: [],
@@ -287,6 +342,17 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
     () => setSortOpen(false),
   );
 
+  const rankNav = useListKeyNav(
+    rankProfileOptions.length,
+    i => {
+      const opt = rankProfileOptions[i];
+      if (!opt) return;
+      onFiltersChange({ ...filters, rankProfile: opt.value });
+      setRankOpen(false);
+    },
+    () => setRankOpen(false),
+  );
+
   return (
     <div className='w-full pb-2 flex items-start gap-2'>
       {/* Left group: type + contextual filters + include bots */}
@@ -328,6 +394,8 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                     onFiltersChange({
                       ...filters,
                       docType: opt.value,
+                      // Rank profiles are schema-scoped; reset to backend default on type change.
+                      rankProfile: '',
                       ...(['channels', 'people'].includes(opt.value) && {
                         fromUserIds: [],
                         inChannelIds: [],
@@ -652,6 +720,64 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
         )}
       </div>
       {/* end left group */}
+
+      {/* Rank profile chip — pinned to the right; hidden for locally-filtered types */}
+      {showRankProfile && (
+        <Popover.Root
+          open={rankOpen}
+          onOpenChange={open => {
+            setRankOpen(open);
+            if (open) rankNav.setActiveIndex(-1);
+          }}
+        >
+          <Popover.Trigger asChild>
+            <Button
+              variant='outline'
+              size='sm'
+              className={cn(CHIP_BASE, isRankActive && CHIP_ACTIVE)}
+              onKeyDown={openOnArrowDown(rankOpen, setRankOpen)}
+            >
+              <SlidersHorizontal className='size-3' />
+              {`Rank: ${rankProfileLabel}`}
+              <ChevronDown
+                className={cn('size-3 transition-transform', rankOpen && 'rotate-180')}
+              />
+            </Button>
+          </Popover.Trigger>
+          <Popover.Content
+            side='bottom'
+            align='end'
+            sideOffset={6}
+            className={cn(POPOVER_CONTENT, 'min-w-[180px] p-1 max-h-[320px] overflow-y-auto')}
+            onKeyDown={rankNav.handleKeyDown}
+          >
+            <div ref={rankNav.listRef}>
+              {rankProfileOptions.map((opt, i) => (
+                <button
+                  key={opt.value || 'default'}
+                  data-list-item
+                  onClick={() => {
+                    onFiltersChange({ ...filters, rankProfile: opt.value });
+                    setRankOpen(false);
+                  }}
+                  onMouseEnter={() => rankNav.setActiveIndex(i)}
+                  className={cn(MENU_ITEM, rankNav.activeIndex === i && 'bg-muted')}
+                  data-track-category='SEARCH_FILTERS'
+                  data-track-name={`SET_RANK_PROFILE_${(opt.value || 'default').toUpperCase()}`}
+                >
+                  <Check
+                    className={cn(
+                      'size-3.5 shrink-0',
+                      filters.rankProfile === opt.value ? 'opacity-100' : 'opacity-0',
+                    )}
+                  />
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </Popover.Content>
+        </Popover.Root>
+      )}
 
       {/* Sort chip — pinned to the right */}
       <Popover.Root

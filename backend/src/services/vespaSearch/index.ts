@@ -114,9 +114,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       callType,   // Call type filter (e.g. HEADLESS for recordings)
       presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
       includeBotMessages,  // 'true'|'false' string from cmd-K toggle; default behavior excludes BOT messages
+      includeDebugInfo,    // 'true' => attach matchfeatures/rankfeatures debug info to each result
       groupBy,    // Override Vespa grouping. Empty string => flat ranked list (no grouping).
       // Note: subApp was moved up to be with other frontend filters
     } = req.query;
+
+    // Joi validateQuery (convert: true) coerces includeDebugInfo to a boolean,
+    // so normalize before comparing
+    const wantDebugInfo = String(includeDebugInfo) === 'true';
 
     const userId = (req as any).user?.id;
     const userEmail = (req as any).user?.email;
@@ -352,7 +357,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
               matchfeatures: matchFeaturesMap.get(hit.fields?.docId) || null
             }
           }));
-          const transformedHits = await transformVespaResults(hitsWithMatchFeatures, db);
+          const transformedHits = await transformVespaResults(hitsWithMatchFeatures, db, wantDebugInfo);
           return {
             groupBy: group.groupBy,
             groupValue: group.groupValue,
@@ -377,7 +382,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // flat results will have matchFeatures returned by vespa.
       // No need to add.
       const hits = parsedResults.hits || [];
-      const transformedResults = await transformVespaResults(hits, db);
+      const transformedResults = await transformVespaResults(hits, db, wantDebugInfo);
 
       res.json({
         success: true,

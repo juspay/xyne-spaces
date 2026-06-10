@@ -7,7 +7,14 @@ import type vespaClient from '../client';
 import {
   type VespaSearchResponse,
   RankProfile,
+  VespaDocType,
   userSchema,
+  messageSchema,
+  attachmentSchema,
+  channelSchema,
+  ticketSchema,
+  fileSchema,
+  mailSchema,
 } from '../types';
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
@@ -148,10 +155,43 @@ export class SearchService {
 
       // Get schemas for the apps
       const appSchemaMap = this.yqlBuilder.getAppSchemaMapping(app);
-      const allSchemas = Array.from(new Set(Object.values(appSchemaMap).flat()));
+      let allSchemas = Array.from(new Set(Object.values(appSchemaMap).flat()));
       //const isGrouped = groupBy && (app.length && app.length != 1);
       if (allSchemas.length === 0) {
         throw new Error(`No valid schemas found for apps: ${app.join(', ')}`);
+      }
+
+      // Prune the queried schemas (`from sources ...`) to those matching the requested
+      // docType filters. This is result-preserving — the docType WHERE clause already
+      // excludes other schemas' docs — and it lets schema-specific rank profiles
+      // (e.g. `personalized` on chat_message, `semantic_ranking` on ticket) validate,
+      // since Vespa rejects a rank profile missing from any queried schema.
+      const docTypeToSchema: Partial<Record<VespaDocType, string>> = {
+        [VespaDocType.MESSAGE]: messageSchema,
+        [VespaDocType.ATTACHMENT]: attachmentSchema,
+        [VespaDocType.CHANNEL]: channelSchema,
+        [VespaDocType.TICKET]: ticketSchema,
+        [VespaDocType.FILE]: fileSchema,
+        [VespaDocType.USER]: userSchema,
+        [VespaDocType.MAIL]: mailSchema,
+      };
+      const docTypesOf = (f: { docType?: string[] }): string[] => f?.docType ?? [];
+      const requestedDocTypes = [
+        ...docTypesOf(slack),
+        ...docTypesOf(ticket as { docType?: string[] }),
+        ...docTypesOf(file as { docType?: string[] }),
+        ...docTypesOf(mail as { docType?: string[] }),
+      ];
+      if (requestedDocTypes.length > 0) {
+        const wantedSchemas = new Set(
+          requestedDocTypes
+            .map((t) => docTypeToSchema[t as VespaDocType])
+            .filter(Boolean) as string[],
+        );
+        const prunedSchemas = allSchemas.filter((s) => wantedSchemas.has(s));
+        if (prunedSchemas.length > 0) {
+          allSchemas = prunedSchemas;
+        }
       }
 
       const queryWordCount = searchQuery?.trim().split(/\s+/).filter(Boolean).length || 0;
