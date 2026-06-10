@@ -53,6 +53,7 @@ import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
+import { SupportRail } from './SupportRail';
 
 const mobileNavigationItems = [
   {
@@ -127,6 +128,16 @@ const mobileNavigationItems = [
   },
 ];
 
+const SUPPORT_HOME_ROUTES = ['/support'];
+const SUPPORT_REUSED_ROUTES = [
+  '/ai',
+  '/chat/activity',
+  '/calls',
+  '/automations',
+  '/analytics-dashboard',
+  '/knowledge-base',
+];
+
 const AppSidebar = (): ReactElement => {
   const location = useLocation();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -161,6 +172,20 @@ const AppSidebar = (): ReactElement => {
       ? location.pathname.slice(`/${workspaceId}`.length) || '/'
       : location.pathname,
   );
+
+  const isSupportHome = SUPPORT_HOME_ROUTES.includes(activeRoute);
+  const isSupportReused = SUPPORT_REUSED_ROUTES.includes(activeRoute);
+  const [supportMode, setSupportMode] = useState<boolean>(
+    () => sessionStorage.getItem('xyne-support-mode') === 'true' || isSupportHome,
+  );
+  useEffect(() => {
+    setSupportMode(prev => {
+      const next = isSupportHome ? true : isSupportReused ? prev : false;
+      sessionStorage.setItem('xyne-support-mode', String(next));
+      return next;
+    });
+  }, [isSupportHome, isSupportReused]);
+  const isSupportContext = isSupportHome || (supportMode && isSupportReused);
 
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
@@ -228,6 +253,11 @@ const AppSidebar = (): ReactElement => {
     [visibleNavigationItems, toolbarPaths],
   );
   const isMoreActive = moreItems.some(item => item.path === activeRoute);
+
+  const permittedGlobalPaths = useMemo(
+    () => new Set(visibleNavigationItems.map(item => item.path)),
+    [visibleNavigationItems],
+  );
 
   const handleCustomizeToolbar = (): void => {
     setIsMoreOpen(false);
@@ -306,136 +336,145 @@ const AppSidebar = (): ReactElement => {
   return (
     <aside className='h-full pl-1 pr-3 pt-5 pb-6 flex flex-col items-center justify-between'>
       <div className='space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
-        <nav>
-          <ul ref={navListRef} className='relative flex flex-col gap-4'>
-            {activeMarkerY !== null && (
-              <div
-                aria-hidden='true'
-                className='absolute left-0 z-0 h-8 w-8 rounded-lg bg-appSidebar-active transition-transform duration-200 ease-out pointer-events-none'
-                style={{ transform: `translate3d(0px, ${activeMarkerY}px, 0)` }}
-              />
-            )}
-            {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
-            {aiLandingDefault && (
-              <li
-                key='/ai'
-                ref={el => {
-                  navItemRefs.current['/ai'] = el;
-                }}
-                className='relative z-10'
-              >
-                <Tooltip content='Xyne AI' side='right' delayDuration={0}>
-                  <Link
-                    to={prefixWs('/ai')}
-                    onClick={() => handleNavigationClick('Xyne AI')}
-                    data-testid='nav-xyne-ai'
-                    data-track-category='App_Sidebar'
-                    data-track-name='Sidebar_Nav_Item'
-                    data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
-                    className={cn(
-                      'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
-                      activeRoute === '/ai'
-                        ? 'text-appSidebar-activeIcon'
-                        : 'bg-transparent text-appSidebar-activeForeground',
-                    )}
-                  >
-                    <XyneAISidebarIcon size={16} />
-                  </Link>
-                </Tooltip>
-              </li>
-            )}
-
-            {toolbarItems.map(item => {
-              const isActive = activeRoute === item.path;
-              const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
-              const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
-              const Icon = item.icon;
-
-              const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
-
-              return (
+        {isSupportContext ? (
+          <SupportRail
+            prefixWs={prefixWs}
+            onNavigationClick={handleNavigationClick}
+            permittedGlobalPaths={permittedGlobalPaths}
+            activeRoute={activeRoute}
+          />
+        ) : (
+          <nav>
+            <ul ref={navListRef} className='relative flex flex-col gap-4'>
+              {activeMarkerY !== null && (
+                <div
+                  aria-hidden='true'
+                  className='absolute left-0 z-0 h-8 w-8 rounded-lg bg-appSidebar-active transition-transform duration-200 ease-out pointer-events-none'
+                  style={{ transform: `translate3d(0px, ${activeMarkerY}px, 0)` }}
+                />
+              )}
+              {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
+              {aiLandingDefault && (
                 <li
-                  key={item.path}
+                  key='/ai'
                   ref={el => {
-                    navItemRefs.current[item.path] = el;
+                    navItemRefs.current['/ai'] = el;
                   }}
                   className='relative z-10'
                 >
-                  <Tooltip content={item.label} side='right' delayDuration={0}>
+                  <Tooltip content='Xyne AI' side='right' delayDuration={0}>
                     <Link
-                      to={prefixWs(item.path)}
-                      onClick={() => handleNavigationClick(item.label)}
-                      aria-label={showPendingDmDot ? 'DMs unread' : item.label}
-                      data-testid={testId}
+                      to={prefixWs('/ai')}
+                      onClick={() => handleNavigationClick('Xyne AI')}
+                      data-testid='nav-xyne-ai'
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
-                      data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+                      data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
                       className={cn(
-                        'relative size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
-                        isActive
+                        'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                        activeRoute === '/ai'
                           ? 'text-appSidebar-activeIcon'
                           : 'bg-transparent text-appSidebar-activeForeground',
                       )}
                     >
-                      <Icon size={item.iconSize ?? 16} />
-                      {showPendingDmDot && (
-                        <span
-                          aria-hidden='true'
-                          className='absolute top-1 right-1 size-[9px] rounded-full bg-[var(--sidebar-dm-dot-bg)]'
-                          style={{ boxShadow: 'var(--sidebar-dm-dot-shadow)' }}
-                        />
-                      )}
-                      {showMissedCallBadge && (
-                        <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
-                          {missedCallCount > 99 ? '99+' : missedCallCount}
-                        </span>
-                      )}
+                      <XyneAISidebarIcon size={16} />
                     </Link>
                   </Tooltip>
                 </li>
-              );
-            })}
+              )}
 
-            {/* More menu — overflow items + customize toolbar (Slack-style) */}
-            <li className='relative z-10'>
-              <Popover
-                open={isMoreOpen}
-                onOpenChange={setIsMoreOpen}
-                side='right'
-                align='start'
-                sideOffset={8}
-                collisionPadding={12}
-                onOpenAutoFocus={handleMorePopoverAutoFocus}
-                className='p-1.5 w-64 max-h-[80vh] overflow-y-auto rounded-xl'
-                trigger={
-                  <button
-                    type='button'
-                    aria-label='More'
-                    data-testid='nav-more'
-                    data-track-category='App_Sidebar'
-                    data-track-name='Sidebar_More_Toggle'
-                    className={cn(
-                      'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
-                      isMoreActive || isMoreOpen
-                        ? 'bg-appSidebar-active text-appSidebar-activeIcon'
-                        : 'bg-transparent text-appSidebar-activeForeground',
-                    )}
+              {toolbarItems.map(item => {
+                const isActive = activeRoute === item.path;
+                const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
+                const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
+                const Icon = item.icon;
+
+                const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
+
+                return (
+                  <li
+                    key={item.path}
+                    ref={el => {
+                      navItemRefs.current[item.path] = el;
+                    }}
+                    className='relative z-10'
                   >
-                    <Ellipsis size={16} />
-                  </button>
-                }
-              >
-                <SidebarMoreMenu
-                  items={moreItems}
-                  activeRoute={activeRoute}
-                  prefixWs={prefixWs}
-                  onNavigate={handleMoreNavigate}
-                  onCustomize={handleCustomizeToolbar}
-                />
-              </Popover>
-            </li>
-          </ul>
-        </nav>
+                    <Tooltip content={item.label} side='right' delayDuration={0}>
+                      <Link
+                        to={prefixWs(item.path)}
+                        onClick={() => handleNavigationClick(item.label)}
+                        aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                        data-testid={testId}
+                        data-track-category='App_Sidebar'
+                        data-track-name='Sidebar_Nav_Item'
+                        data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+                        className={cn(
+                          'relative size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                          isActive
+                            ? 'text-appSidebar-activeIcon'
+                            : 'bg-transparent text-appSidebar-activeForeground',
+                        )}
+                      >
+                        <Icon size={item.iconSize ?? 16} />
+                        {showPendingDmDot && (
+                          <span
+                            aria-hidden='true'
+                            className='absolute top-1 right-1 size-[9px] rounded-full bg-[var(--sidebar-dm-dot-bg)]'
+                            style={{ boxShadow: 'var(--sidebar-dm-dot-shadow)' }}
+                          />
+                        )}
+                        {showMissedCallBadge && (
+                          <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
+                            {missedCallCount > 99 ? '99+' : missedCallCount}
+                          </span>
+                        )}
+                      </Link>
+                    </Tooltip>
+                  </li>
+                );
+              })}
+
+              {/* More menu — overflow items + customize toolbar (Slack-style) */}
+              <li className='relative z-10'>
+                <Popover
+                  open={isMoreOpen}
+                  onOpenChange={setIsMoreOpen}
+                  side='right'
+                  align='start'
+                  sideOffset={8}
+                  collisionPadding={12}
+                  onOpenAutoFocus={handleMorePopoverAutoFocus}
+                  className='p-1.5 w-64 max-h-[80vh] overflow-y-auto rounded-xl'
+                  trigger={
+                    <button
+                      type='button'
+                      aria-label='More'
+                      data-testid='nav-more'
+                      data-track-category='App_Sidebar'
+                      data-track-name='Sidebar_More_Toggle'
+                      className={cn(
+                        'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                        isMoreActive || isMoreOpen
+                          ? 'bg-appSidebar-active text-appSidebar-activeIcon'
+                          : 'bg-transparent text-appSidebar-activeForeground',
+                      )}
+                    >
+                      <Ellipsis size={16} />
+                    </button>
+                  }
+                >
+                  <SidebarMoreMenu
+                    items={moreItems}
+                    activeRoute={activeRoute}
+                    prefixWs={prefixWs}
+                    onNavigate={handleMoreNavigate}
+                    onCustomize={handleCustomizeToolbar}
+                  />
+                </Popover>
+              </li>
+            </ul>
+          </nav>
+        )}
       </div>
 
       <div className='flex flex-col items-center justify-center pb-4'>
