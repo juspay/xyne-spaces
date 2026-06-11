@@ -7,6 +7,10 @@ import {
 import type { Message, DraftSource } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { logger, Event } from '../utils/logger';
 import { rewriteEmailText } from '../services/emailQuickRewriteService';
+import {
+  extractInlineCitations,
+  type InlineCitation,
+} from '../components/ui/TipTapExtensions/CitationMark';
 export interface DeskAIDraftHeaders {
   from?: string | null;
   to?: ReadonlyArray<string> | null;
@@ -28,6 +32,7 @@ export type AIRefineQuickAction = 'polish' | 'formalise' | 'elaborate' | 'shorte
 export interface UseDeskAIDraftReturn {
   draftContent: string;
   draftSources: DraftSource[];
+  draftInlineCitations: InlineCitation[];
   isStreaming: boolean;
   isDraftActive: boolean;
   /** Text selected by user for partial refinement (from AI Draft or Your Draft) */
@@ -118,6 +123,7 @@ export function useDeskAIDraft({
 }: UseDeskAIDraftOptions): UseDeskAIDraftReturn {
   const [draftContent, setDraftContent] = useState('');
   const [draftSources, setDraftSources] = useState<DraftSource[]>([]);
+  const [draftInlineCitations, setDraftInlineCitations] = useState<InlineCitation[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -163,6 +169,7 @@ export function useDeskAIDraft({
     let cancelled = false;
     setDraftContent('');
     setDraftSources([]);
+    setDraftInlineCitations([]);
     setIsStreaming(false);
     setIsDraftActive(false);
     setSessionId(null);
@@ -183,6 +190,8 @@ export function useDeskAIDraft({
         const content = latestBotContent(active.messages);
         if (content !== null) setDraftContent(content);
         setDraftSources(latestBotSources(active.messages));
+        const raw = active.messages[active.messages.length - 1]?.content ?? '';
+        setDraftInlineCitations(extractInlineCitations(raw));
       }
     }
 
@@ -194,6 +203,7 @@ export function useDeskAIDraft({
           if (parsed?.content) {
             setDraftContent(parsed.content);
             setIsDraftActive(true);
+            setDraftInlineCitations(extractInlineCitations(parsed.content));
           }
         }
       } catch {
@@ -246,6 +256,8 @@ export function useDeskAIDraft({
       const content = latestBotContent(state.messages);
       if (content !== null) setDraftContent(content);
       setDraftSources(latestBotSources(state.messages));
+      const raw = state.messages[state.messages.length - 1]?.content ?? '';
+      setDraftInlineCitations(extractInlineCitations(raw));
       setIsStreaming(state.status === 'streaming');
     });
   }, [threadId]);
@@ -259,6 +271,7 @@ export function useDeskAIDraft({
       setIsStreaming(true);
       setDraftContent('');
       setDraftSources([]);
+      setDraftInlineCitations([]);
 
       const userMessageId = `user-${Date.now()}`;
       const effectiveSessionId =
@@ -377,11 +390,13 @@ export function useDeskAIDraft({
       setIsStreaming(true);
       setDraftContent('');
       setDraftSources([]);
+      setDraftInlineCitations([]);
 
       try {
         const result = await rewriteEmailText({ query });
 
         setDraftContent(result.rewrittenText);
+        setDraftInlineCitations(extractInlineCitations(result.rewrittenText));
         setIsStreaming(false);
         writeStorage(result.rewrittenText);
       } catch (error) {
@@ -428,7 +443,7 @@ export function useDeskAIDraft({
       const query = [
         'You are an inline rewrite engine.',
         'Rewrite the text below according to the instruction. Do not invoke any tools, do not search, do not fetch external content. Output ONLY the rewritten text — no preamble, no explanation, no headers, no quotes around the output.',
-        'Formatting: the source may contain HTML (`<strong>`, `<em>`, `<ul>`, `<ol>`, `<li>`, `<a>`, `<h1>`-`<h6>`, `<br>`, `<p>`, `<cite>`) or markdown. Preserve every formatting element from the source in your output as MARKDOWN — bold as `**text**`, italic as `*text*`, links as `[text](url)`, headings with `#`/`##`, bullets as `- item`, ordered lists as `1.`/`2.`, and keep paragraph breaks as blank lines. **Citation tags `<cite ref="X">…</cite>` MUST be preserved verbatim around the same factual span in the rewrite — do not drop them, do not change the `ref` attribute, do not move them to a different sentence.** If a phrase is bold (or italic / a list item / a link / wrapped in `<cite>`) in the source, the rewritten phrase covering the same point MUST be bold (or italic / a list item / a link / wrapped in `<cite>`) too. Never strip formatting. Never wrap the output in ``` code fences.',
+        'Formatting: the source may contain HTML (`<strong>`, `<em>`, `<ul>`, `<ol>`, `<li>`, `<a>`, `<h1>`-`<h6>`, `<br>`, `<p>`, `<cite>`) or markdown. Preserve every formatting element from the source in your output as MARKDOWN — bold as `**text**`, italic as `*text*`, links as `[text](url)`, headings with `#`/`##`, bullets as `- item`, ordered lists as `1.`/`2.`, and keep paragraph breaks as blank lines. **Citation tags `<cite ref="X">…</cite>` and trailing `<citation>…</citation>` source blocks MUST be preserved verbatim in the rewrite — do not drop them, do not change citation refs/URLs, and do not move inline `<cite>` tags to a different sentence.** If a phrase is bold (or italic / a list item / a link / wrapped in `<cite>`) in the source, the rewritten phrase covering the same point MUST be bold (or italic / a list item / a link / wrapped in `<cite>`) too. Never strip formatting. Never wrap the output in ``` code fences.',
         `Instruction: ${actionInstruction[action]}`,
         `Text to rewrite:\n"""\n${trimmedSource}\n"""${headerBlock}${signoffRule}`,
       ].join('\n\n');
@@ -437,11 +452,13 @@ export function useDeskAIDraft({
       setIsStreaming(true);
       setDraftContent('');
       setDraftSources([]);
+      setDraftInlineCitations([]);
 
       try {
         const result = await rewriteEmailText({ query });
 
         setDraftContent(result.rewrittenText);
+        setDraftInlineCitations(extractInlineCitations(result.rewrittenText));
         setIsStreaming(false);
         writeStorage(result.rewrittenText);
       } catch (error) {
@@ -478,7 +495,7 @@ export function useDeskAIDraft({
       const query = [
         'You are an inline rewrite engine.',
         'Rewrite the text below according to the instruction. Do not invoke any tools, do not search, do not fetch external content. Output ONLY the rewritten text — no preamble, no explanation, no headers, no quotes around the output.',
-        'Formatting: the source may contain HTML (`<strong>`, `<em>`, `<ul>`, `<ol>`, `<li>`, `<a>`, `<h1>`-`<h6>`, `<br>`, `<p>`, `<cite>`) or markdown. Preserve every formatting element from the source in your output as MARKDOWN — bold as `**text**`, italic as `*text*`, links as `[text](url)`, headings with `#`/`##`, bullets as `- item`, ordered lists as `1.`/`2.`, and keep paragraph breaks as blank lines. **Citation tags `<cite ref="X">…</cite>` MUST be preserved verbatim around the same factual span in the rewrite — do not drop them, do not change the `ref` attribute, do not move them to a different sentence.** If a phrase is bold (or italic / a list item / a link / wrapped in `<cite>`) in the source, the rewritten phrase covering the same point MUST be bold (or italic / a list item / a link / wrapped in `<cite>`) too. Never strip formatting. Never wrap the output in ``` code fences.',
+        'Formatting: the source may contain HTML (`<strong>`, `<em>`, `<ul>`, `<ol>`, `<li>`, `<a>`, `<h1>`-`<h6>`, `<br>`, `<p>`, `<cite>`) or markdown. Preserve every formatting element from the source in your output as MARKDOWN — bold as `**text**`, italic as `*text*`, links as `[text](url)`, headings with `#`/`##`, bullets as `- item`, ordered lists as `1.`/`2.`, and keep paragraph breaks as blank lines. **Citation tags `<cite ref="X">…</cite>` and trailing `<citation>…</citation>` source blocks MUST be preserved verbatim in the rewrite — do not drop them, do not change citation refs/URLs, and do not move inline `<cite>` tags to a different sentence.** If a phrase is bold (or italic / a list item / a link / wrapped in `<cite>`) in the source, the rewritten phrase covering the same point MUST be bold (or italic / a list item / a link / wrapped in `<cite>`) too. Never strip formatting. Never wrap the output in ``` code fences.',
         `Instruction: ${trimmedInstruction}`,
         `Text to rewrite:\n"""\n${trimmedSource}\n"""${headerBlock}${signoffRule}`,
       ].join('\n\n');
@@ -487,11 +504,13 @@ export function useDeskAIDraft({
       setIsStreaming(true);
       setDraftContent('');
       setDraftSources([]);
+      setDraftInlineCitations([]);
 
       try {
         const result = await rewriteEmailText({ query });
 
         setDraftContent(result.rewrittenText);
+        setDraftInlineCitations(extractInlineCitations(result.rewrittenText));
         setIsStreaming(false);
         writeStorage(result.rewrittenText);
       } catch (error) {
@@ -521,6 +540,7 @@ export function useDeskAIDraft({
     setIsDraftActive(false);
     setDraftContent('');
     setDraftSources([]);
+    setDraftInlineCitations([]);
     setIsStreaming(false);
     setSelectedTextForRefine('');
     clearStorage();
@@ -532,6 +552,7 @@ export function useDeskAIDraft({
       setSelectedTextForRefine(selectedText);
       setIsDraftActive(true);
       setDraftSources([]);
+      setDraftInlineCitations(extractInlineCitations(sourceContent));
     },
     [],
   );
@@ -543,6 +564,7 @@ export function useDeskAIDraft({
   return {
     draftContent,
     draftSources,
+    draftInlineCitations,
     isStreaming,
     isDraftActive,
     selectedTextForRefine,

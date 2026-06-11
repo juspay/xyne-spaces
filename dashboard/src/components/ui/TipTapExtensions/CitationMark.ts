@@ -206,6 +206,27 @@ export function stripCitationMarks(html: string): string {
     .replace(/\n?<citation\b[^>]*>([\s\S]*?)<\/citation>/gi, '');
 }
 
+export function extractCitationBlock(text: string | null | undefined): string {
+  if (!text) return '';
+  const match = /<citation\b[^>]*>[\s\S]*?<\/citation>/i.exec(text);
+  return match?.[0] ?? '';
+}
+
+export function appendCitationBlock(
+  content: string,
+  citationSource: string | null | undefined,
+): string {
+  const block = extractCitationBlock(citationSource);
+  if (!block) return content;
+  return extractCitationBlock(content) ? content : `${content}${content ? '\n' : ''}${block}`;
+}
+
+/** Strips the entire <citation> block (including surrounding whitespace/newlines). */
+export function stripCitationBlock(text: string): string {
+  if (!text) return text;
+  return text.replace(/\s*<citation\b[^>]*>([\s\S]*?)<\/citation>\s*/gi, '');
+}
+
 export function extractInlineCitations(content: string): InlineCitation[] {
   const match = /<citation\b[^>]*>([\s\S]*?)<\/citation>/i.exec(content);
   if (!match || !match[1]) return [];

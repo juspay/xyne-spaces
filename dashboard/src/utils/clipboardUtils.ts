@@ -14,7 +14,7 @@ import rehypeStringify from 'rehype-stringify';
 
 const citationSanitizeSchema = {
   ...defaultSchema,
-  tagNames: [...(defaultSchema.tagNames ?? []), 'cite'],
+  tagNames: [...(defaultSchema.tagNames ?? []), 'cite', 'citation'],
   attributes: {
     ...defaultSchema.attributes,
     cite: ['dataCitationRef', 'ref'],
