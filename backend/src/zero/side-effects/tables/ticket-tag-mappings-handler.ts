@@ -4,6 +4,8 @@ import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketSchema } from '@/vespa/src/types';
 
 export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -17,6 +19,20 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
     }
 
     await this.handleTagActivity(ticketId, tagName, 'added');
+    await this.queueTicketVespaFeed(ticketId);
+  }
+
+  async onUpdate(job: SideEffectJobConfig): Promise<void> {
+    const { args, previousValue } = job;
+    const prev = previousValue as { ticketId?: string } | undefined;
+    const ticketId: string | undefined = args?.ticketId ?? prev?.ticketId;
+
+    if (!ticketId) {
+      logger.warn('[TicketTagMappingsSideEffectHandler] Missing ticketId in update args and previousValue');
+      return;
+    }
+
+    await this.queueTicketVespaFeed(ticketId);
   }
 
   async onDelete(job: SideEffectJobConfig): Promise<void> {
@@ -34,6 +50,24 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
     }
 
     await this.handleTagActivity(prev.ticketId, prev.tagName, 'removed');
+    await this.queueTicketVespaFeed(prev.ticketId);
+  }
+
+  private async queueTicketVespaFeed(ticketId: string): Promise<void> {
+    try {
+      await vespaQueue.addJob({
+        schema: ticketSchema,
+        jobType: 'feed',
+        docId: ticketId,
+        userId: this.ctx.userID,
+        workspaceId: this.ctx.workspaceId,
+      });
+    } catch (error) {
+      logger.error('[TicketTagMappingsSideEffectHandler] Failed to queue ticket Vespa feed:', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async handleTagActivity(

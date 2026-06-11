@@ -1,9 +1,15 @@
 import { BaseSideEffectHandler } from '../base-handler';
-import type { SideEffectJobConfig } from '../types';
+import type { FormEntityValuePreviousValue, SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { emitEventToWorkspaceApps } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '@/apps/types';
+import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
+import type { KanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
+import { websocketService } from '@/services/websocketService';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketSchema } from '@/vespa/src/types';
+import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 
 /**
  * Side effect handler for form_entity_values table.
@@ -18,10 +24,87 @@ import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '@
 export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     await this.emitFormFieldEvent(job, 'insert');
+    await this.broadcastTicketCountsUpdate(job, 'insert');
   }
 
   async onUpdate(job: SideEffectJobConfig): Promise<void> {
     await this.emitFormFieldEvent(job, 'update');
+    await this.broadcastTicketCountsUpdate(job, 'update');
+  }
+
+  async onDelete(job: SideEffectJobConfig): Promise<void> {
+    await this.broadcastTicketCountsUpdate(job, 'delete');
+  }
+
+  private async broadcastTicketCountsUpdate(
+    job: SideEffectJobConfig,
+    operation: 'insert' | 'update' | 'delete',
+  ): Promise<void> {
+    const previousValue = job.previousValue as FormEntityValuePreviousValue | undefined;
+    const currentFormEntityValue =
+      operation === 'delete'
+        ? null
+        : await db.formEntityValues.findUnique({ where: { id: job.entityId } });
+    const entityType = currentFormEntityValue?.entityType ?? previousValue?.entityType;
+    const ticketId = currentFormEntityValue?.entityId ?? previousValue?.entityId;
+    const fieldId = currentFormEntityValue?.fieldId ?? previousValue?.fieldId;
+
+    if (entityType !== 'TICKET' || !ticketId || !fieldId) return;
+
+    await this.queueTicketVespaFeed(ticketId);
+
+    const currentSnapshot = await buildKanbanCountsSnapshot(ticketId);
+    if (!currentSnapshot) return;
+
+    const previousSnapshot = this.buildPreviousCountsSnapshot(
+      currentSnapshot,
+      fieldId,
+      operation === 'insert' ? undefined : previousValue?.actualFieldValue,
+      operation,
+    );
+
+    websocketService.broadcastTicketCountsUpdate({
+      operation: 'update',
+      ticket: currentSnapshot,
+      previousTicket: previousSnapshot,
+    });
+  }
+
+  private async queueTicketVespaFeed(ticketId: string): Promise<void> {
+    try {
+      await vespaQueue.addJob({
+        schema: ticketSchema,
+        jobType: 'feed',
+        docId: ticketId,
+        userId: this.ctx.userID,
+        workspaceId: this.ctx.workspaceId,
+      });
+    } catch (error) {
+      logger.error('[FormEntityValuesSideEffectHandler] Failed to queue ticket Vespa feed:', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private buildPreviousCountsSnapshot(
+    currentSnapshot: KanbanCountsSnapshot,
+    fieldId: string,
+    previousFieldValue: unknown,
+    operation: 'insert' | 'update' | 'delete',
+  ): KanbanCountsSnapshot {
+    const previousFormFieldValues = { ...currentSnapshot.formFieldValues };
+
+    if (operation === 'insert') {
+      delete previousFormFieldValues[fieldId];
+    } else {
+      previousFormFieldValues[fieldId] = previousFieldValue;
+    }
+
+    return {
+      ...currentSnapshot,
+      formFieldValues: previousFormFieldValues,
+    };
   }
 
   private async emitFormFieldEvent(job: SideEffectJobConfig, operation: 'insert' | 'update'): Promise<void> {
@@ -51,7 +134,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       const ticketId = formEntityValue.entityId;
       const fieldName = formField?.fieldName;
-      const fieldValue = formEntityValue.actualFieldValue || formEntityValue.fieldValue;
+      const fieldValue = formEntityValue.actualFieldValue ?? formEntityValue.fieldValue;
 
       if (!ticketId || !fieldName) {
         logger.warn('[FormEntityValuesSideEffectHandler] Missing ticketId or fieldName');
@@ -98,9 +181,9 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         boardId: ticket.boardId,
         boardName: board?.name || '',
         fieldName,
-        fieldValue: String(fieldValue || ''),
+        fieldValue: normalizeVespaFieldValue(fieldValue as any) || '',
         previousValue: operation === 'update' && previousValue 
-          ? String((previousValue as any).fieldValue || '')
+          ? normalizeVespaFieldValue((previousValue as any).actualFieldValue ?? (previousValue as any).fieldValue) || ''
           : undefined,
         updatedBy: this.ctx.userID,
         workspaceId: ticket.workspaceId,

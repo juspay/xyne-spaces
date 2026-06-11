@@ -57,8 +57,14 @@ import { PrismaClient } from '@prisma/client';
        callType?: string;
        mailId?: string;
        recipientCount?: number;
+       priority?: string;
+       stageName?: string;
+       projectId?: string;
+       createdAtTimestamp?: number;
+       ticketType?: string;
+       userGroupId?: string;
+       tags?: string[];
        // Knowledge base / collection specific fields
-    projectId?: string;
     collectionId?: string;
     docId?: string;
     folderId?: string;
@@ -687,6 +693,13 @@ function transformCollection(
          assigneeName: assigneeName || undefined,
          conversationId: doc.convId,
          xyneId: doc.xyneId,
+         priority: doc.priority,
+         stageName: doc.stage,
+         projectId: doc.projectRef,
+         createdAtTimestamp: doc.createdAtTimestamp,
+         ticketType: doc.ticketType,
+         userGroupId: doc.userGroupId,
+         tags: doc.tags,
        },
      };
    }

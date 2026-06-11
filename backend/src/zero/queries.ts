@@ -25,11 +25,289 @@ import {
   Status,
   ProjectType,
   TicketPriority,
+  TicketStatusV2,
   DelayedMessageStatus,
   RecapEntityType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
+
+const kanbanTicketPageFiltersSchema = z.object({
+  priority: z.array(z.nativeEnum(TicketPriority)).optional(),
+  assignee: z.array(z.string()).optional(),
+  userGroups: z.array(z.string()).optional(),
+  createdBy: z.array(z.string()).optional(),
+  prReviewers: z.array(z.string()).optional(),
+  qaAssigned: z.array(z.string()).optional(),
+  dueDateStart: z.number().optional(),
+  dueDateEnd: z.number().optional(),
+  createdDateStart: z.number().optional(),
+  createdDateEnd: z.number().optional(),
+  boards: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+  assigned: z.boolean().optional(),
+  created: z.boolean().optional(),
+  stages: z.array(z.string()).optional(),
+  ticketTypes: z.array(z.string()).optional(),
+});
+
+const kanbanTicketsPageArgsSchema = z.object({
+  viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
+  projectId: z.string().optional(),
+  boardId: z.string().optional(),
+  userId: z.string().optional(),
+  groupId: z.string().optional(),
+  columnType: z.enum(['stage', 'status']).optional(),
+  stageName: z.string(),
+  limit: z.number(),
+  start: z.object({ kanbanPosition: z.string(), id: z.string() }).nullable(),
+  groupBy: z
+    .union([
+      z.enum(['none', 'assignee', 'status', 'priority']),
+      z.object({
+        type: z.literal('formField'),
+        fieldId: z.string(),
+        fieldName: z.string().optional(),
+        fieldType: z.string().optional(),
+      }),
+    ])
+    .optional(),
+  groupKey: z.string().optional(),
+  formFieldValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  vespaTicketIds: z.array(z.string()).optional(),
+  dynamicFieldScalarFilters: z
+    .array(z.object({
+      fieldId: z.string(),
+      values: z.array(z.union([z.string(), z.number(), z.boolean()])),
+    }))
+    .optional(),
+  filters: kanbanTicketPageFiltersSchema.optional(),
+  formEntityValueFieldIds: z.array(z.string()).optional(),
+  showOverdueOnly: z.boolean().optional(),
+  overdueReferenceTime: z.number().optional(),
+});
+
+type KanbanTicketsPageArgs = z.infer<typeof kanbanTicketsPageArgsSchema>;
+
+const prefixedKanbanIdentityValues = (id: string): string[] => [
+  id,
+  `user:${id}`,
+  `group:${id}`,
+  `userGroup:${id}`,
+];
+
+const applyKanbanTicketPageConditions = (
+  query: any,
+  ctx: { userID: string },
+  args: KanbanTicketsPageArgs,
+) => {
+  const {
+    viewMode,
+    projectId,
+    boardId,
+    userId,
+    groupId,
+    columnType,
+    stageName,
+    groupBy,
+    groupKey,
+    formFieldValue,
+    vespaTicketIds,
+    dynamicFieldScalarFilters,
+    filters,
+    showOverdueOnly,
+    overdueReferenceTime,
+  } = args;
+
+  query =
+    columnType === 'status'
+      ? query.where('statusV2', stageName as TicketStatusV2)
+      : query.where('stageName', stageName);
+
+  if (filters?.stages?.length) {
+    query = query.where('stageName', 'IN', filters.stages);
+  }
+
+  if (boardId) {
+    query = query.where('boardId', boardId);
+  }
+
+  if (!boardId && viewMode !== 'my-tickets' && projectId) {
+    query = query.where('projectId', projectId);
+  }
+
+  switch (viewMode) {
+    case 'my-tickets':
+      query = query.where((helpers: any) =>
+        helpers.or(
+          helpers.cmp('assignedTo', `user:${ctx.userID}`),
+          helpers.cmp('assignedTo', ctx.userID),
+          helpers.cmp('createdBy', `user:${ctx.userID}`),
+          helpers.cmp('createdBy', ctx.userID),
+        ),
+      );
+      break;
+    case 'user-tickets':
+      if (userId) {
+        query = query.where((helpers: any) =>
+          helpers.or(
+            helpers.cmp('assignedTo', `user:${userId}`),
+            helpers.cmp('assignedTo', userId),
+            helpers.cmp('createdBy', `user:${userId}`),
+            helpers.cmp('createdBy', userId),
+          ),
+        );
+      }
+      break;
+    case 'group-tickets':
+      if (groupId) {
+        query = query.where((helpers: any) =>
+          helpers.or(
+            helpers.cmp('userGroupId', `group:${groupId}`),
+            helpers.cmp('userGroupId', groupId),
+          ),
+        );
+      }
+      break;
+  }
+
+  query = query.where((helpers: any) =>
+    helpers.or(
+      helpers.cmp('ticketType', 'IS', null),
+      helpers.cmp('ticketType', '!=', BaseTicketType.Support),
+    ),
+  );
+
+  if (filters?.priority?.length) {
+    query = query.where('priority', 'IN', filters.priority);
+  }
+
+  if (filters?.assignee?.length) {
+    query = query.where('assignedTo', 'IN', filters.assignee.flatMap(prefixedKanbanIdentityValues));
+  }
+
+  if (filters?.createdBy?.length) {
+    query = query.where('createdBy', 'IN', filters.createdBy);
+  }
+
+  if (filters?.userGroups?.length) {
+    query = query.where('userGroupId', 'IN', filters.userGroups);
+  }
+
+  if (filters?.prReviewers?.length) {
+    query = query.whereExists('assignments', (assignment: any) =>
+      assignment
+        .where('userResponsibility', 'PR_REVIEWER')
+        .where('userId', 'IN', filters.prReviewers ?? []),
+    );
+  }
+
+  if (filters?.qaAssigned?.length) {
+    query = query.whereExists('assignments', (assignment: any) =>
+      assignment
+        .where('userResponsibility', 'QA')
+        .where('userId', 'IN', filters.qaAssigned ?? []),
+    );
+  }
+
+  if (filters?.dueDateStart !== undefined) {
+    query = query.where('eta', '>=', filters.dueDateStart);
+  }
+
+  if (filters?.dueDateEnd !== undefined) {
+    query = query.where('eta', '<=', filters.dueDateEnd);
+  }
+
+  if (filters?.createdDateStart !== undefined) {
+    query = query.where('createdAt', '>=', filters.createdDateStart);
+  }
+
+  if (filters?.createdDateEnd !== undefined) {
+    query = query.where('createdAt', '<=', filters.createdDateEnd);
+  }
+
+  if (filters?.ticketTypes?.length) {
+    query = query.where('ticketType', 'IN', filters.ticketTypes);
+  }
+
+  if (filters?.assigned || filters?.created) {
+    query = query.where((helpers: any) => {
+      const assignedToMe = helpers.or(
+        helpers.cmp('assignedTo', `user:${ctx.userID}`),
+        helpers.cmp('assignedTo', ctx.userID),
+      );
+      const createdByMe = helpers.or(
+        helpers.cmp('createdBy', `user:${ctx.userID}`),
+        helpers.cmp('createdBy', ctx.userID),
+      );
+
+      if (filters.assigned && filters.created) {
+        return helpers.or(assignedToMe, createdByMe);
+      }
+
+      return filters.assigned ? assignedToMe : createdByMe;
+    });
+  }
+
+  if (showOverdueOnly) {
+    const overdueBefore = overdueReferenceTime ?? Date.now();
+    query = query.where((helpers: any) =>
+      helpers.and(
+        helpers.cmp('statusV2', '!=', TicketStatusV2.COMPLETED),
+        helpers.cmp('statusV2', '!=', TicketStatusV2.CANCELLED),
+        helpers.exists('stageEtaEntries', (stageEtaEntry: any) =>
+          stageEtaEntry.where('stageLeftAt', 'IS', null).where('stageEta', '<', overdueBefore),
+        ),
+      ),
+    );
+  }
+
+  if (vespaTicketIds) {
+    if (vespaTicketIds.length === 0) {
+      return query.where('id', '__kanban_vespa_no_match__');
+    }
+    query = query.where('id', 'IN', vespaTicketIds);
+  }
+
+  if (dynamicFieldScalarFilters?.length) {
+    for (const dynamicFieldFilter of dynamicFieldScalarFilters) {
+      if (dynamicFieldFilter.values.length === 0) continue;
+
+      query = query.whereExists('formEntityValues', (formEntityValue: any) =>
+        formEntityValue
+          .where('entityType', 'TICKET')
+          .where('fieldId', dynamicFieldFilter.fieldId)
+          .where((helpers: any) =>
+            helpers.or(
+              ...dynamicFieldFilter.values.map((value: string | number | boolean) =>
+                helpers.cmp('fieldValue', String(value)),
+              ),
+            ),
+          ),
+      );
+    }
+  }
+
+  if (groupBy === 'assignee' && groupKey) {
+    query =
+      groupKey === 'Unassigned'
+        ? query.where('assignedTo', 'IS', null)
+        : query.where('assignedTo', groupKey);
+  } else if (groupBy === 'status' && groupKey) {
+    query = query.where('statusV2', groupKey as TicketStatusV2);
+  } else if (groupBy === 'priority' && groupKey) {
+    query = query.where('priority', groupKey as TicketPriority);
+  } else if (typeof groupBy === 'object' && groupBy.type === 'formField' && formFieldValue !== undefined) {
+    query = query.whereExists('formEntityValues', (formEntityValue: any) =>
+      formEntityValue
+        .where('entityType', 'TICKET')
+        .where('fieldId', groupBy.fieldId)
+        .where('fieldValue', '=', String(formFieldValue)),
+    );
+  }
+
+  return query;
+};
 
 const applyCanvasVisibilityQueryFilter = (
   query: any,
@@ -458,6 +736,37 @@ export const queries = defineQueries({
       if (formEntityValueFieldIds && formEntityValueFieldIds.length > 0) {
         finalQuery = finalQuery.related('formEntityValues', fev =>
           fev.where('fieldId', 'IN', formEntityValueFieldIds).related('formField'),
+        );
+      }
+
+      return finalQuery;
+    },
+  ),
+
+  kanbanTicketsPage: defineQuery(
+    kanbanTicketsPageArgsSchema,
+    ({ ctx, args }) => {
+      let query = applyKanbanTicketPageConditions(zql.tickets, ctx, args)
+        .where('kanbanPosition', 'IS NOT', null)
+        .orderBy('kanbanPosition', 'asc')
+        .orderBy('id', 'asc');
+
+      if (args.start) {
+        query = query.start(
+          { kanbanPosition: args.start.kanbanPosition, id: args.start.id },
+          { inclusive: false },
+        );
+      }
+
+      let finalQuery = query
+        .limit(args.limit)
+        .related('assignments')
+        .related('stageEtaEntries')
+        .related('tagMappings');
+
+      if (args.formEntityValueFieldIds?.length) {
+        finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
+          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField'),
         );
       }
 
@@ -1807,6 +2116,7 @@ export const queries = defineQueries({
       .related('tags')
       .orderBy('createdAt', 'desc')
   ),
+  // @deprecated
   ticketsByProjectV2: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) =>
     zql.tickets
       .where('projectId', projectId)

@@ -12,6 +12,7 @@ import { CanvasesVespaHandler } from '../tables/canvases-handler';
 import { TranscriptsVespaHandler } from '../tables/transcripts-handler';
 import { MessageAttachmentsVespaHandler } from '../tables/message-attachments-handler';
 import { ChannelStatsVespaHandler } from '../tables/channel-stats-handler';
+import { FormEntityValuesVespaHandler } from '../tables/form-entity-values-handler';
 /**
  * Factory for getting the appropriate Vespa handler for a given table.
  * 
@@ -43,6 +44,8 @@ export class VespaHandlerFactory {
       // Ticketing tables
       case 'tickets':
         return new TicketsVespaHandler(ctx);
+      case 'form_entity_values':
+        return new FormEntityValuesVespaHandler(ctx);
 
       // Project tables
       case 'projects':

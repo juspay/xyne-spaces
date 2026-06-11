@@ -1,4 +1,4 @@
-import { ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
+import { ReactElement, useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import {
@@ -6,8 +6,6 @@ import {
   useGetChannelConversations,
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { queries } from '../../../zero/queries';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
 import { useChannelSubscription } from '../../../hooks/useChannelSubscription';
@@ -25,16 +23,12 @@ import PinListV2 from '../PinListV2';
 import { ThreadMessages } from '../ThreadPannel';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
 import CanvasTab from '../../Canvas/CanvasTab';
-import { useSelector } from '@xstate/react';
-import { stateMachineActor } from '../../../machines/stateMachine';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { queries } from '../../../zero/queries';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
 import ChatListV3 from '../ChatList/ChatListV3';
 import LinksTab from '../LinksTab/LinksTab';
-
-interface NavigationState {
-  fromMyTickets?: boolean;
-}
 
 const ExpandedTicketView = ({
   ticketId,
@@ -45,83 +39,10 @@ const ExpandedTicketView = ({
   channelId: string;
   conversationId: string;
 }): ReactElement => {
-  const navigate = useNavigate();
-  const { buildChannelRoute } = useRouteContext();
-  const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId }));
-  const [allProjectTickets] = useCachedQuery(
-    queries.ticketsByProjectV2({ projectId: ticket?.projectId ?? '' }),
-  );
-
-  const filteredIds = useSelector(stateMachineActor, s => s.context.filteredTicketIds || []);
-
-  // Filter tickets by current ticket's board and sort by createdAt desc
-  const boardTickets = useMemo(() => {
-    if (!ticket?.boardId || !allProjectTickets) return [];
-    const baseBoardTickets = [...allProjectTickets]
-      .filter(t => t.boardId === ticket.boardId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    if (filteredIds && filteredIds.length > 0) {
-      return baseBoardTickets.filter(t => filteredIds.includes(t.id));
-    }
-
-    return baseBoardTickets;
-  }, [allProjectTickets, ticket?.boardId, filteredIds]);
-
-  // Navigation state
-  const currentIndex = boardTickets.findIndex(t => t.id === ticketId);
-  const totalCount = boardTickets.length;
-  const canNavigatePrevious = currentIndex > 0;
-  const canNavigateNext = currentIndex < totalCount - 1;
-
-  const location = useLocation();
-  const navState = location.state as NavigationState;
-
-  const handleNavigatePrevious = (): void => {
-    const prevTicket = boardTickets[currentIndex - 1];
-    if (!prevTicket) return;
-    void navigate(
-      buildChannelRoute(prevTicket.channelId, {
-        tab: 'tickets',
-        ticketId: prevTicket.id,
-        conversationId: prevTicket.conversationId,
-      }),
-      {
-        state: navState,
-      },
-    );
-  };
-
-  const handleNavigateNext = (): void => {
-    const nextTicket = boardTickets[currentIndex + 1];
-    if (!nextTicket) return;
-    void navigate(
-      buildChannelRoute(nextTicket.channelId, {
-        tab: 'tickets',
-        ticketId: nextTicket.id,
-        conversationId: nextTicket.conversationId,
-      }),
-      {
-        state: navState,
-      },
-    );
-  };
-
   return (
     <PanelGroup direction='horizontal'>
       <Panel minSize={60}>
-        <TicketDetails
-          ticketId={ticketId}
-          expandedView={true}
-          navigation={{
-            currentIndex,
-            totalCount,
-            canNavigatePrevious,
-            canNavigateNext,
-          }}
-          onNavigatePrevious={handleNavigatePrevious}
-          onNavigateNext={handleNavigateNext}
-        />
+        <TicketDetails ticketId={ticketId} expandedView={true} />
       </Panel>
       <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
         <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>

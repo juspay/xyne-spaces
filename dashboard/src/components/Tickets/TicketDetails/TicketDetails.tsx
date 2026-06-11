@@ -1,6 +1,5 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { useZero } from '../../../hooks/useZero';
-import { useShortcut } from '../../../shortcuts';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -11,7 +10,6 @@ import {
   FileText,
   ChevronDown,
   ChevronLeft,
-  ChevronUp,
   LinkIcon,
   Minimize2,
   Play,
@@ -89,6 +87,7 @@ import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPrefere
 import ApprovalNudgeBanner from './ApprovalNudgeBanner';
 import { isReleaseTicket } from '@xyne/shared';
 import { generateReleaseNotes } from '../../../services/ticketBoardService';
+import { searchService } from '../../../services/searchService';
 import { AIClassificationPanel } from './AIClassificationPanel';
 import type { TicketClassificationData } from '../../../types/classification';
 
@@ -131,6 +130,60 @@ const PRIORITY_OPTIONS: TicketPriority[] = [
   TicketPriority.CRITICAL,
 ];
 
+type VespaProjectTicket = {
+  id: string;
+  title?: string;
+  xyneId?: string | null;
+  searchContext?: {
+    tags?: string[];
+  };
+};
+
+const VESPA_PROJECT_TICKET_MAX_OFFSET = 1000;
+
+const toVespaProjectTicket = (result: {
+  id: string;
+  title: string;
+  searchContext?: {
+    xyneId?: string | null;
+    tags?: string[];
+  };
+}): VespaProjectTicket => ({
+  id: result.id,
+  title: result.title,
+  ...(result.searchContext?.xyneId !== undefined
+    ? { xyneId: result.searchContext.xyneId ?? null }
+    : {}),
+  ...(result.searchContext?.tags ? { searchContext: { tags: result.searchContext.tags } } : {}),
+});
+
+const fetchProjectTicketsPageFromVespa = async (
+  projectId: string,
+  query: string,
+  offset: number,
+): Promise<{
+  results: VespaProjectTicket[];
+  totalCount: number;
+  offset: number;
+  limit: number;
+}> => {
+  const response = await searchService.vespaSearch({
+    query: query || '*',
+    type: 'tickets',
+    apps: 'ticket',
+    projectId,
+    limit: 200,
+    offset,
+  });
+
+  return {
+    results: response.results.map(result => toVespaProjectTicket(result)),
+    totalCount: response.totalCount,
+    offset: response.offset,
+    limit: response.limit,
+  };
+};
+
 interface TicketReferenceWithTicket extends TicketReferenceMapping {
   targetTicket?: {
     id?: string;
@@ -165,14 +218,6 @@ interface TicketDetailsProps {
   ticketId: string;
   onNavigateToTicket?: (ticketId: string) => void;
   expandedView?: boolean;
-  navigation?: {
-    currentIndex: number;
-    totalCount: number;
-    canNavigatePrevious: boolean;
-    canNavigateNext: boolean;
-  };
-  onNavigatePrevious?: () => void;
-  onNavigateNext?: () => void;
   onFillRCA?: () => void;
 }
 
@@ -286,9 +331,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   ticketId,
   onNavigateToTicket,
   expandedView = false,
-  navigation,
-  onNavigatePrevious,
-  onNavigateNext,
   onFillRCA,
 }) => {
   const zero = useZero();
@@ -297,20 +339,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const location = useLocation();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
-
-  // j / k navigate between tickets when the detail view exposes navigation callbacks.
-  useShortcut('j', () => onNavigateNext?.(), {
-    scope: 'global',
-    description: 'Next ticket',
-    category: 'Tickets',
-    enabled: !!(onNavigateNext && navigation?.canNavigateNext),
-  });
-  useShortcut('k', () => onNavigatePrevious?.(), {
-    scope: 'global',
-    description: 'Previous ticket',
-    category: 'Tickets',
-    enabled: !!(onNavigatePrevious && navigation?.canNavigatePrevious),
-  });
 
   // State declarations
   const [editingTitle, setEditingTitle] = useState(false);
@@ -507,17 +535,147 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   );
   const isEmailDeskTicket = !!emailChannelPreference;
 
-  // Query all tickets in the project for reference picker
-  const [projectTickets] = useCachedQuery(
-    queries.ticketsByProjectV2({ projectId: ticket?.projectId ?? '' }),
-    { enabled: !!ticket?.projectId },
-  );
+  const [projectTickets, setProjectTickets] = useState<VespaProjectTicket[] | null>(null);
+  const [isAddTicketMenuOpen, setIsAddTicketMenuOpen] = useState(false);
+  const [isLoadingProjectTickets, setIsLoadingProjectTickets] = useState(false);
+  const [isLoadingMoreProjectTickets, setIsLoadingMoreProjectTickets] = useState(false);
+  const [projectTicketHasMore, setProjectTicketHasMore] = useState(false);
+  const [projectTicketSearch, setProjectTicketSearch] = useState('');
+  const [projectTicketNextOffset, setProjectTicketNextOffset] = useState(0);
+  const projectTicketsRequestIdRef = useRef(0);
 
   // Project-level tags — lazy-loaded when tag dropdown is opened
   const [projectTags] = useCachedQuery(
     queries.projectTagsByProjectId({ projectId: ticket?.projectId ?? '' }),
     { enabled: !!ticket?.projectId && showTagDropdown },
   );
+
+  useEffect(() => {
+    setProjectTickets(null);
+    setIsLoadingProjectTickets(false);
+    setIsLoadingMoreProjectTickets(false);
+    setProjectTicketHasMore(false);
+    setProjectTicketNextOffset(0);
+    setProjectTicketSearch('');
+    setIsAddTicketMenuOpen(false);
+    projectTicketsRequestIdRef.current += 1;
+  }, [ticket?.projectId]);
+
+  const loadProjectTicketsPage = useCallback(
+    async (offset: number, replace: boolean): Promise<void> => {
+      if (!ticket?.projectId) {
+        return;
+      }
+
+      const normalizedQuery = projectTicketSearch.trim();
+      const requestId = ++projectTicketsRequestIdRef.current;
+      const isInitialLoad = replace || offset === 0;
+
+      if (isInitialLoad) {
+        setIsLoadingProjectTickets(true);
+      } else {
+        setIsLoadingMoreProjectTickets(true);
+      }
+
+      try {
+        const response = await fetchProjectTicketsPageFromVespa(
+          ticket.projectId,
+          normalizedQuery,
+          offset,
+        );
+
+        if (requestId !== projectTicketsRequestIdRef.current) {
+          return;
+        }
+
+        const nextOffset = response.offset + response.limit;
+        const cappedNextOffset = Math.min(nextOffset, VESPA_PROJECT_TICKET_MAX_OFFSET);
+        const hasMore =
+          response.results.length > 0 &&
+          nextOffset < response.totalCount &&
+          nextOffset < VESPA_PROJECT_TICKET_MAX_OFFSET;
+
+        setProjectTickets(previousTickets => {
+          const baseTickets = replace ? [] : (previousTickets ?? []);
+          return Array.from(
+            new Map(
+              [...baseTickets, ...response.results].map(ticket => [ticket.id, ticket]),
+            ).values(),
+          );
+        });
+        setProjectTicketNextOffset(cappedNextOffset);
+        setProjectTicketHasMore(hasMore);
+      } catch (error) {
+        if (requestId !== projectTicketsRequestIdRef.current) {
+          return;
+        }
+
+        console.warn('[TicketDetails] Failed to load Vespa project tickets', {
+          projectId: ticket.projectId,
+          offset,
+          query: normalizedQuery || '*',
+          error,
+        });
+
+        if (replace) {
+          setProjectTickets([]);
+          setProjectTicketNextOffset(0);
+        }
+
+        setProjectTicketHasMore(false);
+      } finally {
+        if (requestId === projectTicketsRequestIdRef.current) {
+          setIsLoadingProjectTickets(false);
+          setIsLoadingMoreProjectTickets(false);
+        }
+      }
+    },
+    [projectTicketSearch, ticket?.projectId],
+  );
+
+  useEffect(() => {
+    if (!isAddTicketMenuOpen || !ticket?.projectId) {
+      return;
+    }
+
+    setProjectTickets(null);
+    setProjectTicketNextOffset(0);
+    setProjectTicketHasMore(false);
+    if (projectTicketSearch.trim()) {
+      void loadProjectTicketsPage(0, true);
+    }
+  }, [isAddTicketMenuOpen, loadProjectTicketsPage, ticket?.projectId, projectTicketSearch]);
+
+  const handleAddTicketMenuOpenChange = useCallback((open: boolean): void => {
+    setIsAddTicketMenuOpen(open);
+  }, []);
+
+  const handleAddTicketMenuSearchChange = useCallback((searchValue: string): void => {
+    setProjectTicketSearch(searchValue);
+    setProjectTicketNextOffset(0);
+    setProjectTicketHasMore(false);
+    setProjectTickets(null);
+    projectTicketsRequestIdRef.current += 1;
+  }, []);
+
+  const handleAddTicketMenuScrollEnd = useCallback((): void => {
+    if (!projectTicketHasMore || isLoadingProjectTickets || isLoadingMoreProjectTickets) {
+      return;
+    }
+
+    if (projectTicketNextOffset >= VESPA_PROJECT_TICKET_MAX_OFFSET) {
+      setProjectTicketHasMore(false);
+      return;
+    }
+
+    void loadProjectTicketsPage(projectTicketNextOffset, false);
+  }, [
+    isLoadingMoreProjectTickets,
+    isLoadingProjectTickets,
+    loadProjectTicketsPage,
+    projectTicketHasMore,
+    projectTicketNextOffset,
+  ]);
 
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
@@ -858,7 +1016,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     handleReferenceRelationChange,
   } = useTicketReferences({
     ticketId: ticket?.id,
-    projectTickets,
+    projectTickets: projectTickets ?? [],
     referencesOut,
   });
 
@@ -1659,105 +1817,68 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               {ticket.xyneId}
             </span>
           </div>
-          <div className='flex gap-x-3'>
-            <div className='flex items-center gap-x-2'>
-              <button
-                onClick={onNavigatePrevious}
-                disabled={!navigation?.canNavigatePrevious}
-                className={
-                  navigation?.canNavigatePrevious
-                    ? 'hover:bg-muted rounded cursor-pointer'
-                    : 'opacity-40 cursor-not-allowed'
-                }
-                aria-label='Previous ticket'
-                data-track-category='Tickets'
-                data-track-name='NavigateToPreviousTicket'
+          <div className='flex items-center gap-x-2'>
+            <Tooltip content='Copy Ticket Link'>
+              <Button
+                className='p-2 border border-border rounded-lg h-8 w-8'
+                variant='ghost'
+                size='sm'
+                onClick={handleCopyTicketViewLink}
+                aria-label='Copy Ticket'
               >
-                <ChevronUp size={18} className='text-foreground' />
-              </button>
-              <button
-                onClick={onNavigateNext}
-                disabled={!navigation?.canNavigateNext}
-                className={
-                  navigation?.canNavigateNext
-                    ? 'hover:bg-muted rounded cursor-pointer'
-                    : 'opacity-40 cursor-not-allowed'
-                }
-                aria-label='Next ticket'
-                data-track-category='Tickets'
-                data-track-name='NavigateToNextTicket'
+                <LinkIcon size={20} />
+              </Button>
+            </Tooltip>
+            <Tooltip content='Summarize thread'>
+              <Button
+                variant='ghost'
+                size='sm'
+                className='p-2 border border-border rounded-lg h-8 w-8'
+                onClick={() => {
+                  void navigate(
+                    `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
+                  );
+                }}
+                title='Summarize thread'
               >
-                <ChevronDown size={18} className='text-foreground' />
-              </button>
-              <div className='flex items-center gap-x-1/2 text-[14px] text-foreground font-medium'>
-                <span>{(navigation?.currentIndex ?? 0) + 1}</span>
-                <span>/</span>
-                <span className='text-muted-foreground'>{navigation?.totalCount ?? 0}</span>
-              </div>
-            </div>
-            <div className='flex items-center gap-x-2'>
-              <Tooltip content='Copy Ticket Link'>
-                <Button
-                  className='p-2 border border-border rounded-lg h-8 w-8'
-                  variant='ghost'
-                  size='sm'
-                  onClick={handleCopyTicketViewLink}
-                  aria-label='Copy Ticket'
-                >
-                  <LinkIcon size={20} />
-                </Button>
-              </Tooltip>
-              <Tooltip content='Summarize thread'>
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  className='p-2 border border-border rounded-lg h-8 w-8'
-                  onClick={() => {
-                    void navigate(
-                      `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
-                    );
-                  }}
-                  title='Summarize thread'
-                >
-                  <Sparkles size={20} />
-                </Button>
-              </Tooltip>
-              <Tooltip content='Trigger Workflow'>
-                <Button
-                  className='p-2 border border-border rounded-lg h-8 w-8'
-                  variant='ghost'
-                  size='sm'
-                  onClick={() => setIsWorkflowModalOpen(true)}
-                  disabled={ticket?.isArchived}
-                  aria-label='Trigger Workflow'
-                >
-                  <Play size={20} />
-                </Button>
-              </Tooltip>
-              <Tooltip content={'Archive Ticket'}>
-                <Button
-                  className='p-2 border border-border rounded-lg h-8 w-8'
-                  variant='ghost'
-                  size='sm'
-                  onClick={() => setShowArchiveConfirmDialog(true)}
-                  disabled={ticket?.isArchived}
-                  aria-label='Archive Ticket'
-                >
-                  <Archive size={20} />
-                </Button>
-              </Tooltip>
-              <Tooltip content='Minimize View'>
-                <Button
-                  className='p-2 border border-border rounded-lg h-8 w-8'
-                  variant='ghost'
-                  size='sm'
-                  onClick={handleMinimizeExpandedView}
-                  aria-label='Copy Ticket'
-                >
-                  <Minimize2 size={20} />
-                </Button>
-              </Tooltip>
-            </div>
+                <Sparkles size={20} />
+              </Button>
+            </Tooltip>
+            <Tooltip content='Trigger Workflow'>
+              <Button
+                className='p-2 border border-border rounded-lg h-8 w-8'
+                variant='ghost'
+                size='sm'
+                onClick={() => setIsWorkflowModalOpen(true)}
+                disabled={ticket?.isArchived}
+                aria-label='Trigger Workflow'
+              >
+                <Play size={20} />
+              </Button>
+            </Tooltip>
+            <Tooltip content={'Archive Ticket'}>
+              <Button
+                className='p-2 border border-border rounded-lg h-8 w-8'
+                variant='ghost'
+                size='sm'
+                onClick={() => setShowArchiveConfirmDialog(true)}
+                disabled={ticket?.isArchived}
+                aria-label='Archive Ticket'
+              >
+                <Archive size={20} />
+              </Button>
+            </Tooltip>
+            <Tooltip content='Minimize View'>
+              <Button
+                className='p-2 border border-border rounded-lg h-8 w-8'
+                variant='ghost'
+                size='sm'
+                onClick={handleMinimizeExpandedView}
+                aria-label='Copy Ticket'
+              >
+                <Minimize2 size={20} />
+              </Button>
+            </Tooltip>
           </div>
         </div>
       )}
@@ -3241,6 +3362,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   onSelect={value => handleAddReference(value)}
                   placeholder='+ Add ticket'
                   searchPlaceholder='Search by ID or name'
+                  isOpen={isAddTicketMenuOpen}
+                  onOpenChange={handleAddTicketMenuOpenChange}
+                  onSearchChange={handleAddTicketMenuSearchChange}
+                  onScrollEnd={handleAddTicketMenuScrollEnd}
+                  hasMore={projectTicketHasMore}
+                  isLoading={
+                    isLoadingProjectTickets && (!projectTickets || projectTickets.length === 0)
+                  }
+                  disableClientFiltering={true}
                   width='100%'
                   noBorder
                 />

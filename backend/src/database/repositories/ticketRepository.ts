@@ -1,6 +1,7 @@
 import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent, PrismaClient } from '@prisma/client';
 import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
 import { websocketService } from '@/services/websocketService';
+import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
@@ -20,6 +21,36 @@ type PrismaTransaction = Omit<
   PrismaClient,
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
+
+const makeFallbackCountsSnapshot = (ticket: {
+  id: string;
+  workspaceId: string;
+  boardId: string | null;
+  projectId: string | null;
+  stageName: string;
+  statusV2: TicketStatusV2;
+  priority: TicketPriority;
+  assignedTo: string | null;
+  createdBy: string;
+  userGroupId: string | null;
+  ticketType: string | null;
+  eta: Date | null;
+  createdAt: Date;
+}) => ({
+  id: ticket.id,
+  workspaceId: ticket.workspaceId,
+  boardId: ticket.boardId,
+  projectId: ticket.projectId,
+  stageName: ticket.stageName,
+  statusV2: ticket.statusV2,
+  priority: ticket.priority,
+  assignedTo: ticket.assignedTo,
+  createdBy: ticket.createdBy,
+  userGroupId: ticket.userGroupId,
+  ticketType: ticket.ticketType,
+  eta: ticket.eta?.getTime() ?? null,
+  createdAt: ticket.createdAt.getTime(),
+});
 
 export class TicketRepository {
 
@@ -173,6 +204,12 @@ export class TicketRepository {
     websocketService.trackUserActivity(data.createdBy)
       .catch(err => logger.error('Failed to track user activity after ticket creation:', err));
 
+    const createdSnapshot = (await buildKanbanCountsSnapshot(ticket.id)) ?? makeFallbackCountsSnapshot(ticket);
+    websocketService.broadcastTicketCountsUpdate({
+      operation: 'insert',
+      ticket: createdSnapshot,
+    });
+
     // Queue ticket for Vespa ingestion with complete data
     // try {
     //   // Run all independent database queries concurrently
@@ -257,7 +294,21 @@ export class TicketRepository {
     // Get current ticket to capture old stage name, boardId, and statusV2
     const currentTicket = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { stageName: true, boardId: true, statusV2: true, conversationId: true }
+      select: {
+        workspaceId: true,
+        projectId: true,
+        stageName: true,
+        boardId: true,
+        statusV2: true,
+        conversationId: true,
+        priority: true,
+        assignedTo: true,
+        createdBy: true,
+        userGroupId: true,
+        ticketType: true,
+        eta: true,
+        createdAt: true,
+      }
     });
 
     if (!currentTicket) {
@@ -434,6 +485,19 @@ export class TicketRepository {
         performedById: updatedBy,
       });
     }
+
+    const updatedSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+    websocketService.broadcastTicketCountsUpdate({
+      operation: 'update',
+      ticket: updatedSnapshot,
+      previousTicket: {
+        ...updatedSnapshot,
+        stageName: oldStageName,
+        statusV2: oldStatusV2,
+        priority: currentTicket.priority,
+        assignedTo: currentTicket.assignedTo,
+      },
+    });
 
     // Create activity record for the stage change
     if (source === ActivitySource.WEBHOOK && prActivityData) {
@@ -728,6 +792,16 @@ export class TicketRepository {
         performedById: updatedBy,
       });
     }
+
+    const assigneeSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+    websocketService.broadcastTicketCountsUpdate({
+      operation: 'update',
+      ticket: assigneeSnapshot,
+      previousTicket: {
+        ...assigneeSnapshot,
+        assignedTo: previousAssigneeId,
+      },
+    });
   }
 
   async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
@@ -870,6 +944,19 @@ export class TicketRepository {
           performedById: updatedBy,
         });
       }
+    }
+
+    if (prevSnapshot) {
+      const metadataSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket);
+      websocketService.broadcastTicketCountsUpdate({
+        operation: 'update',
+        ticket: metadataSnapshot,
+        previousTicket: {
+          ...metadataSnapshot,
+          statusV2: previousStatus,
+          priority: prevSnapshot.priority,
+        },
+      });
     }
   }
 

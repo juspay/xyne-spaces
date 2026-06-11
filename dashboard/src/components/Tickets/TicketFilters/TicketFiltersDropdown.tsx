@@ -45,7 +45,7 @@ import {
   StagesSubmenu,
   TicketTypeSubmenu,
 } from './Submenus';
-import { TicketFiltersProps, DateRange } from './types';
+import { TicketFiltersProps, DateRange, BoardOption } from './types';
 import type { TicketFilters } from './types';
 import { FormFieldType } from '@xyne/shared';
 import type { TicketPriority, FormFields } from '@xyne/shared';
@@ -53,7 +53,6 @@ import { cn } from '../../../utils/classNames';
 import * as Popover from '@radix-ui/react-popover';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
-import { logger, Event } from '../../../utils/logger';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useCanViewAnalytics } from '../../../hooks/usePermissions';
 
@@ -107,6 +106,7 @@ export const TicketFiltersDropdown = ({
   className = '',
   availablePriorities,
   availableUsers,
+  availableBoardDetails,
   availableUserGroups,
   availableBoards,
   showBoardsFilter = false,
@@ -117,6 +117,7 @@ export const TicketFiltersDropdown = ({
   searchValue,
   onSearchChange,
   selectedBoardName,
+  onBoardDropdownOpenChange,
   isTicketsSyncing = false,
   channelId,
   groupBy,
@@ -128,71 +129,26 @@ export const TicketFiltersDropdown = ({
   const [boardOpen, setBoardOpen] = useState(false);
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
 
-  // Latency tracking for boards loading
-  const boardsLoadStartRef = useRef<number | null>(null);
-  const boardsLoggedRef = useRef(false);
-
-  // Start timing when dropdown first opens
-  useEffect(() => {
-    if (hasBoardDropdownOpened && boardsLoadStartRef.current === null) {
-      boardsLoadStartRef.current = performance.now();
-      boardsLoggedRef.current = false;
-    }
-  }, [hasBoardDropdownOpened]);
-
   // When availableBoards is provided (my-tickets/user-tickets/group-tickets), we already know
-  // exactly which board IDs the user has tickets in — fetch only those instead of loading all
-  // boards globally or by project.
+  // exactly which board IDs the user has tickets in.
   const isMyTicketsMode = availableBoards !== undefined;
 
-  // my-tickets path: fetch only the boards the user actually has tickets in, lazily when the
-  // dropdown opens. Skip the query entirely when availableBoards is empty (no tickets loaded yet).
-  const [boardsByIdsResult, boardsByIdsDetails] = useCachedQuery(
-    queries.boardsByIds({ boardIds: availableBoards ?? [] }),
-    {
-      enabled: isMyTicketsMode && hasBoardDropdownOpened && (availableBoards?.length ?? 0) > 0,
-    },
-  );
-
   // project/channel path: lazily fetch boards scoped to the project (always project-scoped).
-  const [allBoardsProject, allBoardsProjectDetails] = useCachedQuery(
+  const [allBoardsProject] = useCachedQuery(
     queries.boardsListByProject({ projectId: projectId || '' }),
     {
       enabled: !isMyTicketsMode && hasBoardDropdownOpened && !!projectId,
     },
   );
+  const allBoardsRaw: BoardOption[] | undefined = isMyTicketsMode
+    ? availableBoardDetails
+    : allBoardsProject;
 
-  const allBoardsRaw = isMyTicketsMode ? boardsByIdsResult : allBoardsProject;
-  const boardsDetails = isMyTicketsMode ? boardsByIdsDetails : allBoardsProjectDetails;
-
-  // Log boards loading latency when complete
-  useEffect(() => {
-    if (
-      boardsDetails.type === 'complete' &&
-      boardsLoadStartRef.current !== null &&
-      !boardsLoggedRef.current
-    ) {
-      const latency = performance.now() - boardsLoadStartRef.current;
-      boardsLoggedRef.current = true;
-
-      logger.info(Event.KANBAN_ENTITY_LOADED, {
-        entity: 'boards',
-        latency,
-        context: 'TicketFiltersDropdown',
-        projectId: projectId || 'global',
-      });
-    }
-  }, [boardsDetails, projectId]);
-
-  // In my-tickets mode the boardsByIds query is already scoped to the user's boards, so no
-  // further filtering is needed. In project/channel modes, allBoardsRaw is already correct.
   const allBoardsList = useMemo(() => {
     if (isMyTicketsMode) {
-      // If tickets haven't loaded yet (availableBoards is empty), show no boards in dropdown
       if (!availableBoards || availableBoards.length === 0) return [];
-      return allBoardsRaw ?? [];
     }
-    return allBoardsRaw;
+    return allBoardsRaw ?? [];
   }, [allBoardsRaw, availableBoards, isMyTicketsMode]);
 
   // Derive selectedBoard from fetched boards
@@ -213,10 +169,11 @@ export const TicketFiltersDropdown = ({
   );
 
   const availableTicketTypes = useMemo(() => {
-    if (ticketTypesResult && ticketTypesResult.length > 0) {
-      return ticketTypesResult.map(t => t.value).filter((value): value is string => Boolean(value));
-    }
-    return Object.values(BaseTicketType);
+    const values = new Set<string>(Object.values(BaseTicketType));
+    ticketTypesResult?.forEach(t => {
+      if (t.value) values.add(t.value);
+    });
+    return Array.from(values);
   }, [ticketTypesResult]);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -290,14 +247,6 @@ export const TicketFiltersDropdown = ({
         : selectedBoards.length === 1
           ? (selectedBoard?.name ?? selectedBoardName ?? 'Board')
           : `${selectedBoards.length} Boards`;
-
-  // Track when board dropdown is opened for lazy loading
-  const handleBoardDropdownOpenChange = (open: boolean): void => {
-    setBoardOpen(open);
-    if (open && !hasBoardDropdownOpened) {
-      setHasBoardDropdownOpened(true);
-    }
-  };
 
   // Helper to get icon for field type
   const getIconForFieldType = (fieldType: FormFieldType): typeof BarChart3 => {
@@ -744,11 +693,20 @@ export const TicketFiltersDropdown = ({
   return (
     <div className={`relative flex  flex-col w-full ${className}`}>
       <div className='w-max'>
-        <Popover.Root open={boardOpen} onOpenChange={handleBoardDropdownOpenChange}>
+        <Popover.Root
+          open={boardOpen}
+          onOpenChange={open => {
+            setBoardOpen(open);
+            onBoardDropdownOpenChange?.(open);
+            if (open && !hasBoardDropdownOpened) {
+              setHasBoardDropdownOpened(true);
+            }
+          }}
+        >
           <Popover.Trigger asChild>
             <Button
               variant='ghost'
-              onClick={() => handleBoardDropdownOpenChange(!boardOpen)}
+              onClick={() => setBoardOpen(!boardOpen)}
               className={cn('rounded-[10px] mb-3')}
               data-track-category='Tickets'
               data-track-name='ToggleBoardDropdown'

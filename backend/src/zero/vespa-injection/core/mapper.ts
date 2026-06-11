@@ -3,6 +3,7 @@ import { channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
+import { FormFieldType } from '@xyne/shared';
 import { VespaJob, VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
 import { Conversation, Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem } from '@prisma/client';
@@ -17,6 +18,7 @@ import { config } from '@/config/env';
 import { TextStrategy } from '../strategies/TextStrategy';
 import { getStorageService } from '@/services/storage';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import { buildFormFields, type TicketDynamicFieldValue } from './form-fields';
 
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
@@ -529,7 +531,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     createdByUser,
     assignedToUser,
     closedByUser,
-    descriptionMentions
+    descriptionMentions,
   ] = await Promise.all([
     db.conversation.findUnique({
       where: { conversationId: args.conversationId }
@@ -568,8 +570,35 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
       where: { id: args.closedBy },
       select: { name: true }
     }) : Promise.resolve(null),
-    extractMentionsFromContent(args.description)
+    extractMentionsFromContent(args.description),
   ])
+
+  const formEntityValues = await db.formEntityValues.findMany({
+    where: {
+      entityId: args.id,
+      entityType: 'TICKET',
+    },
+    select: {
+      fieldId: true,
+      actualFieldValue: true,
+    },
+  }) as TicketDynamicFieldValue[];
+
+  const fieldIds = [...new Set(formEntityValues.map(value => value.fieldId))];
+  const formFieldRows = fieldIds.length > 0
+    ? await db.formFields.findMany({
+      where: {
+        id: { in: fieldIds },
+      },
+      select: {
+        id: true,
+        fieldType: true,
+      },
+    })
+    : [];
+  const fieldTypeByFieldId = new Map(
+    formFieldRows.map(field => [field.id, field.fieldType as FormFieldType]),
+  );
 
   // Resolve parent/child ticket relationships
   const { parentTicketXyneId, childTicketXyneIds } = await resolveTicketRelationships(args.id);
@@ -592,6 +621,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
   }
 
   const resolvedChannelName = await resolveChannelName(channel?.name || '', channel?.scopeType);
+  const vespaFormFields = buildFormFields(formEntityValues ?? [], fieldTypeByFieldId);
   return {
     docId: args.id,
     docType: VespaDocType.TICKET,
@@ -620,6 +650,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     boardId: args.boardId,
     attachmentIds: attachments.map(a => a.id),
     metadata: JSON.stringify(args.metadata),
+    formFields: vespaFormFields,
     eta: toDateString(args.eta),
     channelName: resolvedChannelName,
     boardName: board?.name || '',

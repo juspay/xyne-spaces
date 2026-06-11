@@ -48,6 +48,13 @@ export interface TicketTagPreviousValue {
   ticketId: string;
 }
 
+export interface FormEntityValuePreviousValue {
+  entityId: string;
+  fieldId: string;
+  entityType: string;
+  actualFieldValue: unknown;
+}
+
 export interface DelayedMessagePreviousValue {
   scheduledFor: number;
   status: string;
@@ -91,6 +98,7 @@ export type PreviousValue =
   | ReactionPreviousValue
   | MessagePreviousValue
   | TicketTagPreviousValue
+  | FormEntityValuePreviousValue
   | DelayedMessagePreviousValue
   | ChannelPreviousValue
   | EmailReadPreviousValue
@@ -115,8 +123,8 @@ export type SideEffectOperationConfigMap = {
 export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   reactions: ['insert', 'delete'],
   messages: ['insert', 'delete', 'update'],
-  ticket_tags: ['insert', 'delete'],
-  ticket_tag_mappings: ['insert', 'delete'],
+  ticket_tags: ['insert', 'update', 'delete'],
+  ticket_tag_mappings: ['insert', 'update', 'delete'],
   call_participants: ["insert", "update"],
   channel_participants: ['insert'],
   canvas_participants: ['insert', 'update', 'delete'],
@@ -126,12 +134,12 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   ticket_assignments: ['insert', 'update'],
   ticket_stage_eta: ['update'],
   canvases: ['insert'],
+  form_entity_values: ['insert', 'update', 'delete'],
   delayed_messages: ['insert', 'update', 'delete'],
   channels: ['update'],
   email_reads: ['insert', 'update'],
   channel_user_status: ['update'],
   conversation_participants: ['update'],
-  form_entity_values: ['insert', 'update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

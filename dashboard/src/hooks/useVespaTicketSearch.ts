@@ -1,0 +1,285 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { searchService } from '../services/searchService';
+import type { VespaSearchFilters, DisplaySearchResult } from '../types/search';
+import type { Ticket } from '@xyne/shared';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+
+const MAX_VESPA_TICKET_SEARCH_LIMIT = 200;
+const FILTER_ONLY_DYNAMIC_FIELD_CACHE_TTL_MS = 30_000;
+const SEARCH_DEBOUNCE_MS = 300;
+
+interface UseVespaTicketSearchParams {
+  searchTerm?: string;
+  projectId?: string;
+  boardId?: string;
+  status?: string;
+  stage?: string;
+  dynamicFieldValues?: string[];
+  enabled?: boolean;
+  limit?: number;
+  fetchAllDynamicFieldMatches?: boolean;
+}
+
+interface UseVespaTicketSearchResult {
+  searchResults: Ticket[] | null;
+  isSearching: boolean;
+}
+
+const EMPTY_DYNAMIC_FIELD_VALUES: string[] = [];
+
+type VespaTicketSearchResponse = Awaited<ReturnType<typeof searchService.vespaSearch>>;
+
+const filterOnlyDynamicFieldCache = new Map<
+  string,
+  { expiresAt: number; results: DisplaySearchResult[] }
+>();
+const filterOnlyDynamicFieldInflight = new Map<string, Promise<DisplaySearchResult[]>>();
+
+const getFilterOnlyDynamicFieldCacheKey = (filters: VespaSearchFilters): string =>
+  JSON.stringify({
+    query: filters.query,
+    type: filters.type,
+    apps: filters.apps,
+    projectId: filters.projectId ?? null,
+    board: filters.board ?? null,
+    status: filters.status ?? null,
+    stage: filters.stage ?? null,
+    dynamicFieldValues: filters.dynamicFieldValues ?? null,
+    filterOnly: filters.filterOnly ?? null,
+    limit: filters.limit ?? null,
+  });
+
+const fetchAllFilterOnlyDynamicFieldResults = async (
+  vespaFilters: VespaSearchFilters,
+  pageLimit: number,
+): Promise<DisplaySearchResult[]> => {
+  const cacheKey = getFilterOnlyDynamicFieldCacheKey(vespaFilters);
+  const cached = filterOnlyDynamicFieldCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.results;
+  }
+
+  const inflight = filterOnlyDynamicFieldInflight.get(cacheKey);
+  if (inflight) {
+    return inflight;
+  }
+
+  const request = (async (): Promise<DisplaySearchResult[]> => {
+    const firstResponse: VespaTicketSearchResponse = await searchService.vespaSearch(vespaFilters);
+    const allResults = [...firstResponse.results];
+    const totalToFetch = firstResponse.totalCount;
+
+    for (
+      let offset = firstResponse.offset + pageLimit;
+      offset < totalToFetch;
+      offset += pageLimit
+    ) {
+      const pageResponse = await searchService.vespaSearch({
+        ...vespaFilters,
+        offset,
+      });
+      allResults.push(...pageResponse.results);
+
+      if (pageResponse.results.length === 0) break;
+    }
+
+    const uniqueResults = Array.from(
+      new Map(allResults.map(result => [result.id, result])).values(),
+    );
+    filterOnlyDynamicFieldCache.set(cacheKey, {
+      expiresAt: Date.now() + FILTER_ONLY_DYNAMIC_FIELD_CACHE_TTL_MS,
+      results: uniqueResults,
+    });
+
+    return uniqueResults;
+  })();
+
+  filterOnlyDynamicFieldInflight.set(cacheKey, request);
+
+  try {
+    return await request;
+  } finally {
+    filterOnlyDynamicFieldInflight.delete(cacheKey);
+  }
+};
+
+function toTicket(r: DisplaySearchResult): Ticket {
+  const ctx = r.searchContext ?? {};
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.context ?? '',
+    status: '' as never,
+    statusV2: (ctx.ticketStatus as TicketStatusV2) ?? TicketStatusV2.TODO,
+    priority: (ctx.priority as TicketPriority) ?? TicketPriority.MEDIUM,
+    stageName: ctx.stageName ?? '',
+    boardId: ctx.boardId ?? '',
+    projectId: ctx.projectId ?? '',
+    channelId: ctx.channelId ?? '',
+    conversationId: ctx.conversationId ?? '',
+    xyneId: ctx.xyneId ?? '',
+    assignedTo: ctx.assignedTo ?? '',
+    createdBy: ctx.createdBy ?? '',
+    updatedBy: '',
+    createdAt: ctx.createdAtTimestamp ?? 0,
+    updatedAt: 0,
+    statusUpdatedAt: 0,
+    workspaceId: '',
+    userGroupId: ctx.userGroupId ?? '',
+    tags: (ctx.tags ?? []).map(tag => ({
+      id: `${r.id}:${tag}`,
+      ticketId: r.id,
+      name: tag,
+      workspaceId: '',
+      createdAt: 0,
+      updatedAt: 0,
+    })),
+    ticketType: ctx.ticketType ?? null,
+    isArchived: false,
+    kanbanPosition: null,
+    lastEmailAt: 0,
+    emailCount: null,
+    merchantId: null,
+    eta: null,
+    metadata: null,
+    closedAt: null,
+    closedBy: null,
+    classificationData: null,
+    aiCategory: null,
+    aiSubCategory: null,
+    aiPriority: null,
+    firstRespondedAt: null,
+    emailReplyEnabled: false,
+  } as unknown as Ticket;
+}
+
+/**
+ * Debounced Vespa search for tickets. Returns Ticket[] directly from Vespa
+ * when a search term is active, or null when there's no search.
+ * Only passes server-side scoping (projectId, boardId) to Vespa.
+ */
+export const useVespaTicketSearch = ({
+  searchTerm = '',
+  projectId,
+  boardId,
+  status,
+  stage,
+  dynamicFieldValues = EMPTY_DYNAMIC_FIELD_VALUES,
+  enabled = true,
+  limit = MAX_VESPA_TICKET_SEARCH_LIMIT,
+  fetchAllDynamicFieldMatches = false,
+}: UseVespaTicketSearchParams): UseVespaTicketSearchResult => {
+  const [searchResults, setSearchResults] = useState<Ticket[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const dynamicFieldValuesKey = dynamicFieldValues.join('\u001f');
+  const normalizedDynamicFieldValues = useMemo(
+    () =>
+      dynamicFieldValuesKey ? dynamicFieldValuesKey.split('\u001f') : EMPTY_DYNAMIC_FIELD_VALUES,
+    [dynamicFieldValuesKey],
+  );
+  const safeLimit = Math.min(limit, MAX_VESPA_TICKET_SEARCH_LIMIT);
+
+  const performSearch = useCallback(
+    async (query: string) => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
+      const isFilterOnlyDynamicSearch =
+        normalizedDynamicFieldValues.length > 0 && (!query.trim() || query.trim() === '*');
+      const shouldFetchAllDynamicMatches = fetchAllDynamicFieldMatches && isFilterOnlyDynamicSearch;
+      const pageLimit = shouldFetchAllDynamicMatches ? MAX_VESPA_TICKET_SEARCH_LIMIT : safeLimit;
+      const vespaFilters: VespaSearchFilters = {
+        query,
+        type: 'tickets',
+        apps: 'ticket',
+      };
+
+      vespaFilters.limit = pageLimit;
+
+      if (projectId) vespaFilters.projectId = projectId;
+      if (boardId) vespaFilters.board = boardId;
+      if (status) vespaFilters.status = status;
+      if (stage) vespaFilters.stage = stage;
+      if (normalizedDynamicFieldValues.length > 0) {
+        vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
+        vespaFilters.filterOnly = isFilterOnlyDynamicSearch;
+      }
+
+      try {
+        if (shouldFetchAllDynamicMatches) {
+          const results = await fetchAllFilterOnlyDynamicFieldResults(vespaFilters, pageLimit);
+          if (!abortController.signal.aborted) {
+            setSearchResults(results.map(toTicket));
+          }
+          return;
+        }
+
+        const firstResponse = await searchService.vespaSearch(vespaFilters);
+        if (!abortController.signal.aborted) {
+          setSearchResults(firstResponse.results.map(toTicket));
+        }
+      } catch {
+        if (!abortController.signal.aborted) {
+          setSearchResults(null);
+        }
+      } finally {
+        if (!abortController.signal.aborted) {
+          setIsSearching(false);
+        }
+      }
+    },
+    [
+      projectId,
+      boardId,
+      status,
+      stage,
+      normalizedDynamicFieldValues,
+      safeLimit,
+      fetchAllDynamicFieldMatches,
+    ],
+  );
+
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    const trimmed = searchTerm.trim();
+    const hasDynamicFieldFilters = normalizedDynamicFieldValues.length > 0;
+    if (!enabled || (!trimmed && !hasDynamicFieldFilters)) {
+      setSearchResults(null);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    debounceTimerRef.current = setTimeout(
+      () => {
+        void performSearch(trimmed || '*');
+      },
+      hasDynamicFieldFilters ? 0 : SEARCH_DEBOUNCE_MS,
+    );
+
+    return (): void => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [searchTerm, normalizedDynamicFieldValues, enabled, performSearch]);
+
+  useEffect(() => {
+    return (): void => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  return { searchResults, isSearching };
+};

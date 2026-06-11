@@ -75,7 +75,7 @@ export async function collectSideEffectJobs(
       };
     }
   }
-  if (operation === 'delete' && table === 'ticket_tags') {
+  if ((operation === 'update' || operation === 'delete') && table === 'ticket_tags') {
     const tag = await tx.run(zql.ticket_tags.where('id', entityId).one());
     if (tag) {
       previousValue = {
@@ -103,6 +103,18 @@ export async function collectSideEffectJobs(
         userGroupId: participant.userGroupId,
         channelId: participant.channelId,
         role: participant.role,
+      };
+    }
+  }
+
+  if ((operation === 'update' || operation === 'delete') && table === 'form_entity_values') {
+    const entity = await tx.run(zql.form_entity_values.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        entityId: entity.entityId,
+        fieldId: entity.fieldId,
+        entityType: entity.entityType,
+        actualFieldValue: entity.actualFieldValue,
       };
     }
   }

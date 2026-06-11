@@ -3,7 +3,11 @@ import { ActivityType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, TicketTagPreviousValue } from '../types';
 import { db } from '@/database/client';
+import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
+import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketSchema } from '@/vespa/src/types';
 
 export class TicketTagsSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -17,6 +21,21 @@ export class TicketTagsSideEffectHandler extends BaseSideEffectHandler {
     }
 
     await this.handleTagActivity(ticketId, tagName, 'added');
+    await this.queueTicketVespaFeed(ticketId);
+    await this.broadcastTicketCountsUpdate(ticketId, tagName, 'added');
+  }
+
+  async onUpdate(job: SideEffectJobConfig): Promise<void> {
+    const { args, previousValue } = job;
+    const prev = previousValue as TicketTagPreviousValue | undefined;
+    const ticketId: string | undefined = args?.ticketId ?? prev?.ticketId;
+
+    if (!ticketId) {
+      logger.warn('[TicketTagsSideEffectHandler] Missing ticketId in update args and previousValue');
+      return;
+    }
+
+    await this.queueTicketVespaFeed(ticketId);
   }
 
   async onDelete(job: SideEffectJobConfig): Promise<void> {
@@ -29,6 +48,25 @@ export class TicketTagsSideEffectHandler extends BaseSideEffectHandler {
 
     const prev = previousValue as TicketTagPreviousValue;
     await this.handleTagActivity(prev.ticketId, prev.tagName, 'removed');
+    await this.queueTicketVespaFeed(prev.ticketId);
+    await this.broadcastTicketCountsUpdate(prev.ticketId, prev.tagName, 'removed');
+  }
+
+  private async queueTicketVespaFeed(ticketId: string): Promise<void> {
+    try {
+      await vespaQueue.addJob({
+        schema: ticketSchema,
+        jobType: 'feed',
+        docId: ticketId,
+        userId: this.ctx.userID,
+        workspaceId: this.ctx.workspaceId,
+      });
+    } catch (error) {
+      logger.error('[TicketTagsSideEffectHandler] Failed to queue ticket Vespa feed:', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async handleTagActivity(
@@ -102,5 +140,26 @@ export class TicketTagsSideEffectHandler extends BaseSideEffectHandler {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  private async broadcastTicketCountsUpdate(
+    ticketId: string,
+    tagName: string,
+    action: 'added' | 'removed',
+  ): Promise<void> {
+    const snapshot = await buildKanbanCountsSnapshot(ticketId);
+    if (!snapshot) return;
+
+    const tags = snapshot.tags.filter(tag => tag !== tagName);
+    const previousTags = action === 'added' ? tags : [...tags, tagName];
+
+    websocketService.broadcastTicketCountsUpdate({
+      operation: 'update',
+      ticket: snapshot,
+      previousTicket: {
+        ...snapshot,
+        tags: previousTags,
+      },
+    });
   }
 }

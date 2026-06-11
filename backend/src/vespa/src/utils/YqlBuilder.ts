@@ -14,6 +14,8 @@ import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
 type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail';
 
+const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
+
 export interface SlackFilters {
   channelId?: string[];
   projectId?: string[];
@@ -40,6 +42,7 @@ export interface TicketFilters {
   // New filters
   boardId?: string[]; // Filter by board ID - comma-separated
   tags?: string[]; // Filter by tags
+  dynamicFieldValues?: string[]; // Filter by dynamic form field tokens (fieldId::value)
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
   createdOn?: string; // Created on specific date (multiple formats)
@@ -86,6 +89,10 @@ export interface MailFilters {
 
 export class YqlBuilder {
   constructor() {}
+
+  private escapeYqlValue(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
 
 buildYql(
   query:string,
@@ -540,8 +547,55 @@ buildYql(
 
     // Tags filter (array)
     if (filters.tags && filters.tags.length > 0) {
-      const tagConditions = filters.tags.map((tag) => `tags contains "${tag.trim()}"`).join(' or ');
+      const tagConditions = filters.tags
+        .map((tag) => `tags contains "${this.escapeYqlValue(tag.trim())}"`)
+        .join(' or ');
       conditions.push(`(${tagConditions})`);
+    }
+
+    // Dynamic field filter (fieldId::value tokens)
+    if (filters.dynamicFieldValues && filters.dynamicFieldValues.length > 0) {
+      const valuesByFieldId = new Map<string, string[]>();
+      filters.dynamicFieldValues.forEach((token) => {
+        const separatorIndex = token.indexOf('::');
+        if (separatorIndex === -1) return;
+        const fieldId = token.slice(0, separatorIndex).trim();
+        const fieldValue = token.slice(separatorIndex + 2).trim();
+        if (!fieldId || !fieldValue) return;
+        valuesByFieldId.set(fieldId, [...(valuesByFieldId.get(fieldId) ?? []), fieldValue]);
+      });
+      const dynamicFieldConditions = Array.from(valuesByFieldId.entries())
+        .map(([fieldId, fieldValues]) => {
+          const uniqueValues = Array.from(new Set(fieldValues));
+          const missingRequested = uniqueValues.includes(VESPA_MISSING_DYNAMIC_FIELD_VALUE);
+          const concreteValues = uniqueValues.filter(
+            (fieldValue) => fieldValue !== VESPA_MISSING_DYNAMIC_FIELD_VALUE,
+          );
+          const valueConditions: string[] = [];
+
+          if (concreteValues.length > 0) {
+            const valueClause = concreteValues
+              .map((fieldValue) => `fieldValue contains "${this.escapeYqlValue(fieldValue)}"`)
+              .join(' or ');
+            valueConditions.push(
+              `formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}" and (${valueClause}))`,
+            );
+          }
+
+          if (missingRequested) {
+            valueConditions.push(
+              `!(formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}"))`,
+            );
+          }
+
+          if (valueConditions.length === 0) return '';
+          if (valueConditions.length === 1) return valueConditions[0];
+          return `(${valueConditions.join(' or ')})`;
+        })
+        .join(' and ');
+      if (dynamicFieldConditions) {
+        conditions.push(`(${dynamicFieldConditions})`);
+      }
     }
 
     // Stage filter

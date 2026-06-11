@@ -43,7 +43,18 @@ export const UserGroupSubmenu = ({
     // Filter by availableGroupIds if provided
     let filtered = allUserGroups;
     if (availableGroupIds && availableGroupIds.length > 0) {
-      filtered = allUserGroups.filter(group => availableGroupIds.includes(group.id));
+      const groupById = new Map(allUserGroups.map(group => [group.id, group] as const));
+      const orderedGroups: UserGroup[] = [];
+      const seen = new Set<string>();
+
+      for (const groupId of availableGroupIds) {
+        if (seen.has(groupId)) continue;
+        seen.add(groupId);
+        const group = groupById.get(groupId);
+        if (group) orderedGroups.push(group);
+      }
+
+      filtered = orderedGroups;
     }
 
     // Filter by search term
