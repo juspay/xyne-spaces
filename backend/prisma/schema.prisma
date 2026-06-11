@@ -1967,6 +1967,7 @@ model Channel {
   channelStats       ChannelStats?
   incomingWebhooks   AppIncomingWebhook[]
   canvasFolders      CanvasFolder[]
+  emails             Email[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -2176,6 +2177,8 @@ model Email {
   externalMessageId String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  channel Channel @relation(fields: [channelId], references: [id]) // emulated (relationMode="prisma"), no DB FK
 
   @@unique([externalMessageId])
   @@index([conversationId])
