@@ -1,5 +1,10 @@
 import { TicketPriority, TicketStatusV2, FormContextMapping } from '@xyne/shared';
 
+export interface BoardOption {
+  id: string;
+  name: string;
+}
+
 export interface TicketFilters {
   priority?: TicketPriority[];
   assignee?: string[]; // user IDs
@@ -61,6 +66,7 @@ export interface TicketFiltersProps {
   availableUsers?: string[] | undefined;
   availableUserGroups?: string[] | undefined;
   availableBoards?: string[] | undefined;
+  availableBoardDetails?: BoardOption[] | undefined;
   showBoardsFilter?: boolean;
   availableTags?: string[] | undefined;
   availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
@@ -68,6 +74,7 @@ export interface TicketFiltersProps {
   formMappings?: readonly FormContextMapping[] | undefined;
   /** Board name from parent (avoids waiting for lazy board list fetch) */
   selectedBoardName?: string | undefined;
+  onBoardDropdownOpenChange?: (open: boolean) => void;
   isTicketsSyncing?: boolean;
   channelId?: string;
   groupBy?: string; // serialized groupBy — included in save view and hasActiveFilters check

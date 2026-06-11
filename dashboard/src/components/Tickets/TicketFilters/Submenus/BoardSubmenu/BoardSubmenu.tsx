@@ -1,13 +1,13 @@
 import { ReactElement, useTransition } from 'react';
 import { Check } from 'lucide-react';
-import type { Board } from '@xyne/shared';
 import { Button } from '../../../../ui/Button/Button';
+import type { BoardOption } from '../../types';
 
 interface BoardSubmenuProps {
   selectedBoards: string[];
   onChange: (boardIds: string[]) => void;
   onClose: () => void;
-  boards?: Board[];
+  boards?: BoardOption[];
 }
 
 export const BoardSubmenu = ({

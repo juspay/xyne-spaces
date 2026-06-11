@@ -70,6 +70,12 @@ export interface EntitySelectorProps {
   /** Callback fired when search value changes (for server-side filtering) */
   onSearchChange?: (searchValue: string) => void;
 
+  /** Callback fired when the options list is scrolled near the end */
+  onScrollEnd?: () => void;
+
+  /** Whether more options can be requested from the server */
+  hasMore?: boolean;
+
   /** Controller */
   isOpen?: boolean;
   onOpenChange?: (isOpen: boolean) => void;

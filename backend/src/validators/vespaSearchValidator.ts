@@ -140,6 +140,18 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'Tags must be a comma-separated string'
   }),
 
+  dynamicFieldValues: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((item: string) => item.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'dynamicFieldValues must be a string or array'
+    }),
+
   before: Joi.string().optional().messages({
     'string.base': 'Before date must be a string'
   }),

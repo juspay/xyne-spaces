@@ -36,8 +36,17 @@ export const UserSubmenu = ({
 
   const availableUsersData = useMemo(() => {
     if (availableUserIds && availableUserIds.length > 0) {
-      const idSet = new Set(availableUserIds.slice(0, 100));
-      return users.filter(v => idSet.has(v.id));
+      const idSet = new Set<string>();
+      const orderedUsers = [];
+
+      for (const userId of availableUserIds.slice(0, 100)) {
+        if (idSet.has(userId)) continue;
+        idSet.add(userId);
+        const user = users.find(v => v.id === userId);
+        if (user) orderedUsers.push(user);
+      }
+
+      return orderedUsers;
     }
     return searchedUsers;
   }, [availableUserIds, users, searchedUsers]);

@@ -26,6 +26,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   isLoading = false,
   width = 'auto',
   onSearchChange,
+  onScrollEnd,
+  hasMore = false,
   disableClientFiltering = false,
   showClearButton = false,
   isStatusSelector,
@@ -140,6 +142,19 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     e.stopPropagation();
     if (onSelect) {
       onSelect?.(null);
+    }
+  };
+
+  const handleOptionsScroll = (e: React.UIEvent<HTMLDivElement>): void => {
+    if (!onScrollEnd || !hasMore) {
+      return;
+    }
+
+    const target = e.currentTarget;
+    const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+
+    if (distanceToBottom <= 24) {
+      onScrollEnd();
     }
   };
 
@@ -363,6 +378,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           {/* ========== OPTIONS LIST ========== */}
           <div
             className='overflow-y-auto max-h-[320px]'
+            onScroll={handleOptionsScroll}
             onWheel={e => e.stopPropagation()}
             onTouchMove={e => e.stopPropagation()}
           >
@@ -454,9 +470,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             ) : (
               // Empty state (no results found)
               <div className='p-2 text-center text-sm text-muted-foreground'>
-                {searchValue.trim()
-                  ? `No results found for "${searchValue}"`
-                  : 'No options available'}
+                {searchValue.trim() ? `No results found for "${searchValue}"` : null}
               </div>
             )}
           </div>

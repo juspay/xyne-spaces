@@ -40,6 +40,12 @@ interface ChannelSubscriptionData {
   sessionId: string;
 }
 
+type TicketCountsRoomType = 'project' | 'board' | 'user' | 'group';
+
+interface TicketCountsRoomSubscriptionData {
+  room: string;
+}
+
 class WebSocketService {
   private io: SocketIOServer | null = null;
   private channelRepository: ChannelRepository;
@@ -324,6 +330,16 @@ class WebSocketService {
     // Handle workflow unsubscription
     socket.on('unsubscribe_from_workflow', (data: { executionId: string }) => {
       this.handleWorkflowUnsubscription(socket, data.executionId);
+    });
+
+    // Handle ticket count room subscription
+    socket.on('subscribe_to_ticket_counts', (data: TicketCountsRoomSubscriptionData) => {
+      this.handleTicketCountsSubscription(socket, data.room);
+    });
+
+    // Handle ticket count room unsubscription
+    socket.on('unsubscribe_from_ticket_counts', (data: TicketCountsRoomSubscriptionData) => {
+      this.handleTicketCountsUnsubscription(socket, data.room);
     });
 
     // Handle user status update (ONLINE/AWAY/OFFLINE)
@@ -1114,6 +1130,72 @@ class WebSocketService {
     }
   }
 
+  broadcastTicketCountsUpdate(payload: {
+    operation: 'insert' | 'update' ;
+    ticket: {
+      id: string;
+      workspaceId: string;
+      boardId: string | null;
+      projectId: string | null;
+      stageName: string | null;
+      statusV2: string | null;
+      priority: string | null;
+      assignedTo: string | null;
+      createdBy: string | null;
+      userGroupId: string | null;
+      ticketType: string | null;
+      eta: number | null;
+      createdAt: number;
+      tags?: string[];
+      prReviewers?: string[];
+      qaAssigned?: string[];
+      formFieldValues?: Record<string, unknown>;
+    };
+    previousTicket?: {
+      id: string;
+      workspaceId: string;
+      boardId: string | null;
+      projectId: string | null;
+      stageName: string | null;
+      statusV2: string | null;
+      priority: string | null;
+      assignedTo: string | null;
+      createdBy: string | null;
+      userGroupId: string | null;
+      ticketType: string | null;
+      eta: number | null;
+      createdAt: number;
+      tags?: string[];
+      prReviewers?: string[];
+      qaAssigned?: string[];
+      formFieldValues?: Record<string, unknown>;
+    } | null;
+  }): void {
+    if (!this.io) {
+      logger.warn('WebSocket server not initialized');
+      return;
+    }
+
+    const rooms = new Set<string>();
+    for (const room of this.getTicketCountsRooms(payload.ticket)) {
+      rooms.add(room);
+    }
+    if (payload.previousTicket) {
+      for (const room of this.getTicketCountsRooms(payload.previousTicket)) {
+        rooms.add(room);
+      }
+    }
+
+    const eventPayload = {
+      ...payload,
+      timestamp: new Date().toISOString(),
+    };
+
+    for (const room of rooms) {
+      this.io.to(room).emit('ticket_counts_room_updated', eventPayload);
+    }
+  }
+
   async broadcastToUser(userId: string, event: string, data: any): Promise<void> {
     if (!this.io) {
       logger.warn('WebSocket server not initialized');
@@ -1241,6 +1323,53 @@ class WebSocketService {
     } else {
       logger.info(`📊 [WORKFLOW-UNSUB] Socket ${socket.id} left workflow room: ${roomName} (no subscribers tracked)`);
     }
+  }
+
+  private getTicketCountsRoomName(type: TicketCountsRoomType, id: string): string {
+    return `ticket-counts:${type}:${id}`;
+  }
+
+  private getTicketCountsRooms(ticket: {
+    boardId: string | null;
+    projectId: string | null;
+    assignedTo: string | null;
+    createdBy: string | null;
+    userGroupId: string | null;
+  }): string[] {
+    const rooms = new Set<string>();
+
+    if (ticket.projectId) {
+      rooms.add(this.getTicketCountsRoomName('project', ticket.projectId));
+    }
+
+    if (ticket.boardId) {
+      rooms.add(this.getTicketCountsRoomName('board', ticket.boardId));
+    }
+
+    const userIds = [ticket.assignedTo, ticket.createdBy].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    );
+    for (const userId of userIds) {
+      rooms.add(this.getTicketCountsRoomName('user', userId));
+    }
+
+    if (ticket.userGroupId) {
+      rooms.add(this.getTicketCountsRoomName('group', ticket.userGroupId));
+    }
+
+    return [...rooms];
+  }
+
+  private handleTicketCountsSubscription(socket: AuthenticatedSocket, room: string): void {
+    if (!room) return;
+
+    socket.join(room);
+  }
+
+  private handleTicketCountsUnsubscription(socket: AuthenticatedSocket, room: string): void {
+    if (!room) return;
+
+    socket.leave(room);
   }
 
   // Handle workflow events from Redis and broadcast to Socket.IO room

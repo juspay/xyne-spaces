@@ -2,9 +2,11 @@ import { ActivityClassification } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
+import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
+import { websocketService } from '@/services/websocketService';
 import {
   emitTicketUpdated,
   TicketUpdatedFieldSchema,
@@ -87,6 +89,36 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
       const fullTicket = await db.ticket.findUnique({ where: { id: ticketId } });
       if (fullTicket) {
         await emitTicketUpdated({ ticket: fullTicket, changes, performedById: actorId });
+        const snapshot = (await buildKanbanCountsSnapshot(ticketId)) ?? {
+          id: fullTicket.id,
+          workspaceId: fullTicket.workspaceId,
+          boardId: fullTicket.boardId,
+          projectId: fullTicket.projectId,
+          stageName: fullTicket.stageName,
+          statusV2: fullTicket.statusV2,
+          priority: fullTicket.priority,
+          assignedTo: fullTicket.assignedTo,
+          createdBy: fullTicket.createdBy,
+          userGroupId: fullTicket.userGroupId,
+          ticketType: fullTicket.ticketType,
+          eta: fullTicket.eta?.getTime() ?? null,
+          createdAt: fullTicket.createdAt.getTime(),
+          tags: [],
+          prReviewers: [],
+          qaAssigned: [],
+          formFieldValues: {},
+        };
+        websocketService.broadcastTicketCountsUpdate({
+          operation: 'update',
+          ticket: snapshot,
+          previousTicket: {
+            ...snapshot,
+            stageName: prev.stageName,
+            statusV2: prev.statusV2,
+            priority: prev.priority,
+            assignedTo: prev.assignedTo,
+          },
+        });
       }
     }
 

@@ -78,6 +78,24 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
   return { grouped: true, groups , cntRemoved:removedCount};
 }
 
+const toCommaSeparatedValues = (value: unknown): string[] => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  const values = Array.isArray(value) ? value : [value];
+  return values.flatMap(item => {
+    if (typeof item !== 'string') {
+      return [];
+    }
+
+    return item
+      .split(',')
+      .map(part => part.trim())
+      .filter(Boolean);
+  });
+};
+
 
 
 // Export search handler function
@@ -87,7 +105,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       q,
       apps = 'slack,ticket,user,file,mail',
       offset = 0,
-      limit = 20,
+      limit,
       rankProfile,
       // Frontend-compatible filters
       type,        // 'messages' | 'attachments' | 'channels' | 'tickets' | 'files'
@@ -104,6 +122,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       searchId,
       board,       // Board name/ID
       tags,        // Comma-separated tags
+      dynamicFieldValues, // Dynamic field filters
       before,      // Created before date (multiple formats)
       after,       // Created after date (multiple formats)
       on,          // Created on specific date (multiple formats)
@@ -136,10 +155,16 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       res.status(400).json({ success: false, error: 'Query parameter "q" is required' });
       return;
     }
+
+    const isFilterOnlyDynamicFieldSearch =
+      filterOnly === 'true' && dynamicFieldValues !== undefined;
+    const effectiveLimit =
+      limit !== undefined ? Number(limit) : isFilterOnlyDynamicFieldSearch ? 200 : 20;
+
     // Build options object
     const options: any = {
       offset: Number(offset),
-      limit: Number(limit),
+      limit: effectiveLimit,
       slack: {},
       ticket: {},
       file: {},
@@ -248,31 +273,35 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     
     // Add unified filters (apply to both slack and ticket)
     if (projectId) {
-      const projectIds = (projectId as string).split(',');
+      const projectIds = toCommaSeparatedValues(projectId);
       options.slack.projectId = projectIds;
       options.ticket.projectId = projectIds;
     }
 
     // Add ticket-specific filters
     if (status) {
-      options.ticket.status = (status as string).split(',');
+      options.ticket.status = toCommaSeparatedValues(status);
     }
 
     if (ticketId) {
-      options.ticket.ticketId = (ticketId as string).split(',');
+      options.ticket.ticketId = toCommaSeparatedValues(ticketId);
     }
 
     if (priority) {
-      options.ticket.priority = (priority as string).split(',');
+      options.ticket.priority = toCommaSeparatedValues(priority);
     }
 
     // New ticket filters
     if (board) {
-      options.ticket.boardId = (board as string).split(',');
+      options.ticket.boardId = toCommaSeparatedValues(board);
     }
 
     if (tags) {
-      options.ticket.tags = (tags as string).split(',');
+      options.ticket.tags = toCommaSeparatedValues(tags);
+    }
+
+    if (dynamicFieldValues) {
+      options.ticket.dynamicFieldValues = toCommaSeparatedValues(dynamicFieldValues);
     }
 
     // Date filters (apply to both slack and ticket)
@@ -297,19 +326,19 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
 
     if (stage) {
-      options.ticket.stage = (stage as string).split(',');
+      options.ticket.stage = toCommaSeparatedValues(stage);
     }
 
     if (assignee) {
-      options.ticket.assignedTo = (assignee as string).split(',');
+      options.ticket.assignedTo = toCommaSeparatedValues(assignee);
     }
 
     if (subApp) {
-      options.file.subApp = (subApp as string).split(',');
+      options.file.subApp = toCommaSeparatedValues(subApp);
     }
 
     if (callType) {
-      options.file.callType = (callType as string).split(',');
+      options.file.callType = toCommaSeparatedValues(callType);
     }
 
     if (presentationSummary) {
@@ -374,7 +403,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           groups: groupedResults,
           totalCount: (parsedResults.cntRemoved && groupedResults.length > 0) ? (Number(offset) + groupedResults[0].count) : results.root.fields?.totalCount,
           offset: Number(offset),
-          limit: Number(limit)
+          limit: effectiveLimit
         }
       });
     } else {
@@ -391,7 +420,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           results: transformedResults,
           totalCount: results.root.fields?.totalCount || 0,
           offset: Number(offset),
-          limit: Number(limit)
+          limit: effectiveLimit
         }
       });
     }

@@ -66,6 +66,13 @@ export interface SearchContext {
   assigneeName?: string;
   createdBy?: string;
   creatorName?: string;
+  priority?: string;
+  stageName?: string;
+  projectId?: string;
+  createdAtTimestamp?: number;
+  ticketType?: string;
+  userGroupId?: string;
+  tags?: string[];
   mailId?: string; // externalMessageId for mail results (used for scroll-to)
   recipientCount?: number; // total to+cc+bcc (excluding sender) for mail results
   attachmentId?: string;
@@ -75,7 +82,6 @@ export interface SearchContext {
   internalUrl?: string;
   originalUrl?: string;
   // Knowledge base / collection specific fields
-  projectId?: string;
   collectionId?: string;
   docId?: string;
   folderId?: string;
@@ -161,6 +167,7 @@ export interface VespaSearchFilters {
   range?: string; // Time keyword (today, yesterday, this week, last 7 days, etc.)
   stage?: string; // Ticket stage
   assignee?: string; // Assigned user ID
+  dynamicFieldValues?: string | string[]; // Comma-separated or array of fieldId::value tokens
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'
   callType?: string; // Comma-separated call types: 'HEADLESS'
   presentationSummary?: string; // Vespa presentation.summary profile (e.g. 'lean')

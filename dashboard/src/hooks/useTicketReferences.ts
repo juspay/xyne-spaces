@@ -66,7 +66,7 @@ export const formatIncomingReferenceLabel = (relationType: TicketReferenceRelati
 
 export const useTicketReferences = ({
   ticketId,
-  projectTickets,
+  projectTickets = [],
   referencesOut,
 }: UseTicketReferencesParams): UseTicketReferencesResult => {
   const zero = useZero();
@@ -74,10 +74,6 @@ export const useTicketReferences = ({
   const [isReferenceSaving, setIsReferenceSaving] = useState(false);
 
   const referenceTicketOptions = useMemo<SelectorOption[]>(() => {
-    if (!projectTickets) {
-      return [];
-    }
-
     return projectTickets
       .filter(candidate => candidate.id !== ticketId)
       .map(candidate => {

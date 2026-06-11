@@ -4,14 +4,21 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { Ticket, TicketTag } from '@xyne/shared';
+import type { Ticket, TicketTagMapping } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
+
+type TicketWithTags = Ticket & { tagMappings?: TicketTagMapping[] };
 import type {
   DroppableStageProps,
   SortableTicketCardProps,
   Stage,
 } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import type { BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
+import {
+  type KanbanTicketsPageBaseArgs,
+  useKanbanTicketsPage,
+} from '../../../routes/KanbanBoardScreen/useKanbanTicketsPage';
+import { sortByKanbanPosition } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { TicketCard } from '../TicketCard/TicketCard';
 import Button from '../../ui/Button';
 import { CollapseIcon } from '../../../assets/icons/CollapseIcon';
@@ -20,7 +27,7 @@ import { cn } from '../../../utils/classNames';
 import { StatusOptions } from '../TicketTable/TicketTableHelper';
 
 const VIRTUAL_ROW_HEIGHT = 130;
-const VIRTUAL_OVERSCAN = 15;
+const VIRTUAL_OVERSCAN = 25;
 
 const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   ticket,
@@ -32,6 +39,7 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
+    data: { ticket },
   });
 
   const style = {
@@ -65,28 +73,49 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
 
 const DroppableStage: React.FC<DroppableStageProps> = ({ id, children }) => {
   const { setNodeRef } = useDroppable({ id });
+
   return <div ref={setNodeRef}>{children}</div>;
 };
 
 const VirtualizedStageList: React.FC<{
   stageId: string;
+  columnKey: string;
   stageTickets: Ticket[];
-  tagsByTicketId: Map<string, TicketTag[]>;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
+  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stageId,
+  columnKey,
   stageTickets,
-  tagsByTicketId,
+  hasMore = false,
+  isLoadingMore = false,
+  onLoadMore,
+  onTicketsChange,
   availableTags,
   visibleColumns,
   onTicketClick,
   slaPolicies,
 }) => {
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const lastReportedTicketIdsRef = React.useRef<string>('');
   const scrollKey = `kanban-scroll-${stageId}`;
+  const ticketIdsSignature = React.useMemo(
+    () => stageTickets.map(ticket => ticket.id).join(','),
+    [stageTickets],
+  );
+
+  React.useEffect(() => {
+    if (!onTicketsChange) return;
+    if (lastReportedTicketIdsRef.current === ticketIdsSignature) return;
+    lastReportedTicketIdsRef.current = ticketIdsSignature;
+    onTicketsChange(columnKey, stageTickets);
+  }, [columnKey, onTicketsChange, stageTickets, ticketIdsSignature]);
 
   React.useEffect(() => {
     const el = scrollRef.current;
@@ -97,10 +126,16 @@ const VirtualizedStageList: React.FC<{
 
     const onScroll = (): void => {
       sessionStorage.setItem(scrollKey, String(el.scrollTop));
+      if (!hasMore || isLoadingMore || !onLoadMore) return;
+
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distanceFromBottom < VIRTUAL_ROW_HEIGHT * 3) {
+        onLoadMore();
+      }
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
-  }, [scrollKey]);
+  }, [hasMore, isLoadingMore, onLoadMore, scrollKey]);
 
   const virtualizer = useVirtualizer({
     count: stageTickets.length,
@@ -135,7 +170,11 @@ const VirtualizedStageList: React.FC<{
             >
               <SortableTicketCard
                 ticket={ticket}
-                tags={tagsByTicketId.get(ticket.id) || []}
+                tags={((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
+                  id: m.tagId,
+                  name: m.tagName,
+                  ticketId: m.ticketId,
+                }))}
                 availableTags={availableTags}
                 onClick={e => onTicketClick(e, ticket)}
                 visibleColumns={visibleColumns}
@@ -145,19 +184,128 @@ const VirtualizedStageList: React.FC<{
           );
         })}
       </div>
+      {isLoadingMore && (
+        <div className='py-3 text-center text-xs text-muted-foreground'>Loading more...</div>
+      )}
     </div>
   );
+};
+
+const PaginatedStageList: React.FC<{
+  stage: Stage;
+  columnKey: string;
+  paginationArgs: KanbanTicketsPageBaseArgs;
+  columnType: 'stage' | 'status';
+  allKnownTickets: Ticket[];
+  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
+  availableTags: string[];
+  visibleColumns?: Set<string> | undefined;
+  onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
+  slaPolicies?: BoardSlaPolicy[];
+}> = ({
+  stage,
+  columnKey,
+  paginationArgs,
+  columnType,
+  allKnownTickets,
+  onTicketsChange,
+  availableTags,
+  visibleColumns,
+  onTicketClick,
+  slaPolicies,
+}) => {
+  const columnValue = columnType === 'status' ? stage.id : stage.name;
+  const columnStatus = stage.defaultTicketStatusV2;
+  const { tickets, hasMore, isLoadingMore, loadMore } = useKanbanTicketsPage({
+    ...paginationArgs,
+    columnType,
+    stageName: columnValue,
+  });
+  const renderedTickets = React.useMemo(() => {
+    if (allKnownTickets.length === 0) return tickets;
+
+    const knownTicketsById = new Map(allKnownTickets.map(ticket => [ticket.id, ticket]));
+    const renderedTicketsById = new Map<string, Ticket>();
+
+    for (const ticket of tickets) {
+      const knownTicket = knownTicketsById.get(ticket.id);
+      if (knownTicket) {
+        if (!ticketBelongsToColumn(knownTicket, columnType, columnValue, columnStatus)) continue;
+        renderedTicketsById.set(ticket.id, knownTicket);
+        continue;
+      }
+
+      renderedTicketsById.set(ticket.id, ticket);
+    }
+
+    return sortByKanbanPosition([...renderedTicketsById.values()]);
+  }, [allKnownTickets, columnStatus, columnType, columnValue, tickets]);
+
+  const fetchedTicketIdsSignature = React.useMemo(
+    () => tickets.map(ticket => ticket.id).join(','),
+    [tickets],
+  );
+  const lastReportedFetchedTicketIdsRef = React.useRef<string>('');
+
+  React.useEffect(() => {
+    if (!onTicketsChange) return;
+    if (lastReportedFetchedTicketIdsRef.current === fetchedTicketIdsSignature) return;
+    lastReportedFetchedTicketIdsRef.current = fetchedTicketIdsSignature;
+    onTicketsChange(columnKey, tickets);
+  }, [columnKey, fetchedTicketIdsSignature, onTicketsChange, tickets]);
+
+  return (
+    <SortableContext
+      items={renderedTickets.map(ticket => ticket.id)}
+      strategy={verticalListSortingStrategy}
+    >
+      <VirtualizedStageList
+        stageId={stage.id}
+        columnKey={columnKey}
+        stageTickets={renderedTickets}
+        hasMore={hasMore}
+        isLoadingMore={isLoadingMore}
+        onLoadMore={loadMore}
+        availableTags={availableTags}
+        visibleColumns={visibleColumns}
+        onTicketClick={onTicketClick}
+        {...(slaPolicies !== undefined && { slaPolicies })}
+      />
+    </SortableContext>
+  );
+};
+
+const isTerminalStageStatus = (status?: TicketStatusV2): boolean =>
+  status === TicketStatusV2.COMPLETED || status === TicketStatusV2.CANCELLED;
+
+const ticketBelongsToColumn = (
+  ticket: Ticket,
+  columnType: 'stage' | 'status',
+  columnValue: string,
+  columnStatus?: TicketStatusV2,
+): boolean => {
+  if (columnType === 'status') {
+    return ticket.statusV2 === columnStatus;
+  }
+
+  return ticket.stageName === columnValue;
 };
 
 interface KanbanColumnsProps {
   stages: Stage[];
   ticketsByStage: Record<string, Ticket[]>;
-  tagsByTicketId: Map<string, TicketTag[]>;
+  stageCounts?: Record<string, number>;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   keyPrefix?: string;
   availableTags?: string[];
   containerClassName?: string;
   visibleColumns?: Set<string> | undefined;
+  paginatedColumnConfig?: {
+    columnType: 'stage' | 'status';
+    baseArgs: KanbanTicketsPageBaseArgs;
+  };
+  allKnownTickets?: Ticket[];
+  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   /**
    * SLA policies pre-fetched by the parent for the active board.
    * Passed through to each TicketCard so they skip their own per-card
@@ -182,17 +330,53 @@ export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) 
 export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   stages,
   ticketsByStage,
-  tagsByTicketId,
+  stageCounts,
   onTicketClick,
   keyPrefix = '',
   containerClassName,
   availableTags = [],
   visibleColumns,
   slaPolicies,
+  paginatedColumnConfig,
+  allKnownTickets,
+  onTicketsChange,
 }) => {
-  const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>([]);
+  const knownTicketsForOptimisticMerge = React.useMemo(
+    () => allKnownTickets ?? Object.values(ticketsByStage).flat(),
+    [allKnownTickets, ticketsByStage],
+  );
+  const stageCollapseSignature = React.useMemo(
+    () => stages.map(stage => `${stage.id}:${stage.defaultTicketStatusV2 ?? ''}`).join('|'),
+    [stages],
+  );
+  const userToggledCollapsedStageIdsRef = React.useRef<Set<string>>(new Set());
+  const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>(() =>
+    stages
+      .filter(stage => isTerminalStageStatus(stage.defaultTicketStatusV2))
+      .map(stage => stage.id),
+  );
+
+  React.useEffect(() => {
+    setCollapsedStageIds(prev => {
+      const next = new Set(prev);
+
+      for (const stage of stages) {
+        if (
+          !isTerminalStageStatus(stage.defaultTicketStatusV2) ||
+          userToggledCollapsedStageIdsRef.current.has(stage.id)
+        ) {
+          continue;
+        }
+
+        next.add(stage.id);
+      }
+
+      return [...next];
+    });
+  }, [stageCollapseSignature, stages]);
 
   const toggleCollapse = (stageId: string) => {
+    userToggledCollapsedStageIdsRef.current.add(stageId);
     setCollapsedStageIds(prev =>
       prev.includes(stageId) ? prev.filter(id => id !== stageId) : [...prev, stageId],
     );
@@ -208,7 +392,11 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
       {stages.map(stage => {
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
+        const countByStageId = stageCounts?.[stage.id];
+        const countByStageName = stageCounts?.[stage.name];
+        const stageCount = countByStageId ?? countByStageName ?? stageTickets.length;
         const isCollapsed = collapsedStageIds.includes(stage.id);
+        const columnKey = `${keyPrefix}${stage.id}`;
 
         return (
           <DroppableStage key={`${keyPrefix}${stage.id}`} id={stage.id}>
@@ -233,7 +421,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                         {stage.name}
                       </h3>
                       <span className='text-xs px-2 py-0.5 rounded-full text-muted-foreground bg-muted-foreground/10'>
-                        {stageTickets.length}
+                        {stageCount}
                       </span>
                     </div>
 
@@ -289,7 +477,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                           '[transform-origin:center] [writing-mode:vertical-rl] [text-orientation:mixed]',
                         )}
                       >
-                        {stageTickets.length}
+                        {stageCount}
                       </span>
                     </div>
 
@@ -315,17 +503,33 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
 
               {!isCollapsed && (
                 <div className='flex-1 min-h-0'>
-                  <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
-                    <VirtualizedStageList
-                      stageId={stage.id}
-                      stageTickets={stageTickets}
-                      tagsByTicketId={tagsByTicketId}
+                  {paginatedColumnConfig ? (
+                    <PaginatedStageList
+                      stage={stage}
+                      columnKey={columnKey}
+                      paginationArgs={paginatedColumnConfig.baseArgs}
+                      columnType={paginatedColumnConfig.columnType}
+                      allKnownTickets={knownTicketsForOptimisticMerge}
+                      {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                       availableTags={availableTags}
                       visibleColumns={visibleColumns}
                       onTicketClick={onTicketClick}
                       {...(slaPolicies !== undefined && { slaPolicies })}
                     />
-                  </SortableContext>
+                  ) : (
+                    <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
+                      <VirtualizedStageList
+                        stageId={stage.id}
+                        columnKey={columnKey}
+                        stageTickets={stageTickets}
+                        {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
+                        availableTags={availableTags}
+                        visibleColumns={visibleColumns}
+                        onTicketClick={onTicketClick}
+                        {...(slaPolicies !== undefined && { slaPolicies })}
+                      />
+                    </SortableContext>
+                  )}
                 </div>
               )}
             </div>

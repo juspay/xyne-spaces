@@ -122,9 +122,12 @@ export const useDragAndDrop = ({
 
   const handleDragStart = useCallback(
     (event: DragStartEvent): void => {
-      const ticket = localTickets?.find((t): boolean => t.id === event.active.id);
-      if (ticket) {
-        setActiveTicket(ticket);
+      const draggedTicket =
+        (event.active.data.current as { ticket?: Ticket } | undefined)?.ticket ??
+        localTickets?.find((t): boolean => t.id === event.active.id) ??
+        null;
+      if (draggedTicket) {
+        setActiveTicket(draggedTicket);
       }
     },
     [localTickets],
@@ -137,8 +140,12 @@ export const useDragAndDrop = ({
 
       if (!over) return;
 
-      const activeTicket = localTickets?.find((t): boolean => t.id === active.id);
-      const overTicket = localTickets?.find((t): boolean => t.id === over.id);
+      const activeTicket =
+        (active.data.current as { ticket?: Ticket } | undefined)?.ticket ??
+        localTickets?.find((t): boolean => t.id === active.id);
+      const overTicket =
+        (over.data.current as { ticket?: Ticket } | undefined)?.ticket ??
+        localTickets?.find((t): boolean => t.id === over.id);
 
       if (!activeTicket) return;
 

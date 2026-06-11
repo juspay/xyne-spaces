@@ -7,6 +7,10 @@ import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { PRStatusEvent } from '@prisma/client';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketSchema } from '@/vespa/src/types';
+import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
+import { websocketService } from '@/services/websocketService';
 
 
 const prisma = DatabaseClient.getInstance();
@@ -171,12 +175,33 @@ export class TicketService {
     if (params.status) { data['statusV2'] = params.status; updates.push('status'); }
     if (params.eta) { data['eta'] = new Date(params.eta); updates.push('eta'); }
 
+    const previousCountsSnapshot = await buildKanbanCountsSnapshot(ticketId);
     const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data,
     });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+    await vespaQueue.addJob({
+      schema: ticketSchema,
+      jobType: 'feed',
+      docId: updatedTicket.id,
+      userId,
+      workspaceId: updatedTicket.workspaceId,
+    }).catch(error => {
+      logger.error('[TicketService] Failed to queue Vespa feed after ticket update:', {
+        ticketId: updatedTicket.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    const currentCountsSnapshot = await buildKanbanCountsSnapshot(updatedTicket.id);
+    if (currentCountsSnapshot) {
+      websocketService.broadcastTicketCountsUpdate({
+        operation: 'update',
+        ticket: currentCountsSnapshot,
+        previousTicket: previousCountsSnapshot,
+      });
+    }
 
     logger.info(`[TicketService] Updated ticket ${ticketId}: ${updates.join(', ')}`);
     return updates;

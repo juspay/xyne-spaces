@@ -33,11 +33,7 @@ import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
 import { Button } from '../../components/ui/Button/Button';
 import Dialog from '../../components/ui/Dialog';
-import {
-  getStageColor,
-  groupTicketsByStage,
-  createTagsByTicketIdMap,
-} from '../KanbanBoardScreen/KanbanBoardScreen.utils';
+import { getStageColor, groupTicketsByStage } from '../KanbanBoardScreen/KanbanBoardScreen.utils';
 import type { Stage } from '../KanbanBoardScreen/KanbanBoardScreen.types';
 
 const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: number }) => ({
@@ -223,8 +219,6 @@ export const SupportKanbanBoard = ({
     [deferredLocalTickets, stageColumns],
   );
 
-  const tagsByTicketId = useMemo(() => createTagsByTicketIdMap([]), []);
-
   // Stage form modal state — shown when moving a ticket to a stage that has a form.
   const [stageFormModal, setStageFormModal] = useState<{
     ticket: Ticket;
@@ -321,7 +315,6 @@ export const SupportKanbanBoard = ({
         <KanbanColumns
           stages={stageColumns}
           ticketsByStage={ticketsByStage}
-          tagsByTicketId={tagsByTicketId}
           onTicketClick={onTicketClick}
           containerClassName='h-full'
           slaPolicies={slaPolicies}

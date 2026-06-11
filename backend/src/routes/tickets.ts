@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { TicketController } from '../controllers/ticketController';
 import { ReleaseNotesController } from '../controllers/releaseNotesController';
 import { AnalyticsController } from '../controllers/analyticsController';
+import { KanbanTicketController } from '../controllers/kanbanTicketController';
 import { uploadMultiple } from '../middleware/upload';
 import { validate } from '../middleware/validation';
 import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
@@ -11,8 +12,13 @@ const router = Router();
 const ticketController = new TicketController();
 const releaseNotesController = new ReleaseNotesController();
 const analyticsController = new AnalyticsController();
+const kanbanTicketController = new KanbanTicketController();
 
 // Note: Authentication and ACL middleware are applied at the app level
+
+// Kanban board counts grouped by the active view, filters, and group-by mode
+router.post('/kanban/counts', kanbanTicketController.getCounts);
+router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
 
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);

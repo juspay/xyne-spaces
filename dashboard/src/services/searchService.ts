@@ -433,6 +433,12 @@ export class SearchService {
       params['assignee'] = filters.assignee;
     }
 
+    if (filters.dynamicFieldValues) {
+      params['dynamicFieldValues'] = Array.isArray(filters.dynamicFieldValues)
+        ? filters.dynamicFieldValues.join(',')
+        : filters.dynamicFieldValues;
+    }
+
     if (filters.subApp) {
       params['subApp'] = filters.subApp;
     }

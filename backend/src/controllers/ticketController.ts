@@ -61,6 +61,11 @@ import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 
 const prisma = DatabaseClient.getInstance();
 
+type MyTicketBoardOption = {
+  id: string;
+  name: string;
+};
+
 export class TicketController {
   private ticketRepository: TicketRepository;
   private conversationRepository: ConversationRepository;
@@ -279,6 +284,74 @@ export class TicketController {
 
     return ticket;
   }
+
+  getMyTicketBoardIds = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const boardRows = await prisma.ticket.findMany({
+        where: {
+          workspaceId,
+          isArchived: false,
+          AND: [
+            {
+              OR: [
+                { assignedTo: { in: [`user:${userId}`, userId] } },
+                { createdBy: { in: [`user:${userId}`, userId] } },
+              ],
+            },
+            {
+              OR: [
+                { ticketType: null },
+                { ticketType: { not: BaseTicketType.Support } },
+              ],
+            },
+          ],
+        },
+        select: {
+          boardId: true,
+          createdAt: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        distinct: ['boardId'],
+      });
+      const boardIds = boardRows
+      .map(row => row.boardId)
+      .filter((boardId): boardId is string => Boolean(boardId));
+
+    const boards = await prisma.board.findMany({
+      where: {
+        id: { in: boardIds },
+        workspaceId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    const boardNameById = new Map(boards.map(board => [board.id, board.name]));
+    const boardDetails: MyTicketBoardOption[] = boardIds.map(boardId => ({
+      id: boardId,
+      name: boardNameById.get(boardId) ?? boardId,
+    }));
+
+      res.json({
+        boardIds,
+        boards: boardDetails,
+      });
+    } catch (error) {
+      logger.error('[TicketController] Failed to fetch my ticket board ids', error);
+      res.status(500).json({ error: 'Failed to fetch board ids' });
+    }
+  };
 
   createTicket = async (req: Request, res: Response): Promise<void> => {
     try {
