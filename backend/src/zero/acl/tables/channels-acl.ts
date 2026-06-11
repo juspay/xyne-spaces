@@ -51,6 +51,10 @@ export class ChannelsACL extends BaseACL<'channels'> {
       throw new MutationACLError('Channel update failed: only ADMINs can archive the channel', 'channels');
     }
 
+    if (args.showTicketsTabTicketsInChat !== undefined && channel.createdBy !== this.ctx.userID && (!currentUserParticipantData || currentUserParticipantData.role !== ChannelRole.ADMIN)) {
+      throw new MutationACLError('Channel update failed: only ADMINs or the owner can change Tickets-tab visibility', 'channels');
+    }
+
     if (!currentUserParticipantData) {
        throw new MutationACLError('Channel update failed: only channel participants can modify channel settings', 'channels');
     }

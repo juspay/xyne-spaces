@@ -1393,6 +1393,7 @@ export const channelTable = table('channels')
     isMigrated: boolean().optional(),
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
     isArchived: boolean(),
+    showTicketsTabTicketsInChat: boolean().optional(),
   })
   .primaryKey('id');
 
@@ -1481,6 +1482,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(), // Markdown format ticket card data
     initial_message_md: string().optional(), // Markdown format initial message data
     parent_message_md: string().optional(), // Markdown format parent message data
+    doNotPostToChannel: boolean().optional(),
     createdAt: number(),
   })
   .primaryKey("conversationId");

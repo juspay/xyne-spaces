@@ -336,6 +336,9 @@ export class TicketController {
         parentTicketId,
         ticketType
       }: CreateTicketRequest & { parentTicketId?: string } = req.body;
+
+      const fromTicketsTab = req.body.fromTicketsTab === true || req.body.fromTicketsTab === 'true';
+
       // Validate excludedChatAttachmentIds if provided
       if (excludedChatAttachmentIds && !Array.isArray(excludedChatAttachmentIds)) {
         res.status(400).json({ error: 'Invalid format for excludedChatAttachmentIds. Must be an array of strings.' });
@@ -642,10 +645,19 @@ export class TicketController {
           // If there were any excluded attachments, they remain as CHAT attachments
           // (they won't be deleted since the conversation still exists)
         } else {
+          let doNotPostToChannel = false;
+          if (fromTicketsTab) {
+            const channelSetting = await tx.channel.findUnique({
+              where: { id: channelId! },
+              select: { showTicketsTabTicketsInChat: true },
+            });
+            doNotPostToChannel = channelSetting?.showTicketsTabTicketsInChat === false;
+          }
           const conversation = await this.conversationRepository.create({
             channelId: channelId!,
             createdBy: userId,
             initialMessageId,
+            doNotPostToChannel,
           });
 
           conversationId = conversation.conversationId;

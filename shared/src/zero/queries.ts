@@ -1847,6 +1847,12 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit, start, direction } }) => {
       let query = zql.conversations
         .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
         .related('initialMessage', initialMessageQuery =>
           initialMessageQuery
             .where(helpers => {
@@ -1907,6 +1913,12 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit, start, direction } }) => {
       let query = zql.conversations
         .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
         .related('initialMessage', initialMessageQuery =>
           initialMessageQuery
             .where(helpers => {
@@ -1951,6 +1963,12 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit, start, direction } }) => {
       let query = zql.conversations
         .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
         .related('initialMessageAttachments')
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
@@ -1979,6 +1997,12 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
         .related('initialMessage', initialMessageQuery =>
           initialMessageQuery
             .where(helpers => {
@@ -2013,6 +2037,12 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
         .related('initialMessage', initialMessageQuery =>
           initialMessageQuery
             .where(helpers => {
@@ -2042,6 +2072,12 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
         .related('initialMessageAttachments')
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
@@ -2060,6 +2096,12 @@ export const queries = defineQueries({
     ({ args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
         .orderBy('createdAt', 'desc')
         .orderBy('conversationId', 'desc')
         .limit(1)
