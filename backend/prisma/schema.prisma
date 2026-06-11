@@ -1951,6 +1951,7 @@ model Channel {
   isMigrated      Boolean?                @default(false)
   addUserPolicy   ChannelAddUserPolicy?  @default(EVERYONE)
   isArchived      Boolean                @default(false)
+  showTicketsTabTicketsInChat Boolean?   @default(true)
 
   // Relations
   conversations      Conversation[]
@@ -2099,6 +2100,7 @@ model Conversation {
   ticket_md         String?
   initial_message_md String?
   parent_message_md  String?
+  doNotPostToChannel Boolean? @default(false)
   createdAt         DateTime @default(now())
 
   // Relations
@@ -2114,6 +2116,7 @@ model Conversation {
   @@index([callId])
   @@index([conversationId, callId])
   @@index([channelId, createdAt(sort: Desc), conversationId(sort: Asc)])
+  @@index([channelId, doNotPostToChannel, createdAt(sort: Desc), conversationId(sort: Asc)])
   @@index([createdBy])
   @@index([initialMessageId])
   @@map("conversations")

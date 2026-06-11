@@ -83,7 +83,8 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.scopeType === b?.scopeType &&
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
-      a?.createdAt === b?.createdAt,
+      a?.createdAt === b?.createdAt &&
+      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
   );
   const visibleChannel = useSelector(
     stateMachineActor,
@@ -94,7 +95,8 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.scopeType === b?.scopeType &&
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
-      a?.createdAt === b?.createdAt,
+      a?.createdAt === b?.createdAt &&
+      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
   );
   return channel || visibleChannel;
 };

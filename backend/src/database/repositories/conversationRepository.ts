@@ -9,6 +9,7 @@ export interface CreateConversationInput {
   initialMessageId: string;
   parentMessageId?: string;
   pinned?: boolean;
+  doNotPostToChannel?: boolean;
   metadata?: Record<string, any>;
   createdAt?: Date; // Optional custom timestamp for migrations
 }
@@ -50,6 +51,9 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         initialMessageId: data.initialMessageId,
         parentMessageId: data.parentMessageId,
         pinned: data.pinned || false,
+        ...(data.doNotPostToChannel !== undefined && {
+          doNotPostToChannel: data.doNotPostToChannel,
+        }),
         metadata: data.metadata,
         ...(data.createdAt && { createdAt: data.createdAt }),
       }

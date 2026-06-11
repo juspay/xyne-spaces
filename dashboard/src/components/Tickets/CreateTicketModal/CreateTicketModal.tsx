@@ -1056,6 +1056,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           formDataPayload.append('fileMetadata', JSON.stringify(fileMetadata));
         }
 
+        formDataPayload.append('fromTicketsTab', String(isFromTicketsTab));
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType);
@@ -1071,6 +1072,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           boardId: formData.boardId,
           // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
           channelId: isFromSubTicket || isFromAI ? formData.channelId : channelId,
+          fromTicketsTab: isFromTicketsTab,
           ...(selectedChannelProjectId && { projectId: selectedChannelProjectId }),
           ticketType: formData.ticketType,
           ...(draftAttachmentIds.length > 0 && { draftAttachmentIds }),

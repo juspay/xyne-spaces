@@ -8,9 +8,11 @@ import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { useClipboard } from '../../../hooks/useClipboard';
 import { useUsers } from '../../../hooks/useUsers';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
+import { Switch } from '../../ui/Switch';
 import { useNavigate } from 'react-router-dom';
 import { stateMachineActor } from '../../../machines/stateMachine';
 
@@ -78,6 +80,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   onClose,
 }) => {
   const zero = useZero();
+  const context = useAuthContextValues();
   const navigate = useNavigate();
   const { copy } = useClipboard();
   const allUsers = useUsers();
@@ -91,6 +94,12 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   useEffect(() => {
     setSelectedPolicy(currentPolicy);
   }, [currentPolicy]);
+
+  const showTicketsInChat = channel.showTicketsTabTicketsInChat ?? true;
+
+  // Admins or the channel owner (creator) can change the ticket-visibility setting.
+  const canManageTicketVisibility =
+    isAdmin || (!!context.userID && context.userID === channel.createdBy);
 
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
   const isPrivateChannel = channel.visibility === ChannelVisibility.PRIVATE;
@@ -144,6 +153,21 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
     } catch {
       setSelectedPolicy(previousPolicy);
       toast.error('Failed to update add user policy');
+    }
+  };
+
+  const handleToggleTicketsInChat = (next: boolean): void => {
+    if (!canManageTicketVisibility) return;
+
+    try {
+      zero.mutate(
+        mutators.channel.updateShowTicketsTabTicketsInChat({
+          channelId: channel.id,
+          show: next,
+        }),
+      );
+    } catch {
+      toast.error('Failed to update setting');
     }
   };
 
@@ -211,6 +235,25 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             )}
           </div>
         </div>
+
+        {canManageTicketVisibility && (
+          <div className='bg-card p-[12px] rounded-[12px] border border-border'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='flex flex-col gap-y-1'>
+                <p className='text-sm font-medium text-foreground'>Post new tickets to chat</p>
+                <p className='text-sm text-muted-foreground'>
+                  Notify the channel when tickets are created from the Tickets tab. Tickets created
+                  from messages are unaffected.
+                </p>
+              </div>
+              <Switch
+                checked={showTicketsInChat}
+                onCheckedChange={handleToggleTicketsInChat}
+                aria-label='Show tickets created from the Tickets tab in chat'
+              />
+            </div>
+          </div>
+        )}
 
         {/* Copy actions card */}
         <div className='bg-card rounded-[12px] border border-border overflow-hidden'>

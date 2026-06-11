@@ -659,6 +659,34 @@ export const mutators = defineMutators({
         });
       },
     ),
+    updateShowTicketsTabTicketsInChat: defineMutator(
+      z.object({
+        channelId: z.string(),
+        show: z.boolean(),
+      }),
+      async ({ tx, ctx, args: { channelId, show } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+          throw new Error('Can only update this setting for default channels');
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (channel.createdBy !== ctx.userID && (!participant || participant.role !== ChannelRole.ADMIN)) {
+          throw new Error('Only channel admins or the owner can change Tickets-tab visibility');
+        }
+
+        await tx.mutate.channels.update({
+          id: channelId,
+          showTicketsTabTicketsInChat: show,
+        });
+      },
+    ),
     makeChannelPublic: defineMutator(
       z.object({
         channelId: z.string(),
