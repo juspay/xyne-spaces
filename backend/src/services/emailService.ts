@@ -72,6 +72,11 @@ import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
 
+function stripCitationBlock(text: string): string {
+  if (!text) return text;
+  return text.replace(/\s*<citation\b[^>]*>([\s\S]*?)<\/citation>\s*/gi, '');
+}
+
 
 interface UserInfo {
   id: string;
@@ -703,7 +708,8 @@ export class EmailService {
       return;
     }
 
-    const html = await marked.parse(summary);
+    const cleanedSummary = stripCitationBlock(summary);
+    const html = await marked.parse(cleanedSummary);
     const now = new Date();
     try {
       const existingSeed = await this.prisma.emailDraft.findFirst({

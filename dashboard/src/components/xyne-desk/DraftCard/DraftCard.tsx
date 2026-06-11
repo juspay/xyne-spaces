@@ -29,6 +29,7 @@ import { RefineInput } from '../RefineInput/RefineInput';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
+import { stripCitationBlock } from '../../ui/TipTapExtensions/CitationMark';
 
 const DRAFT_SELECTION_HIGHLIGHT_KEY = 'desk-ai-draft-selection';
 
@@ -88,6 +89,7 @@ export const DraftCard = ({
   onClearSelectedText,
   onCollapse,
 }: DraftCardProps): ReactElement => {
+  const visibleDraftContent = useMemo(() => stripCitationBlock(draftContent), [draftContent]);
   const contentRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const selectedRangeRef = useRef<Range | null>(null);
@@ -357,10 +359,10 @@ export const DraftCard = ({
           ref={contentRef}
           className='px-4 py-3 flex-1 min-h-0 max-h-80 overflow-y-auto select-text selection:bg-red-400/30'
         >
-          {draftContent ? (
+          {visibleDraftContent ? (
             <div className={aiMarkdownProseClassName}>
               <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={[rehypeRaw]}>
-                {draftContent}
+                {visibleDraftContent}
               </Markdown>
               {isStreaming && (
                 <span className='inline-block w-0.5 h-4 bg-foreground animate-pulse ml-0.5 align-text-bottom' />

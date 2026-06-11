@@ -102,7 +102,10 @@ import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailCom
 import { ReplyPill } from '../../components/xyne-desk/EmailComposer/ReplyPill';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
 import { AnimatePresence, motion } from 'framer-motion';
-import { DraftSourcesPanel } from '../../components/xyne-desk/DraftSourcesPanel/DraftSourcesPanel';
+import {
+  DraftSourcesPanel,
+  isOpenableCitationUrl,
+} from '../../components/xyne-desk/DraftSourcesPanel/DraftSourcesPanel';
 import { AutoDraftReasoningPanel } from '../../components/xyne-desk/AutoDraftReasoningPanel/AutoDraftReasoningPanel';
 import type { DraftSource } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import {
@@ -120,7 +123,11 @@ import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
 import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
-import { extractCitationRefs } from '../../components/ui/TipTapExtensions/CitationMark';
+import {
+  extractCitationRefs,
+  extractInlineCitations,
+  type InlineCitation,
+} from '../../components/ui/TipTapExtensions/CitationMark';
 
 interface BotMessageBrief {
   id: string;
@@ -2152,6 +2159,7 @@ const SupportTicketDetail = ({
   const [autodraftBotMessages, setAutodraftBotMessages] = useState<BotMessageBrief[]>([]);
   const [userSessionBotMessages, setUserSessionBotMessages] = useState<BotMessageBrief[]>([]);
   const [sourcesHydrating, setSourcesHydrating] = useState(false);
+  const [draftInlineCitations, setDraftInlineCitations] = useState<InlineCitation[]>([]);
   const [highlightedSourceRef, setHighlightedSourceRef] = useState<string | null>(null);
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {
     if (!cid) return;
@@ -2220,6 +2228,17 @@ const SupportTicketDetail = ({
     return ownedBody ?? fallbackBody;
   }, [ticketEmailDrafts, userID]);
   const bodyCitedRefs = useMemo(() => extractCitationRefs(draftBodyHtml), [draftBodyHtml]);
+  const persistedInlineCitations = useMemo(
+    () => extractInlineCitations(draftBodyHtml ?? ''),
+    [draftBodyHtml],
+  );
+  const visibleInlineCitations = useMemo(
+    () =>
+      (draftInlineCitations.length > 0 ? draftInlineCitations : persistedInlineCitations).filter(
+        citation => isOpenableCitationUrl(citation.url),
+      ),
+    [draftInlineCitations, persistedInlineCitations],
+  );
   const draftSources = useMemo<DraftSource[]>(() => {
     if (bodyCitedRefs.length === 0) return [];
     const allBots: BotMessageBrief[] = [...userSessionBotMessages, ...autodraftBotMessages];
@@ -2244,7 +2263,9 @@ const SupportTicketDetail = ({
     return bodyCitedRefs.map(ref => bySrc.get(ref)).filter((s): s is DraftSource => !!s);
   }, [composerOpen, ticketEmailDraftCount, bodyCitedRefs, draftSources]);
 
-  const draftHasCitations = (composerOpen || ticketEmailDraftCount > 0) && bodyCitedRefs.length > 0;
+  const draftHasCitations =
+    (composerOpen || ticketEmailDraftCount > 0) &&
+    (bodyCitedRefs.length > 0 || visibleInlineCitations.length > 0);
   const emails = useMemo(() => (ticket?.emails as Email[] | undefined) ?? [], [ticket?.emails]);
   const emailCollapseState = useEmailCollapseState(emails);
 
@@ -3160,6 +3181,7 @@ const SupportTicketDetail = ({
                           setActiveTab('sources');
                           setHighlightedSourceRef(ref);
                         }}
+                        onDraftInlineCitationsChange={setDraftInlineCitations}
                         channelId={channelId}
                         ticketId={ticketId}
                         replyToEmailId={replyToEmailId}
@@ -3299,7 +3321,7 @@ const SupportTicketDetail = ({
                                   {sourcesHydrating && visibleDraftSources.length === 0 ? (
                                     <Loader2 size={10} className='animate-spin' />
                                   ) : (
-                                    visibleDraftSources.length
+                                    visibleDraftSources.length + visibleInlineCitations.length
                                   )}
                                 </span>
                               </button>
@@ -3433,6 +3455,7 @@ const SupportTicketDetail = ({
                     >
                       <DraftSourcesPanel
                         sources={visibleDraftSources}
+                        inlineCitations={visibleInlineCitations}
                         embedded
                         loading={sourcesHydrating}
                         highlightedRef={highlightedSourceRef}

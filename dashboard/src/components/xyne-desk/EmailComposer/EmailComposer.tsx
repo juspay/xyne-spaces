@@ -67,7 +67,11 @@ import { EmailEditor } from '../EmailEditor/EmailEditor';
 import { EmailTagWithAvatar } from '../EmailTagWithAvatar/EmailTagWithAvatar';
 import { RecipientSuggestionsDropdown } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
 import { AIComposerPanel, AIRefineDropdown } from '../AIComposerPanel/AIComposerPanel';
-import { stripCitationMarks } from '../../ui/TipTapExtensions/CitationMark';
+import {
+  appendCitationBlock,
+  stripCitationBlock,
+  stripCitationMarks,
+} from '../../ui/TipTapExtensions/CitationMark';
 import { RecipientPillExtension } from '../../ui/TipTapExtensions';
 import { Popover } from '../../ui/Popover/Popover';
 import { RecipientMentionSelector } from './RecipientMentionSelector';
@@ -180,6 +184,9 @@ interface EmailComposerProps {
    */
   composeDraftId?: string;
   onDraftSourcesChange?: (sources: DraftSource[]) => void;
+  onDraftInlineCitationsChange?: (
+    citations: import('../../ui/TipTapExtensions/CitationMark').InlineCitation[],
+  ) => void;
   onCitationClick?: (ref: string) => void;
   onCitationOrderChange?: (orderedRefs: string[]) => void;
   /** Pre-fill the To field when the composer mounts (draft restoration takes precedence). */
@@ -204,6 +211,7 @@ export const EmailComposer = ({
   composeDraftId,
   ticketSubject,
   onDraftSourcesChange,
+  onDraftInlineCitationsChange,
   onCitationClick,
   onCitationOrderChange,
   initialTo,
@@ -497,6 +505,14 @@ export const EmailComposer = ({
     agentSlug: channelPreference?.autoDraftAgentSlug ?? 'draft-agent',
   });
 
+  const contentWithDraftCitations = useCallback(
+    (content: string): string =>
+      appendCitationBlock(content, aiDraft.draftContent || draft?.draftContent),
+    [aiDraft.draftContent, draft?.draftContent],
+  );
+
+  const displayEmailContent = useMemo(() => stripCitationBlock(emailContent), [emailContent]);
+
   useEffect(() => {
     onDraftSourcesChange?.(aiDraft.draftSources);
   }, [aiDraft.draftSources, onDraftSourcesChange]);
@@ -508,6 +524,10 @@ export const EmailComposer = ({
       setBodyEditor(null);
     }
   }, [aiDraft.isDraftActive, aiPanelMode]);
+
+  useEffect(() => {
+    onDraftInlineCitationsChange?.(aiDraft.draftInlineCitations);
+  }, [aiDraft.draftInlineCitations, onDraftInlineCitationsChange]);
 
   const [composeSources, setComposeSources] = useState<DraftSource[]>([]);
 
@@ -2309,7 +2329,7 @@ export const EmailComposer = ({
             return (
               <>
                 <EmailEditor
-                  value={emailContent}
+                  value={displayEmailContent}
                   onChange={handleEditorChange}
                   onAddFiles={addFilesToAttachments}
                   uploadAndInsertInlineImages={uploadAndInsertInlineImages}
@@ -2519,7 +2539,9 @@ export const EmailComposer = ({
               {features.showAI && (
                 <AIRefineDropdown
                   onQuickRewrite={action => {
-                    const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
+                    const source = aiDraft.isDraftActive
+                      ? aiDraft.draftContent
+                      : contentWithDraftCitations(emailContent);
                     setDraftOrigin('rewrite');
                     void aiDraft.quickRewrite(action, source);
                   }}
