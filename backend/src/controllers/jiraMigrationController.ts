@@ -49,6 +49,7 @@ export class JiraMigrationController {
         channelId,
         sourceBoardId,
         targetBoardId,
+        tagNames,
         dryRun,
         confirmText,
       } = req.body as {
@@ -56,6 +57,7 @@ export class JiraMigrationController {
         channelId?: string;
         sourceBoardId?: string;
         targetBoardId?: string;
+        tagNames?: string[];
         dryRun?: boolean;
         confirmText?: string;
       };
@@ -66,6 +68,14 @@ export class JiraMigrationController {
       }
 
       const normalizedProjectKey = jiraProjectKey.trim().toUpperCase();
+      const normalizedTagNames = Array.from(
+        new Set(
+          (Array.isArray(tagNames) ? tagNames : [])
+            .filter((value): value is string => typeof value === 'string')
+            .map(value => value.trim())
+            .filter(Boolean),
+        ),
+      );
       const resolvedDryRun = dryRun !== false;
       const resolvedConfirmText = (confirmText || '').trim();
       if (!resolvedDryRun && resolvedConfirmText !== `MOVE ${normalizedProjectKey}`) {
@@ -134,6 +144,17 @@ export class JiraMigrationController {
         where: {
           id: { in: mappedTicketIds },
           boardId: sourceBoardId,
+          ...(normalizedTagNames.length > 0
+            ? {
+                tags: {
+                  some: {
+                    OR: normalizedTagNames.map(tagName => ({
+                      name: { equals: tagName, mode: 'insensitive' as const },
+                    })),
+                  },
+                },
+              }
+            : {}),
         },
         select: {
           id: true,
@@ -166,6 +187,7 @@ export class JiraMigrationController {
             channelId,
             sourceBoardId,
             targetBoardId,
+            tagNames: normalizedTagNames,
             movedTickets: ticketsToMove.length,
             missingStages,
             ...(externalSourceBoardMismatch
@@ -338,6 +360,7 @@ export class JiraMigrationController {
           channelId,
           sourceBoardId,
           targetBoardId,
+          tagNames: normalizedTagNames,
           movedTickets: ticketUpdates.length,
           missingStages: [],
           ...(externalSourceBoardMismatch
@@ -935,6 +958,7 @@ export class JiraMigrationController {
         targetProjectId?: string;
         targetBoardId?: string;
         targetChannelId?: string;
+        issueKeys?: string[];
         jiraBoardId?: number;
         nextPageToken?: string;
         maxResults?: number;
@@ -955,6 +979,9 @@ export class JiraMigrationController {
         targetProjectId,
         targetBoardId,
         targetChannelId,
+        issueKeys: Array.isArray(req.body.issueKeys)
+          ? req.body.issueKeys.filter((value: unknown): value is string => typeof value === 'string')
+          : undefined,
         ...(typeof req.body.jiraBoardId === 'number' ? { jiraBoardId: req.body.jiraBoardId } : {}),
         nextPageToken: req.body.nextPageToken,
         maxResults: req.body.maxResults,
