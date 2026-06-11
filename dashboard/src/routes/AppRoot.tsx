@@ -890,7 +890,7 @@ export const router = createBrowserRouter([
               {
                 path: 'tickets',
                 element: (
-                  <ResourceProtectedRoute resourceName='TICKETS'>
+                  <ResourceProtectedRoute resourceName='WORKFLOWS'>
                     <TicketsScreen />
                   </ResourceProtectedRoute>
                 ),
@@ -1103,14 +1103,16 @@ export const router = createBrowserRouter([
               {
                 path: 'support',
                 element: (
-                  <SaveRoute
-                    keyword='support'
-                    stripSearchParams={['settings', 'openSettings']}
-                    preserveSearchParams={['emailConnected', 'emailError']}
-                    redirectOnlyAt={/^\/[^/]+\/support\/?$/}
-                  >
-                    <SupportScreen />
-                  </SaveRoute>
+                  <ResourceProtectedRoute resourceName='SUPPORT'>
+                    <SaveRoute
+                      keyword='support'
+                      stripSearchParams={['settings', 'openSettings']}
+                      preserveSearchParams={['emailConnected', 'emailError']}
+                      redirectOnlyAt={/^\/[^/]+\/support\/?$/}
+                    >
+                      <SupportScreen />
+                    </SaveRoute>
+                  </ResourceProtectedRoute>
                 ),
                 children: [
                   {

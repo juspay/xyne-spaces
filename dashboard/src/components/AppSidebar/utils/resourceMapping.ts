@@ -3,7 +3,8 @@
  * Used for permission checks to determine which navigation items to show
  */
 export const PATH_TO_RESOURCE: Record<string, string> = {
-  '/tickets': 'TICKETS',
+  '/support': 'SUPPORT',
+  '/tickets': 'WORKFLOWS',
   '/knowledge-base': 'KNOWLEDGE-BASE',
   '/analytics': 'ANALYTICS',
   '/user-groups': 'USER-GROUPS',
