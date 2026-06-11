@@ -1,6 +1,8 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
+import axios from 'axios';
+import { API_BASE_URL } from '../../config';
 import { useAuth } from '../../hooks/useAuth';
 import { useOAuthProviders } from '../../hooks/useOAuthProviders';
 import { ElectronEnrollmentSteps } from '../../components/Auth/ElectronEnrollmentSteps';
@@ -46,6 +48,7 @@ const AuthScreen = (): ReactElement => {
     userExistsButRemoved,
     signInWithMicrosoft,
     logout,
+    signInWithEmail,
   } = useAuth();
   const { data: providers } = useOAuthProviders();
   const [searchParams] = useSearchParams();
@@ -53,8 +56,23 @@ const AuthScreen = (): ReactElement => {
   const [orgName, setOrgName] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
   const [showCreateOrgForm, setShowCreateOrgForm] = useState(false);
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const orgNameInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
+
+  // Forgot password flow
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [fpEmail, setFpEmail] = useState('');
+  const [fpCode, setFpCode] = useState('');
+  const [fpNewPassword, setFpNewPassword] = useState('');
+  const [fpConfirmPassword, setFpConfirmPassword] = useState('');
+  const [fpStep, setFpStep] = useState<'email' | 'code' | 'success'>('email');
+  const [fpError, setFpError] = useState('');
+  const [fpMessage, setFpMessage] = useState('');
+  const [fpLoading, setFpLoading] = useState(false);
+  const fpSubmitLockRef = useRef(false);
 
   useEffect(() => {
     const param = searchParams.get('enrollment_success');
@@ -77,6 +95,7 @@ const AuthScreen = (): ReactElement => {
     }
   }, [isAuthenticated]);
 
+  const location = useLocation();
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
       return;
@@ -90,8 +109,17 @@ const AuthScreen = (): ReactElement => {
     const rafId = requestAnimationFrame(() => {
       orgNameInputRef.current?.focus();
     });
-    return () => cancelAnimationFrame(rafId);
+    return (): void => cancelAnimationFrame(rafId);
   }, [showCreateOrgForm, isCreatingOrg, isMobile]);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    setShowForgotPassword(false);
+    setShowEmailForm(true);
+  }, [error]);
 
   const handleGoogleSignIn = (): void => {
     clearError();
@@ -116,6 +144,95 @@ const AuthScreen = (): ReactElement => {
     e.preventDefault();
     if (orgName.trim() && workspaceName.trim()) {
       createOrg(orgName.trim(), workspaceName.trim());
+    }
+  };
+
+  const handleEmailSubmit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    clearError();
+    const invitationId = searchParams.get('invitationId')?.trim() || undefined;
+    await signInWithEmail(email.trim(), password, invitationId);
+  };
+
+  const handleFpRequestCode = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    if (fpSubmitLockRef.current) {
+      return;
+    }
+
+    fpSubmitLockRef.current = true;
+    setFpError('');
+    setFpMessage('');
+    setFpLoading(true);
+    try {
+      await axios.post(
+        `${API_BASE_URL}/v2/auth/email/forgot-password`,
+        {
+          email: fpEmail.trim(),
+        },
+        {
+          timeout: 30000,
+        },
+      );
+      setFpMessage('Code sent! Check your email.');
+      setFpStep('code');
+    } catch (err) {
+      if (axios.isAxiosError<{ error?: string; message?: string }>(err)) {
+        setFpError(
+          err.response?.data?.message ??
+            err.response?.data?.error ??
+            'Failed to send code. Please try again.',
+        );
+      } else {
+        setFpError('Failed to send code. Please try again.');
+      }
+    } finally {
+      fpSubmitLockRef.current = false;
+      setFpLoading(false);
+    }
+  };
+
+  const handleFpResetPassword = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    if (fpSubmitLockRef.current) {
+      return;
+    }
+
+    fpSubmitLockRef.current = true;
+    setFpError('');
+    const normalizedCode = fpCode.replace(/\D/g, '');
+    if (!/^\d{6}$/.test(normalizedCode)) {
+      setFpError('Enter a valid 6-digit code');
+      fpSubmitLockRef.current = false;
+      return;
+    }
+    if (fpNewPassword.length < 8) {
+      setFpError('Password must be at least 8 characters');
+      fpSubmitLockRef.current = false;
+      return;
+    }
+    if (fpNewPassword !== fpConfirmPassword) {
+      setFpError('Passwords do not match');
+      fpSubmitLockRef.current = false;
+      return;
+    }
+    setFpLoading(true);
+    try {
+      await axios.post(`${API_BASE_URL}/v2/auth/email/reset-password`, {
+        email: fpEmail.trim(),
+        code: normalizedCode,
+        newPassword: fpNewPassword,
+      });
+      setFpStep('success');
+    } catch (err: unknown) {
+      if (axios.isAxiosError<{ error?: string }>(err) && err.response?.data?.error) {
+        setFpError(err.response.data.error);
+      } else {
+        setFpError('Failed to reset password. Please try again.');
+      }
+    } finally {
+      fpSubmitLockRef.current = false;
+      setFpLoading(false);
     }
   };
 
@@ -411,6 +528,222 @@ const AuthScreen = (): ReactElement => {
                             </span>
                           </button>
                         </div>
+                      )}
+
+                      {/* Divider */}
+                      <div className='w-full max-w-[280px] md:max-w-[320px] flex items-center gap-3 my-1'>
+                        <div className='flex-1 h-px bg-border' />
+                        <span className='text-xs text-muted-foreground'>or</span>
+                        <div className='flex-1 h-px bg-border' />
+                      </div>
+
+                      {/* Email Sign In Toggle */}
+                      {!showEmailForm ? (
+                        <div className='w-full max-w-[280px] md:max-w-[320px]'>
+                          <button
+                            onClick={() => {
+                              clearError();
+                              setShowEmailForm(true);
+                            }}
+                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
+                            data-track-category='Auth'
+                            data-track-name='EmailSignInToggle'
+                          >
+                            <span className='text-sm font-semibold text-center text-white'>
+                              Sign in with Email
+                            </span>
+                          </button>
+                        </div>
+                      ) : showForgotPassword ? (
+                        /* Forgot Password Flow */
+                        <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
+                          {fpStep === 'email' && (
+                            <form
+                              onSubmit={e => {
+                                void handleFpRequestCode(e);
+                              }}
+                              className='flex flex-col gap-3'
+                            >
+                              <p className='text-sm font-medium text-foreground'>Reset Password</p>
+                              <p className='text-xs text-muted-foreground'>
+                                Enter your email to receive a reset code.
+                              </p>
+                              <input
+                                type='email'
+                                value={fpEmail}
+                                onChange={e => setFpEmail(e.target.value)}
+                                placeholder='Email address'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                data-track-category='Auth'
+                                data-track-name='ForgotPasswordEmailInput'
+                              />
+                              {fpError && <p className='text-xs text-red-600'>{fpError}</p>}
+                              {fpMessage && <p className='text-xs text-green-600'>{fpMessage}</p>}
+                              <button
+                                type='submit'
+                                disabled={fpLoading}
+                                className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                                data-track-category='Auth'
+                                data-track-name='SendResetCode'
+                              >
+                                {fpLoading ? 'Sending...' : 'Send Code'}
+                              </button>
+                            </form>
+                          )}
+
+                          {fpStep === 'code' && (
+                            <form
+                              onSubmit={e => {
+                                void handleFpResetPassword(e);
+                              }}
+                              className='flex flex-col gap-3'
+                            >
+                              <p className='text-sm font-medium text-foreground'>Enter Code</p>
+                              <p className='text-xs text-muted-foreground'>
+                                We sent a 6-digit code to {fpEmail}
+                              </p>
+                              <input
+                                type='text'
+                                value={fpCode}
+                                onChange={e =>
+                                  setFpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                                }
+                                placeholder='6-digit code'
+                                maxLength={6}
+                                pattern='[0-9]{6}'
+                                inputMode='numeric'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
+                                data-track-category='Auth'
+                                data-track-name='ResetCodeInput'
+                              />
+                              <input
+                                type='password'
+                                value={fpNewPassword}
+                                onChange={e => setFpNewPassword(e.target.value)}
+                                placeholder='New password (min 8 chars)'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                data-track-category='Auth'
+                                data-track-name='ResetNewPasswordInput'
+                              />
+                              <input
+                                type='password'
+                                value={fpConfirmPassword}
+                                onChange={e => setFpConfirmPassword(e.target.value)}
+                                placeholder='Confirm new password'
+                                required
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                data-track-category='Auth'
+                                data-track-name='ResetConfirmPasswordInput'
+                              />
+                              {fpError && <p className='text-xs text-red-600'>{fpError}</p>}
+                              <button
+                                type='submit'
+                                disabled={fpLoading}
+                                className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                                data-track-category='Auth'
+                                data-track-name='ResetPassword'
+                              >
+                                {fpLoading ? 'Resetting...' : 'Reset Password'}
+                              </button>
+                            </form>
+                          )}
+
+                          {fpStep === 'success' && (
+                            <div className='flex flex-col gap-3 text-center'>
+                              <p className='text-sm font-medium text-green-600'>
+                                Password reset successful!
+                              </p>
+                              <p className='text-xs text-muted-foreground'>
+                                You can now sign in with your new password.
+                              </p>
+                            </div>
+                          )}
+
+                          <button
+                            type='button'
+                            onClick={() => {
+                              setShowForgotPassword(false);
+                              setFpStep('email');
+                              setFpEmail('');
+                              setFpCode('');
+                              setFpNewPassword('');
+                              setFpConfirmPassword('');
+                              setFpError('');
+                              setFpMessage('');
+                            }}
+                            className='text-xs text-muted-foreground hover:text-foreground text-center'
+                            data-track-category='Auth'
+                            data-track-name='BackToSignIn'
+                          >
+                            Back to sign in
+                          </button>
+                        </div>
+                      ) : (
+                        <form
+                          onSubmit={(e): void => {
+                            void handleEmailSubmit(e);
+                          }}
+                          className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'
+                        >
+                          <input
+                            type='email'
+                            value={email}
+                            onChange={e => setEmail(e.target.value)}
+                            placeholder='Email address'
+                            required
+                            className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                            data-track-category='Auth'
+                            data-track-name='EmailInput'
+                          />
+                          <input
+                            type='password'
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                            placeholder='Password'
+                            required
+                            className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                            data-track-category='Auth'
+                            data-track-name='PasswordInput'
+                          />
+                          <button
+                            type='button'
+                            onClick={() => {
+                              clearError();
+                              setShowForgotPassword(true);
+                            }}
+                            className='text-xs text-muted-foreground hover:text-foreground text-right self-end'
+                            data-track-category='Auth'
+                            data-track-name='ForgotPassword'
+                          >
+                            Forgot password?
+                          </button>
+                          <button
+                            type='submit'
+                            disabled={isLoading}
+                            className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                            data-track-category='Auth'
+                            data-track-name='EmailSignInSubmit'
+                          >
+                            {isLoading ? 'Please wait...' : 'Sign In'}
+                          </button>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              clearError();
+                              setShowEmailForm(false);
+                              setEmail('');
+                              setPassword('');
+                            }}
+                            className='text-xs text-muted-foreground hover:text-foreground text-center'
+                            data-track-category='Auth'
+                            data-track-name='BackFromEmailForm'
+                          >
+                            Back
+                          </button>
+                        </form>
                       )}
                     </div>
                   )

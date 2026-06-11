@@ -328,6 +328,7 @@ export enum AuthProvider {
   GOOGLE = 'GOOGLE',
   MICROSOFT = "MICROSOFT",
   API_KEY = 'API_KEY',
+  EMAIL = 'EMAIL',
 }
 
 // @ts-ignore TS1294

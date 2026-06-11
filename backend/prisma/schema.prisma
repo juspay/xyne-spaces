@@ -981,6 +981,7 @@ enum AuthProvider {
   GOOGLE
   MICROSOFT
   API_KEY
+  EMAIL
   @@schema("public")
 }
 
@@ -1744,6 +1745,7 @@ model OrgMember {
   userId      String   @default("deprecated")   // Deprecated not using, only here for backward compatibility
   email       String   @unique // Email address — globally unique, one org per email
   role        OrgRole  // OWNER | ADMIN | MEMBER | VIEWER
+  passwordHash String?  // For email-password based login; null for existing Google/Microsoft SSO users unless explicitly set by forgot password
   joinedAt    DateTime @default(now())
   invitedBy   String?  // Who invited this user (no FK constraint)
   leftAt      DateTime?

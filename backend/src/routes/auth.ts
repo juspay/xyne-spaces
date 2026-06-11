@@ -33,6 +33,7 @@ router.get('/me', authV2Middleware.authenticate, (req, res) => {
       role: req.user!.role,
       orgRole: req.user!.orgRole,
       memberId: req.user!.memberId,
+      authProvider: req.user!.authProvider,
     }
   });
 });
@@ -57,6 +58,7 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
       role: req.user!.role,
       orgRole: req.user!.orgRole,
       memberId: req.user!.memberId,
+      authProvider: req.user!.authProvider,
     },
     selfDmChannelId,
   });

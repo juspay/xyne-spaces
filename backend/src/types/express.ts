@@ -48,6 +48,7 @@ export interface AuthenticatedUser {
   role: string;
   orgRole: string;
   memberId: string;
+  authProvider?: string;
 }
 
 declare global {

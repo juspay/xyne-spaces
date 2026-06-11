@@ -105,6 +105,28 @@ class AuthV2Middleware {
         return false;
       }
 
+      // Check if user has been removed from the organization entirely
+      if (session.user.orgMember?.leftAt) {
+        logger.warn(`[AUTH] [Auto-Refresh] User ${session.user.email} has left organization (leftAt=${session.user.orgMember.leftAt.toISOString()}). Session ${sessionId} rejected.`, {
+          sessionId,
+          userId: session.user.id,
+          email: session.user.email,
+          orgMemberLeftAt: session.user.orgMember.leftAt.toISOString(),
+        });
+        return false;
+      }
+
+      if (session.user.leftAt) {
+        logger.warn(`[AUTH] [Auto-Refresh] Workspace user ${session.user.email} has left workspace ${session.user.workspaceId} (leftAt=${session.user.leftAt.toISOString()}). Session ${sessionId} rejected.`, {
+          sessionId,
+          userId: session.user.id,
+          email: session.user.email,
+          workspaceId: session.user.workspaceId,
+          userLeftAt: session.user.leftAt.toISOString(),
+        });
+        return false;
+      }
+
       // --- Provider Verification Step ---
       // Only verify with Google if the user authenticated via Google
       if (session.user.authProvider === 'GOOGLE' && session.refreshToken) {
@@ -195,6 +217,10 @@ class AuthV2Middleware {
         } else {
           logger.info(`[Auto-Refresh] No access token for Microsoft user ${session.user.email}. Skipping Graph check.`);
         }
+      } else if (session.user.authProvider === 'EMAIL') {
+        // Email auth: we issued the refresh token ourselves
+        // No external provider to verify against
+        logger.info(`[Auto-Refresh] Email auth session for ${session.user.email} — skipping provider check`);
       } else if (!session.refreshToken) {
          logger.info(`[Auto-Refresh] No refresh token in session for user ${session.user.email}. Skipping provider check.`);
       }
@@ -258,6 +284,7 @@ class AuthV2Middleware {
         role: session.user.role,
         orgRole: session.user.orgMember.role,
         memberId: session.user.orgMemberId,
+        authProvider: session.user.authProvider,
       };
 
       logger.info(`[AUTH] [Auto-Refresh] SUCCESS: Token refreshed and user attached to request ${sessionId}`, {
@@ -371,12 +398,13 @@ class AuthV2Middleware {
                     email: true, 
                     name: true, 
                     leftAt: true, 
-                    providerUserId: true 
+                    providerUserId: true,
+                    authProvider: true,
                   }
                 }),
                 db.orgMember.findUnique({
                   where: { memberId: effectiveMemberId! },
-                  select: { role: true }
+                  select: { role: true, leftAt: true }
                 })
               ]);
               
@@ -394,43 +422,59 @@ class AuthV2Middleware {
                     message: 'You have been removed from this workspace',
                   });
                   return;
-                 } else {
-                  // Use fresh roles from database
-                  const workspaceRole = user.role;
-                  const orgRole = orgMember!.role;
-                  
-                  req.user = {
-                    id: user.id,
-                    googleId: user.providerUserId,
-                    email: user.email,
-                    name: user.name,
-                    workspaceId: effectiveWorkspaceId,
-                    role: workspaceRole,
-                    orgRole: orgRole,
-                    memberId: effectiveMemberId!,
-                  };
-                  logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email} ${sessionId}`, {
+                }
+
+                if (orgMember?.leftAt) {
+                  logger.warn(`[AUTH] ${logPrefix} User has been removed from organization: ${user.email} ${sessionId}`, {
                     sessionId,
                     tokenSource,
                     tokenPreview,
-                    tokenSub: decoded.sub,
                     userId: user.id,
-                    googleId: user.providerUserId,
-                    email: user.email,
-                    workspaceRole,
-                    orgRole,
+                    orgMemberLeftAt: orgMember.leftAt,
                   });
-                  tokenIsValid = true;
-                  return next();
+                  res.status(401).json({
+                    error: 'User removed from organization',
+                    message: 'You have been removed from this organization',
+                  });
+                  return;
                 }
-             } else {
-               logger.warn(`[AUTH] ${logPrefix} Token valid, but user not found in DB: ${decoded.sub} ${sessionId}`, {
-                 sessionId,
-                 tokenSource,
-                 tokenPreview,
-                 tokenSub: decoded.sub,
-               });
-             }
+                
+                // Use fresh roles from database
+                const workspaceRole = user.role;
+                const orgRole = orgMember!.role;
+                
+                req.user = {
+                  id: user.id,
+                  googleId: user.providerUserId,
+                  email: user.email,
+                  name: user.name,
+                  workspaceId: effectiveWorkspaceId,
+                  role: workspaceRole,
+                  orgRole: orgRole,
+                  memberId: effectiveMemberId!,
+                  authProvider: user.authProvider,
+                };
+                logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email} ${sessionId}`, {
+                  sessionId,
+                  tokenSource,
+                  tokenPreview,
+                  tokenSub: decoded.sub,
+                  userId: user.id,
+                  googleId: user.providerUserId,
+                  email: user.email,
+                  workspaceRole,
+                  orgRole,
+                });
+                tokenIsValid = true;
+                return next();
+              } else {
+                logger.warn(`[AUTH] ${logPrefix} Token valid, but user not found in DB: ${decoded.sub} ${sessionId}`, {
+                  sessionId,
+                  tokenSource,
+                  tokenPreview,
+                  tokenSub: decoded.sub,
+                });
+              }
           }
         } catch (err) {
            // Token invalid/expired, log and fall through to refresh logic

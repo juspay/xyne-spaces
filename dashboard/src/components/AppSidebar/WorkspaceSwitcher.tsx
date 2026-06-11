@@ -9,6 +9,7 @@ import {
   setLastActiveWorkspaceId,
 } from '../../machines/authMachine';
 import { queryClient } from '../../services/clients/queryClient';
+import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 
 interface WorkspaceItem {
   id: string;
@@ -38,6 +39,7 @@ interface CreateWorkspaceResponse {
 
 export const WorkspaceSwitcher: React.FC = () => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const canCreateWorkspace = useCanCreateWorkspace();
 
   // Read initial name from user-bound localStorage so the button renders immediately without an API call
   const [localWorkspaceName, setLocalWorkspaceName] = useState<string>(() => {
@@ -353,140 +355,144 @@ export const WorkspaceSwitcher: React.FC = () => {
 
           <div className='border-t border-border' />
 
-          {/* Add a workspace — 3 options */}
-          <div className='py-1'>
-            <p className='px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-              Add a workspace
-            </p>
+          {/* Add a workspace — hidden for members without create permission */}
+          {canCreateWorkspace && (
+            <div className='py-1'>
+              <p className='px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+                Add a workspace
+              </p>
 
-            {/* Sign in to another workspace — expands list of user's workspaces */}
-            <button
-              onClick={() => setShowSignInList(prev => !prev)}
-              data-track-category='Workspace_Switcher'
-              data-track-name='Sign_In_Another_Workspace'
-              className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
-            >
-              <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
-                <LogIn size={14} className='text-foreground' />
-              </div>
-              <span className='text-sm text-foreground flex-1'>Sign in to another workspace</span>
-              {showSignInList ? (
-                <ChevronDown size={14} className='text-muted-foreground shrink-0' />
-              ) : (
-                <ChevronRight size={14} className='text-muted-foreground shrink-0' />
-              )}
-            </button>
-
-            {showSignInList && (
-              <div className='ml-4 border-l border-border pl-2 pb-1'>
-                {loading ? (
-                  <div className='flex items-center justify-center py-3'>
-                    <Loader2 size={14} className='animate-spin text-muted-foreground' />
-                  </div>
-                ) : workspaces.length === 0 ? (
-                  <p className='text-xs text-muted-foreground px-2 py-2'>
-                    No other workspaces found.
-                  </p>
-                ) : (
-                  workspaces.map(ws => {
-                    const isActive = ws.id === workspaceId;
-                    const isSwitching = switching === ws.id;
-                    const count = activityCounts.get(ws.id) || 0;
-                    return (
-                      <button
-                        key={ws.id}
-                        onClick={() => void handleSwitch(ws.id)}
-                        disabled={isSwitching}
-                        data-track-category='Workspace_Switcher'
-                        data-track-name='Switch_Workspace_SignIn'
-                        className='w-full flex items-center gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
-                      >
-                        <div
-                          className='size-6 rounded flex items-center justify-center text-white text-xs font-bold shrink-0'
-                          style={{ backgroundColor: getInitialColor(ws.name) }}
-                        >
-                          {ws.name[0]?.toUpperCase() ?? '?'}
-                        </div>
-                        <div className='flex-1 min-w-0'>
-                          <p className='text-xs font-medium text-foreground truncate'>{ws.name}</p>
-                          <p className='text-xs text-muted-foreground truncate'>{ws.orgName}</p>
-                        </div>
-                        <div className='flex items-center gap-1 shrink-0'>
-                          {count > 0 && (
-                            <span className='min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
-                              {count > 99 ? '99+' : count}
-                            </span>
-                          )}
-                          {isSwitching ? (
-                            <Loader2 size={12} className='animate-spin text-muted-foreground' />
-                          ) : isActive ? (
-                            <Check size={12} className='text-green-500' />
-                          ) : null}
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            )}
-
-            {/* Create a new workspace */}
-            {showCreateForm ? (
-              <form
-                onSubmit={e => void handleCreate(e)}
-                className='px-3 pb-3 pt-1 flex flex-col gap-2'
-              >
-                {error && <p className='text-xs text-red-500'>{error}</p>}
-                <input
-                  type='text'
-                  placeholder='Workspace name'
-                  value={workspaceName}
-                  onChange={e => setWorkspaceName(e.target.value)}
-                  data-track-category='Workspace_Switcher'
-                  data-track-name='Workspace_Name_Input'
-                  className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
-                  required
-                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                  autoFocus
-                />
-                <div className='flex gap-2'>
-                  <button
-                    type='submit'
-                    disabled={creating || !workspaceName.trim()}
-                    data-track-category='Workspace_Switcher'
-                    data-track-name='Create_Workspace'
-                    className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
-                  >
-                    {creating ? 'Creating…' : 'Create'}
-                  </button>
-                  <button
-                    type='button'
-                    onClick={() => {
-                      setShowCreateForm(false);
-                      setError(null);
-                    }}
-                    data-track-category='Workspace_Switcher'
-                    data-track-name='Cancel_Create_Workspace'
-                    className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            ) : (
+              {/* Sign in to another workspace — expands list of user's workspaces */}
               <button
-                onClick={() => setShowCreateForm(true)}
+                onClick={() => setShowSignInList(prev => !prev)}
                 data-track-category='Workspace_Switcher'
-                data-track-name='Show_Create_Workspace_Form'
+                data-track-name='Sign_In_Another_Workspace'
                 className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
               >
                 <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
-                  <Plus size={14} className='text-foreground' />
+                  <LogIn size={14} className='text-foreground' />
                 </div>
-                <span className='text-sm text-foreground'>Create a new workspace</span>
+                <span className='text-sm text-foreground flex-1'>Sign in to another workspace</span>
+                {showSignInList ? (
+                  <ChevronDown size={14} className='text-muted-foreground shrink-0' />
+                ) : (
+                  <ChevronRight size={14} className='text-muted-foreground shrink-0' />
+                )}
               </button>
-            )}
-          </div>
+
+              {showSignInList && (
+                <div className='ml-4 border-l border-border pl-2 pb-1'>
+                  {loading ? (
+                    <div className='flex items-center justify-center py-3'>
+                      <Loader2 size={14} className='animate-spin text-muted-foreground' />
+                    </div>
+                  ) : workspaces.length === 0 ? (
+                    <p className='text-xs text-muted-foreground px-2 py-2'>
+                      No other workspaces found.
+                    </p>
+                  ) : (
+                    workspaces.map(ws => {
+                      const isActive = ws.id === workspaceId;
+                      const isSwitching = switching === ws.id;
+                      const count = activityCounts.get(ws.id) || 0;
+                      return (
+                        <button
+                          key={ws.id}
+                          onClick={() => void handleSwitch(ws.id)}
+                          disabled={isSwitching}
+                          data-track-category='Workspace_Switcher'
+                          data-track-name='Switch_Workspace_SignIn'
+                          className='w-full flex items-center gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
+                        >
+                          <div
+                            className='size-6 rounded flex items-center justify-center text-white text-xs font-bold shrink-0'
+                            style={{ backgroundColor: getInitialColor(ws.name) }}
+                          >
+                            {ws.name[0]?.toUpperCase() ?? '?'}
+                          </div>
+                          <div className='flex-1 min-w-0'>
+                            <p className='text-xs font-medium text-foreground truncate'>
+                              {ws.name}
+                            </p>
+                            <p className='text-xs text-muted-foreground truncate'>{ws.orgName}</p>
+                          </div>
+                          <div className='flex items-center gap-1 shrink-0'>
+                            {count > 0 && (
+                              <span className='min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
+                                {count > 99 ? '99+' : count}
+                              </span>
+                            )}
+                            {isSwitching ? (
+                              <Loader2 size={12} className='animate-spin text-muted-foreground' />
+                            ) : isActive ? (
+                              <Check size={12} className='text-green-500' />
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              {/* Create a new workspace */}
+              {showCreateForm ? (
+                <form
+                  onSubmit={e => void handleCreate(e)}
+                  className='px-3 pb-3 pt-1 flex flex-col gap-2'
+                >
+                  {error && <p className='text-xs text-red-500'>{error}</p>}
+                  <input
+                    type='text'
+                    placeholder='Workspace name'
+                    value={workspaceName}
+                    onChange={e => setWorkspaceName(e.target.value)}
+                    data-track-category='Workspace_Switcher'
+                    data-track-name='Workspace_Name_Input'
+                    className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
+                    required
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                  />
+                  <div className='flex gap-2'>
+                    <button
+                      type='submit'
+                      disabled={creating || !workspaceName.trim()}
+                      data-track-category='Workspace_Switcher'
+                      data-track-name='Create_Workspace'
+                      className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
+                    >
+                      {creating ? 'Creating…' : 'Create'}
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowCreateForm(false);
+                        setError(null);
+                      }}
+                      data-track-category='Workspace_Switcher'
+                      data-track-name='Cancel_Create_Workspace'
+                      className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  onClick={() => setShowCreateForm(true)}
+                  data-track-category='Workspace_Switcher'
+                  data-track-name='Show_Create_Workspace_Form'
+                  className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
+                >
+                  <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
+                    <Plus size={14} className='text-foreground' />
+                  </div>
+                  <span className='text-sm text-foreground'>Create a new workspace</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
