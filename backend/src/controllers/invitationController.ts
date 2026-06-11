@@ -3,14 +3,15 @@
  * Handles HTTP requests for invitation operations
  */
 
+import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { ProjectType, Status } from '@prisma/client';
 import { invitationService } from '@/services/invitationService';
+import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import jwt from 'jsonwebtoken';
 
 export class InvitationController {
   /**
@@ -48,6 +49,19 @@ export class InvitationController {
         invitedBy,
       });
 
+      const normalizedEmail = email.trim().toLowerCase();
+
+      // Only generate a temp password for brand-new invitees with no existing workspace access.
+      // Existing users may have already set their own password; overwriting it would be destructive.
+      const existingWorkspaceUsers = await DatabaseClient.getInstance().user.count({
+        where: { email: normalizedEmail, leftAt: null },
+      });
+
+      let tempPassword: string | null = null;
+      if (existingWorkspaceUsers === 0) {
+        tempPassword = await invitationService.generateOrgMemberPassword(normalizedEmail);
+      }
+
       // Send invitation email
       const emailResult = await invitationService.sendInvitationEmail({
         to: email,
@@ -55,6 +69,7 @@ export class InvitationController {
         workspaceName: invitation.workspace?.name || 'the workspace',
         invitationLink: `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspaceId}&invitationId=${invitation.invitationId || invitation.id}`)}`,
         invitationId: invitation.invitationId || invitation.id,
+        tempPassword: tempPassword ?? undefined,
       });
 
       // If email failed, delete the invitation to maintain consistency
@@ -176,7 +191,8 @@ export class InvitationController {
         return;
       }
 
-      // Read identity from the httpOnly google_access_token cookie
+      // Read identity from the httpOnly google_access_token cookie.
+      // Supports both signed-JWT (new email/OAuth flows) and legacy JSON shapes.
       const pendingAuthRaw = req.cookies?.google_access_token as string | undefined;
       if (!pendingAuthRaw) {
         res.status(401).json({ error: 'Not authenticated. Please login first.' });
@@ -185,23 +201,39 @@ export class InvitationController {
 
       let oauthUser: { email: string; googleId?: string; providerUserId?: string; name: string; picture?: string };
       let provider: string;
+      let pendingAuthJwtId: string | undefined;
 
       try {
         const decoded = jwt.verify(pendingAuthRaw, process.env.JWT_SECRET!) as {
           email?: string;
           name?: string;
+          providerUserId?: string;
           picture?: string;
           googleId?: string;
-          providerUserId?: string;
           provider?: string;
+          refreshToken?: string | null;
+          accessToken?: string | null;
+          jwtId?: string;
         };
-        if (!decoded?.email) throw new Error('Invalid JWT payload');
+        if (!decoded.email) throw new Error('Invalid JWT payload');
+
+        // If the JWT contains a jwtId, verify it exists in Redis (email-flow revocable token)
+        if (decoded.jwtId) {
+          const jwtKey = `pendingauth:jwtid:${decoded.jwtId}`;
+          const jwtValue = await redisService.get(jwtKey);
+          if (!jwtValue) {
+            res.status(401).json({ error: 'Authentication session expired. Please login again.' });
+            return;
+          }
+          pendingAuthJwtId = decoded.jwtId;
+        }
+
         oauthUser = {
           email: decoded.email,
           name: decoded.name || '',
-          picture: decoded.picture,
           googleId: decoded.googleId,
           providerUserId: decoded.providerUserId,
+          picture: decoded.picture || '',
         };
         provider = decoded.provider || 'GOOGLE';
       } catch {
@@ -217,7 +249,12 @@ export class InvitationController {
       }
 
       // Normalize auth provider
-      const authProvider = provider?.toUpperCase() === 'MICROSOFT' ? 'MICROSOFT' : 'GOOGLE';
+      const normalizedProvider = provider?.toUpperCase();
+      const authProvider = normalizedProvider === 'MICROSOFT'
+        ? 'MICROSOFT'
+        : normalizedProvider === 'EMAIL'
+          ? 'EMAIL'
+          : 'GOOGLE';
 
       // Fetch invitation to verify email before accepting
       const invitation = await invitationService.getInvitationByInvitationId(id);
@@ -243,6 +280,11 @@ export class InvitationController {
           authProvider: authProvider,
         },
       });
+
+      // Consume the one-time pending-auth token so it cannot be replayed
+      if (pendingAuthJwtId) {
+        await redisService.del(`pendingauth:jwtid:${pendingAuthJwtId}`);
+      }
 
       res.status(200).json({
         success: true,

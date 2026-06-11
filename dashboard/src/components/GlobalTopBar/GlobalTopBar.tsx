@@ -22,8 +22,6 @@ import { Tooltip } from '../ui/Tooltip';
 import { WorkspaceSwitcher } from '../AppSidebar/WorkspaceSwitcher';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
 
-import { useCanCreateWorkspace } from '../../hooks/usePermissions';
-
 interface GlobalTopBarProps {
   onOpenErrorReport?: () => void;
   onViewMyTickets?: () => void;
@@ -264,8 +262,6 @@ const GlobalTopBar = ({
     menuTimerRef.current = setTimeout(() => setSupportMenuOpen(false), 150);
   };
 
-  const canCreateWorkspace = useCanCreateWorkspace();
-
   const handleDoubleClick = (): void => {
     if (typeof window.electronAPI?.toggleCompactMode === 'function') {
       window.electronAPI.toggleCompactMode();
@@ -284,7 +280,7 @@ const GlobalTopBar = ({
         // no-drag so the button is clickable
       >
         <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} className='ml-1 mt-1'>
-          {canCreateWorkspace && <WorkspaceSwitcher />}
+          <WorkspaceSwitcher />
         </div>
       </div>
       <div className='absolute left-1/2 -translate-x-1/2 flex items-center'>

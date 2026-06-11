@@ -41,6 +41,7 @@ interface AuthContext {
 type AuthEvent =
   | { type: 'GOOGLE_SIGNIN' }
   | { type: 'MICROSOFT_SIGNIN' }
+  | { type: 'EMAIL_SIGNIN' }
   | { type: 'LOGOUT' }
   | { type: 'SESSION_VALIDATED'; user: User; isNewUser?: boolean }
   | { type: 'OAUTH_CALLBACK_COMPLETE'; output: OAuthCallbackOutput }
@@ -80,7 +81,7 @@ interface Invitation {
   workspaceName?: string;
 }
 
-interface OAuthCallbackOutput {
+export interface OAuthCallbackOutput {
   user?: User;
   workspaces: Workspace[];
   invitations?: Invitation[];
@@ -552,6 +553,9 @@ export const authMachine = createMachine(
             actions: {
               type: 'initiateMicrosoftSignIn',
             },
+          },
+          EMAIL_SIGNIN: {
+            target: 'authenticating',
           },
           SESSION_VALIDATED: {
             target: 'authenticated',

@@ -17,8 +17,13 @@ import {
   Monitor,
   Smartphone,
   LayoutGrid,
+  Shield,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { NotificationLevel } from '@xyne/shared';
+import axios from 'axios';
+import { API_BASE_URL } from '../../../config';
 import { format } from 'date-fns';
 
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -67,6 +72,7 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'calendar', label: 'Calendar', icon: <Calendar className='size-4' /> },
+  { id: 'security', label: 'Security', icon: <Shield className='size-4' /> },
   { id: 'developer', label: 'Developer', icon: <Code2 className='size-4' /> },
 ];
 
@@ -440,6 +446,140 @@ const CalendarSection: FC<{ state: PreferencesState }> = ({ state }) => (
   </div>
 );
 
+// ─── Security ───────────────────────────────────────────────────────────────
+const SecuritySection: FC = () => {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (): Promise<void> => {
+    setError('');
+    setSuccess('');
+
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await axios.post(
+        `${API_BASE_URL}/v2/auth/email/change-password`,
+        { currentPassword, newPassword },
+        { withCredentials: true },
+      );
+      setSuccess('Password updated successfully');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      if (axios.isAxiosError<{ error?: string }>(err) && err.response?.data?.error) {
+        setError(err.response.data.error);
+      } else {
+        setError('Failed to update password');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className='space-y-4'>
+      <SectionHeader title='Security' subtitle='Manage your account security' />
+
+      <div className='space-y-4'>
+        <div className='space-y-3'>
+          <div className='relative'>
+            <input
+              type={showCurrent ? 'text' : 'password'}
+              placeholder='Current password'
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              data-track-category='PREFERENCES'
+              data-track-name='CurrentPasswordInput'
+            />
+            <button
+              type='button'
+              onClick={() => setShowCurrent(!showCurrent)}
+              className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
+              data-track-category='PREFERENCES'
+              data-track-name='ToggleShowCurrentPassword'
+            >
+              {showCurrent ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
+            </button>
+          </div>
+
+          <div className='relative'>
+            <input
+              type={showNew ? 'text' : 'password'}
+              placeholder='New password (min 8 characters)'
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              data-track-category='PREFERENCES'
+              data-track-name='NewPasswordInput'
+            />
+            <button
+              type='button'
+              onClick={() => setShowNew(!showNew)}
+              className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
+              data-track-category='PREFERENCES'
+              data-track-name='ToggleShowNewPassword'
+            >
+              {showNew ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
+            </button>
+          </div>
+
+          <div className='relative'>
+            <input
+              type={showConfirm ? 'text' : 'password'}
+              placeholder='Confirm new password'
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              data-track-category='PREFERENCES'
+              data-track-name='ConfirmPasswordInput'
+            />
+            <button
+              type='button'
+              onClick={() => setShowConfirm(!showConfirm)}
+              className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
+              data-track-category='PREFERENCES'
+              data-track-name='ToggleShowConfirmPassword'
+            >
+              {showConfirm ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
+            </button>
+          </div>
+
+          {error && <p className='text-sm text-destructive'>{error}</p>}
+          {success && <p className='text-sm text-green-600 dark:text-green-400'>{success}</p>}
+        </div>
+
+        <Button
+          onClick={() => void handleSubmit()}
+          disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
+          className='w-full'
+          data-track-category='PREFERENCES'
+          data-track-name='UpdatePassword'
+        >
+          {isSubmitting ? 'Updating...' : 'Update Password'}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 // ─── Developer ──────────────────────────────────────────────────────────────
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   const { isMobile } = usePlatform();
@@ -603,6 +743,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   search: SearchSection,
   toolbar: ToolbarSection,
   calendar: CalendarSection,
+  security: SecuritySection as FC<{ state: PreferencesState }>,
   developer: DeveloperSection,
 };
 

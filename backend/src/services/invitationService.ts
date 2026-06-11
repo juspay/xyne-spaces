@@ -9,6 +9,7 @@ import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
 import { UserService } from './userService';
 import crypto from 'crypto';
+import { hashPassword } from '../utils/passwordUtils';
 
 export interface CreateInvitationParams {
   email: string;
@@ -202,6 +203,31 @@ export class InvitationService {
   }
 
   /**
+   * Ensure orgMember has a password. If not, generate a temporary one,
+   * hash it, store it, and return the plaintext for the invitation email.
+   */
+  async generateOrgMemberPassword(email: string): Promise<string> {
+    const orgMember = await this.prisma.orgMember.findUnique({
+      where: { email: email.toLowerCase() },
+      select: { memberId: true, passwordHash: true },
+    });
+
+    if (!orgMember) {
+      throw new Error(`orgMember not found for ${email}`);
+    }
+
+    const tempPassword = crypto.randomBytes(12).toString('base64url'); // ~16 chars
+    const hashed = await hashPassword(tempPassword);
+
+    await this.prisma.orgMember.update({
+      where: { memberId: orgMember.memberId },
+      data: { passwordHash: hashed },
+    });
+
+    return tempPassword;
+  }
+
+  /**
    * Send invitation email using the configured email service
    */
   async sendInvitationEmail(params: {
@@ -210,8 +236,9 @@ export class InvitationService {
     workspaceName: string;
     invitationLink: string;
     invitationId: string;
+    tempPassword?: string;
   }): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    const { to, inviterName, workspaceName, invitationLink, invitationId } = params;
+    const { to, inviterName, workspaceName, invitationLink, invitationId, tempPassword } = params;
 
     const result = await emailService.sendInvitationEmail({
       to,
@@ -219,6 +246,7 @@ export class InvitationService {
       workspaceName,
       invitationLink,
       invitationId,
+      tempPassword,
     });
 
     if (result.success) {

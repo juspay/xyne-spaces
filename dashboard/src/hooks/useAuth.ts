@@ -1,10 +1,12 @@
 import { useSelector } from '@xstate/react';
 import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
 import { authActor } from '../machines/authMachine';
-import type { AuthState, User, Workspace } from '../machines/authMachine';
+import type { AuthState, User, Workspace, OAuthCallbackOutput } from '../machines/authMachine';
 import { analyticsService } from '../services/Analytics/analyticsService';
 import { Context } from '@xyne/shared/index';
+import { API_BASE_URL } from '../config';
 
 export interface UseAuthReturn {
   // State
@@ -24,6 +26,7 @@ export interface UseAuthReturn {
 
   signInWithGoogle: () => void;
   signInWithMicrosoft: () => void;
+  signInWithEmail: (email: string, password: string, invitationId?: string) => Promise<void>;
   logout: () => void;
   clearError: () => void;
   selectWorkspace: (workspaceId: string) => void;
@@ -47,6 +50,53 @@ export const useAuth = (): UseAuthReturn => {
   const signInWithMicrosoft = useCallback(() => {
     send({ type: 'MICROSOFT_SIGNIN' });
   }, [send]);
+
+  const signInWithEmail = useCallback(
+    async (email: string, password: string, invitationId?: string) => {
+      send({ type: 'EMAIL_SIGNIN' });
+      try {
+        const response = await axios.post(
+          `${API_BASE_URL}/v2/auth/email/login`,
+          { email, password, invitationId },
+          { withCredentials: true, timeout: 15000 },
+        );
+        const data = response.data as {
+          success: boolean;
+          user?: User;
+          workspaces: Workspace[];
+          pendingUserData: { email: string; name: string; picture?: string };
+          userExistsButRemoved: boolean;
+          autoLoginWorkspace?: string;
+        };
+
+        if (!data.success) {
+          send({ type: 'AUTH_ERROR', message: 'Email login failed' });
+          return;
+        }
+
+        authActor.send({
+          type: 'OAUTH_CALLBACK_COMPLETE',
+          output: {
+            ...(data.user ? { user: data.user } : {}),
+            workspaces: data.workspaces,
+            pendingUserData: data.pendingUserData,
+            userExistsButRemoved: data.userExistsButRemoved,
+            autoLoginWorkspace: data.autoLoginWorkspace,
+          } as OAuthCallbackOutput,
+        });
+      } catch (err) {
+        if (axios.isAxiosError(err)) {
+          const data = err.response?.data as { error?: string; message?: string } | undefined;
+          if (data?.message) {
+            send({ type: 'AUTH_ERROR', message: data.message });
+            return;
+          }
+        }
+        send({ type: 'AUTH_ERROR', message: 'Email login failed. Please check your credentials.' });
+      }
+    },
+    [send],
+  );
 
   const clearError = useCallback(() => {
     send({ type: 'CLEAR_ERROR' });
@@ -91,6 +141,7 @@ export const useAuth = (): UseAuthReturn => {
 
     signInWithGoogle,
     signInWithMicrosoft,
+    signInWithEmail,
     logout,
     clearError,
     selectWorkspace,

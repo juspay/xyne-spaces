@@ -1206,10 +1206,40 @@ export class AuthV2Controller {
           });
           return;
         }
-        oauthUserData = parsed.oauthUserData;
-        provider = parsed.provider;
-        pendingRefreshToken = parsed.pendingRefreshToken;
-        pendingAccessToken = parsed.pendingAccessToken;
+
+        const hasProviderIdentity = !!(parsed.oauthUserData.providerUserId || parsed.oauthUserData.googleId);
+        if (hasProviderIdentity) {
+          oauthUserData = parsed.oauthUserData;
+          provider = parsed.provider;
+          pendingRefreshToken = parsed.pendingRefreshToken;
+          pendingAccessToken = parsed.pendingAccessToken;
+        } else if (existingSessionId) {
+
+          const session = await this.userSessionService.getSessionById(existingSessionId);
+          if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
+            res.status(401).json({
+              error: 'Invalid session',
+              message: 'Session not found or expired'
+            });
+            return;
+          }
+
+          oauthUserData = {
+            email: session.user.email,
+            name: session.user.name || '',
+            providerUserId: session.user.providerUserId,
+            picture: session.user.picture || undefined,
+          };
+          provider = session.user.authProvider;
+          pendingRefreshToken = session.refreshToken;
+          pendingAccessToken = session.accessToken || undefined;
+        } else {
+          res.status(401).json({
+            error: 'Invalid auth data',
+            message: 'Pending auth data is missing provider identity'
+          });
+          return;
+        }
       } else if (existingSessionId) {
         /**
          * AUTO-LOGIN FLOW: Use existing session (cookies already set)
@@ -1786,6 +1816,7 @@ export class AuthV2Controller {
     try {
       const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
         googleId?: string;
+        providerUserId?: string;
         email?: string;
         name?: string;
         picture?: string;
@@ -1799,6 +1830,7 @@ export class AuthV2Controller {
           email: decoded.email,
           name: decoded.name || '',
           googleId: decoded.googleId,
+          providerUserId: decoded.providerUserId,
           picture: decoded.picture,
         },
         provider: decoded.provider || AuthProvider.GOOGLE,

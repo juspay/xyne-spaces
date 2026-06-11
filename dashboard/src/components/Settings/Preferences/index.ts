@@ -10,6 +10,7 @@ export type PreferenceSection =
   | 'search'
   | 'toolbar'
   | 'calendar'
+  | 'security'
   | 'developer';
 
 export interface PreferencesProps {

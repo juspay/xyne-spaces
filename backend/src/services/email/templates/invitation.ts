@@ -4,7 +4,8 @@ export function invitationEmailHtml({
   inviterName,
   workspaceName,
   invitationLink,
-}: Pick<SendInvitationEmailParams, 'inviterName' | 'workspaceName' | 'invitationLink'>): string {
+  tempPassword,
+}: Pick<SendInvitationEmailParams, 'inviterName' | 'workspaceName' | 'invitationLink' | 'tempPassword'>): string {
   return `
 <!DOCTYPE html>
 <html>
@@ -76,6 +77,19 @@ export function invitationEmailHtml({
                 </tr>
               </table>
 
+              ${tempPassword ? `
+              <!-- Temp Password Banner -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+                <tr>
+                  <td style="background:#ecfdf5;border:1px solid #10b981;border-radius:8px;padding:12px 16px;">
+                    <strong style="display:block;color:#065f46;font-size:13px;margin-bottom:4px;">🔑 Your Temporary Password</strong>
+                    <span style="color:#065f46;font-size:13px;">Use this password to sign in with your email. This will remain your password until you have set it manually. Alternately, sign-in with Google/Microsoft SSO instead.</span>
+                    <p style="font-size:18px;font-weight:bold;color:#047857;margin:8px 0 0 0;letter-spacing:1px;">${tempPassword}</p>
+                  </td>
+                </tr>
+              </table>
+              ` : ''}
+
               <!-- Step 2 -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:32px;">
                 <tr>
@@ -124,7 +138,8 @@ export function invitationEmailText({
   inviterName,
   workspaceName,
   invitationLink,
-}: Pick<SendInvitationEmailParams, 'inviterName' | 'workspaceName' | 'invitationLink'>): string {
+  tempPassword,
+}: Pick<SendInvitationEmailParams, 'inviterName' | 'workspaceName' | 'invitationLink' | 'tempPassword'>): string {
   return `
 You've been invited to join ${workspaceName} on Xyne Spaces!
 
@@ -148,6 +163,14 @@ Once the app is installed, open the link below to accept your invitation and log
 Do NOT open this link in a browser — it must be opened in the Xyne Spaces desktop app.
 
   ${invitationLink}
+
+${tempPassword ? `──────────────────────────────────────────
+🔑 YOUR TEMPORARY PASSWORD
+──────────────────────────────────────────
+Use this password to sign in with your email. This will remain your password until you have set it manually. Alternately, sign-in with Google/Microsoft SSO instead.
+
+  ${tempPassword}
+` : ''}
 
 ──────────────────────────────────────────
 This invitation was sent by Xyne Spaces. If you weren't expecting this email, you can safely ignore it.
