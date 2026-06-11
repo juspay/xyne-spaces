@@ -66,6 +66,7 @@ export interface JiraMigrationPreviewInput {
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
+  issueKeys?: string[];
   jiraBoardId?: number;
   nextPageToken?: string;
   maxResults?: number;
@@ -565,6 +566,13 @@ export class JiraMigrationPreviewService {
     const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
     const pageSize = Math.min(Math.max(input.maxResults || 25, 1), 100);
     const pageOffset = Math.max(Number.parseInt(input.nextPageToken || '0', 10) || 0, 0);
+    const selectedIssueKeys = Array.from(
+      new Set(
+        (input.issueKeys || [])
+          .map(value => value.trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    );
     const appliedFilters: JiraMigrationFilters = {
       ...(input.filters?.reporterAccountIds?.length ? { reporterAccountIds: [...new Set(input.filters.reporterAccountIds.map(value => value.trim()).filter(Boolean))] } : {}),
       ...(input.filters?.creatorAccountIds?.length ? { creatorAccountIds: [...new Set(input.filters.creatorAccountIds.map(value => value.trim()).filter(Boolean))] } : {}),
@@ -572,7 +580,7 @@ export class JiraMigrationPreviewService {
       ...(input.filters?.labels?.length ? { labels: [...new Set(input.filters.labels.map(value => value.trim()).filter(Boolean))] } : {}),
       ...(input.filters?.epicKeys?.length ? { epicKeys: [...new Set(input.filters.epicKeys.map(value => value.trim().toUpperCase()).filter(Boolean))] } : {}),
     };
-    const shouldLoadFilters =
+    const shouldLoadFilters = selectedIssueKeys.length === 0 && (
       input.loadFilterOptions === true ||
       Boolean(
         appliedFilters.reporterAccountIds?.length ||
@@ -580,7 +588,8 @@ export class JiraMigrationPreviewService {
           appliedFilters.assigneeAccountIds?.length ||
           appliedFilters.labels?.length ||
           appliedFilters.epicKeys?.length,
-      );
+      )
+    );
 
     const [
       project,
@@ -645,7 +654,32 @@ export class JiraMigrationPreviewService {
     let responseNextPageToken: string | null = null;
     let responseHasNextPage = false;
 
-    if (shouldLoadFilters) {
+    if (selectedIssueKeys.length > 0) {
+      const paginatedIssueKeys = selectedIssueKeys.slice(pageOffset, pageOffset + pageSize);
+      filteredIssueCount = selectedIssueKeys.length;
+      responseNextPageToken =
+        pageOffset + pageSize < selectedIssueKeys.length ? String(pageOffset + pageSize) : null;
+      responseHasNextPage = pageOffset + pageSize < selectedIssueKeys.length;
+
+      const previewIssues = paginatedIssueKeys.length > 0
+        ? await this.jiraClient.fetchIssuesByKeys(
+            jiraProjectKey,
+            paginatedIssueKeys,
+            input.dateFrom,
+            buildPreviewIssueFields(fieldDefinitions),
+          )
+        : [];
+
+      const previewIssuesByKey = new Map(previewIssues.map(issue => [issue.key, issue]));
+      orderedPreviewIssues = paginatedIssueKeys
+        .map(issueKey => previewIssuesByKey.get(issueKey))
+        .filter((issue): issue is JiraIssue => Boolean(issue));
+      filteredStatusNames = new Set(
+        orderedPreviewIssues
+          .map(issue => issue.fields.status?.name)
+          .filter((statusName): statusName is string => typeof statusName === 'string' && statusName.trim().length > 0),
+      );
+    } else if (shouldLoadFilters) {
       const projectIssueIndex = await jiraMigrationProjectIndexService.getProjectIssueIndex(jiraProjectKey, input.dateFrom);
       const filteredIndexIssues = jiraMigrationProjectIndexService.filterIssues(projectIssueIndex, appliedFilters);
       filterOptions = await jiraMigrationProjectIndexService.getFilterOptions(jiraProjectKey, input.dateFrom);
@@ -819,11 +853,21 @@ export class JiraMigrationPreviewService {
     const orderedSource: string[] =
       boardStatusSequence && boardStatusSequence.length > 0 ? boardStatusSequence : projectStatusSequence;
 
-    const orderedStatusesByNormalized = new Map<string, string>(
-      orderedSource
-        .map(status => [normalize(status), status] as const)
-        .filter(([key]) => Boolean(key)),
-    );
+    const existingBoardStageOrder = boardStages
+      .map(stage => stage.name?.trim())
+      .filter((stageName): stageName is string => Boolean(stageName));
+
+    const orderedStatusesByNormalized = new Map<string, string>();
+    for (const status of existingBoardStageOrder) {
+      const normalizedStatus = normalize(status);
+      if (!normalizedStatus || orderedStatusesByNormalized.has(normalizedStatus)) continue;
+      orderedStatusesByNormalized.set(normalizedStatus, status);
+    }
+    for (const status of orderedSource) {
+      const normalizedStatus = normalize(status);
+      if (!normalizedStatus || orderedStatusesByNormalized.has(normalizedStatus)) continue;
+      orderedStatusesByNormalized.set(normalizedStatus, status);
+    }
     const allStatusesByNormalized = new Map<string, string>(
       Array.from(allStatuses)
         .map(status => [normalize(status), status] as const)

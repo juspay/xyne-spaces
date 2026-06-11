@@ -125,6 +125,7 @@ export interface JiraMigrationPreviewRequest {
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
+  issueKeys?: string[];
   jiraBoardId?: number;
   nextPageToken?: string;
   maxResults?: number;
@@ -138,6 +139,7 @@ export interface JiraMigrationBaseRequest {
   targetProjectId: string;
   targetBoardId: string;
   targetChannelId: string;
+  issueKeys?: string[];
   jiraBoardId?: number;
   dateFrom?: string;
   filters?: JiraMigrationFilters;
@@ -301,6 +303,7 @@ export interface JiraMigrationMoveJiraProjectBoardRequest {
   channelId: string;
   sourceBoardId: string;
   targetBoardId: string;
+  tagNames?: string[];
   dryRun?: boolean;
   confirmText?: string;
 }
@@ -312,8 +315,10 @@ export interface JiraMigrationMoveJiraProjectBoardResponse {
   channelId: string;
   sourceBoardId: string;
   targetBoardId: string;
+  tagNames?: string[];
   movedTickets: number;
   missingStages: string[];
+  warnings?: string[];
 }
 
 export interface JiraMigrationPurgeProjectMigrationRequest {

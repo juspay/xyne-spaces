@@ -164,6 +164,7 @@ const JiraMigrationScreen = (): ReactElement => {
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [targetChannelId, setTargetChannelId] = useState('');
   const [jiraProjectKey, setJiraProjectKey] = useState('');
+  const [issueKeysInput, setIssueKeysInput] = useState('');
   const [jiraBoardId, setJiraBoardId] = useState<number | null>(null);
   const [ticketRange, setTicketRange] = useState<TicketRange>('all');
   const [filters, setFilters] = useState<JiraMigrationFilters>({});
@@ -227,6 +228,7 @@ const JiraMigrationScreen = (): ReactElement => {
   const [moveJiraChannelId, setMoveJiraChannelId] = useState('');
   const [moveSourceBoardId, setMoveSourceBoardId] = useState('');
   const [moveTargetBoardId, setMoveTargetBoardId] = useState('');
+  const [moveTagNamesInput, setMoveTagNamesInput] = useState('');
   const [moveDryRun, setMoveDryRun] = useState(true);
   const [moveConfirmText, setMoveConfirmText] = useState('');
   const [moveResult, setMoveResult] = useState<JiraMigrationMoveJiraProjectBoardResponse | null>(
@@ -484,6 +486,15 @@ const JiraMigrationScreen = (): ReactElement => {
       }
     }
 
+    const normalizedMoveTagNames = Array.from(
+      new Set(
+        moveTagNamesInput
+          .split(',')
+          .map(value => value.trim())
+          .filter(Boolean),
+      ),
+    );
+
     setIsMoveBoardLoading(true);
     try {
       const payload = {
@@ -491,6 +502,7 @@ const JiraMigrationScreen = (): ReactElement => {
         channelId: moveJiraChannelId.trim(),
         sourceBoardId: moveSourceBoardId.trim(),
         targetBoardId: moveTargetBoardId.trim(),
+        ...(normalizedMoveTagNames.length > 0 ? { tagNames: normalizedMoveTagNames } : {}),
         dryRun: moveDryRun,
         ...(!moveDryRun ? { confirmText: moveConfirmText.trim() } : {}),
       };
@@ -764,6 +776,19 @@ const JiraMigrationScreen = (): ReactElement => {
     return date.toISOString().slice(0, 10);
   }, [ticketRange]);
 
+  const normalizedIssueKeys = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          issueKeysInput
+            .split(',')
+            .map(value => value.trim().toUpperCase())
+            .filter(Boolean),
+        ),
+      ),
+    [issueKeysInput],
+  );
+
   useEffect(() => {
     if (!activeJobId) return undefined;
 
@@ -966,6 +991,7 @@ const JiraMigrationScreen = (): ReactElement => {
         setScanPagesScanned(pages);
         const page = await jiraMigrationService.resolveUsers({
           jiraProjectKey: jiraProjectKey.trim().toUpperCase(),
+          ...(normalizedIssueKeys.length > 0 ? { issueKeys: normalizedIssueKeys } : {}),
           ...(resolvedDateFrom ? { dateFrom: resolvedDateFrom } : {}),
           includeComments: scanIncludeComments,
           includeAttachments: scanIncludeAttachments,
@@ -1249,11 +1275,13 @@ const JiraMigrationScreen = (): ReactElement => {
     targetProjectId: selectedProjectId,
     targetBoardId: selectedBoardId,
     targetChannelId: targetChannelId.trim(),
+    ...(normalizedIssueKeys.length > 0 ? { issueKeys: normalizedIssueKeys } : {}),
     ...(jiraBoardId !== null ? { jiraBoardId } : {}),
     maxResults: 25,
     ...(resolvedDateFrom ? { dateFrom: resolvedDateFrom } : {}),
     ...(isFilterEnabled ? { loadFilterOptions: true } : {}),
-    ...(isFilterEnabled &&
+    ...(normalizedIssueKeys.length === 0 &&
+    isFilterEnabled &&
     (filters.reporterAccountIds?.length ||
       filters.creatorAccountIds?.length ||
       filters.assigneeAccountIds?.length ||
@@ -2151,6 +2179,28 @@ const JiraMigrationScreen = (): ReactElement => {
                   </div>
                 </div>
 
+                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <label
+                    htmlFor='jira-move-project-tags'
+                    className='mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                  >
+                    <Tag className='h-3.5 w-3.5' />
+                    Ticket Tags
+                  </label>
+                  <Input
+                    id='jira-move-project-tags'
+                    value={moveTagNamesInput}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                      setMoveTagNamesInput(e.target.value);
+                      setMoveResult(null);
+                    }}
+                    placeholder='bug, urgent, customer-escalation'
+                  />
+                  <p className='mt-2 text-xs text-muted-foreground'>
+                    Optional. When set, only tickets with any of these tags will be moved.
+                  </p>
+                </div>
+
                 <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
                   <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
@@ -2226,6 +2276,14 @@ const JiraMigrationScreen = (): ReactElement => {
                         <div className='text-[11px] uppercase text-muted-foreground'>Tickets</div>
                         <div className='font-semibold'>{moveResult.movedTickets}</div>
                       </div>
+                      <div>
+                        <div className='text-[11px] uppercase text-muted-foreground'>
+                          Tag Filter
+                        </div>
+                        <div className='font-semibold'>
+                          {moveResult.tagNames?.length ? moveResult.tagNames.join(', ') : 'All'}
+                        </div>
+                      </div>
                       <div className='md:col-span-3'>
                         <div className='text-[11px] uppercase text-muted-foreground'>
                           Missing Stages
@@ -2237,6 +2295,11 @@ const JiraMigrationScreen = (): ReactElement => {
                         </div>
                       </div>
                     </div>
+                    {moveResult.warnings?.length ? (
+                      <div className='mt-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-900'>
+                        {moveResult.warnings.join(' ')}
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -2297,6 +2360,33 @@ const JiraMigrationScreen = (): ReactElement => {
                       />
                       <p className='mt-2 text-xs text-muted-foreground'>
                         Short Jira project identifier, for example `EUL`.
+                      </p>
+                      <label
+                        htmlFor='jira-issue-keys'
+                        className='mt-4 mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
+                      >
+                        Issue Keys
+                      </label>
+                      <Input
+                        id='jira-issue-keys'
+                        value={issueKeysInput}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                          setIssueKeysInput(e.target.value.toUpperCase());
+                          setStatusV2Mappings({});
+                          setSkippedCustomFieldIds({});
+                          setMigrationPhase('setup');
+                          setFilters({});
+                          setIsFilterEnabled(false);
+                          setPreview(null);
+                          setResult(null);
+                          setPageTokens([undefined]);
+                          setPageIndex(0);
+                        }}
+                        placeholder='JP-1234, JP-4566'
+                      />
+                      <p className='mt-2 text-xs text-muted-foreground'>
+                        Optional. Migrate only specific ticket keys. If provided, these keys take
+                        priority over project-wide filters.
                       </p>
                       <Button
                         variant='outline'
@@ -2566,10 +2656,17 @@ const JiraMigrationScreen = (): ReactElement => {
                                   Map all Jira statuses to StatusV2 before migrating.
                                 </p>
                               )}
+                              {normalizedIssueKeys.length > 0 && (
+                                <p className='text-xs text-amber-600'>
+                                  Explicit issue-key migration is available only in all-to-one mode.
+                                  Clear issue keys to run per-board bulk migration.
+                                </p>
+                              )}
                               <Button
                                 onClick={() => void handlePerBoardImport()}
                                 disabled={
                                   isPerBoardImportLoading ||
+                                  normalizedIssueKeys.length > 0 ||
                                   !hasCompleteStatusV2Mappings ||
                                   !targetChannelId.trim() ||
                                   !selectedProjectId.trim() ||
@@ -2667,6 +2764,9 @@ const JiraMigrationScreen = (): ReactElement => {
                       <p className='mt-2 text-xs text-muted-foreground'>
                         Range: {ticketRangeLabelMap[ticketRange]}
                         {resolvedDateFrom ? ` • Since ${resolvedDateFrom}` : ''}
+                        {normalizedIssueKeys.length > 0
+                          ? ` • ${normalizedIssueKeys.length} explicit issue key${normalizedIssueKeys.length > 1 ? 's' : ''}`
+                          : ''}
                       </p>
                     </div>
 
@@ -2684,6 +2784,12 @@ const JiraMigrationScreen = (): ReactElement => {
                             Filters are optional. If disabled, preview uses the standard Jira flow
                             and does not load filter metadata.
                           </p>
+                          {normalizedIssueKeys.length > 0 ? (
+                            <p className='mt-2 text-xs text-amber-700'>
+                              Explicit issue keys are set, so ticket-key scope overrides filters
+                              during preview and migration.
+                            </p>
+                          ) : null}
                         </div>
                         {preview && isFilterEnabled && (
                           <span className='rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-medium text-sky-800'>
