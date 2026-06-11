@@ -436,61 +436,62 @@ export const WorkspaceSwitcher: React.FC = () => {
               )}
 
               {/* Create a new workspace */}
-              {showCreateForm ? (
-                <form
-                  onSubmit={e => void handleCreate(e)}
-                  className='px-3 pb-3 pt-1 flex flex-col gap-2'
-                >
-                  {error && <p className='text-xs text-red-500'>{error}</p>}
-                  <input
-                    type='text'
-                    placeholder='Workspace name'
-                    value={workspaceName}
-                    onChange={e => setWorkspaceName(e.target.value)}
+              {canCreateWorkspace &&
+                (showCreateForm ? (
+                  <form
+                    onSubmit={e => void handleCreate(e)}
+                    className='px-3 pb-3 pt-1 flex flex-col gap-2'
+                  >
+                    {error && <p className='text-xs text-red-500'>{error}</p>}
+                    <input
+                      type='text'
+                      placeholder='Workspace name'
+                      value={workspaceName}
+                      onChange={e => setWorkspaceName(e.target.value)}
+                      data-track-category='Workspace_Switcher'
+                      data-track-name='Workspace_Name_Input'
+                      className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
+                      required
+                      // eslint-disable-next-line jsx-a11y/no-autofocus
+                      autoFocus
+                    />
+                    <div className='flex gap-2'>
+                      <button
+                        type='submit'
+                        disabled={creating || !workspaceName.trim()}
+                        data-track-category='Workspace_Switcher'
+                        data-track-name='Create_Workspace'
+                        className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
+                      >
+                        {creating ? 'Creating…' : 'Create'}
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setShowCreateForm(false);
+                          setError(null);
+                        }}
+                        data-track-category='Workspace_Switcher'
+                        data-track-name='Cancel_Create_Workspace'
+                        className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => setShowCreateForm(true)}
                     data-track-category='Workspace_Switcher'
-                    data-track-name='Workspace_Name_Input'
-                    className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
-                    required
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
-                    autoFocus
-                  />
-                  <div className='flex gap-2'>
-                    <button
-                      type='submit'
-                      disabled={creating || !workspaceName.trim()}
-                      data-track-category='Workspace_Switcher'
-                      data-track-name='Create_Workspace'
-                      className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
-                    >
-                      {creating ? 'Creating…' : 'Create'}
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setShowCreateForm(false);
-                        setError(null);
-                      }}
-                      data-track-category='Workspace_Switcher'
-                      data-track-name='Cancel_Create_Workspace'
-                      className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <button
-                  onClick={() => setShowCreateForm(true)}
-                  data-track-category='Workspace_Switcher'
-                  data-track-name='Show_Create_Workspace_Form'
-                  className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
-                >
-                  <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
-                    <Plus size={14} className='text-foreground' />
-                  </div>
-                  <span className='text-sm text-foreground'>Create a new workspace</span>
-                </button>
-              )}
+                    data-track-name='Show_Create_Workspace_Form'
+                    className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
+                  >
+                    <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
+                      <Plus size={14} className='text-foreground' />
+                    </div>
+                    <span className='text-sm text-foreground'>Create a new workspace</span>
+                  </button>
+                ))}
             </div>
           )}
         </div>
