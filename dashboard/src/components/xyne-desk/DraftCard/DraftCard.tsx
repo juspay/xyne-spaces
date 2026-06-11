@@ -13,10 +13,9 @@ import {
   Loader2,
   Square,
   Quote,
-  RefreshCw,
   ChevronDown,
+  ChevronUp,
   Wand2,
-  Pencil,
   AlignLeft,
   CheckCheck,
   Maximize2,
@@ -44,20 +43,22 @@ const REFINE_PRESETS: ReadonlyArray<{
   { id: 'shorten', label: 'Shorten', icon: <Minimize2 size={14} /> },
 ];
 
+export type DraftAcceptAction = 'insert' | 'replace';
+
 interface DraftCardProps {
   draftContent: string;
   isStreaming: boolean;
-  onAccept: () => void;
+  onAccept: (action: DraftAcceptAction) => void;
+  defaultAcceptAction?: DraftAcceptAction;
   onReject: () => void;
   onRefine: (instruction: string, options?: { selectedText?: string }) => void;
-  /** Regenerate the draft from the original request. Hidden when omitted. */
-  onRecreate?: () => void;
   /** Apply a one-tap rewrite preset (Polish / Formalize / Elaborate / Shorten) to the draft. */
   onQuickRefine?: (action: AIRefineQuickAction) => void;
   /** Selected text for refinement (can come from AI Draft selection or external "Your Draft" selection) */
   selectedTextForRefine?: string;
   /** Clear the selected text for refinement */
   onClearSelectedText?: () => void;
+  onCollapse?: () => void;
 }
 
 interface SelectionPopoverState {
@@ -79,12 +80,13 @@ export const DraftCard = ({
   draftContent,
   isStreaming,
   onAccept,
+  defaultAcceptAction = 'insert',
   onReject,
   onRefine,
-  onRecreate,
   onQuickRefine,
   selectedTextForRefine,
   onClearSelectedText,
+  onCollapse,
 }: DraftCardProps): ReactElement => {
   const contentRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -93,8 +95,9 @@ export const DraftCard = ({
   const refineMenuRef = useRef<HTMLDivElement>(null);
   const [selectionPopover, setSelectionPopover] = useState<SelectionPopoverState | null>(null);
   const [localSelectedText, setLocalSelectedText] = useState('');
-  const [showCustomRefine, setShowCustomRefine] = useState(false);
   const [refineMenuOpen, setRefineMenuOpen] = useState(false);
+  const [acceptMenuOpen, setAcceptMenuOpen] = useState(false);
+  const acceptMenuRef = useRef<HTMLDivElement>(null);
 
   // Use external selectedTextForRefine if provided, otherwise use local state
   const selectedText = selectedTextForRefine || localSelectedText;
@@ -154,6 +157,23 @@ export const DraftCard = ({
     document.addEventListener('mousedown', onDocMouseDown);
     return () => document.removeEventListener('mousedown', onDocMouseDown);
   }, [refineMenuOpen]);
+
+  // Keep the streaming draft pinned to the bottom of the card's scroll area.
+  useEffect(() => {
+    if (!isStreaming) return;
+    const el = contentRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [draftContent, isStreaming]);
+
+  // Close the accept split-button menu on outside click.
+  useEffect(() => {
+    if (!acceptMenuOpen) return;
+    const onDocMouseDown = (event: MouseEvent): void => {
+      if (!acceptMenuRef.current?.contains(event.target as Node)) setAcceptMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [acceptMenuOpen]);
 
   useEffect(() => {
     const handleWindowSelectionChange = (): void => {
@@ -290,37 +310,52 @@ export const DraftCard = ({
             <span className='text-sm font-semibold text-foreground'>AI Draft</span>
             {isStreaming && <Loader2 size={12} className='animate-spin text-muted-foreground' />}
           </div>
-          {isStreaming ? (
-            <button
-              type='button'
-              onClick={onReject}
-              className='inline-flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors dark:hover:bg-red-950/40 dark:hover:text-red-400'
-              aria-label='Stop generating'
-              title='Stop generating'
-              data-track-category='AIDraft'
-              data-track-name='StopDraft'
-            >
-              <Square size={11} className='fill-current' />
-              <span>Stop</span>
-            </button>
-          ) : (
-            <button
-              type='button'
-              onClick={onReject}
-              className='size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-              aria-label='Discard draft'
-              title='Discard draft'
-              data-track-category='AIDraft'
-              data-track-name='RejectDraft'
-            >
-              <X size={14} />
-            </button>
-          )}
+          <div className='flex items-center gap-1'>
+            {onCollapse && !isStreaming && (
+              <button
+                type='button'
+                onClick={onCollapse}
+                className='size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                aria-label='Collapse AI draft'
+                title='Collapse (keeps the draft)'
+                data-track-category='AIDraft'
+                data-track-name='CollapseAIDraft'
+              >
+                <ChevronUp size={14} />
+              </button>
+            )}
+            {isStreaming ? (
+              <button
+                type='button'
+                onClick={onReject}
+                className='inline-flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors dark:hover:bg-red-950/40 dark:hover:text-red-400'
+                aria-label='Stop generating'
+                title='Stop generating'
+                data-track-category='AIDraft'
+                data-track-name='StopDraft'
+              >
+                <Square size={11} className='fill-current' />
+                <span>Stop</span>
+              </button>
+            ) : (
+              <button
+                type='button'
+                onClick={onReject}
+                className='size-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                aria-label='Discard draft'
+                title='Discard draft'
+                data-track-category='AIDraft'
+                data-track-name='RejectDraft'
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
         </div>
 
         <div
           ref={contentRef}
-          className='px-4 py-3 flex-1 min-h-0 overflow-y-auto select-text selection:bg-red-400/30'
+          className='px-4 py-3 flex-1 min-h-0 max-h-80 overflow-y-auto select-text selection:bg-red-400/30'
         >
           {draftContent ? (
             <div className={aiMarkdownProseClassName}>
@@ -341,7 +376,7 @@ export const DraftCard = ({
           )}
         </div>
 
-        {(!!selectedText || showCustomRefine) && (
+        {!!selectedText && (
           <div className='px-4 pb-2 flex-shrink-0'>
             {selectedText && (
               <div className='mb-2 rounded-xl border border-red-200/70 bg-red-50/60 px-3 py-2 text-left dark:border-red-900/60 dark:bg-red-950/20'>
@@ -371,33 +406,15 @@ export const DraftCard = ({
             <RefineInput
               ref={refineInputRef}
               onSubmit={instruction => {
-                onRefine(instruction, selectedText ? { selectedText } : undefined);
-                setShowCustomRefine(false);
+                onRefine(instruction, { selectedText });
               }}
               disabled={isStreaming}
-              placeholder={
-                selectedText
-                  ? 'Refine the selected text (e.g., make it warmer, clearer...)'
-                  : 'Tell AI how to refine this draft...'
-              }
+              placeholder='Refine the selected text (e.g., make it warmer, clearer...)'
             />
           </div>
         )}
 
         <div className='flex items-center gap-1.5 px-3 py-2.5 border-t border-border flex-shrink-0'>
-          {onRecreate && (
-            <button
-              type='button'
-              onClick={onRecreate}
-              disabled={isStreaming}
-              className='inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-              data-track-category='AIDraft'
-              data-track-name='RecreateDraft'
-            >
-              <RefreshCw size={14} />
-              <span>Recreate</span>
-            </button>
-          )}
           <div className='relative' ref={refineMenuRef}>
             <button
               type='button'
@@ -437,37 +454,71 @@ export const DraftCard = ({
                     <span>{preset.label}</span>
                   </button>
                 ))}
-                <div className='border-t border-border my-1' />
-                <button
-                  type='button'
-                  role='menuitem'
-                  onClick={() => {
-                    setRefineMenuOpen(false);
-                    setShowCustomRefine(true);
-                    setTimeout(() => refineInputRef.current?.focus(), 0);
-                  }}
-                  className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors'
-                  data-track-category='AIDraft'
-                  data-track-name='OpenCustomRefine'
-                >
-                  <Pencil size={14} className='text-muted-foreground' />
-                  <span>Custom instructions…</span>
-                </button>
               </div>
             )}
           </div>
-          <button
-            type='button'
-            onClick={onAccept}
-            disabled={!draftContent || isStreaming}
-            className='ml-auto inline-flex items-center justify-center h-8 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-            aria-label='Insert draft into your reply'
-            title='Insert into your draft'
-            data-track-category='AIDraft'
-            data-track-name='AcceptDraft'
-          >
-            Insert
-          </button>
+          <div className='ml-auto relative flex items-center' ref={acceptMenuRef}>
+            <button
+              type='button'
+              onClick={() => onAccept(defaultAcceptAction)}
+              disabled={!draftContent || isStreaming}
+              className='inline-flex items-center justify-center h-8 pl-4 pr-3 rounded-l-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+              aria-label={
+                defaultAcceptAction === 'insert'
+                  ? 'Insert — append the AI draft to your draft'
+                  : 'Replace your draft with the AI draft'
+              }
+              title={
+                defaultAcceptAction === 'insert' ? 'Append to your draft' : 'Replace your draft'
+              }
+              data-track-category='AIDraft'
+              data-track-name='AcceptDraft'
+              data-track-metadata={JSON.stringify({ action: defaultAcceptAction })}
+            >
+              {defaultAcceptAction === 'insert' ? 'Insert' : 'Replace'}
+            </button>
+            <button
+              type='button'
+              onClick={() => setAcceptMenuOpen(open => !open)}
+              disabled={!draftContent || isStreaming}
+              className='inline-flex items-center justify-center h-8 px-1.5 rounded-r-full bg-primary text-primary-foreground border-l border-primary-foreground/25 hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+              aria-haspopup='menu'
+              aria-expanded={acceptMenuOpen}
+              aria-label='More accept options'
+              data-track-category='AIDraft'
+              data-track-name='ToggleAcceptMenu'
+            >
+              <ChevronDown size={13} />
+            </button>
+            {acceptMenuOpen && (
+              <div
+                role='menu'
+                className='absolute bottom-full right-0 mb-1.5 z-50 w-56 rounded-xl border border-border bg-popover shadow-lg overflow-hidden py-1'
+              >
+                {(defaultAcceptAction === 'insert'
+                  ? ([['replace', 'Replace', 'Overwrite your draft']] as const)
+                  : ([['insert', 'Insert', 'Append to your draft']] as const)
+                ).map(([action, label, hint]) => (
+                  <button
+                    key={action}
+                    type='button'
+                    role='menuitem'
+                    onClick={() => {
+                      setAcceptMenuOpen(false);
+                      onAccept(action);
+                    }}
+                    className='w-full flex flex-col items-start px-3 py-1.5 text-left hover:bg-muted transition-colors'
+                    data-track-category='AIDraft'
+                    data-track-name='AcceptDraft'
+                    data-track-metadata={JSON.stringify({ action })}
+                  >
+                    <span className='text-sm text-foreground'>{label}</span>
+                    <span className='text-xs text-muted-foreground'>{hint}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

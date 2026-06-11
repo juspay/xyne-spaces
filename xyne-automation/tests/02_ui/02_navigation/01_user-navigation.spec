@@ -14,7 +14,7 @@
 ## User navigates to Context page
 * Using browser
 * Ensuring user "user-1" is logged in
-* clicking on "[data-testid='nav-context']"
+* navigating via sidebar to "context"
 * waiting for "[data-testid='context-page']" to appear
 * verifying "Context" is visible in "[data-testid='context-page']"
 * verifying "Upload Docs" is visible in "[data-testid='context-page']"
@@ -26,7 +26,7 @@
 ## User navigates to Scheduled Messages page
 * Using browser
 * Ensuring user "user-1" is logged in
-* clicking on "[data-testid='nav-scheduled-messages']"
+* navigating via sidebar to "scheduled-messages"
 * waiting for "[data-testid='scheduled-messages-page']" to appear
 * verifying "Scheduled Messages" is visible in "[data-testid='scheduled-messages-page']"
 * verifying "Scheduled" is visible in "[data-testid='scheduled-messages-page']"
@@ -34,7 +34,7 @@
 ## User navigates to Apps page
 * Using browser
 * Ensuring user "user-1" is logged in
-* clicking on "[data-testid='nav-apps']"
+* navigating via sidebar to "apps"
 * waiting for "[data-testid='apps-page']" to appear
 * verifying "Xyne Apps" is visible in "[data-testid='apps-page']"
 * verifying "Manage your xyne-apps" is visible in "[data-testid='apps-page']"

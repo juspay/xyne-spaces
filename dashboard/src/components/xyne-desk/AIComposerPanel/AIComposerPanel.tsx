@@ -9,6 +9,7 @@ import {
   CheckCheck,
   Maximize2,
   Minimize2,
+  RefreshCw,
 } from 'lucide-react';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
@@ -171,6 +172,8 @@ export const AIComposerPanel = ({
 interface AIRefineDropdownProps {
   onQuickRewrite: (action: AIRefineQuickAction) => void;
   onAskAI: () => void;
+  onRerunDraft?: () => void;
+  agentName?: string;
   disabled?: boolean;
   showQuickRewrite?: boolean;
 }
@@ -178,6 +181,8 @@ interface AIRefineDropdownProps {
 export const AIRefineDropdown = ({
   onQuickRewrite,
   onAskAI,
+  onRerunDraft,
+  agentName,
   disabled = false,
   showQuickRewrite = true,
 }: AIRefineDropdownProps): ReactElement => {
@@ -279,6 +284,25 @@ export const AIRefineDropdown = ({
               </span>
               <span>Help me draft</span>
             </button>
+            {onRerunDraft && (
+              <button
+                type='button'
+                disabled={disabled}
+                onClick={() => {
+                  onRerunDraft();
+                  setOpen(false);
+                }}
+                className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
+                title={agentName ? `Rerun draft with ${agentName}` : 'Rerun draft'}
+                data-track-category='Support'
+                data-track-name='RerunDraftFromDropdown'
+              >
+                <span className='text-muted-foreground'>
+                  <RefreshCw size={14} />
+                </span>
+                <span>Rerun draft</span>
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

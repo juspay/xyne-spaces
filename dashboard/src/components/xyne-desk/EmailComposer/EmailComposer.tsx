@@ -8,16 +8,15 @@ import React, {
   type DragEvent,
 } from 'react';
 import type { Editor } from '@tiptap/react';
+import DOMPurify from 'dompurify';
 import {
   ArrowUp,
   Check,
   ChevronDown,
-  ChevronUp,
   CornerUpLeft,
   Loader2,
   Minimize2,
   Paperclip,
-  Pencil,
   PencilLine,
   RefreshCw,
   ReplyAll,
@@ -61,6 +60,7 @@ import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailD
 import { useDeskAIDraft } from '../../../hooks/useDeskAIDraft';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useChannelConnectedEmail } from '../../../hooks/useChannelConnectedEmail';
+import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
 
 import { DraftCard } from '../DraftCard/DraftCard';
 import { EmailEditor } from '../EmailEditor/EmailEditor';
@@ -228,6 +228,9 @@ export const EmailComposer = ({
   );
   const channelPreference = channelPreferenceList?.[0];
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
+  const clawAgents = useChannelClawAgents(channelId || null);
+  const draftAgentName =
+    clawAgents.find(a => a.slug === channelPreference?.autoDraftAgentSlug)?.name ?? 'Xyne AI';
   const deskContacts = useDeskContacts(channelId);
   // Use email draft hooks
   const draft = useEmailDraft(conversationId);
@@ -263,7 +266,14 @@ export const EmailComposer = ({
   const [aiPromptText, setAiPromptText] = useState<string>('');
   const aiPromptInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [aiPaneExpanded, setAiPaneExpanded] = useState<'ai' | 'yours'>('ai');
+  // AI draft pane toggle — your draft always shows as plain text above it.
+  const [aiPaneOpen, setAiPaneOpen] = useState(true);
+  // Scroll container of the draft-mode view — kept pinned to the bottom so the
+  // AI draft card and its actions stay in view while the draft streams in.
+  const draftScrollRef = useRef<HTMLDivElement | null>(null);
+  // How the active AI draft was produced — picks the accept default:
+  // 'write' (new writing) → Insert appends; 'rewrite' (quick changes) → Replace overwrites.
+  const [draftOrigin, setDraftOrigin] = useState<'write' | 'rewrite'>('write');
   const lastAskInstructionRef = useRef<string | null>(null);
 
   const isInlineAIPanelOpen = aiPanelMode !== null;
@@ -493,13 +503,11 @@ export const EmailComposer = ({
 
   // Clear stale editor ref when the body EmailEditor unmounts (e.g. draft pane collapsed).
   useEffect(() => {
-    const bodyEditorMounted =
-      (!aiDraft.isDraftActive && aiPanelMode === null) ||
-      (aiDraft.isDraftActive && aiPaneExpanded === 'yours');
+    const bodyEditorMounted = !aiDraft.isDraftActive && aiPanelMode === null;
     if (!bodyEditorMounted) {
       setBodyEditor(null);
     }
-  }, [aiDraft.isDraftActive, aiPaneExpanded, aiPanelMode]);
+  }, [aiDraft.isDraftActive, aiPanelMode]);
 
   const [composeSources, setComposeSources] = useState<DraftSource[]>([]);
 
@@ -577,15 +585,24 @@ export const EmailComposer = ({
   const runAskAIRefine = useCallback(
     (instruction: string): void => {
       lastAskInstructionRef.current = instruction;
-      setAiPaneExpanded('ai');
+      setAiPaneOpen(true);
+      setDraftOrigin('write');
       aiDraft.askAIRefine(instruction, stripHtml(emailContent));
     },
     [aiDraft, emailContent],
   );
 
   useEffect(() => {
-    if (aiDraft.isStreaming) setAiPaneExpanded('ai');
+    if (aiDraft.isStreaming) setAiPaneOpen(true);
   }, [aiDraft.isStreaming]);
+
+  // Keep the AI draft card fully in view: scroll to the bottom when the card
+  // opens and stay pinned there while the draft streams in.
+  useEffect(() => {
+    if (!aiDraft.isDraftActive || !aiPaneOpen) return;
+    const el = draftScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [aiDraft.isDraftActive, aiPaneOpen, aiDraft.draftContent]);
 
   // Drag-and-drop chips between To / Cc / Bcc.
   const [dragOverField, setDragOverField] = useState<RecipientField | null>(null);
@@ -2204,24 +2221,23 @@ export const EmailComposer = ({
               <DraftCard
                 draftContent={aiDraft.draftContent}
                 isStreaming={aiDraft.isStreaming}
-                onAccept={() => {
+                defaultAcceptAction={draftOrigin === 'rewrite' ? 'replace' : 'insert'}
+                onAccept={action => {
                   const content = aiDraft.acceptDraft();
                   void (async (): Promise<void> => {
                     const html = content ? await markdownToHtml(content) : '';
-                    setEmailContent(html);
-                    if (html) saveDraft(html);
+                    const next =
+                      action === 'insert' && hasEmailBody ? `${emailContent}${html}` : html;
+                    setEmailContent(next);
+                    if (next) saveDraft(next);
                   })();
                 }}
+                onCollapse={() => setAiPaneOpen(false)}
                 onReject={() => {
                   aiDraft.rejectDraft();
                 }}
                 onRefine={(instruction: string, options?: { selectedText?: string }) => {
                   void aiDraft.refineDraft(instruction, options);
-                }}
-                onRecreate={() => {
-                  const instruction = lastAskInstructionRef.current;
-                  if (instruction) runAskAIRefine(instruction);
-                  else aiDraft.triggerDraft();
                 }}
                 onQuickRefine={action => {
                   void aiDraft.quickRewrite(action, aiDraft.draftContent);
@@ -2233,80 +2249,20 @@ export const EmailComposer = ({
 
             if (draftActive) {
               return (
-                <div className='flex-1 min-h-0 flex flex-col gap-2 px-4 pt-2 pb-3'>
-                  {aiPaneExpanded === 'yours' ? (
-                    <div className='flex-1 min-h-0 flex flex-col border border-border rounded-xl bg-background overflow-hidden'>
-                      <button
-                        type='button'
-                        onClick={() => setAiPaneExpanded('ai')}
-                        className='flex items-center gap-2 px-4 py-2.5 min-h-[3rem] border-b border-border bg-muted/30 flex-shrink-0 text-left hover:bg-muted/50 transition-colors'
-                        aria-label='Collapse your draft'
-                        data-track-category='Support'
-                        data-track-name='CollapseYourDraft'
-                      >
-                        <Pencil size={14} className='text-muted-foreground' />
-                        <span className='text-sm font-medium text-foreground'>Your draft</span>
-                        <ChevronUp size={14} className='ml-auto text-muted-foreground' />
-                      </button>
-                      <EmailEditor
-                        value={emailContent}
-                        onChange={handleEditorChange}
-                        onAddFiles={addFilesToAttachments}
-                        uploadAndInsertInlineImages={uploadAndInsertInlineImages}
-                        extraExtensions={recipientExtensions}
-                        onEditorReady={handleBodyEditorReady}
-                        onSendShortcut={() => {
-                          const canSend = isComposeMode
-                            ? !!channelId && composeSubject.trim().length > 0
-                            : !!conversationId;
-                          if (
-                            (hasEmailBody || attachments.length > 0) &&
-                            canSend &&
-                            !isSending &&
-                            toEmails.length > 0
-                          ) {
-                            void handleSendEmail();
-                          }
-                        }}
-                        onBlur={() => {
-                          if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
-                        }}
-                        onCitationClick={effectiveCitationClick}
-                        {...(onCitationOrderChange && { onCitationOrderChange })}
-                        readOnly={aiDraft.isDraftActive && !aiDraft.isStreaming}
-                        disabled={isSending}
-                        className='flex-1 min-h-0'
-                        footerSlot={composerFooter}
-                        toolbarRightSlot={toolbarRightSlot}
-                        showSelectionRefine={features.showAI && !aiDraft.isStreaming && !isSending}
-                        onSelectionRefine={selectedText => {
-                          aiDraft.prepareRefineFromExternal(emailContent, selectedText);
-                          setAiPaneExpanded('ai');
-                        }}
-                      />
-                      {recipientMentionPicker}
-                    </div>
-                  ) : (
-                    <button
-                      type='button'
-                      onClick={() => setAiPaneExpanded('yours')}
-                      className='flex items-center gap-2 self-start px-3 py-1.5 rounded-full border border-border bg-background hover:bg-muted transition-colors flex-shrink-0'
-                      aria-label='Open your draft'
-                      data-track-category='Support'
-                      data-track-name='ExpandYourDraft'
-                    >
-                      <Pencil size={13} className='text-muted-foreground' />
-                      <span className='text-[13px] font-medium text-foreground'>Your draft</span>
-                      <ChevronDown size={13} className='text-muted-foreground' />
-                    </button>
+                <div ref={draftScrollRef} className='flex-1 min-h-0 overflow-y-auto px-4 pt-2 pb-3'>
+                  {/* Your draft rendered as plain text above the inline AI card (Gmail-style). */}
+                  {hasEmailBody && (
+                    <div
+                      className='px-1 pb-3 text-sm leading-relaxed text-foreground/90 break-words [&_p]:my-1'
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailContent) }}
+                    />
                   )}
-
-                  {aiPaneExpanded === 'ai' ? (
-                    <div className='flex-1 min-h-0'>{draftCard}</div>
+                  {aiPaneOpen ? (
+                    draftCard
                   ) : (
                     <button
                       type='button'
-                      onClick={() => setAiPaneExpanded('ai')}
+                      onClick={() => setAiPaneOpen(true)}
                       className='flex items-center gap-2 self-start pl-1 pr-3 py-1 rounded-full border border-border bg-background hover:bg-muted transition-colors flex-shrink-0'
                       aria-label='Open AI draft'
                       data-track-category='Support'
@@ -2417,11 +2373,11 @@ export const EmailComposer = ({
                       setAiPromptText('');
                     }
                   }}
-                  placeholder='Tell AI what to write…'
+                  placeholder={`Tell ${draftAgentName} what to write…`}
                   className='flex-1 min-w-0 bg-transparent outline-none text-[15px] text-foreground placeholder:text-muted-foreground/70'
                   data-track-category='Support'
                   data-track-name='AIPromptInput'
-                  aria-label='Tell AI what to write'
+                  aria-label={`Tell ${draftAgentName} what to write`}
                 />
                 <button
                   type='button'
@@ -2461,142 +2417,162 @@ export const EmailComposer = ({
           </div>
         )}
 
-        <div className='px-2 py-1.5 flex items-center justify-between'>
-          <div className='flex items-center gap-0.5'>
-            {/* Attachment button */}
-            <div>
-              <input
-                ref={fileInputRef}
-                type='file'
-                multiple
-                className='hidden'
-                onChange={handleFileSelect}
-                disabled={isSending || isUploadingAttachments}
-              />
-              <Tooltip content='Attach files' side='top' delayDuration={300}>
-                <button
-                  type='button'
-                  onClick={() => fileInputRef.current?.click()}
+        {/* Bottom toolbar — hidden while the AI draft card or the AI prompt bar is active. */}
+        {!aiDraft.isDraftActive && !aiPromptOpen && (
+          <div className='px-2 py-1.5 flex items-center justify-between'>
+            <div className='flex items-center gap-0.5'>
+              {/* Attachment button */}
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type='file'
+                  multiple
+                  className='hidden'
+                  onChange={handleFileSelect}
                   disabled={isSending || isUploadingAttachments}
-                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                  aria-label='Attach files'
-                  data-track-category='SUPPORT'
-                  data-track-name='AddEmailAttachment'
-                  data-track-metadata={JSON.stringify({
-                    conversationId,
-                    attachmentCount: attachments.length,
-                  })}
-                >
-                  <Paperclip size={14} />
-                </button>
-              </Tooltip>
-            </div>
-
-            {/* Signature selector */}
-            {features.showSignature && signatures.length > 0 ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+                />
+                <Tooltip content='Attach files' side='top' delayDuration={300}>
                   <button
                     type='button'
-                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                    title={
-                      selectedSignatureId
-                        ? (signatures.find(s => s.id === selectedSignatureId)?.name ?? 'Signature')
-                        : 'No signature'
-                    }
-                    data-track-category='email-compose'
-                    data-track-name='select-signature'
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isSending || isUploadingAttachments}
+                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                    aria-label='Attach files'
+                    data-track-category='SUPPORT'
+                    data-track-name='AddEmailAttachment'
+                    data-track-metadata={JSON.stringify({
+                      conversationId,
+                      attachmentCount: attachments.length,
+                    })}
                   >
-                    <Signature size={14} />
+                    <Paperclip size={14} />
                   </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align='start' side='top'>
-                  <DropdownMenuItem
+                </Tooltip>
+              </div>
+
+              {/* Signature selector */}
+              {features.showSignature && signatures.length > 0 ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type='button'
+                      className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+                      title={
+                        selectedSignatureId
+                          ? (signatures.find(s => s.id === selectedSignatureId)?.name ??
+                            'Signature')
+                          : 'No signature'
+                      }
+                      data-track-category='email-compose'
+                      data-track-name='select-signature'
+                    >
+                      <Signature size={14} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align='start' side='top'>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        const base = channelId ? `${supportBase}/${channelId}` : supportBase;
+                        void composerNavigate(`${base}?openSettings=signatures`);
+                      }}
+                      className='text-xs text-muted-foreground'
+                    >
+                      Manage signatures
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => setSelectedSignatureId(null)}
+                      className={!selectedSignatureId ? 'font-medium' : ''}
+                    >
+                      No signature
+                    </DropdownMenuItem>
+                    {signatures.map(sig => (
+                      <DropdownMenuItem
+                        key={sig.id}
+                        onClick={() => setSelectedSignatureId(sig.id)}
+                        className={selectedSignatureId === sig.id ? 'font-medium' : ''}
+                      >
+                        {sig.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : features.showSignature ? (
+                <Tooltip content='Add signature' side='top' delayDuration={300}>
+                  <button
+                    type='button'
                     onClick={() => {
                       const base = channelId ? `${supportBase}/${channelId}` : supportBase;
                       void composerNavigate(`${base}?openSettings=signatures`);
                     }}
-                    className='text-xs text-muted-foreground'
+                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+                    aria-label='Add signature'
+                    data-track-category='email-compose'
+                    data-track-name='add-signature'
                   >
-                    Manage signatures
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => setSelectedSignatureId(null)}
-                    className={!selectedSignatureId ? 'font-medium' : ''}
-                  >
-                    No signature
-                  </DropdownMenuItem>
-                  {signatures.map(sig => (
-                    <DropdownMenuItem
-                      key={sig.id}
-                      onClick={() => setSelectedSignatureId(sig.id)}
-                      className={selectedSignatureId === sig.id ? 'font-medium' : ''}
-                    >
-                      {sig.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : features.showSignature ? (
-              <Tooltip content='Add signature' side='top' delayDuration={300}>
-                <button
-                  type='button'
-                  onClick={() => {
-                    const base = channelId ? `${supportBase}/${channelId}` : supportBase;
-                    void composerNavigate(`${base}?openSettings=signatures`);
+                    <Signature size={14} />
+                  </button>
+                </Tooltip>
+              ) : null}
+            </div>
+            <div className='flex items-center gap-1.5'>
+              {features.showAI && (
+                <AIRefineDropdown
+                  onQuickRewrite={action => {
+                    const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
+                    setDraftOrigin('rewrite');
+                    void aiDraft.quickRewrite(action, source);
                   }}
-                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                  aria-label='Add signature'
-                  data-track-category='email-compose'
-                  data-track-name='add-signature'
-                >
-                  <Signature size={14} />
-                </button>
-              </Tooltip>
-            ) : null}
+                  onAskAI={() => {
+                    setAIPanelMode(null);
+                    setAiPromptOpen(true);
+                    requestAnimationFrame(() => aiPromptInputRef.current?.focus());
+                  }}
+                  onRerunDraft={() => {
+                    const instruction = lastAskInstructionRef.current;
+                    if (instruction) {
+                      runAskAIRefine(instruction);
+                    } else {
+                      setAiPaneOpen(true);
+                      setDraftOrigin('write');
+                      aiDraft.triggerDraft();
+                    }
+                  }}
+                  agentName={draftAgentName}
+                  showQuickRewrite={hasEmailBody || aiDraft.isDraftActive}
+                  disabled={aiDraft.isStreaming}
+                />
+              )}
+              <button
+                className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
+                onClick={() => void handleSendEmail()}
+                disabled={
+                  (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
+                  (isComposeMode
+                    ? !channelId || composeSubject.trim().length === 0
+                    : !conversationId) ||
+                  isSending ||
+                  toEmails.length === 0 ||
+                  aiDraft.isDraftActive
+                }
+                aria-label='Send email'
+                title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send (⌘↵)'}
+                data-track-category='Support'
+                data-track-name='SendEmailReply'
+                data-track-metadata={JSON.stringify({
+                  conversationId,
+                  attachmentCount: attachments.length,
+                })}
+              >
+                {isSending ? (
+                  <RefreshCw size={16} className='animate-spin' />
+                ) : (
+                  <ArrowUp size={16} />
+                )}
+              </button>
+            </div>
           </div>
-          <div className='flex items-center gap-1.5'>
-            {features.showAI && (
-              <AIRefineDropdown
-                onQuickRewrite={action => {
-                  const source = aiDraft.isDraftActive ? aiDraft.draftContent : emailContent;
-                  void aiDraft.quickRewrite(action, source);
-                }}
-                onAskAI={() => {
-                  setAIPanelMode(null);
-                  setAiPromptOpen(true);
-                  requestAnimationFrame(() => aiPromptInputRef.current?.focus());
-                }}
-                showQuickRewrite={hasEmailBody || aiDraft.isDraftActive}
-                disabled={aiDraft.isStreaming}
-              />
-            )}
-            <button
-              className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
-              onClick={() => void handleSendEmail()}
-              disabled={
-                (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
-                (isComposeMode
-                  ? !channelId || composeSubject.trim().length === 0
-                  : !conversationId) ||
-                isSending ||
-                toEmails.length === 0 ||
-                aiDraft.isDraftActive
-              }
-              aria-label='Send email'
-              title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send (⌘↵)'}
-              data-track-category='Support'
-              data-track-name='SendEmailReply'
-              data-track-metadata={JSON.stringify({
-                conversationId,
-                attachmentCount: attachments.length,
-              })}
-            >
-              {isSending ? <RefreshCw size={16} className='animate-spin' /> : <ArrowUp size={16} />}
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Media viewer for attachment preview */}

@@ -157,10 +157,13 @@ export default class BrowserSteps {
   @Step('clicking on text <text> in <selector>')
   public async clickOnTextInSelector(text: string, selector: string): Promise<void> {
     const resolvedText = resolveStoredText(text);
-    const container = testContext.activePage.locator(selector).first();
+    const containers = testContext.activePage.locator(selector);
 
-    await container.waitFor({ state: 'visible' });
-    await container.getByText(resolvedText, { exact: false }).first().click();
+    await containers.first().waitFor({ state: 'visible' });
+    // Search every matching container, not just the first: with prefix
+    // selectors (e.g. [data-testid^='project-item-']) the target text may
+    // live in any of the matched elements.
+    await containers.getByText(resolvedText, { exact: false }).first().click();
   }
 
   @Step('clicking on text <text>')
@@ -197,6 +200,34 @@ export default class BrowserSteps {
           .catch(() => {});
       }
       await element.click({ force: true });
+    }
+  }
+
+  @Step('navigating via sidebar to <itemId>')
+  public async navigateViaSidebar(itemId: string): Promise<void> {
+    const page = testContext.activePage;
+    // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
+    await page.locator("[data-testid='nav-more']").first().waitFor({ state: 'visible' });
+
+    const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
+    if (await toolbarItem.isVisible()) {
+      await toolbarItem.click();
+      return;
+    }
+
+    // Item is not in the toolbar — open the "More" overflow menu and click it there.
+    await page.locator("[data-testid='nav-more']").first().click();
+    const moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+    await moreItem.waitFor({ state: 'visible' });
+    try {
+      await moreItem.click({ timeout: 5000 });
+    } catch (_error) {
+      // Two flake modes: the popover's entry animation keeps the item
+      // "unstable" past the deadline, or the click actually landed and the
+      // popover already closed. Only retry if the item is still visible.
+      if (await moreItem.isVisible()) {
+        await moreItem.click({ force: true, timeout: 5000 });
+      }
     }
   }
 

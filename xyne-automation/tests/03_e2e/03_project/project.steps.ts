@@ -308,6 +308,18 @@ export default class ProjectSteps {
     const page = testContext.activePage;
     const listbox = page.locator('[role="listbox"]').first();
     await listbox.waitFor({ state: 'visible' });
+
+    // The form auto-selects the first project, and clicking an already
+    // selected option toggles it off. If the target project is already shown
+    // on the trigger, close the dropdown instead of re-clicking the option.
+    const triggerLabel =
+      (await page.locator("[data-testid='project-select-trigger']").first().textContent()) ?? '';
+    if (triggerLabel.includes(project.name)) {
+      await page.keyboard.press('Escape');
+      await listbox.waitFor({ state: 'hidden' });
+      return;
+    }
+
     await listbox.getByText(project.name, { exact: false }).first().click();
   }
 }

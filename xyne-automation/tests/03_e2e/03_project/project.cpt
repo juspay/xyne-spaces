@@ -1,6 +1,6 @@
 # Creating project <projectAlias> for user <userAlias>
 * generating net-new project details <projectAlias> for user <userAlias>
-* clicking on "[data-testid='nav-list-projects']"
+* navigating via sidebar to "list-projects"
 * waiting for "[data-testid='list-projects-page']" to appear
 * clicking on text "New"
 * typing stored user <userAlias> project <projectAlias> field "name" in "input[placeholder*='Enter project name']"
