@@ -21,6 +21,7 @@ import {
   ConversationsACL,
   ExternalStepResponsesACL,
   MessageAttachmentsACL,
+  EmailsACL,
   MessagesACL,
   NotificationPreferencesACL,
   NotificationsACL,
@@ -112,6 +113,9 @@ export class ACLFactory {
 
       case 'messageAttachment':
         return new MessageAttachmentsACL(ctx, prisma)
+
+      case 'email':
+        return new EmailsACL(ctx, prisma)
 
       case 'message':
         return new MessagesACL(ctx, prisma)
