@@ -21,6 +21,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
 
 interface DmListItemProps {
   channel: Channel;
@@ -83,6 +84,15 @@ export const DmListItem = ({
     return sanitizeHtmlString(rawContent);
   }, [lastMessage]);
 
+  // FlowJSON messages carry the whole interactive flow in their content. Feeding
+  // that to RenderMessageWithHTML mounts the full flow card (title, textarea,
+  // buttons) inside the one-line preview, breaking row layout. Collapse it to a
+  // short plain-text summary instead.
+  const flowPreviewText = useMemo(
+    () => (lastMessage?.content ? getFlowJsonPreviewText(lastMessage.content) : null),
+    [lastMessage?.content],
+  );
+
   // Memoize message preview with RenderMessageWithHTML component
   const messagePreview = useMemo(() => {
     if (!lastMessage) return 'No messages yet';
@@ -95,6 +105,16 @@ export const DmListItem = ({
 
     const prefix = senderFirstName ? `${senderFirstName}: ` : '';
 
+    // Flow message: render the extracted plain-text summary, never the flow card.
+    if (flowPreviewText) {
+      return (
+        <>
+          {prefix}
+          <span data-message-preview='true'>{flowPreviewText}</span>
+        </>
+      );
+    }
+
     return (
       <>
         {prefix}
@@ -103,7 +123,7 @@ export const DmListItem = ({
         </span>
       </>
     );
-  }, [sanitizedHtml, lastMessage, lastMessageSender, context.userID]);
+  }, [sanitizedHtml, flowPreviewText, lastMessage, lastMessageSender, context.userID]);
 
   // 3. Format elapsed time (now, 5m, 2h, 3d, 1 month, 2 years, etc.)
   const formatTime = (timestamp?: number): string => {

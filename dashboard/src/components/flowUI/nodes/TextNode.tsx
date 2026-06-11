@@ -137,7 +137,8 @@ type BlockSegment =
   | { type: 'paragraph'; lines: string[] }
   | { type: 'codeblock'; code: string }
   | { type: 'bullets'; items: string[] }
-  | { type: 'ordered'; items: string[] };
+  | { type: 'ordered'; items: string[] }
+  | { type: 'blockquote'; lines: string[] };
 
 function parseBlockSegments(content: string): BlockSegment[] {
   const lines = content.split('\n');
@@ -179,6 +180,17 @@ function parseBlockSegments(content: string): BlockSegment[] {
       continue;
     }
 
+    // Blockquote line: starts with "> " or ">" (allow leading whitespace)
+    if (/^\s*>\s?/.test(line)) {
+      const quoteLines: string[] = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i] ?? '')) {
+        quoteLines.push((lines[i] ?? '').replace(/^\s*>\s?/, ''));
+        i++;
+      }
+      segments.push({ type: 'blockquote', lines: quoteLines });
+      continue;
+    }
+
     // Ordered list line: starts with "1. ", "2. ", etc. (allow leading whitespace)
     if (/^\s*\d+\.\s+/.test(line)) {
       const items: string[] = [];
@@ -196,6 +208,7 @@ function parseBlockSegments(content: string): BlockSegment[] {
       i < lines.length &&
       !/^```/.test((lines[i] ?? '').trim()) &&
       !/^\s*[-*•]\s+/.test(lines[i] ?? '') &&
+      !/^\s*>\s?/.test(lines[i] ?? '') &&
       !/^\s*\d+\.\s+/.test(lines[i] ?? '')
     ) {
       paraLines.push(lines[i] ?? '');
@@ -432,6 +445,16 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
                 </li>
               ))}
             </ul>
+          );
+        }
+        if (seg.type === 'blockquote') {
+          return (
+            <blockquote
+              key={segIdx}
+              className='border-l-2 border-muted-foreground/30 pl-3 my-1 text-muted-foreground'
+            >
+              {renderParagraphLines(seg.lines, `quote${segIdx}`)}
+            </blockquote>
           );
         }
         if (seg.type === 'ordered') {
