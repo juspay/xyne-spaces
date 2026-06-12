@@ -1,6 +1,7 @@
 import { metrics } from '@opentelemetry/api';
 import type { Histogram, Meter, ObservableGauge } from '@opentelemetry/api';
 import { OTEL_SERVICE_NAME } from '../../config';
+import { logger, Event } from '../../utils/logger';
 
 function getMeter(): Meter {
   return metrics.getMeter(OTEL_SERVICE_NAME);
@@ -75,6 +76,43 @@ export function registerMemoryGauge(): void {
   );
 }
 
+// --- JS Heap snapshot bridge log (route-tagged via the logger envelope) ---
+//
+// The Prometheus `js_heap_*` gauges only carry `instance` (per-browser UUID),
+// so heap pressure cannot be attributed to a page/route/feature from metrics
+// alone. This periodic snapshot rides the existing bridge logger, which adds
+// `pageUrl`, `pageViewId`, `clientSessionId`, `emailId`, `platformName`, and
+// `version` to every entry — giving free route attribution and user-level
+// correlation without adding labels to the metric (which would explode
+// cardinality).
+//
+// Cadence: 30s. With ~1000 active browsers, that's ~33 events/sec — small.
+
+let _heapSnapshotLogRegistered = false;
+const HEAP_SNAPSHOT_INTERVAL_MS = 30_000;
+const BYTES_PER_MB = 1024 * 1024;
+
+export function registerHeapSnapshotLog(): void {
+  if (_heapSnapshotLogRegistered) return;
+  if (!getPerformanceMemory()) return;
+
+  _heapSnapshotLogRegistered = true;
+
+  const emit = (): void => {
+    const mem = getPerformanceMemory();
+    if (!mem) return;
+    logger.info(Event.JS_HEAP_SNAPSHOT, {
+      usedHeapMb: Math.round(mem.usedJSHeapSize / BYTES_PER_MB),
+      totalHeapMb: Math.round(mem.totalJSHeapSize / BYTES_PER_MB),
+      limitHeapMb: Math.round(mem.jsHeapSizeLimit / BYTES_PER_MB),
+      usedHeapFraction: Number((mem.usedJSHeapSize / mem.jsHeapSizeLimit).toFixed(3)),
+    });
+  };
+
+  // First snapshot one interval after init so app startup isn't double-taxed.
+  setInterval(emit, HEAP_SNAPSHOT_INTERVAL_MS);
+}
+
 // --- Long Tasks (main thread blocked >50ms) ---
 
 let _longTaskDuration: Histogram | null = null;
@@ -120,7 +158,9 @@ export const pokeRenderDuration: Histogram = new Proxy({} as Histogram, {
           'Client-side poke processing time: IVM advancement + query view state updates in milliseconds',
         unit: 'ms',
         advice: {
-          explicitBucketBoundaries: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512],
+          // Top bucket extended past 512ms because the prior cap was clipping
+          // a real long tail — observed p99 saturating at exactly 512.
+          explicitBucketBoundaries: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 5000],
         },
       });
     }
