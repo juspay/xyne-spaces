@@ -516,7 +516,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     description: descriptionValue,
     projectId: selectedChannelProjectId,
     currentBoardId: formValues?.boardId || '',
-    isOpen: isOpen && !boardAISuggestionSuppressed,
+    isOpen: isOpen && !boardAISuggestionSuppressed && !selectedBoardId,
     debounceMs: 2000,
   });
 
