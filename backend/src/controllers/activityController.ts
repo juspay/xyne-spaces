@@ -42,13 +42,12 @@ export class ActivityController {
             platform = deviceInfoObj?.platform;
           }
         } catch (err) {
-          logger.warn('Failed to fetch platform from session', { sessionId, error: err });
+          logger.warn('Failed to fetch platform from session', { error: err });
         }
       }
 
       const logEntry: ActivityLogEntry = {
         ...validated,
-        sessionId: sessionId || 'unknown',
         ...(platform && { platform }),
         serverTimestamp: new Date().toISOString(),
         severity: 'INFO',

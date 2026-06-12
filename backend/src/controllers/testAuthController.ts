@@ -370,7 +370,7 @@ export class TestAuthController {
         });
 
         sessionId = session.id;
-        logger.info(`[${requestId}] Session created: ${sessionId}`);
+        logger.info(`[${requestId}] Session created`);
       } catch (sessionError) {
         logger.error(`[${requestId}] Session creation failed:`, sessionError);
       }

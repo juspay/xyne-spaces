@@ -781,7 +781,7 @@ class NotificationService {
       }
       logger.info('Unregistered mobile push token', {
         userId,
-        sessionId: sessionId ?? 'all',
+        scope: sessionId ? 'single_session' : 'all_sessions',
       });
     } catch (error) {
       logger.error('Failed to unregister mobile push token:', error);
@@ -1559,7 +1559,11 @@ class NotificationService {
           try {
             await realTimeNotificationService.queueMobilePush(userId, session, mobilePayload);
           } catch (reason) {
-            logger.error('Failed to queue mobile push notification for session ', session.id, reason);
+            logger.error('Failed to queue mobile push notification', {
+              userId,
+              notificationId: sessionNotification.id,
+              reason,
+            });
           }
         })
       );

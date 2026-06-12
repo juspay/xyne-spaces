@@ -6,9 +6,9 @@ import { getCallNotifications } from '@/services/otel';
 
 export class MobilePushChannel {
   async deliver(job: MobilePushJobData): Promise<NotificationDeliveryResult> {
-    const { sessionId, token, voipToken, platform, payload, userId, appVersion } = job;
+    const { token, voipToken, platform, payload, userId, appVersion } = job;
 
-    logger.info(`[MobilePush] Delivering to session ${sessionId}...`, {
+    logger.info('[MobilePush] Delivering push notification...', {
       userId,
       platform,
       notificationId: payload.notificationId,
@@ -50,7 +50,6 @@ export class MobilePushChannel {
           getCallNotifications().add(1, { deliveryType: 'fcm', platform, status: 'failed', failureReason: 'disabled' });
         }
         logger.warn(`[MobilePush] FCM not enabled, skipping delivery`, {
-          sessionId,
           userId,
         });
         return {
@@ -75,7 +74,7 @@ export class MobilePushChannel {
         getCallNotifications().add(1, { deliveryType: 'fcm', platform, status: 'sent' });
       }
 
-      logger.info(`[MobilePush] ✅ Delivered to session ${sessionId.substring(0, 8)}`, {
+      logger.info('[MobilePush] ✅ Delivered push notification', {
         userId,
         platform,
         notificationId: payload.notificationId,
@@ -95,7 +94,6 @@ export class MobilePushChannel {
       }
 
       logger.error(`[MobilePush] ❌ Failed to deliver`, {
-        sessionId,
         userId,
         platform,
         errorCode,
@@ -121,11 +119,10 @@ export class MobilePushChannel {
           // Only clear token if it's definitely invalid
           if (errorCode === 'UNREGISTERED' || errorCode === 'NOT_FOUND') {
             await fcmPushService.clearSessionPushToken(sessionId);
-            logger.info(`[MobilePush] Cleared invalid token for session ${sessionId}`);
+            logger.info('[MobilePush] Cleared invalid token for push notification');
           }
         } catch (clearError) {
           logger.error(`[MobilePush] Failed to clear session token`, {
-            sessionId,
             error: clearError,
           });
         }
@@ -161,13 +158,12 @@ export class MobilePushChannel {
   }
 
   private async deliverApn(job: MobilePushJobData): Promise<boolean> {
-    const { sessionId, voipToken, payload, userId } = job;
+    const { voipToken, payload, userId } = job;
     
     getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'created' });
 
     try {
       logger.info(`[MobilePush] Using APNS VoIP for incoming call`, {
-        sessionId,
         userId,
         notificationId: payload.notificationId,
         appVersion: job.appVersion,
@@ -188,7 +184,7 @@ export class MobilePushChannel {
 
       if (!voipToken) {
         getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'failed', failureReason: 'missing_token' });
-        logger.error(`[MobilePush] Missing voipToken for APNS delivery`, { sessionId, userId });
+        logger.error(`[MobilePush] Missing voipToken for APNS delivery`, { userId });
         return false;
       }
 
@@ -197,7 +193,6 @@ export class MobilePushChannel {
       if (success) {
         getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'sent' });
         logger.info(`[MobilePush] ✅ APNS delivered`, {
-          sessionId,
           userId,
           notificationId: payload.notificationId,
           appVersion: job.appVersion,
@@ -205,14 +200,13 @@ export class MobilePushChannel {
         return true;
       } else {
         getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'failed', failureReason: 'send_failed' });
-        logger.info(`[MobilePush] APNS VoIP failed, falling back to FCM`, { sessionId, userId, notificationId: payload.notificationId });
+        logger.info(`[MobilePush] APNS VoIP failed, falling back to FCM`, { userId, notificationId: payload.notificationId });
         return false;
       }
     } catch (error: any) {
       getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'failed', failureReason: 'error' });
       logger.error(`[MobilePush] APNS VoIP error`, {
         error,
-        sessionId,
         userId,
         notificationId: payload.notificationId,
         appVersion: job.appVersion,

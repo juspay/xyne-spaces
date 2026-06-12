@@ -96,13 +96,11 @@ export class NotificationProducer {
       if (payload.type === 'INCOMING_CALL') {
         await notificationWorker.addIncomingCallJob(jobData);
         this.logger.info('Queued incoming call push (High Priority)', {
-          sessionId: session.id.substring(0, 8),
           userId,
         });
       } else {
         await notificationWorker.addMobilePushJob(jobData);
         this.logger.info('Queued mobile push', {
-          sessionId: session.id.substring(0, 8),
           userId,
         });
       }

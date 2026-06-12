@@ -113,7 +113,6 @@ export class NotificationWorker {
       this.logger.info(`Processing ${job.queue.name} job`, { 
         jobId: job.id, 
         userId: data.userId,
-        sessionId: data.sessionId,
         notificationId,
         notificationType: data.payload?.type,
         appVersion: data.appVersion,
@@ -307,7 +306,6 @@ export class NotificationWorker {
 
       this.logger.info('Queued mobile push', {
         jobId: job.id,
-        sessionId: data.sessionId,
         userId: data.userId,
         notificationId: data.payload?.notificationId,
         notificationType: data.payload?.type
@@ -345,7 +343,6 @@ export class NotificationWorker {
 
       this.logger.info('Queued incoming call push', {
         jobId: job.id,
-        sessionId: data.sessionId,
         userId: data.userId,
         notificationId: data.payload?.notificationId,
       });

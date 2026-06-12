@@ -238,7 +238,6 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=enter', {
       userId,
-      sessionId: payload.sessionId,
       platform: payload.platform ?? null,
       deviceId: payload.deviceId ?? null,
       fcmTokenPresent: !!payload.fcmToken,
@@ -250,7 +249,6 @@ class FcmPushService {
     if (!payload.fcmToken) {
       logger.warn('[FCM] registerToken step=missing_token', {
         userId,
-        sessionId: payload.sessionId,
         platform: payload.platform ?? null,
         deviceId: payload.deviceId ?? null,
       });
@@ -259,7 +257,6 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=find_session', {
       userId,
-      requestedSessionId: payload.sessionId,
       fcmTokenPreview,
     });
     const sessionEntry = await db.userSession.findFirst({
@@ -273,7 +270,6 @@ class FcmPushService {
     if (!sessionEntry) {
       logger.warn('[FCM] registerToken step=session_not_found', {
         userId,
-        sessionId: payload.sessionId,
         fcmTokenPreview,
         voipTokenPreview,
       });
@@ -282,8 +278,6 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=session_resolved', {
       userId,
-      requestedSessionId: payload.sessionId,
-      resolvedSessionId: sessionEntry.id,
       sessionDeviceId: sessionEntry.deviceId ?? null,
     });
 
@@ -299,7 +293,6 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=compose_tokens', {
       userId,
-      sessionId: sessionEntry.id,
       platform: payload.platform ?? null,
       fcmTokenPreview,
       composedTokenPreview,
@@ -326,7 +319,6 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=update_target_session', {
       userId,
-      sessionId: sessionEntry.id,
       nextDeviceId,
       composedTokenPreview,
       composedVoipTokenPreview,
@@ -347,7 +339,6 @@ class FcmPushService {
     if (composedVoipToken) {
       logger.info('[FCM] registerToken step=add_duplicate_condition_voip', {
         userId,
-        sessionId: sessionEntry.id,
         composedVoipTokenPreview,
       });
       duplicateConditions.push({ voipToken: composedVoipToken });
@@ -355,7 +346,6 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=clear_duplicates', {
       userId,
-      sessionId: sessionEntry.id,
       duplicateConditionCount: duplicateConditions.length,
       nextDeviceId,
       composedTokenPreview,
@@ -376,7 +366,6 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=complete', {
       userId,
-      sessionId: sessionEntry.id,
       nextDeviceId,
       duplicateConditionCount: duplicateConditions.length,
       duplicateCleanupCount: duplicateCleanupResult.count,
@@ -532,7 +521,6 @@ class FcmPushService {
           await this.clearSessionPushToken(target.sessionId);
         } catch (cleanupError) {
           logger.debug('Failed to clear session token after delivery failure', {
-            sessionId: target.sessionId,
             cleanupError,
           });
         }
@@ -729,7 +717,7 @@ class FcmPushService {
         data: { fcmToken: null, voipToken: null, deviceId: null },
       });
     } catch (error) {
-      logger.debug('Failed to clear session push token', { sessionId, error });
+      logger.debug('Failed to clear session push token', { error });
     }
   }
 

@@ -78,10 +78,9 @@ export class UserSessionService {
 
       const endTime = Date.now();
       logger.info(`✅ [${sessionCreateId}] Session created successfully in ${endTime - startTime}ms`);
-      logger.info(`✅ [${sessionCreateId}] Session ID: ${session.id}`);
       logger.info(`✅ [${sessionCreateId}] === Session Creation Complete ===`);
       
-      logger.info(`Created new session for user: ${session.userId} (${session.id})`);
+      logger.info(`Created new session for user: ${session.userId}`);
       return session;
     } catch (error) {
       const endTime = Date.now();
@@ -175,7 +174,7 @@ export class UserSessionService {
         },
       });
 
-      logger.info(`Updated session: ${sessionId}`);
+      logger.info(`Updated session`);
       return session;
     } catch (error) {
       logger.error('Error updating session:', error);
@@ -214,7 +213,7 @@ export class UserSessionService {
         },
       });
 
-      logger.info(`Revoked session: ${sessionId}`);
+      logger.info(`Revoked session`);
     } catch (error) {
       logger.error('Error revoking session:', error);
       throw new Error('Failed to revoke session');

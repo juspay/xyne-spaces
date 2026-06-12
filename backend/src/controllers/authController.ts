@@ -299,7 +299,7 @@ export class AuthController {
 
           sessionId = session.id;
           const sessionEndTime = Date.now();
-          logger.info(`✅ [${requestId}] Session created in ${sessionEndTime - sessionStartTime}ms: ${sessionId}`);
+          logger.info(`✅ [${requestId}] Session created in ${sessionEndTime - sessionStartTime}ms`);
         } catch (sessionError) {
           logger.info(`❌ [${requestId}] Error creating user session:`, sessionError);
           logger.error('Error creating user session:', sessionError);
@@ -690,7 +690,7 @@ export class AuthController {
           });
           
           sessionId = session.id;
-          logger.info(`✅ [${requestId}] Session created: ${sessionId}`);
+          logger.info(`✅ [${requestId}] Session created`);
         } catch (sessionError) {
           logger.info(`❌ [${requestId}] Session creation failed:`, sessionError);
           // Continue without session - not critical
@@ -775,13 +775,13 @@ export class AuthController {
         return;
       }
 
-      logger.info(`[REFRESH] Found session ID: ${sessionId}`);
+      logger.info(`[REFRESH] Found session ID`);
 
       // Find session by ID
       const session = await this.userSessionService.getSessionById(sessionId);
 
       if (!session || !session.user) {
-        logger.warn(`[REFRESH] Session not found in database: ${sessionId}`);
+        logger.warn(`[REFRESH] Session not found in database`);
         res.status(401).json({
           error: 'Invalid session',
           message: 'Session not found or expired',
@@ -793,7 +793,7 @@ export class AuthController {
 
       // Check if session is still active and not expired
       if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
-        logger.warn(`[REFRESH] Session expired or inactive: ${sessionId} (status: ${session.status}, expiry: ${session.refreshTokenExpiry})`);
+        logger.warn(`[REFRESH] Session expired or inactive (status: ${session.status}, expiry: ${session.refreshTokenExpiry})`);
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
