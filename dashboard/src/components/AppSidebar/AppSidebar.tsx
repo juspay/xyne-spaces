@@ -39,6 +39,7 @@ import { isStatusExpired } from '../../utils/statusUtils';
 import { UpdateStatusModal } from './UpdateStatusModal';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
+import { useUnreadActivitiesCount } from '../../hooks/useUnreadActivitiesCount';
 import { useRecapUnreadCount } from '../../hooks/useRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useAllVisibleChannels } from '../../hooks/useChannels';
@@ -148,6 +149,7 @@ const AppSidebar = (): ReactElement => {
   const visibleNavigationItems = useVisibleNavigationItems();
   const { toolbarPaths } = useToolbarItems();
   const missedCallCount = useMissedCallCount();
+  const unreadActivityCount = useUnreadActivitiesCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
   const visibleChannels = useAllVisibleChannels();
@@ -328,6 +330,7 @@ const AppSidebar = (): ReactElement => {
         isOnChat={hasChannelOrThreadId}
         onNavigationClick={handleNavigationClick}
         missedCallCount={missedCallCount}
+        unreadActivityCount={unreadActivityCount}
         recapUnreadCount={recapUnreadCount}
       />
     );
@@ -387,6 +390,7 @@ const AppSidebar = (): ReactElement => {
                 const isActive = activeRoute === item.path;
                 const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
                 const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
+                const showActivityBadge = item.path === '/chat/activity' && unreadActivityCount > 0;
                 const Icon = item.icon;
 
                 const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
@@ -426,6 +430,11 @@ const AppSidebar = (): ReactElement => {
                         {showMissedCallBadge && (
                           <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
                             {missedCallCount > 99 ? '99+' : missedCallCount}
+                          </span>
+                        )}
+                        {showActivityBadge && (
+                          <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
+                            {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
                           </span>
                         )}
                       </Link>
@@ -652,6 +661,7 @@ const MobileNavbar = ({
   isOnChat,
   onNavigationClick,
   missedCallCount,
+  unreadActivityCount,
   recapUnreadCount,
 }: {
   filteredNavigationItems: {
@@ -663,6 +673,7 @@ const MobileNavbar = ({
   isOnChat: boolean;
   onNavigationClick: (label: string) => void;
   missedCallCount: number;
+  unreadActivityCount: number;
   recapUnreadCount: number;
 }): ReactElement => {
   const analyticsPermission = useCanViewAnalytics();
@@ -740,6 +751,7 @@ const MobileNavbar = ({
               const isActive = activeRoute === item.path;
               const Icon = item.icon;
               const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
+              const showActivityBadge = item.path === '/chat/activity' && unreadActivityCount > 0;
 
               return (
                 <Link
@@ -759,6 +771,11 @@ const MobileNavbar = ({
                     {showMissedCallBadge && (
                       <span className='absolute -top-1 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
                         {missedCallCount > 99 ? '99+' : missedCallCount}
+                      </span>
+                    )}
+                    {showActivityBadge && (
+                      <span className='absolute -top-1 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
+                        {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
                       </span>
                     )}
                   </div>
