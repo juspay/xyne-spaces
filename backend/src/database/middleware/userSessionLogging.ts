@@ -9,7 +9,6 @@ type LoggableData = Record<string, unknown> | Record<string, unknown>[] | null |
 type LogIdentifiers = {
   email: string;
   userId: string;
-  sessionId: string;
 };
 
 function maskToken(value: string | null | undefined): string | null {
@@ -35,7 +34,7 @@ function maskSensitiveFields(data: LoggableData): LoggableData {
 
 /**
  * Setup logging middleware for UserSession model operations.
- * Logs CREATE, CREATE_MANY, UPDATE, DELETE operations with requestId, sessionId, userId, email, and masked token values.
+ * Logs CREATE, CREATE_MANY, UPDATE, DELETE operations with requestId, userId, email, and masked token values.
  */
 export function setupUserSessionLogging(prisma: PrismaClient, enabled: boolean = true): void {
   if (!enabled) return;
@@ -63,7 +62,6 @@ export function setupUserSessionLogging(prisma: PrismaClient, enabled: boolean =
         params.args?.where,
         affectedRows,
         identifiers.userId,
-        identifiers.sessionId,
       );
     } else if (params.args?.data) {
       logDataOperation(
@@ -74,7 +72,6 @@ export function setupUserSessionLogging(prisma: PrismaClient, enabled: boolean =
         params.args.where,
         affectedRows,
         identifiers.userId,
-        identifiers.sessionId,
       );
     }
 
@@ -123,12 +120,6 @@ async function resolveLogIdentifiers(
 ): Promise<LogIdentifiers> {
   const firstDataRow = getFirstDataRow(data);
 
-  const sessionId =
-    getStringField(where, 'id') ||
-    getStringField(firstDataRow, 'id') ||
-    getStringField(result, 'id') ||
-    'multiple';
-
   const userId =
     getStringField(firstDataRow, 'userId') ||
     getStringField(where, 'userId') ||
@@ -145,7 +136,7 @@ async function resolveLogIdentifiers(
     email = user?.email || 'unknown';
   }
 
-  return { email, userId, sessionId };
+  return { email, userId };
 }
 
 function logDeleteOperation(
@@ -155,7 +146,6 @@ function logDeleteOperation(
   where: Record<string, unknown> = {},
   affectedRows: number | 'unknown' = 'unknown',
   userId: string = 'unknown',
-  sessionId: string = 'multiple',
 ): void {
   logger.info('UserSession operation', {
     module: 'UserSessionLogging',
@@ -164,7 +154,6 @@ function logDeleteOperation(
     email,
     operation,
     model: 'UserSession',
-    sessionId,
     userId,
     affectedRows,
     changes: { deleted: true, criteria: where },
@@ -179,7 +168,6 @@ function logDataOperation(
   where: Record<string, unknown> = {},
   affectedRows: number | 'unknown' = 'unknown',
   userId: string = 'unknown',
-  sessionId: string = 'new',
 ): void {
   const maskedData = maskSensitiveFields(data);
 
@@ -190,7 +178,6 @@ function logDataOperation(
     email,
     operation,
     model: 'UserSession',
-    sessionId,
     userId,
     affectedRows,
     changes: maskedData,

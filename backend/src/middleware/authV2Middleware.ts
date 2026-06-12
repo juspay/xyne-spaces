@@ -62,10 +62,9 @@ class AuthV2Middleware {
     try {
       const sessionId = this.getSessionId(req);
       const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
-      logger.info(`[AUTH] [Auto-Refresh] Attempting refresh. Cookie found: ${!!sessionId} ${sessionId}`, {
+      logger.info(`[AUTH] [Auto-Refresh] Attempting refresh. Cookie found:`, {
         method: req.method,
         path: req.path,
-        sessionId,
         workspaceId,
         workspaceTokenPresent: workspaceId ? !!req.cookies?.[`xyne_ws_${workspaceId}_token`] : false,
       });
@@ -81,8 +80,7 @@ class AuthV2Middleware {
       const session = await this.userSessionService.getSessionById(sessionId);
 
       if (!session || !session.user) {
-        logger.warn(`[AUTH] [Auto-Refresh] Session check failed: Session or user not found for ID ${sessionId}`, {
-          sessionId,
+        logger.warn(`[AUTH] [Auto-Refresh] Session check failed: Session or user not found`, {
           sessionFound: !!session,
           userFound: !!session?.user,
         });
@@ -95,8 +93,7 @@ class AuthV2Middleware {
       const isExpired = now >= session.refreshTokenExpiry;
 
       if (!isActive || isExpired) {
-        logger.warn(`[AUTH] [Auto-Refresh] Session invalid: Status=${session.status}, Expired=${isExpired} ${sessionId} (Expiry: ${session.refreshTokenExpiry})`, {
-          sessionId,
+        logger.warn(`[AUTH] [Auto-Refresh] Session invalid: Status=${session.status}, Expired=${isExpired} (Expiry: ${session.refreshTokenExpiry})`, {
           userId: session.user.id,
           email: session.user.email,
           sessionStatus: session.status,
@@ -107,8 +104,7 @@ class AuthV2Middleware {
 
       // Check if user has been removed from the organization entirely
       if (session.user.orgMember?.leftAt) {
-        logger.warn(`[AUTH] [Auto-Refresh] User ${session.user.email} has left organization (leftAt=${session.user.orgMember.leftAt.toISOString()}). Session ${sessionId} rejected.`, {
-          sessionId,
+        logger.warn(`[AUTH] [Auto-Refresh] User ${session.user.email} has left organization (leftAt=${session.user.orgMember.leftAt.toISOString()}). Session rejected.`, {
           userId: session.user.id,
           email: session.user.email,
           orgMemberLeftAt: session.user.orgMember.leftAt.toISOString(),
@@ -117,8 +113,7 @@ class AuthV2Middleware {
       }
 
       if (session.user.leftAt) {
-        logger.warn(`[AUTH] [Auto-Refresh] Workspace user ${session.user.email} has left workspace ${session.user.workspaceId} (leftAt=${session.user.leftAt.toISOString()}). Session ${sessionId} rejected.`, {
-          sessionId,
+        logger.warn(`[AUTH] [Auto-Refresh] Workspace user ${session.user.email} has left workspace ${session.user.workspaceId} (leftAt=${session.user.leftAt.toISOString()}). Session rejected.`, {
           userId: session.user.id,
           email: session.user.email,
           workspaceId: session.user.workspaceId,
@@ -138,27 +133,24 @@ class AuthV2Middleware {
           // If the user has been deleted or suspended in Google, this should throw.
           await this.googleClient.getAccessToken();
           
-          logger.info(`[AUTH] [Auto-Refresh] Google verification successful for user ${session.user.email} ${sessionId}`, {
-            userSessionId:sessionId,
-            userId: session.user.id,
-            email: session.user.email,
-          });
+          logger.info(`[AUTH] [Auto-Refresh] Google verification successful for user ${session.user.email}`, {
+                      userId: session.user.id,
+                      email: session.user.email,
+                    });
         } catch (err) {
           const googleError = err as gaxios.GaxiosError;
           // Check if it's a user-related error vs system error
           const isInvalidGrant = googleError.response?.data?.error === 'invalid_grant';
 
           if (isInvalidGrant) {
-            logger.warn(`[AUTH] [Auto-Refresh] User token revoked for ${session.user.email} ${sessionId}`, {
-              sessionId,
+            logger.warn(`[AUTH] [Auto-Refresh] User token revoked for ${session.user.email}`, {
               userId: session.user.id,
               email: session.user.email,
             });
             return false;
           } else {
             // For system errors, allow the refresh but log the issue
-            logger.warn(`[AUTH] [Auto-Refresh] Google verification FAILED (Transient): Allowing session. User: ${session.user.email}. Error: ${googleError} ${sessionId}`, {
-              sessionId,
+            logger.warn(`[AUTH] [Auto-Refresh] Google verification FAILED (Transient): Allowing session. User: ${session.user.email}. Error: ${googleError}`, {
               userId: session.user.id,
               email: session.user.email,
               error: googleError.message,
@@ -226,8 +218,7 @@ class AuthV2Middleware {
       }
       // --------------------------------
 
-      logger.info(`[AUTH] [Auto-Refresh] Valid session found: ${sessionId} for user ${session.user.email}`, {
-        sessionId,
+      logger.info(`[AUTH] [Auto-Refresh] Valid session found for user ${session.user.email}`, {
         userId: session.user.id,
         email: session.user.email,
         googleId: session.user.providerUserId,
@@ -287,8 +278,7 @@ class AuthV2Middleware {
         authProvider: session.user.authProvider,
       };
 
-      logger.info(`[AUTH] [Auto-Refresh] SUCCESS: Token refreshed and user attached to request ${sessionId}`, {
-        sessionId,
+      logger.info(`[AUTH] [Auto-Refresh] SUCCESS: Token refreshed and user attached to request`, {
         userId: session.user.id,
         googleId: session.user.providerUserId,
         email: session.user.email,
@@ -300,7 +290,6 @@ class AuthV2Middleware {
 
     } catch (refreshError) {
       logger.error('[AUTH] [Auto-Refresh] CRITICAL ERROR during auto-refresh:', {
-        sessionId: req.cookies?.user_session_id,
         error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
         stack: refreshError instanceof Error ? refreshError.stack : undefined,
       });
@@ -324,10 +313,9 @@ class AuthV2Middleware {
             ? 'authorization_header'
             : 'none';
       const tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
-      logger.info(`[AUTH] ${logPrefix} Step 1: Token extraction result: ${!!token} ${sessionId}`, {
+      logger.info(`[AUTH] ${logPrefix} Step 1: Token extraction result: ${!!token}`, {
         method: req.method,
         path: req.path,
-        sessionId,
         workspaceId,
         tokenSource,
         tokenPresent: !!token,
@@ -356,8 +344,7 @@ class AuthV2Middleware {
               let effectiveMemberId: string | undefined = decoded.memberId;
 
               if (!hasWorkspaceClaims) {
-                logger.info(`[AUTH] ${logPrefix} LEGACY JWT FORMAT - User ${decoded.sub} using pre-workspace client ${sessionId}`, {
-                  sessionId,
+                logger.info(`[AUTH] ${logPrefix} LEGACY JWT FORMAT - User ${decoded.sub} using pre-workspace client`, {
                   userId: decoded.sub,
                   tokenSource,
                   tokenPreview,
@@ -374,8 +361,7 @@ class AuthV2Middleware {
               // END BACKWARD COMPAT
 
               if (!effectiveWorkspaceId || !effectiveMemberId) {
-                logger.warn(`[AUTH] ${logPrefix} No workspace context resolved for user ${decoded.sub} ${sessionId}`, {
-                  sessionId,
+                logger.warn(`[AUTH] ${logPrefix} No workspace context resolved for user ${decoded.sub}`, {
                   tokenSource,
                   tokenPreview,
                   effectiveWorkspaceId,
@@ -410,8 +396,7 @@ class AuthV2Middleware {
               
               if (user) {
                 if (user.leftAt) {
-                  logger.warn(`[AUTH] ${logPrefix} User has been removed from workspace: ${user.email} ${sessionId}`, {
-                    sessionId,
+                  logger.warn(`[AUTH] ${logPrefix} User has been removed from workspace: ${user.email}`, {
                     tokenSource,
                     tokenPreview,
                     userId: user.id,
@@ -425,8 +410,7 @@ class AuthV2Middleware {
                 }
 
                 if (orgMember?.leftAt) {
-                  logger.warn(`[AUTH] ${logPrefix} User has been removed from organization: ${user.email} ${sessionId}`, {
-                    sessionId,
+                  logger.warn(`[AUTH] ${logPrefix} User has been removed from organization: ${user.email}`, {
                     tokenSource,
                     tokenPreview,
                     userId: user.id,
@@ -454,8 +438,7 @@ class AuthV2Middleware {
                   memberId: effectiveMemberId!,
                   authProvider: user.authProvider,
                 };
-                logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email} ${sessionId}`, {
-                  sessionId,
+                logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email}`, {
                   tokenSource,
                   tokenPreview,
                   tokenSub: decoded.sub,
@@ -468,8 +451,7 @@ class AuthV2Middleware {
                 tokenIsValid = true;
                 return next();
               } else {
-                logger.warn(`[AUTH] ${logPrefix} Token valid, but user not found in DB: ${decoded.sub} ${sessionId}`, {
-                  sessionId,
+                logger.warn(`[AUTH] ${logPrefix} Token valid, but user not found in DB: ${decoded.sub}`, {
                   tokenSource,
                   tokenPreview,
                   tokenSub: decoded.sub,
@@ -480,23 +462,20 @@ class AuthV2Middleware {
            // Token invalid/expired, log and fall through to refresh logic
            const isExpired = err instanceof Error && err.message === 'JWT token has expired';
            if (isExpired) {
-             logger.info(`[AUTH] ${logPrefix} ${sessionId} Token expired. Falling back to refresh.`, {
-               sessionId,
-               tokenSource,
-               tokenPreview,
-             });
+              logger.info(`[AUTH] ${logPrefix} Token expired. Falling back to refresh.`, {
+                tokenSource,
+                tokenPreview,
+              });
            } else {
-             logger.warn(`[AUTH] ${logPrefix} ${sessionId} Token invalid. Falling back to refresh. Error: ${err instanceof Error ? err.message : String(err)}`, {
-               sessionId,
-               tokenSource,
-               tokenPreview,
-               error: err instanceof Error ? err.message : String(err),
-             });
+              logger.warn(`[AUTH] ${logPrefix} Token invalid. Falling back to refresh. Error: ${err instanceof Error ? err.message : String(err)}`, {
+                tokenSource,
+                tokenPreview,
+                error: err instanceof Error ? err.message : String(err),
+              });
            }
         }
       } else {
-        logger.info(`[AUTH] ${logPrefix} ${sessionId} No token provided. Falling back to refresh.`, {
-          sessionId,
+        logger.info(`[AUTH] ${logPrefix} No token provided. Falling back to refresh.`, {
           tokenSource,
         });
       }
@@ -504,8 +483,7 @@ class AuthV2Middleware {
       // If we reached here, token is either missing or invalid/expired.
       // 2. Fallback to Session Refresh
       if (!tokenIsValid) {
-        logger.info(`[AUTH] ${logPrefix} ${sessionId} Step 2: Attempting session refresh`, {
-          sessionId,
+        logger.info(`[AUTH] ${logPrefix} Step 2: Attempting session refresh`, {
           tokenSource,
           tokenPreview,
         });
@@ -517,12 +495,11 @@ class AuthV2Middleware {
          if (refreshed) {
            // Logs inside attemptRefresh will handle success details
            return; 
-         } else {
-           logger.info(`[AUTH] ${logPrefix} ${sessionId} Refresh attempt failed.`, {
-             sessionId,
-             tokenSource,
-             tokenPreview,
-           });
+          } else {
+            logger.info(`[AUTH] ${logPrefix} Refresh attempt failed.`, {
+              tokenSource,
+              tokenPreview,
+            });
          }
       } else {
         logger.info(`[AUTH] ${logPrefix} No workspace session cookie present.`, {
@@ -533,8 +510,7 @@ class AuthV2Middleware {
       }
 
       // 3. Final Failure
-      logger.warn(`[AUTH] ${logPrefix} ${sessionId} Authentication FAILED. No valid token and no valid session.`, {
-        sessionId,
+      logger.warn(`[AUTH] ${logPrefix} Authentication FAILED. No valid token and no valid session.`, {
         tokenSource,
         tokenPreview,
       });
@@ -544,8 +520,7 @@ class AuthV2Middleware {
       });
 
     } catch (error) {
-      logger.error(`[AUTH] ${logPrefix}  ${sessionId} CRITICAL middleware error:`, {
-        sessionId,
+      logger.error(`[AUTH] ${logPrefix} CRITICAL middleware error:`, {
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
       });

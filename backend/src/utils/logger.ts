@@ -6,7 +6,6 @@ export interface LogContext {
   requestId?: string;
   zeroClientId?: string;
   zeroClientGroupId?: string;
-  sessionId?: string;
   clientSessionId?: string;
   emailId?: string;
   appVersion?: string;

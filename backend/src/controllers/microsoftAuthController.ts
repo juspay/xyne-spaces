@@ -368,7 +368,7 @@ export class MicrosoftAuthController {
             });
 
             sessionId = session.id;
-            logger.info(`[${requestId}] Session created: ${sessionId}`);
+            logger.info(`[${requestId}] Session created`);
           } catch (sessionError) {
             logger.error(`[${requestId}] Error creating user session:`, sessionError);
             // Continue without session creation - not critical for login
@@ -731,7 +731,7 @@ export class MicrosoftAuthController {
             });
 
             sessionId = session.id;
-            logger.info(`[${requestId}] Session created: ${sessionId}`);
+            logger.info(`[${requestId}] Session created`);
           } catch (sessionError) {
             logger.error(`[${requestId}] Error creating user session:`, sessionError);
             // Continue without session creation - not critical for login
@@ -844,7 +844,7 @@ export class MicrosoftAuthController {
           });
 
           sessionId = session.id;
-          logger.info(`[${requestId}] Session created: ${sessionId}`);
+          logger.info(`[${requestId}] Session created`);
         } catch (sessionError) {
           logger.error(`[${requestId}] Error creating user session:`, sessionError);
           // Continue without session creation - not critical for login
@@ -1079,7 +1079,7 @@ export class MicrosoftAuthController {
           });
 
           sessionId = session.id;
-          logger.info(`[${requestId}] Session created: ${sessionId}`);
+          logger.info(`[${requestId}] Session created`);
         } catch (sessionError) {
           logger.error(`[${requestId}] Error creating user session:`, sessionError);
           // Continue without session creation - not critical for login

@@ -529,7 +529,7 @@ export class AuthV2Controller {
 
 
         logger.info(`[${requestId}] Auto-login complete - redirecting to dashboard with cookies`);
-        logger.info(`[${requestId}] Cookies set: xyne_last_workspace=${workspaceId}, user_session_id=${sessionId}, xyne_ws_${workspaceId}_token=<JWT>`);
+        logger.info(`[${requestId}] Cookies set: xyne_last_workspace=${workspaceId}, xyne_ws_${workspaceId}_token=<JWT>`);
 
         // If this was a "connect calendar" re-auth, redirect straight to the calls page
         if (stateData.connectCalendar) {
@@ -594,7 +594,7 @@ export class AuthV2Controller {
         return;
       }
 
-      logger.info(`[${requestId}] Found session ID: ${sessionId}`);
+      logger.info(`[${requestId}] Found session ID`);
 
       const session = await this.userSessionService.getSessionById(sessionId);
 
@@ -1127,7 +1127,7 @@ export class AuthV2Controller {
       const sessionId = req.cookies?.user_session_id;
       
       if (sessionId) {
-        logger.info(`[${requestId}] Revoking session: ${sessionId} for user ${req.user?.email}`);
+        logger.info(`[${requestId}] Revoking session for user ${req.user?.email}`);
         await this.userSessionService.revokeSession(sessionId);
       }
 
@@ -1331,7 +1331,7 @@ export class AuthV2Controller {
           });
 
           sessionId = session.id;
-          logger.info(`[LOGIN-WORKSPACE] Session created: ${sessionId}`);
+          logger.info(`[LOGIN-WORKSPACE] Session created`);
         } catch (sessionError) {
           logger.error(`[LOGIN-WORKSPACE] Session creation failed:`, sessionError);
         }
@@ -1505,7 +1505,7 @@ export class AuthV2Controller {
           });
 
           sessionId = session.id;
-          logger.info(`[CREATE-ORG] Session created: ${sessionId}`);
+          logger.info(`[CREATE-ORG] Session created`);
         } catch (sessionError) {
           logger.error(`[CREATE-ORG] Session creation failed:`, sessionError);
         }
