@@ -352,61 +352,58 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
-const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => {
-  const { isMac } = usePlatform();
-  const cmdKey = isMac ? '⌘' : 'Ctrl';
-  return (
-    <div className='space-y-4'>
-      <SectionHeader title='Messaging' subtitle='Configure message composition and link behavior' />
-      <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
+  <div className='space-y-4'>
+    <SectionHeader title='Messaging' subtitle='Configure message composition and link behavior' />
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <p className='text-sm font-medium text-foreground'>
+        When writing a message, press <KeyCap>Enter</KeyCap> to&hellip;
+      </p>
+      <RadioGroup
+        value={state.enterSendsMessage ? 'send' : 'newline'}
+        onChange={value => state.setEnterSendsMessage(value === 'send')}
+      >
+        <Radio value='send'>Send the message</Radio>
+        <Radio value='newline'>
+          Start a new line (use <KeyCap>Shift</KeyCap> / <KeyCap>⌘</KeyCap> + <KeyCap>Enter</KeyCap>{' '}
+          to send)
+        </Radio>
+      </RadioGroup>
+    </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
         <p className='text-sm font-medium text-foreground'>
-          When writing a message, press <KeyCap>Enter</KeyCap> to&hellip;
+          Allow @channel/@here in thread replies
         </p>
-        <RadioGroup
-          value={state.enterSendsMessage ? 'send' : 'newline'}
-          onChange={value => state.setEnterSendsMessage(value === 'send')}
-        >
-          <Radio value='send'>Send the message</Radio>
-          <Radio value='newline'>
-            Start a new line (use <KeyCap>{cmdKey}</KeyCap> + <KeyCap>Enter</KeyCap> to send)
-          </Radio>
-        </RadioGroup>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          When enabled, your thread replies can notify many channel members
+        </p>
       </div>
+      <Switch
+        id='allow-thread-broadcast-mentions'
+        checked={state.allowThreadBroadcastMentions}
+        onCheckedChange={state.setAllowThreadBroadcastMentions}
+      />
+    </div>
+    {linkOpenPrefIsRelevant() && (
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>
-          <p className='text-sm font-medium text-foreground'>
-            Allow @channel/@here in thread replies
-          </p>
+          <p className='text-sm font-medium text-foreground'>Open links in external browser</p>
           <p className='text-xs text-muted-foreground mt-0.5'>
-            When enabled, your thread replies can notify many channel members
+            {state.linksOpenExternalByDefault
+              ? 'Click opens externally · ⌘/Ctrl-click opens in the app browser'
+              : 'Click opens in the app browser · ⌘/Ctrl-click opens externally'}
           </p>
         </div>
         <Switch
-          id='allow-thread-broadcast-mentions'
-          checked={state.allowThreadBroadcastMentions}
-          onCheckedChange={state.setAllowThreadBroadcastMentions}
+          id='links-open-external-by-default'
+          checked={state.linksOpenExternalByDefault}
+          onCheckedChange={state.setLinksOpenExternalByDefault}
         />
       </div>
-      {linkOpenPrefIsRelevant() && (
-        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-          <div>
-            <p className='text-sm font-medium text-foreground'>Open links in external browser</p>
-            <p className='text-xs text-muted-foreground mt-0.5'>
-              {state.linksOpenExternalByDefault
-                ? 'Click opens externally · ⌘/Ctrl-click opens in the app browser'
-                : 'Click opens in the app browser · ⌘/Ctrl-click opens externally'}
-            </p>
-          </div>
-          <Switch
-            id='links-open-external-by-default'
-            checked={state.linksOpenExternalByDefault}
-            onCheckedChange={state.setLinksOpenExternalByDefault}
-          />
-        </div>
-      )}
-    </div>
-  );
-};
+    )}
+  </div>
+);
 
 // ─── Launch ─────────────────────────────────────────────────────────────────
 const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
