@@ -138,6 +138,7 @@ export class EmailAuthController {
       const workspaceUsers = await this.prisma.user.findMany({
         where: { orgMemberId: orgMember.memberId, leftAt: null },
         orderBy: { createdAt: 'desc' },
+        include: { workspace: true },
       });
 
       // Invitation handling is keyed only by an explicit invitationId from the
@@ -270,7 +271,7 @@ export class EmailAuthController {
       // Build workspaces array for frontend auth machine
       const workspaces = workspaceUsers.map(u => ({
         id: u.workspaceId,
-        name: u.workspaceId, // Frontend will resolve name; fallback to ID
+        name: u.workspace?.name || u.workspaceId,
         role: u.role,
       }));
 
