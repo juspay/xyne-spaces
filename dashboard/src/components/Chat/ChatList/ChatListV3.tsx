@@ -8,6 +8,7 @@ import { activitySkipMarkAsReadChannelRef } from '../../Activity/activitySkipMar
 import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
+import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 import { DatePill } from '../DatePill';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
@@ -22,7 +23,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { ArrowDown } from 'lucide-react';
 import { mutators } from '../../../zero/mutators';
-import { queryCacheActor } from '../../../machines/queryCacheMachine';
+import { queryCacheActor, flushQueryCachePersistence } from '../../../machines/queryCacheMachine';
 import { browserPanelActor } from '../../../machines/browserPanelMachine';
 import LoadingAnimation from '../Loader/Loader';
 import { getDraft } from '../../../hooks/useDraft';
@@ -261,6 +262,10 @@ const ChatListV3: React.FC<ChatListProps> = ({
 
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations);
   const conversationsRef = useRef<Conversation[]>(cachedConversations);
+  // The cache snapshot we hydrated from — used to skip echoing identical
+  // data back into the query cache at mount (would dirty the IndexedDB
+  // persist key for no reason).
+  const hydratedFromCacheRef = useRef<Conversation[]>(cachedConversations);
   const setConversationsState = useCallback(
     (next: Conversation[] | ((prev: Conversation[]) => Conversation[])): void => {
       if (typeof next !== 'function') {
@@ -344,6 +349,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // Container for the shared hover toolbar overlay (Slack pattern): one
+  // toolbar for the whole list, positioned over the hovered row.
+  const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(false);
   const dateObserverRef = useRef<IntersectionObserver | null>(null);
   const visibleDatesRef = useRef<
@@ -884,12 +892,40 @@ const ChatListV3: React.FC<ChatListProps> = ({
   }, [channelId]);
 
   useEffect(() => {
-    queryCacheActor.send({
-      type: 'SET_CONVERSATIONS',
-      channelId,
-      conversations: conversations,
-    });
-  }, [conversations]);
+    if (!channelId) return;
+
+    const flushToCache = (): void => {
+      const latest = conversationsRef.current;
+      if (latest === hydratedFromCacheRef.current || latest.length === 0) return;
+      hydratedFromCacheRef.current = latest;
+      queryCacheActor.send({
+        type: 'SET_CONVERSATIONS',
+        channelId,
+        conversations: latest,
+      });
+    };
+
+    const handlePageHide = (): void => {
+      flushToCache();
+      flushQueryCachePersistence();
+    };
+
+    // Tab switch / app background / OS killing a background tab all pass
+    // through `hidden` first — flushing here bounds data loss for the cases
+    // where pagehide never fires (crash, force-kill). Deduped via
+    // hydratedFromCacheRef, so repeated hides with no new data are no-ops.
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === 'hidden') handlePageHide();
+    };
+
+    window.addEventListener('pagehide', handlePageHide);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      flushToCache();
+    };
+  }, [channelId]);
 
   // When a thread is opened (conversationId appears in URL), scroll the parent message into view
   // after the panel resize settles, so it doesn't jump out of the user's viewport.
@@ -1202,6 +1238,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
 
   return (
     <div
+      ref={hoverToolbarContainerRef}
       data-component='ChatListV11'
       data-testid='chat-message-list'
       className='flex-1 relative no-scrollbar min-h-0'
@@ -1292,6 +1329,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
         }}
         style={{ height: '100%', zIndex: 0 }}
       />
+
+      {/* ONE shared hover-actions toolbar for the entire list. Driven by a
+          delegated pointerover listener — hovering rows causes zero bubble
+          re-renders (see hoveredMessageRef / messageHoverActionsRegistry). */}
+      <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
 
       {/* New messages pill — hides once boundary enters viewport, stays hidden until new boundary */}
       {newConversationBoundary !== null && newConversationBoundary.seenConvId === null && (

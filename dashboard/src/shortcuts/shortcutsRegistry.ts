@@ -60,8 +60,19 @@ let orderCounter = 0;
 const registry: Registry = new Map();
 const tieWarnings = new Set<string>();
 
+// Signature of the last key set sent to the actor. registerShortcut runs once
+// PER SHORTCUT PER COMPONENT (e.g. ~7 per mounted ChatBubble), but the key SET
+// almost never changes — every bubble registers the same key strings. Without
+// this dedupe, mounting/unmounting a message list fired hundreds of
+// UPDATE_KEYS events in a tight loop, each re-rendering ShortcutsProvider and
+// every HotkeyBinding under it (a 100% CPU spike on channel mount/unmount).
+let lastSentKeysSignature: string | null = null;
+
 const updateRegisteredKeys = (): void => {
   const keys = Array.from(registry.keys());
+  const signature = keys.join(' ');
+  if (signature === lastSentKeysSignature) return;
+  lastSentKeysSignature = signature;
   shortcutsActor.send({ type: 'UPDATE_KEYS', keys });
 };
 

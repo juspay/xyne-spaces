@@ -4,6 +4,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { useLocation } from 'react-router-dom';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
+import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 import { useThreadListInitialScroll } from './useThreadListInitialScroll';
 import type { ThreadListItemWithSeparator } from '../../../utils/chatUtils';
 import { DatePill } from '../DatePill';
@@ -60,6 +61,8 @@ const ThreadList = ({
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
+  // Container for the shared hover toolbar overlay (one toolbar per list).
+  const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
   const hasAppliedInitialScrollRef = useRef(false);
   const scrollIdleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -368,7 +371,9 @@ const ThreadList = ({
   // Render with date separators for ticket threads
   if (isTicketThread && messagesWithSeparators) {
     return (
-      <div className='relative flex-1 min-h-0 bg-background'>
+      <div ref={hoverToolbarContainerRef} className='relative flex-1 min-h-0 bg-background'>
+        {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
+        <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
         <div
           data-component='ThreadList'
           ref={scrollContainerRef}
@@ -492,7 +497,9 @@ const ThreadList = ({
 
   // Default render without date separators
   return (
-    <div className='relative flex-1 min-h-0 bg-background'>
+    <div ref={hoverToolbarContainerRef} className='relative flex-1 min-h-0 bg-background'>
+      {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
+      <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
       <div
         data-component='ThreadList'
         ref={scrollContainerRef}

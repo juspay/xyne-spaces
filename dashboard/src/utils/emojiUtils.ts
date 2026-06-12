@@ -82,6 +82,44 @@ export const EmojiSize = {
 
 export type EmojiSizeValue = (typeof EmojiSize)[keyof typeof EmojiSize];
 
+const STRUCTURAL_TAGS_SELECTOR =
+  'code, pre, ul, ol, li, blockquote, h1, h2, h3, h4, h5, h6, table, tr, td, th';
+
+/**
+ * Same semantics as `isEmojiOnly`, but operates on an ALREADY-PARSED DOM tree.
+ * Use this when you have a parsed document (e.g. RenderMessageWithHTML) —
+ * `isEmojiOnly(html)` re-parses the HTML string with DOMParser, which was
+ * profiled as the single largest DOMParser consumer in message rendering
+ * (a third full parse per message per mount).
+ */
+export function isEmojiOnlyFromDom(body: HTMLElement | null): boolean {
+  if (!body) return false;
+
+  if (body.querySelector(STRUCTURAL_TAGS_SELECTOR)) {
+    return false;
+  }
+
+  const customEmojiCount = body.querySelectorAll('img[data-emoji-id]').length;
+
+  // <img> elements contribute nothing to textContent, so no need to strip
+  // custom emojis first as the string-based variant does.
+  const strippedText = (body.textContent || '').trim();
+
+  if (!strippedText && customEmojiCount === 0) {
+    return false;
+  }
+
+  const unicodeEmojiCount = Array.from(strippedText.matchAll(EMOJI_REGEX)).length;
+  const totalEmojiCount = customEmojiCount + unicodeEmojiCount;
+
+  const remainingText = strippedText.replace(EMOJI_REGEX, '').trim();
+
+  const isPureEmoji = remainingText.length === 0;
+  const isWithinLimit = totalEmojiCount > 0 && totalEmojiCount <= MAX_LARGE_EMOJIS;
+
+  return isPureEmoji && isWithinLimit;
+}
+
 export function isEmojiOnly(text: string): boolean {
   if (!text || !text.trim()) {
     return false;

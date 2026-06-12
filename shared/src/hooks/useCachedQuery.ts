@@ -10,7 +10,7 @@ import type {
   TTL,
 } from '@rocicorp/zero';
 import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
-import { queryCacheActor, type CacheEntry } from '../machines/queryCacheMachine.js';
+import { queryCacheActor, type CacheEntry, loadCacheEntryFromStorage } from '../machines/queryCacheMachine.js';
 import { useSelector } from '@xstate/react';
 import { useQuery } from './useQuery.js';
 import { useZero, useInstrumentation } from './useZero.js';
@@ -177,6 +177,25 @@ export function useCachedQuery<
   const cacheEntry = useSelector(queryCacheActor, state => {
     return hash ? state.context.cache.get(hash) : undefined;
   }) as CacheEntry<TReturn> | undefined;
+
+  // Lazy-load from IndexedDB on cache miss (entry was evicted or not hydrated)
+  const idbLoadAttemptedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hash || cacheEntry || idbLoadAttemptedRef.current === hash) return;
+    idbLoadAttemptedRef.current = hash;
+
+    void loadCacheEntryFromStorage(hash).then(entry => {
+      if (entry?.data) {
+        queryCacheActor.send({
+          type: 'SET_KEY',
+          hash,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+          data: entry.data as any,
+          lastUpdatedAt: entry.lastUpdatedAt,
+        });
+      }
+    });
+  }, [hash, cacheEntry]);
 
   const hasCachedData = cacheEntry?.data?.[0] !== null && cacheEntry?.data?.[0] !== undefined;
   const lastUpdatedAt = cacheEntry?.lastUpdatedAt;

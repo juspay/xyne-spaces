@@ -306,7 +306,9 @@ const AppRoot = (): ReactElement => {
   useGlobalShortcuts({ leftPanelRef });
 
   const webviewState = useSelector(webviewActor, state => state.context.webviewState);
-  const xyneAIState = useSelector(xyneAIActor, state => state);
+  // Select the boolean, not the whole snapshot — subscribing to the full
+  // snapshot re-rendered the entire app shell on EVERY xyneAI actor event.
+  const isXyneAIDrawerOpen = useSelector(xyneAIActor, state => state.matches('open'));
   const xyneAIChannelId = useSelector(xyneAIActor, state => state.context.channelId);
   const browserPanelState = useSelector(
     browserPanelActor,
@@ -335,26 +337,28 @@ const AppRoot = (): ReactElement => {
     reactNativeBridge.notifyRouteReady(path);
   }, [location]);
 
-  // Get call state for mobile header using snapshot
-  const callSnapshot = useSelector(roomActor, state => state);
-  const {
-    viewMode: machineViewMode,
-    participants,
-    activeCalls,
-    externalId,
-    room,
-    isNativeMode,
-  } = callSnapshot.context;
-  const machineState = callSnapshot.value;
+  // Get call state for mobile header. Narrow selectors instead of the full
+  // snapshot — the room actor churns on every participant/speaking event
+  // during calls, and a full-snapshot subscription re-rendered the whole app
+  // shell each time.
+  const machineViewMode = useSelector(roomActor, state => state.context.viewMode);
+  const participants = useSelector(roomActor, state => state.context.participants);
+  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
+  const externalId = useSelector(roomActor, state => state.context.externalId);
 
   // Compute mic state from LiveKit (not stored in context)
-  const isMicEnabled = isNativeMode
-    ? (participants.find(p => p.isLocal)?.isMicrophoneEnabled ?? false)
-    : (room?.localParticipant.isMicrophoneEnabled ?? false);
+  const isMicEnabled = useSelector(roomActor, state =>
+    state.context.isNativeMode
+      ? (state.context.participants.find(p => p.isLocal)?.isMicrophoneEnabled ?? false)
+      : (state.context.room?.localParticipant.isMicrophoneEnabled ?? false),
+  );
 
-  const isCallActive =
-    (typeof machineState === 'object' && 'connected' in machineState) ||
-    machineState === 'connecting';
+  const isCallActive = useSelector(
+    roomActor,
+    state =>
+      (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
+      state.value === 'connecting',
+  );
   const shouldShowMobileHeader =
     isMobile && isCallActive && machineViewMode === 'mini' && externalId && !isOnboarding;
   const globalTopBarProps = {
@@ -396,7 +400,7 @@ const AppRoot = (): ReactElement => {
 
   // Monitor for pathname changes to update XyneAI context when navigating
   useEffect(() => {
-    if (xyneAIState.matches('open')) {
+    if (isXyneAIDrawerOpen) {
       const pathParts = location.pathname.split('/').filter(Boolean);
 
       // Check for chat route and extract channelId
@@ -433,7 +437,7 @@ const AppRoot = (): ReactElement => {
       // Note: We don't close XyneAI when leaving chat - it stays open globally
       // Users can manually close it with the X button
     }
-  }, [location.pathname, xyneAIState, xyneAIChannelId]);
+  }, [location.pathname, isXyneAIDrawerOpen, xyneAIChannelId]);
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -452,8 +456,6 @@ const AppRoot = (): ReactElement => {
 
     return unsubscribe;
   }, []);
-
-  const isXyneAIDrawerOpen = xyneAIState.matches('open');
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -502,7 +504,7 @@ const AppRoot = (): ReactElement => {
                     <EditWarningModal />
                     <Outlet />
                   </main>
-                ) : xyneAIState.matches('open') && !isMobile ? (
+                ) : isXyneAIDrawerOpen && !isMobile ? (
                   // XyneAI is open on desktop - show panel layout with XyneAI
                   <div className='flex flex-col h-screen'>
                     {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
@@ -653,7 +655,7 @@ const AppRoot = (): ReactElement => {
                 {/* XyneAI Mobile Drawer */}
                 {isMobile && !isInPanelWebview && (
                   <Drawer
-                    open={xyneAIState.matches('open')}
+                    open={isXyneAIDrawerOpen}
                     onOpenChange={open => {
                       // Don't allow closing during AI onboarding
                       if (!open && isAIOnboardingActive()) return;

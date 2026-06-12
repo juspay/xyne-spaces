@@ -342,7 +342,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
 };
 
 const getMessageBubbleClassName = (
-  isHovered: boolean,
+  shouldShowPending: boolean,
   variant?: MessageBubbleProps['variant'],
   isPinned?: boolean,
   isBookmarked?: boolean,
@@ -367,21 +367,19 @@ const getMessageBubbleClassName = (
       !isBookmarked &&
       !isShowInChannel &&
       !searchItemView &&
-      'hover:bg-accent/50',
-    variant !== 'pinned' &&
-      !isActiveCall &&
-      !isPrivateSystemNotice &&
-      !isBookmarked &&
-      !isShowInChannel &&
-      !searchItemView &&
       'active:bg-accent/50 transition-colors',
+    // Hover highlight lives on the ChatBubble root via `data-[hovered]:bg-...`
+    // (stamped imperatively by the shared MessageHoverToolbar) so the bg and
+    // the toolbar can never desync, and hovering never triggers a React
+    // render. `shouldShowPending` force-applies the same highlight for unsent
+    // own messages.
     variant !== 'pinned' &&
-      isHovered &&
       !isActiveCall &&
       !isPrivateSystemNotice &&
       !isBookmarked &&
       !isShowInChannel &&
       !searchItemView &&
+      shouldShowPending &&
       'bg-muted/50',
     isActiveCall && 'bg-stage-completed active-call-highlight rounded-md',
     isShowInChannel &&
@@ -417,7 +415,6 @@ const getMessageBubbleClassName = (
  * MessageBubble component displays a single message in a conversation.
  * Supports user avatars, reactions, attachments, and custom action buttons.
  *
- * @param isHovered - Optional flag to control the hover state externally.
  * @param message - The message object to display (includes sender, content, reactions, attachments)
  * @param onUserClick - Optional callback when user avatar/name is clicked
  * @param renderActions - Optional function to render custom action buttons for the message
@@ -426,7 +423,6 @@ const getMessageBubbleClassName = (
  */
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
-  isHovered = false,
   message,
   renderActions,
   showAvatar = true,
@@ -633,7 +629,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isShowInChannelHighlight = context === 'thread' && message.showInChannel === true;
 
   const messageBubbleClassName = getMessageBubbleClassName(
-    (isHovered = isHovered || shouldShowPending),
+    shouldShowPending,
     variant,
     isPinned,
     isBookmarked,

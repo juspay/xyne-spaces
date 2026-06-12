@@ -52,7 +52,6 @@ export interface ConversationWithTicket extends Conversation {
 }
 
 export interface MessageBubbleProps {
-  isHovered?: boolean;
   message: MessageWithOptionalNudgeCounts;
   onUserClick?: (userId: string) => void;
   renderActions?: (message: Message) => React.ReactNode;

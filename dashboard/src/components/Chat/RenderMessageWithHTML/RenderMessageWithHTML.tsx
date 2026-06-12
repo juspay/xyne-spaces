@@ -26,7 +26,7 @@ import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover
 import { useChannel } from '../../../hooks/useChannels';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { ALLOWED_TAGS, isValidURL, sanitizeDomTree } from '../../../utils/sanitizer';
-import { tokenizeMessage, isEmojiOnly } from '../../../utils/emojiUtils';
+import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
 import { getUserDisplayNameById } from '../../../utils/userDisplayName';
@@ -1307,8 +1307,9 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
       const nodes: React.ReactNode[] = [];
       let idx = 0;
 
-      const sanitizedHtml = doc.body.innerHTML;
-      const skipEmojiWrapping = isEmojiOnly(sanitizedHtml);
+      // Reuse the already-parsed tree — isEmojiOnly(html) would re-parse the
+      // whole message with DOMParser a third time.
+      const skipEmojiWrapping = isEmojiOnlyFromDom(doc.body);
 
       doc.body.childNodes.forEach((child: Node) => {
         const parsed = parseNode(

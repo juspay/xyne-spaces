@@ -235,13 +235,67 @@ export const useChannelParticipation = (
   return statusFromHook ?? statusFromQuery;
 };
 
+// Stable empty result. An inline `|| []` inside the selector returned a NEW
+// array reference on every queryCacheActor event, so every subscriber of a
+// channel with no cached conversations re-rendered on every cache event
+// (i.e. on every websocket message, app-wide).
+const NO_CONVERSATIONS: Conversation[] = [];
+
+/**
+ * NON-REACTIVE read of the cached conversations for a channel.
+ *
+ * Use this for warm-start hydration (e.g. ChatListV3 reads the cache once in
+ * a useState initializer). Subscribing via useGetChannelConversations for
+ * that purpose created a render echo: ChatListV3 dispatches
+ * SET_CONVERSATIONS on every live-query emit → cache updates → subscribing
+ * parent re-renders → list re-renders again, doubling the render work for
+ * every incoming message.
+ *
+ * Returns a WINDOW of at most `windowSize` conversations, not the whole
+ * cached array — hydrating 1000 conversations meant rendering and
+ * height-estimating all of them on mount. Without an anchor, the newest
+ * window is returned (channels open at the bottom). With an anchor
+ * (deep link / activity click), the window is centered on it; if the anchor
+ * is outside the cached range, the newest window is returned and the
+ * caller's existing fetch-around-anchor path takes over (its findIndex
+ * lookups all guard on -1).
+ */
+export const getChannelConversationsSnapshot = (
+  channelId: string,
+  anchorCreatedAt?: number,
+  windowSize = 100,
+): Conversation[] => {
+  const cached =
+    queryCacheActor.getSnapshot().context.channelConversations[channelId] || NO_CONVERSATIONS;
+  const sorted = [...cached].sort((a, b) => a.createdAt - b.createdAt);
+
+  if (sorted.length <= windowSize) return sorted;
+
+  if (anchorCreatedAt === undefined) {
+    return sorted.slice(-windowSize);
+  }
+
+  const anchorIdx = sorted.findIndex(c => c.createdAt >= anchorCreatedAt);
+  if (anchorIdx === -1) {
+    // Anchor is newer than everything cached — newest window contains it.
+    return sorted.slice(-windowSize);
+  }
+
+  // Center the window on the anchor, clamped to the array bounds.
+  const half = Math.floor(windowSize / 2);
+  const start = Math.max(0, Math.min(anchorIdx - half, sorted.length - windowSize));
+  return sorted.slice(start, start + windowSize);
+};
+
 export const useGetChannelConversations = (channelId: string): Conversation[] => {
   const channelConversations = useSelector(
     queryCacheActor,
-    state => state.context.channelConversations[channelId] || [],
+    state => state.context.channelConversations[channelId] || NO_CONVERSATIONS,
   );
   return useMemo(
-    () => channelConversations.sort((a, b) => a.createdAt - b.createdAt),
+    // Sort a copy — `.sort()` mutated the array held inside the actor's
+    // context, silently reordering state for every other consumer.
+    () => [...channelConversations].sort((a, b) => a.createdAt - b.createdAt),
     [channelConversations],
   );
 };
@@ -249,11 +303,14 @@ export const useGetChannelConversations = (channelId: string): Conversation[] =>
 export const useGetLatestConversation = (channelId: string): Conversation | undefined => {
   const channelConversations = useSelector(
     queryCacheActor,
-    state => state.context.channelConversations[channelId] || [],
+    state => state.context.channelConversations[channelId] || NO_CONVERSATIONS,
   );
 
   return useMemo(
-    () => channelConversations.sort((a, b) => b.createdAt - a.createdAt)[0],
+    () =>
+      channelConversations.length === 0
+        ? undefined
+        : channelConversations.reduce((latest, c) => (c.createdAt > latest.createdAt ? c : latest)),
     [channelConversations],
   );
 };

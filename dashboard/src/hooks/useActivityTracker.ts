@@ -163,6 +163,11 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
     // Events to monitor
     events: ['mousemove', 'keydown', 'wheel', 'mousedown', 'touchstart', 'touchmove'],
 
+    // Idle detection only needs coarse granularity; without throttling,
+    // react-idle-timer runs its handler on EVERY mousemove/wheel event,
+    // a constant CPU/battery drain.
+    throttle: 500,
+
     // Event handlers
     onIdle: handleIdle,
     onActive: handleActive,

@@ -37,6 +37,8 @@ export interface CacheEntry<T> {
   data: QueryResult<T>;
   lastUpdatedAt?: number;
   lastAccessedAt?: number;
+  accessCount?: number;
+  estimatedSize?: number;
 }
 
 export interface QueryCacheContext {
@@ -98,7 +100,18 @@ export const queryCacheMachine = setup({
       const entry: CacheEntry<any> = {
         data: event.data,
         lastAccessedAt: Date.now(),
+        accessCount: (existing?.accessCount ?? 0) + 1,
+        estimatedSize: existing?.estimatedSize,
       };
+
+      // Estimate size on first write or when data reference changes
+      if (!existing || existing.data !== event.data) {
+        try {
+          entry.estimatedSize = JSON.stringify(event.data).length;
+        } catch {
+          entry.estimatedSize = 1000; // fallback 1KB
+        }
+      }
 
       if (resolvedLastUpdatedAt !== undefined) {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -130,10 +143,23 @@ export const queryCacheMachine = setup({
     setConversations: assign({
       channelConversations: ({ context, event }) => {
         if (event.type === 'SET_CONVERSATIONS') {
-          return {
+          const next = {
             ...context.channelConversations,
-            [event.channelId]: event.conversations,
+            [event.channelId]: capConversations(event.conversations),
           };
+          // LRU cap: the cache is a warm-start hint, not a source of truth.
+          // Without a bound it grows with every channel ever opened (and the
+          // persistence layer clones all of it). Object key order is
+          // insertion order for string keys, so deleting + re-adding the
+          // current channel keeps "least recently SET" at the front.
+          const capped = next[event.channelId]!;
+          delete next[event.channelId];
+          next[event.channelId] = capped;
+          const keys = Object.keys(next);
+          for (let i = 0; i < keys.length - MAX_CACHED_CHANNELS; i++) {
+            delete next[keys[i]!];
+          }
+          return next;
         }
         return context.channelConversations;
       },
@@ -148,7 +174,10 @@ export const queryCacheMachine = setup({
         const updated = idx >= 0
           ? existing.map((c, i) => (i === idx ? conversation : c))
           : [conversation, ...existing];
-        return { ...context.channelConversations, [channelId]: updated };
+        // Cap here too: background channels receive MERGE_CONVERSATION per
+        // incoming message and could otherwise grow unboundedly over a long
+        // session without ever being re-SET.
+        return { ...context.channelConversations, [channelId]: capConversations(updated) };
       },
     }),
     hydrateConversations: assign(({ event, context }) => {
@@ -276,9 +305,134 @@ export const queryCacheMachine = setup({
 
 export const queryCacheActor = createActor(queryCacheMachine).start();
 
+// LRU bound for per-channel conversation caches (warm-start data only).
+const MAX_CACHED_CHANNELS = 50;
+
+/* -------------------------- STORAGE REF -------------------------- */
+
+let _storageAdapter: StorageAdapter | null = null;
+
+export function setStorageAdapter(storage: StorageAdapter): void {
+  _storageAdapter = storage;
+}
+
+export async function loadCacheEntryFromStorage(hash: string): Promise<CacheEntry<unknown> | null> {
+  if (!_storageAdapter) return null;
+  try {
+    const value = await _storageAdapter.loadContextProperty(hash);
+    if (!value || value === null) return null;
+    return value as CacheEntry<unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/* -------------------------- LRU EVICTION -------------------------- */
+
+const EVICTION_MAX_ENTRIES = 300;
+const EVICTION_RECENCY_PROTECT_MS = 60 * 60 * 1000; // 1 hour
+const EVICTION_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const ACCESS_COUNT_DECAY_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Evict cache entries that exceed the max entry limit.
+ * Skips entries accessed within the last hour.
+ * Among eligible entries, evicts the one with highest estimatedSize / (1 + accessCount).
+ */
+function runEviction(): void {
+  const { cache } = queryCacheActor.getSnapshot().context;
+  if (cache.size <= EVICTION_MAX_ENTRIES) return;
+
+  const now = Date.now();
+  let worstKey: string | null = null;
+  let worstScore = -1;
+
+  for (const [key, entry] of cache) {
+    const lastAccessed = entry.lastAccessedAt ?? 0;
+    if (now - lastAccessed < EVICTION_RECENCY_PROTECT_MS) continue;
+
+    const size = entry.estimatedSize ?? 1000;
+    const accesses = entry.accessCount ?? 1;
+    const score = size / (1 + accesses);
+
+    if (score > worstScore) {
+      worstScore = score;
+      worstKey = key;
+    }
+  }
+
+  if (worstKey) {
+    const newCache = new Map(cache);
+    newCache.delete(worstKey);
+    queryCacheActor.send({ type: 'HYDRATE_CACHE', cacheData: Object.fromEntries(newCache) });
+  }
+}
+
+/**
+ * Decay access counts so old frequency doesn't dominate forever.
+ * Halves all accessCount values.
+ */
+function decayAccessCounts(): void {
+  const { cache } = queryCacheActor.getSnapshot().context;
+  let hasChanges = false;
+
+  for (const entry of cache.values()) {
+    if (entry.accessCount && entry.accessCount > 1) {
+      entry.accessCount = Math.floor(entry.accessCount / 2);
+      hasChanges = true;
+    }
+  }
+
+  if (hasChanges) {
+    // Mutation is fine here — the Map entries are objects, and XState
+    // subscribers won't re-fire since we're not changing the Map reference.
+    // The decayed counts will be picked up on next eviction check.
+  }
+}
+
+// Start eviction and decay timers
+if (typeof setInterval !== 'undefined') {
+  setInterval(runEviction, EVICTION_CHECK_INTERVAL_MS);
+  setInterval(decayAccessCounts, ACCESS_COUNT_DECAY_INTERVAL_MS);
+}
+
+// Per-channel bound. Warm-start only ever renders a ~100-item window, so
+// caching more than this per channel is pure memory + persistence-clone cost.
+const MAX_CONVERSATIONS_PER_CHANNEL = 200;
+
+/** Keep the newest N conversations by createdAt (input order preserved otherwise). */
+const capConversations = (conversations: Conversation[]): Conversation[] => {
+  if (conversations.length <= MAX_CONVERSATIONS_PER_CHANNEL) return conversations;
+  return [...conversations]
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .slice(-MAX_CONVERSATIONS_PER_CHANNEL);
+};
+
 // Debounce function for persistence
 let persistTimeout: ReturnType<typeof setTimeout> | null = null;
-const PERSIST_DEBOUNCE_MS = 500;
+// 2s: persistence is a crash-recovery cache, not a source of truth — there is
+// no UX benefit to flushing faster, and each flush structured-clones data into
+// IndexedDB on the main thread (measured ~450ms long tasks at 500ms).
+const PERSIST_DEBOUNCE_MS = 2000;
+
+// References persisted in the previous flush, used to skip unchanged entries.
+// The machine's reducers replace values immutably, so reference equality is a
+// valid "unchanged" check. Before dirty-tracking, EVERY cache key was re-`put`
+// into IndexedDB on EVERY flush — profiled at ~660ms of main-thread time for
+// four channel opens.
+const lastPersistedRefs = new Map<string, unknown>();
+
+// Schedule work off the critical path when the platform supports it
+// (requestIdleCallback exists in browsers; guarded for React Native).
+const runWhenIdle = (fn: () => void): void => {
+  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void })
+    .requestIdleCallback;
+  if (typeof ric === 'function') {
+    ric(fn, { timeout: 2000 });
+  } else {
+    fn();
+  }
+};
 
 /**
  * Get the AST-based hash for the channelConversationsPaginatedV3 query.
@@ -340,6 +494,11 @@ export const getRecordingsQueryHash = (): string => {
   }
 };
 
+// Set by setupQueryCachePersistence; lets flushQueryCachePersistence run the
+// persist body immediately (e.g. on pagehide, where debounce + idle callbacks
+// would never fire before the page dies).
+let persistNow: (() => void) | null = null;
+
 /**
  * Setup persistence middleware for query cache.
  * Accepts a StorageAdapter for platform-agnostic persistence.
@@ -349,57 +508,112 @@ export const setupQueryCachePersistence = (
   userId: string,
   schemaVersion: string,
 ): void => {
+  setStorageAdapter(storage);
+
+  const doPersist = (): void => {
+    // Read the LATEST snapshot at flush time (not the one that scheduled
+    // the flush) so dirty-tracking compares against current state.
+    const { cache, channelConversations, callHistory, recordings } =
+      queryCacheActor.getSnapshot().context;
+
+    // Only persist cache entries whose reference changed since the
+    // last flush. Each `put` structured-clones on the main thread, so
+    // rewriting the entire cache per flush was the dominant cost.
+    // The Map stores REFERENCES to objects the actor context already
+    // holds (not copies), so marginal memory is key + pointer.
+    cache.forEach((value, key) => {
+      if (lastPersistedRefs.get(key) === value) return;
+      lastPersistedRefs.set(key, value);
+      storage.saveContextProperty(key, value).catch(error => {
+        console.error(`Failed to persist query cache entry ${key}:`, error);
+      });
+    });
+
+    // Prune refs for keys no longer in the cache. Without this, a
+    // ref to an EVICTED entry's value would pin it against GC and
+    // the Map would accumulate dead keys.
+    for (const key of lastPersistedRefs.keys()) {
+      if (
+        !cache.has(key) &&
+        key !== 'channelConversations' &&
+        key !== CALL_HISTORY_KEY &&
+        key !== RECORDINGS_KEY
+      ) {
+        lastPersistedRefs.delete(key);
+      }
+    }
+
+    if (lastPersistedRefs.get('channelConversations') !== channelConversations) {
+      lastPersistedRefs.set('channelConversations', channelConversations);
+      const conversationHash = getChannelConversationsQueryHash({ userID: userId });
+
+      const payload: Record<string, unknown> = {
+        ...channelConversations,
+        [FINGERPRINT_FIELD]: conversationHash,
+      };
+
+      storage.saveContextProperty('channelConversations', payload).catch(error => {
+        console.error('Failed to persist conversations:', error);
+      });
+    }
+
+    if (lastPersistedRefs.get(CALL_HISTORY_KEY) !== callHistory) {
+      lastPersistedRefs.set(CALL_HISTORY_KEY, callHistory);
+      storage
+        .saveContextProperty(CALL_HISTORY_KEY, {
+          ...callHistory,
+          [FINGERPRINT_FIELD]: getCallHistoryQueryHash(),
+        })
+        .catch(error => {
+          console.error('Failed to persist call history:', error);
+        });
+    }
+
+    if (lastPersistedRefs.get(RECORDINGS_KEY) !== recordings) {
+      lastPersistedRefs.set(RECORDINGS_KEY, recordings);
+      storage
+        .saveContextProperty(RECORDINGS_KEY, {
+          ...recordings,
+          [FINGERPRINT_FIELD]: getRecordingsQueryHash(),
+        })
+        .catch(error => {
+          console.error('Failed to persist recordings:', error);
+        });
+    }
+  };
+
   storage
     .init(userId, schemaVersion)
-    .then(() =>
-      queryCacheActor.subscribe(snapshot => {
+    .then(() => {
+      persistNow = doPersist;
+      queryCacheActor.subscribe(() => {
         if (persistTimeout) {
           clearTimeout(persistTimeout);
         }
 
         persistTimeout = setTimeout(() => {
-          const { cache, channelConversations, callHistory, recordings } = snapshot.context;
-
-          cache.forEach((value, key) => {
-            storage.saveContextProperty(key, value).catch(error => {
-              console.error(`Failed to persist query cache entry ${key}:`, error);
-            });
-          });
-
-          const conversationHash = getChannelConversationsQueryHash({ userID: userId });
-
-          const payload: Record<string, unknown> = {
-            ...channelConversations,
-            [FINGERPRINT_FIELD]: conversationHash,
-          };
-
-          storage.saveContextProperty('channelConversations', payload).catch(error => {
-            console.error('Failed to persist conversations:', error);
-          });
-
-          storage
-            .saveContextProperty(CALL_HISTORY_KEY, {
-              ...callHistory,
-              [FINGERPRINT_FIELD]: getCallHistoryQueryHash(),
-            })
-            .catch(error => {
-              console.error('Failed to persist call history:', error);
-            });
-
-          storage
-            .saveContextProperty(RECORDINGS_KEY, {
-              ...recordings,
-              [FINGERPRINT_FIELD]: getRecordingsQueryHash(),
-            })
-            .catch(error => {
-              console.error('Failed to persist recordings:', error);
-            });
+          runWhenIdle(doPersist);
         }, PERSIST_DEBOUNCE_MS);
-      }),
-    )
+      });
+    })
     .catch(error => {
       console.error('Failed to initialize storage for query cache:', error);
     });
+};
+
+/**
+ * Persist dirty cache state to storage IMMEDIATELY — no debounce, no idle
+ * callback. Call from `pagehide` so the warm-start cache survives a refresh:
+ * the IDB transaction kicked off here completes even as the page unloads,
+ * whereas the debounced path would die with the page. No-op until
+ * setupQueryCachePersistence's storage init has finished.
+ */
+export const flushQueryCachePersistence = (): void => {
+  if (persistTimeout) {
+    clearTimeout(persistTimeout);
+    persistTimeout = null;
+  }
+  persistNow?.();
 };
 
 /**
@@ -411,6 +625,7 @@ export const hydrateQueryCacheFromStorage = async (
   userId: string,
   schemaVersion: string,
 ): Promise<boolean> => {
+  setStorageAdapter(storage);
   try {
     await storage.init(userId, schemaVersion);
 
@@ -420,14 +635,11 @@ export const hydrateQueryCacheFromStorage = async (
       return false;
     }
 
-    //eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cacheData: Record<string, CacheEntry<any>> = {};
+    // Only hydrate special keys (conversations, call history, recordings).
+    // Generic cache entries are lazy-loaded from IndexedDB on demand via useCachedQuery.
     const conversationsData: Record<string, Conversation[]> = {};
     let callHistoryHydrated = false;
     let recordingsHydrated = false;
-    const staleKeys: string[] = [];
-    const CACHE_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
-    const now = Date.now();
 
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
 
@@ -490,28 +702,9 @@ export const hydrateQueryCacheFromStorage = async (
           data: { recordings: raw.recordings, hasMore: raw.hasMore },
         });
         recordingsHydrated = true;
-      } else {
-        if (value === null || value === undefined) {
-          staleKeys.push(key);
-          continue;
-        }
-        const entry = value as CacheEntry<unknown>;
-        const lastAccessed = (entry as { lastAccessedAt?: number }).lastAccessedAt ?? 0;
-        if (lastAccessed > 0 && now - lastAccessed > CACHE_TTL_MS) {
-          staleKeys.push(key);
-          continue;
-        }
-        //eslint-disable-next-line @typescript-eslint/no-explicit-any
-        cacheData[key] = entry as CacheEntry<any>;
       }
-    }
-
-    if (Object.keys(cacheData).length > 0) {
-      queryCacheActor.send({
-        type: 'HYDRATE_CACHE',
-        cacheData,
-      });
-      console.log(`Hydrated ${Object.keys(cacheData).length} query cache entries from storage`);
+      // Generic cache entries (else branch) are intentionally NOT hydrated.
+      // They will be lazy-loaded from IndexedDB when useCachedQuery requests them.
     }
 
     if (Object.keys(conversationsData).length > 0) {
@@ -524,18 +717,7 @@ export const hydrateQueryCacheFromStorage = async (
       );
     }
 
-    // Delete stale entries from storage
-    if (staleKeys.length > 0) {
-      console.log(`Evicting ${staleKeys.length} stale cache entries (older than 3 days)`);
-      for (const key of staleKeys) {
-        storage.saveContextProperty(key, null).catch(() => {
-          // Ignore deletion errors
-        });
-      }
-    }
-
     return (
-      Object.keys(cacheData).length > 0 ||
       Object.keys(conversationsData).length > 0 ||
       callHistoryHydrated ||
       recordingsHydrated

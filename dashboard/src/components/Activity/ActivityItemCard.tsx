@@ -1,5 +1,5 @@
 import React, { createContext, ReactElement, ReactNode, useContext } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import {
   activitySkipMarkAsReadThreadRef,
@@ -71,12 +71,16 @@ export const ActivityItemCard = ({
   const context = useAuthContextValues();
   const zero = useZero();
   const { isMobile } = usePlatform();
-  const location = useLocation();
   const nofocusRef = useContext(NofocusRefContext);
 
-  // URL-based selection — survives refresh, unique per activity.id
-  const selectedActivityParam = new URLSearchParams(location.search).get('selectedActivity');
-  const isSelectedPath = selectedActivityParam === activity.id;
+  // URL-based selection fallback — survives refresh, unique per activity.id.
+  // Read from window.location WITHOUT useLocation(): a router subscription
+  // here re-rendered EVERY mounted card on EVERY navigation (each activity
+  // click changes the URL). Selection updates are driven by the `isSelected`
+  // prop from the list; this fallback only needs to be correct at mount.
+  const isSelectedPath =
+    isSelected === undefined &&
+    new URLSearchParams(window.location.search).get('selectedActivity') === activity.id;
   const isActive = isSelected || isSelectedPath;
 
   const channel = useChannel(channelId || '');

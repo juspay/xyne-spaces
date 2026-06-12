@@ -51,12 +51,30 @@ export function AudioPlayer({
   const blobUrlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Releases the current Audio element: stops playback, detaches the media
+  // resource (removeAttribute('src')+load() frees the decoder and makes the
+  // element + its listeners GC-able), and revokes the blob URL (which pins
+  // the whole recording's bytes). Runs on unmount AND before creating a
+  // replacement — previously each replay leaked the prior element + blob.
+  const releaseAudio = (): void => {
+    abortRef.current?.abort();
+    const a = audioRef.current;
+    if (a) {
+      a.pause();
+      a.removeAttribute('src');
+      a.load();
+      audioRef.current = null;
+    }
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+  };
+  const releaseRef = useRef(releaseAudio);
+  releaseRef.current = releaseAudio;
+
   useEffect(() => {
-    return (): void => {
-      abortRef.current?.abort();
-      audioRef.current?.pause();
-      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    };
+    return (): void => releaseRef.current();
   }, []);
 
   const stop = (e: { stopPropagation(): void }): void => {
@@ -79,6 +97,7 @@ export function AudioPlayer({
     if (state !== 'idle') return;
 
     setState('loading');
+    releaseAudio(); // free the previous element + blob before creating new ones
     try {
       abortRef.current = new AbortController();
       const blob = await onLoad(abortRef.current.signal);

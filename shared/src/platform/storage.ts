@@ -7,6 +7,7 @@ export interface StorageAdapter {
   saveContextProperty(key: string, value: unknown): Promise<void>;
   saveContext(context: Record<string, unknown>): Promise<void>;
   loadContext(): Promise<Record<string, unknown> | null>;
+  loadContextProperty(key: string): Promise<unknown>;
   isInitialized(): boolean;
   close(): void;
   dropAllUserDatabases(): Promise<void>;

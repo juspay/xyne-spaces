@@ -9,6 +9,7 @@ import { GroupedVirtuoso, GroupedVirtuosoHandle } from 'react-virtuoso';
 import { DatePill } from '../DatePill';
 import { formatDatePill } from '../../../utils/dateUtils';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
+import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 import { useNavigate, useLocation } from 'react-router-dom';
 import LoadingAnimation from '../Loader/Loader';
 import { ChannelScopeType, MessageType } from '@xyne/shared';
@@ -57,6 +58,8 @@ const ChatListV2: React.FC<ChatListProps> = ({
   const [oldestConversation, setOldestConversation] = useState<Anchor>(initialItem);
   const [firstItemIndex, setFirstItemIndex] = useState(100000);
   const virtuosoRef = useRef<GroupedVirtuosoHandle>(null);
+  // Container for the shared hover toolbar overlay (one toolbar per list).
+  const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const { editingMessageId, requestEdit } = useEditContext();
   const particpantionStatus = useGetChannelUserStatus(channelId);
@@ -508,6 +511,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
 
   return (
     <div
+      ref={hoverToolbarContainerRef}
       data-component='ChatListV2'
       data-testid='chat-message-list'
       className='flex-1 relative no-scrollbar min-h-0'
@@ -576,6 +580,9 @@ const ChatListV2: React.FC<ChatListProps> = ({
         }}
         style={{ height: '100%', zIndex: 0 }}
       />
+
+      {/* ONE shared hover-actions toolbar for the entire list (zero-render hover). */}
+      <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
 
       {/* Scroll to bottom button */}
       {showScrollButton && (

@@ -28,6 +28,7 @@ export {
   useGetChannelUserStatus,
   useChannelParticipation,
   useGetChannelConversations,
+  getChannelConversationsSnapshot,
   useGetLatestConversation,
 } from './useChannels.js';
 export type { VisibleChannel, VisibleProject } from './useChannels.js';

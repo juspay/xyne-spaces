@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import { playAudio } from '../../../utils/audioPlayer';
 import { useSelector } from '@xstate/react';
 import type { Zero } from '@rocicorp/zero';
 import { CallType, InvitationResponse } from '@xyne/shared';
@@ -177,7 +178,7 @@ export function CustomLiveKitRoom({
             duration: 5000,
           },
         );
-        void new Audio('/sounds/notification.wav').play().catch(() => {});
+        playAudio('/sounds/notification.wav');
       }
     }
     prevLobbyCountRef.current = lobbyRequests.length;
