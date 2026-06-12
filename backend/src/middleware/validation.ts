@@ -64,7 +64,7 @@ export const validateQuery = (schema: Joi.ObjectSchema) => {
  */
 export const validateSearchFilters = () => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const { priority, offset = 0, limit = 20, projectId, in: inChannel, from, withUser, on, after, before, range, board, ticketId, assignee, type } = req.query;
+    const { priority, offset = 0, limit = 20, projectId, in: inChannel, from, withUser, on, after, before, range, board, ticketId, assignee, type, tags } = req.query;
 
     // Validate 'on' filter (specific date)
     if (on) {
@@ -99,6 +99,15 @@ export const validateSearchFilters = () => {
       if (!isValid) {
         res.json({ success: true, data: { grouped: false, results: [], totalCount: 0, offset: Number(offset), limit: Number(limit) } });
         return;
+      }
+    }
+
+    // Validate tags filter — reject values containing YQL special characters
+    if (tags) {
+      const tagValues = (tags as string).split(',').map(t => t.trim());
+      const hasIllegalChars = tagValues.some(t => /["()\\]/.test(t));
+      if (hasIllegalChars) {
+        return next(new AppError('Invalid tag values: tags cannot contain quote or bracket characters', 400));
       }
     }
 
