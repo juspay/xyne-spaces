@@ -624,6 +624,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         prefetchedData,
         false,
         replyExcludedUserIds,
+        this.ctx.workspaceId,
       );
     }
 
@@ -1110,6 +1111,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     prefetchedData?: PrefetchedFilterData,
     isGroupDM: boolean = false,
     excludedUserIds: string[] = [],
+    workspaceId?: string,
   ): Promise<void> {
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
     const participants = await db.conversationParticipant.findMany({
@@ -1141,6 +1143,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           actorId: senderUserId,
           recipientUserId: userId,
           latestReplyMessageId: replyMessageId,
+          workspaceId,
         })
       )
     );
@@ -1338,10 +1341,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         scopeType === ChannelScopeType.DM,
         prefetchedData,
         scopeType === ChannelScopeType.GROUP_DM,
+        [],
+        this.ctx.workspaceId,
       );
     } else {
       if (!mentionType && !isLargeGroupDm) {
-        await createDirectMessageActivities(messageId, senderId, channelId, initialMessageId !== messageId);
+        await createDirectMessageActivities(messageId, senderId, channelId, initialMessageId !== messageId, this.ctx.workspaceId);
       }
 
       const recipientIds = channelParticipants

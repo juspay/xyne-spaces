@@ -1472,6 +1472,7 @@ export const conversationTable = table("conversations")
     channelId: string(),
     createdBy: string(),
     initialMessageId: string(),
+    workspaceId: string().optional(),
     parentMessageId: string().optional(),
     lastActivityAt: number(),
     replyCount: number(),
@@ -1508,6 +1509,7 @@ export const messageTable = table('messages')
     conversationId: string(),
     childConversationId: string().optional(),
     senderId: string(),
+    workspaceId: string().optional(),
     content: string(),
     msgType: enumeration<MessageType>(),
     hasAttachment: boolean(),
@@ -1613,6 +1615,7 @@ export const activityTable = table('activities')
   .columns({
     id: string(),
     userId: string(),
+    workspaceId: string().optional(),
     actorAction: string(),
     actionSource: string(), // @deprecated Use messageId, reactionId, or callId
     actionSourceId: string(), // @deprecated Use messageId, reactionId, or callId

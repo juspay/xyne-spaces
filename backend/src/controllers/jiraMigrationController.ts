@@ -1785,6 +1785,11 @@ export class JiraMigrationController {
       ...(canvasUrl ? ['', `View full report: ${canvasUrl}`] : []),
     ].join('\n');
 
+    const migrationReportChannel = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
+
     await db.$transaction(async tx => {
       await tx.conversation.create({
         data: {
@@ -1792,6 +1797,7 @@ export class JiraMigrationController {
           channelId,
           createdBy: actorUserId,
           initialMessageId: messageId,
+          ...(migrationReportChannel?.workspaceId ? { workspaceId: migrationReportChannel.workspaceId } : {}),
           createdAt: now,
           lastActivityAt: now,
           metadata: {
@@ -1810,6 +1816,7 @@ export class JiraMigrationController {
           messageId,
           conversationId,
           senderId: actorUserId,
+          ...(migrationReportChannel?.workspaceId ? { workspaceId: migrationReportChannel.workspaceId } : {}),
           content: messageContent,
           msgType: 'SYSTEM',
           hasAttachment: false,

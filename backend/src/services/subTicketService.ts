@@ -80,6 +80,7 @@ export async function createSubTicket(
         data: {
           messageId: uuidv4(),
           conversationId: parent.conversationId,
+          ...(parent.workspaceId ? { workspaceId: parent.workspaceId } : {}),
           senderId: input.createdBy,
           content: `Subticket ${displayId} created: ${input.title}`,
           msgType: MessageType.SYSTEM,

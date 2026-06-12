@@ -590,6 +590,7 @@ export class TicketRepository {
         await prisma.message.create({
           data: {
             conversationId: currentTicket.conversationId,
+            ...(currentTicket.workspaceId ? { workspaceId: currentTicket.workspaceId } : {}),
             senderId: updatedBy,
             content: statusMessage,
             msgType: 'SYSTEM',

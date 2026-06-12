@@ -38,6 +38,7 @@ export async function resolveMessage(
     messageId: summary.messageId,
     conversationId: summary.conversationId,
     senderId: summary.senderId,
+    workspaceId: summary.workspaceId ?? null,
     content: summary.content,
     msgType: summary.msgType,
     hasAttachment: summary.hasAttachment,

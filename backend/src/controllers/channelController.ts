@@ -412,18 +412,20 @@ export class ChannelController {
       });
 
       // Use transaction for all write operations to maintain atomicity
+      const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
       const result = await db.$transaction(async (tx) => {
         // Create conversation
-        const conversation = await tx.conversation.create({
-          data: {
-            channelId: channelId,
-            createdBy: senderId,
-            initialMessageId: 'temp', // Will be updated after message creation
-            lastActivityAt: new Date(),
-            replyCount: 0,
-            pinned: false,
-          },
-        });
+      const conversation = await tx.conversation.create({
+        data: {
+          channelId: channelId,
+          createdBy: senderId,
+          initialMessageId: 'temp',
+          workspaceId: channelWorkspaceId,
+          lastActivityAt: new Date(),
+          replyCount: 0,
+          pinned: false,
+        },
+      });
 
         const forwardedMessageMetadata = {} as Record<string, unknown>;
         if (isCall) {
@@ -438,6 +440,7 @@ export class ChannelController {
           data: {
             conversationId: conversation.conversationId,
             senderId: senderId,
+            workspaceId: channelWorkspaceId,
             content: xmlContent,
             msgType: MessageType.FORWARDED,
             hasAttachment: originalAttachments.length > 0,
@@ -447,7 +450,6 @@ export class ChannelController {
 
          // Copy attachments to the new message
          const copiedAttachments: any[] = [];
-         const channelWorkspaceId = await this.channelRepository.getWorkspaceId(conversation.channelId);
         if (originalAttachments.length > 0) {
            for (const attachment of originalAttachments) {
              const copiedAttachment = await tx.messageAttachment.create({
@@ -494,6 +496,7 @@ export class ChannelController {
               data: {
                 conversationId: conversation.conversationId,
                 senderId: botMsg.senderId,
+                workspaceId: channelWorkspaceId,
                 content: botMsg.content,
                 msgType: botMsg.msgType,
                 hasAttachment: botMsg.hasAttachment,

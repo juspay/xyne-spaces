@@ -158,7 +158,8 @@ export async function createDirectMessageActivities(
   messageId: string,
   senderUserId: string,
   channelId: string,
-  isThreadActivity?: boolean
+  isThreadActivity?: boolean,
+  workspaceId?: string,
 ): Promise<void> {
   logger.info('[ActivityUtils] Creating direct message activities', {
     messageId,
@@ -180,6 +181,7 @@ export async function createDirectMessageActivities(
   const activities = recipientIds.map(userId => ({
     id: uuidv4(),
     userId,
+    workspaceId,
     actorId: senderUserId,
     actorAction: 'direct_message' as const,
     actionSource: 'message' as const,

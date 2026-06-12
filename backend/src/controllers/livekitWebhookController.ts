@@ -315,10 +315,15 @@ class LiveKitWebhookController {
         // If this transaction fails the LiveKit room is already live with no DB record — a
         // "ghost room". Catch it specifically so the log contains the room name and explicit
         // ghost_room_detected marker rather than the generic 'Error handling participant join'.
+        const channelRecord = await this.db.channel.findUnique({
+          where: { id: channelId },
+          select: { workspaceId: true },
+        });
         const result = await repositories.calls.createCallWithParticipantsAndMessage({
           callId,
           roomName,
           channelId,
+          workspaceId: channelRecord?.workspaceId,
           createdBy,
           callType,
           roomLink,
@@ -411,10 +416,16 @@ class LiveKitWebhookController {
           });
           const initiatorName = joiningUser?.name || participant.name;
 
+          const callChannelRecord = await this.db.channel.findUnique({
+            where: { id: call.channelId ?? '' },
+            select: { workspaceId: true },
+          });
+
           await repositories.calls.activateScheduledCall({
             call,
             initiatorName,
             now,
+            workspaceId: callChannelRecord?.workspaceId,
           });
 
           logger.info(`[LiveKit Webhook] Scheduled call ${roomName} activated (status → ACTIVE)`);
