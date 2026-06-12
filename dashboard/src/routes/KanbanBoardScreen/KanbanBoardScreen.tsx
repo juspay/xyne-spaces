@@ -1606,9 +1606,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     [navigate, channel, buildChannelRoute],
   );
 
-  // Get first board for create ticket modal
-  // CreateTicketModal fetches its own boards and auto-selects the first one if needed
-  const firstBoardId = boardId || null;
+  // Board context for create ticket modal. When creating from a board route or
+  // a single board-filtered channel ticket tab, preselect that board so users
+  // do not need to choose it again.
+  const currentBoardId = filteredSingleBoardId ?? null;
 
   const shouldUseStatusColumns =
     (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
@@ -2536,7 +2537,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           onClose={() => setIsCreateModalOpen(false)}
           channelId={channel.id}
           projectId={effectiveProjectId}
-          selectedBoardId={firstBoardId}
+          selectedBoardId={currentBoardId}
           onTicketCreated={handleTicketCreated}
         />
       )}
