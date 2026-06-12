@@ -21,7 +21,12 @@ export class EmailRepository {
     createdAt?: Date;
   }): Promise<Email> {
     const email = await this.db.email.upsert({
-      where: { externalMessageId: data.externalMessageId },
+      where: {
+        externalMessageId_channelId: {
+          externalMessageId: data.externalMessageId,
+          channelId: data.channelId,
+        },
+      },
       update: {},
       create: {
         type: data.type,
@@ -49,10 +54,33 @@ export class EmailRepository {
     });
   }
 
-  async findByExternalMessageId(externalMessageId: string): Promise<Email | null> {
+  async findByExternalMessageIdAndChannel(
+    externalMessageId: string,
+    channelId: string,
+  ): Promise<Email | null> {
     return await this.db.email.findUnique({
-      where: { externalMessageId },
+      where: {
+        externalMessageId_channelId: {
+          externalMessageId,
+          channelId,
+        },
+      },
     });
+  }
+
+  async findExistingExternalMessageIds(
+    externalMessageIds: string[],
+    channelId: string,
+  ): Promise<string[]> {
+    if (externalMessageIds.length === 0) return [];
+    const emails = await this.db.email.findMany({
+      where: {
+        externalMessageId: { in: externalMessageIds },
+        channelId,
+      },
+      select: { externalMessageId: true },
+    });
+    return emails.map(e => e.externalMessageId);
   }
 
   async findByConversationId(conversationId: string): Promise<Email[]> {

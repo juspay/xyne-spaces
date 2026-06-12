@@ -2179,8 +2179,7 @@ model Email {
   updatedAt DateTime @updatedAt
 
   channel Channel @relation(fields: [channelId], references: [id]) // emulated (relationMode="prisma"), no DB FK
-
-  @@unique([externalMessageId])
+  @@unique([externalMessageId, channelId])
   @@index([conversationId])
   @@index([externalThreadId])
   @@index([channelId])

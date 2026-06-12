@@ -13,15 +13,15 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { emailService } from '@/services/emailService';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
-import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { EmailRepository } from '@/database/repositories';
 
 const TAG = '[GoogleRefetch]';
 const transformer = new GoogleTransformer();
 const preferenceRepo = new EmailChannelPreferenceRepository();
-const externalMessageRepo = new ExternalMessageRepository();
 const channelRepo = new ChannelRepository();
+const emailRepo = new EmailRepository();
 
 export class GoogleRefetch extends BaseRefetch {
   async refetch(source: ExternalSource, options?: RefetchOptions): Promise<RefetchResult> {
@@ -65,9 +65,9 @@ export class GoogleRefetch extends BaseRefetch {
 
     const allMessageIds = threadGroups.flatMap(([, ids]) => ids);
     if (allMessageIds.length > 0) {
-      const existing = await externalMessageRepo.findByExternalIds(source.id, allMessageIds);
+      const existing = await emailRepo.findExistingExternalMessageIds(allMessageIds, ingestChannelId);
       if (existing.length > 0) {
-        const existingSet = new Set(existing.map(e => e.externalId));
+        const existingSet = new Set(existing);
         let skippedBeforeFetch = 0;
         const filtered: typeof threadGroups = [];
         for (const [threadId, ids] of threadGroups) {

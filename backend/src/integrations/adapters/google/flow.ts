@@ -32,8 +32,13 @@ export class GoogleFlow extends BaseFlow {
 
       const existing = await externalMessageRepo.findByExternalIds(source.id, [messageId]);
       if (existing.length > 0) {
-        logger.info(`${TAG} skipping already-ingested message ${messageId}`);
-        return { __skipIngestion: true, __skipReason: `duplicate-webhook:${messageId}` };
+        // Only skip if this message was already ingested as INCOMING.
+        // An OUTGOING record means WE sent this reply — other desks sharing
+        // the same source may still need to receive it via resolveDlChannels.
+        if (existing.some(e => e.direction === 'INCOMING')) {
+          logger.info(`${TAG} skipping already-ingested message ${messageId}`);
+          return { __skipIngestion: true, __skipReason: `duplicate-webhook:${messageId}` };
+        }
       }
 
       const messageData = await googleService.getMessageById(messageId);

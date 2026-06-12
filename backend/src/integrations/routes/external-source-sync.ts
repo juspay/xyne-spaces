@@ -77,17 +77,17 @@ router.post(
       });
 
       // Execute core ingestion: preprocess → transform → sync
-      const result = await externalSourceCore.ingest(adapter, sourceName, req.body, source);
+      const results = await externalSourceCore.ingest(adapter, sourceName, req.body, source);
 
       const duration = Date.now() - startTime;
       logger.info(`Data processed in ${duration}ms`, {
         sourceName,
-        action: result.action,
-        conversationId: result.conversationId,
-        entityId: result.entityId,
+        resultCount: results.length,
+        actions: results.map(r => r.action),
+        conversationIds: results.map(r => r.conversationId),
       });
 
-      return res.status(200).json(result);
+      return res.status(200).json(results);
     } catch (error) {
       const duration = Date.now() - startTime;
       logger.error('Sync error:', {

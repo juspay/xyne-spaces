@@ -49,7 +49,7 @@ export class ExternalMessageRepository {
         externalSourceId,
         externalId: { in: externalIds },
       },
-      select: { externalId: true },
+      select: { externalId: true, direction: true },
     });
   }
 
