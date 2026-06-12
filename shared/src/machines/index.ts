@@ -5,6 +5,7 @@ export {
   getCallHistoryQueryHash,
   getRecordingsQueryHash,
   setupQueryCachePersistence,
+  flushQueryCachePersistence,
   hydrateQueryCacheFromStorage,
   FINGERPRINT_FIELD,
   CALL_HISTORY_KEY,

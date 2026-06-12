@@ -1,4 +1,4 @@
-import { ReactElement } from 'react';
+import { memo, ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageMentionActivity } from './MessageMentionActivity';
 import { CanvasMentionActivity } from './CanvasMentionActivity';
@@ -22,11 +22,15 @@ interface ActivityItemProps {
   isSelected?: boolean;
 }
 
-export const ActivityItem = ({
+// memo: rows are rendered inside Virtuoso with a 2000px overscan (~40-60
+// mounted rows). Without memo, every list-level state change (selection,
+// mark-as-read, unread-count updates) re-rendered every mounted row — the
+// main cause of the CPU spike when opening an activity.
+export const ActivityItem = memo(function ActivityItem({
   activity,
   isExpanded,
   isSelected = false,
-}: ActivityItemProps): ReactElement | null => {
+}: ActivityItemProps): ReactElement | null {
   switch (activity.actorAction) {
     case 'mentioned_user':
       if (activity.canvasId) {
@@ -184,4 +188,4 @@ export const ActivityItem = ({
     default:
       return null;
   }
-};
+});

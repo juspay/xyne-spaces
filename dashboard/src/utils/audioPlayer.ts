@@ -1,9 +1,18 @@
 /**
  * Utility function to play audio files
  */
+// Singleton per sound path: a fresh Audio element per play leaks native
+// listener registrations and media elements over long sessions.
+const audioCache = new Map<string, HTMLAudioElement>();
+
 export const playAudio = (audioPath: string): void => {
   try {
-    const audio = new Audio(audioPath);
+    let audio = audioCache.get(audioPath);
+    if (!audio) {
+      audio = new Audio(audioPath);
+      audioCache.set(audioPath, audio);
+    }
+    audio.currentTime = 0;
     audio.play().catch(() => {
       // Silently handle audio play failures (e.g., user hasn't interacted with the page yet)
     });

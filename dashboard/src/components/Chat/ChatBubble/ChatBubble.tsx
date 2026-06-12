@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
@@ -9,7 +9,12 @@ import { CanvasPreview } from '../../Canvas/CanvasPreview';
 import { TicketActivityMessage } from '../TicketActivityMessage/TicketActivityMessage';
 import { ConversationTabContext } from '../ConversationTabContext';
 
-import { HoverActionsToolbar } from '../HoverActionsToolbar/HoverActionsToolbar';
+import { hoveredMessage } from './hoveredMessageRef';
+import {
+  registerMessageHoverActions,
+  unregisterMessageHoverActions,
+  type MessageHoverToolbarActions,
+} from '../HoverActionsToolbar/messageHoverActionsRegistry';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
@@ -56,7 +61,6 @@ import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { logger, Event } from '../../../utils/logger';
-import { useShortcutById } from '../../../shortcuts';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
 import { useUser } from '../../../hooks/useUsers';
 import { fetchFile } from '../../../services/clients/fileFetchService';
@@ -211,21 +215,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     message.messageId,
     conversation?.conversationId,
   ]);
-  const [showHoverActions, setShowHoverActions] = useState(false);
-
   const [showLinkPreview, setShowLinkPreview] = useState(true);
   const [showCanvasPreview, setShowCanvasPreview] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isScrollingRef = useRef(false);
   const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchEndedInsideRef = useRef(false);
-  const isMouseHoveringRef = useRef(false);
 
   useEffect(() => {
     setIsEditing(editingMessageId === message.messageId);
@@ -245,8 +245,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const metadata = message?.metadata as Record<string, unknown> | null;
 
-  // Both internal and external link previews are stored in link_preview_md
-  const previewResult = parsePreviewMd(message.link_preview_md);
+  // Both internal and external link previews are stored in link_preview_md.
+  // Memoized: ChatBubble re-renders on every hover, and parsing per render
+  // made cursor sweeps across messages spike CPU.
+  const previewResult = useMemo(
+    () => parsePreviewMd(message.link_preview_md),
+    [message.link_preview_md],
+  );
   const isThreadOpen = conversation?.conversationId === conversationId;
 
   const isMentionUserAddition = metadata && metadata['messageSubtype'] === 'user_not_in_channel';
@@ -264,13 +269,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   useEffect(() => {
     onEmojiPickerOpenChange?.(isEmojiPickerOpen);
   }, [isEmojiPickerOpen, onEmojiPickerOpenChange]);
-
-  // When both sub-menus are closed and the mouse has left, hide the action tray.
-  useEffect(() => {
-    if (!isEmojiPickerOpen && !isDropdownOpen && !isMouseHoveringRef.current) {
-      setShowHoverActions(false);
-    }
-  }, [isEmojiPickerOpen, isDropdownOpen]);
 
   const handleActionsDrawerOpenChange = (open: boolean): void => {
     setIsActionsDrawerOpen(open);
@@ -759,8 +757,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const canEditMessage = user?.id ? isMessageEditable(message, user.id) : false;
 
-  // Check if message has meaningful text content (not just attachments)
-  const hasTextContent = (() => {
+  // Check if message has meaningful text content (not just attachments).
+  // Memoized: this runs a full DOMParser parse — doing it per render meant
+  // every hover re-render re-parsed the message (audit finding #7).
+  const hasTextContent = useMemo(() => {
     if (!message?.content) return false;
 
     // Parse HTML and get text content
@@ -772,51 +772,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
     // Consider it text content only if there's actual text
     return textContent.length > 0 || hasEmoji;
-  })();
+  }, [message?.content]);
 
   // Only show copy button if there's text content to copy
   const shouldShowCopyButton = hasTextContent;
-
-  // Keyboard shortcuts for message actions - only enabled when message is hovered/focused
-  useShortcutById('message.edit', handleEditMessage, {
-    enabled: showHoverActions && canEditMessage,
-  });
-
-  useShortcutById('message.delete', handleDeleteMessage, {
-    enabled: showHoverActions && canEditMessage,
-  });
-
-  useShortcutById('message.pin', handlePinMessage, {
-    enabled: showHoverActions && !!conversation && !isMessageDeleted,
-  });
-
-  useShortcutById('message.bookmark', handleToggleBookmark, {
-    enabled: showHoverActions && !isMessageDeleted,
-  });
-
-  useShortcutById('message.copyLink', onCopyLink, {
-    enabled: showHoverActions,
-  });
-
-  useShortcutById(
-    'message.copyContent',
-    () => {
-      if (message?.content) {
-        copyHtmlToClipboard(message.content)
-          .then(() => {
-            toast.success('Message content copied to clipboard');
-          })
-          .catch(() => {
-            toast.error('Could not copy content to clipboard');
-          });
-      }
-    },
-    {
-      enabled: showHoverActions && !isMessageDeleted,
-    },
-  );
-
-  if (!message) return <></>;
 
   const isCurrentEditing = editingMessageId === message.messageId;
 
@@ -889,6 +848,122 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     (!isMessageDeleted || context === 'channel') &&
     !!replies?.onOpenThread;
 
+  // Keyboard shortcuts for message actions are NOT registered here — they are
+  // registered once per list by MessageHoverToolbar (useMessageHoverShortcuts)
+  // and resolve this bubble's handlers via the hover-actions registry below.
+  const handleCopyContent = (): void => {
+    if (message?.content) {
+      copyHtmlToClipboard(message.content)
+        .then(() => {
+          toast.success('Message content copied to clipboard');
+        })
+        .catch(() => {
+          toast.error('Could not copy content to clipboard');
+        });
+    }
+  };
+
+  // ===== Shared hover-toolbar registration (Slack-style overlay) =====
+  // The toolbar itself is mounted ONCE per list (MessageHoverToolbar). Each
+  // bubble only keeps its current per-message capabilities/handlers registered
+  // (keyed by a per-instance id stamped on the root node as data-hover-key) so
+  // the overlay can derive them at show time. Hover never sets state here.
+  const hoverToolbarKey = useId();
+  const canShowHoverToolbar =
+    !isMobile &&
+    !searchItemView &&
+    variant !== 'pinned' &&
+    !isMentionUserAddition &&
+    !isTicketActivity &&
+    !(isEditing && isCurrentEditing);
+
+  // No dependency array on purpose: re-registering is a cheap Map.set and this
+  // keeps the registered handlers/capabilities in sync with the latest render.
+  useEffect(() => {
+    if (!canShowHoverToolbar) {
+      unregisterMessageHoverActions(hoverToolbarKey);
+      return;
+    }
+
+    const actions: MessageHoverToolbarActions = {
+      showEditAction: canEditMessage,
+      // Capability flags + content-copy handler for the centralized hover
+      // keyboard shortcuts (mirror the old per-bubble `enabled:` expressions).
+      canEditMessage,
+      isMessageDeleted,
+      onCopyContent: handleCopyContent,
+      messageId: message.messageId,
+      conversationId: conversation?.conversationId || message.conversationId,
+      ...(conversation && { conversation }),
+      ...(conversation?.initialMessageId && {
+        initialMessageId: conversation.initialMessageId,
+      }),
+      reactionsMd: message.reactions_md,
+      onCopyLink,
+      ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
+      ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
+      isChannelArchived: channel?.isArchived ?? false,
+      ...(context === 'channel' &&
+        !isSystemMessage &&
+        !isMessageDeleted &&
+        !hasTicket &&
+        channelScopeType === ChannelScopeType.DEFAULT && {
+          onCreateTicket: handleCreateTicket,
+        }),
+      ...(context === 'thread' &&
+        !isMessageDeleted &&
+        isTicketThread &&
+        !isFirstInThread && {
+          onCreateSubTicket: handleCreateSubTicket,
+        }),
+      ...((!isSystemMessage || isTicketCreationMessage) &&
+        !isMessageDeleted && {
+          onBookmark: handleToggleBookmark,
+          isBookmarked,
+        }),
+      ...((!isSystemMessage || isTicketCreationMessage) &&
+        !isMessageDeleted && {
+          onRemindMeOption: handleReminderPresetSelect,
+        }),
+      ...(!isMessageDeleted &&
+        (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage }),
+      isPinned: conversation?.pinned || false,
+      ...(shouldShowSendToChannel && !isMessageDeleted && { onSendToChannel: handleSendToChannel }),
+      ...(canEditMessage && { onEditMessage: handleEditMessage }),
+      ...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage }),
+      ...(replies?.onOpenThread &&
+        (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
+        !isShowInChannel &&
+        (!isMessageDeleted || context === 'channel') && {
+          onReplyInThread: replies.onOpenThread,
+        }),
+      ...(!isSystemMessage &&
+        !isMessageDeleted && {
+          onInitiateCall: handleInitiateCall,
+          isCallDisabled: hasActiveCallForConversation,
+        }),
+      ...(conversation &&
+        (!isSystemMessage || isTicketCreationMessage) &&
+        !isMessageDeleted &&
+        (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
+          onPinMessage: handlePinMessage,
+        }),
+      ...(!disableAskAI &&
+        ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
+        (!isSystemMessage || isCallMessage) &&
+        !isMessageDeleted && { onAskAI: handleAskAI }),
+      ...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {}),
+    };
+
+    registerMessageHoverActions(hoverToolbarKey, actions);
+  });
+
+  useEffect(() => {
+    return () => unregisterMessageHoverActions(hoverToolbarKey);
+  }, [hoverToolbarKey]);
+
+  if (!message) return <></>;
+
   const handleMobileBubbleThreadOpen = (e?: React.MouseEvent<HTMLDivElement>): void => {
     if (!shouldEnableMobileThreadOpen || !replies?.onOpenThread) return;
 
@@ -929,9 +1004,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }}
       data-testid={`chat-message-${message.messageId}`}
       data-show-avatar={showAvatar}
+      data-message-id={message.messageId}
+      data-hover-key={hoverToolbarKey}
       className={cn(
         isMobile && 'no-select-mobile',
-        'relative transition-all duration-200 ease-in-out',
+        'group/bubble relative transition-all duration-200 ease-in-out',
+        // Row highlight driven by the shared MessageHoverToolbar, which stamps
+        // `data-hovered` on the [data-message-id] root. Applied at the root so
+        // every sub-layout (message, link/canvas previews, reply layout) is
+        // covered uniformly and stays in sync with the toolbar.
+        'data-[hovered]:bg-muted/50',
       )}
       style={
         isMobile
@@ -1005,15 +1087,18 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         }
       }}
       onMouseEnter={() => {
+        // Ref write only — no setState. Keeps the shortcut `when` predicates
+        // working in containers that do not mount the shared overlay.
         if (!isMobile) {
-          isMouseHoveringRef.current = true;
-          setShowHoverActions(true);
+          hoveredMessage.current = {
+            messageId: message.messageId,
+            conversationId: conversation?.conversationId || message.conversationId,
+          };
         }
       }}
       onMouseLeave={() => {
-        isMouseHoveringRef.current = false;
-        if (!isEmojiPickerOpen && !isDropdownOpen) {
-          setShowHoverActions(false);
+        if (hoveredMessage.current?.messageId === message.messageId) {
+          hoveredMessage.current = null;
         }
       }}
     >
@@ -1038,7 +1123,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ) : (
         <>
           <MessageBubble
-            isHovered={showHoverActions}
             message={message}
             showAvatar={showAvatar}
             isPinned={conversation?.pinned || false}
@@ -1072,77 +1156,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               })}
           />
 
-          {!isMobile && !searchItemView && (
-            <HoverActionsToolbar
-              isVisible={showHoverActions && variant !== 'pinned' && !isMentionUserAddition}
-              showEditAction={canEditMessage}
-              messageId={message.messageId}
-              conversationId={conversation?.conversationId || message.conversationId}
-              {...(conversation && { conversation })}
-              {...(conversation?.initialMessageId && {
-                initialMessageId: conversation.initialMessageId,
-              })}
-              reactionsMd={message.reactions_md}
-              onCopyLink={onCopyLink}
-              {...(!isMessageDeleted &&
-                shouldShowCopyButton && { onCopyMessage: handleCopyMessage })}
-              {...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen })}
-              {...(!isMessageDeleted && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
-              onDropdownOpenChange={setIsDropdownOpen}
-              isChannelArchived={channel?.isArchived ?? false}
-              {...(context === 'channel' &&
-                !isSystemMessage &&
-                !isMessageDeleted &&
-                !hasTicket &&
-                channelScopeType === ChannelScopeType.DEFAULT && {
-                  onCreateTicket: handleCreateTicket,
-                })}
-              {...(context === 'thread' &&
-                !isMessageDeleted &&
-                isTicketThread &&
-                !isFirstInThread && {
-                  onCreateSubTicket: handleCreateSubTicket,
-                })}
-              {...((!isSystemMessage || isTicketCreationMessage) &&
-                !isMessageDeleted && {
-                  onBookmark: handleToggleBookmark,
-                  isBookmarked,
-                })}
-              {...((!isSystemMessage || isTicketCreationMessage) &&
-                !isMessageDeleted && {
-                  onRemindMeOption: handleReminderPresetSelect,
-                })}
-              {...(!isMessageDeleted &&
-                (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
-              isPinned={conversation?.pinned || false}
-              {...(shouldShowSendToChannel &&
-                !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
-              {...(canEditMessage && { onEditMessage: handleEditMessage })}
-              {...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage })}
-              {...(replies &&
-                (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
-                !isShowInChannel &&
-                (!isMessageDeleted || context === 'channel') && {
-                  onReplyInThread: replies?.onOpenThread,
-                })}
-              {...(!isSystemMessage &&
-                !isMessageDeleted && {
-                  onInitiateCall: handleInitiateCall,
-                  isCallDisabled: hasActiveCallForConversation,
-                })}
-              {...(conversation &&
-                (!isSystemMessage || isTicketCreationMessage) &&
-                !isMessageDeleted &&
-                (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
-                  onPinMessage: handlePinMessage,
-                })}
-              {...(!disableAskAI &&
-                ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
-                (!isSystemMessage || isCallMessage) &&
-                !isMessageDeleted && { onAskAI: handleAskAI })}
-              {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
-            />
-          )}
+          {/* Desktop hover actions are rendered by the shared MessageHoverToolbar
+              overlay mounted at the list-container level (see
+              messageHoverActionsRegistry registration above). */}
           {/* Mobile Actions Drawer */}
           {isMobile && !searchItemView && isActionsDrawerOpen && (
             <MessageActionsDrawer
@@ -1222,7 +1238,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           className={cn(
             'pr-3 max-w-full pl-4 ml-14 transition-colors rounded-r border-l-4 border-l-gray-300 dark:border-l-gray-600',
             message.senderId === user?.id && 'max-[500px]:mb-5',
-            showHoverActions && 'bg-accent/50',
+            'group-data-[hovered]/bubble:bg-accent/50',
           )}
         >
           {previewResult.type === 'message_preview' ? (
@@ -1243,7 +1259,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           className={cn(
             'pr-3 max-w-full pl-4 ml-14 transition-colors rounded-r border-l-4 border-l-gray-300 dark:border-l-gray-600',
             message.senderId === user?.id && 'max-[500px]:mb-5',
-            showHoverActions && 'bg-accent/50',
+            'group-data-[hovered]/bubble:bg-accent/50',
           )}
         >
           <CanvasPreview canvasId={canvasId} onClose={() => setShowCanvasPreview(false)} />

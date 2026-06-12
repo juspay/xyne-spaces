@@ -13,12 +13,20 @@ import { queryCacheActor, type Conversation } from '../../machines/queryCacheMac
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 
+// Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
+// registrations and media elements — heap analysis showed "JS event
+// listeners" accumulating all session for notification-heavy (support) users.
+let notificationAudio: HTMLAudioElement | null = null;
+
 // Function to play notification sound
 const playNotificationSound = (): void => {
   try {
-    const audio = new Audio('/sounds/notification.wav');
-    audio.volume = 0.5; // Set volume to 50%
-    audio.play().catch(() => {});
+    if (!notificationAudio) {
+      notificationAudio = new Audio('/sounds/notification.wav');
+      notificationAudio.volume = 0.5; // Set volume to 50%
+    }
+    notificationAudio.currentTime = 0;
+    notificationAudio.play().catch(() => {});
   } catch (error) {
     console.error('Error playing notification sound:', error);
   }

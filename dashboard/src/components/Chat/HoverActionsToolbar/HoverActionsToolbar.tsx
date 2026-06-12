@@ -52,7 +52,7 @@ const REMINDER_TRACK_NAME_BY_OPTION: Record<ReminderMenuOption, string> = {
   custom: 'REMINDER_CUSTOM',
 };
 
-interface HoverActionsToolbarProps {
+export interface HoverActionsToolbarProps {
   isVisible: boolean;
   messageId: string;
   conversationId?: string;

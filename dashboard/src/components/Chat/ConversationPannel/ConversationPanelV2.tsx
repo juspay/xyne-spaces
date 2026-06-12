@@ -1,9 +1,9 @@
-import { ReactElement, useCallback, useEffect, useRef } from 'react';
+import { ReactElement, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import {
   useChannel,
-  useGetChannelConversations,
+  getChannelConversationsSnapshot,
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
@@ -29,6 +29,11 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
 import ChatListV3 from '../ChatList/ChatListV3';
 import LinksTab from '../LinksTab/LinksTab';
+
+// Stable empty array — an inline `[]` here would be a new reference on every
+// render, causing useChannelSubscription's effect to unsubscribe/resubscribe
+// the websocket channel on each render (measured as constant subscribe churn).
+const NO_CONVERSATION_IDS: string[] = [];
 
 const ExpandedTicketView = ({
   ticketId,
@@ -74,7 +79,6 @@ const ConversationPanelV2 = ({
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
   const channelParticipation = useGetChannelUserStatus(channelId);
-  const cachedConversations = useGetChannelConversations(channelId);
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(channelId);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -135,13 +139,27 @@ const ConversationPanelV2 = ({
     stateLinkedItemCreatedAt ??
     (urlConversationId ? initialMessageById?.createdAt : null);
 
+  // ONE-TIME windowed snapshot, not a subscription. ChatListV3 only reads
+  // cachedConversations in its useState initializer (warm-start hydration),
+  // but it also writes back into the cache — subscribing here closed a render
+  // loop (every cache write → new ref → panel re-render → list re-render).
+  // The snapshot is a ~100-item window: newest by default, centered on the
+  // linked anchor for deep links. ChatListV3 mounts only after urlCreatedAt
+  // has resolved for linked navigation (the loading gate below), so the
+  // anchor is available at hydration time. Older/newer pages load through
+  // the normal pagination path.
+  const cachedConversations = useMemo(
+    () => getChannelConversationsSnapshot(channelId, urlCreatedAt ?? undefined),
+    [channelId, urlCreatedAt],
+  );
+
   // Skip mark as read functionality
   const skipMarkAsReadRef = useRef(false);
   const setSkipMarkAsRead = useCallback((skip: boolean) => {
     skipMarkAsReadRef.current = skip;
   }, []);
 
-  useChannelSubscription(channelId, []);
+  useChannelSubscription(channelId, NO_CONVERSATION_IDS);
   useScope('channel', !!channelId);
   useShortcutById('global.openCanvasTab', () => {
     handleTabChange('canvas');
@@ -152,17 +170,25 @@ const ConversationPanelV2 = ({
   const shouldShowJoinChannel =
     channel?.visibility === ChannelVisibility.PUBLIC && !isUserMember && !channel?.isArchived;
 
-  // Safe tab setter with validation
-  const handleTabChange = (tab: string, e?: React.MouseEvent): void => {
-    if (isValidTab(tab)) {
-      standaloneNavigate(navigate, `${baseRoute}/${channelId}?tab=${tab}`, { event: e });
-    }
-  };
+  // Safe tab setter with validation. Memoized because it feeds the context
+  // value below — an unstable reference re-rendered every visible ChatBubble
+  // (context consumers) on each panel render.
+  const handleTabChange = useCallback(
+    (tab: string, e?: React.MouseEvent): void => {
+      if (isValidTab(tab)) {
+        standaloneNavigate(navigate, `${baseRoute}/${channelId}?tab=${tab}`, { event: e });
+      }
+    },
+    [isValidTab, navigate, baseRoute, channelId],
+  );
+
+  const conversationTabContextValue = useMemo(
+    () => ({ setActiveTab: handleTabChange, setSkipMarkAsRead, skipMarkAsReadRef }),
+    [handleTabChange, setSkipMarkAsRead],
+  );
 
   return (
-    <ConversationTabContext.Provider
-      value={{ setActiveTab: handleTabChange, setSkipMarkAsRead, skipMarkAsReadRef }}
-    >
+    <ConversationTabContext.Provider value={conversationTabContextValue}>
       <div key={`${channelId}-conversation-panel`} className='w-full relative h-full flex flex-col'>
         <ConversationHeader
           channelId={channelId}

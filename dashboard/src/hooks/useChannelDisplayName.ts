@@ -50,8 +50,18 @@ export const useChannelDisplayName = (
   );
 
   const allUsers = useUsers();
-  const users = allUsers.filter(v => userIdsToFetch.some(u => u === v.id));
-  const currentUser = allUsers.find(u => u.id === currentUserId);
+  // Memoized: unmemoized `.filter()` produced a fresh `users` array every
+  // render, which busted the displayInfo memo below — so the full
+  // display-name computation re-ran on every render of every caller
+  // (profiled in the activity list trace).
+  const users = useMemo(
+    () => allUsers.filter(v => userIdsToFetch.some(u => u === v.id)),
+    [allUsers, userIdsToFetch],
+  );
+  const currentUser = useMemo(
+    () => allUsers.find(u => u.id === currentUserId),
+    [allUsers, currentUserId],
+  );
 
   const totalOtherParticipants = useMemo(() => {
     if (!isDMChannel(safeChannel.scopeType)) return 0;

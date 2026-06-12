@@ -1,4 +1,4 @@
-import { ReactElement } from 'react';
+import { ReactElement, useMemo } from 'react';
 
 import MessagesIcon from '../../icons/MessagesIcon';
 import { PinIcon, NotebookText, FolderOpen, SquareKanban, Link } from 'lucide-react';
@@ -48,6 +48,12 @@ const TICKETS_TAB: ConversationTabListType = {
   icon: <SquareKanban size={14} />,
 };
 
+// Stable references — a fresh `[...STATIC_TABS, TICKETS_TAB]` and fresh
+// closures per render made ConversationPanelV2's memoized tab handler and
+// context value unstable, re-rendering every visible message bubble.
+const TABS_WITH_TICKETS: ConversationTabListType[] = [...STATIC_TABS, TICKETS_TAB];
+const getDefaultTab = (): string => 'messages';
+
 // Hook to get conversation tabs based on permissions and channel scope type
 export const useConversationTabs = (channelScopeType?: ChannelScopeType) => {
   const canReadTicket = useCanReadTicket();
@@ -56,14 +62,16 @@ export const useConversationTabs = (channelScopeType?: ChannelScopeType) => {
   const isDMOrGroupDM = channelScopeType ? isDMChannel(channelScopeType) : false;
 
   // Include Tickets tab only if user has READ access AND it's not a DM or GROUP_DM
-  const availableTabs =
-    canReadTicket && !isDMOrGroupDM ? [...STATIC_TABS, TICKETS_TAB] : STATIC_TABS;
+  const availableTabs = canReadTicket && !isDMOrGroupDM ? TABS_WITH_TICKETS : STATIC_TABS;
 
-  return {
-    availableTabs,
-    getDefaultTab: () => 'messages',
-    isValidTab: (tab: string) => availableTabs.some(t => t.value === tab),
-  };
+  return useMemo(
+    () => ({
+      availableTabs,
+      getDefaultTab,
+      isValidTab: (tab: string) => availableTabs.some(t => t.value === tab),
+    }),
+    [availableTabs],
+  );
 };
 
 // Export the static list for backward compatibility (deprecated)

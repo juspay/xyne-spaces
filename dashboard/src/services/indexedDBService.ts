@@ -119,6 +119,26 @@ class IndexedDBService {
   }
 
   /**
+   * Load a single context property from IndexedDB
+   */
+  async loadContextProperty(key: string): Promise<unknown> {
+    if (!this.db) {
+      throw new Error('IndexedDB not initialized. Call init() first.');
+    }
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(key);
+
+      request.onsuccess = () => {
+        resolve(request.result ?? null);
+      };
+      request.onerror = () => reject(new Error(`Failed to load ${key} from IndexedDB`));
+    });
+  }
+
+  /**
    * Save a single context property to IndexedDB
    */
   async saveContextProperty(key: string, value: unknown): Promise<void> {

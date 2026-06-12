@@ -82,7 +82,15 @@ export const ShortcutsProvider = ({
 }: {
   children: React.ReactNode;
 }): React.ReactElement => {
-  const keys = useSelector(shortcutsActor, state => state.context.registeredKeys);
+  // Content comparator: this provider wraps the whole app, and registeredKeys
+  // gets replaced with a fresh array reference on registry updates — without
+  // the comparator, every update re-rendered all HotkeyBindings even when the
+  // key set was identical.
+  const keys = useSelector(
+    shortcutsActor,
+    state => state.context.registeredKeys,
+    (a, b) => a === b || (a.length === b.length && a.every((k, i) => k === b[i])),
+  );
   const { isMobile, isMac } = usePlatform();
 
   if (isMobile) {
