@@ -12,6 +12,6 @@
 ## User views My Canvas page
 * Using browser
 * Ensuring user "user-1" is logged in
-* clicking button with text "My Canvas"
+* navigating via sidebar to "my-canvas"
 * waiting for network to be idle
 * verifying "[data-testid='canvas-list']" is visible

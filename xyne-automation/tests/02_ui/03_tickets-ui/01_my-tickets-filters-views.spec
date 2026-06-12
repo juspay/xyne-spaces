@@ -4,8 +4,7 @@
 ## User navigates my tickets and applies filters
 * Using browser
 * Ensuring user "admin-1" is logged in
-* Navigating to chat
-* clicking on "[data-testid='my-tickets-btn']"
+* navigating via sidebar to "tickets"
 * verifying "[data-testid='more-filters-btn']" is visible
 * clicking on "[data-testid='more-filters-btn']"
 * verifying "[data-testid='filter-menu-priority']" is visible
