@@ -7,11 +7,9 @@ import { CalendarClock, Bell, CalendarCheck, CalendarX } from 'lucide-react';
 export const ScheduledCallActivity = ({
   activity,
   isExpanded,
-  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }): ReactElement | null => {
   const actor = useUser(activity.actorId ?? '');
 
@@ -65,7 +63,6 @@ export const ScheduledCallActivity = ({
       description={description}
       targetPath={targetPath}
       isExpanded={isExpanded}
-      isSelected={isSelected}
       actorAction={activity.actorAction}
       className='flex items-start'
     >

@@ -10,11 +10,9 @@ import { useRouteContext } from '../../hooks/useRouteContext';
 export const DirectMessageActivity = ({
   activity,
   isExpanded,
-  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }): ReactElement | null => {
   const message = activity.message;
   const sender = useUser(message?.senderId ?? '');
@@ -43,7 +41,6 @@ export const DirectMessageActivity = ({
       linkedItemCreatedAt={message.conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
-      isSelected={isSelected}
       className='flex items-start'
     >
       {isExpanded ? (

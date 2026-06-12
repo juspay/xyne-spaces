@@ -10,11 +10,9 @@ import { useRouteContext } from '../../hooks/useRouteContext';
 export const MessageMentionActivity = ({
   activity,
   isExpanded,
-  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }): ReactElement | null => {
   const message = activity.message;
   const sender = useUser(message?.senderId ?? '');
@@ -46,7 +44,6 @@ export const MessageMentionActivity = ({
       linkedItemCreatedAt={message.conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
-      isSelected={isSelected}
       showUnreadDot
       className='flex items-start'
     >

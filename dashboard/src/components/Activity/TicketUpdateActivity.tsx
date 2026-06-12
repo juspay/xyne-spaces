@@ -15,7 +15,6 @@ import { useUser } from '../../hooks/useUsers';
 interface TicketUpdateActivityProps {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }
 
 interface ActivityConfig {
@@ -110,7 +109,6 @@ const getActivityConfig = (actorAction: string): ActivityConfig => {
 export const TicketUpdateActivity = ({
   activity,
   isExpanded,
-  isSelected,
 }: TicketUpdateActivityProps): ReactElement | null => {
   const ticket = activity.ticket;
   const actorId = activity.actorId || 'system';
@@ -170,7 +168,6 @@ export const TicketUpdateActivity = ({
       focusThread
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
-      isSelected={isSelected}
     >
       {isExpanded ? expandedContent : condensedContent}
     </ActivityItemCard>

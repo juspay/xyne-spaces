@@ -11,11 +11,9 @@ import { renderEmoji } from '../../utils/customEmojiUtils';
 export const ReactionAddedActivityV2 = ({
   activity,
   isExpanded = true,
-  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }): ReactElement | null => {
   const message = activity.message;
   const actorUser = useUser(activity.actorId); // Most recent reactor
@@ -77,7 +75,6 @@ export const ReactionAddedActivityV2 = ({
       linkedItemCreatedAt={message.conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
-      isSelected={isSelected}
     >
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />

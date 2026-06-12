@@ -12,11 +12,9 @@ import { useRouteContext } from '../../hooks/useRouteContext';
 export const CanvasMentionActivity = ({
   activity,
   isExpanded,
-  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }): ReactElement | null => {
   const { baseRoute } = useRouteContext();
   const canvasId = activity.canvasId ?? undefined;
@@ -40,7 +38,6 @@ export const CanvasMentionActivity = ({
       description={<span className='text-muted-foreground text-sm'>mentioned you in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
-      isSelected={isSelected}
       className='flex items-start'
     >
       <div className='text-muted-foreground text-sm'>

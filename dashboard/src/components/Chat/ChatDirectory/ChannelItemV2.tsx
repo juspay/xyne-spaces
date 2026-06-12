@@ -56,7 +56,6 @@ const ChannelItemV2 = memo(
     sections = [],
     onMoveToSection,
   }: ChannelItemV2Props): ReactElement => {
-    const [isHovered, setIsHovered] = useState(false);
     const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
     const zero = useZero();
     const context = useAuthContextValues();
@@ -331,7 +330,7 @@ const ChannelItemV2 = memo(
         <Link
           to={`/chat/dir/${channel.id}`}
           className={cn(
-            'text-base flex items-center gap-2 rounded-lg px-2 h-8 transition-colors ',
+            'group/chitem text-base flex items-center gap-2 rounded-lg px-2 h-8 transition-colors ',
             'hover:bg-muted hover:text-foreground',
 
             isActive ? 'bg-muted' : 'bg-transparent',
@@ -342,8 +341,6 @@ const ChannelItemV2 = memo(
                 ? 'font-normal text-foreground'
                 : 'font-normal text-muted-foreground',
           )}
-          onMouseEnter={() => setIsHovered(true)}
-          onMouseLeave={() => setIsHovered(false)}
           data-track-category='CHAT_SIDEBAR'
           data-track-name='OPEN_CHANNEL'
           data-track-metadata={JSON.stringify({
@@ -387,11 +384,11 @@ const ChannelItemV2 = memo(
                 {unreadCount > 10 ? '10+' : unreadCount}
               </Badge>
             )}
-            {/* Close button for DMs - shown on hover */}
-            {isDM && isHovered && (
+            {/* Close button for DMs - revealed on hover via CSS (no React re-render) */}
+            {isDM && (
               <button
                 onClick={handleCloseDm}
-                className='p-1 rounded hover:bg-accent transition-colors shrink-0'
+                className='invisible pointer-events-none group-hover/chitem:visible group-hover/chitem:pointer-events-auto p-1 rounded hover:bg-accent transition-colors shrink-0'
                 aria-label='Close conversation'
                 title='Close conversation'
                 data-track-category='CHAT_SIDEBAR'

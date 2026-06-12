@@ -184,15 +184,17 @@ export const ThreadMessages = ({
 
   // Single enriched query: replaces getConversationById + ticketById + conversationMessagesV2
   // (4 pipelines → 1 pipeline, 178ms → 44ms hydration)
-  const [conversation, conversationDetails] = useCachedQuery(
-    queries.threadConversation({
-      conversationId: derivedConversationId || ' ',
-      ...(derivedChannelId ? { channelId: derivedChannelId, isMember } : {}),
-    }),
-    {
-      enabled: !!derivedConversationId,
-    },
+  const threadConversationQuery = useMemo(
+    () =>
+      queries.threadConversation({
+        conversationId: derivedConversationId || ' ',
+        ...(derivedChannelId ? { channelId: derivedChannelId, isMember } : {}),
+      }),
+    [derivedConversationId, derivedChannelId, isMember],
   );
+  const [conversation, conversationDetails] = useCachedQuery(threadConversationQuery, {
+    enabled: !!derivedConversationId,
+  });
 
   // Participant comes from the combined threadConversation query or from prop (batch fetch in UserThreads)
   const conversationParticipant = useMemo(() => {
@@ -232,11 +234,17 @@ export const ThreadMessages = ({
 
   // Messages come from the enriched conversation query; initialMessage = messages[0]
   // Spread to mutable array since ThreadList expects mutable type
-  const queriedMessages = conversation?.messages ? [...conversation.messages] : undefined;
+  const queriedMessages = useMemo(
+    () => (conversation?.messages ? [...conversation.messages] : undefined),
+    [conversation?.messages],
+  );
   const queryDetails = conversationDetails;
 
   // Use pre-fetched messages if provided, otherwise use queried
-  const messages = propThreadMessages ?? queriedMessages ?? [];
+  const messages = useMemo(
+    () => propThreadMessages ?? queriedMessages ?? [],
+    [propThreadMessages, queriedMessages],
+  );
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
   const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
@@ -412,6 +420,15 @@ export const ThreadMessages = ({
     skipMarkAsReadThreadRef.current = skip;
   }, []);
 
+  const conversationTabContextValue = useMemo(
+    () => ({
+      setActiveTab: (): void => {},
+      setSkipMarkAsRead: setSkipMarkAsReadThread,
+      skipMarkAsReadRef: skipMarkAsReadThreadRef,
+    }),
+    [setSkipMarkAsReadThread],
+  );
+
   useEffect(() => {
     return () => {
       if (skipMarkAsReadThreadRef?.current || activitySkipMarkAsReadThreadRef.current) {
@@ -507,12 +524,14 @@ export const ThreadMessages = ({
   }, [messages, isTicketThread, ticketId]);
 
   // Fetch ticket attachments if this is a ticket thread
-  const [ticketAttachments] = useCachedQuery(
-    queries.attachmentsByTicket({ ticketId: derivedTicketId }),
-    {
-      enabled: !!derivedTicketId,
-    },
+  // Memoized query request — same per-render AST/hash churn as threadConversationQuery.
+  const ticketAttachmentsQuery = useMemo(
+    () => queries.attachmentsByTicket({ ticketId: derivedTicketId }),
+    [derivedTicketId],
   );
+  const [ticketAttachments] = useCachedQuery(ticketAttachmentsQuery, {
+    enabled: !!derivedTicketId,
+  });
 
   // Get all attachments with their parent messages
   // For tickets, use ticket attachments. For regular conversations, use message attachments
@@ -1069,13 +1088,7 @@ export const ThreadMessages = ({
   ];
 
   return (
-    <ConversationTabContext.Provider
-      value={{
-        setActiveTab: () => {},
-        setSkipMarkAsRead: setSkipMarkAsReadThread,
-        skipMarkAsReadRef: skipMarkAsReadThreadRef,
-      }}
-    >
+    <ConversationTabContext.Provider value={conversationTabContextValue}>
       <div
         className={`flex-1 h-full flex flex-col bg-background overflow-hidden relative ${
           isInPanelWebview ? '' : 'rounded-lg'

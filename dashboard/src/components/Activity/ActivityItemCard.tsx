@@ -40,7 +40,6 @@ interface ActivityItemCardProps {
   children: ReactNode;
   className?: string;
   actorAction?: string;
-  isSelected?: boolean | undefined;
   showUnreadDot?: boolean;
   linkedItemCreatedAt?: number;
   useActivityCutoff?: boolean;
@@ -61,7 +60,6 @@ export const ActivityItemCard = ({
   children,
   className,
   actorAction,
-  isSelected,
   showUnreadDot = false,
   linkedItemCreatedAt,
   useActivityCutoff = true,
@@ -72,16 +70,6 @@ export const ActivityItemCard = ({
   const zero = useZero();
   const { isMobile } = usePlatform();
   const nofocusRef = useContext(NofocusRefContext);
-
-  // URL-based selection fallback — survives refresh, unique per activity.id.
-  // Read from window.location WITHOUT useLocation(): a router subscription
-  // here re-rendered EVERY mounted card on EVERY navigation (each activity
-  // click changes the URL). Selection updates are driven by the `isSelected`
-  // prop from the list; this fallback only needs to be correct at mount.
-  const isSelectedPath =
-    isSelected === undefined &&
-    new URLSearchParams(window.location.search).get('selectedActivity') === activity.id;
-  const isActive = isSelected || isSelectedPath;
 
   const channel = useChannel(channelId || '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
@@ -152,7 +140,15 @@ export const ActivityItemCard = ({
     }
   };
 
-  const doMarkAsUnread = () => {
+  // Whether THIS card is the currently-open activity. Selection highlighting
+  // is imperative (ActivityListView stamps `data-selected` on the row root —
+  // no React state, no per-row router subscription), so read it back from the
+  // DOM, with the ?selectedActivity= URL param as a fallback.
+  const isCardActive = (origin: HTMLElement | null): boolean =>
+    origin?.closest('[data-activity-id]')?.hasAttribute('data-selected') ||
+    new URLSearchParams(window.location.search).get('selectedActivity') === activity.id;
+
+  const doMarkAsUnread = (origin: HTMLElement | null) => {
     // Check if this is a reaction activity (excluded)
     if (['reacted', 'removed'].includes(activity.actorAction)) {
       return;
@@ -165,7 +161,7 @@ export const ActivityItemCard = ({
       }),
     );
 
-    if (isActive) {
+    if (isCardActive(origin)) {
       activitySkipMarkAsReadThreadRef.current = true;
       activitySkipMarkAsReadChannelRef.current = true;
     }
@@ -174,14 +170,14 @@ export const ActivityItemCard = ({
   const handleMarkAsUnread = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation(); // Prevent triggering the card's onClick
     e.preventDefault();
-    doMarkAsUnread();
+    doMarkAsUnread(e.currentTarget);
   };
 
   const handleMarkAsUnreadKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.stopPropagation();
       e.preventDefault();
-      doMarkAsUnread();
+      doMarkAsUnread(e.currentTarget);
     }
   };
 
@@ -222,7 +218,9 @@ export const ActivityItemCard = ({
       onClick={handleClick}
       className={cn(
         'group flex w-full items-start gap-3 p-4 text-left transition-colors duration-150 h-auto rounded-none border-b border-border border-l-4',
-        isActive ? 'border-l-foreground' : 'border-l-transparent',
+        // Selection highlight is driven by the `data-selected` attribute that
+        // ActivityListView stamps imperatively (no render needed to update).
+        'border-l-transparent data-[selected]:border-l-foreground',
         !activity.isRead ? 'bg-accent hover:!bg-accent/50' : 'bg-card hover:!bg-muted/30',
         className,
       )}

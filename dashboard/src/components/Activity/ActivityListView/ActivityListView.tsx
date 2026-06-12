@@ -468,23 +468,65 @@ const ActivityListView = (): ReactElement => {
     return activities.filter(activity => activeTabConfig.filter(activity));
   }, [activities, activeTab, visibleTabs]);
 
-  // j/k keyboard navigation through activity list.
-  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const selectedActivityIdRef = useRef<string | null>(
+    new URLSearchParams(window.location.search).get('selectedActivity'),
+  );
+  const selectedRowElRef = useRef<HTMLElement | null>(null);
   const activityVirtuosoRef = useRef<VirtuosoHandle>(null);
   const nofocusRef = useRef(false);
 
-  // Sync selection when user clicks an activity manually
+  const stampSelectedRow = useCallback((el: HTMLElement | null): void => {
+    const prev = selectedRowElRef.current;
+    if (prev === el) return;
+    prev?.removeAttribute('data-selected');
+    el?.setAttribute('data-selected', 'true');
+    selectedRowElRef.current = el;
+  }, []);
+
+  const restoreRafRef = useRef<number | null>(null);
+  const restoreSelectedRow = useCallback((): void => {
+    if (restoreRafRef.current !== null) return;
+    restoreRafRef.current = requestAnimationFrame((): void => {
+      restoreRafRef.current = null;
+      const id = selectedActivityIdRef.current;
+      if (!id) return;
+      const el = document.querySelector<HTMLElement>(
+        `[data-component="ActivityList"] [data-activity-id="${CSS.escape(id)}"]`,
+      );
+      if (el) stampSelectedRow(el);
+    });
+  }, [stampSelectedRow]);
+
   useEffect(() => {
+    return (): void => {
+      if (restoreRafRef.current !== null) cancelAnimationFrame(restoreRafRef.current);
+    };
+  }, []);
+
+  const hasActivityRows = filteredActivities.length > 0;
+
+  useEffect(() => {
+    if (!hasActivityRows) return;
     const container = document.querySelector('[data-component="ActivityList"]');
     if (!container) return;
     const handler = (e: Event) => {
       const activityEl = (e.target as HTMLElement).closest<HTMLElement>('[data-activity-id]');
       const id = activityEl?.getAttribute('data-activity-id');
-      if (id) setSelectedActivityId(id);
+      if (id && activityEl) {
+        selectedActivityIdRef.current = id;
+        stampSelectedRow(activityEl);
+      }
     };
     container.addEventListener('click', handler, true);
     return () => container.removeEventListener('click', handler, true);
-  }, []);
+  }, [hasActivityRows, stampSelectedRow]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get('selectedActivity');
+    if (!id) return;
+    selectedActivityIdRef.current = id;
+    restoreSelectedRow();
+  }, [location.search, restoreSelectedRow]);
 
   const navigateActivity = useCallback(
     (delta: number) => {
@@ -493,6 +535,7 @@ const ActivityListView = (): ReactElement => {
       const items = Array.from(container.querySelectorAll<HTMLElement>('[data-activity-id]'));
       if (items.length === 0) return;
 
+      const selectedActivityId = selectedActivityIdRef.current;
       let currentIdx = -1;
       if (selectedActivityId) {
         currentIdx = items.findIndex(
@@ -513,13 +556,14 @@ const ActivityListView = (): ReactElement => {
       const activityId = nextEl.getAttribute('data-activity-id');
       if (!activityId) return;
 
-      setSelectedActivityId(activityId);
+      selectedActivityIdRef.current = activityId;
+      stampSelectedRow(nextEl);
       nextEl.scrollIntoView({ block: 'nearest' });
       nofocusRef.current = true;
       nextEl.click();
       nofocusRef.current = false;
     },
-    [selectedActivityId],
+    [stampSelectedRow],
   );
 
   useShortcut('j', () => navigateActivity(1), {
@@ -688,12 +732,9 @@ const ActivityListView = (): ReactElement => {
               }}
               computeItemKey={(_, activity) => activity.id}
               overscan={{ main: 2000, reverse: 500 }}
+              itemsRendered={restoreSelectedRow}
               itemContent={(_, activity) => (
-                <ActivityItem
-                  activity={activity}
-                  isExpanded={isExpanded}
-                  isSelected={selectedActivityId === activity.id}
-                />
+                <ActivityItem activity={activity} isExpanded={isExpanded} />
               )}
             />
           </NofocusRefProvider>
