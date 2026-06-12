@@ -123,6 +123,7 @@ export interface GenericQuery {
   orderBy?: OrderBy[];
   limit?: number;
   offset?: number;
+  dateGranularity?: 'hour' | 'day' | 'week' | 'month';
 }
 
 /**
@@ -237,6 +238,7 @@ const GenericQuerySchema = z.object({
   orderBy: z.array(OrderBySchema).optional(),
   limit: z.number().int().positive().optional(),
   offset: z.number().int().nonnegative().optional(),
+  dateGranularity: z.enum(['hour', 'day', 'week', 'month']).optional(),
 });
 
 /**

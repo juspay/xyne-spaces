@@ -21,6 +21,11 @@ import {
   getVisualizationConstraints,
   VisualizationSelector,
 } from '../QueryBuilderComponents/VisualizationSelector';
+import {
+  defaultSizeForVisualType,
+  nextOpenPosition,
+  serializePosition,
+} from '../DynamicDashboard/componentEditor/queryPlanUtils';
 import { getBarChartPreview } from '../QueryVisualizations/BarChart';
 import { getDataTablePreview } from '../QueryVisualizations/DataTable';
 import { getDonutChartPreview } from '../QueryVisualizations/DonutChart';
@@ -76,6 +81,7 @@ export const QueryDashboardScreen: React.FC = () => {
   const [aggregations, setAggregations] = useState<
     Array<{ function: 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX'; field: string; alias?: string }>
   >([]);
+  const [dateGranularity, setDateGranularity] = useState<'hour' | 'day' | 'week' | 'month'>('day');
   const [query, setQuery] = useState<FilterGroup>({ id: '', combinator: 'AND', conditions: [] });
   const [visualizationType, setVisualizationType] = useState<QueryVisualizationType | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
@@ -138,6 +144,9 @@ export const QueryDashboardScreen: React.FC = () => {
               field: a.field,
               ...(a.alias ? { alias: a.alias } : {}),
             })),
+          );
+          setDateGranularity(
+            (queryJson['dateGranularity'] as 'hour' | 'day' | 'week' | 'month') || 'day',
           );
           setSelectedEntityType((queryJson['entityType'] as string) || 'TICKET');
           setVisualizationType(
@@ -301,6 +310,7 @@ export const QueryDashboardScreen: React.FC = () => {
     if (offset > 0) queryValidation['offset'] = offset;
     if (aggregations.length > 0) queryValidation['aggregations'] = aggregations;
     if (groupBy.length > 0) queryValidation['groupBy'] = groupBy;
+    if (groupBy.length > 0) queryValidation['dateGranularity'] = dateGranularity;
 
     // Transform FilterGroup format to backend's LogicalFilter format
     if (query && query.conditions && query.conditions.length > 0) {
@@ -335,6 +345,23 @@ export const QueryDashboardScreen: React.FC = () => {
       // Build full query object for storage (includes visualizationType)
       const queryToSave: Record<string, unknown> = { ...queryValidation, visualizationType };
 
+      let position: string | undefined;
+      if (!editingQueryId && currentDashboard) {
+        const dashboard = (
+          Array.isArray(currentDashboard) ? currentDashboard[0] : currentDashboard
+        ) as {
+          queryMappings?: Array<{ query?: { position?: string } }>;
+        };
+        const existingPositions = (dashboard?.queryMappings ?? [])
+          .map(m => m.query?.position)
+          .filter((p): p is string => typeof p === 'string' && p.length > 0);
+        const gridPos = nextOpenPosition(
+          existingPositions,
+          defaultSizeForVisualType(visualizationType),
+        );
+        position = serializePosition(gridPos);
+      }
+
       void zero.mutate(
         mutators.query.upsert({
           id: queryId,
@@ -342,6 +369,7 @@ export const QueryDashboardScreen: React.FC = () => {
           queryJson: queryToSave,
           targetEntity: selectedEntityType,
           visualType: visualizationType || undefined,
+          ...(position !== undefined && { position }),
           dashboardId: dashboardId || currentDashboard?.id || '',
           createdBy: user?.id || '',
           timestamp: Date.now(),
@@ -787,47 +815,76 @@ export const QueryDashboardScreen: React.FC = () => {
                             Maximum 2 group bys are allowed for Heatmap
                           </p>
                         )}
-                      {groupBy.map((field, i) => (
-                        <div
-                          key={i}
-                          className='flex items-center gap-2 p-3 rounded-lg bg-muted/30 border border-border/30 hover:border-border/50 transition-colors'
-                        >
-                          <EntitySelector
-                            options={
-                              fields
-                                ?.filter(f => !f.name.startsWith('custom.'))
-                                .map(f => ({
-                                  value: f.name,
-                                  label: f.label,
-                                  icon: null,
-                                })) || []
-                            }
-                            selectedValue={field || null}
-                            onSelect={value => {
-                              if (value) {
-                                setGroupBy(prev => {
-                                  const n = [...prev];
-                                  n[i] = value;
-                                  return n;
-                                });
-                              }
-                            }}
-                            placeholder='Select field...'
-                            searchPlaceholder='Search fields...'
-                            showSearch={true}
-                            width='100%'
-                          />
-                          <Button
-                            variant='ghost'
-                            size='icon'
-                            onClick={() => setGroupBy(prev => prev.filter((_, x) => x !== i))}
-                            data-track-category='ANALYTICS'
-                            data-track-name='Remove_Group_By'
+                      {groupBy.map((field, i) => {
+                        const fieldConfig = fields?.find(f => f.name === field);
+                        const isDateField = fieldConfig?.type === 'date';
+                        return (
+                          <div
+                            key={i}
+                            className='flex flex-col gap-2 p-3 rounded-lg bg-muted/30 border border-border/30 hover:border-border/50 transition-colors'
                           >
-                            <X className='w-3 h-3' />
-                          </Button>
-                        </div>
-                      ))}
+                            <div className='flex items-center gap-2'>
+                              <EntitySelector
+                                options={
+                                  fields
+                                    ?.filter(f => !f.name.startsWith('custom.'))
+                                    .map(f => ({
+                                      value: f.name,
+                                      label: f.label,
+                                      icon: null,
+                                    })) || []
+                                }
+                                selectedValue={field || null}
+                                onSelect={value => {
+                                  if (value) {
+                                    setGroupBy(prev => {
+                                      const n = [...prev];
+                                      n[i] = value;
+                                      return n;
+                                    });
+                                  }
+                                }}
+                                placeholder='Select field...'
+                                searchPlaceholder='Search fields...'
+                                showSearch={true}
+                                width='100%'
+                              />
+                              <Button
+                                variant='ghost'
+                                size='icon'
+                                onClick={() => setGroupBy(prev => prev.filter((_, x) => x !== i))}
+                                data-track-category='ANALYTICS'
+                                data-track-name='Remove_Group_By'
+                              >
+                                <X className='w-3 h-3' />
+                              </Button>
+                            </div>
+                            {isDateField && (
+                              <div className='flex items-center gap-1'>
+                                <span className='text-[10px] text-muted-foreground uppercase tracking-wide mr-1'>
+                                  Granularity
+                                </span>
+                                {(['hour', 'day', 'week', 'month'] as const).map(g => (
+                                  <button
+                                    key={g}
+                                    type='button'
+                                    onClick={() => setDateGranularity(g)}
+                                    className={`px-2 py-0.5 text-[10px] rounded-full capitalize transition-colors ${
+                                      dateGranularity === g
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                                    }`}
+                                    data-track-category='ANALYTICS'
+                                    data-track-name='Set_Date_Granularity'
+                                  >
+                                    {g}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 

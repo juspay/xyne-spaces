@@ -115,6 +115,7 @@ export type FieldConfig = {
   value: string;
   key: string;
   isCustom: boolean;
+  type?: FieldType;
   operators: Array<{ name: string; label: string }>;
   valueEditorType: ValueEditorType | ((operator: string) => ValueEditorType);
   values?: Array<{ name: string; label: string }>;
@@ -146,6 +147,7 @@ export function buildFieldsConfig(
       value: field.isCustom ? field.key : field.name,
       key: field.key,
       isCustom: field.isCustom ?? false,
+      type: field.type,
       ...(field.aggregatable !== undefined ? { aggregatable: field.aggregatable } : {}),
       operators: getOperatorsForFieldType(field.type, field.isRequired).map(op => ({
         name: op,

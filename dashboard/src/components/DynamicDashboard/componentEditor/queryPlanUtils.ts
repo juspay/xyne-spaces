@@ -1,6 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
 import { QueryVisualizationType } from '@xyne/shared';
-import { GRID_COLS, DEFAULT_TILE_W, DEFAULT_TILE_H } from '../ComponentGrid/constants';
+import {
+  GRID_COLS,
+  DEFAULT_TILE_W,
+  DEFAULT_TILE_H,
+  MIN_TILE_W,
+  MIN_TILE_H,
+} from '../ComponentGrid/constants';
 import type { ColumnKind, FilterOp, FilterRow } from './types';
 import { isUnaryOp } from './validation';
 
@@ -84,8 +90,14 @@ const DEFAULT_TILE_SIZE_BY_TYPE: Partial<Record<QueryVisualizationType, { w: num
   {
     [QueryVisualizationType.KPI]: { w: 3, h: 2 },
     [QueryVisualizationType.KPI_COMPARE]: { w: 3, h: 2 },
+    [QueryVisualizationType.BAR_CHART]: { w: 8, h: 4 },
     [QueryVisualizationType.LINE_CHART]: { w: 8, h: 4 },
     [QueryVisualizationType.AREA_CHART]: { w: 8, h: 4 },
+    [QueryVisualizationType.SCATTER_CHART]: { w: 8, h: 4 },
+    [QueryVisualizationType.PIE_CHART]: { w: 4, h: 4 },
+    [QueryVisualizationType.DONUT_CHART]: { w: 4, h: 4 },
+    [QueryVisualizationType.FUNNEL]: { w: 4, h: 4 },
+    [QueryVisualizationType.HEATMAP]: { w: 8, h: 5 },
     [QueryVisualizationType.DATA_TABLE]: { w: 12, h: 5 },
   };
 
@@ -93,14 +105,30 @@ export function defaultSizeFor(visualType: QueryVisualizationType): { w: number;
   return DEFAULT_TILE_SIZE_BY_TYPE[visualType] ?? { w: DEFAULT_TILE_W, h: DEFAULT_TILE_H };
 }
 
-interface Rect {
+export function defaultSizeForVisualType(visualType: string | null | undefined): {
+  w: number;
+  h: number;
+} {
+  if (!visualType) return { w: DEFAULT_TILE_W, h: DEFAULT_TILE_H };
+  const enumValues = Object.values(QueryVisualizationType) as string[];
+  if (enumValues.includes(visualType)) {
+    return defaultSizeFor(visualType as QueryVisualizationType);
+  }
+  return { w: DEFAULT_TILE_W, h: DEFAULT_TILE_H };
+}
+
+export interface GridPosition {
   x: number;
   y: number;
   w: number;
   h: number;
 }
 
-function parsePosition(raw: string): Rect | null {
+export function serializePosition(pos: GridPosition): string {
+  return JSON.stringify(pos);
+}
+
+export function parsePosition(raw: string): GridPosition | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
@@ -112,28 +140,32 @@ function parsePosition(raw: string): Rect | null {
       typeof p.h !== 'number'
     )
       return null;
+    // Reject react-grid-layout's default 1×1 placeholder sizes and other invalid footprints.
+    if (p.w < MIN_TILE_W || p.h < MIN_TILE_H) return null;
     return { x: p.x, y: p.y, w: p.w, h: p.h };
   } catch {
     return null;
   }
 }
 
-function rectsOverlap(a: Rect, b: Rect): boolean {
+function rectsOverlap(a: GridPosition, b: GridPosition): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
 export function nextOpenPosition(
   existingPositionStrings: ReadonlyArray<string>,
   size: { w: number; h: number },
-): Rect {
-  const existing = existingPositionStrings.map(parsePosition).filter((r): r is Rect => r !== null);
+): GridPosition {
+  const existing = existingPositionStrings
+    .map(parsePosition)
+    .filter((r): r is GridPosition => r !== null);
 
   const maxBottom = existing.reduce((acc, r) => Math.max(acc, r.y + r.h), 0);
   const w = Math.min(size.w, GRID_COLS);
 
   for (let y = 0; y <= maxBottom; y++) {
     for (let x = 0; x <= GRID_COLS - w; x++) {
-      const candidate: Rect = { x, y, w, h: size.h };
+      const candidate: GridPosition = { x, y, w, h: size.h };
       if (!existing.some(r => rectsOverlap(candidate, r))) {
         return candidate;
       }

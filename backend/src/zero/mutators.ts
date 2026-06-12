@@ -9841,12 +9841,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           entityType: z.nativeEnum(FormEntityType).optional(),
           targetEntity: z.string().optional(),
           visualType: z.string().optional(),
+          position: z.string().optional(),
           dashboardId: z.string().optional(),
           createdBy: z.string(),
           timestamp: z.number(),
           mappingId: z.string().optional(),
         }),
-        async ({ tx, args: { id, title, queryJson, entityType, targetEntity, visualType, dashboardId, createdBy, timestamp, mappingId } }) => {
+        async ({ tx, args: { id, title, queryJson, entityType, targetEntity, visualType, position, dashboardId, createdBy, timestamp, mappingId } }) => {
           const now = timestamp;
 
           const existingQuery = await tx.run(zql.queries.where('id', id).one())
@@ -9859,7 +9860,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             entityType: entityType ?? null,
             targetEntity: targetEntity ?? null,
             visualType: visualType ? (visualType as QueryVisualizationType) : null,
-            position: existingQuery?.position ?? '{}',
+            position: position ?? existingQuery?.position ?? '{}',
             config: existingQuery?.config ?? '{}',
             createdBy: existingQuery?.createdBy ?? createdBy,
             updatedAt: now,
