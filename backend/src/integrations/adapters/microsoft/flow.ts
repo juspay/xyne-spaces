@@ -120,8 +120,13 @@ export class MicrosoftFlow extends BaseFlow {
     
     const existing = await externalMessageRepo.findByExternalIds(source.id, [lookupId]);
     if (existing.length > 0) {
-      logger.info(`Microsoft flow: skipping already-ingested message ${lookupId}`);
-      return { __skipIngestion: true, __skipReason: `duplicate-webhook:${lookupId}` };
+      // Only skip if this message was already ingested as INCOMING.
+      // An OUTGOING record means WE sent this reply — other desks sharing
+      // the same source may still need to receive it via resolveDlChannels.
+      if (existing.some(e => e.direction === 'INCOMING')) {
+        logger.info(`Microsoft flow: skipping already-ingested message ${lookupId}`);
+        return { __skipIngestion: true, __skipReason: `duplicate-webhook:${lookupId}` };
+      }
     }
 
     const credentials = source.credentials as { email?: string };

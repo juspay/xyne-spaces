@@ -55,7 +55,7 @@ export class ExternalSourceCore {
     sourceName: string,
     rawPayload: any,
     source?: ExternalSource
-  ): Promise<IngestionResult> {
+  ): Promise<IngestionResult[]> {
     logger.info(`Ingesting data from ${sourceName} using ${adapter.name} adapter`);
 
     // 1. Preprocess (optional - fetch extra data if needed)
@@ -64,7 +64,7 @@ export class ExternalSourceCore {
     if (enrichedPayload && typeof enrichedPayload === 'object' && (enrichedPayload as any).__skipIngestion) {
       const reason = (enrichedPayload as any).__skipReason || 'unspecified';
       logger.info(`Skipping ingestion for ${sourceName}: ${reason}`);
-      return { success: true, conversationId: '', entityId: '', action: 'skipped' };
+      return [{ success: true, conversationId: '', entityId: '', action: 'skipped' }];
     }
 
     // 2. Transform to normalized format
@@ -89,7 +89,7 @@ export class ExternalSourceCore {
     adapter: ExternalSourceAdapter,
     sourceName: string,
     normalizedData: NormalizedData
-  ): Promise<IngestionResult> {
+  ): Promise<IngestionResult[]> {
     logger.info(`Syncing ${sourceName}`, {
       externalId: normalizedData.externalId,
       eventType: normalizedData.metadata.eventType,
@@ -102,13 +102,29 @@ export class ExternalSourceCore {
     }
 
     if (source.workspaceId && !source.channelId) {
-      const resolvedChannelId = await this.resolveDlChannel(source, normalizedData);
-      if (!resolvedChannelId) {
-        return { success: true, conversationId: '', entityId: '', action: 'skipped' };
+      const resolvedChannelIds = await this.resolveDlChannels(source, normalizedData);
+      if (resolvedChannelIds.length === 0) {
+        return [{ success: true, conversationId: '', entityId: '', action: 'skipped' }];
       }
-      (source as { channelId: string | null }).channelId = resolvedChannelId;
+
+      const results: IngestionResult[] = [];
+      for (const channelId of resolvedChannelIds) {
+        const channelSource = { ...source, channelId };
+        const result = await this.processChannel(adapter, sourceName, normalizedData, channelSource);
+        results.push(result);
+      }
+      return results;
     }
 
+    return [await this.processChannel(adapter, sourceName, normalizedData, source)];
+  }
+
+  private async processChannel(
+    adapter: ExternalSourceAdapter,
+    sourceName: string,
+    normalizedData: NormalizedData,
+    source: ExternalSource,
+  ): Promise<IngestionResult> {
     if (!source.channelId) {
        throw new Error(`External source ${sourceName} does not have a channel binding`);
     }
@@ -181,20 +197,25 @@ export class ExternalSourceCore {
       normalizedData.externalId
     );
 
-    if (existingExtMsg && isDeskChannel) {
-      // in case of duplicate entry, for desk flow (email/slack), donot add any updates
-      return {
-        success: true,
-        conversationId: "",
-        entityId: existingExtMsg.entityId || "",
-        action: "duplicate",
-        isNew: false,
-      }
-    }
-
     if (existingExtMsg && !isDeskChannel) {
       logger.info(`Duplicate message detected for ${normalizedData.externalId}`);
       return await this.handleUpdate(source, normalizedData, existingExtMsg, downloadedAttachments);
+    }
+
+    if (existingExtMsg && isDeskChannel) {
+      const existingEmail = await this.emailRepo.findByExternalMessageIdAndChannel(
+        normalizedData.externalId,
+        source.channelId
+      );
+      if (existingEmail) {
+        return {
+          success: true,
+          conversationId: existingEmail.conversationId,
+          entityId: existingEmail.id,
+          action: "duplicate",
+          isNew: false,
+        };
+      }
     }
 
     // 4. Find or create conversation
@@ -228,14 +249,16 @@ export class ExternalSourceCore {
     logger.info(`Using conversation ${conversation.conversationId}, isNew: ${isNew}`);
 
     // 5. Create ExternalMessage tracking record
-    await this.externalMessageRepo.create({
-      externalSourceId: source.id,
-      externalId: normalizedData.externalId,
-      externalThreadId: normalizedData.externalThreadId,
-      entityId: resolvedEntityId,
-      direction: 'INCOMING',
-      entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
-    });
+    if (!existingExtMsg) {
+      await this.externalMessageRepo.create({
+        externalSourceId: source.id,
+        externalId: normalizedData.externalId,
+        externalThreadId: normalizedData.externalThreadId,
+        entityId: resolvedEntityId,
+        direction: 'INCOMING',
+        entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
+      });
+    }
 
     // Call adapter's postprocess hook if available (adapter decides when to process)
     if (adapter.postprocess) {
@@ -258,10 +281,10 @@ export class ExternalSourceCore {
     };
   }
 
-  private async resolveDlChannel(
+  private async resolveDlChannels(
     source: ExternalSource,
     normalizedData: NormalizedData,
-  ): Promise<string | null> {
+  ): Promise<string[]> {
     const workspaceId = source.workspaceId!;
     const addrs = collectDlCandidates(normalizedData.emailData ?? {});
     if (addrs.length === 0) {
@@ -269,28 +292,28 @@ export class ExternalSourceCore {
         sourceName: source.name,
         workspaceId,
       });
-      return null;
+      return [];
     }
 
-    const match = await db.emailChannelPreference.findFirst({
+    const matches = await db.emailChannelPreference.findMany({
       where: { workspaceId, dlEmail: { in: addrs, mode: 'insensitive' } },
       select: { channelId: true, dlEmail: true },
     });
-    if (!match) {
+    if (matches.length === 0) {
       logger.info(`[DL_ROUTE] Dropping inbound: no desk for from/to/cc`, {
         sourceName: source.name,
         workspaceId,
         addrs,
       });
-      return null;
+      return [];
     }
 
-    logger.info(`[DL_ROUTE] Matched DL to desk via from/to/cc`, {
+    logger.info(`[DL_ROUTE] Matched DL to ${matches.length} desk(s) via from/to/cc`, {
       sourceName: source.name,
-      dlEmail: match.dlEmail,
-      channelId: match.channelId,
+      dlEmails: matches.map(m => m.dlEmail),
+      channelIds: matches.map(m => m.channelId),
     });
-    return match.channelId;
+    return matches.map(m => m.channelId);
   }
 
   /**
@@ -307,6 +330,21 @@ export class ExternalSourceCore {
       throw new Error(`External source ${source.name} does not have a channel binding`);
     }
 
+    // For desk channels, check exact duplicate for this channel first
+    // before any cross-desk ExternalMessage lookups.
+    if (isDeskChannel && normalizedData.emailData) {
+      const existingEmail = await this.emailRepo.findByExternalMessageIdAndChannel(
+        normalizedData.externalId,
+        source.channelId,
+      );
+      if (existingEmail) {
+        const conversation = await this.conversationRepo.findById(existingEmail.conversationId);
+        if (conversation) {
+          return { conversation, message: undefined, email: existingEmail, isNew: false };
+        }
+      }
+    }
+
     // Keep merge scoped to the configured external source. All providers share
     // this logic, but one source must not merge into another source's tickets.
     const existingExtMsg = await this.externalMessageRepo.findByThreadId(
@@ -315,17 +353,9 @@ export class ExternalSourceCore {
       isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
     );
 
-    if (existingExtMsg) {
-      let conversationid: string = "";
-      if (isDeskChannel) {
-        if (existingExtMsg.entityId) {
-          const emailMessage = await this.emailRepo.findById(existingExtMsg.entityId);
-          conversationid = emailMessage?.conversationId || "";
-        }
-      } else {
-        const messageRepo = await this.messageRepo.findById(existingExtMsg.messageId);
-        conversationid = messageRepo?.conversationId || "";
-      }
+    if (existingExtMsg && !isDeskChannel) {
+      const messageRepo = await this.messageRepo.findById(existingExtMsg.messageId);
+      const conversationid = messageRepo?.conversationId || "";
 
       const conversation = await this.conversationRepo.findById(conversationid);
 
@@ -339,47 +369,25 @@ export class ExternalSourceCore {
       const uploadedFiles = AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
       logger.info(`Converted to ${uploadedFiles.length} uploaded files`);
 
-      if (isDeskChannel) {
-        if (!normalizedData.emailData?.to || !normalizedData?.emailData.from ) {
-          throw new Error(
-            'Missing required email fields in normalizedData. Required: subject, body, to, from'
-          );
-        }
-        const { email } = await emailService.addEmailToConversation({
-          conversationId: conversation.conversationId,
-          emailSubject: normalizedData.emailData.subject || "",
-          emailBody: normalizedData.content,
-          emailTo: normalizedData.emailData.to,
-          emailFrom: normalizedData.emailData.from,
-          emailCc: normalizedData?.emailData?.cc,
-          emailBcc: normalizedData?.emailData?.bcc,
-          externalThreadId: normalizedData.externalThreadId,
-          externalMessageId: normalizedData.externalId,
-          uploadedFiles: uploadedFiles,
-          receivedAt: normalizedData.metadata.timestamp,
-        });
-        return { conversation, message: undefined, email, isNew: false };
-      } else {
-        const { message } = await conversationService.addMessageToConversation({
-          conversationId: conversation.conversationId,
-          userId: source.displayName,
-          content: normalizedData.content,
-          msgType: 'BOT',
-          uploadedFiles: uploadedFiles,
-          metadata: {
-            externalSource: source.name,
-            externalAuthor: normalizedData.author,
-            eventType: normalizedData.metadata.eventType,
-            ticketNumber: normalizedData.metadata.ticketNumber,
-            webUrl: normalizedData.metadata.webUrl,
-          },
-          isBot: true,
-        });
-        return { conversation, message, email: undefined, isNew: false };
-      }
+      const { message } = await conversationService.addMessageToConversation({
+        conversationId: conversation.conversationId,
+        userId: source.displayName,
+        content: normalizedData.content,
+        msgType: 'BOT',
+        uploadedFiles: uploadedFiles,
+        metadata: {
+          externalSource: source.name,
+          externalAuthor: normalizedData.author,
+          eventType: normalizedData.metadata.eventType,
+          ticketNumber: normalizedData.metadata.ticketNumber,
+          webUrl: normalizedData.metadata.webUrl,
+        },
+        isBot: true,
+      });
+      return { conversation, message, email: undefined, isNew: false };
     }
 
-    if (isDeskChannel && !existingExtMsg && normalizedData.emailData) {
+    if (isDeskChannel && normalizedData.emailData) {
       const threadEmail = await this.emailRepo.findFirstByThreadAndChannel(
         normalizedData.externalThreadId,
         source.channelId,
@@ -420,7 +428,7 @@ export class ExternalSourceCore {
     // This handles cases where tickets were created manually (not via Zoho)
     // Vespa duplicate detection only for email channels (not Slack — no subject-based merging)
     const isSlackSource = normalizedData.metadata.source === 'slack';
-    if (isDeskChannel && !isSlackSource && !existingExtMsg && normalizedData.emailData) {
+    if (isDeskChannel && !isSlackSource && normalizedData.emailData) {
       logger.info(`[EMAIL_DUPLICATE_CHECK] Checking Vespa for duplicate email`, {
         channelId: source.channelId,
         emailFrom: normalizedData.emailData.from,

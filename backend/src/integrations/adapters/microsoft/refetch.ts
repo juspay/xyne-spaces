@@ -15,17 +15,17 @@ import { graphFetchWithRetry } from './graphFetch';
 import { GraphMailMessage } from './types';
 import { emailService } from '@/services/emailService';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
-import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { AttachmentConversionService } from '@/services/externalAttachmentService';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { emailMatchesDl } from '@/services/dlResolver';
+import { EmailRepository } from '@/database/repositories';
 
 const TAG = '[MicrosoftRefetch]';
 const RANGE_MAX_MESSAGES = 2000;
 const transformer = new MicrosoftTransformer();
 const preferenceRepo = new EmailChannelPreferenceRepository();
-const externalMessageRepo = new ExternalMessageRepository();
 const channelRepo = new ChannelRepository();
+const emailRepo = new EmailRepository();
 
 const GRAPH_MESSAGE_FIELDS = [
   'id', 'subject', 'body', 'bodyPreview', 'from',
@@ -104,9 +104,9 @@ export class MicrosoftRefetch extends BaseRefetch {
       stubs.map(stubLookupId),
     );
     if (allLookupIds.length > 0) {
-      const existing = await externalMessageRepo.findByExternalIds(source.id, allLookupIds);
+      const existing = await emailRepo.findExistingExternalMessageIds(allLookupIds, ingestChannelId);
       if (existing.length > 0) {
-        const existingSet = new Set(existing.map(e => e.externalId));
+        const existingSet = new Set(existing);
         let skippedBeforeFetch = 0;
         for (const [threadId, stubs] of Array.from(groupedByThread.entries())) {
           const remaining = stubs.filter(s => !existingSet.has(stubLookupId(s)));
