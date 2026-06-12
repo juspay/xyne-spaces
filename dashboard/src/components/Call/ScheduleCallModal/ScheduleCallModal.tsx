@@ -1013,6 +1013,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const newStartsAt = parseTimeAndUpdateDate(timeString, startsAt);
       if (newStartsAt) {
         setValue('startsAt', newStartsAt, { shouldValidate: true });
+        setRecurringStartTime(toHHMM(newStartsAt));
 
         // Auto-adjust end time to be 1 hour after start time if end time is before start time
         let effectiveEndsAt = endsAt;
@@ -1020,6 +1021,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           const newEndsAt = new Date(newStartsAt.getTime() + 60 * 60 * 1000);
           setValue('endsAt', newEndsAt, { shouldValidate: true });
           effectiveEndsAt = newEndsAt;
+          setRecurringEndTime(toHHMM(newEndsAt));
         }
 
         validateTimes(newStartsAt, effectiveEndsAt);
@@ -1033,6 +1035,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const newEndsAt = parseTimeAndUpdateDate(time, endsAt);
       if (newEndsAt) {
         setValue('endsAt', newEndsAt, { shouldValidate: true });
+        setRecurringEndTime(toHHMM(newEndsAt));
         validateTimes(startsAt, newEndsAt);
       }
     },
@@ -1049,7 +1052,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         setValue('startsAt', parsed, { shouldValidate: true });
       }
     },
-    [startsAt, parseTimeAndUpdateDate],
+    [startsAt, parseTimeAndUpdateDate, setValue],
   );
 
   const handleRecurringEndTimeChange = useCallback(
@@ -1569,6 +1572,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                               if (date) {
                                 const merged = mergeDateWithTime(date, field.value ?? startsAt);
                                 field.onChange(merged);
+                                setRecurringStartTime(toHHMM(merged));
                                 validateTimes(merged, endsAt);
                               }
                             }}
@@ -1664,6 +1668,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                 if (date) {
                                   const merged = mergeDateWithTime(date, field.value ?? startsAt);
                                   field.onChange(merged);
+                                  setRecurringStartTime(toHHMM(merged));
                                   validateTimes(merged, endsAt);
                                 }
                               }}
@@ -1721,6 +1726,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                 if (date) {
                                   const merged = mergeDateWithTime(date, field.value);
                                   field.onChange(merged);
+                                  setRecurringEndTime(toHHMM(merged));
                                   validateTimes(startsAt, merged);
                                 }
                               }}
