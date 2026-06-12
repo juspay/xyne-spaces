@@ -16,6 +16,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
+import { executeCallLlmWithRetry } from './callLlmRetry';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -243,7 +244,7 @@ export class TranscriptService {
           timeouts: { llm: 300000 },
           limits: {},
           errorHandling: {
-            maxRetries: 5,
+            maxRetries: 3,
             retryDelay: 120000,
             maxDelay: 960000,
           },
@@ -959,32 +960,29 @@ Output ONLY the processed transcript, nothing else.`;
    * @param callId - The call ID for logging
    * @returns AI-generated Markdown summary or null if generation fails
    */
+  /**
+   * Generate AI summary from the formatted transcript with explicit retry loop.
+   * Framework retries are disabled (maxRetries: 0) so we control retry count,
+   * backoff, and logging with the full callId context.
+   */
+  /**
+   * Generate AI summary from the formatted transcript with explicit retry loop.
+   */
   async generateCallSummary(transcript: string, callId?: string): Promise<string | null> {
-    const agent = this.createAgent();
-    const logCallId = callId || 'unknown';
-    if (!agent) return null;
-
-    logger.info(`[${logCallId}] ai_summary_generation_started`, { summary_type: 'call_summary', model: config.llm.callLitellmModel || 'glm-latest' });
     const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
 
-    const summaryStart = Date.now();
-    try {
-      const result = await agent.execute({
-        messages: [createUserMessage(prompt)],
-      });
+    const extracted = await executeCallLlmWithRetry(
+      () => this.createAgent(),
+      () => prompt,
+      'call_summary',
+      callId || 'unknown',
+    );
 
-      const extracted = extractAgentContent(result);
-      if (!extracted.ok) {
-        logger.error(`[${logCallId}] ai_summary_generation_failed`, { reason: extracted.reason, status: extracted.status ?? result.status, duration_ms: Date.now() - summaryStart });
-        return null;
-      }
-
-      logger.info(`[${logCallId}] ai_summary_generated`, { summary_length: extracted.content.length, duration_ms: Date.now() - summaryStart });
-      return extracted.content;
-    } catch (error) {
-      logger.error(`[${logCallId}] ai_summary_generation_failed`, { error: error instanceof Error ? error.message : String(error), duration_ms: Date.now() - summaryStart, stack: error instanceof Error ? error.stack : undefined });
+    if (!extracted.ok) {
       return null;
     }
+
+    return extracted.content;
   }
 
   /**
@@ -992,24 +990,32 @@ Output ONLY the processed transcript, nothing else.`;
    * @param transcript - The formatted transcript text
    * @returns AI-generated title (max 100 chars) or null if generation fails
    */
-  async generateCallTitle(transcript: string): Promise<string | null> {
-    const agent = this.createAgent();
-    if (!agent) return null;
-
+  /**
+   * Generate a short AI title from transcript with explicit retry loop.
+   */
+  async generateCallTitle(transcript: string, callId?: string): Promise<string | null> {
     const prompt = CALL_TITLE_PROMPT.replace('{transcript}', transcript);
 
-    const result = await agent.execute({
-      messages: [createUserMessage(prompt)],
-    });
+    const extracted = await executeCallLlmWithRetry(
+      () => this.createAgent(),
+      () => prompt,
+      'call_title',
+      callId || 'unknown',
+    );
 
-    const extracted = extractAgentContent(result);
     if (!extracted.ok) {
-      logger.error(`generate_call_title_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
       return null;
     }
 
-    // Truncate to 100 chars max
     return extracted.content.substring(0, 100);
+  }
+
+  /**
+   * Generate a title for a call based on conversation messages
+   */
+  async generateCallTitleFromConversation(conversationId: string, callId?: string): Promise<string | null> {
+    const formatted = await this.formatConversationMessagesForTitle(conversationId);
+    return formatted ? await this.generateCallTitle(formatted, callId) : null;
   }
 
   /**
@@ -1041,14 +1047,6 @@ Output ONLY the processed transcript, nothing else.`;
       logger.error(`Failed to format conversation messages for title: ${conversationId}`, error);
       return null;
     }
-  }
-
-  /**
-   * Generate a title for a call based on conversation messages
-   */
-  async generateCallTitleFromConversation(conversationId: string): Promise<string | null> {
-    const formatted = await this.formatConversationMessagesForTitle(conversationId);
-    return formatted ? await this.generateCallTitle(formatted) : null;
   }
 
   /**
@@ -1489,7 +1487,7 @@ Output ONLY the processed transcript, nothing else.`;
           logger.error(`[${callId}] generate_summary_threw`, { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
           return null;
         }),
-        skipTitleGeneration ? Promise.resolve(null) : this.generateCallTitle(titleInput).catch((err) => {
+        skipTitleGeneration ? Promise.resolve(null) : this.generateCallTitle(titleInput, callId).catch((err) => {
           logger.error(`[${callId}] generate_title_threw`, { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
           return null;
         }),
