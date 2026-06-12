@@ -1,30 +1,21 @@
 import TeamAccomplishments from '@/components/TeamIntelligence/TeamAccomplishments';
 import TeamHeader from '@/components/TeamIntelligence/TeamHeader';
 import { ReactElement } from 'react';
-import { useOutletContext, useParams } from 'react-router-dom';
-import { useTeamHighlights, useTeamMembers, useTeams } from '@/hooks/useTeamIntelligence';
+import { useParams } from 'react-router-dom';
+import { useTeams } from '@/hooks/useTeamIntelligence';
 import TeamQuickInsights from '@/components/TeamIntelligence/TeamQuickInsights';
-import { TeamIntelligenceOutletContext } from './TeamIntelligenceScreen';
 import { Loader2 } from 'lucide-react';
 import TeamMembers from '@/components/TeamIntelligence/TeamMembers';
 import TeamRecaps from '@/components/TeamIntelligence/TeamRecaps';
 import TeamOverdueTickets from '@/components/TeamIntelligence/TeamOverdueTickets';
 
 const TeamIntelligenceTeamScreen = (): ReactElement => {
-  const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
   const { teamId } = useParams<{ teamId: string }>();
 
   const { data: teams, isLoading: isLoadingTeams } = useTeams();
   const team = teams?.data.find(t => t.id === teamId);
 
-  const { data: teamHighlights, isLoading: isLoadingHighlights } = useTeamHighlights(teamId!, {
-    from: dateRange.from,
-    to: dateRange.to,
-  });
-
-  const { data: teamMembers, isLoading: isLoadingMembers } = useTeamMembers(teamId!);
-
-  if (isLoadingTeams || isLoadingHighlights || isLoadingMembers) {
+  if (isLoadingTeams) {
     return (
       <div className='h-full flex items-center justify-center gap-1'>
         <Loader2 size={16} className='animate-spin text-muted-foreground' />
@@ -45,12 +36,10 @@ const TeamIntelligenceTeamScreen = (): ReactElement => {
     <div className='flex-1 w-full flex flex-col mx-auto max-w-6xl px-6 py-8 space-y-16'>
       <TeamHeader team={team} />
       <TeamQuickInsights />
-      <TeamAccomplishments data={teamHighlights?.bullets || []} />
+      <TeamAccomplishments />
       <TeamRecaps />
       <TeamOverdueTickets />
-      {teamMembers && teamMembers?.employee_list?.length > 0 && (
-        <TeamMembers teamMembers={teamMembers} />
-      )}
+      <TeamMembers />
     </div>
   );
 };

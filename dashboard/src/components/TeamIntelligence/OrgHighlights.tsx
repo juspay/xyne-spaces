@@ -4,12 +4,12 @@ import { useOutletContext } from 'react-router-dom';
 import { TeamIntelligenceOutletContext } from '@/routes/TeamIntelligenceScreen/TeamIntelligenceScreen';
 import { getHighlightTypeConfig } from './HighlightCard';
 import { formatReportDate } from '@/utils/teamIntelligenceUtils';
-import { RocketIcon } from 'lucide-react';
+import { LoaderCircleIcon, RocketIcon } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 
 const OrgHighlights = (): ReactElement => {
   const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
-  const { data: orgHighlights } = useOrgHighlights({
+  const { data: orgHighlights, isLoading } = useOrgHighlights({
     params: {
       from: dateRange.from,
       to: dateRange.to,
@@ -17,6 +17,24 @@ const OrgHighlights = (): ReactElement => {
   });
 
   const highlights = orgHighlights?.bullets || [];
+
+  if (isLoading) {
+    return (
+      <section className='space-y-4'>
+        <div className='flex items-center gap-3'>
+          <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-green-500/10'>
+            <RocketIcon className='h-4 w-4 text-green-500' />
+          </div>
+          <h3 className='text-lg font-semibold text-foreground'>Highlights</h3>
+        </div>
+
+        <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center gap-2'>
+          <LoaderCircleIcon className='h-5 w-5 animate-spin text-muted-foreground' />
+          <p className='text-sm text-muted-foreground'>Loading Highlights</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className='space-y-4'>
@@ -27,7 +45,14 @@ const OrgHighlights = (): ReactElement => {
         <h3 className='text-lg font-semibold text-foreground'>Highlights</h3>
       </div>
 
-      {highlights.length > 0 ? (
+      {isLoading ? (
+        <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center gap-2'>
+          <LoaderCircleIcon className='h-5 w-5 animate-spin text-muted-foreground' />
+          <p className='text-sm text-muted-foreground'>Loading Highlights</p>
+        </div>
+      ) : null}
+
+      {highlights.length > 0 && !isLoading ? (
         <div className='grid gap-4 md:grid-cols-2'>
           {orgHighlights?.bullets?.map(highlight => {
             const type = highlight.bulletCat;

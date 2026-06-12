@@ -35,7 +35,12 @@ const TeamIntelligenceScreen = (): ReactElement => {
   const isTablet = windowWidth >= SM && windowWidth < LG;
   const isDesktop = windowWidth >= LG;
 
-  const [timeRange, setTimeRange] = useState<TimeRange>(TimeRange.LAST_WEEK);
+  const getDefaultTimeRange = (): TimeRange => {
+    const today = new Date();
+    return today.getDay() === 1 ? TimeRange.LAST_WEEK : TimeRange.THIS_WEEK;
+  };
+
+  const [timeRange, setTimeRange] = useState<TimeRange>(getDefaultTimeRange);
   const dateRange = useMemo(() => getDateRange(timeRange), [timeRange]);
 
   // Sidebar open by default only on desktop

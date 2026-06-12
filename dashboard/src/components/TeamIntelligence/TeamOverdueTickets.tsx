@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { AlertTriangleIcon, CalendarClockIcon } from 'lucide-react';
+import { AlertTriangleIcon, CalendarClockIcon, Loader2 } from 'lucide-react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTeamTicketRecaps } from '@/hooks/useTeamIntelligence';
 import { TeamIntelligenceOutletContext } from '@/routes/TeamIntelligenceScreen/TeamIntelligenceScreen';
@@ -45,8 +45,9 @@ export const TeamOverdueTickets = (): ReactElement => {
           <h3 className='text-lg font-semibold text-foreground'>Overdue Tickets</h3>
         </div>
 
-        <div className='rounded-xl border border-border/50 bg-card p-5'>
-          <p className='text-sm text-muted-foreground'>Loading overdue tickets...</p>
+        <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-center gap-2'>
+          <Loader2 size={16} className='animate-spin text-muted-foreground' />
+          <p className='text-sm text-muted-foreground'>Loading tickets...</p>
         </div>
       </section>
     );

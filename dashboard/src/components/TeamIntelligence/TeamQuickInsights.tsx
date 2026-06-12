@@ -15,17 +15,20 @@ const TeamQuickInsights = (): ReactElement => {
   const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
   const { teamId } = useParams<{ teamId: string }>();
 
-  const { data: teamMetrics } = useTeamMetrics(teamId!, {
+  const { data: teamMetrics, isLoading: isTeamMetricsLoading } = useTeamMetrics(teamId!, {
     from: dateRange.from,
     to: dateRange.to,
   });
 
-  const { data: ticketRecapsData } = useTeamTicketRecaps(teamId!, {
-    from: dateRange.from,
-    to: dateRange.to,
-    page: 1,
-    limit: 4,
-  });
+  const { data: ticketRecapsData, isLoading: isTicketRecapsLoading } = useTeamTicketRecaps(
+    teamId!,
+    {
+      from: dateRange.from,
+      to: dateRange.to,
+      page: 1,
+      limit: 4,
+    },
+  );
 
   const totalPrCount = teamMetrics?.totalPrCount || 0;
   const totalCommitCount = teamMetrics?.totalCommitCount || 0;
@@ -48,24 +51,28 @@ const TeamQuickInsights = (): ReactElement => {
           value={totalPrCount}
           icon={GitPullRequestIcon}
           description='PRs Merged'
+          isLoading={isTeamMetricsLoading}
         />
         <StatCard
           title='Code Contributions'
           value={totalCommitCount}
           icon={GitCommitIcon}
           description='Commits Made'
+          isLoading={isTeamMetricsLoading}
         />
         <StatCard
           title='AI Adoption'
           value={totalAiTokens}
           icon={SparklesIcon}
           description='Total AI Tokens Used'
+          isLoading={isTeamMetricsLoading}
         />
         <StatCard
           title='Tickets Delivered'
           value={solvedTickets}
           icon={TicketCheckIcon}
           description={`Out of ${totalTickets} Tickets`}
+          isLoading={isTicketRecapsLoading}
         />
       </div>
     </section>

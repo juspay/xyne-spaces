@@ -1,19 +1,25 @@
-import { TeamMembersResponse } from '@/services/TeamIntelligence/teamIntelligenceService';
 import { SearchIcon, UserIcon } from 'lucide-react';
 import { ReactElement, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import Input from '../ui/Input';
 import TeamMember from './TeamMember';
+import { useTeamMembers } from '@/hooks/useTeamIntelligence';
+import { Loader2 } from 'lucide-react';
 
-const TeamMembers = ({ teamMembers }: { teamMembers: TeamMembersResponse }): ReactElement => {
+const TeamMembers = (): ReactElement => {
+  const { teamId } = useParams<{ teamId: string }>();
   const [query, setQuery] = useState('');
-  const members = teamMembers.employee_list.filter(m => {
-    const q = query.toLowerCase();
-    return (
-      m.name.toLowerCase().includes(q) ||
-      m.email.toLowerCase().includes(q) ||
-      m.designation.toLowerCase().includes(q)
-    );
-  });
+
+  const { data: teamMembers, isLoading } = useTeamMembers(teamId!);
+  const members =
+    teamMembers?.employee_list.filter(m => {
+      const q = query.toLowerCase();
+      return (
+        m.name.toLowerCase().includes(q) ||
+        m.email.toLowerCase().includes(q) ||
+        m.designation.toLowerCase().includes(q)
+      );
+    }) ?? [];
 
   return (
     <section className='space-y-4'>
@@ -36,17 +42,24 @@ const TeamMembers = ({ teamMembers }: { teamMembers: TeamMembersResponse }): Rea
         </div>
       </div>
 
-      <div className='grid gap-4 md:grid-cols-2'>
-        {members.length === 0 ? (
-          <p className='col-span-2 py-6 text-center text-sm text-muted-foreground'>
-            No members match &ldquo;{query}&rdquo;.
-          </p>
-        ) : (
-          members.map(member => {
-            return <TeamMember key={member.email} member={member} />;
-          })
-        )}
-      </div>
+      {isLoading ? (
+        <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-center gap-2'>
+          <Loader2 size={16} className='animate-spin text-muted-foreground' />
+          <p className='text-sm text-muted-foreground'>Loading team members...</p>
+        </div>
+      ) : (
+        <div className='grid gap-4 md:grid-cols-2'>
+          {members.length === 0 ? (
+            <p className='col-span-2 py-6 text-center text-sm text-muted-foreground'>
+              No members match &ldquo;{query}&rdquo;.
+            </p>
+          ) : (
+            members.map(member => {
+              return <TeamMember key={member.email} member={member} />;
+            })
+          )}
+        </div>
+      )}
     </section>
   );
 };

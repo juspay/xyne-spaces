@@ -3,6 +3,10 @@ import { CalendarClockIcon, TicketIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/utils/classNames';
 import { Ticket } from '@/services/TeamIntelligence/teamIntelligenceService';
+import { useOutletContext, useParams } from 'react-router-dom';
+import { TeamIntelligenceOutletContext } from '@/routes/TeamIntelligenceScreen/TeamIntelligenceScreen';
+import { useMemberInsights } from '@/hooks/useTeamIntelligence';
+import { Loader2 } from 'lucide-react';
 
 const formatDate = (value: string | null | undefined): string => {
   if (!value) return 'Not available';
@@ -22,7 +26,17 @@ const statusPillClassName = (status: string): string =>
       'bg-muted text-muted-foreground',
   );
 
-const MemberTickets = ({ tickets }: { tickets: Ticket[] }): ReactElement => {
+const MemberTickets = (): ReactElement => {
+  const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
+  const { memberEmail } = useParams<{ memberEmail: string }>();
+
+  const { data: member, isLoading } = useMemberInsights(memberEmail!, {
+    from: dateRange.from,
+    to: dateRange.to,
+  });
+
+  const tickets: Ticket[] = member?.tickets ?? [];
+
   return (
     <section className='space-y-4'>
       <div className='flex items-center gap-3'>
@@ -32,12 +46,19 @@ const MemberTickets = ({ tickets }: { tickets: Ticket[] }): ReactElement => {
         <div>
           <h3 className='text-lg font-semibold text-foreground'>Member Tickets</h3>
           <p className='text-xs text-muted-foreground'>
-            {tickets.length} ticket{tickets.length === 1 ? '' : 's'} in the selected range
+            {isLoading
+              ? 'Loading…'
+              : `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} in the selected range`}
           </p>
         </div>
       </div>
 
-      {tickets.length === 0 ? (
+      {isLoading ? (
+        <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-center gap-2'>
+          <Loader2 size={18} className='animate-spin text-muted-foreground' />
+          <p className='text-sm text-muted-foreground'>Loading tickets...</p>
+        </div>
+      ) : tickets.length === 0 ? (
         <div className='rounded-xl border border-border/50 bg-card p-5'>
           <p className='text-sm text-muted-foreground'>
             No tickets found for the selected date range.
