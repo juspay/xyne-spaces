@@ -590,7 +590,7 @@ const InlineTextFile: React.FC<{
     const attachment: AttachmentRef = {
       attachmentId,
       fileName,
-      fileUrl: `/attachments/${attachmentId}/stream`,
+      fileUrl: `/attachments/${attachmentId}/download`,
       mimeType: 'text/plain',
       fileSize: fileData.size,
       ...(conversationId && { conversationId }),
@@ -736,7 +736,7 @@ const InlineCodeFile: React.FC<{
     const attachment: AttachmentRef = {
       attachmentId,
       fileName,
-      fileUrl: `/attachments/${attachmentId}/stream`,
+      fileUrl: `/attachments/${attachmentId}/download`,
       mimeType,
       fileSize: 0,
       ...(conversationId && { conversationId }),
@@ -1168,7 +1168,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         const ref: AttachmentRef = {
           attachmentId: att.id,
           fileName: att.originalFilename,
-          fileUrl: `/attachments/${att.id}/stream`,
+          fileUrl: `/attachments/${att.id}/download`,
           mimeType: att.mimetype,
           fileSize: att.size,
           thumbnailUrl: att.thumbnailUrl,
