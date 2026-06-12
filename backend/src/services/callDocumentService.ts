@@ -5,9 +5,8 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Agent, type AgentConfig, createUserMessage } from '@framework';
+import { Agent, type AgentConfig } from '@framework';
 import { LogLevel } from '@framework';
-import { extractAgentContent } from '@/utils/agentUtils';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -48,6 +47,16 @@ interface ParticipantInfo {
   userEmail: string;
   userPicture?: string;
 }
+
+// Participant information for mentions
+interface ParticipantInfo {
+  userId: string;
+  username: string;
+  userEmail: string;
+  userPicture?: string;
+}
+
+import { executeCallLlmWithRetry } from './callLlmRetry';
 
 /**
  * Sanitize input strings to prevent injection attacks
@@ -623,7 +632,7 @@ export class CallDocumentService {
           timeouts: { llm: 300000 },
           limits: {},
           errorHandling: {
-            maxRetries: 5,
+            maxRetries: 3,
             retryDelay: 120000,
             maxDelay: 960000,
           },
@@ -652,19 +661,14 @@ export class CallDocumentService {
   async generatePRDFromTranscript(
     transcript: string,
     summary: string | null,
-    customPrompt?: string
+    customPrompt?: string,
+    callId?: string,
   ): Promise<PRDDocument | null> {
-    const agent = this.createAgent();
-    if (!agent) {
-      logger.error('[CallDocumentService] Failed to create agent for PRD generation');
-      return null;
-    }
+    const logCallId = callId || 'unknown';
 
-    try {
-      // Sanitize inputs to prevent injection attacks
+    const buildPrompt = () => {
       const sanitizedTranscript = sanitizeInput(transcript);
       const sanitizedSummary = sanitizeInput(summary);
-
       const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
 
       let prompt = PRD_GENERATION_PROMPT
@@ -674,61 +678,58 @@ export class CallDocumentService {
       if (sanitizedCustomPrompt) {
         prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this PRD. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
       }
+      return prompt;
+    };
 
-      const result = await agent.execute({
-        messages: [createUserMessage(prompt)],
-      });
+    const extracted = await executeCallLlmWithRetry(
+      () => this.createAgent(),
+      buildPrompt,
+      'prd_generation',
+      logCallId,
+    );
 
-      const extracted = extractAgentContent(result);
-      if (!extracted.ok) {
-        logger.error('[CallDocumentService] prd_generation_failed', { reason: extracted.reason, status: extracted.status ?? result.status });
-        return null;
-      }
+    if (!extracted.ok) {
+      logger.error(`[${logCallId}] prd_generation_failed`, { reason: extracted.reason, status: extracted.status });
+      return null;
+    }
 
-      // Extract JSON from response
-      const jsonMatch = extracted.content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        logger.error('[CallDocumentService] Could not find JSON in PRD response');
-        return null;
-      }
+    // Extract JSON from response
+    const jsonMatch = extracted.content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      logger.error(`[${logCallId}] Could not find JSON in PRD response`);
+      return null;
+    }
 
+    try {
       const prd = JSON.parse(jsonMatch[0]) as PRDDocument;
-      logger.info('[CallDocumentService] Successfully generated PRD');
+      logger.info(`[${logCallId}] Successfully generated PRD`);
       return prd;
-    } catch (error) {
-      logger.error('[CallDocumentService] Error generating PRD:', error);
+    } catch (parseError) {
+      logger.error(`[${logCallId}] PRD JSON parse failed`, { error: parseError instanceof Error ? parseError.message : String(parseError) });
       return null;
     }
   }
 
   /**
-   * Generate detailed summary from transcript
+   * Generate detailed summary from transcript with explicit retry loop.
    */
   async generateDetailedSummary(transcript: string, callId: string, customPrompt?: string): Promise<string | null> {
-    const agent = this.createAgent();
-    if (!agent) {
-      logger.warn('[CallDocumentService] Failed to create agent for detailed summary');
-      return null;
-    }
+    // Resolve channelId and build participant map once (expensive DB lookups)
+    const call = await repositories.calls.findByExternalId(callId);
+    const channelId = call?.channelId;
 
-    try {
-      // Resolve channelId from the call so we can build the channel participant map
-      const call = await repositories.calls.findByExternalId(callId);
-      const channelId = call?.channelId;
+    const participantMap = channelId
+      ? await buildParticipantMap(channelId)
+      : new Map<string, ParticipantInfo>();
 
-      // Build participant map from channel members (covers all channel participants, not just call attendees)
-      const participantMap = channelId
-        ? await buildParticipantMap(channelId)
-        : new Map<string, ParticipantInfo>();
+    const participantList = Array.from(participantMap.values())
+      .map(p => `- ${p.username}`)
+      .join('\n');
 
-      const participantList = Array.from(participantMap.values())
-        .map(p => `- ${p.username}`)
-        .join('\n');
+    const sanitizedTranscript = sanitizeInput(transcript);
+    const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
 
-      // Sanitize input to prevent injection attacks
-      const sanitizedTranscript = sanitizeInput(transcript);
-      const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
-
+    const buildPrompt = () => {
       let prompt = DETAILED_SUMMARY_PROMPT
         .replace('{participants}', participantList || '- No participants found')
         .replace('{transcript}', sanitizedTranscript);
@@ -736,23 +737,23 @@ export class CallDocumentService {
       if (sanitizedCustomPrompt) {
         prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this summary. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
       }
+      return prompt;
+    };
 
-      const result = await agent.execute({
-        messages: [createUserMessage(prompt)],
-      });
+    const extracted = await executeCallLlmWithRetry(
+      () => this.createAgent(),
+      buildPrompt,
+      'detailed_summary_generation',
+      callId,
+    );
 
-      const extracted = extractAgentContent(result);
-      if (!extracted.ok) {
-        logger.error('[CallDocumentService] detailed_summary_generation_failed', { reason: extracted.reason, status: extracted.status ?? result.status });
-        return null;
-      }
-
-      logger.info('[CallDocumentService] Successfully generated detailed summary');
-      return extracted.content;
-    } catch (error) {
-      logger.error('[CallDocumentService] Error generating detailed summary:', error);
+    if (!extracted.ok) {
+      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: extracted.reason, status: extracted.status });
       return null;
     }
+
+    logger.info(`[${callId}] Successfully generated detailed summary`);
+    return extracted.content;
   }
 
   /**
@@ -1282,7 +1283,7 @@ A comprehensive detailed summary has been generated from this call.
         return { success: false, error: 'Channel workspace not found' };
       }
       // 1. Generate PRD from transcript
-      const prd = await this.generatePRDFromTranscript(transcript, summary, customPrompt);
+      const prd = await this.generatePRDFromTranscript(transcript, summary, customPrompt, callId);
       if (!prd) {
         return { success: false, error: 'Failed to generate PRD from transcript' };
       }

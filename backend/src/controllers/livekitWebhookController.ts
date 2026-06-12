@@ -101,7 +101,7 @@ class LiveKitWebhookController {
           break;
 
         default:
-          logger.debug(`[LiveKit Webhook] Unhandled event type: ${event.event}`);
+          logger.info(`[LiveKit Webhook] Unhandled event type: ${event.event}`);
       }
 
       res.status(200).json({ success: true });
@@ -179,7 +179,7 @@ class LiveKitWebhookController {
           logger.error(`[LiveKit Webhook] Failed to post external chat summary for ${callId}:`, sideEffectError);
         }
       } else {
-        logger.debug(`[LiveKit Webhook] Call ${callId} already marked as ENDED`);
+        logger.info(`[LiveKit Webhook] Call ${callId} already marked as ENDED`);
       }
 
       if (result.messageUpdated) {
@@ -208,13 +208,13 @@ class LiveKitWebhookController {
 
     // Skip agent participants
     if (participant.identity.startsWith('agent-')) {
-      logger.debug(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
+      logger.info(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
       return;
     }
 
     // Skip egress participants (the recording bot that joins to capture audio)
     if (participant.kind === ParticipantInfo_Kind.EGRESS) {
-      logger.debug(`[LiveKit Webhook] Skipping egress participant: ${participant.identity}`);
+      logger.info(`[LiveKit Webhook] Skipping egress participant: ${participant.identity}`);
       return;
     }
 
@@ -494,13 +494,13 @@ class LiveKitWebhookController {
 
     // Skip agent participants early
     if (participant.identity.startsWith('agent-')) {
-      logger.debug(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
+      logger.info(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
       return;
     }
 
     // Skip egress participants (the recording bot that joins to capture audio)
     if (participant.kind === ParticipantInfo_Kind.EGRESS) {
-      logger.debug(`[LiveKit Webhook] Skipping egress participant: ${participant.identity}`);
+      logger.info(`[LiveKit Webhook] Skipping egress participant: ${participant.identity}`);
       return;
     }
 
