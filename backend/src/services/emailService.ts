@@ -977,6 +977,7 @@ export class EmailService {
           channelId,
           createdBy: userId,
           initialMessageId: 'temp',
+          ...(channel.workspaceId ? { workspaceId: channel.workspaceId } : {}),
           ...(receivedAt && { createdAt: receivedAt, lastActivityAt: receivedAt }),
         },
       });
@@ -1859,6 +1860,7 @@ export class EmailService {
               channelId,
               createdBy: userId,
               initialMessageId: 'temp',
+              ...(channel.workspaceId ? { workspaceId: channel.workspaceId } : {}),
               ...(firstEmail.receivedAt && {
                 createdAt: firstEmail.receivedAt,
                 lastActivityAt: firstEmail.receivedAt,
@@ -1903,6 +1905,7 @@ export class EmailService {
             data: {
               conversationId: conv.conversationId,
               senderId: userId,
+              ...(channel.workspaceId ? { workspaceId: channel.workspaceId } : {}),
               content: '',
               hasAttachment: true,
               metadata: { ticketId: createdTicket.id },

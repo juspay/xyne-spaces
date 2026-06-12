@@ -470,6 +470,7 @@ export class WorkflowController {
               messageId: botMessageId,
               conversationId,
               senderId: req.user?.id || 'system',
+              ...(req.user?.workspaceId ? { workspaceId: req.user.workspaceId } : {}),
               content: ``,
               msgType: 'SYSTEM',
               metadata: messageMetadata,

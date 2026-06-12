@@ -9,7 +9,7 @@ type MessagesSchema = Schema['tables']['messages'];
 
 /**
  * Vespa handler for the messages table.
- * 
+ *
  * Queues jobs for message indexing in Vespa's chat_message schema.
  */
 export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
@@ -22,8 +22,8 @@ export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
       schema: messageSchema,
       jobType: 'feed',
       data: args,
-      docId: args.messageId
-    }];
+      docId: args.messageId,
+    }] as VespaQueueHandler[];
   }
 
   onUpdate(args: UpdateValue<MessagesSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
@@ -31,8 +31,8 @@ export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
       schema: messageSchema,
       jobType: 'feed',
       data: args,
-      docId: args.messageId
-    }];
+      docId: args.messageId,
+    }] as VespaQueueHandler[];
   }
 
   onUpsert(args: UpsertValue<MessagesSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
@@ -40,8 +40,8 @@ export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
       schema: messageSchema,
       jobType: 'feed',
       data: args,
-      docId: args.messageId
-    }];
+      docId: args.messageId,
+    }] as VespaQueueHandler[];
   }
 
   onDelete(args: DeleteID<MessagesSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
@@ -49,7 +49,7 @@ export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
       schema: messageSchema,
       jobType: 'delete',
       data: args,
-      docId: args.messageId
-    }];
+      docId: args.messageId,
+    }] as VespaQueueHandler[];
   }
 }

@@ -811,30 +811,33 @@ export class CallRepository {
       conversationId: string;
       messageId: string;
       channelId: string;
+      workspaceId?: string;
       callId: string;        // room externalId / roomName
       callType?: CallType;   // undefined ⇒ regular call
       initiatorName: string;
       conversationMetadata?: Prisma.InputJsonValue;
     }
   ): Promise<void> {
-    const { conversationId, messageId, channelId, callId, callType, initiatorName, conversationMetadata } = params;
+    const { conversationId, messageId, channelId, workspaceId, callId, callType, initiatorName, conversationMetadata } = params;
     const isHeadless = callType === CallType.HEADLESS;
 
     await tx.conversation.create({
       data: {
         conversationId,
         channelId,
+        ...(workspaceId ? { workspaceId } : {}),
         createdBy: 'system',
         initialMessageId: messageId,
         ...(conversationMetadata ? { metadata: conversationMetadata } : {}),
       },
     });
 
-    await tx.message.create({
-      data: {
-        messageId,
-        conversationId,
-        senderId: 'system',
+        await tx.message.create({
+          data: {
+            messageId,
+            conversationId,
+            ...(workspaceId ? { workspaceId } : {}),
+            senderId: 'system',
         content: isHeadless ? 'Recording started' : `${initiatorName} started a call`,
         msgType: 'SYSTEM',
         showInChannel: isHeadless ? true : false,
@@ -866,8 +869,9 @@ export class CallRepository {
     call: Call;
     initiatorName: string;
     now: Date;
+    workspaceId?: string;
   }): Promise<void> {
-    const { call: callParam, initiatorName, now } = params;
+    const { call: callParam, initiatorName, now, workspaceId } = params;
 
     await DatabaseClient.getInstance().$transaction(async (tx) => {
       // Re-read the call inside the transaction to ensure fresh data
@@ -892,6 +896,7 @@ export class CallRepository {
         await this.createConversationAndSystemMessage(tx, {
           conversationId,
           messageId,
+          workspaceId,
           channelId: call.callUpdatesChannel ?? call.channelId ?? '',
           callId: call.externalId,
           initiatorName,
@@ -1010,6 +1015,7 @@ export class CallRepository {
       callId: string;
       roomName: string;
       channelId: string;
+      workspaceId?: string;
       createdBy: string;
       callType: CallType;
       roomLink: string;
@@ -1025,6 +1031,7 @@ export class CallRepository {
       callId,
       roomName,
       channelId,
+      workspaceId,
       createdBy,
       callType,
       roomLink,
@@ -1119,6 +1126,7 @@ export class CallRepository {
           data: {
             messageId,
             conversationId,
+            ...(workspaceId ? { workspaceId } : {}),
             senderId: 'system',
             content: `${user?.name || 'Someone'} started a call`,
             msgType: 'SYSTEM',
@@ -1137,6 +1145,7 @@ export class CallRepository {
           conversationId,
           messageId,
           channelId,
+          workspaceId,
           callId: roomName,
           callType,
           initiatorName: user?.name || 'Someone',

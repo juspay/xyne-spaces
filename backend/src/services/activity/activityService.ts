@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 export interface CreateActivityParams {
   id?: string;
   userId: string;
+  workspaceId?: string;
   actorAction: string;
   /** @deprecated Use messageId, reactionId, or callId instead. Still required for backward compatibility. */
   actionSource: string;
@@ -237,6 +238,7 @@ export class ActivityService {
       data: {
         ...(activity.id ? { id: activity.id } : {}),
         userId: activity.userId,
+        ...(activity.workspaceId ? { workspaceId: activity.workspaceId } : {}),
         actorAction: activity.actorAction,
         actionSource: activity.actionSource,
         actionSourceId: activity.actionSourceId,
@@ -298,6 +300,7 @@ export class ActivityService {
       data: enrichedActivities.map(a => ({
         ...(a.id ? { id: a.id } : {}),
         userId: a.userId,
+        ...(a.workspaceId ? { workspaceId: a.workspaceId } : {}),
         actorAction: a.actorAction,
         actionSource: a.actionSource,
         actionSourceId: a.actionSourceId,
@@ -359,10 +362,11 @@ export class ActivityService {
   async upsertReactionActivityV2(params: {
     messageId: string;
     channelId: string;
+    workspaceId?: string;
     actorId: string;
     messageAuthorId: string;
   }): Promise<'created' | 'updated'> {
-    const { messageId, channelId, actorId, messageAuthorId } = params;
+    const { messageId, channelId, workspaceId, actorId, messageAuthorId } = params;
 
     const existingActivity = await this.prisma.activity.findFirst({
       where: {
@@ -376,6 +380,7 @@ export class ActivityService {
     if (existingActivity) {
       const activity = await this.enrichActivityWithConversationCutoff({
         userId: messageAuthorId,
+        workspaceId,
         actorAction: 'added_v2',
         actionSource: 'message',
         actionSourceId: messageId,
@@ -408,6 +413,7 @@ export class ActivityService {
 
     const activity = await this.enrichActivityWithConversationCutoff({
       userId: messageAuthorId,
+      workspaceId,
       actorAction: 'added_v2',
       actionSource: 'message',
       actionSourceId: messageId,
@@ -420,6 +426,7 @@ export class ActivityService {
     await this.prisma.activity.create({
       data: {
         userId: activity.userId,
+        ...(activity.workspaceId ? { workspaceId: activity.workspaceId } : {}),
         actorAction: activity.actorAction,
         actionSource: activity.actionSource,
         actionSourceId: activity.actionSourceId,
@@ -484,6 +491,7 @@ export class ActivityService {
     conversationId: string;
     parentMessageId: string;
     channelId: string;
+    workspaceId?: string;
     actorId: string;
     recipientUserId: string;
     latestReplyMessageId: string;
@@ -491,6 +499,7 @@ export class ActivityService {
     const {
       conversationId,
       channelId,
+      workspaceId,
       actorId,
       recipientUserId,
       latestReplyMessageId,
@@ -538,6 +547,7 @@ export class ActivityService {
     await this.prisma.activity.create({
       data: {
         userId: recipientUserId,
+        ...(workspaceId ? { workspaceId } : {}),
         actorAction: 'replied_v2',
         actionSource: 'message',
         actionSourceId: latestReplyMessageId,

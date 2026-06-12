@@ -415,6 +415,7 @@ export function getMostRecentReplier(data: RepliesData): string | null {
 export interface InitialMessageSummary {
   messageId: string;
   conversationId: string;
+  workspaceId?: string | null;
   senderId: string;
   content: string;
   msgType: MessageType;
@@ -483,6 +484,7 @@ export function parseInitialMessageMd(md: string | null | undefined): InitialMes
   return {
     messageId: summary['messageId'],
     conversationId: summary['conversationId'] ?? '',
+    workspaceId: summary['workspaceId'] || null,
     senderId: summary['senderId'] ?? '',
     content: summary['content'] ?? '',
     msgType: (summary['msgType'] as MessageType) ?? 'USER',
@@ -510,6 +512,7 @@ export function serializeInitialMessageMd(
   const entries: Array<[string, string | number | boolean | null | undefined]> = [
     ['messageId', summary.messageId],
     ['conversationId', summary.conversationId],
+    ['workspaceId', summary.workspaceId],
     ['senderId', summary.senderId],
     ['content', summary.content],
     ['msgType', summary.msgType],

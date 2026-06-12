@@ -2092,6 +2092,7 @@ model Conversation {
   channelId         String   // Channel this thread belongs to (no FK constraint)
   createdBy         String   // User who started the thread (no FK constraint)
   initialMessageId  String   // First message - use this for thread preview (no FK constraint)
+  workspaceId       String?  // Workspace for ACL optimization (denormalized from channel)
   parentMessageId   String?  // Parent message that this conversation is replying to (no FK constraint)
   lastActivityAt    DateTime @default(now())
   replyCount        Int      @default(0)
@@ -2114,6 +2115,7 @@ model Conversation {
   messageAttachments MessageAttachment[]
 
   @@index([channelId, lastActivityAt])
+  @@index([workspaceId]) // ACL workspace filtering
   @@index([channelId]) // Alternative simple index
   @@index([ticketId]) // Fast ticket lookup
   @@index([callId])
@@ -2311,6 +2313,7 @@ model Message {
   conversationId      String      // Every message belongs to a conversation (no FK constraint)
   childConversationId String?     // Child conversation created from this message (no FK constraint)
   senderId            String      // User who sent the message (no FK constraint)
+  workspaceId         String?     // Workspace for ACL optimization (denormalized from conversation)
   content             String      // Text content
   msgType             MessageType @default(USER) // USER | BOT | SYSTEM
   hasAttachment       Boolean     @default(false) // Quick check for attachments
@@ -2334,6 +2337,7 @@ model Message {
   externalMessages   ExternalMessage[] @relation("ExternalMessageEntity")
 
   @@index([conversationId, createdAt]) // Fast conversation message lookup
+  @@index([workspaceId]) // ACL workspace filtering
   @@index([conversationId]) // Alternative simple index
   @@index([visibleTo]) // Fast visibility filtering
   @@index([conversationId, visibleTo]) // Composite index for visibility queries
@@ -2447,6 +2451,7 @@ model CustomEmoji {
 model Activity {
   id              String   @id @default(cuid())
   userId          String   // User who receives this notification (no FK constraint)
+  workspaceId     String?  // Workspace for ACL optimization
   actorAction     String   // Action performed: 'mentioned_user', 'group_mention', 'replied', 'added', 'created', etc.
   /// @deprecated Use messageId, reactionId, or callId instead. Will be removed in future migration.
   actionSource    String   // Source entity: 'message', 'reaction', 'channel' (singular)
@@ -2474,6 +2479,7 @@ model Activity {
 
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated
+  @@index([workspaceId]) // ACL workspace filtering
   @@index([userId, actorAction, createdAt, id]) // for userActivitiesPaginated
   @@index([userId, classification, createdAt, id]) // for userActivitiesPaginated
   @@index([userId, actorAction, classification, createdAt, id]) // for userActivitiesPaginated

@@ -28,6 +28,7 @@ export function initialMessageSummaryToMessage(
     isSent: summary.isSent,
     reactions_md: summary.reactions_md ?? null,
     link_preview_md: summary.link_preview_md ?? null,
+    workspaceId: summary.workspaceId ?? null,
   };
 }
 

@@ -609,6 +609,7 @@ async function main() {
           channelId: generalChannel.id,
           createdBy: user1.id,
           initialMessageId: generateId(),
+          workspaceId: generalChannel.workspaceId,
           lastActivityAt: hoursAgo(1),
           replyCount: 5,
           pinned: false
@@ -620,6 +621,7 @@ async function main() {
           channelId: devChannel.id,
           createdBy: user3.id,
           initialMessageId: generateId(),
+          workspaceId: devChannel.workspaceId,
           lastActivityAt: hoursAgo(2),
           replyCount: 3,
           pinned: true
@@ -631,6 +633,7 @@ async function main() {
           channelId: designChannel.id,
           createdBy: user2.id,
           initialMessageId: generateId(),
+          workspaceId: designChannel.workspaceId,
           lastActivityAt: hoursAgo(3),
           replyCount: 7,
           pinned: false
@@ -642,6 +645,7 @@ async function main() {
           channelId: generalChannel.id,
           createdBy: user4.id,
           initialMessageId: generateId(),
+          workspaceId: generalChannel.workspaceId,
           lastActivityAt: hoursAgo(4),
           replyCount: 2,
           parentMessageId: generateId(),
@@ -672,6 +676,7 @@ async function main() {
       const messageData = [
         {
           conversationId: conv1.conversationId,
+          workspaceId: generalChannel.workspaceId,
           senderId: user1.id,
           content: 'Hey everyone! Welcome to the Xyne Spaces project!',
           msgType: MessageType.USER,
@@ -679,6 +684,7 @@ async function main() {
         },
         {
           conversationId: conv1.conversationId,
+          workspaceId: generalChannel.workspaceId,
           senderId: user2.id,
           content: 'Excited to work on this! Let me know if you need any design help.',
           msgType: MessageType.USER,
@@ -686,6 +692,7 @@ async function main() {
         },
         {
           conversationId: conv1.conversationId,
+          workspaceId: generalChannel.workspaceId,
           senderId: user1.id,
           content: 'Thanks Sarah! @mike.product, could you share the requirements?',
           msgType: MessageType.USER,
@@ -693,6 +700,7 @@ async function main() {
         },
         {
           conversationId: conv1.conversationId,
+          workspaceId: generalChannel.workspaceId,
           senderId: user3.id,
           content: 'Sure! I\'ll upload the requirements document shortly.',
           msgType: MessageType.USER,
@@ -700,6 +708,7 @@ async function main() {
         },
         {
           conversationId: conv2.conversationId,
+          workspaceId: devChannel.workspaceId,
           senderId: user3.id,
           content: 'I found a potential bug in the workflow execution engine.',
           msgType: MessageType.USER,
@@ -707,6 +716,7 @@ async function main() {
         },
         {
           conversationId: conv2.conversationId,
+          workspaceId: devChannel.workspaceId,
           senderId: user1.id,
           content: 'Can you share more details? I\'ll investigate.',
           msgType: MessageType.USER,
@@ -714,6 +724,7 @@ async function main() {
         },
         {
           conversationId: conv2.conversationId,
+          workspaceId: devChannel.workspaceId,
           senderId: user3.id,
           content: 'Check the workflow ticket I created. Steps are not executing in the correct order.',
           msgType: MessageType.USER,
@@ -721,6 +732,7 @@ async function main() {
         },
         {
           conversationId: conv3.conversationId,
+          workspaceId: designChannel.workspaceId,
           senderId: user2.id,
           content: 'New mockups are ready for the dashboard redesign!',
           msgType: MessageType.USER,
@@ -728,6 +740,7 @@ async function main() {
         },
         {
           conversationId: conv3.conversationId,
+          workspaceId: designChannel.workspaceId,
           senderId: user4.id,
           content: 'These look great! When can we start implementing?',
           msgType: MessageType.USER,
@@ -735,6 +748,7 @@ async function main() {
         },
         {
           conversationId: conv3.conversationId,
+          workspaceId: designChannel.workspaceId,
           senderId: user2.id,
           content: 'Next week. Let me create tickets for each component.',
           msgType: MessageType.USER,
@@ -742,6 +756,7 @@ async function main() {
         },
         {
           conversationId: conv4.conversationId,
+          workspaceId: generalChannel.workspaceId,
           senderId: user4.id,
           content: 'QA is done for the user auth module.',
           msgType: MessageType.USER,
@@ -749,6 +764,7 @@ async function main() {
         },
         {
           conversationId: conv4.conversationId,
+          workspaceId: generalChannel.workspaceId,
           senderId: user3.id,
           content: 'Great work Lisa! Any blockers?',
           msgType: MessageType.USER,

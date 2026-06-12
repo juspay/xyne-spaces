@@ -80,6 +80,7 @@ import { z } from 'zod';
 function buildInitialMessageMd(msg: {
   messageId: string;
   conversationId: string;
+  workspaceId?: string | null;
   senderId: string;
   content: string;
   msgType: MessageTypeEnum;
@@ -93,6 +94,7 @@ function buildInitialMessageMd(msg: {
   return serializeInitialMessageMd({
     messageId: msg.messageId,
     conversationId: msg.conversationId,
+    workspaceId: msg.workspaceId ?? null,
     senderId: msg.senderId,
     content: msg.content,
     msgType: msg.msgType,
@@ -287,10 +289,10 @@ export const mutators = defineMutators({
          channelWideMentionsEnabled: z.boolean().nullable().optional(),
          timestamp: z.number(),
        }),
-       async ({
-         tx,
-         ctx,
-         args: {
+      async ({
+        tx,
+        ctx,
+        args: {
            channelId,
            desktopNotificationLevel,
            mobileNotificationLevel,
@@ -1190,6 +1192,7 @@ export const mutators = defineMutators({
         await tx.mutate.conversations.insert({
           conversationId,
           channelId,
+          workspaceId: ctx.workspaceId,
           createdBy: ctx.userID,
           initialMessageId: messageId,
           lastActivityAt: now,
@@ -1200,6 +1203,7 @@ export const mutators = defineMutators({
           initial_message_md: buildInitialMessageMd({
             messageId,
             conversationId,
+            workspaceId: ctx.workspaceId,
             senderId: ctx.userID,
             content: systemMessageContent,
             msgType: MessageType.SYSTEM,
@@ -1210,6 +1214,7 @@ export const mutators = defineMutators({
         await tx.mutate.messages.insert({
           messageId,
           conversationId,
+          workspaceId: ctx.workspaceId,
           senderId: ctx.userID,
           content: systemMessageContent,
           msgType: MessageType.SYSTEM,
@@ -1331,6 +1336,7 @@ export const mutators = defineMutators({
         await tx.mutate.conversations.insert({
           conversationId,
           channelId,
+          workspaceId: ctx.workspaceId,
           createdBy: ctx.userID,
           initialMessageId: messageId,
           lastActivityAt: now,
@@ -1341,6 +1347,7 @@ export const mutators = defineMutators({
           initial_message_md: buildInitialMessageMd({
             messageId,
             conversationId,
+            workspaceId: ctx.workspaceId,
             senderId: ctx.userID,
             content: systemMessageContent,
             msgType: MessageType.SYSTEM,
@@ -1351,6 +1358,7 @@ export const mutators = defineMutators({
         await tx.mutate.messages.insert({
           messageId,
           conversationId,
+          workspaceId: ctx.workspaceId,
           senderId: ctx.userID,
           content: systemMessageContent,
           msgType: MessageType.SYSTEM,
@@ -1522,6 +1530,7 @@ export const mutators = defineMutators({
         await tx.mutate.conversations.insert({
           conversationId,
           channelId,
+          workspaceId: ctx.workspaceId,
           createdBy: ctx.userID,
           initialMessageId: messageId,
           lastActivityAt: now,
@@ -1532,6 +1541,7 @@ export const mutators = defineMutators({
           initial_message_md: buildInitialMessageMd({
             messageId,
             conversationId,
+            workspaceId: ctx.workspaceId,
             senderId: ctx.userID,
             content: content.trim(),
             msgType: type,
@@ -1543,6 +1553,7 @@ export const mutators = defineMutators({
         await tx.mutate.messages.insert({
           messageId,
           conversationId,
+          workspaceId: ctx.workspaceId,
           senderId: ctx.userID,
           content: content.trim(),
           msgType: type,
@@ -1724,6 +1735,7 @@ export const mutators = defineMutators({
         await tx.mutate.conversations.insert({
           conversationId,
           channelId: targetChannelId,
+          workspaceId: ctx.workspaceId,
           createdBy: ctx.userID,
           initialMessageId: messageId,
           lastActivityAt: now,
@@ -1734,6 +1746,7 @@ export const mutators = defineMutators({
           initial_message_md: buildInitialMessageMd({
             messageId,
             conversationId,
+            workspaceId: ctx.workspaceId,
             senderId: ctx.userID,
             content: xmlContent,
             msgType: MessageType.FORWARDED,
@@ -1799,6 +1812,7 @@ export const mutators = defineMutators({
             await tx.mutate.messages.insert({
               messageId: clonedMessageId,
               conversationId,
+              workspaceId: ctx.workspaceId,
               senderId: botMsg.senderId,
               content: botMsg.content,
               msgType: botMsg.msgType,
@@ -1860,6 +1874,7 @@ export const mutators = defineMutators({
         await tx.mutate.messages.insert({
           messageId,
           conversationId,
+          workspaceId: ctx.workspaceId,
           senderId: ctx.userID,
           content: xmlContent,
           msgType: MessageType.FORWARDED,
@@ -2049,6 +2064,7 @@ export const mutators = defineMutators({
         const message = {
           messageId,
           conversationId,
+          workspaceId: ctx.workspaceId,
           senderId: ctx.userID,
           content: content.trim(),
           msgType: type,
@@ -2113,6 +2129,7 @@ export const mutators = defineMutators({
           await tx.mutate.conversations.insert({
             conversationId: childConversationId,
             channelId: conversation.channelId,
+            workspaceId: ctx.workspaceId,
             createdBy: ctx.userID,
             initialMessageId: messageId,
             parentMessageId: conversation.initialMessageId,
@@ -2123,6 +2140,7 @@ export const mutators = defineMutators({
             initial_message_md: buildInitialMessageMd({
               messageId,
               conversationId,
+              workspaceId: ctx.workspaceId,
               senderId: ctx.userID,
               content: content.trim(),
               msgType: type,
@@ -2259,6 +2277,7 @@ export const mutators = defineMutators({
         await tx.mutate.conversations.insert({
           conversationId: childConversationId,
           channelId: conversation.channelId,
+          workspaceId: ctx.workspaceId,
           createdBy: ctx.userID,
           initialMessageId: messageId,
           parentMessageId: conversation.initialMessageId,
@@ -2269,6 +2288,7 @@ export const mutators = defineMutators({
           initial_message_md: buildInitialMessageMd({
             messageId,
             conversationId: message.conversationId,
+            workspaceId: ctx.workspaceId,
             senderId: message.senderId,
             content: message.content,
             msgType: message.msgType,
@@ -4347,6 +4367,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
+        ctx,
         args: {
           id,
           ticketId,
@@ -4409,6 +4430,7 @@ export const mutators = defineMutators({
 
           await tx.mutate.messages.insert({
             messageId: requestActivityId,
+            workspaceId: ctx.workspaceId,
             conversationId: ticket.conversationId,
             senderId: updatedBy,
             content: `${actorName} ${actionText} ${stage.name}`,
@@ -4483,6 +4505,7 @@ export const mutators = defineMutators({
           await tx.mutate.messages.insert({
             messageId: approvedActivityId,
             conversationId: ticket.conversationId,
+            workspaceId: ctx.workspaceId,
             senderId: updatedBy,
             content: `${actorName} ${actionText} ${stage.name}`,
             msgType: MessageType.SYSTEM,
@@ -4512,6 +4535,7 @@ export const mutators = defineMutators({
           await tx.mutate.messages.insert({
             messageId: rejectedActivityId,
             conversationId: ticket.conversationId,
+            workspaceId: ctx.workspaceId,
             senderId: updatedBy,
             content: `${actorName} ${actionText} ${stage.name}`,
             msgType: MessageType.SYSTEM,

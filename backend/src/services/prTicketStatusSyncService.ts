@@ -523,6 +523,7 @@ export class PRTicketStatusSyncService {
         data: {
           messageId: uuidv4(),
           conversationId: ticket.conversationId,
+          ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
           senderId,
           content: message,
           msgType: MessageType.SYSTEM,
@@ -725,6 +726,7 @@ export class PRTicketStatusSyncService {
       data: {
         messageId: uuidv4(),
         conversationId: ticket.conversationId,
+        ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
         senderId: updatedBy,
         content: activityMessage,
         msgType: MessageType.SYSTEM,

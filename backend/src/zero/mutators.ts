@@ -238,6 +238,7 @@ async function assignFullRoles(
     messageId,
     timestamp,
     projectId,
+    workspaceId,
   }: {
     ticketId: string;
     userGroupId: string;
@@ -250,6 +251,7 @@ async function assignFullRoles(
     messageId?: string;
     timestamp: number;
     projectId?: string;
+    workspaceId?: string;
   }
 ): Promise<void> {
   logger.info(`[AUTO-ASSIGN] Board ${boardId} has fullRoleAssignment enabled for ticket ${ticketId}`);
@@ -288,6 +290,7 @@ async function assignFullRoles(
           messageId,
           conversationId,
           senderId: createdBy,
+          ...(workspaceId ? { workspaceId } : {}),
           content: `${creatorName} auto-assigned ticket to ${assignedUser.name} (full role assignment)`,
           msgType: MessageType.SYSTEM,
           hasAttachment: false,
@@ -336,6 +339,7 @@ async function createNonParticipantSystemMessages(
   senderId: string,
   isThreadReply: boolean,
   scopeType: string,
+  workspaceId?: string,
 ): Promise<void> {
   try {
     if (mentionedUserIds.length === 0 && mentionedGroupIds.length === 0) {
@@ -424,6 +428,7 @@ async function createNonParticipantSystemMessages(
         messageId: systemMessageId,
         conversationId: conversationId,
         senderId: 'user',
+        ...(workspaceId ? { workspaceId } : {}),
         content: htmlContent,
         msgType: MessageType.SYSTEM,
         hasAttachment: false,
@@ -455,6 +460,7 @@ async function createNonParticipantSystemMessages(
       await tx.mutate.conversations.insert({
         conversationId: newConversationId,
         channelId,
+        ...(workspaceId ? { workspaceId } : {}),
         createdBy: 'user',
         initialMessageId: systemMessageId,
         lastActivityAt: now,
@@ -469,6 +475,7 @@ async function createNonParticipantSystemMessages(
         messageId: systemMessageId,
         conversationId: newConversationId,
         senderId: 'user',
+        ...(workspaceId ? { workspaceId } : {}),
         content: htmlContent,
         msgType: MessageType.SYSTEM,
         hasAttachment: false,
@@ -747,6 +754,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.conversations.insert({
             conversationId: conversationId,
             channelId: channelId,
+            workspaceId: authData.workspaceId,
             createdBy: authData.sub,
             initialMessageId: messageId,
             lastActivityAt: timestamp,
@@ -759,6 +767,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.messages.insert({
             messageId: messageId,
             conversationId: conversationId,
+            workspaceId: authData.workspaceId,
             senderId: authData.sub,
             content: systemContent,
             msgType: MessageType.SYSTEM,
@@ -1408,6 +1417,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.conversations.insert({
             conversationId,
             channelId,
+            workspaceId: authData.workspaceId,
             createdBy: authData.sub,
             initialMessageId: messageId,
             lastActivityAt: now,
@@ -1423,6 +1433,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.messages.insert({
             messageId,
             conversationId,
+            workspaceId: authData.workspaceId,
             senderId: authData.sub,
             content: systemMessageContent,
             msgType: MessageType.SYSTEM,
@@ -1608,6 +1619,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.conversations.insert({
             conversationId,
             channelId,
+            workspaceId: authData.workspaceId,
             createdBy: authData.sub,
             initialMessageId: messageId,
             lastActivityAt: now,
@@ -1623,6 +1635,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.messages.insert({
             messageId,
             conversationId,
+            workspaceId: authData.workspaceId,
             senderId: authData.sub,
             content: systemMessageContent,
             msgType: MessageType.SYSTEM,
@@ -1680,6 +1693,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.conversations.insert({
             conversationId: conversationId,
             channelId,
+            workspaceId: authData.workspaceId,
             createdBy: authData.sub,
             createdAt: now,
             initialMessageId: messageId,
@@ -1691,6 +1705,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.messages.insert({
             messageId,
             conversationId,
+            workspaceId: authData.workspaceId,
             senderId: authData.sub,
             content: archiveMessage,
             msgType: MessageType.SYSTEM,
@@ -1745,6 +1760,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.conversations.insert({
             conversationId: conversationId,
             channelId,
+            workspaceId: authData.workspaceId,
             createdBy: authData.sub,
             createdAt: now,
             initialMessageId: messageId,
@@ -1756,6 +1772,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.messages.insert({
             messageId,
             conversationId,
+            workspaceId: authData.workspaceId,
             senderId: authData.sub,
             content: unarchiveMessage,
             msgType: MessageType.SYSTEM,
@@ -1961,6 +1978,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.conversations.insert({
             conversationId,
             channelId,
+            workspaceId: authData.workspaceId,
             createdBy: authData.sub,
             initialMessageId: messageId,
             lastActivityAt: now,
@@ -1974,6 +1992,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const message = {
             messageId,
             conversationId,
+            workspaceId: authData.workspaceId,
             senderId: authData.sub,
             content: content.trim(),
             msgType: type,
@@ -2316,6 +2335,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.conversations.insert({
             conversationId,
             channelId: targetChannelId,
+            workspaceId: authData.workspaceId,
             createdBy: authData.sub,
             initialMessageId: messageId,
             lastActivityAt: now,
@@ -2344,6 +2364,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.messages.insert({
             messageId,
             conversationId,
+            workspaceId: authData.workspaceId,
             senderId: authData.sub,
             content: xmlContent,
             msgType: MessageType.FORWARDED,
@@ -2423,6 +2444,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   messageId: clonedMessageId,
                   conversationId,
                   senderId: sysMsg.senderId,
+                  workspaceId: authData.workspaceId,
                   content: sysMsg.content,
                   msgType: sysMsg.msgType,
                   hasAttachment: sysMsg.hasAttachment,
@@ -2636,6 +2658,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const message = {
             messageId,
             conversationId,
+            workspaceId: authData.workspaceId,
             senderId: authData.sub,
             content: content.trim(),
             msgType: type,
@@ -2763,6 +2786,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.conversations.insert({
               conversationId: childConversationId,
               channelId: conversation.channelId,
+              workspaceId: authData.workspaceId,
               createdBy: authData.sub,
               initialMessageId: messageId,
               parentMessageId: conversation.initialMessageId,
@@ -3350,6 +3374,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.conversations.insert({
             conversationId: childConversationId,
             channelId: conversation.channelId,
+            workspaceId: authData.workspaceId,
             createdBy: authData.sub,
             initialMessageId: messageId,
             parentMessageId: conversation.initialMessageId,
@@ -5033,6 +5058,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       creatorName: authData.name,
                       timestamp: Date.now(),
                       projectId: ticket.projectId,
+                      workspaceId: authData.workspaceId,
                     });
                   } else {
                     const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId);
@@ -5340,21 +5366,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 const boardRow = await tx.run(zql.boards.where('id', targetBoardId).one());
                 const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
-                if (boardMetadata?.fullRoleAssignment === true) {
-                  await assignFullRoles(tx, {
-                    ticketId: params.id,
-                    userGroupId: params.userGroupId!,
-                    boardId: targetBoardId,
-                    oldAssignedTo: ticket.assignedTo,
-                    conversationId: ticket.conversationId,
-                    createdBy: authData.sub,
-                    creatorName,
-                    activityId,
-                    messageId,
-                    timestamp,
-                    projectId: ticket.projectId,
-                  });
-                } else {
+                  if (boardMetadata?.fullRoleAssignment === true) {
+                    await assignFullRoles(tx, {
+                      ticketId: params.id,
+                      userGroupId: params.userGroupId!,
+                      boardId: targetBoardId,
+                      oldAssignedTo: ticket.assignedTo,
+                      conversationId: ticket.conversationId,
+                      createdBy: authData.sub,
+                      creatorName,
+                      activityId,
+                      messageId,
+                      timestamp,
+                      projectId: ticket.projectId,
+                      workspaceId: authData.workspaceId,
+                    });
+                  } else {
                 const assignmentResult = await evaluateAssignmentRule(
                   params.userGroupId!,
                   targetBoardId,
@@ -5388,6 +5415,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       await tx.mutate.messages.insert({
                         messageId,
                         conversationId: ticket.conversationId,
+                        workspaceId: authData.workspaceId,
                         senderId: authData.sub,
                         content: `${creatorName} auto-assigned ticket to ${assignedUser.name}`,
                         msgType: MessageType.SYSTEM,
@@ -5491,6 +5519,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               await tx.mutate.messages.insert({
                 messageId: uuidv4(),
                 conversationId: ticket.conversationId,
+                workspaceId: authData.workspaceId,
                 senderId: authData.sub,
                 content: activityMessage,
                 msgType: MessageType.SYSTEM,
@@ -5715,6 +5744,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.messages.insert({
               messageId: uuidv4(),
               conversationId: ticket.conversationId,
+              workspaceId: authData.workspaceId,
               senderId: authData.sub,
               content: activityMessage,
               msgType: MessageType.SYSTEM,
@@ -5792,6 +5822,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.messages.insert({
               messageId: uuidv4(),
               conversationId,
+              workspaceId: authData.workspaceId,
               senderId: authData.sub,
               content: `${userName} created subticket ${displayId}`,
               msgType: MessageType.SYSTEM,
@@ -6706,6 +6737,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               messageId: uuidv4(),
               conversationId: sourceTicket.conversationId,
               senderId: ctx.userID,
+              ...(sourceTicket?.workspaceId ? { workspaceId: sourceTicket.workspaceId } : {}),
               content: activityMessage,
               msgType: MessageType.SYSTEM,
               hasAttachment: false,
@@ -6777,6 +6809,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.messages.insert({
               messageId: uuidv4(),
               conversationId: sourceTicket.conversationId,
+              workspaceId: authData.workspaceId,
               senderId: authData.sub,
               content: activityMessage,
               msgType: MessageType.SYSTEM,
@@ -6841,6 +6874,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.messages.insert({
               messageId: uuidv4(),
               conversationId: sourceTicket.conversationId,
+              workspaceId: authData.workspaceId,
               senderId: authData.sub,
               content: activityMessage,
               msgType: MessageType.SYSTEM,
@@ -10095,6 +10129,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               messageId: requestActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
+              ...(authData.workspaceId ? { workspaceId: authData.workspaceId } : {}),
               content: `${actorName} ${actionText} ${stage.name}`,
               msgType: MessageType.SYSTEM,
               hasAttachment: false,
@@ -10125,6 +10160,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               messageId: requestActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
+              ...(authData.workspaceId ? { workspaceId: authData.workspaceId } : {}),
               content: `${actorName} ${actionText} ${stage.name}`,
               msgType: MessageType.SYSTEM,
               hasAttachment: false,
@@ -10164,6 +10200,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               messageId: approvedActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
+              ...(authData.workspaceId ? { workspaceId: authData.workspaceId } : {}),
               content: `${actorName} ${actionText} ${stage.name}`,
               msgType: MessageType.SYSTEM,
               hasAttachment: false,
@@ -10193,6 +10230,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               messageId: rejectedActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
+              ...(authData.workspaceId ? { workspaceId: authData.workspaceId } : {}),
               content: `${actorName} ${actionText} ${stage.name}`,
               msgType: MessageType.SYSTEM,
               hasAttachment: false,

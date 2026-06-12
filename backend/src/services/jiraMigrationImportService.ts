@@ -3237,17 +3237,19 @@ export class JiraMigrationImportService {
                   channelId: channel.id,
                   createdBy: resolvedReporterId,
                   initialMessageId,
+                  workspaceId,
                   createdAt,
                   lastActivityAt: createdAt,
                 },
               });
 
-	              await tx.message.create({
-	                data: {
-	                  messageId: initialMessageId,
-	                  conversationId: generatedConversationId,
-	                  senderId: initialTicketMessageSenderId,
-	                  content: rootMessageContent,
+ 	              await tx.message.create({
+ 	                data: {
+ 	                  messageId: initialMessageId,
+ 	                  conversationId: generatedConversationId,
+ 	                  senderId: initialTicketMessageSenderId,
+ 	                  workspaceId,
+ 	                  content: rootMessageContent,
 	                  msgType: MessageType.USER,
 	                  hasAttachment: false,
 	                  edited: false,
