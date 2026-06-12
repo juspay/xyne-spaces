@@ -1570,10 +1570,24 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                             selectedDate={startsAt}
                             onSelect={date => {
                               if (date) {
-                                const merged = mergeDateWithTime(date, field.value ?? startsAt);
+                                const previousStart = field.value ?? startsAt;
+                                const merged = mergeDateWithTime(date, previousStart);
+                                const shiftedEnd = endsAt
+                                  ? new Date(
+                                      merged.getTime() +
+                                        Math.max(
+                                          endsAt.getTime() - previousStart.getTime(),
+                                          60 * 60 * 1000,
+                                        ),
+                                    )
+                                  : endsAt;
                                 field.onChange(merged);
                                 setRecurringStartTime(toHHMM(merged));
-                                validateTimes(merged, endsAt);
+                                if (shiftedEnd) {
+                                  setValue('endsAt', shiftedEnd, { shouldValidate: true });
+                                  setRecurringEndTime(toHHMM(shiftedEnd));
+                                }
+                                validateTimes(merged, shiftedEnd);
                               }
                             }}
                             placeholder='Select start date'
