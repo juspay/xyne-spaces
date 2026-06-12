@@ -9,6 +9,7 @@ import type {
   ReadonlyJSONValue,
   QueryRequest,
   Query,
+  TTL,
 } from '@rocicorp/zero';
 import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { Event } from '../logger/events.js';
@@ -16,6 +17,21 @@ import { useInstrumentation } from './useZero.js';
 import { useZeroFallbackConfig } from './ZeroFallbackContext.js';
 import { useFallbackQuery } from './useFallbackQuery.js';
 import { wasInterrupted } from './metricValidity.js';
+
+/**
+ * App-wide default TTL for queries that don't specify one. Zero's own default
+ * is 5m; after unmount a query keeps a live zero-cache pipeline until its TTL
+ * expires, so per-entity queries pile up server-side. Callers with a reason to
+ * keep a query hot (shared context, frequent back-nav) pass an explicit ttl.
+ */
+export const DEFAULT_QUERY_TTL: TTL = '2m';
+
+function withDefaultTTL(options?: UseQueryOptions | boolean): UseQueryOptions {
+  if (typeof options === 'object' && options !== null) {
+    return options.ttl !== undefined ? options : { ...options, ttl: DEFAULT_QUERY_TTL };
+  }
+  return { ttl: DEFAULT_QUERY_TTL };
+}
 
 /**
  * Internal: routes query through Zero or fallback based on config.
@@ -36,12 +52,10 @@ function useQueryWithFallback<
   const enabledOption = typeof options === 'object' ? options.enabled : options;
   const baseEnabled = enabledOption ?? true;
 
-  const zeroResult = zeroUseQuery(
-    query,
-    typeof options === 'object'
-      ? { ...options, enabled: !fallbackEnabled && baseEnabled }
-      : !fallbackEnabled && baseEnabled,
-  );
+  const zeroResult = zeroUseQuery(query, {
+    ...withDefaultTTL(options),
+    enabled: !fallbackEnabled && baseEnabled,
+  });
 
   const fallbackResult = useFallbackQuery<TTable, TInput, TOutput, TSchema, TReturn, TContext>(
     query,
@@ -132,7 +146,7 @@ export function useRawQuery<
     metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'start' });
   }, [queryName, queryKey]);
 
-  const result = zeroUseQuery(query, options);
+  const result = zeroUseQuery(query, withDefaultTTL(options));
   const [data, details] = result;
 
   useEffect(() => {
