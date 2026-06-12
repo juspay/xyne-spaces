@@ -7419,6 +7419,7 @@ export const mutators = defineMutators({
         entityType: z.nativeEnum(FormEntityType).optional(),
         targetEntity: z.string().optional(),
         visualType: z.string().optional(),
+        position: z.string().optional(),
         dashboardId: z.string().optional(),
         createdBy: z.string(),
         timestamp: z.number(),
@@ -7426,7 +7427,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
-        args: { id, title, queryJson, entityType, targetEntity, visualType, dashboardId, createdBy, timestamp, mappingId },
+        args: { id, title, queryJson, entityType, targetEntity, visualType, position, dashboardId, createdBy, timestamp, mappingId },
       }) => {
         const now = timestamp;
 
@@ -7440,7 +7441,7 @@ export const mutators = defineMutators({
           entityType: entityType ?? null,
           targetEntity: targetEntity ?? null,
           visualType: (visualType as QueryVisualizationType | undefined) ?? null,
-          position: existingQuery?.position ?? '{}',
+          position: position ?? existingQuery?.position ?? '{}',
           config: existingQuery?.config ?? '{}',
           createdBy: existingQuery?.createdBy ?? createdBy,
           updatedAt: now,

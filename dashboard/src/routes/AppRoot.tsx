@@ -564,7 +564,7 @@ const AppRoot = (): ReactElement => {
                       >
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
-                          <main className='flex-1 no-scrollbar overflow-auto'>
+                          <main className='flex-1 no-scrollbar overflow-auto rounded-2xl'>
                             <EditWarningModal />
                             <Outlet />
                           </main>

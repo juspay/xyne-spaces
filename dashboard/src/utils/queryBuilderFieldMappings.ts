@@ -28,7 +28,7 @@
  */
 export function detectFieldType(
   fieldName: string,
-): 'userGroup' | 'user' | 'project' | 'board' | 'channel' | null {
+): 'userGroup' | 'user' | 'project' | 'board' | 'channel' | 'workspace' | null {
   if (!fieldName) return null;
 
   // Exact field names from database schema
@@ -67,6 +67,14 @@ export function detectFieldType(
   // Found in: Ticket, EmailThread, ExternalMessage, etc.
   if (fieldName === 'channelId') {
     return 'channel';
+  }
+
+  if (fieldName === 'workspaceId') {
+    return 'workspace';
+  }
+
+  if (fieldName === 'referenceTicket') {
+    return null;
   }
 
   return null;

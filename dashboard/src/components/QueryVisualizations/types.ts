@@ -4,6 +4,13 @@
  */
 
 import { QueryVisualizationType as SharedQueryVisualizationType } from '@xyne/shared';
+import {
+  formatReferenceDisplayValue,
+  formatUnknownValue,
+  type ReferenceLabels,
+} from '../../utils/referenceLabelUtils';
+
+export type { ReferenceLabels };
 
 // Re-export the shared enum as the default export
 export const QueryVisualizationType = SharedQueryVisualizationType;
@@ -108,10 +115,22 @@ export function transformToKPI(data: Record<string, unknown>[]): {
   };
 }
 
+function resolveDimensionLabel(
+  fieldKey: string,
+  value: unknown,
+  referenceLabels?: ReferenceLabels,
+): string {
+  const { display } = formatReferenceDisplayValue(fieldKey, value, referenceLabels);
+  return display || formatUnknownValue(value);
+}
+
 /**
  * Transforms data for bar chart
  */
-export function transformToBarChart(data: Record<string, unknown>[]) {
+export function transformToBarChart(
+  data: Record<string, unknown>[],
+  referenceLabels?: ReferenceLabels,
+) {
   if (!data || data.length === 0) return [];
 
   const firstRow = data[0];
@@ -124,7 +143,7 @@ export function transformToBarChart(data: Record<string, unknown>[]) {
   if (!key0 || !key1) return [];
 
   return data.map(row => ({
-    label: String(row[key0]),
+    label: resolveDimensionLabel(key0, row[key0], referenceLabels),
     value: Number(row[key1]) || 0,
   }));
 }
@@ -132,8 +151,11 @@ export function transformToBarChart(data: Record<string, unknown>[]) {
 /**
  * Transforms data for pie/donut chart
  */
-export function transformToPieChart(data: Record<string, unknown>[]) {
-  return transformToBarChart(data).map(item => ({
+export function transformToPieChart(
+  data: Record<string, unknown>[],
+  referenceLabels?: ReferenceLabels,
+) {
+  return transformToBarChart(data, referenceLabels).map(item => ({
     ...item,
     label: item.label.length > 15 ? item.label.substring(0, 15) + '...' : item.label,
   }));
@@ -142,21 +164,30 @@ export function transformToPieChart(data: Record<string, unknown>[]) {
 /**
  * Transforms data for line chart
  */
-export function transformToLineChart(data: Record<string, unknown>[]) {
-  return transformToBarChart(data);
+export function transformToLineChart(
+  data: Record<string, unknown>[],
+  referenceLabels?: ReferenceLabels,
+) {
+  return transformToBarChart(data, referenceLabels);
 }
 
 /**
  * Transforms data for funnel
  */
-export function transformToFunnel(data: Record<string, unknown>[]) {
-  return transformToBarChart(data);
+export function transformToFunnel(
+  data: Record<string, unknown>[],
+  referenceLabels?: ReferenceLabels,
+) {
+  return transformToBarChart(data, referenceLabels);
 }
 
 /**
  * Transforms data for heatmap
  */
-export function transformToHeatmap(data: Record<string, unknown>[]): Array<{
+export function transformToHeatmap(
+  data: Record<string, unknown>[],
+  referenceLabels?: ReferenceLabels,
+): Array<{
   x: string | number;
   y: string | number;
   value: number;
@@ -176,14 +207,14 @@ export function transformToHeatmap(data: Record<string, unknown>[]): Array<{
     const key2 = keys[2];
     if (!key2) return [];
     return data.map(row => ({
-      x: (row[key0] as string | number) || '',
-      y: (row[key1] as string | number) || '',
+      x: resolveDimensionLabel(key0, row[key0], referenceLabels),
+      y: resolveDimensionLabel(key1, row[key1], referenceLabels),
       value: Number(row[key2]) || 0,
     }));
   }
 
   return data.map((row, index) => ({
-    x: (row[key0] as string | number) || '',
+    x: resolveDimensionLabel(key0, row[key0], referenceLabels),
     y: `Row ${index + 1}`,
     value: Number(row[key1]) || 0,
   }));

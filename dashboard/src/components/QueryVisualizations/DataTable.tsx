@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ChevronUp, ChevronDown, Search } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import { CHART_COLORS } from './constants';
+import { formatReferenceDisplayValue, type ReferenceLabels } from '../../utils/referenceLabelUtils';
 
 export interface DataTableColumn {
   key: string;
@@ -23,8 +24,11 @@ interface DataTableProps {
   rows: DataTableRow[];
   queryLabel?: string;
   className?: string;
+  fillHeight?: boolean;
+  compact?: boolean;
   pageSize?: number;
   onRowClick?: (row: DataTableRow) => void;
+  referenceLabels?: ReferenceLabels;
 }
 
 const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
@@ -83,8 +87,11 @@ export const DataTable: React.FC<DataTableProps> = ({
   rows,
   queryLabel,
   className,
+  fillHeight = false,
+  compact = false,
   pageSize = 10,
   onRowClick,
+  referenceLabels,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortConfig, setSortConfig] = useState<{
@@ -165,6 +172,15 @@ export const DataTable: React.FC<DataTableProps> = ({
       return column.render(value, row);
     }
 
+    if (referenceLabels?.[column.key]) {
+      const { display, tooltip } = formatReferenceDisplayValue(column.key, value, referenceLabels);
+      return (
+        <span title={tooltip} className='cursor-default'>
+          {display}
+        </span>
+      );
+    }
+
     switch (column.type) {
       case 'status':
         return <StatusBadge status={String(value)} />;
@@ -184,18 +200,32 @@ export const DataTable: React.FC<DataTableProps> = ({
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/40 bg-gradient-to-br from-background via-background/90 to-background/80 p-6',
+        'rounded-xl border border-border/40 bg-gradient-to-br from-background via-background/90 to-background/80',
+        compact ? 'p-3' : 'p-6',
         'flex flex-col shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm',
+        fillHeight && 'h-full min-h-0',
         className,
       )}
     >
       {/* Header */}
-      <div className='mb-6 pb-4 border-b border-border/30'>
-        <h3 className='text-base font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent mb-3'>
-          {title}
-        </h3>
+      <div className={cn('border-b border-border/30', compact ? 'mb-2 pb-2' : 'mb-6 pb-4')}>
+        {title && (
+          <h3
+            className={cn(
+              'text-base font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent',
+              compact ? 'mb-1' : 'mb-3',
+            )}
+          >
+            {title}
+          </h3>
+        )}
         {queryLabel && (
-          <p className='text-xs text-muted-foreground font-mono mb-4 line-clamp-1 opacity-70'>
+          <p
+            className={cn(
+              'text-xs text-muted-foreground font-mono line-clamp-1 opacity-70',
+              compact ? 'mb-2' : 'mb-4',
+            )}
+          >
             {queryLabel}
           </p>
         )}
@@ -211,7 +241,10 @@ export const DataTable: React.FC<DataTableProps> = ({
               setSearchQuery(e.target.value);
               setCurrentPage(0);
             }}
-            className='w-full pl-9 pr-3 py-2.5 text-sm border border-border/50 rounded-lg bg-background/80 hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/50 font-medium'
+            className={cn(
+              'w-full pl-9 pr-3 text-sm border border-border/50 rounded-lg bg-background/80 hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/50 font-medium',
+              compact ? 'py-1.5' : 'py-2.5',
+            )}
             data-track-category='ANALYTICS'
             data-track-name='DataTable_Search'
           />
@@ -219,7 +252,7 @@ export const DataTable: React.FC<DataTableProps> = ({
       </div>
 
       {/* Table */}
-      <div className='flex-1 min-h-0 overflow-auto'>
+      <div className={cn('flex-1 min-h-0 overflow-auto', !fillHeight && 'max-h-[400px]')}>
         <table className='w-full text-sm'>
           {/* Table Head */}
           <thead className='sticky top-0 z-10'>
@@ -299,7 +332,12 @@ export const DataTable: React.FC<DataTableProps> = ({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className='mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between text-sm'>
+        <div
+          className={cn(
+            'border-t border-gray-200 dark:border-gray-700 flex items-center justify-between text-sm',
+            compact ? 'mt-2 pt-2' : 'mt-4 pt-4',
+          )}
+        >
           <span className='text-gray-500'>
             Page {currentPage + 1} of {totalPages} ({sortedRows.length} total)
           </span>

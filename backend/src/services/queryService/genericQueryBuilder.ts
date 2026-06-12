@@ -39,15 +39,17 @@ export class GenericQueryBuilder {
   }
 
   /**
-   * Format date value for grouping by day (YYYY-MM-DD)
-   * Prevents grouping by year or timestamp and ensures day-level grouping
+   * Format date value for grouping with configurable granularity
    */
-  private formatDateForGrouping(value: any): string {
+  private formatDateForGrouping(
+    value: any,
+    granularity: 'hour' | 'day' | 'week' | 'month' = 'day',
+  ): string {
     if (!value) return 'null';
-    
+
     try {
       let date: Date;
-      
+
       if (value instanceof Date) {
         date = value;
       } else if (typeof value === 'string') {
@@ -55,12 +57,27 @@ export class GenericQueryBuilder {
       } else {
         return String(value);
       }
-      
+
       if (isNaN(date.getTime())) return 'null';
-      
-      // Extract just the date part (YYYY-MM-DD) by converting to ISO and taking first 10 chars
-      // This discards all time information
-      return date.toISOString().substring(0, 10);
+
+      switch (granularity) {
+        case 'hour':
+          return `${date.toISOString().substring(0, 10)} ${String(date.getUTCHours()).padStart(2, '0')}:00`;
+        case 'day':
+          return date.toISOString().substring(0, 10);
+        case 'week': {
+          const dayOfWeek = date.getUTCDay();
+          const weekStart = new Date(date);
+          weekStart.setUTCDate(date.getUTCDate() - dayOfWeek);
+          const weekEnd = new Date(weekStart);
+          weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+          return `${weekStart.toISOString().substring(0, 10)}_${weekEnd.toISOString().substring(0, 10)}`;
+        }
+        case 'month':
+          return date.toISOString().substring(0, 7);
+        default:
+          return date.toISOString().substring(0, 10);
+      }
     } catch {
       return String(value);
     }
@@ -732,7 +749,7 @@ export class GenericQueryBuilder {
             // Format date fields for proper display
             if (this.isDateField(field, query.entityType) || 
                 (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value))) {
-              formattedRow[field] = this.formatDateForGrouping(value);
+              formattedRow[field] = this.formatDateForGrouping(value, query.dateGranularity || 'day');
             } else {
               formattedRow[field] = value;
             }
@@ -841,7 +858,7 @@ export class GenericQueryBuilder {
         const groupKey = groupByFields.map(field => {
           const fieldValue = data[field];
           if (this.isDateField(field, query.entityType)) {
-            const formatted = this.formatDateForGrouping(fieldValue);
+            const formatted = this.formatDateForGrouping(fieldValue, query.dateGranularity || 'day');
             return formatted;
           }
           return fieldValue ?? 'null';
@@ -867,7 +884,7 @@ export class GenericQueryBuilder {
           // Format date fields in response for proper chart display
           // Check both via metadata and by detecting ISO datetime strings
           if (isDateFieldCheck || isISOString) {
-            const formatted = this.formatDateForGrouping(value);
+            const formatted = this.formatDateForGrouping(value, query.dateGranularity || 'day');
             row[field] = formatted;
           } else {
             row[field] = value;

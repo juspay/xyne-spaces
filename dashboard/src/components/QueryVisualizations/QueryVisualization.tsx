@@ -11,6 +11,7 @@ import {
   transformToHeatmap,
   transformToDataTable,
 } from './types';
+import { useReferenceLabels } from '../../hooks/useReferenceLabels';
 import { BarChart } from './BarChart';
 import { PieChart } from './PieChart';
 import { DonutChart } from './DonutChart';
@@ -29,6 +30,8 @@ interface QueryVisualizationProps {
   visualizationType?: QueryVisualizationType;
   onVisualizationTypeChange?: (type: QueryVisualizationType) => void;
   className?: string;
+  fillHeight?: boolean;
+  compact?: boolean;
 }
 
 export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
@@ -39,7 +42,11 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
   error,
   visualizationType: userPreference,
   className,
+  fillHeight = false,
+  compact = false,
 }) => {
+  const referenceLabels = useReferenceLabels(data);
+
   const visualizationType = useMemo(() => {
     if (isLoading || error) return QueryVisualizationType.DATA_TABLE;
 
@@ -121,19 +128,20 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
     }
 
     case QueryVisualizationType.BAR_CHART: {
-      const chartData = transformToBarChart(data);
+      const chartData = transformToBarChart(data, referenceLabels);
       return (
         <BarChart
           title={title}
           data={chartData}
           queryLabel={queryLabel ?? ''}
+          fillHeight={fillHeight}
           className={className ?? ''}
         />
       );
     }
 
     case QueryVisualizationType.PIE_CHART: {
-      const chartData = transformToPieChart(data);
+      const chartData = transformToPieChart(data, referenceLabels);
       return (
         <PieChart
           title={title}
@@ -145,7 +153,7 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
     }
 
     case QueryVisualizationType.DONUT_CHART: {
-      const chartData = transformToPieChart(data);
+      const chartData = transformToPieChart(data, referenceLabels);
       return (
         <DonutChart
           title={title}
@@ -157,7 +165,7 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
     }
 
     case QueryVisualizationType.LINE_CHART: {
-      const chartData = transformToLineChart(data);
+      const chartData = transformToLineChart(data, referenceLabels);
       return (
         <LineChart
           title={title}
@@ -169,7 +177,7 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
     }
 
     case QueryVisualizationType.FUNNEL: {
-      const funnelData = transformToFunnel(data);
+      const funnelData = transformToFunnel(data, referenceLabels);
       return (
         <Funnel
           title={title}
@@ -181,7 +189,7 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
     }
 
     case QueryVisualizationType.HEATMAP: {
-      const heatmapData = transformToHeatmap(data);
+      const heatmapData = transformToHeatmap(data, referenceLabels);
       if (heatmapData.length === 0) {
         return (
           <DataTable
@@ -196,7 +204,10 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
             }
             rows={data}
             queryLabel={queryLabel ?? ''}
+            fillHeight={fillHeight}
+            compact={compact}
             className={className ?? ''}
+            referenceLabels={referenceLabels}
           />
         );
       }
@@ -225,7 +236,10 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
           columns={tableColumns}
           rows={rows}
           queryLabel={queryLabel ?? ''}
+          fillHeight={fillHeight}
+          compact={compact}
           className={className ?? ''}
+          referenceLabels={referenceLabels}
         />
       );
     }
