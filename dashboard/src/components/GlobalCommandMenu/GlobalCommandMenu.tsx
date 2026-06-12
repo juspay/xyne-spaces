@@ -15,10 +15,9 @@ import {
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
-import { TabType } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
+import { TabType, type MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { VisibleChannel } from '../../machines/stateMachine';
 import { useShortcutById } from '../../shortcuts';
-import type { MentionData } from '../Chat/ChatDirectory/MentionNode';
 import { useUsers } from '../../hooks/useUsers';
 
 export function resolveDMChannelName(

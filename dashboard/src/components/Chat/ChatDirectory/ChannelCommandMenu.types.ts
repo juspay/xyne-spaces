@@ -1,7 +1,6 @@
 // Types for ChannelCommandMenu component (using const objects due to erasableSyntaxOnly)
 import type { Channel } from '@xyne/shared';
 import type { ContextItem } from '../ThreadContextPanel/ThreadContextPanel.types';
-import type { MentionData } from './MentionNode';
 
 /**
  * Searchable type constants for the type: filter
@@ -86,6 +85,19 @@ export const MentionType = {
 } as const;
 
 export type MentionType = (typeof MentionType)[keyof typeof MentionType];
+
+/**
+ * Picked entity + filter metadata for a mention/filter chip (cmd+K search,
+ * GlobalCommandMenu). `type` mirrors the MentionType values above.
+ */
+export interface MentionData {
+  id: string;
+  name: string;
+  type: 'user' | 'channel';
+  prefix?: 'from:' | 'with:' | 'in:' | 'assignee:';
+  email?: string;
+  photoLink?: string;
+}
 
 export type { ContextItem };
 
