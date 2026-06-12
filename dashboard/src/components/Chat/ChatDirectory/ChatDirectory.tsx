@@ -1,18 +1,14 @@
-import { ReactElement, useState, useMemo, useEffect, useRef } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
 import {
   Bookmark,
-  Megaphone,
   ChevronRight,
   Plus,
   FolderPlus,
   Search,
   CornerDownRight,
-  Ticket,
-  FileText,
-  MessageCircle,
   Sparkles,
   HelpCircle,
   FileEdit,
@@ -46,7 +42,6 @@ import AddChannelForm from '../AddChannelForm/AddChannelForm';
 import AddSectionForm from '../AddSectionForm/AddSectionForm';
 import CreateSectionDialog from '../CreateSectionDialog/CreateSectionDialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
-import { useUnreadActivitiesCount } from '../../../hooks/useUnreadActivitiesCount';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Dialog, { cn } from '../../ui/Dialog';
@@ -93,8 +88,6 @@ const ChatDirectory = ({
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
   const { isMobile } = usePlatform();
 
-  // Get unread activities count with cancelled reactions filtered out
-  const activityCount = useUnreadActivitiesCount();
   const threadCount = useUnreadThreadsCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
@@ -195,11 +188,6 @@ const ChatDirectory = ({
       void navigate(`/chat/dir/${response.id}`);
     },
   });
-
-  // Sum unread counts across all DM channels
-  const dmCount = useMemo(() => {
-    return directMessages.reduce((total, channel) => total + (unreadCounts[channel.id] || 0), 0);
-  }, [directMessages, unreadCounts]);
 
   // Redirect to last visited channel or first available channel when at /chat/dir root
   useEffect(() => {
@@ -380,33 +368,28 @@ const ChatDirectory = ({
         <button
           className={cn(
             'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-            activityCount > 0
+            threadCount > 0
               ? 'text-sidebar-unread-foreground'
               : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
           )}
           onClick={() => {
-            mixpanelService.track(EVENTS.INITIATE_ACTION, {
-              type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_VIEWED,
-            });
-            void navigate('/chat/activity');
+            void navigate('/chat/dir/threads');
           }}
           data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_ACTIVITY'
-          data-track-metadata={JSON.stringify({ activityCount })}
+          data-track-name='OPEN_THREADS'
+          data-track-metadata={JSON.stringify({ threadCount })}
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
-            <Megaphone className='size-4' />
+            <CornerDownRight className='size-4' />
           </span>
-          <span className='flex-1 min-w-0 text-left truncate block' data-testid='nav-activity'>
-            Activity
-          </span>
-          {activityCount > 0 && (
+          <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
+          {threadCount > 0 && (
             <span className='size-5 flex items-center justify-center shrink-0'>
               <Badge
                 variant='success'
                 className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
               >
-                {activityCount}
+                {threadCount > 10 ? '10+' : threadCount}
               </Badge>
             </span>
           )}
@@ -459,96 +442,6 @@ const ChatDirectory = ({
               </span>
             )}
           </span>
-        </button>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-            dmCount > 0
-              ? 'text-sidebar-unread-foreground'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onClick={() => {
-            void navigate('/chat/dm');
-          }}
-          data-testid='open-dms-button'
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_DMS'
-          data-track-metadata={JSON.stringify({ dmCount })}
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <MessageCircle className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>DMs</span>
-          {dmCount > 0 && (
-            <span className='size-5 flex items-center justify-center shrink-0'>
-              <Badge
-                variant='success'
-                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
-              >
-                {dmCount > 9 ? '9+' : dmCount}
-              </Badge>
-            </span>
-          )}
-        </button>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onClick={() => {
-            void navigate('/chat/dir/my-tickets');
-          }}
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_MY_TICKETS'
-          data-testid='my-tickets-btn'
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <Ticket className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>My Tickets</span>
-        </button>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onClick={() => {
-            void navigate('/chat/canvas');
-          }}
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_MY_CANVAS'
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <FileText className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>My Canvas</span>
-        </button>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-            threadCount > 0
-              ? 'text-sidebar-unread-foreground'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onClick={() => {
-            void navigate('/chat/dir/threads');
-          }}
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_THREADS'
-          data-track-metadata={JSON.stringify({ threadCount })}
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <CornerDownRight className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
-          {threadCount > 0 && (
-            <span className='size-5 flex items-center justify-center shrink-0'>
-              <Badge
-                variant='success'
-                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
-              >
-                {threadCount > 10 ? '10+' : threadCount}
-              </Badge>
-            </span>
-          )}
         </button>
         <button
           className={cn(
