@@ -47,6 +47,11 @@ export enum AutoDraftMode {
   DRAFT = "DRAFT",
 }
 
+export enum AutoDraftStatus {
+  GENERATING = "GENERATING",
+  READY = "READY",
+}
+
 export enum TicketStatus {
   NEW = "NEW",
   IN_PROGRESS = "IN_PROGRESS",
@@ -85,6 +90,7 @@ export enum EmailMergeMode {
 export enum DeskType {
   EMAIL = "EMAIL",
   DL = "DL",
+  SLACK = "SLACK",
 }
 
 export enum UserResponsibility {
@@ -197,6 +203,7 @@ export enum ChannelType {
   DEFAULT = "DEFAULT",
   EMAIL = "EMAIL",
   SUPPORT = "SUPPORT",
+  SLACK = "SLACK",
 }
 
 export enum ChannelRole {
@@ -207,6 +214,16 @@ export enum ChannelRole {
 export enum ChannelVisibility {
   PUBLIC = "PUBLIC",
   PRIVATE = "PRIVATE",
+}
+
+export enum AppIncomingWebhookType {
+  SLACK = "SLACK",
+  SENTINELONE = "SENTINELONE",
+}
+
+export enum AppIncomingWebhookAction {
+  MESSAGE = "MESSAGE",
+  TICKET = "TICKET",
 }
 
 export enum CalendarVisibility {
@@ -300,12 +317,19 @@ export enum WorkflowEventType {
   TICKET_COMMENTED = "TICKET_COMMENTED",
   EMAIL_RECEIVED = "EMAIL_RECEIVED",
   EMAIL_SENT = "EMAIL_SENT",
+  WEBHOOK = "WEBHOOK",
+  MESSAGE_RECEIVED = "MESSAGE_RECEIVED",
+}
+
+export enum WorkflowMappingEntityType {
+  AUTOMATION_WEBHOOK = "AUTOMATION_WEBHOOK",
 }
 
 export enum AuthProvider {
   GOOGLE = "GOOGLE",
   MICROSOFT = "MICROSOFT",
   API_KEY = "API_KEY",
+  EMAIL = "EMAIL",
 }
 
 export enum UserStatus {
@@ -495,6 +519,9 @@ export enum NotificationType {
   EMAIL_FETCH_COMPLETED = "EMAIL_FETCH_COMPLETED",
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
   CANVAS_SHARED = "CANVAS_SHARED",
+  EMAIL_REPLY_RECEIVED = "EMAIL_REPLY_RECEIVED",
+  MESSAGE_DELETED = "MESSAGE_DELETED",
+  MESSAGE_EDITED = "MESSAGE_EDITED",
 }
 
 export enum NotificationStatus {
@@ -737,6 +764,17 @@ export enum QueryType {
   external = "external",
 }
 
+export enum AppPermissionType {
+  READ = "READ",
+  WRITE = "WRITE",
+}
+
+export enum AppPermissionStatus {
+  UNAPPROVED = "UNAPPROVED",
+  APPROVED = "APPROVED",
+  PENDINGDELETE = "PENDINGDELETE",
+}
+
 // Define tables
 
 export const agentTable = table("agents")
@@ -832,6 +870,7 @@ export const ticketTable = table("tickets")
     aiCategory: string().optional(),
     aiSubCategory: string().optional(),
     aiPriority: string().optional(),
+    emailReplyEnabled: boolean(),
   })
   .primaryKey("id");
 
@@ -990,6 +1029,15 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     context: string().optional(),
     output: string().optional(),
     currentStepIndex: number(),
+  })
+  .primaryKey("id");
+
+export const workflowMappingTable = table("workflow_mappings")
+  .columns({
+    id: string(),
+    entityType: enumeration<WorkflowMappingEntityType>(),
+    entityId: string(),
+    entitySecret: string(),
   })
   .primaryKey("id");
 
@@ -1180,6 +1228,10 @@ export const userPreferenceTable = table("user_preferences")
     channelSortOrder: enumeration<ChannelSortOrder>(),
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
+    globalDesktopNotificationLevel: enumeration<NotificationLevel>(),
+    globalMobileNotificationLevel: enumeration<NotificationLevel>(),
+    threadReplyNotificationsEnabled: boolean(),
+    channelWideMentionsEnabled: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1379,14 +1431,17 @@ export const pullRequestsTable = table("pull_requests")
   })
   .primaryKey("id");
 
-export const teamIntelligenceIngestionBatchTable = table("team_intelligence_ingestion_batches")
+export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_ingestion_batches_v2")
   .columns({
     id: string(),
     reportDate: number(),
     source: string(),
     idempotencyKey: string(),
     requestChecksum: string(),
-    requestPayload: json(),
+    requestPayload: json().optional(),
+    contentUrl: string().optional(),
+    contentSize: number().optional(),
+    contentChecksum: string().optional(),
     totalUsers: number(),
     queuedUsers: number(),
     failedUsers: number(),
@@ -1400,7 +1455,7 @@ export const teamIntelligenceIngestionBatchTable = table("team_intelligence_inge
   })
   .primaryKey("id");
 
-export const teamIntelligenceUserIngestionTable = table("team_intelligence_user_ingestions")
+export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_user_ingestions_v2")
   .columns({
     id: string(),
     batchId: string(),
@@ -1410,12 +1465,10 @@ export const teamIntelligenceUserIngestionTable = table("team_intelligence_user_
     userName: string(),
     teamId: string().optional(),
     teamName: string().optional(),
-    rawPayload: json(),
-    pullRequests: json(),
-    soloCommits: json(),
     aiUsage: json().optional(),
-    employeeSummary: json().optional(),
-    summaryMetadata: json().optional(),
+    contentUrl: string().optional(),
+    contentSize: number().optional(),
+    contentChecksum: string().optional(),
     processingStatus: enumeration<TeamIntelligenceUserIngestionStatus>(),
     queueJobId: string().optional(),
     queuedAt: number().optional(),
@@ -1428,7 +1481,7 @@ export const teamIntelligenceUserIngestionTable = table("team_intelligence_user_
   })
   .primaryKey("id");
 
-export const teamIntelligenceTeamSummaryTable = table("team_intelligence_team_summaries")
+export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_summaries_v2")
   .columns({
     id: string(),
     batchId: string(),
@@ -1440,9 +1493,9 @@ export const teamIntelligenceTeamSummaryTable = table("team_intelligence_team_su
     totalUsers: number(),
     completedUsers: number(),
     failedUsers: number(),
-    summaryText: json().optional(),
-    summaryMetadata: json().optional(),
-    provenance: json().optional(),
+    contentUrl: string().optional(),
+    contentSize: number().optional(),
+    contentChecksum: string().optional(),
     status: enumeration<TeamIntelligenceBatchStatus>(),
     queueJobId: string().optional(),
     queuedAt: number().optional(),
@@ -1455,7 +1508,7 @@ export const teamIntelligenceTeamSummaryTable = table("team_intelligence_team_su
   })
   .primaryKey("id");
 
-export const teamIntelligenceOrgSummaryTable = table("team_intelligence_org_summaries")
+export const teamIntelligenceOrgSummaryV2Table = table("team_intelligence_org_summaries_v2")
   .columns({
     id: string(),
     batchId: string(),
@@ -1465,9 +1518,9 @@ export const teamIntelligenceOrgSummaryTable = table("team_intelligence_org_summ
     totalTeams: number(),
     completedTeams: number(),
     failedTeams: number(),
-    summaryText: json().optional(),
-    summaryMetadata: json().optional(),
-    provenance: json().optional(),
+    contentUrl: string().optional(),
+    contentSize: number().optional(),
+    contentChecksum: string().optional(),
     status: enumeration<TeamIntelligenceBatchStatus>(),
     queueJobId: string().optional(),
     queuedAt: number().optional(),
@@ -1500,6 +1553,7 @@ export const orgMemberTable = table("org_members")
     userId: string(),
     email: string(),
     role: enumeration<OrgRole>(),
+    passwordHash: string().optional(),
     joinedAt: number(),
     invitedBy: string().optional(),
     leftAt: number().optional(),
@@ -1625,6 +1679,7 @@ export const channelTable = table("channels")
     isMigrated: boolean().optional(),
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
     isArchived: boolean(),
+    showTicketsTabTicketsInChat: boolean().optional(),
   })
   .primaryKey("id");
 
@@ -1662,14 +1717,33 @@ export const channelUserStatusTable = table("channel_user_status")
     isStarred: boolean(),
     isClosed: boolean(),
     unreadCount: number(),
+    sectionId: string().optional(),
+    sectionPosition: string().optional(),
     selectedBoardId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
     isRecapSubscribed: boolean(),
     lastSeenRecapDate: number().optional(),
     customRecapPrompt: string().optional(),
-    desktopNotificationLevel: enumeration<NotificationLevel>(),
-    mobileNotificationLevel: enumeration<NotificationLevel>(),
+    desktopNotificationLevel: enumeration<NotificationLevel>().optional(),
+    mobileNotificationLevel: enumeration<NotificationLevel>().optional(),
+    threadReplyNotificationsEnabled: boolean().optional(),
+    channelWideMentionsEnabled: boolean().optional(),
     isDeleted: boolean(),
+    updatedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const channelSectionTable = table("channel_sections")
+  .columns({
+    id: string(),
+    userId: string(),
+    workspaceId: string(),
+    name: string(),
+    emoji: string().optional(),
+    position: string(),
+    isCollapsed: boolean(),
+    isDeleted: boolean(),
+    createdAt: number(),
     updatedAt: number().optional(),
   })
   .primaryKey("id");
@@ -1691,6 +1765,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(),
     initial_message_md: string().optional(),
     parent_message_md: string().optional(),
+    doNotPostToChannel: boolean().optional(),
     createdAt: number(),
   })
   .primaryKey("conversationId");
@@ -1737,6 +1812,7 @@ export const emailDraftTable = table("email_drafts")
     channelId: string(),
     draftContent: string(),
     attachmentIds: json().optional(),
+    autoDraftStatus: enumeration<AutoDraftStatus>().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1783,6 +1859,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     priorityClassificationPrompt: string().optional(),
     priorityClassificationThreshold: number(),
     autoDraftMode: enumeration<AutoDraftMode>(),
+    autoDraftAgentSlug: string().optional(),
     deskType: enumeration<DeskType>(),
     dlEmail: string().optional(),
     workspaceId: string().optional(),
@@ -1927,6 +2004,21 @@ export const activityTable = table("activities")
     createdAt: number(),
     updatedAt: number(),
     conversationSeenCutoffAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const userExternalTokenTable = table("user_external_tokens")
+  .columns({
+    id: string(),
+    userId: string(),
+    provider: string(),
+    providerUserId: string().optional(),
+    encryptedToken: string(),
+    refreshToken: string().optional(),
+    expiresAt: number().optional(),
+    connectedAt: number(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -2188,6 +2280,17 @@ export const canvasParticipantTable = table("canvas_participants")
     role: enumeration<CanvasRole>(),
     joinedAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const canvasUserStatusTable = table("canvas_user_status")
+  .columns({
+    id: string(),
+    canvasId: string(),
+    userId: string(),
+    isStarred: boolean(),
+    createdAt: number(),
+    updatedAt: number().optional(),
   })
   .primaryKey("id");
 
@@ -2651,7 +2754,10 @@ export const appIncomingWebhookTable = table("app_incoming_webhooks")
     id: string(),
     installedAppId: string(),
     channelId: string(),
+    boardId: string().optional(),
     name: string(),
+    type: enumeration<AppIncomingWebhookType>(),
+    action: enumeration<AppIncomingWebhookAction>(),
     secret: string(),
     isActive: boolean(),
     createdBy: string(),
@@ -2838,6 +2944,36 @@ export const dashboardQueryMappingTable = table("dashboard_queries_mapping")
     sequence: number(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const availableAppPermissionTable = table("available_app_permissions")
+  .columns({
+    id: string(),
+    name: string(),
+    type: enumeration<AppPermissionType>(),
+    description: string().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const appPermissionTable = table("app_permission")
+  .columns({
+    id: string(),
+    appId: string(),
+    permissionId: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const installedAppPermissionTable = table("installed_app_permissions")
+  .columns({
+    id: string(),
+    installedAppId: string(),
+    permissionId: string(),
+    status: enumeration<AppPermissionStatus>(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -3230,6 +3366,11 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ one,
     destField: ["userGroupId"],
     destSchema: userExpertiseMappingTable,
   }),
+  collectionPermissions: many({
+    sourceField: ["id"],
+    destField: ["userGroupId"],
+    destSchema: collectionPermissionTable,
+  }),
   workspace: one({
     sourceField: ["workspaceId"],
     destField: ["id"],
@@ -3326,6 +3467,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ["userId"],
     destSchema: channelUserStatusTable,
   }),
+  canvasUserStatuses: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: canvasUserStatusTable,
+  }),
   sentMessages: many({
     sourceField: ["id"],
     destField: ["senderId"],
@@ -3390,6 +3536,16 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ["orgMemberId"],
     destField: ["memberId"],
     destSchema: orgMemberTable,
+  }),
+  externalTokens: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: userExternalTokenTable,
+  }),
+  permissions: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: collectionPermissionTable,
   })
 }));
 
@@ -3518,45 +3674,45 @@ export const pullRequestsTableRelationships = relationships(pullRequestsTable, (
   })
 }));
 
-export const teamIntelligenceIngestionBatchTableRelationships = relationships(teamIntelligenceIngestionBatchTable, ({ one, many }) => ({
+export const teamIntelligenceIngestionBatchV2TableRelationships = relationships(teamIntelligenceIngestionBatchV2Table, ({ one, many }) => ({
   users: many({
     sourceField: ["id"],
     destField: ["batchId"],
-    destSchema: teamIntelligenceUserIngestionTable,
+    destSchema: teamIntelligenceUserIngestionV2Table,
   }),
   teamSummaries: many({
     sourceField: ["id"],
     destField: ["batchId"],
-    destSchema: teamIntelligenceTeamSummaryTable,
+    destSchema: teamIntelligenceTeamSummaryV2Table,
   }),
   orgSummary: one({
     sourceField: ["id"],
     destField: ["batchId"],
-    destSchema: teamIntelligenceOrgSummaryTable,
+    destSchema: teamIntelligenceOrgSummaryV2Table,
   })
 }));
 
-export const teamIntelligenceUserIngestionTableRelationships = relationships(teamIntelligenceUserIngestionTable, ({ one }) => ({
+export const teamIntelligenceUserIngestionV2TableRelationships = relationships(teamIntelligenceUserIngestionV2Table, ({ one }) => ({
   batch: one({
     sourceField: ["batchId"],
     destField: ["id"],
-    destSchema: teamIntelligenceIngestionBatchTable,
+    destSchema: teamIntelligenceIngestionBatchV2Table,
   })
 }));
 
-export const teamIntelligenceTeamSummaryTableRelationships = relationships(teamIntelligenceTeamSummaryTable, ({ one }) => ({
+export const teamIntelligenceTeamSummaryV2TableRelationships = relationships(teamIntelligenceTeamSummaryV2Table, ({ one }) => ({
   batch: one({
     sourceField: ["batchId"],
     destField: ["id"],
-    destSchema: teamIntelligenceIngestionBatchTable,
+    destSchema: teamIntelligenceIngestionBatchV2Table,
   })
 }));
 
-export const teamIntelligenceOrgSummaryTableRelationships = relationships(teamIntelligenceOrgSummaryTable, ({ one }) => ({
+export const teamIntelligenceOrgSummaryV2TableRelationships = relationships(teamIntelligenceOrgSummaryV2Table, ({ one }) => ({
   batch: one({
     sourceField: ["batchId"],
     destField: ["id"],
-    destSchema: teamIntelligenceIngestionBatchTable,
+    destSchema: teamIntelligenceIngestionBatchV2Table,
   })
 }));
 
@@ -3733,6 +3889,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ["id"],
     destField: ["boardId"],
     destSchema: userExpertiseMappingTable,
+  }),
+  incomingWebhooks: many({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: appIncomingWebhookTable,
   })
 }));
 
@@ -3804,6 +3965,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: canvasFolderTable,
+  }),
+  emails: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: emailTable,
   })
 }));
 
@@ -3887,6 +4053,14 @@ export const conversationParticipantTableRelationships = relationships(conversat
   })
 }));
 
+export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  })
+}));
+
 export const messageTableRelationships = relationships(messageTable, ({ one, many }) => ({
   messageSearch: one({
     sourceField: ["messageId"],
@@ -3949,6 +4123,14 @@ export const reactionCountTableRelationships = relationships(reactionCountTable,
     sourceField: ["messageId"],
     destField: ["messageId"],
     destSchema: messageTable,
+  })
+}));
+
+export const userExternalTokenTableRelationships = relationships(userExternalTokenTable, ({ one }) => ({
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
   })
 }));
 
@@ -4018,6 +4200,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ["canvasId"],
     destSchema: canvasParticipantTable,
   }),
+  userStatuses: many({
+    sourceField: ["id"],
+    destField: ["canvasId"],
+    destSchema: canvasUserStatusTable,
+  }),
   folder: one({
     sourceField: ["folderId"],
     destField: ["id"],
@@ -4035,6 +4222,19 @@ export const canvasParticipantTableRelationships = relationships(canvasParticipa
     sourceField: ["canvasId"],
     destField: ["id"],
     destSchema: canvasTable,
+  })
+}));
+
+export const canvasUserStatusTableRelationships = relationships(canvasUserStatusTable, ({ one }) => ({
+  canvas: one({
+    sourceField: ["canvasId"],
+    destField: ["id"],
+    destSchema: canvasTable,
+  }),
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
   })
 }));
 
@@ -4118,6 +4318,11 @@ export const appsTableRelationships = relationships(appsTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["appId"],
     destSchema: appCommandTable,
+  }),
+  appPermissions: many({
+    sourceField: ["id"],
+    destField: ["appId"],
+    destSchema: appPermissionTable,
   })
 }));
 
@@ -4136,6 +4341,11 @@ export const installedAppsTableRelationships = relationships(installedAppsTable,
     sourceField: ["id"],
     destField: ["installedAppId"],
     destSchema: appIncomingWebhookTable,
+  }),
+  installedAppPermissions: many({
+    sourceField: ["id"],
+    destField: ["installedAppId"],
+    destSchema: installedAppPermissionTable,
   })
 }));
 
@@ -4149,6 +4359,11 @@ export const appIncomingWebhookTableRelationships = relationships(appIncomingWeb
     sourceField: ["channelId"],
     destField: ["id"],
     destSchema: channelTable,
+  }),
+  board: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
   }),
   createdByUser: one({
     sourceField: ["createdBy"],
@@ -4290,6 +4505,45 @@ export const dashboardQueryMappingTableRelationships = relationships(dashboardQu
   })
 }));
 
+export const availableAppPermissionTableRelationships = relationships(availableAppPermissionTable, ({ many }) => ({
+  appPermissions: many({
+    sourceField: ["id"],
+    destField: ["permissionId"],
+    destSchema: appPermissionTable,
+  }),
+  installedAppPermissions: many({
+    sourceField: ["id"],
+    destField: ["permissionId"],
+    destSchema: installedAppPermissionTable,
+  })
+}));
+
+export const appPermissionTableRelationships = relationships(appPermissionTable, ({ one }) => ({
+  app: one({
+    sourceField: ["appId"],
+    destField: ["id"],
+    destSchema: appsTable,
+  }),
+  permission: one({
+    sourceField: ["permissionId"],
+    destField: ["id"],
+    destSchema: availableAppPermissionTable,
+  })
+}));
+
+export const installedAppPermissionTableRelationships = relationships(installedAppPermissionTable, ({ one }) => ({
+  installedApp: one({
+    sourceField: ["installedAppId"],
+    destField: ["id"],
+    destSchema: installedAppsTable,
+  }),
+  permission: one({
+    sourceField: ["permissionId"],
+    destField: ["id"],
+    destSchema: availableAppPermissionTable,
+  })
+}));
+
 // Define schema
 
 export const schema = createSchema(
@@ -4313,6 +4567,7 @@ export const schema = createSchema(
       workflowTable,
       workflowExecutionTable,
       workflowExecutionStateTable,
+      workflowMappingTable,
       workflowExecutionLockTable,
       workflowExecutionUsersTable,
       workflowStepTable,
@@ -4339,10 +4594,10 @@ export const schema = createSchema(
       resourceAccessTable,
       aclAuditLogTable,
       pullRequestsTable,
-      teamIntelligenceIngestionBatchTable,
-      teamIntelligenceUserIngestionTable,
-      teamIntelligenceTeamSummaryTable,
-      teamIntelligenceOrgSummaryTable,
+      teamIntelligenceIngestionBatchV2Table,
+      teamIntelligenceUserIngestionV2Table,
+      teamIntelligenceTeamSummaryV2Table,
+      teamIntelligenceOrgSummaryV2Table,
       organizationTable,
       orgMemberTable,
       workspaceOrganizationTable,
@@ -4356,6 +4611,7 @@ export const schema = createSchema(
       channelStatsTable,
       channelParticipantTable,
       channelUserStatusTable,
+      channelSectionTable,
       conversationTable,
       conversationParticipantTable,
       emailTable,
@@ -4372,6 +4628,7 @@ export const schema = createSchema(
       reactionCountTable,
       customEmojiTable,
       activityTable,
+      userExternalTokenTable,
       externalSourceTable,
       externalMessageTable,
       proactiveNudgeTable,
@@ -4386,6 +4643,7 @@ export const schema = createSchema(
       canvasFolderTable,
       canvasTable,
       canvasParticipantTable,
+      canvasUserStatusTable,
       bookmarkTable,
       linkTable,
       linkAccessTable,
@@ -4435,6 +4693,9 @@ export const schema = createSchema(
       dashboardActivityTable,
       queryTable,
       dashboardQueryMappingTable,
+      availableAppPermissionTable,
+      appPermissionTable,
+      installedAppPermissionTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -4470,10 +4731,10 @@ export const schema = createSchema(
       resourceAccessTableRelationships,
       aclAuditLogTableRelationships,
       pullRequestsTableRelationships,
-      teamIntelligenceIngestionBatchTableRelationships,
-      teamIntelligenceUserIngestionTableRelationships,
-      teamIntelligenceTeamSummaryTableRelationships,
-      teamIntelligenceOrgSummaryTableRelationships,
+      teamIntelligenceIngestionBatchV2TableRelationships,
+      teamIntelligenceUserIngestionV2TableRelationships,
+      teamIntelligenceTeamSummaryV2TableRelationships,
+      teamIntelligenceOrgSummaryV2TableRelationships,
       organizationTableRelationships,
       orgMemberTableRelationships,
       workspaceOrganizationTableRelationships,
@@ -4488,11 +4749,13 @@ export const schema = createSchema(
       channelUserStatusTableRelationships,
       conversationTableRelationships,
       conversationParticipantTableRelationships,
+      emailTableRelationships,
       messageTableRelationships,
       messageSearchTableRelationships,
       messageAttachmentTableRelationships,
       reactionTableRelationships,
       reactionCountTableRelationships,
+      userExternalTokenTableRelationships,
       externalMessageTableRelationships,
       callTableRelationships,
       callParticipantTableRelationships,
@@ -4500,6 +4763,7 @@ export const schema = createSchema(
       canvasFolderTableRelationships,
       canvasTableRelationships,
       canvasParticipantTableRelationships,
+      canvasUserStatusTableRelationships,
       formTableRelationships,
       formFieldsTableRelationships,
       collectionTableRelationships,
@@ -4519,6 +4783,9 @@ export const schema = createSchema(
       dashboardParticipantTableRelationships,
       queryTableRelationships,
       dashboardQueryMappingTableRelationships,
+      availableAppPermissionTableRelationships,
+      appPermissionTableRelationships,
+      installedAppPermissionTableRelationships,
     ],
   }
 );
@@ -4543,6 +4810,7 @@ export type TicketStageEta = Row<typeof schema.tables.ticket_stage_eta>;
 export type Workflow = Row<typeof schema.tables.workflows>;
 export type WorkflowExecution = Row<typeof schema.tables.workflow_executions>;
 export type WorkflowExecutionState = Row<typeof schema.tables.workflow_execution_states>;
+export type WorkflowMapping = Row<typeof schema.tables.workflow_mappings>;
 export type WorkflowExecutionLock = Row<typeof schema.tables.workflow_execution_locks>;
 export type WorkflowExecutionUsers = Row<typeof schema.tables.workflow_execution_users>;
 export type WorkflowStep = Row<typeof schema.tables.workflow_steps>;
@@ -4569,10 +4837,10 @@ export type Resource = Row<typeof schema.tables.resources>;
 export type ResourceAccess = Row<typeof schema.tables.resource_access>;
 export type ACLAuditLog = Row<typeof schema.tables.acl_audit_logs>;
 export type PullRequests = Row<typeof schema.tables.pull_requests>;
-export type TeamIntelligenceIngestionBatch = Row<typeof schema.tables.team_intelligence_ingestion_batches>;
-export type TeamIntelligenceUserIngestion = Row<typeof schema.tables.team_intelligence_user_ingestions>;
-export type TeamIntelligenceTeamSummary = Row<typeof schema.tables.team_intelligence_team_summaries>;
-export type TeamIntelligenceOrgSummary = Row<typeof schema.tables.team_intelligence_org_summaries>;
+export type TeamIntelligenceIngestionBatchV2 = Row<typeof schema.tables.team_intelligence_ingestion_batches_v2>;
+export type TeamIntelligenceUserIngestionV2 = Row<typeof schema.tables.team_intelligence_user_ingestions_v2>;
+export type TeamIntelligenceTeamSummaryV2 = Row<typeof schema.tables.team_intelligence_team_summaries_v2>;
+export type TeamIntelligenceOrgSummaryV2 = Row<typeof schema.tables.team_intelligence_org_summaries_v2>;
 export type Organization = Row<typeof schema.tables.organizations>;
 export type OrgMember = Row<typeof schema.tables.org_members>;
 export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizations>;
@@ -4586,6 +4854,7 @@ export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
+export type ChannelSection = Row<typeof schema.tables.channel_sections>;
 export type Conversation = Row<typeof schema.tables.conversations>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;
 export type Email = Row<typeof schema.tables.emails>;
@@ -4602,6 +4871,7 @@ export type Reaction = Row<typeof schema.tables.reactions>;
 export type ReactionCount = Row<typeof schema.tables.reaction_counts>;
 export type CustomEmoji = Row<typeof schema.tables.custom_emojis>;
 export type Activity = Row<typeof schema.tables.activities>;
+export type UserExternalToken = Row<typeof schema.tables.user_external_tokens>;
 export type ExternalSource = Row<typeof schema.tables.external_sources>;
 export type ExternalMessage = Row<typeof schema.tables.external_messages>;
 export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
@@ -4616,6 +4886,7 @@ export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series
 export type CanvasFolder = Row<typeof schema.tables.canvas_folders>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
+export type CanvasUserStatus = Row<typeof schema.tables.canvas_user_status>;
 export type Bookmark = Row<typeof schema.tables.bookmarks>;
 export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
@@ -4665,3 +4936,6 @@ export type DashboardParticipant = Row<typeof schema.tables.dashboard_participan
 export type DashboardActivity = Row<typeof schema.tables.dashboard_activity>;
 export type Query = Row<typeof schema.tables.queries>;
 export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
+export type AvailableAppPermission = Row<typeof schema.tables.available_app_permissions>;
+export type AppPermission = Row<typeof schema.tables.app_permission>;
+export type InstalledAppPermission = Row<typeof schema.tables.installed_app_permissions>;

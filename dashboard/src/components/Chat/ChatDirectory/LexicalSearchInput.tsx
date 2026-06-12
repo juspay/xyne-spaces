@@ -14,12 +14,18 @@ import {
   $createTextNode,
   $createParagraphNode,
 } from 'lexical';
-import { MentionNode, $isMentionNode, $createMentionNode } from './MentionNode';
-import type { MentionData } from './MentionNode';
+import {
+  FilterChipNode,
+  FilterChipContainerNode,
+  FilterChipIconNode,
+  $isFilterChipNode,
+  $createFilterChip,
+} from './FilterChipNode';
+import { FilterChipPlugin } from './FilterChipPlugin';
 import { MentionPlugin, UserTriggerType, ChannelTriggerType } from './MentionPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
-import { MentionType } from './ChannelCommandMenu.types';
+import { MentionType, type MentionData } from './ChannelCommandMenu.types';
 import { Search } from 'lucide-react';
 import { usePlatform } from '../../../hooks/usePlatform';
 
@@ -72,10 +78,8 @@ function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData
         const paragraph = $createParagraphNode();
         root.append(paragraph);
 
-        const mentionNode = $createMentionNode(initialMention);
         const spaceNode = $createTextNode(' ');
-        paragraph.append(mentionNode);
-        paragraph.append(spaceNode);
+        paragraph.append($createFilterChip(initialMention), spaceNode);
         spaceNode.selectEnd();
       });
     }, 50);
@@ -134,12 +138,17 @@ function ClearEditorPlugin({ value }: { value: string | undefined }) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
-    if (value === '') {
-      editor.update(() => {
-        const root = $getRoot();
-        root.clear();
-      });
-    }
+    if (value !== '') return;
+    editor.update(() => {
+      const root = $getRoot();
+      // value='' excludes chip text (see `extractTextWithoutMentions`), so a
+      // lone chip reports empty — clearing would wipe it. Recurse the full tree
+      // (a paste can nest a chip) and bail if any chip remains.
+      const hasChip = (node: LexicalNode): boolean =>
+        $isFilterChipNode(node) || ($isElementNode(node) && node.getChildren().some(hasChip));
+      if (hasChip(root)) return;
+      root.clear();
+    });
   }, [value, editor]);
 
   return null;
@@ -230,7 +239,7 @@ function OnChangePluginWrapper({
   ): Array<{ id: string; type: MentionType; prefix?: string }> => {
     const mentions: Array<{ id: string; type: MentionType; prefix?: string }> = [];
 
-    if ($isMentionNode(node)) {
+    if ($isFilterChipNode(node)) {
       const mentionData = node.getMentionData();
       const mention: { id: string; type: MentionType; prefix?: string } = {
         id: mentionData.id,
@@ -253,8 +262,8 @@ function OnChangePluginWrapper({
   };
 
   const extractTextWithoutMentions = (node: LexicalNode): string => {
-    if ($isMentionNode(node)) {
-      return ''; // Exclude mention text from search
+    if ($isFilterChipNode(node)) {
+      return ''; // Exclude chip text from search; it's carried as a mention
     }
 
     if ($isElementNode(node)) {
@@ -324,7 +333,8 @@ export function LexicalSearchInput({
     onError: (_error: Error) => {
       // Silently handle Lexical errors
     },
-    nodes: [MentionNode],
+    // The three filter-chip nodes (pill + icon + label); see FilterChipNode.tsx.
+    nodes: [FilterChipContainerNode, FilterChipIconNode, FilterChipNode],
     ...(value ? { editorState: value } : {}),
   };
 
@@ -372,6 +382,7 @@ export function LexicalSearchInput({
           {initialMention && <InitialMentionPlugin initialMention={initialMention} />}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
+          <FilterChipPlugin />
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}

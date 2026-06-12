@@ -634,6 +634,21 @@
     @apply inline whitespace-nowrap;
   }
 
+  /* Filter chip (cmd+K) */
+  .filter-chip {
+    --chip-bg: rgb(219 234 254); /* blue-100 */
+    --chip-fg: rgb(30 64 175); /* blue-800 */
+    @apply inline-flex items-center gap-1 rounded px-1.5 py-0.5 align-middle font-medium;
+    background-color: var(--chip-bg);
+    color: var(--chip-fg);
+    white-space: nowrap;
+  }
+
+  [data-theme="midnight"] .filter-chip {
+    --chip-bg: rgb(30 58 138 / 0.4); /* blue-900 @ 40% */
+    --chip-fg: rgb(191 219 254); /* blue-200 */
+  }
+
   /* Paragraph Adjacent Sibling */
   .chat-input-field p + p {
     @apply mt-2;

@@ -8,16 +8,14 @@ import {
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
-  KEY_BACKSPACE_COMMAND,
-  KEY_DELETE_COMMAND,
   TextNode,
   $getSelection,
   $isRangeSelection,
   $createTextNode,
   $getRoot,
 } from 'lexical';
-import { $createMentionNode, MentionData, $isMentionNode } from './MentionNode';
-import { MentionType } from './ChannelCommandMenu.types';
+import { $createFilterChip } from './FilterChipNode';
+import { MentionType, type MentionData } from './ChannelCommandMenu.types';
 
 export type ChannelTriggerType = '#' | 'in:' | 'in:#' | 'in:@';
 export type UserTriggerType = '@' | 'from:' | 'with:' | 'assignee:' | 'in:@';
@@ -164,12 +162,11 @@ export function MentionPlugin({
               ...(normalizedPrefix && { prefix: normalizedPrefix }),
               ...(item.email && { email: item.email }),
             };
-            const mentionNode = $createMentionNode(mentionData);
+            // Insert the chip pill (icon + editable label) then a trailing space.
+            const chip = $createFilterChip(mentionData);
             const spaceNode = $createTextNode(' ');
-
-            // Insert mention after the current text
-            anchorNode.insertAfter(mentionNode);
-            mentionNode.insertAfter(spaceNode);
+            anchorNode.insertAfter(chip);
+            chip.insertAfter(spaceNode);
 
             // If there's text after, add it
             if (textAfter) {
@@ -227,12 +224,11 @@ export function MentionPlugin({
           ...(normalizedPrefix && { prefix: normalizedPrefix }),
           ...(item.email && { email: item.email }),
         };
-        const mentionNode = $createMentionNode(mentionData);
+        // Insert the chip pill (icon + editable label) then a trailing space.
+        const chip = $createFilterChip(mentionData);
         const spaceNode = $createTextNode(' ');
-
-        // Insert mention after the current text
-        anchorNode.insertAfter(mentionNode);
-        mentionNode.insertAfter(spaceNode);
+        anchorNode.insertAfter(chip);
+        chip.insertAfter(spaceNode);
 
         // If there's text after, add it
         if (textAfter) {
@@ -396,106 +392,12 @@ export function MentionPlugin({
       COMMAND_PRIORITY_LOW,
     );
 
-    // Handle backspace to delete mention nodes
-    const removeBackspaceCommand = editor.registerCommand(
-      KEY_BACKSPACE_COMMAND,
-      () => {
-        let handled = false;
-        editor.update(() => {
-          const selection = $getSelection();
-          if (!$isRangeSelection(selection)) return;
-
-          const nodes = selection.getNodes();
-          const anchor = selection.anchor;
-          const anchorNode = anchor.getNode();
-
-          // If selection contains mention nodes, delete them
-          for (const node of nodes) {
-            if ($isMentionNode(node)) {
-              node.remove();
-              handled = true;
-              return;
-            }
-          }
-
-          // Check if cursor is at the start of a text node
-          if (anchor.offset === 0) {
-            const previousSibling = anchorNode.getPreviousSibling();
-            if (previousSibling && $isMentionNode(previousSibling)) {
-              previousSibling.remove();
-              handled = true;
-              return;
-            }
-          }
-
-          const parent = anchorNode.getParent();
-          if (parent && anchor.offset === 0) {
-            const parentPrevSibling = parent.getPreviousSibling();
-            if (parentPrevSibling && $isMentionNode(parentPrevSibling)) {
-              parentPrevSibling.remove();
-              handled = true;
-              return;
-            }
-          }
-        });
-        return handled;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-
-    // Handle delete key for mention nodes
-    const removeDeleteCommand = editor.registerCommand(
-      KEY_DELETE_COMMAND,
-      () => {
-        let handled = false;
-        editor.update(() => {
-          const selection = $getSelection();
-          if (!$isRangeSelection(selection)) return;
-
-          const nodes = selection.getNodes();
-          const anchor = selection.anchor;
-          const anchorNode = anchor.getNode();
-
-          for (const node of nodes) {
-            if ($isMentionNode(node)) {
-              node.remove();
-              handled = true;
-              return;
-            }
-          }
-
-          if (anchor.offset === anchorNode.getTextContentSize()) {
-            const nextSibling = anchorNode.getNextSibling();
-            if (nextSibling && $isMentionNode(nextSibling)) {
-              nextSibling.remove();
-              handled = true;
-              return;
-            }
-          }
-
-          const parent = anchorNode.getParent();
-          if (parent && anchor.offset === anchorNode.getTextContentSize()) {
-            const parentNextSibling = parent.getNextSibling();
-            if (parentNextSibling && $isMentionNode(parentNextSibling)) {
-              parentNextSibling.remove();
-              handled = true;
-              return;
-            }
-          }
-        });
-        return handled;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-
     return () => {
       removeKeyDownCommand();
       removeKeyUpCommand();
       removeKeyEnterCommand();
       removeKeyTabCommand();
       removeKeyEscapeCommand();
-      removeBackspaceCommand();
-      removeDeleteCommand();
     };
   }, [
     editor,
