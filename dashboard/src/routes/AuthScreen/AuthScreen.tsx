@@ -2,7 +2,7 @@ import { ReactElement, useEffect, useRef, useState } from 'react';
 import { Navigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import axios from 'axios';
-import { API_BASE_URL } from '../../config';
+import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import { useOAuthProviders } from '../../hooks/useOAuthProviders';
 import { ElectronEnrollmentSteps } from '../../components/Auth/ElectronEnrollmentSteps';
@@ -165,8 +165,8 @@ const AuthScreen = (): ReactElement => {
     setFpMessage('');
     setFpLoading(true);
     try {
-      await axios.post(
-        `${API_BASE_URL}/v2/auth/email/forgot-password`,
+      await apiInstance.post(
+        '/v2/auth/email/forgot-password',
         {
           email: fpEmail.trim(),
         },
@@ -218,7 +218,7 @@ const AuthScreen = (): ReactElement => {
     }
     setFpLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/v2/auth/email/reset-password`, {
+      await apiInstance.post('/v2/auth/email/reset-password', {
         email: fpEmail.trim(),
         code: normalizedCode,
         newPassword: fpNewPassword,

@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { NotificationLevel } from '@xyne/shared';
 import axios from 'axios';
-import { API_BASE_URL } from '../../../config';
+import { apiInstance } from '../../../services/clients/apiClient';
 import { format } from 'date-fns';
 
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -473,11 +473,7 @@ const SecuritySection: FC = () => {
 
     setIsSubmitting(true);
     try {
-      await axios.post(
-        `${API_BASE_URL}/v2/auth/email/change-password`,
-        { currentPassword, newPassword },
-        { withCredentials: true },
-      );
+      await apiInstance.post('/v2/auth/email/change-password', { currentPassword, newPassword });
       setSuccess('Password updated successfully');
       setCurrentPassword('');
       setNewPassword('');

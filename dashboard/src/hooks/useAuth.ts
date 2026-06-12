@@ -6,7 +6,7 @@ import { authActor } from '../machines/authMachine';
 import type { AuthState, User, Workspace, OAuthCallbackOutput } from '../machines/authMachine';
 import { analyticsService } from '../services/Analytics/analyticsService';
 import { Context } from '@xyne/shared/index';
-import { API_BASE_URL } from '../config';
+import { apiInstance } from '../services/clients/apiClient';
 
 export interface UseAuthReturn {
   // State
@@ -55,10 +55,10 @@ export const useAuth = (): UseAuthReturn => {
     async (email: string, password: string, invitationId?: string) => {
       send({ type: 'EMAIL_SIGNIN' });
       try {
-        const response = await axios.post(
-          `${API_BASE_URL}/v2/auth/email/login`,
+        const response = await apiInstance.post(
+          '/v2/auth/email/login',
           { email, password, invitationId },
-          { withCredentials: true, timeout: 15000 },
+          { timeout: 15000 },
         );
         const data = response.data as {
           success: boolean;
