@@ -7,13 +7,23 @@ import {
 } from 'lucide-react';
 import { ReactElement } from 'react';
 import { StatCard } from './StatCard';
-import { UserProductivity } from '@/services/TeamIntelligence/teamIntelligenceService';
+import { useOutletContext, useParams } from 'react-router-dom';
+import { TeamIntelligenceOutletContext } from '@/routes/TeamIntelligenceScreen/TeamIntelligenceScreen';
+import { useMemberInsights } from '@/hooks/useTeamIntelligence';
 
-const MemberQuickInsights = ({ member }: { member: UserProductivity }): ReactElement => {
-  const totalCommitCount = member.productivityMetrics?.totalCommitCount || 0;
-  const mergedPrCount = member.productivityMetrics?.mergedPullRequestCount || 0;
-  const totalAiTokens = member.aiUsages.totalTokens || 0;
-  const aiCost = member.aiUsages.cost ?? { amount: 0, currency: 'USD' };
+const MemberQuickInsights = (): ReactElement => {
+  const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
+  const { memberEmail } = useParams<{ memberEmail: string }>();
+
+  const { data: member, isLoading } = useMemberInsights(memberEmail!, {
+    from: dateRange.from,
+    to: dateRange.to,
+  });
+
+  const totalCommitCount = member?.productivityMetrics?.totalCommitCount || 0;
+  const mergedPrCount = member?.productivityMetrics?.mergedPullRequestCount || 0;
+  const totalAiTokens = member?.aiUsages.totalTokens || 0;
+  const aiCost = member?.aiUsages.cost ?? { amount: 0, currency: 'USD' };
 
   return (
     <section className='space-y-4'>
@@ -30,24 +40,28 @@ const MemberQuickInsights = ({ member }: { member: UserProductivity }): ReactEle
           value={mergedPrCount}
           icon={GitPullRequestIcon}
           description='PRs Merged'
+          isLoading={isLoading}
         />
         <StatCard
           title='Code Contributions'
           value={totalCommitCount}
           icon={GitCommitIcon}
           description='Commits Made'
+          isLoading={isLoading}
         />
         <StatCard
           title='AI Adoption'
           value={totalAiTokens}
           icon={SparklesIcon}
           description='Total AI Tokens Used'
+          isLoading={isLoading}
         />
         <StatCard
           title='AI Cost'
           value={aiCost.amount}
           icon={BadgeDollarSign}
           description={`${aiCost.currency}`}
+          isLoading={isLoading}
         />
       </div>
     </section>

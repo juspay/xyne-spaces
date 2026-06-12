@@ -13,14 +13,14 @@ import { TeamIntelligenceOutletContext } from '@/routes/TeamIntelligenceScreen/T
 
 const OrgQuickInsights = (): ReactElement => {
   const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
-  const { data } = useOrgSummary({
+  const { data, isLoading: isOrgSummaryLoading } = useOrgSummary({
     params: {
       from: dateRange.from,
       to: dateRange.to,
     },
   });
 
-  const { data: ticketRecapsData } = useOrgTicketRecaps({
+  const { data: ticketRecapsData, isLoading: isTicketRecapsLoading } = useOrgTicketRecaps({
     from: dateRange.from,
     to: dateRange.to,
     page: 1,
@@ -48,24 +48,28 @@ const OrgQuickInsights = (): ReactElement => {
           value={totalPrMerged}
           icon={GitCommitIcon}
           description='PRs Merged'
+          isLoading={isOrgSummaryLoading}
         />
         <StatCard
           title='AI Adoption'
           value={totalAiTokens}
           icon={SparklesIcon}
           description='Total AI Tokens Used'
+          isLoading={isOrgSummaryLoading}
         />
         <StatCard
           title='Tickets Delivered'
           value={solvedTickets}
           icon={TicketCheckIcon}
           description={`Out of ${totalTickets} Tickets`}
+          isLoading={isTicketRecapsLoading}
         />
         <StatCard
           title='Overdue Tickets'
           value={overDueTickets}
           icon={ClockAlertIcon}
           description={`Out of ${totalTickets} Tickets`}
+          isLoading={isTicketRecapsLoading}
         />
       </div>
     </section>

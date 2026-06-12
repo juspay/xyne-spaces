@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { ChevronLeft, ChevronRight, MessageSquareIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, MessageSquareIcon } from 'lucide-react';
 import { useTeamTicketRecaps } from '@/hooks/useTeamIntelligence';
 import Button from '../ui/Button';
 import { cn } from '@/utils/classNames';
@@ -28,11 +28,13 @@ export const TeamRecaps = (): ReactElement => {
           </div>
           <h3 className='text-lg font-semibold text-foreground'>Conversations Worth Noting</h3>
         </div>
-        <div className='w-full rounded-xl border border-border/50 bg-card p-5'>
-          <p className='text-sm text-muted-foreground'>Loading recaps...</p>
+        <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-center gap-2'>
+          <Loader2 size={16} className='animate-spin text-muted-foreground' />
+          <p className='text-sm text-muted-foreground'>Loading conversations...</p>
         </div>
       </div>
     );
+
   if (error)
     return (
       <div className='space-y-4'>
