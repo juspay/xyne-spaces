@@ -19,6 +19,8 @@ import {
   OTEL_EXPORT_INTERVAL_MS,
   OTEL_SERVICE_NAME,
 } from '../../config';
+import { detectPlatform } from '../../hooks/usePlatform';
+import { logger, Event } from '../../utils/logger';
 
 /**
  * Initialize OpenTelemetry metrics provider
@@ -30,10 +32,18 @@ export function initializeTelemetry(): void {
   }
 
   try {
-    // Create resource with service identification
+    // Stable per-browser device id; persisted in localStorage so it survives reloads.
+    const deviceId = getOrGenerateDeviceId();
+    const platformName = detectPlatform();
+
+    // Create resource with service identification.
+    // `platform.name` becomes the Prometheus label `platform_name` after OTLP→Collector
+    // export and is what lets dashboards filter web/electron/mobile separately.
     const resource = resourceFromAttributes({
       [ATTR_SERVICE_NAME]: OTEL_SERVICE_NAME,
-      [SEMRESATTRS_SERVICE_INSTANCE_ID]: getOrGenerateDeviceId(),
+      [SEMRESATTRS_SERVICE_INSTANCE_ID]: deviceId,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- OTel semantic-convention dotted key (becomes `platform_name` in Prometheus)
+      'platform.name': platformName,
     });
 
     // Create OTLP/HTTP exporter
@@ -59,14 +69,32 @@ export function initializeTelemetry(): void {
 
     // Register performance observers
     import('./perfMetrics')
-      .then(({ registerMemoryGauge, registerLongTaskObserver, registerWebVitals }) => {
-        registerMemoryGauge();
-        registerLongTaskObserver();
-        registerWebVitals();
-      })
+      .then(
+        ({
+          registerMemoryGauge,
+          registerHeapSnapshotLog,
+          registerLongTaskObserver,
+          registerWebVitals,
+        }) => {
+          registerMemoryGauge();
+          registerHeapSnapshotLog();
+          registerLongTaskObserver();
+          registerWebVitals();
+        },
+      )
       .catch(() => {
         // Non-critical — perf metrics registration failed
       });
+
+    // Emit a single bridge breadcrumb pairing the OTel `service_instance_id`
+    // (= the per-browser device UUID, the only varying label on every frontend
+    // metric) with the bridge's identifying envelope (`clientSessionId`,
+    // `emailId`, `platformName`). This is the join key from Prometheus frontend
+    // metrics back to a specific user/session in the logging-bridge stream.
+    logger.info(Event.OTEL_INSTANCE_REGISTERED, {
+      serviceInstanceId: deviceId,
+      platformName,
+    });
   } catch (error) {
     console.error('[OTel] Failed to initialize telemetry:', error);
     // Don't throw - telemetry failure shouldn't break the app
