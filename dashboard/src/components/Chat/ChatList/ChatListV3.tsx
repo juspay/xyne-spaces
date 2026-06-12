@@ -53,6 +53,7 @@ type UpdatedConveresationsAnchor = {
 
 const PAGE_SIZE = 50;
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
+const MAX_LINKED_ANCHOR_FETCH_ATTEMPTS = 3;
 
 function dedupeAndSort(a: Conversation[], b: Conversation[]): Conversation[] {
   const map = new Map<string, Conversation>();
@@ -305,6 +306,12 @@ const ChatListV3: React.FC<ChatListProps> = ({
     useState<NewConversationBoundary | null>(null);
 
   const initialLinkedIdRef = useRef<string | null>(null);
+  // Per-navigation retry counter for the linked-anchor fetch path. Keyed by
+  // navigationKey so a fresh activity click resets the budget.
+  const linkedAnchorFetchAttemptsRef = useRef<{ key: string; count: number }>({
+    key: '',
+    count: 0,
+  });
   const [initialTopMostItemIndex, setInitialTopMostItemIndex] = useState<VirtuosoIndex | null>(
     () => {
       // Browser panel restore: check FIRST (takes priority over activity navigation).
@@ -637,6 +644,20 @@ const ChatListV3: React.FC<ChatListProps> = ({
         )
         .then(newer => {
           const currentConversations = conversationsRef.current;
+          const hasNewItems = newer.some(
+            c => !currentConversations.some(v => v.conversationId === c.conversationId),
+          );
+          // No-op guard: if the fetched page contains nothing new and there is
+          // no pending latest-list to merge, bail WITHOUT touching state.
+          // Otherwise setConversationsState(merged) publishes a new array
+          // reference for identical content, which re-triggers every effect
+          // keyed on `conversations`/`combinedMessages` (notably the
+          // linked-anchor effect below) and can spin into an infinite
+          // fetch -> setState -> re-render -> fetch loop.
+          if (!hasNewItems && latestConversationsListRef.current.length === 0) {
+            isFetchingRef.current = false;
+            return;
+          }
           const fetched = dedupeAndSort(currentConversations, newer);
           const { merged, latestClear } = mergeWithLatest(
             fetched,
@@ -761,6 +782,19 @@ const ChatListV3: React.FC<ChatListProps> = ({
         );
         return;
       }
+      // Cap retries: if the linked conversation never shows up in the pages
+      // fetched around its createdAt (deleted conversation, or one excluded
+      // from the channel feed), stop re-fetching. Without this cap, every
+      // fetch that touches `conversations` re-runs this effect (it depends on
+      // combinedMessages) with idx still -1, producing a non-converging
+      // fetch loop that pegs CPU and grows memory until force-quit.
+      if (linkedAnchorFetchAttemptsRef.current.key !== navigationKey) {
+        linkedAnchorFetchAttemptsRef.current = { key: navigationKey, count: 0 };
+      }
+      if (linkedAnchorFetchAttemptsRef.current.count >= MAX_LINKED_ANCHOR_FETCH_ATTEMPTS) {
+        return;
+      }
+      linkedAnchorFetchAttemptsRef.current.count += 1;
       setOldestConversationsAnchor(linkedItemCreatedAt);
       setNewConversationsAnchor(linkedItemCreatedAt);
       fetchNewerMessages(linkedItemCreatedAt);

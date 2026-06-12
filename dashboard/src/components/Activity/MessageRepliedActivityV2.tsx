@@ -11,11 +11,9 @@ import { parseRepliesMd, RepliesData } from '@xyne/shared';
 export const MessageRepliedActivityV2 = ({
   activity,
   isExpanded = true,
-  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }): ReactElement | null => {
   const message = activity.message;
   const actorUser = useUser(activity.actorId); // Most recent replier
@@ -94,7 +92,6 @@ export const MessageRepliedActivityV2 = ({
       linkedItemCreatedAt={conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
-      isSelected={isSelected}
     >
       {isExpanded ? (
         <MessageBubble

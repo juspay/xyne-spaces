@@ -10,11 +10,9 @@ import { renderEmoji } from '../../utils/customEmojiUtils';
 export const ReactionAddedActivity = ({
   activity,
   isExpanded = true,
-  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }): ReactElement | null => {
   const reaction = activity.reaction;
   const message = activity.message;
@@ -46,7 +44,6 @@ export const ReactionAddedActivity = ({
       linkedItemCreatedAt={message.conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
-      isSelected={isSelected}
     >
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />

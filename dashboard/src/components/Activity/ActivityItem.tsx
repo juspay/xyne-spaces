@@ -19,130 +19,62 @@ import { CanvasSharedActivity } from './CanvasSharedActivity';
 interface ActivityItemProps {
   activity: ActivityWithRelated;
   isExpanded: boolean;
-  isSelected?: boolean;
 }
 
 // memo: rows are rendered inside Virtuoso with a 2000px overscan (~40-60
-// mounted rows). Without memo, every list-level state change (selection,
-// mark-as-read, unread-count updates) re-rendered every mounted row — the
-// main cause of the CPU spike when opening an activity.
+// mounted rows). Without memo, every list-level state change (mark-as-read,
+// unread-count updates) re-rendered every mounted row — the main cause of
+// the CPU spike when opening an activity. Selection highlighting is fully
+// imperative (data-selected stamped by ActivityListView), so it never
+// invalidates the memo.
 export const ActivityItem = memo(function ActivityItem({
   activity,
   isExpanded,
-  isSelected = false,
 }: ActivityItemProps): ReactElement | null {
   switch (activity.actorAction) {
     case 'mentioned_user':
       if (activity.canvasId) {
-        return (
-          <CanvasMentionActivity
-            activity={activity}
-            isExpanded={isExpanded}
-            isSelected={isSelected}
-          />
-        );
+        return <CanvasMentionActivity activity={activity} isExpanded={isExpanded} />;
       }
-      return (
-        <MessageMentionActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'group_mention':
-      return (
-        <MessageMentionActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'direct_message':
-      return (
-        <DirectMessageActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <DirectMessageActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'replied':
-      return (
-        <MessageRepliedActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <MessageRepliedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'replied_v2':
-      return (
-        <MessageRepliedActivityV2
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <MessageRepliedActivityV2 activity={activity} isExpanded={isExpanded} />;
 
     case 'added':
-      return (
-        <ReactionAddedActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <ReactionAddedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'added_v2':
-      return (
-        <ReactionAddedActivityV2
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <ReactionAddedActivityV2 activity={activity} isExpanded={isExpanded} />;
 
     case 'removed':
-      return (
-        <ReactionAddedActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <ReactionAddedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'eta_warning':
     case 'eta_breach':
     case 'stage_eta_breach':
-      return <EtaActivity activity={activity} isExpanded={isExpanded} isSelected={isSelected} />;
+      return <EtaActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'paused_from_assignment':
     case 'resumed_from_assignment':
-      return (
-        <AssignmentPauseActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <AssignmentPauseActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'ticket_assigned':
-      return (
-        <TicketAssignmentActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <TicketAssignmentActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'ticket_status':
     case 'ticket_eta':
     case 'ticket_board':
-      return (
-        <TicketUpdateActivity activity={activity} isExpanded={isExpanded} isSelected={isSelected} />
-      );
+      return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'ticket_pr_created':
     case 'ticket_pr_updated':
@@ -150,31 +82,17 @@ export const ActivityItem = memo(function ActivityItem({
     case 'ticket_pr_declined':
     case 'ticket_pr_reviewer_assigned':
     case 'ticket_qa_assigned':
-      return (
-        <TicketUpdateActivity activity={activity} isExpanded={isExpanded} isSelected={isSelected} />
-      );
+      return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'workflow_question':
-      return (
-        <WorkflowQuestionActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <WorkflowQuestionActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'scheduled_call':
     case 'call_reminder':
     case 'call_updated':
     case 'meeting_accepted':
     case 'meeting_declined':
-      return (
-        <ScheduledCallActivity
-          activity={activity}
-          isExpanded={isExpanded}
-          isSelected={isSelected}
-        />
-      );
+      return <ScheduledCallActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'email_fetch_completed':
     case 'email_fetch_failed':

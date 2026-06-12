@@ -92,7 +92,7 @@ const ThreadList = ({
     });
 
     return result;
-  }, [threadMessages, channelId]);
+  }, [threadMessages, channelId, conversation?.replyCount]);
 
   const handleEditLastMessage = useCallback(() => {
     const result = findLastEditableMessage(threadMessages, user?.id, msg => msg);
@@ -248,6 +248,14 @@ const ThreadList = ({
     };
   })();
 
+  // messageId -> index lookup for the ticket-thread render path. A per-item
+  // threadMessages.findIndex() made that path O(n²) per render on long threads.
+  const messageIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    threadMessages.forEach((m, i) => map.set(m.messageId, i));
+    return map;
+  }, [threadMessages]);
+
   const firstUnreadReplyIndex = useMemo(() => {
     const lastReadAt = conversationParticipant?.lastReadAt;
     if (typeof lastReadAt !== 'number' || !visibleMessages || visibleMessages.length <= 1) {
@@ -336,6 +344,11 @@ const ThreadList = ({
       }
       scrollIdleTimeoutRef.current = setTimeout(() => {
         setIsScrolling(false);
+        // Persist scroll position once scrolling settles. Calling saveScrollPosition on
+        // EVERY scroll event updated savedScrollPosition state per tick, re-rendering the
+        // entire (unvirtualized) ChatBubble list on each scroll frame — a CPU spike on
+        // long threads. The unmount effect below still persists the final position.
+        saveScrollPosition(container.scrollTop);
       }, 1000);
 
       if (onScrollPositionChange) {
@@ -344,8 +357,6 @@ const ThreadList = ({
           onScrollPositionChange(container.scrollTop);
         }, 300);
       }
-
-      saveScrollPosition(container.scrollTop);
     };
 
     container.addEventListener('scroll', handleScroll);
@@ -386,9 +397,7 @@ const ThreadList = ({
               }
 
               const threadMessage = item.data;
-              const messageIndex = threadMessages.findIndex(
-                m => m.messageId === threadMessage.messageId,
-              );
+              const messageIndex = messageIndexById.get(threadMessage.messageId) ?? -1;
               const previousMessage = threadMessages[messageIndex - 1];
               const previousMessageMetadata = previousMessage?.metadata as MessageMetadata | null;
               const isPreviousMessageAWorkflowMessage =
