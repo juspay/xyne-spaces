@@ -3989,15 +3989,36 @@ model AppIncomingWebhook {
   @@schema("workflow")
 }
 
+enum CommandType {
+  COMMAND
+  SHORTCUT
+
+  @@schema("public")
+}
+
+enum CommandAccessibility {
+  CHAT
+  THREAD
+  BOTH
+  MESSAGE
+  GLOBAL
+
+  @@schema("public")
+}
+
 model AppCommand {
-  id          String   @id @default(cuid())
-  appId       String
-  commandName String   // e.g. "sell", "send", "todo"
-  description String   // shown in the / dropdown
-  isForThread Boolean  @default(true)
-  isForChat   Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                    String               @id @default(cuid())
+  appId                 String
+  commandName           String               // e.g. "sell" for commands, "create_task" (callbackId) for shortcuts
+  description           String               // shown in the / dropdown or shortcut picker
+  commandType           CommandType
+  commandAccessibility  CommandAccessibility
+  // @deprecated — use commandAccessibility instead
+  isForThread           Boolean?
+  // @deprecated — use commandAccessibility instead
+  isForChat             Boolean?              
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   app         Apps     @relation(fields: [appId], references: [id], onDelete: Cascade)
 

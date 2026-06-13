@@ -97,8 +97,10 @@ router.post('/permissions/:appId', authMiddleware.authenticate, authorize('XYNE-
 
 // Commands (user auth) — manage commands per app
 router.get('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getCommands);
-router.put('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.upsertCommand);
+router.post('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.createCommand);
+router.put('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.updateCommand);
 router.delete('/:appId/commands/:commandName', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.deleteCommand);
+
 
 // Channel commands user-auth routes are declared above, before authenticateApp middleware.
 

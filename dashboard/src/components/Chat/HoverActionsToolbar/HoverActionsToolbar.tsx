@@ -17,6 +17,7 @@ import {
   SquareAsterisk,
   Clock3,
   ChevronRight,
+  Zap,
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
@@ -42,6 +43,7 @@ import {
 } from '../../ui/dropdown-menu';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { MESSAGE_REMINDER_MENU_OPTIONS, type ReminderMenuOption } from '../utils/bookmarkUtils';
+import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
 
 const REMINDER_TRACK_NAME_BY_OPTION: Record<ReminderMenuOption, string> = {
   '20mins': 'REMINDER_20_MINS',
@@ -81,6 +83,12 @@ export interface HoverActionsToolbarProps {
   onInitiateCall?: () => void;
   isCallDisabled?: boolean;
   isChannelArchived?: boolean;
+  /** MESSAGE shortcuts for this channel — shown in the More Actions dropdown */
+  messageShortcuts?: AppShortcutWithApp[];
+  /** Called when user selects a message shortcut */
+  onRunShortcut?: (shortcut: AppShortcutWithApp) => void;
+  /** Called when user clicks “Show all shortcuts” */
+  onShowAllShortcuts?: () => void;
 }
 
 export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
@@ -112,6 +120,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onInitiateCall,
   isCallDisabled = false,
   isChannelArchived = false,
+  messageShortcuts,
+  onRunShortcut,
+  onShowAllShortcuts,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -145,6 +156,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
     onBookmark ||
     onRemindMeOption ||
     onForwardMessage ||
+    (messageShortcuts && messageShortcuts.length > 0) ||
     (onReplyInThread && conversationId);
 
   // Keep toolbar visible if dropdown is open, even if parent says to hide
@@ -498,6 +510,51 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {/* Separator before Delete */}
                   {(hasCopySection || hasSubscriptionSection || hasEditSection) && hasDelete && (
                     <DropdownMenuSeparator />
+                  )}
+
+                  {/* Message Shortcuts — Connect to apps */}
+                  {messageShortcuts && messageShortcuts.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                          <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
+                            <Zap className='w-4 h-4' />
+                          </span>
+                          Connect to apps
+                          <ChevronRight className='w-4 h-4 ml-auto text-muted-foreground' />
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className='w-[240px]'>
+                          {messageShortcuts.slice(0, 3).map(shortcut => (
+                            <DropdownMenuItem
+                              key={shortcut.commandName}
+                              onClick={() => onRunShortcut?.(shortcut)}
+                            >
+                              <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
+                                <Zap className='w-3.5 h-3.5' />
+                              </span>
+                              <div className='flex-1 min-w-0'>
+                                <p className='text-sm truncate'>{shortcut.commandName}</p>
+                                <p className='text-xs text-muted-foreground truncate'>
+                                  {shortcut.appName}
+                                </p>
+                              </div>
+                            </DropdownMenuItem>
+                          ))}
+                          {messageShortcuts.length > 3 && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={onShowAllShortcuts}>
+                                <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
+                                  <Zap className='w-4 h-4' />
+                                </span>
+                                Show more shortcuts ({messageShortcuts.length - 3} more)
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                    </>
                   )}
 
                   {/* Delete */}

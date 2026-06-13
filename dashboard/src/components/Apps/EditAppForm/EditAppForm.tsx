@@ -17,6 +17,7 @@ import {
   Check,
   X,
   Lock,
+  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
@@ -27,6 +28,9 @@ import {
   type IncomingWebhook,
   type AppCommand,
   type UpsertCommandRequest,
+  type AppShortcut,
+  type UpsertShortcutRequest,
+  type ShortcutType,
   type AppPermission,
 } from '../../../services/Apps/appsService';
 import { APPS_PUBLIC_BASE_URL } from '../../../config';
@@ -104,8 +108,9 @@ const CommandFormInline = ({
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(initial?.commandName ?? '');
   const [desc, setDesc] = useState(initial?.description ?? '');
-  const [forChat, setForChat] = useState(initial?.isForChat ?? true);
-  const [forThread, setForThread] = useState(initial?.isForThread ?? true);
+  const [accessibility, setAccessibility] = useState<'CHAT' | 'THREAD' | 'BOTH'>(
+    (initial?.commandAccessibility as 'CHAT' | 'THREAD' | 'BOTH') ?? 'BOTH',
+  );
   const [nameError, setNameError] = useState('');
 
   const handleSave = async () => {
@@ -127,10 +132,12 @@ const CommandFormInline = ({
       const payload: UpsertCommandRequest = {
         commandName: trimmed,
         description: desc.trim(),
-        isForChat: forChat,
-        isForThread: forThread,
+        commandType: 'COMMAND',
+        commandAccessibility: accessibility,
       };
-      const saved = await appsService.upsertCommand(appId, payload);
+      const saved = initial
+        ? await appsService.updateCommand(appId, payload)
+        : await appsService.createCommand(appId, payload);
       onSaved(saved);
     } catch (e) {
       toast.error('Failed to save command', {
@@ -183,27 +190,235 @@ const CommandFormInline = ({
       <div className='flex gap-4'>
         <label className='flex items-center gap-1.5 text-xs text-foreground cursor-pointer'>
           <input
-            type='checkbox'
-            checked={forChat}
-            onChange={e => setForChat(e.target.checked)}
+            type='radio'
+            name='command-accessibility'
+            checked={accessibility === 'CHAT'}
+            onChange={() => setAccessibility('CHAT')}
             disabled={saving}
-            className='rounded'
             data-track-category='app-command'
-            data-track-name='toggle-for-chat'
+            data-track-name='toggle-accessibility-chat'
           />
-          Available in chat
+          Chat only
         </label>
         <label className='flex items-center gap-1.5 text-xs text-foreground cursor-pointer'>
           <input
-            type='checkbox'
-            checked={forThread}
-            onChange={e => setForThread(e.target.checked)}
+            type='radio'
+            name='command-accessibility'
+            checked={accessibility === 'THREAD'}
+            onChange={() => setAccessibility('THREAD')}
             disabled={saving}
-            className='rounded'
             data-track-category='app-command'
-            data-track-name='toggle-for-thread'
+            data-track-name='toggle-accessibility-thread'
           />
-          Available in threads
+          Threads only
+        </label>
+        <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
+          <input
+            type='radio'
+            name='command-accessibility'
+            checked={accessibility === 'BOTH'}
+            onChange={() => setAccessibility('BOTH')}
+            disabled={saving}
+            data-track-category='app-command'
+            data-track-name='toggle-accessibility-both'
+          />
+          Both
+        </label>
+      </div>
+      <div className='flex gap-2 justify-end pt-1'>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-7'
+          onClick={onCancel}
+          disabled={saving}
+        >
+          <X size={13} className='mr-1' /> Cancel
+        </Button>
+        <Button
+          type='button'
+          size='sm'
+          className='h-7'
+          onClick={() => void handleSave()}
+          disabled={saving}
+        >
+          <Check size={13} className='mr-1' />
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+// ─── Shortcut row ─────────────────────────────────────────────────────────────
+
+interface ShortcutRowProps {
+  shortcut: AppShortcut;
+  onEdit: (shortcut: AppShortcut) => void;
+  onDelete: (commandName: string) => void;
+}
+
+const ShortcutRow = ({ shortcut, onEdit, onDelete }: ShortcutRowProps): ReactElement => (
+  <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
+    <div className='flex-shrink-0 w-6 h-6 rounded bg-primary/10 flex items-center justify-center'>
+      <Zap className='w-3.5 h-3.5 text-primary' />
+    </div>
+    <div className='flex-1 min-w-0'>
+      <div className='flex items-center gap-2'>
+        <span className='text-sm font-mono font-medium text-foreground truncate'>
+          {shortcut.commandName}
+        </span>
+        <span
+          className={`text-[10px] px-1 py-0.5 rounded ${
+            shortcut.commandAccessibility === 'GLOBAL'
+              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+              : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+          }`}
+        >
+          {shortcut.commandAccessibility?.toLowerCase() ?? 'global'}
+        </span>
+      </div>
+      <p className='text-xs text-muted-foreground truncate mt-0.5'>{shortcut.description}</p>
+    </div>
+    <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
+      <Button
+        type='button'
+        variant='ghost'
+        size='sm'
+        className='h-7 w-7 p-0'
+        onClick={() => onEdit(shortcut)}
+        title='Edit shortcut'
+      >
+        <Pencil size={13} />
+      </Button>
+      <Button
+        type='button'
+        variant='ghost'
+        size='sm'
+        className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+        onClick={() => onDelete(shortcut.commandName)}
+        title='Delete shortcut'
+      >
+        <Trash2 size={13} />
+      </Button>
+    </div>
+  </div>
+);
+
+// ─── Inline shortcut form ─────────────────────────────────────────────────────
+
+interface ShortcutFormInlineProps {
+  appId: string;
+  initial?: AppShortcut | null;
+  onSaved: (s: AppShortcut) => void;
+  onCancel: () => void;
+}
+
+const ShortcutFormInline = ({
+  appId,
+  initial,
+  onSaved,
+  onCancel,
+}: ShortcutFormInlineProps): ReactElement => {
+  const [saving, setSaving] = useState(false);
+  const [commandName, setCommandName] = useState(initial?.commandName ?? '');
+  const [desc, setDesc] = useState(initial?.description ?? '');
+  const [type, setType] = useState<ShortcutType>(
+    (initial?.commandAccessibility as ShortcutType) ?? 'GLOBAL',
+  );
+  const [nameError, setNameError] = useState('');
+
+  const handleSave = async () => {
+    const trimmedName = commandName.trim().toLowerCase();
+    if (!trimmedName) {
+      setNameError('Shortcut ID is required');
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(trimmedName)) {
+      setNameError('Only lowercase letters, numbers, and underscores');
+      return;
+    }
+    if (!desc.trim()) {
+      toast.error('Description is required');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: UpsertShortcutRequest = {
+        commandName: trimmedName,
+        description: desc.trim(),
+        shortcutType: type,
+      };
+      const saved = initial
+        ? await appsService.updateShortcut(appId, payload)
+        : await appsService.createShortcut(appId, payload);
+      onSaved(saved);
+    } catch (e) {
+      toast.error('Failed to save shortcut', {
+        description: e instanceof Error ? e.message : 'Unknown error',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className='p-3 rounded-md border border-ring bg-muted/20 space-y-2'>
+      <div className='space-y-1'>
+        <label htmlFor='shortcut-command-name' className='text-xs font-medium text-foreground'>
+          Shortcut ID
+        </label>
+        <Input
+          id='shortcut-command-name'
+          className='text-sm h-8 font-mono'
+          placeholder='e.g. create_task'
+          value={commandName}
+          onChange={e => {
+            setCommandName(e.target.value);
+            setNameError('');
+          }}
+          disabled={!!initial || saving}
+        />
+        {nameError && <p className='text-xs text-destructive'>{nameError}</p>}
+      </div>
+      <div className='space-y-1'>
+        <label htmlFor='shortcut-description' className='text-xs font-medium text-foreground'>
+          Description
+        </label>
+        <Input
+          id='shortcut-description'
+          className='text-sm h-8'
+          placeholder='What does this shortcut do?'
+          value={desc}
+          onChange={e => setDesc(e.target.value)}
+          disabled={saving}
+        />
+      </div>
+      <div className='flex gap-4'>
+        <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
+          <input
+            type='radio'
+            name='shortcut-type'
+            checked={type === 'GLOBAL'}
+            onChange={() => setType('GLOBAL')}
+            disabled={saving}
+            data-track-category='app-shortcut'
+            data-track-name='toggle-type-global'
+          />
+          Global
+        </label>
+        <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
+          <input
+            type='radio'
+            name='shortcut-type'
+            checked={type === 'MESSAGE'}
+            onChange={() => setType('MESSAGE')}
+            disabled={saving}
+            data-track-category='app-shortcut'
+            data-track-name='toggle-type-message'
+          />
+          Message
         </label>
       </div>
       <div className='flex gap-2 justify-end pt-1'>
@@ -657,6 +872,12 @@ export const EditAppForm = ({
   const [showCommandForm, setShowCommandForm] = useState(false);
   const [editingCommand, setEditingCommand] = useState<AppCommand | null>(null);
 
+  // ── Shortcuts state ──
+  const [shortcuts, setShortcuts] = useState<AppShortcut[]>([]);
+  const [shortcutsLoading, setShortcutsLoading] = useState(false);
+  const [showShortcutForm, setShowShortcutForm] = useState(false);
+  const [editingShortcut, setEditingShortcut] = useState<AppShortcut | null>(null);
+
   useEffect(() => {
     setCommandsLoading(true);
     appsService
@@ -664,6 +885,15 @@ export const EditAppForm = ({
       .then(setCommands)
       .catch(() => toast.error('Failed to load commands'))
       .finally(() => setCommandsLoading(false));
+  }, [appId]);
+
+  useEffect(() => {
+    setShortcutsLoading(true);
+    appsService
+      .getShortcuts(appId)
+      .then(setShortcuts)
+      .catch(() => toast.error('Failed to load shortcuts'))
+      .finally(() => setShortcutsLoading(false));
   }, [appId]);
 
   const handleCommandSaved = (saved: AppCommand) => {
@@ -694,6 +924,36 @@ export const EditAppForm = ({
   const handleEditCommand = (command: AppCommand) => {
     setEditingCommand(command);
     setShowCommandForm(true);
+  };
+
+  const handleShortcutSaved = (saved: AppShortcut) => {
+    setShortcuts(prev => {
+      const idx = prev.findIndex(s => s.commandName === saved.commandName);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = saved;
+        return next;
+      }
+      return [...prev, saved];
+    });
+    setShowShortcutForm(false);
+    setEditingShortcut(null);
+    toast.success(`Shortcut "${saved.commandName}" saved`);
+  };
+
+  const handleDeleteShortcut = async (commandName: string) => {
+    try {
+      await appsService.deleteShortcut(appId, commandName);
+      setShortcuts(prev => prev.filter(s => s.commandName !== commandName));
+      toast.success('Shortcut deleted');
+    } catch {
+      toast.error('Failed to delete shortcut');
+    }
+  };
+
+  const handleEditShortcut = (shortcut: AppShortcut) => {
+    setEditingShortcut(shortcut);
+    setShowShortcutForm(true);
   };
 
   const {
@@ -1302,6 +1562,61 @@ export const EditAppForm = ({
                   command={cmd}
                   onEdit={handleEditCommand}
                   onDelete={commandName => void handleDeleteCommand(commandName)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Shortcuts */}
+        <div className='space-y-2'>
+          <div className='flex items-center justify-between'>
+            <span className='block text-sm font-medium text-foreground'>Shortcuts</span>
+            {!showShortcutForm && (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                className='gap-1 h-7 text-xs'
+                onClick={() => {
+                  setEditingShortcut(null);
+                  setShowShortcutForm(true);
+                }}
+              >
+                <Plus size={12} /> Add Shortcut
+              </Button>
+            )}
+          </div>
+
+          {showShortcutForm && (
+            <ShortcutFormInline
+              appId={appId}
+              initial={editingShortcut}
+              onSaved={handleShortcutSaved}
+              onCancel={() => {
+                setShowShortcutForm(false);
+                setEditingShortcut(null);
+              }}
+            />
+          )}
+
+          {shortcutsLoading ? (
+            <p className='text-xs text-muted-foreground py-2'>Loading shortcuts…</p>
+          ) : shortcuts.length === 0 && !showShortcutForm ? (
+            <p className='text-xs text-muted-foreground py-2'>
+              No shortcuts yet. Add a <span className='font-semibold'>Global</span> shortcut
+              (accessible from the ⚡ button in the composer) or a{' '}
+              <span className='font-semibold'>Message</span> shortcut (accessible from the message
+              action menu).
+            </p>
+          ) : (
+            <div className='space-y-1.5'>
+              {shortcuts.map(s => (
+                <ShortcutRow
+                  key={s.commandName}
+                  shortcut={s}
+                  onEdit={handleEditShortcut}
+                  onDelete={callbackId => void handleDeleteShortcut(callbackId)}
                 />
               ))}
             </div>

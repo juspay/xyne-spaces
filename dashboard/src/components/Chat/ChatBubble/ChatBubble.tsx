@@ -94,6 +94,8 @@ import {
 import type { ReminderMenuOption, ReminderTimeOption } from '../utils/bookmarkUtils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
+import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 
 export interface ThreadData {
   replyCount: number;
@@ -176,6 +178,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const channel = useChannel(channelId);
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
+
+  // Message shortcuts — fetched per channel, used by HoverActionsToolbar
+  const [messageShortcuts, setMessageShortcuts] = useState<AppShortcutWithApp[]>([]);
+  const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
+  useEffect(() => {
+    appsService
+      .getChannelShortcuts(channelId, { type: 'MESSAGE' })
+      .then(setMessageShortcuts)
+      .catch(() => {});
+  }, [channelId]);
 
   const messageConversationId = message.conversationId;
 
@@ -953,6 +965,26 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         (!isSystemMessage || isCallMessage) &&
         !isMessageDeleted && { onAskAI: handleAskAI }),
       ...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {}),
+      ...(messageShortcuts.length > 0 &&
+        !isSystemMessage &&
+        !isMessageDeleted && {
+          messageShortcuts,
+          onRunShortcut: (shortcut: AppShortcutWithApp) => {
+            const plainText =
+              new DOMParser().parseFromString(message.content ?? '', 'text/html').body
+                .textContent ?? '';
+            void appsService
+              .executeShortcutAction(
+                channelId,
+                shortcut.commandName,
+                conversation?.conversationId ?? null,
+                plainText,
+                message.messageId,
+              )
+              .catch(() => {});
+          },
+          onShowAllShortcuts: () => setShortcutModalOpen(true),
+        }),
     };
 
     registerMessageHoverActions(hoverToolbarKey, actions);
@@ -1158,7 +1190,29 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
           {/* Desktop hover actions are rendered by the shared MessageHoverToolbar
               overlay mounted at the list-container level (see
-              messageHoverActionsRegistry registration above). */}
+              messageHoverActionsRegistry registration above). Message shortcuts
+              are surfaced through that same registration. */}
+          {/* Message Shortcut Picker Modal */}
+          {shortcutModalOpen && messageShortcuts.length > 0 && (
+            <ShortcutPickerModal
+              open={shortcutModalOpen}
+              onClose={() => setShortcutModalOpen(false)}
+              channelId={channelId}
+              conversationId={conversation?.conversationId ?? null}
+              message={
+                !isSystemMessage
+                  ? {
+                      text:
+                        new DOMParser().parseFromString(message.content ?? '', 'text/html').body
+                          .textContent ?? '',
+                      senderName: sender?.name ?? '',
+                      messageId: message.messageId,
+                    }
+                  : undefined
+              }
+              shortcuts={messageShortcuts}
+            />
+          )}
           {/* Mobile Actions Drawer */}
           {isMobile && !searchItemView && isActionsDrawerOpen && (
             <MessageActionsDrawer

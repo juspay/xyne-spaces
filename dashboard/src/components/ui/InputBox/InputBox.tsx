@@ -190,6 +190,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       disableEnterToSend = false,
       hideSendButton = false,
       sendDisabled = false,
+      bottomLeftSlot,
     },
 
     ref,
@@ -1554,6 +1555,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <span className='text-muted-foreground font-semibold text-sm'>#</span>
                     </button>
                   </Tooltip>
+
+                  {bottomLeftSlot}
                 </div>
 
                 <div className='flex items-center gap-2'>
