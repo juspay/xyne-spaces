@@ -36,7 +36,6 @@ import {
   PanelsTopLeft,
   Activity,
   PieChart,
-  MonitorCog,
   ChevronRight,
 } from 'lucide-react';
 
@@ -1534,7 +1533,6 @@ function genericScenes(visualKey: string): SceneConfig[] {
     apps: 'apps',
     browser: 'apps',
     vscode: 'apps',
-    inspector: 'apps',
     rca: 'apps',
     shortcuts: 'chat',
     'call-recording-share': 'calls',
@@ -1704,15 +1702,6 @@ function genericScenes(visualKey: string): SceneConfig[] {
       title: 'VSCode Workspace',
       icon: <FileCode2 size={10} />,
       lines: ['src/auth.ts', 'src/api.ts', 'tests/auth.test.ts'],
-    },
-    inspector: {
-      title: 'Inspector',
-      icon: <MonitorCog size={10} />,
-      lines: [
-        'ERROR · Pool exhausted [req-9f2a]',
-        'WARN · Retry attempt 2 /checkout',
-        'INFO · Resolved after 3.2s',
-      ],
     },
     rca: {
       title: 'RCA',

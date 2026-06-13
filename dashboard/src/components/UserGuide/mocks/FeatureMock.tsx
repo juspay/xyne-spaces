@@ -1625,35 +1625,6 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
         </MockFrame>
       );
 
-    case 'inspector':
-      return (
-        <MockFrame title={title}>
-          <div className='space-y-1.5'>
-            <div className='flex items-center gap-1.5 mb-1'>
-              <span className='text-[9px] font-semibold text-muted-foreground uppercase'>
-                Service
-              </span>
-              <span className='text-[10px] text-foreground font-medium'>API Gateway</span>
-            </div>
-            {[
-              { level: 'ERROR', msg: 'Connection pool exhausted [req-9f2a]', time: '02:14:05' },
-              { level: 'WARN', msg: 'Retry attempt 2 for /checkout', time: '02:14:07' },
-              { level: 'INFO', msg: 'Request resolved after 3.2s', time: '02:14:09' },
-            ].map((l, i) => (
-              <div key={i} className='flex items-start gap-1.5 font-mono'>
-                <span
-                  className={`text-[9px] font-semibold shrink-0 w-9 ${l.level === 'ERROR' ? 'text-rose-500' : l.level === 'WARN' ? 'text-amber-500' : 'text-muted-foreground'}`}
-                >
-                  {l.level}
-                </span>
-                <p className='text-[9px] text-foreground/80 flex-1 leading-tight'>{l.msg}</p>
-                <span className='text-[9px] text-muted-foreground shrink-0'>{l.time}</span>
-              </div>
-            ))}
-          </div>
-        </MockFrame>
-      );
-
     case 'rca':
       return (
         <MockFrame title={title}>

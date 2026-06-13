@@ -245,10 +245,6 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
-  // Grafana Configuration (for Inspector Tools log querying)
-  GRAFANA_URL: Joi.string().allow('').default(''),
-  GRAFANA_TOKEN: Joi.string().allow('').default(''),
-  GRAFANA_LOGS_DATASOURCE_ID: Joi.string().default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
   JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
@@ -603,11 +599,6 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
-  },
-  grafana: {
-    url: envVars.GRAFANA_URL as string,
-    token: envVars.GRAFANA_TOKEN as string,
-    logsDatasourceId: envVars.GRAFANA_LOGS_DATASOURCE_ID as string,
   },
   jira: {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,

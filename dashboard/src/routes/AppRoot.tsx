@@ -156,8 +156,6 @@ import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
-import Inspector from '../components/Inspector/Inspector';
-import { buildGrafanaLogsExploreUrl } from '../components/Inspector/grafanaUrl';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
@@ -281,10 +279,6 @@ const AppRoot = (): ReactElement => {
     'global.composeMessage',
     () => void navigate('/chat/search?mode=dm', { replace: true }),
   );
-  useShortcutById('global.openInspector', () => void navigate('/inspector'));
-  useShortcutById('global.openGrafana', () => {
-    webviewActor.send({ type: 'OPEN', url: buildGrafanaLogsExploreUrl(user?.email) });
-  });
 
   // Set panel refs when component mounts
   useEffect(() => {
@@ -1192,14 +1186,6 @@ export const router = createBrowserRouter([
               {
                 path: 'docs/*',
                 element: <DocsScreen />,
-              },
-              {
-                path: 'inspector',
-                element: (
-                  <ResourceProtectedRoute resourceName='INSPECTOR'>
-                    <Inspector />
-                  </ResourceProtectedRoute>
-                ),
               },
               {
                 path: 'resource-access',

@@ -17,6 +17,5 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/projects': 'PROJECTS',
   '/workspace-management': 'WORKSPACE',
   '/organisations': 'ORGANIZATIONS',
-  '/inspector': 'INSPECTOR',
   '/team-intelligence': 'TEAM-INTELLIGENCE-DASHBOARD',
 };

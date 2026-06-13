@@ -60,21 +60,6 @@
 * verifying "Workspace Management" is visible in "[data-testid='workspace-management-page']"
 * verifying "General & Members" is visible in "[data-testid='workspace-management-page']"
 
-## Admin navigates to Inspector page
-* Using browser
-* Ensuring user "admin-1" is logged in
-* navigating via sidebar to "inspector"
-* waiting for "[data-testid='inspector-page']" to appear
-* verifying "Your Current Session Info" is visible in "[data-testid='inspector-page']"
-* verifying "Email" is visible in "[data-testid='inspector-page']"
-* verifying "User ID" is visible in "[data-testid='inspector-page']"
-* verifying "Role" is visible in "[data-testid='inspector-page']"
-* verifying "Session" is visible in "[data-testid='inspector-page']"
-* verifying "Platform" is visible in "[data-testid='inspector-page']"
-* verifying "Logs" is visible in "[data-testid='inspector-page']"
-* verifying "Graphs" is visible in "[data-testid='inspector-page']"
-* verifying "Open Grafana" is visible in "[data-testid='inspector-page']"
-
 ## Admin navigates to Organisations page
 * Using browser
 * Ensuring user "admin-1" is logged in

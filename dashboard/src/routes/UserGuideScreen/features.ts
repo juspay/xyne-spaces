@@ -20,7 +20,6 @@ import {
   MessageCircle,
   MessagesSquare,
   Mic,
-  MonitorCog,
   Phone,
   PieChart,
   Search,
@@ -128,7 +127,7 @@ export const GUIDE_CATEGORIES: GuideCategoryInfo[] = [
   {
     id: 'power-tools',
     title: 'Power Tools',
-    description: 'Inspector, RCA, VSCode workspace, browser panel, and shortcuts',
+    description: 'RCA, VSCode workspace, browser panel, and shortcuts',
     icon: Zap,
   },
 ];
@@ -755,26 +754,6 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     category: 'admin',
     icon: AppWindow,
     visualKey: 'apps',
-  },
-  {
-    id: 'inspector',
-    title: 'Inspector',
-    tagline: 'Deep-dive debug and diagnostics tools.',
-    path: '/inspector',
-    findIn: 'Sidebar -> Inspector',
-    actions: ['Inspect runtime details', 'Open logs explorer', 'Trace issues quickly'],
-    steps: [
-      'Click Inspector [[SearchCode]] in the left sidebar to open the diagnostics panel.',
-      'The panel displays your current session info as copyable chips — Email, User ID, Role, Session, and Platform.',
-      'Click any chip to copy its value — useful for filing bug reports or sharing debug context with support.',
-      "Switch to the Logs tab and use the email filter to narrow down log entries to a specific user's session or request.",
-      'Use the time range picker in the Logs tab to scroll back to a specific incident window.',
-    ],
-    tip: "Use the email filter in the Logs tab to narrow down log entries to a specific user's session or request.",
-    keywords: ['inspector', 'debug', 'logs'],
-    category: 'power-tools',
-    icon: MonitorCog,
-    visualKey: 'inspector',
   },
   {
     id: 'rca',

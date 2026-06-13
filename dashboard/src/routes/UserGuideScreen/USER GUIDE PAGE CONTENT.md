@@ -1128,30 +1128,7 @@ ticket routing rules
 
 ## Power Tools
 
-_Inspector, RCA, and shortcuts_
-
----
-
-### Inspector
-
-**Deep-dive debug and diagnostics tools.** **Find it:** Sidebar → Inspector
-
-**Actions:** Inspect runtime details · Open logs explorer · Trace issues quickly
-
-**Steps:**
-
-1. Click "Inspector" in the left sidebar to open the diagnostics panel.
-2. The panel displays your current session info as copyable chips — Email, User
-   ID, Role, Session, and Platform.
-3. Click any chip to copy its value — useful for filing bug reports or sharing
-   debug context with support.
-4. Switch to the Logs tab and use the email filter to narrow down log entries to
-   a specific user's session or request.
-5. Use the time range picker in the Logs tab to scroll back to a specific
-   incident window.
-
-> **Tip:** Use the email filter in the Logs tab to narrow down log entries to a
-> specific user's session or request.
+_RCA, and shortcuts_
 
 ---
 
