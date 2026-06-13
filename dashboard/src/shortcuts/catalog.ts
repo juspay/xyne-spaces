@@ -103,14 +103,6 @@ export const shortcuts = {
     category: 'Composer',
     preventDefault: true,
   },
-  'global.openInspector': {
-    keys: 'mod+shift+i',
-    scope: 'global',
-    description: 'Open Inspector panel',
-    category: 'Navigation',
-    priority: 50,
-    allowInInputs: true,
-  },
   'global.toggleBrowser': {
     keys: 'mod+shift+b',
     scope: 'global',
@@ -120,15 +112,6 @@ export const shortcuts = {
     allowInInputs: true,
     useKey: true,
   },
-  'global.openGrafana': {
-    keys: 'mod+shift+g',
-    scope: 'global',
-    description: 'Open Grafana',
-    category: 'Navigation',
-    priority: 50,
-    allowInInputs: true,
-  },
-
   // ===== SIDEBAR NAVIGATION =====
   'sidebar.resizeLeft': {
     keys: '[',

@@ -38,7 +38,6 @@ const ESSENTIAL_RESOURCES = [
   { name: 'DASHBOARDS', description: 'Dynamic dashboard feature gate — create/view/share dashboards' },
   { name: 'WORKSPACE', description: 'Workspace management access' },
   { name: 'ORGANIZATIONS', description: 'Organization management access' },
-  { name: 'INSPECTOR', description: 'Inspector panel access (/inspector)' },
   { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'},
   { name: 'XYNE-APPS', description: 'Admin access to Xyne Apps management (webhooks, bot configuration, signing secrets)'},
   {

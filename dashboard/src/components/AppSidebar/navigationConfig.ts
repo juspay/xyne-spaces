@@ -22,7 +22,6 @@ import {
   LayoutDashboard,
   ArrowRightLeft,
   AppWindow,
-  SearchCode,
   CircleHelp,
   Building2,
   Zap,
@@ -72,7 +71,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/listProjects', label: 'List Projects', icon: Folder },
   { path: '/jira-migration', label: 'Jira Migration', icon: ArrowRightLeft, iconSize: 18 },
   { path: '/migration/confluence', label: 'Confluence Migration', icon: BookOpen, iconSize: 18 },
-  { path: '/inspector', label: 'Inspector', icon: SearchCode },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom },
 ];
 
