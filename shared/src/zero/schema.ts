@@ -357,6 +357,21 @@ export enum AppIncomingWebhookAction {
 }
 
 // @ts-ignore TS1294
+export enum CommandType {
+  COMMAND = 'COMMAND',
+  SHORTCUT = 'SHORTCUT',
+}
+
+// @ts-ignore TS1294
+export enum CommandAccessibility {
+  CHAT = 'CHAT',
+  THREAD = 'THREAD',
+  BOTH = 'BOTH',
+  MESSAGE = 'MESSAGE',
+  GLOBAL = 'GLOBAL',
+}
+
+// @ts-ignore TS1294
 export enum UserPresenceStatus {
   ONLINE = 'ONLINE',
   AWAY = 'AWAY',

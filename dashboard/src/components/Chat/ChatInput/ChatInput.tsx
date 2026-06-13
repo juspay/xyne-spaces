@@ -52,7 +52,7 @@ import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { isStatusExpired } from '../../../utils/statusUtils';
 import { logger, Event } from '../../../utils/logger';
 import { useZeroOfflineState } from '@xyne/shared/hooks';
-import { WifiOff, Wifi } from 'lucide-react';
+import { WifiOff, Wifi, Zap } from 'lucide-react';
 import { format } from 'date-fns';
 import { Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -61,6 +61,9 @@ import { useThreadBroadcastMentions } from '../../../hooks/useThreadBroadcastMen
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
+import type { AppShortcutWithApp, CommandAccessibility } from '../../../services/Apps/appsService';
+import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
 import { setThreadLastRead } from '../../../machines/stateMachine';
 
@@ -176,9 +179,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
     // Slash commands for this channel — filtered by context (thread vs chat)
     const [channelCommands, setChannelCommands] = useState<CommandItem[]>([]);
+    // Global shortcuts for this channel
+    const [globalShortcuts, setGlobalShortcuts] = useState<AppShortcutWithApp[]>([]);
+    const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
     useEffect(() => {
       const isThread = !!conversation?.conversationId;
-      const filter = isThread ? { isForThread: true } : { isForChat: true };
+      const filter: { commandAccessibility?: CommandAccessibility } = isThread
+        ? { commandAccessibility: 'THREAD' }
+        : { commandAccessibility: 'CHAT' };
       appsService
         .getChannelCommands(channelId, filter)
         .then(cmds =>
@@ -189,6 +197,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         .catch(() => {
           // silently ignore — channel may simply have no apps
         });
+      // Fetch global shortcuts (not filtered by thread/chat)
+      appsService
+        .getChannelShortcuts(channelId, { type: 'GLOBAL' })
+        .then(setGlobalShortcuts)
+        .catch(() => {});
     }, [channelId, conversation?.conversationId]);
 
     const handleCommandSelect = useCallback(
@@ -962,6 +975,33 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               hasTicket={hasTicket}
               sendDisabled={isOffline}
               onScheduleSend={handleScheduleSend}
+              {...(globalShortcuts.length > 0 && {
+                bottomLeftSlot: (
+                  <>
+                    <Tooltip content='Shortcuts' side='top'>
+                      <button
+                        type='button'
+                        onClick={() => setShortcutModalOpen(true)}
+                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        aria-label='Open shortcuts'
+                        data-track-category='chat-input'
+                        data-track-name='open-global-shortcuts'
+                      >
+                        <Zap className='h-4 w-4 text-muted-foreground' />
+                      </button>
+                    </Tooltip>
+                    {shortcutModalOpen && (
+                      <ShortcutPickerModal
+                        open={shortcutModalOpen}
+                        onClose={() => setShortcutModalOpen(false)}
+                        channelId={channelId}
+                        conversationId={conversationId ?? null}
+                        shortcuts={globalShortcuts}
+                      />
+                    )}
+                  </>
+                ),
+              })}
             />
           </>
         )}

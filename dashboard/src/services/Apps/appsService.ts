@@ -62,22 +62,43 @@ export interface CreateIncomingWebhookRequest {
   action?: 'MESSAGE' | 'TICKET';
 }
 
+export type CommandType = 'COMMAND' | 'SHORTCUT';
+export type CommandAccessibility = 'CHAT' | 'THREAD' | 'BOTH' | 'MESSAGE' | 'GLOBAL';
+
 export interface AppCommand {
   id: string;
   appId: string;
   commandName: string;
   description: string;
+  commandType: CommandType;
+  commandAccessibility: CommandAccessibility;
+  /** @deprecated use commandAccessibility */
   isForThread: boolean;
+  /** @deprecated use commandAccessibility */
   isForChat: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+export interface AppCommandWithApp extends AppCommand {
+  appName: string;
+}
+
 export interface UpsertCommandRequest {
   commandName: string;
   description: string;
-  isForThread?: boolean;
-  isForChat?: boolean;
+  commandType: CommandType;
+  commandAccessibility: CommandAccessibility;
+}
+
+// Shortcut aliases — kept so UI components require no changes
+export type ShortcutType = 'GLOBAL' | 'MESSAGE';
+export type AppShortcut = AppCommand;
+export type AppShortcutWithApp = AppCommandWithApp;
+export interface UpsertShortcutRequest {
+  commandName: string; // callbackId stored as commandName
+  description: string;
+  shortcutType?: ShortcutType; // mapped to commandAccessibility on send
 }
 
 export interface AppPermission {
@@ -166,26 +187,36 @@ export class AppsService {
   }
 
   async getCommands(appId: string): Promise<AppCommand[]> {
-    const response = await apiInstance.get<AppCommand[]>(`/apps/${appId}/commands`);
+    const response = await apiInstance.get<AppCommand[]>(`/apps/${appId}/commands`, {
+      params: { commandType: 'COMMAND' },
+    });
     return response.data;
   }
 
-  async upsertCommand(appId: string, data: UpsertCommandRequest): Promise<AppCommand> {
+  /** Create a new command. POST → 409 if the name is already taken. */
+  async createCommand(appId: string, data: UpsertCommandRequest): Promise<AppCommand> {
+    const response = await apiInstance.post<AppCommand>(`/apps/${appId}/commands`, data);
+    return response.data;
+  }
+
+  /** Update an existing command. PUT → 404 if it doesn't exist. */
+  async updateCommand(appId: string, data: UpsertCommandRequest): Promise<AppCommand> {
     const response = await apiInstance.put<AppCommand>(`/apps/${appId}/commands`, data);
     return response.data;
   }
 
   async deleteCommand(appId: string, commandName: string): Promise<void> {
-    await apiInstance.delete(`/apps/${appId}/commands/${commandName}`);
+    await apiInstance.delete(`/apps/${appId}/commands/${commandName}`, {
+      params: { commandType: 'COMMAND' },
+    });
   }
 
   async getChannelCommands(
     channelId: string,
-    filter?: { isForThread?: boolean; isForChat?: boolean },
+    filter?: { commandAccessibility?: CommandAccessibility },
   ): Promise<AppCommand[]> {
-    const params: Record<string, string> = {};
-    if (filter?.isForThread) params['isForThread'] = 'true';
-    if (filter?.isForChat) params['isForChat'] = 'true';
+    const params: Record<string, string> = { commandType: 'COMMAND' };
+    if (filter?.commandAccessibility) params['commandAccessibility'] = filter.commandAccessibility;
     const response = await apiInstance.get<AppCommand[]>(`/apps/channel/${channelId}/commands`, {
       params,
     });
@@ -200,8 +231,88 @@ export class AppsService {
   ): Promise<void> {
     await apiInstance.post(`/apps/channel/${channelId}/command`, {
       commandName,
+      commandType: 'COMMAND',
       conversationId: conversationId ?? null,
       text: text ?? null,
+    });
+  }
+
+  // ─── Shortcuts ─────────────────────────────────────────────────────────────
+  // All shortcut operations use the same /commands routes with commandType=SHORTCUT.
+  // Method signatures are kept identical so UI components require no changes.
+
+  async getShortcuts(appId: string): Promise<AppShortcut[]> {
+    const response = await apiInstance.get<AppShortcut[]>(`/apps/${appId}/commands`, {
+      params: { commandType: 'SHORTCUT' },
+    });
+    return response.data;
+  }
+
+  // Map a shortcut request → the command payload the API expects (commandType=SHORTCUT,
+  // shortcutType → commandAccessibility).
+  private toShortcutPayload(data: UpsertShortcutRequest): UpsertCommandRequest {
+    const accessibilityMap: Record<string, CommandAccessibility> = {
+      GLOBAL: 'GLOBAL',
+      MESSAGE: 'MESSAGE',
+    };
+    return {
+      commandName: data.commandName,
+      description: data.description,
+      commandType: 'SHORTCUT',
+      commandAccessibility: accessibilityMap[data.shortcutType ?? 'GLOBAL'] ?? 'GLOBAL',
+    };
+  }
+
+  /** Create a new shortcut. POST → 409 if the name is already taken. */
+  async createShortcut(appId: string, data: UpsertShortcutRequest): Promise<AppShortcut> {
+    const response = await apiInstance.post<AppShortcut>(
+      `/apps/${appId}/commands`,
+      this.toShortcutPayload(data),
+    );
+    return response.data;
+  }
+
+  /** Update an existing shortcut. PUT → 404 if it doesn't exist. */
+  async updateShortcut(appId: string, data: UpsertShortcutRequest): Promise<AppShortcut> {
+    const response = await apiInstance.put<AppShortcut>(
+      `/apps/${appId}/commands`,
+      this.toShortcutPayload(data),
+    );
+    return response.data;
+  }
+
+  async deleteShortcut(appId: string, callbackId: string): Promise<void> {
+    await apiInstance.delete(`/apps/${appId}/commands/${callbackId}`, {
+      params: { commandType: 'SHORTCUT' },
+    });
+  }
+
+  async getChannelShortcuts(
+    channelId: string,
+    filter?: { type?: ShortcutType },
+  ): Promise<AppShortcutWithApp[]> {
+    const params: Record<string, string> = { commandType: 'SHORTCUT' };
+    if (filter?.type) params['commandAccessibility'] = filter.type; // GLOBAL | MESSAGE maps 1:1
+    const response = await apiInstance.get<AppShortcutWithApp[]>(
+      `/apps/channel/${channelId}/commands`,
+      { params },
+    );
+    return response.data;
+  }
+
+  async executeShortcutAction(
+    channelId: string,
+    callbackId: string,
+    conversationId?: string | null,
+    messageText?: string,
+    messageId?: string,
+  ): Promise<void> {
+    await apiInstance.post(`/apps/channel/${channelId}/command`, {
+      commandName: callbackId,
+      commandType: 'SHORTCUT',
+      conversationId: conversationId ?? null,
+      messageText: messageText ?? '',
+      messageId,
     });
   }
 

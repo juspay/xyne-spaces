@@ -216,6 +216,7 @@ export class RepositoryContainer {
     this.appPermissions = new AppPermissionRepository();
     this.incomingWebhooks = new IncomingWebhooksRepository();
     this.appCommands = new AppCommandRepository();
+
     this.scheduledCalls = new ScheduledCallRepository();
     this.workspaces = new WorkspaceRepository();
     this.callMessages = new CallMessageRepository();
