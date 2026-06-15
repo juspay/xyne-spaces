@@ -248,13 +248,16 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       setRecentScheduledFor(null);
     }, [channelId, conversationId]);
 
-    // Use all users for mention resolution
+    // Use all users for mention resolution.
     const allUsersForMentionResolution = React.useMemo((): MentionResult[] => {
       if (allUsers.length === 0) {
         return mentionResults;
       }
       const userIds = new Set(allUsers.map(u => u.id));
       const additionalUsers = mentionResults.filter(m => m.type === 'user' && !userIds.has(m.id));
+      if (additionalUsers.length === 0) {
+        return allUsers;
+      }
       return [...allUsers, ...additionalUsers];
     }, [allUsers, mentionResults]);
     // UPDATED: Handle post-ticket creation logic (Workflows & Cleanup only)

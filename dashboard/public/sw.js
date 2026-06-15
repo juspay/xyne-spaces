@@ -242,19 +242,8 @@ async function serveDocsFile(request, url) {
     if (cachedResponse) {
       return cachedResponse;
     }
-    
-    // Try finding by iterating through cache entries
-    const keys = await cache.keys();
-    for (const cacheRequest of keys) {
-      const cacheUrl = new URL(cacheRequest.url);
-      if (cacheUrl.pathname === pathname || cacheUrl.pathname.endsWith('/' + filePath)) {
-        cachedResponse = await cache.match(cacheRequest);
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-      }
-    }
-    
+
+
     // FALLBACK: If file not found and path has subdirectories, try finding the file at root level
     // This handles cases like docs/index.html -> index.html (when index.html is at root)
     if (filePath.includes('/')) {

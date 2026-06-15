@@ -16,14 +16,7 @@
  *
  * Expose toggle() via ref so MobileEditor's onVoiceToggle can call it.
  */
-import React, {
-  useState,
-  useRef,
-  useCallback,
-  useEffect,
-  forwardRef,
-  useImperativeHandle,
-} from 'react';
+import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import type { Editor } from '@tiptap/react';
 import { Mic, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,6 +25,94 @@ import type { MentionResult } from '../Selectors/Selectors.types';
 import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+interface VoiceUserRecord {
+  userId: string;
+  username: string;
+  email?: string;
+  picture?: string;
+}
+
+interface VoiceMentionMatcher {
+  pattern: RegExp;
+  nameMap: Map<string, string>;
+  userMap: Map<string, VoiceUserRecord>;
+}
+
+/**
+ * Compile the org user set into a single mention-matching RegExp plus lookup
+ * maps. This is expensive (an alternation over every user name) and is intended
+ * to be built ONCE per user set and reused — never on the render path. Voice
+ * code calls it lazily, the first time a transcript actually needs parsing.
+ */
+function buildVoiceMentionMatcher(source: readonly MentionResult[]): VoiceMentionMatcher | null {
+  const candidates = source
+    .filter(item => item.type === 'user')
+    .map(item => {
+      const canonicalName = item.name.replace(/ \(you\)$/, '').trim();
+      const searchName = (item.username || canonicalName).trim();
+      return {
+        canonicalName,
+        searchName,
+        userId: item.id,
+        email: item.email,
+        picture: item.picture,
+      };
+    })
+    .filter(item => item.canonicalName.length > 0 && item.searchName.length > 0);
+
+  const nameMap = new Map<string, string>();
+  const userMap = new Map<string, VoiceUserRecord>();
+  const firstNameToUsers = new Map<string, Set<string>>();
+
+  candidates.forEach(item => {
+    const key = item.searchName.toLowerCase();
+    nameMap.set(key, item.canonicalName);
+    userMap.set(key, {
+      userId: item.userId,
+      username: item.canonicalName,
+      ...(item.email !== undefined && { email: item.email }),
+      ...(item.picture !== undefined && { picture: item.picture }),
+    });
+
+    const [firstName] = item.searchName.split(/\s+/);
+    const normalizedFirstName = (firstName || '').toLowerCase();
+    if (normalizedFirstName.length >= 3) {
+      const usersForFirstName = firstNameToUsers.get(normalizedFirstName) || new Set<string>();
+      usersForFirstName.add(item.canonicalName);
+      firstNameToUsers.set(normalizedFirstName, usersForFirstName);
+    }
+  });
+
+  firstNameToUsers.forEach((usersForFirstName, firstName) => {
+    if (usersForFirstName.size === 1) {
+      const resolved = Array.from(usersForFirstName)[0];
+      if (resolved) {
+        nameMap.set(firstName, resolved);
+        const userEntry = Array.from(userMap.values()).find(u => u.username === resolved);
+        if (userEntry) userMap.set(firstName, userEntry);
+      }
+    }
+  });
+
+  const sortedNames = Array.from(nameMap.keys()).sort((a, b) => b.length - a.length);
+  if (sortedNames.length === 0) return null;
+
+  const pattern = new RegExp(
+    `\\b(?:tag|at)\\s+(${sortedNames.map(name => escapeRegex(name)).join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`,
+    'gi',
+  );
+
+  return { pattern, nameMap, userMap };
+}
+
+/** STT name hints derived from the org user set. Built lazily, reused per set. */
+function buildVoiceHints(source: readonly MentionResult[]): string[] {
+  return source
+    .filter(item => item.type === 'user')
+    .map(item => item.name.replace(/ \(you\)$/, '').trim())
+    .filter(Boolean);
+}
 
 export interface VoiceInputHandle {
   toggle: () => void;
@@ -74,69 +155,22 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
     }, [isVoiceRecording, isVoiceTranscribing, onStateChange]);
 
     // ── Mention resolution ──────────────────────────────────────────────────
-    const voiceMentionMatcher = React.useMemo(() => {
+    // The matcher is an org-sized RegExp that is expensive to build but only
+    // ever consumed when an actual voice transcript needs parsing. We therefore
+    // build it lazily and cache it keyed by the source array identity, so it is
+    // compiled once per user set instead of on every render / channel switch.
+    const matcherCacheRef = useRef<{
+      source: readonly MentionResult[];
+      matcher: VoiceMentionMatcher | null;
+    } | null>(null);
+
+    const getVoiceMentionMatcher = useCallback((): VoiceMentionMatcher | null => {
       const source = voiceMentionItems.length > 0 ? voiceMentionItems : mentionItems;
-      const candidates = source
-        .filter(item => item.type === 'user')
-        .map(item => {
-          const canonicalName = item.name.replace(/ \(you\)$/, '').trim();
-          const searchName = (item.username || canonicalName).trim();
-          return {
-            canonicalName,
-            searchName,
-            userId: item.id,
-            email: item.email,
-            picture: item.picture,
-          };
-        })
-        .filter(item => item.canonicalName.length > 0 && item.searchName.length > 0);
-
-      const nameMap = new Map<string, string>();
-      const userMap = new Map<
-        string,
-        { userId: string; username: string; email?: string; picture?: string }
-      >();
-      const firstNameToUsers = new Map<string, Set<string>>();
-
-      candidates.forEach(item => {
-        const key = item.searchName.toLowerCase();
-        nameMap.set(key, item.canonicalName);
-        userMap.set(key, {
-          userId: item.userId,
-          username: item.canonicalName,
-          ...(item.email !== undefined && { email: item.email }),
-          ...(item.picture !== undefined && { picture: item.picture }),
-        });
-
-        const [firstName] = item.searchName.split(/\s+/);
-        const normalizedFirstName = (firstName || '').toLowerCase();
-        if (normalizedFirstName.length >= 3) {
-          const usersForFirstName = firstNameToUsers.get(normalizedFirstName) || new Set<string>();
-          usersForFirstName.add(item.canonicalName);
-          firstNameToUsers.set(normalizedFirstName, usersForFirstName);
-        }
-      });
-
-      firstNameToUsers.forEach((usersForFirstName, firstName) => {
-        if (usersForFirstName.size === 1) {
-          const resolved = Array.from(usersForFirstName)[0];
-          if (resolved) {
-            nameMap.set(firstName, resolved);
-            const userEntry = Array.from(userMap.values()).find(u => u.username === resolved);
-            if (userEntry) userMap.set(firstName, userEntry);
-          }
-        }
-      });
-
-      const sortedNames = Array.from(nameMap.keys()).sort((a, b) => b.length - a.length);
-      if (sortedNames.length === 0) return null;
-
-      const pattern = new RegExp(
-        `\\b(?:tag|at)\\s+(${sortedNames.map(name => escapeRegex(name)).join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`,
-        'gi',
-      );
-
-      return { pattern, nameMap, userMap };
+      const cached = matcherCacheRef.current;
+      if (cached && cached.source === source) return cached.matcher;
+      const matcher = buildVoiceMentionMatcher(source);
+      matcherCacheRef.current = { source, matcher };
+      return matcher;
     }, [voiceMentionItems, mentionItems]);
 
     // ── Token types for structured transcript insertion ─────────────────────
@@ -154,19 +188,17 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
           .replace(/@here\b/gi, '\x00here\x00')
           .replace(/@channel\b/gi, '\x00channel\x00');
 
-        if (voiceMentionMatcher) {
-          marked = marked.replace(
-            voiceMentionMatcher.pattern,
-            (_fullMatch: string, capturedName: string) => {
-              const key = capturedName.toLowerCase();
-              const user = voiceMentionMatcher.userMap.get(key);
-              if (user) {
-                const emailSuffix = user.email ? `:${user.email}` : '';
-                return `\x00user:${user.userId}:${user.username}${emailSuffix}\x00`;
-              }
-              return `@${capturedName}`;
-            },
-          );
+        const matcher = getVoiceMentionMatcher();
+        if (matcher) {
+          marked = marked.replace(matcher.pattern, (_fullMatch: string, capturedName: string) => {
+            const key = capturedName.toLowerCase();
+            const user = matcher.userMap.get(key);
+            if (user) {
+              const emailSuffix = user.email ? `:${user.email}` : '';
+              return `\x00user:${user.userId}:${user.username}${emailSuffix}\x00`;
+            }
+            return `@${capturedName}`;
+          });
         }
 
         // eslint-disable-next-line no-control-regex
@@ -201,7 +233,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
 
         return tokens;
       },
-      [voiceMentionMatcher],
+      [getVoiceMentionMatcher],
     );
 
     // ── Editor insertion ────────────────────────────────────────────────────
@@ -266,12 +298,20 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
     );
 
     // ── STT hints (user display names for the STT provider) ────────────────
-    const voiceHints = React.useMemo((): string[] => {
+    // Like the matcher, derived from the org user set and only needed at the
+    // moment we transcribe. Built lazily and cached per source identity.
+    const hintsCacheRef = useRef<{
+      source: readonly MentionResult[];
+      hints: string[];
+    } | null>(null);
+
+    const getVoiceHints = useCallback((): string[] => {
       const source = voiceMentionItems.length > 0 ? voiceMentionItems : mentionItems;
-      return source
-        .filter(item => item.type === 'user')
-        .map(item => item.name.replace(/ \(you\)$/, '').trim())
-        .filter(Boolean);
+      const cached = hintsCacheRef.current;
+      if (cached && cached.source === source) return cached.hints;
+      const hints = buildVoiceHints(source);
+      hintsCacheRef.current = { source, hints };
+      return hints;
     }, [voiceMentionItems, mentionItems]);
 
     // ── Media stream helpers ────────────────────────────────────────────────
@@ -286,7 +326,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
         try {
           const transcript = await voiceInputService.transcribeAudio({
             audioBlob: blob,
-            hints: voiceHints,
+            hints: getVoiceHints(),
           });
           appendTranscriptionToEditor(transcript.text);
         } catch (err) {
@@ -297,7 +337,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
           setIsVoiceTranscribing(false);
         }
       },
-      [appendTranscriptionToEditor, voiceHints],
+      [appendTranscriptionToEditor, getVoiceHints],
     );
 
     const stopVoiceRecording = useCallback((): void => {
