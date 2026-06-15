@@ -37,6 +37,10 @@ const NavigationAndSearch = (): ReactElement => {
   const [canGoForward, setCanGoForward] = useState(false);
   const maxIndexRef = useRef(0);
   const [searchOpen, setSearchOpen] = useState(false);
+  // Restore the previous query only when the overlay is opened by clicking the
+  // header search bar on the results screen — the global Cmd+K shortcut and the
+  // empty-state still open with a blank input.
+  const [restoreQuery, setRestoreQuery] = useState(false);
 
   useEffect(() => {
     const historyState = window.history.state as { idx?: number } | null;
@@ -47,9 +51,13 @@ const NavigationAndSearch = (): ReactElement => {
     setCanGoForward(currentIndex < maxIndexRef.current);
   }, [location]);
 
-  // Listen for Cmd+K dispatch from ChannelCommandMenu when in screen mode
+  // Listen for Cmd+K dispatch from ChannelCommandMenu when in screen mode.
+  // The shortcut opens an empty overlay (no query restore).
   useEffect(() => {
-    const handler = (): void => setSearchOpen(true);
+    const handler = (): void => {
+      setRestoreQuery(false);
+      setSearchOpen(true);
+    };
     window.addEventListener('xyne:activate-search-bar', handler);
     return () => window.removeEventListener('xyne:activate-search-bar', handler);
   }, []);
@@ -70,6 +78,9 @@ const NavigationAndSearch = (): ReactElement => {
 
   const handleSearchClick = (): void => {
     if (searchMode === 'screen') {
+      // Clicking the header bar on the results screen restores the active query;
+      // elsewhere the overlay opens empty.
+      setRestoreQuery(isOnSearchScreen && Boolean(searchScreenQuery));
       setSearchOpen(true);
       return;
     }
@@ -124,7 +135,10 @@ const NavigationAndSearch = (): ReactElement => {
         <Popover.Root
           open={searchMode === 'screen' && searchOpen}
           onOpenChange={open => {
-            if (!open) setSearchOpen(false);
+            if (!open) {
+              setSearchOpen(false);
+              setRestoreQuery(false);
+            }
           }}
         >
           <Popover.Anchor asChild>
@@ -173,8 +187,8 @@ const NavigationAndSearch = (): ReactElement => {
               onInteractOutside={() => setSearchOpen(false)}
               className='z-[9999] bg-background border border-border rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D] overflow-hidden max-h-[80vh]'
               style={{
-                width: 'calc(var(--radix-popper-anchor-width) + 16px)',
-                minWidth: '480px',
+                width: 'calc(var(--radix-popper-anchor-width) + 96px)',
+                minWidth: '560px',
                 marginLeft: '-8px',
               }}
             >
@@ -182,9 +196,13 @@ const NavigationAndSearch = (): ReactElement => {
                 inline
                 open={searchOpen}
                 onOpenChange={open => {
-                  if (!open) setSearchOpen(false);
+                  if (!open) {
+                    setSearchOpen(false);
+                    setRestoreQuery(false);
+                  }
                 }}
                 hideTabs
+                restoreQueryFromUrl={restoreQuery}
               />
             </Popover.Content>
           </Popover.Portal>

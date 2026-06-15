@@ -61,7 +61,13 @@ interface LexicalSearchInputProps {
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
   initialMention?: MentionData | null | undefined;
+  initialQuery?: InitialQueryData | null | undefined;
   disableAutoFocus?: boolean;
+}
+
+export interface InitialQueryData {
+  mentions: MentionData[];
+  text: string;
 }
 
 function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData | null }) {
@@ -93,6 +99,46 @@ function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData
 
     return () => clearTimeout(timeoutId);
   }, [initialMention, editor]);
+
+  return null;
+}
+
+function InitialQueryPlugin({ initialQuery }: { initialQuery?: InitialQueryData | null }) {
+  const [editor] = useLexicalComposerContext();
+  const appliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!initialQuery || (initialQuery.mentions.length === 0 && !initialQuery.text)) {
+      appliedRef.current = null;
+      return;
+    }
+
+    const queryKey = `${initialQuery.mentions.map(m => `${m.id}-${m.prefix}`).join('|')}::${initialQuery.text}`;
+    if (appliedRef.current === queryKey) return;
+    appliedRef.current = queryKey;
+
+    const timeoutId = setTimeout(() => {
+      editor.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const paragraph = $createParagraphNode();
+        root.append(paragraph);
+
+        initialQuery.mentions.forEach(mention => {
+          paragraph.append($createFilterChip(mention));
+          paragraph.append($createTextNode(' '));
+        });
+
+        const trailingText = initialQuery.text ? $createTextNode(initialQuery.text) : null;
+        if (trailingText) paragraph.append(trailingText);
+
+        const lastChild = paragraph.getLastChild();
+        lastChild?.selectEnd();
+      });
+    }, 50);
+
+    return () => clearTimeout(timeoutId);
+  }, [initialQuery, editor]);
 
   return null;
 }
@@ -323,6 +369,7 @@ export function LexicalSearchInput({
   autocompleteSuffix,
   onInsertTextReady,
   initialMention,
+  initialQuery,
   disableAutoFocus = false,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
@@ -389,6 +436,7 @@ export function LexicalSearchInput({
           )}
           <ClearEditorPlugin value={value} />
           {initialMention && <InitialMentionPlugin initialMention={initialMention} />}
+          {initialQuery && <InitialQueryPlugin initialQuery={initialQuery} />}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <FilterChipPlugin />

@@ -18,7 +18,9 @@ import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.
 import { TabType, type MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { VisibleChannel } from '../../machines/stateMachine';
 import { useShortcutById } from '../../shortcuts';
+import type { InitialQueryData } from '../Chat/ChatDirectory/LexicalSearchInput';
 import { useUsers } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 export function resolveDMChannelName(
   channel: { name: string; scopeType: ChannelScopeType },
@@ -47,6 +49,7 @@ interface GlobalCommandMenuProps {
   initialMention?: MentionData | null;
   initialTab?: TabType;
   hideTabs?: boolean;
+  restoreQueryFromUrl?: boolean;
 }
 
 const GlobalCommandMenu = ({
@@ -63,6 +66,7 @@ const GlobalCommandMenu = ({
   initialMention: externalInitialMention,
   initialTab: externalInitialTab,
   hideTabs,
+  restoreQueryFromUrl,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
@@ -232,6 +236,39 @@ const GlobalCommandMenu = ({
     };
   }, [channelData, allChannelsUserStatus, visibleAllChannels]);
 
+  // Reconstruct the previous search (mention chips + trailing text) from the
+  // results-page URL params so reopening the overlay from the header restores it.
+  const initialQuery = useMemo((): InitialQueryData | null => {
+    if (!restoreQueryFromUrl) return null;
+
+    const params = new URLSearchParams(location.search);
+    const splitIds = (key: string): string[] => (params.get(key) ?? '').split(',').filter(Boolean);
+
+    const userMention = (id: string, prefix: 'from:' | 'assignee:'): MentionData | null => {
+      const user = allUsers.find(u => u.id === id);
+      if (!user) return null;
+      return { id, name: getUserDisplayName(user), type: 'user', prefix };
+    };
+
+    const channelMention = (id: string): MentionData | null => {
+      const channel = channelData.find(c => c.id === id);
+      if (!channel) return null;
+      const name = resolveDMChannelName(channel, context.userID ?? '', allUsers);
+      return { id, name, type: 'channel', prefix: 'in:' };
+    };
+
+    const mentions: MentionData[] = [
+      ...splitIds('from').map(id => userMention(id, 'from:')),
+      ...splitIds('in').map(channelMention),
+      ...splitIds('assignee').map(id => userMention(id, 'assignee:')),
+    ].filter((m): m is MentionData => m !== null);
+
+    const text = params.get('query')?.trim() ?? '';
+
+    if (mentions.length === 0 && !text) return null;
+    return { mentions, text };
+  }, [restoreQueryFromUrl, location.search, allUsers, channelData, context.userID]);
+
   if (!context.userID) return null;
 
   return (
@@ -244,6 +281,7 @@ const GlobalCommandMenu = ({
       open={open}
       onOpenChange={handleOpenChange}
       initialMention={initialMention}
+      {...(initialQuery !== null ? { initialQuery } : {})}
       {...(contextSelectionMode !== undefined ? { contextSelectionMode } : {})}
       {...(contextItems !== undefined ? { contextItems } : {})}
       {...(onContextItemToggle !== undefined ? { onContextItemToggle } : {})}
