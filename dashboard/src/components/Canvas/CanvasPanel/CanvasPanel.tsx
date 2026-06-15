@@ -77,10 +77,10 @@ const CanvasPanel = (): ReactElement => {
 
   // Restore last opened canvas when landing on the canvas index
   useEffect(() => {
-    if (isOnIndexRoute && lastCanvasId) {
+    if (!isMobile && isOnIndexRoute && lastCanvasId) {
       void navigate(`/chat/canvas/${lastCanvasId}`, { replace: true });
     }
-  }, [isOnIndexRoute, lastCanvasId, navigate]);
+  }, [isMobile, isOnIndexRoute, lastCanvasId, navigate]);
 
   const isQuartoDocsListView = viewMode === 'list' && activeFilter === 'quarto_docs';
 
