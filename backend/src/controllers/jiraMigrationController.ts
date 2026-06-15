@@ -378,6 +378,275 @@ export class JiraMigrationController {
     }
   };
 
+  moveJiraProjectChannel = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const actorUserId = req.user?.id;
+      if (!actorUserId) {
+        res.status(401).json({ error: 'Authenticated user required for Jira migration operations' });
+        return;
+      }
+
+      const {
+        jiraProjectKey,
+        sourceChannelId,
+        targetChannelId,
+        dryRun,
+        confirmText,
+      } = req.body as {
+        jiraProjectKey?: string;
+        sourceChannelId?: string;
+        targetChannelId?: string;
+        dryRun?: boolean;
+        confirmText?: string;
+      };
+
+      if (!jiraProjectKey || !sourceChannelId || !targetChannelId) {
+        res.status(400).json({ error: 'jiraProjectKey, sourceChannelId, and targetChannelId are required' });
+        return;
+      }
+
+      if (sourceChannelId === targetChannelId) {
+        res.status(400).json({ error: 'sourceChannelId and targetChannelId must be different' });
+        return;
+      }
+
+      const normalizedProjectKey = jiraProjectKey.trim().toUpperCase();
+      const resolvedDryRun = dryRun !== false;
+      const resolvedConfirmText = (confirmText || '').trim();
+      if (!resolvedDryRun && resolvedConfirmText !== `MOVE ${normalizedProjectKey}`) {
+        res.status(400).json({ error: `Type 'MOVE ${normalizedProjectKey}' to confirm` });
+        return;
+      }
+
+      const sourceExternalSourceName = `jira-${normalizedProjectKey}-${sourceChannelId}`.toLowerCase();
+      const targetExternalSourceName = `jira-${normalizedProjectKey}-${targetChannelId}`.toLowerCase();
+
+      const [sourceExternalSource, targetExternalSource, sourceChannel, targetChannel] = await Promise.all([
+        db.externalSource.findUnique({
+          where: { name: sourceExternalSourceName },
+          select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
+        }),
+        db.externalSource.findUnique({
+          where: { name: targetExternalSourceName },
+          select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
+        }),
+        db.channel.findUnique({
+          where: { id: sourceChannelId },
+          select: { id: true, name: true, projectId: true, workspaceId: true },
+        }),
+        db.channel.findUnique({
+          where: { id: targetChannelId },
+          select: { id: true, name: true, projectId: true, workspaceId: true },
+        }),
+      ]);
+
+      if (!sourceExternalSource || sourceExternalSource.sourceType !== 'jira') {
+        res.status(404).json({ error: 'Jira external source not found for provided jiraProjectKey + sourceChannelId' });
+        return;
+      }
+
+      if (!sourceChannel || !targetChannel) {
+        res.status(404).json({ error: 'sourceChannelId or targetChannelId not found' });
+        return;
+      }
+
+      if (sourceChannel.projectId !== targetChannel.projectId) {
+        res.status(400).json({ error: 'Source and target channels must belong to the same project' });
+        return;
+      }
+
+      if (sourceChannel.workspaceId !== targetChannel.workspaceId) {
+        res.status(400).json({ error: 'Source and target channels must belong to the same workspace' });
+        return;
+      }
+
+      if (targetExternalSource && targetExternalSource.id !== sourceExternalSource.id) {
+        res.status(409).json({
+          error: 'A Jira external source already exists for the target channel + project key',
+        });
+        return;
+      }
+
+      const ticketMappings = await db.externalMessage.findMany({
+        where: {
+          externalSourceId: sourceExternalSource.id,
+          entityType: 'TICKET',
+          entityId: { not: null },
+        },
+        select: { entityId: true },
+      });
+      const mappedTicketIds = ticketMappings.map(mapping => mapping.entityId!).filter(Boolean);
+
+      if (mappedTicketIds.length === 0) {
+        res.json({
+          success: true,
+          data: {
+            dryRun: resolvedDryRun,
+            jiraProjectKey: normalizedProjectKey,
+            sourceChannelId,
+            targetChannelId,
+            movedTickets: 0,
+            movedConversations: 0,
+            movedParticipants: 0,
+            externalSourceUpdated: false,
+          },
+        });
+        return;
+      }
+
+      const ticketsToMove = await db.ticket.findMany({
+        where: {
+          id: { in: mappedTicketIds },
+          channelId: sourceChannelId,
+        },
+        select: {
+          id: true,
+          conversationId: true,
+        },
+      });
+
+      const conversationIds = Array.from(
+        new Set(
+          ticketsToMove
+            .map(ticket => ticket.conversationId)
+            .filter((conversationId): conversationId is string => Boolean(conversationId)),
+        ),
+      );
+
+      const [conversationCount, participantCount] = await Promise.all([
+        conversationIds.length > 0
+          ? db.conversation.count({
+              where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+            })
+          : Promise.resolve(0),
+        conversationIds.length > 0
+          ? db.conversationParticipant.count({
+              where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+            })
+          : Promise.resolve(0),
+      ]);
+
+      const remainingOnSourceBeforeMove = mappedTicketIds.length - ticketsToMove.length;
+      const wouldFullyDrainSource = remainingOnSourceBeforeMove === 0;
+
+      if (resolvedDryRun) {
+        res.json({
+          success: true,
+          data: {
+            dryRun: true,
+            externalSourceId: sourceExternalSource.id,
+            jiraProjectKey: normalizedProjectKey,
+            sourceChannelId,
+            sourceChannelName: sourceChannel.name,
+            targetChannelId,
+            targetChannelName: targetChannel.name,
+            movedTickets: ticketsToMove.length,
+            movedConversations: conversationCount,
+            movedParticipants: participantCount,
+            externalSourceUpdated: wouldFullyDrainSource,
+            warnings: [
+              ...(wouldFullyDrainSource
+                ? []
+                : [
+                    `Only ${ticketsToMove.length} of ${mappedTicketIds.length} Jira-mapped tickets are currently on sourceChannelId. External source will stay on ${sourceChannelId} until the remaining ${remainingOnSourceBeforeMove} ticket(s) are moved.`,
+                  ]),
+            ],
+          },
+        });
+        return;
+      }
+
+      const now = new Date();
+      const result = await db.$transaction(async tx => {
+        const ticketUpdate = await tx.ticket.updateMany({
+          where: {
+            id: { in: ticketsToMove.map(ticket => ticket.id) },
+            channelId: sourceChannelId,
+          },
+          data: {
+            channelId: targetChannelId,
+            updatedBy: actorUserId,
+            updatedAt: now,
+          },
+        });
+
+        const conversationUpdateCount =
+          conversationIds.length > 0
+            ? (
+                await tx.conversation.updateMany({
+                  where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+                  data: { channelId: targetChannelId, workspaceId: targetChannel.workspaceId ?? null },
+                })
+              ).count
+            : 0;
+
+        const participantUpdateCount =
+          conversationIds.length > 0
+            ? (
+                await tx.conversationParticipant.updateMany({
+                  where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+                  data: { channelId: targetChannelId },
+                })
+              ).count
+            : 0;
+
+        const remainingOnSource = await tx.ticket.count({
+          where: {
+            id: { in: mappedTicketIds },
+            channelId: sourceChannelId,
+          },
+        });
+
+        let externalSourceUpdated = false;
+        if (remainingOnSource === 0) {
+          await tx.externalSource.update({
+            where: { id: sourceExternalSource.id },
+            data: {
+              name: targetExternalSourceName,
+              channelId: targetChannelId,
+            },
+          });
+          externalSourceUpdated = true;
+        }
+
+        return {
+          ticketUpdateCount: ticketUpdate.count,
+          conversationUpdateCount,
+          participantUpdateCount,
+          remainingOnSource,
+          externalSourceUpdated,
+        };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          dryRun: false,
+          externalSourceId: sourceExternalSource.id,
+          jiraProjectKey: normalizedProjectKey,
+          sourceChannelId,
+          sourceChannelName: sourceChannel.name,
+          targetChannelId,
+          targetChannelName: targetChannel.name,
+          movedTickets: result.ticketUpdateCount,
+          movedConversations: result.conversationUpdateCount,
+          movedParticipants: result.participantUpdateCount,
+          externalSourceUpdated: result.externalSourceUpdated,
+          ...(result.remainingOnSource > 0
+            ? {
+                warnings: [
+                  `Moved ${result.ticketUpdateCount} ticket(s), but ${result.remainingOnSource} Jira-mapped ticket(s) still point at ${sourceChannelId}. External source remains on the source channel until those are moved.`,
+                ],
+              }
+            : {}),
+        },
+      });
+    } catch (error) {
+      logger.error('Jira migration move-jira-project-channel failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to move Jira project tickets to another channel' });
+    }
+  };
+
   moveChannelProject = async (req: Request, res: Response): Promise<void> => {
     try {
       const actorUserId = req.user?.id;

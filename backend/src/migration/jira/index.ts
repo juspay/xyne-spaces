@@ -15,6 +15,7 @@ router.post('/execute', authMiddleware.authenticate, jiraMigrationAdminAuth, con
 router.post('/bulk-execute', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.bulkExecute);
 router.post('/move-channel-project', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveChannelProject);
 router.post('/move-jira-project-board', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveJiraProjectBoard);
+router.post('/move-jira-project-channel', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveJiraProjectChannel);
 router.post('/change-ticket-created-by', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.changeTicketCreatedBy);
 router.post('/purge-project-migration', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.purgeProjectMigration);
 router.post('/delete-migrated-stage-eta', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.deleteJiraMigratedStageEta);
