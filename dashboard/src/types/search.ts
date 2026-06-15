@@ -168,6 +168,7 @@ export interface VespaSearchFilters {
   stage?: string; // Ticket stage
   assignee?: string; // Assigned user ID
   dynamicFieldValues?: string | string[]; // Comma-separated or array of fieldId::value tokens
+  dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'
   callType?: string; // Comma-separated call types: 'HEADLESS'
   presentationSummary?: string; // Vespa presentation.summary profile (e.g. 'lean')

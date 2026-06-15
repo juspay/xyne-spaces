@@ -86,6 +86,22 @@ export const getStatusColumns = (): Stage[] => {
   ];
 };
 
+const getTimestampValue = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+    const numericValue = Number(trimmed);
+    return Number.isFinite(numericValue) ? numericValue : null;
+  }
+
+  const parsed = Date.parse(trimmed);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
 /**
  * Filters tickets by board ID
  */
@@ -180,7 +196,7 @@ export const createTagsByTicketIdMap = (
  * with createdAt DESC as tiebreaker.
  * IMPORTANT: Uses native string comparison (<, >), NOT localeCompare.
  */
-export const sortByKanbanPosition = (tickets: Ticket[]): Ticket[] => {
+export const sortByKanbanPosition = <T extends Ticket>(tickets: T[]): T[] => {
   return [...tickets].sort((a, b) => {
     const aPos = a.kanbanPosition;
     const bPos = b.kanbanPosition;
@@ -507,11 +523,10 @@ export const applyTicketFilters = (
           ('start' in filterValue || 'end' in filterValue)
         ) {
           // DATE field - range check
-          // actualFieldValue stores date in yyyy-mm-dd format, convert to timestamp
-          const dateValue = fieldValue.actualFieldValue;
-          const ticketDate = typeof dateValue === 'string' ? new Date(dateValue).getTime() : 0;
-          if (filterValue.start && ticketDate < filterValue.start) return false;
-          if (filterValue.end && ticketDate > filterValue.end) return false;
+          const ticketDate = getTimestampValue(fieldValue.actualFieldValue);
+          if (ticketDate === null) return false;
+          if (filterValue.start !== undefined && ticketDate < filterValue.start) return false;
+          if (filterValue.end !== undefined && ticketDate > filterValue.end) return false;
         }
       }
     }
@@ -598,9 +613,11 @@ export const groupTicketsByFormField = (
 };
 
 /**
- * Extracts form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
+ * Extracts all unique form fields attached to the selected board.
+ * This is shared by grouping and dynamic filter logic, but those callers
+ * should apply their own filtering rules after the fact.
  */
-export const extractGroupableFormFields = (
+export const extractBoardFormFields = (
   filters: TicketFilters,
   allBoards: ReadonlyArray<{ id: string; formContextMappings?: readonly unknown[] }> | undefined,
 ): Array<{ id: string; fieldName: string; fieldType: FormFieldType }> => {
@@ -616,21 +633,31 @@ export const extractGroupableFormFields = (
     const mappingWithFields = mapping as { formFields?: readonly FormFields[] };
     const fields = mappingWithFields.formFields;
     fields?.forEach(field => {
-      if (
-        field.fieldType === FormFieldType.SINGLE_SELECT ||
-        field.fieldType === FormFieldType.MULTI_SELECT ||
-        field.fieldType === FormFieldType.USER
-      ) {
-        if (!fieldsMap.has(field.id)) {
-          fieldsMap.set(field.id, {
-            id: field.id,
-            fieldName: field.fieldName,
-            fieldType: field.fieldType,
-          });
-        }
+      if (!fieldsMap.has(field.id)) {
+        fieldsMap.set(field.id, {
+          id: field.id,
+          fieldName: field.fieldName,
+          fieldType: field.fieldType,
+        });
       }
     });
   });
 
   return Array.from(fieldsMap.values());
+};
+
+/**
+ * Extracts form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
+ */
+export const extractGroupableFormFields = (
+  filters: TicketFilters,
+  allBoards: ReadonlyArray<{ id: string; formContextMappings?: readonly unknown[] }> | undefined,
+): Array<{ id: string; fieldName: string; fieldType: FormFieldType }> => {
+  if (filters.boards?.length !== 1 || !allBoards) return [];
+  return extractBoardFormFields(filters, allBoards).filter(
+    field =>
+      field.fieldType === FormFieldType.SINGLE_SELECT ||
+      field.fieldType === FormFieldType.MULTI_SELECT ||
+      field.fieldType === FormFieldType.USER,
+  );
 };

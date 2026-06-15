@@ -100,6 +100,29 @@ const buildCurrentUserFilter = (
   return filters.assigned ? assignedFilter : createdFilter;
 };
 
+const buildChannelAccessFilter = (
+  currentUserId: string | undefined,
+): Prisma.TicketWhereInput | undefined => {
+  if (!currentUserId) return undefined;
+
+  return {
+    channel: {
+      is: {
+        OR: [
+          { visibility: 'PUBLIC' },
+          {
+            participants: {
+              some: {
+                userId: currentUserId,
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+};
+
 const buildScopeFilter = (context: KanbanTicketQueryContext): Prisma.TicketWhereInput => {
   const { viewMode, projectId, boardId, boardIds, userId, groupId } = context;
 
@@ -144,6 +167,7 @@ export const buildKanbanTicketWhere = (
   return {
     AND: compact<Prisma.TicketWhereInput>([
       { workspaceId: context.workspaceId },
+      buildChannelAccessFilter(context.currentUserId),
       buildScopeFilter(context),
       {
         OR: [{ ticketType: null }, { ticketType: { not: SUPPORT_TICKET_TYPE } }],

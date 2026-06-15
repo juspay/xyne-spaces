@@ -16,6 +16,8 @@ type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript'
 
 const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
 export interface SlackFilters {
   channelId?: string[];
   projectId?: string[];
@@ -43,6 +45,7 @@ export interface TicketFilters {
   boardId?: string[]; // Filter by board ID - comma-separated
   tags?: string[]; // Filter by tags
   dynamicFieldValues?: string[]; // Filter by dynamic form field tokens (fieldId::value)
+  dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
   createdOn?: string; // Created on specific date (multiple formats)
@@ -729,7 +732,11 @@ export class YqlBuilder {
         const separatorIndex = token.indexOf('::');
         if (separatorIndex === -1) return;
         const fieldId = token.slice(0, separatorIndex).trim();
-        const fieldValue = token.slice(separatorIndex + 2).trim();
+        const rawFieldValue = token.slice(separatorIndex + 2).trim();
+        const fieldValue =
+          rawFieldValue.toLowerCase() === VESPA_MISSING_DYNAMIC_FIELD_VALUE.toLowerCase()
+            ? VESPA_MISSING_DYNAMIC_FIELD_VALUE
+            : rawFieldValue.toLowerCase();
         if (!fieldId || !fieldValue) return;
         valuesByFieldId.set(fieldId, [...(valuesByFieldId.get(fieldId) ?? []), fieldValue]);
       });
@@ -764,6 +771,27 @@ export class YqlBuilder {
         .join(' and ');
       if (dynamicFieldConditions) {
         conditions.push(`(${dynamicFieldConditions})`);
+      }
+    }
+
+    if (filters.dynamicFieldDateRanges) {
+      const dateConditions = Object.entries(filters.dynamicFieldDateRanges)
+        .map(([fieldId, range]) => {
+          const effectiveStart =
+            range.start ?? (range.end !== undefined ? range.end - (10 * DAY_IN_MS) : undefined);
+          const effectiveEnd =
+            range.end ?? (range.start !== undefined ? range.start + (10 * DAY_IN_MS) : undefined);
+
+          if (effectiveStart !== undefined && effectiveEnd !== undefined) {
+            return `formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}" and fieldValueLong >= ${effectiveStart} and fieldValueLong <= ${effectiveEnd})`;
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .join(' and ');
+
+      if (dateConditions) {
+        conditions.push(`(${dateConditions})`);
       }
     }
 

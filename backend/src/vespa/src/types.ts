@@ -141,10 +141,15 @@ export interface importedChannelFields {
   permissions: string[];
 }
 
-export interface VespaTicketFormField {
+export type TicketFormField = {
   fieldId: string;
   fieldValue: string;
-}
+  fieldValueLong?: number;
+};
+
+export type TicketFormFields = TicketFormField[];
+
+export type VespaTicketFormField = TicketFormField;
 
 export enum RankProfile {
   nativeRank = "default_native",
@@ -266,7 +271,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   boardId: string;
   attachmentIds: string[];
   metadata: string;
-  formFields: VespaTicketFormField[];
+  formFields: TicketFormFields;
   eta: string;
   channelName: string;
   boardName: string;

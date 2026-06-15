@@ -136,6 +136,42 @@ export class TicketController {
     }
   }
 
+  private async pushVespaJobForTicket(
+    ticketId: string,
+    userId: string,
+    workspaceId?: string
+  ): Promise<void> {
+    vespaQueue.addJob({
+      schema: ticketSchema,
+      jobType: "feed",
+      docId: ticketId,
+      userId,
+      ...(workspaceId ? { workspaceId } : {}),
+    }).catch(async (error) => {
+      logger.error(`[TicketController] Error queuing Vespa job for ticket ${ticketId}:`, error);
+      try {
+        const vespaLogs = db.vespaInsertionLogs;
+        if (vespaLogs) {
+          await vespaLogs.create({
+            data: {
+              status: "FAILED",
+              type: "INSERT",
+              entityId: ticketId,
+              entityType: ticketSchema,
+              namespace: NAMESPACE,
+              errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+              errorDetails: JSON.stringify(error),
+              userId,
+              createdAt: new Date(),
+            },
+          });
+        }
+      } catch (dbError) {
+        logger.error('Failed to log Vespa insertion error to database:', dbError);
+      }
+    });
+  }
+
   /**
    * Shared method to create a ticket with conversation context
    * Used by both HTTP API and transcription agent tool
@@ -967,38 +1003,6 @@ export class TicketController {
       }
 
 
-      // Queue Vespa job in background - worker will handle all processing
-      vespaQueue.addJob({
-        schema: ticketSchema,
-        jobType: "feed",
-        docId: ticket.id,
-        userId: userId,
-        workspaceId: req.user?.workspaceId,
-      }).catch(async (error) => {
-        logger.error('Error queuing Vespa job for ticket:', error);
-        // Log failed insertion to Postgres for later retry
-        try {
-          const vespaLogs = db.vespaInsertionLogs;
-          if (vespaLogs) {
-            await vespaLogs.create({
-              data: {
-                status: "FAILED",
-                type: "INSERT",
-                entityId: ticket.id,
-                entityType: ticketSchema,
-                namespace: NAMESPACE,
-                errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
-                errorDetails: JSON.stringify(error),
-                userId: userId,
-                createdAt: new Date(),
-              },
-            });
-          }
-        } catch (dbError) {
-          logger.error('Failed to log Vespa insertion error to database:', dbError);
-        }
-      });
-
       // Create FormEntityValues records for dynamic fields
       if (Object.keys(dynamicFields).length > 0) {
         try {
@@ -1048,6 +1052,9 @@ export class TicketController {
           // Don't fail ticket creation if form entity values creation fails
         }
       }
+
+      // Queue Vespa job after the ticket and any form fields are fully ingested.
+      await this.pushVespaJobForTicket(ticket.id, userId, req.user?.workspaceId);
 
       void userActivityTrackingService.trackTicketCreated(userId, {
         ticketId: ticket.id,

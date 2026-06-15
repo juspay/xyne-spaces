@@ -96,6 +96,23 @@ const toCommaSeparatedValues = (value: unknown): string[] => {
   });
 };
 
+const parseJsonObject = <T extends Record<string, unknown>>(value: unknown): T | undefined => {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as T;
+    }
+  } catch (error) {
+    logger.warn(`Failed to parse JSON payload: ${String(error)}`);
+  }
+
+  return undefined;
+};
+
 
 
 // Export search handler function
@@ -123,6 +140,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       board,       // Board name/ID
       tags,        // Comma-separated tags
       dynamicFieldValues, // Dynamic field filters
+      dynamicFieldDateRanges, // JSON string of fieldId -> { start, end }
       before,      // Created before date (multiple formats)
       after,       // Created after date (multiple formats)
       on,          // Created on specific date (multiple formats)
@@ -157,7 +175,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
 
     const isFilterOnlyDynamicFieldSearch =
-      filterOnly === 'true' && dynamicFieldValues !== undefined;
+      filterOnly === 'true' &&
+      (dynamicFieldValues !== undefined || dynamicFieldDateRanges !== undefined);
     const effectiveLimit =
       limit !== undefined ? Number(limit) : isFilterOnlyDynamicFieldSearch ? 200 : 20;
 
@@ -302,6 +321,13 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (dynamicFieldValues) {
       options.ticket.dynamicFieldValues = toCommaSeparatedValues(dynamicFieldValues);
+    }
+
+    const parsedDynamicFieldDateRanges = parseJsonObject<Record<string, { start?: number; end?: number }>>(
+      dynamicFieldDateRanges,
+    );
+    if (parsedDynamicFieldDateRanges) {
+      options.ticket.dynamicFieldDateRanges = parsedDynamicFieldDateRanges;
     }
 
     // Date filters (apply to both slack and ticket)
