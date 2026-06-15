@@ -203,6 +203,56 @@ async function reopenClosedDmParticipants(
   }
 }
 
+async function resolveMentionParticipantUserIds(
+  tx: Transaction<Schema>,
+  mentionedUserIds: string[],
+  mentionedGroupIds: string[],
+): Promise<string[]> {
+  const resolvedUserIds = new Set(mentionedUserIds);
+
+  if (mentionedGroupIds.length > 0) {
+    const mappings = await tx.run(
+      zql.user_group_mappings.where(({ cmp }) => cmp('userGroupId', 'IN', mentionedGroupIds)),
+    );
+
+    for (const mapping of mappings) {
+      resolvedUserIds.add(mapping.userId);
+    }
+  }
+
+  return [...resolvedUserIds];
+}
+
+async function addMentionedConversationParticipants(
+  tx: Transaction<Schema>,
+  conversationId: string,
+  channelId: string | null | undefined,
+  userIds: string[],
+  joinedAt: number,
+  lastReplyAt?: number | null,
+): Promise<void> {
+  const existingParticipants = await tx.run(
+    zql.conversation_participants.where('conversationId', conversationId),
+  );
+  const existingParticipantUserIds = new Set(existingParticipants.map(participant => participant.userId));
+
+  for (const userId of userIds) {
+    if (existingParticipantUserIds.has(userId)) continue;
+
+    await tx.mutate.conversation_participants.insert({
+      id: uuidv4(),
+      conversationId,
+      userId,
+      participationType: ConversationParticipation.MENTIONED,
+      isSubscribed: true,
+      joinedAt,
+      channelId,
+      ...(lastReplyAt != null ? { lastReplyAt } : {}),
+    });
+    existingParticipantUserIds.add(userId);
+  }
+}
+
 async function assertCanvasChannelNotArchived(
   tx: Transaction<Schema>,
   channelId: string | null | undefined,
@@ -2139,34 +2189,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Add mentioned users as MENTIONED participants within Zero transaction
           const mentions = extractAllMentions(content);
           logger.info('[MENTION]:', mentions.userIds.length, mentions.groupIds.length, messageId);
-
-          if (mentions.userIds.length > 0) {
-            for (const userId of mentions.userIds) {
-              // Skip if this is the author (already added above)
-              if (userId === authData.sub) {
-                continue;
-              }
-
-              // Check if user is already a participant
-              const existingParticipant = await tx.run(zql.conversation_participants
-                .where('conversationId', conversationId)
-                .where('userId', userId)
-                .one());
-
-              // Only add if not already a participant
-              if (!existingParticipant) {
-                await tx.mutate.conversation_participants.insert({
-                  id: uuidv4(),
-                  conversationId,
-                  userId,
-                  participationType: ConversationParticipation.MENTIONED,
-                  isSubscribed: true,
-                  joinedAt: now,
-                  channelId: channelId,
-                });
-              }
-            }
-          }
+          const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
+            tx,
+            mentions.userIds,
+            mentions.groupIds,
+          );
+          const mentionRecipients = mentionParticipantUserIds.filter(userId => userId !== authData.sub);
+          await addMentionedConversationParticipants(
+            tx,
+            conversationId,
+            channelId,
+            mentionRecipients,
+            now,
+          );
 
           // Create non-participant system messages within Zero transaction
           await createNonParticipantSystemMessages(
@@ -2933,29 +2968,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Add mentioned users as MENTIONED participants within Zero transaction
           const mentions = extractAllMentions(content);
-
-          if (mentions.userIds.length > 0) {
-            for (const userId of mentions.userIds) {
-              // Check if user is already a participant (could be AUTHOR or MENTIONED)
-              const existingMentionedParticipant = await tx.run(zql.conversation_participants
-                .where('conversationId', conversationId)
-                .where('userId', userId)
-                .one());
-
-              // Only add if not already a participant
-              if (!existingMentionedParticipant) {
-                await tx.mutate.conversation_participants.insert({
-                  id: uuidv4(),
-                  conversationId,
-                  userId,
-                  participationType: ConversationParticipation.MENTIONED,
-                  isSubscribed: true,
-                  joinedAt: timestamp,
-                  channelId: conversation.channelId,
-                });
-              }
-            }
-          }
+          const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
+            tx,
+            mentions.userIds,
+            mentions.groupIds,
+          );
+          await addMentionedConversationParticipants(
+            tx,
+            conversationId,
+            conversation.channelId,
+            mentionParticipantUserIds,
+            timestamp,
+            timestamp,
+          );
 
           // Create non-participant system messages within Zero transaction for thread replies
           await createNonParticipantSystemMessages(
@@ -3078,6 +3103,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Only process mention changes if content is being updated
           let newlyMentionedUsers: string[] = [];
+          let newlyMentionedGroups: string[] = [];
           let noLongerMentionedUsers: string[] = [];
 
           if (content !== undefined) {
@@ -3097,6 +3123,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             newlyMentionedUsers = newMentions.userIds.filter(
               userId => !oldMentions.userIds.includes(userId)
             );
+            newlyMentionedGroups = newMentions.groupIds.filter(
+              groupId => !oldMentions.groupIds.includes(groupId)
+            );
 
             // Find users that are no longer mentioned (in old content but not in new)
             noLongerMentionedUsers = oldMentions.userIds.filter(
@@ -3108,30 +3137,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Add newly mentioned users as MENTIONED participants
           // Look up conversation to get channelId for denormalized field
-          const mentionConversation = newlyMentionedUsers.length > 0
+          const mentionConversation = (newlyMentionedUsers.length > 0 || newlyMentionedGroups.length > 0)
             ? await tx.run(zql.conversations.where('conversationId', message.conversationId).one())
             : null;
-          if (newlyMentionedUsers.length > 0) {
-            for (const userId of newlyMentionedUsers) {
-              // Check if user is already a participant (could be AUTHOR or MENTIONED)
-              const existingParticipant = await tx.run(zql.conversation_participants
-                .where('conversationId', message.conversationId)
-                .where('userId', userId)
-                .one());
-
-              // Only add if not already a participant
-              if (!existingParticipant) {
-                await tx.mutate.conversation_participants.insert({
-                  id: uuidv4(),
-                  conversationId: message.conversationId,
-                  userId,
-                  participationType: ConversationParticipation.MENTIONED,
-                  isSubscribed: true,
-                  joinedAt: now,
-                  channelId: mentionConversation?.channelId,
-                });
-              }
-            }
+          if (newlyMentionedUsers.length > 0 || newlyMentionedGroups.length > 0) {
+            const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
+              tx,
+              newlyMentionedUsers,
+              newlyMentionedGroups,
+            );
+            await addMentionedConversationParticipants(
+              tx,
+              message.conversationId,
+              mentionConversation?.channelId,
+              mentionParticipantUserIds,
+              now,
+            );
           }
 
           // Remove users who are no longer mentioned (only if they're MENTIONED type)
