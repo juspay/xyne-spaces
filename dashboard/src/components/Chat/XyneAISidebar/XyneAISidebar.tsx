@@ -30,7 +30,13 @@ import {
 } from '../../../hooks/useAskAISessions';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
 import { fetchV2ConversationMessages } from '../../../services/XyneAI/XyneAISessionsV2Service';
-import type { Message, SummarizerCitation, MessageAttachment, UserTag } from './utils/XyneAITypes';
+import type {
+  Message,
+  SummarizerCitation,
+  MessageAttachment,
+  UserTag,
+  DebugEventRecord,
+} from './utils/XyneAITypes';
 import { buildCitationUrl } from './utils/citationUrlBuilder';
 import { attachmentCitationPreviewStore } from '../../FileViewer/AttachmentCitationPreview';
 import {
@@ -62,6 +68,7 @@ import { useAIOnboarding, ALL_ONBOARDING_SUGGESTIONS } from '../../../contexts/A
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { UserActivityPanel } from './components/UserActivityPanel';
 import { MemoriesPanel } from './components/MemoriesPanel';
+import { AskAIDebugPanel } from './components/AskAIDebugPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
@@ -88,6 +95,8 @@ function newStreamSlotKey(): string {
   return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
+const DEBUGGER_WIDTH_STORAGE_KEY = 'ask-ai-debug-width';
+
 interface XyneAIConfigResponse {
   webSearchAccessible: boolean;
   deepResearchAccessible: boolean;
@@ -101,6 +110,7 @@ interface XyneAISidebarProps {
   canvasInfo?: CanvasInfo | null;
   variant?: 'sidebar' | 'fullscreen';
   onClose?: () => void;
+  onDebuggerOpenChange?: (open: boolean) => void;
   initialConversationId?: string;
   onConversationChange?: (conversationId: string) => void;
   kbCollectionId?: string;
@@ -114,6 +124,7 @@ const XyneAISidebar = ({
   startFreshChat = false,
   variant = 'sidebar',
   onClose,
+  onDebuggerOpenChange,
   initialConversationId,
   onConversationChange,
   kbCollectionId: kbCollectionIdProp,
@@ -130,6 +141,15 @@ const XyneAISidebar = ({
   const [loadingHistorySessionId, setLoadingHistorySessionId] = useState<string | null>(null);
   const [streamingSessionIds, setStreamingSessionIds] = useState<string[]>([]);
   const [currentTraceId, setCurrentTraceId] = useState<string | undefined>();
+  const [debugEvents, setDebugEvents] = useState<DebugEventRecord[]>([]);
+  const [debugArtifactsReadyVersion, setDebugArtifactsReadyVersion] = useState(0);
+  const [showDebugger, setShowDebugger] = useState(false);
+  const [debugTurnIndex, setDebugTurnIndex] = useState<number | null>(null);
+  const [debuggerWidth] = useState(() => {
+    if (typeof window === 'undefined') return 460;
+    const persisted = Number(window.localStorage.getItem(DEBUGGER_WIDTH_STORAGE_KEY));
+    return Number.isFinite(persisted) ? Math.max(460, Math.min(900, persisted)) : 460;
+  });
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
   const [showMemoriesPanel, setShowMemoriesPanel] = useState(false);
@@ -169,6 +189,8 @@ const XyneAISidebar = ({
   const [currentUserTags, setCurrentUserTags] = useState<Record<string, UserTag>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [branchSelections, setBranchSelections] = useState<Record<string, string>>({});
+  const sidebarContentRef = useRef<HTMLDivElement>(null);
+  const [sidebarContentWidth, setSidebarContentWidth] = useState(0);
 
   // Derive the active display path from the full message tree
   const displayMessages = useMemo(
@@ -180,6 +202,13 @@ const XyneAISidebar = ({
     () => messages.some((m: Message) => m.isStreaming),
     [messages],
   );
+  const streamingBotTurnIndex = useMemo(() => {
+    const index = displayMessages.findIndex(
+      message => message.type === 'bot' && message.isStreaming,
+    );
+    if (index < 0) return -1;
+    return displayMessages.slice(0, index + 1).filter(message => message.type === 'bot').length - 1;
+  }, [displayMessages]);
 
   // Legacy conversation: no message has parentId — branching features disabled
   const isLegacyConversation = useMemo(
@@ -408,6 +437,9 @@ const XyneAISidebar = ({
   // isV2 is true when the global config is v2 OR when a non-ask-ai claw agent is selected.
   // Selecting a claw agent forces v2 backend for queries, sessions, and messages.
   const isV2 = askAIVersion === 'v2' || selectedAgentSlug !== null;
+  useEffect(() => {
+    onDebuggerOpenChange?.(showDebugger && isV2);
+  }, [showDebugger, isV2, onDebuggerOpenChange]);
   // When selectedAgentSlug is null (Ask AI default), look for 'ask-ai' agent in v2 mode
   const selectedAgent = selectedAgentSlug
     ? (accessibleAgents.find(a => a.slug === selectedAgentSlug) ?? null)
@@ -445,6 +477,8 @@ const XyneAISidebar = ({
     setMessages,
     setConversationId,
     setCurrentTraceId,
+    setDebugEvents,
+    setDebugArtifactsReadyVersion,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
     deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
     researchContext: selectedResearchContext,
@@ -475,6 +509,9 @@ const XyneAISidebar = ({
       setBranchSelections({});
       setConversationId('');
       setCurrentTraceId(undefined);
+      setDebugEvents([]);
+      setDebugArtifactsReadyVersion(0);
+      setShowDebugger(false);
       setAttachments([]);
       setSelectedActivities([]);
       setShowHistorySidebar(false);
@@ -846,6 +883,8 @@ const XyneAISidebar = ({
 
       if (live && live.status === 'streaming') {
         setMessages(live.messages);
+        setDebugEvents(live.debugEvents);
+        setDebugArtifactsReadyVersion(live.debugArtifactsReadyVersion);
         if (live.sessionId) {
           setConversationId(live.sessionId);
         }
@@ -861,6 +900,8 @@ const XyneAISidebar = ({
       }
 
       if (isV2) {
+        setDebugEvents([]);
+        setDebugArtifactsReadyVersion(0);
         const clawMessages = await fetchV2ConversationMessages(
           conversation.sessionId,
           selectedAgentSlug,
@@ -995,6 +1036,9 @@ const XyneAISidebar = ({
     setConversationId('');
     setConversationChannelId(null);
     setCurrentTraceId(undefined);
+    setDebugEvents([]);
+    setDebugArtifactsReadyVersion(0);
+    setShowDebugger(false);
     setInputValue('');
     setAttachments([]);
     setSelectedActivities([]);
@@ -1589,11 +1633,35 @@ const XyneAISidebar = ({
     onUserTagsChange: setCurrentUserTags,
   };
 
+  const showInlineDebugger = showDebugger && isV2;
+  const isCompactSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 760;
+  const isTightSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 640;
+
+  useEffect(() => {
+    const el = sidebarContentRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const updateWidth = (): void => {
+      setSidebarContentWidth(el.clientWidth);
+    };
+
+    updateWidth();
+    const observer = new ResizeObserver(() => updateWidth());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const rafId = requestAnimationFrame(() => {
+      setSidebarContentWidth(sidebarContentRef.current?.clientWidth ?? 0);
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [showInlineDebugger]);
+
   return (
     <div
-      ref={dragAndDropAreaRef}
       className={cn(
-        'w-full bg-background flex flex-col min-h-0 relative border',
+        'grid h-full min-h-0 w-full overflow-hidden border bg-background',
         isFullscreen
           ? isMobile
             ? 'min-h-full pb-[calc(6rem+env(safe-area-inset-bottom))]'
@@ -1609,66 +1677,83 @@ const XyneAISidebar = ({
               borderColor: selectedAgentColor,
             }
           : {}),
+        gridTemplateColumns: showInlineDebugger
+          ? `minmax(0, 1fr) 8px ${debuggerWidth}px`
+          : 'minmax(0, 1fr)',
       }}
     >
-      {/* Drag and Drop Overlay */}
-      {isDragging && (
-        <div className='absolute inset-0 z-50 bg-background/95 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center border-2 border-dashed border-primary/50'>
-          <div className='flex flex-col items-center gap-3'>
-            <div className='p-4 rounded-full bg-primary/10'>
-              <Upload className='w-8 h-8 text-primary' />
-            </div>
-            <div className='text-center'>
-              <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
-              <p className='text-sm text-muted-foreground'>
-                Images, PDF, text, office documents, or data files
-              </p>
+      <div
+        ref={dragAndDropAreaRef}
+        className={cn(
+          'relative flex min-h-0 min-w-0 flex-1 flex-col bg-background',
+          showInlineDebugger && 'border-r border-border/70',
+        )}
+      >
+        {/* Drag and Drop Overlay */}
+        {isDragging && (
+          <div className='absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+            <div className='flex flex-col items-center gap-3'>
+              <div className='rounded-full bg-primary/10 p-4'>
+                <Upload className='h-8 w-8 text-primary' />
+              </div>
+              <div className='text-center'>
+                <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+                <p className='text-sm text-muted-foreground'>
+                  Images, PDF, text, office documents, or data files
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-      {/* Header */}
-      {showHistorySidebar ? (
-        <ConversationHistory
-          conversations={conversations}
-          conversationId={conversationId}
-          loadingSessionId={loadingHistorySessionId}
-          streamingSessionIds={streamingSessionIds}
-          onBack={() => setShowHistorySidebar(false)}
-          onLoadConversation={(conversation): void => {
-            void handleLoadConversation(conversation);
-          }}
-          onToggleStar={handleToggleStar}
-          onDeleteConversation={handleDeleteConversation}
-          onRenameConversation={handleRenameConversation}
-          selectedAgentSlug={selectedAgentSlug}
-          agents={accessibleAgents}
-          onSelectAgent={handleSelectAgentFromHistory}
-          selectedAgentColor={selectedAgentColor}
-        />
-      ) : showUserActivityPanel ? (
-        <UserActivityPanel
-          isOpen={showUserActivityPanel}
-          onClose={() => setShowUserActivityPanel(false)}
-          onAddToChat={handleAddActivities}
-        />
-      ) : showMemoriesPanel ? (
-        <MemoriesPanel onClose={() => setShowMemoriesPanel(false)} />
-      ) : (
-        <>
-          {/* Header */}
-          {aiOnboarding.isActive ? (
-            <XyneAIOnboardingHeader onClose={completeOnboarding} />
-          ) : isFullscreen && messages.length === 0 ? null : (
-            <>
+        )}
+        {showHistorySidebar ? (
+          <ConversationHistory
+            conversations={conversations}
+            conversationId={conversationId}
+            loadingSessionId={loadingHistorySessionId}
+            streamingSessionIds={streamingSessionIds}
+            onBack={() => setShowHistorySidebar(false)}
+            onLoadConversation={(conversation): void => {
+              void handleLoadConversation(conversation);
+            }}
+            onToggleStar={handleToggleStar}
+            onDeleteConversation={handleDeleteConversation}
+            onRenameConversation={handleRenameConversation}
+            selectedAgentSlug={selectedAgentSlug}
+            agents={accessibleAgents}
+            onSelectAgent={handleSelectAgentFromHistory}
+            selectedAgentColor={selectedAgentColor}
+          />
+        ) : showUserActivityPanel ? (
+          <UserActivityPanel
+            isOpen={showUserActivityPanel}
+            onClose={() => setShowUserActivityPanel(false)}
+            onAddToChat={handleAddActivities}
+          />
+        ) : showMemoriesPanel ? (
+          <MemoriesPanel onClose={() => setShowMemoriesPanel(false)} />
+        ) : (
+          <div ref={sidebarContentRef} className='flex h-full min-h-0 flex-col'>
+            {aiOnboarding.isActive ? (
+              <XyneAIOnboardingHeader onClose={completeOnboarding} />
+            ) : isFullscreen && messages.length === 0 ? null : (
               <XyneAIHeader
                 onNewChat={handleNewChat}
                 onShowHistory={() => setShowHistorySidebar(true)}
                 onShowUserActivity={() => setShowUserActivityPanel(true)}
                 onShowMemories={() => setShowMemoriesPanel(true)}
                 isMobile={isMobile}
+                isCompact={isCompactSidebar}
+                isTight={isTightSidebar}
                 title={isFullscreen ? 'Xyne AI' : selectedAgentName || 'Ask AI'}
                 selectedAgent={selectedAgent}
+                onShowDebugger={
+                  isV2
+                    ? () => {
+                        setDebugTurnIndex(null);
+                        setShowDebugger(true);
+                      }
+                    : undefined
+                }
                 {...(isFullscreen
                   ? {
                       hideMemoriesAndActivity: true,
@@ -1685,196 +1770,69 @@ const XyneAISidebar = ({
                     }
                   : {})}
               />
-            </>
-          )}
+            )}
 
-          {hasBackgroundStreamingElsewhere ? (
-            <div className='flex-shrink-0 px-4 py-2 text-xs text-muted-foreground border-b border-border bg-muted/35'>
-              Another chat is still generating. Open history to see which one is marked{' '}
-              <span className='font-medium text-foreground'>Responding</span>.
-            </div>
-          ) : null}
-
-          {/* Content - Scrollable Area */}
-          <div className='flex-1 overflow-y-auto overflow-x-hidden min-h-0'>
-            {isLoadingConversation ? (
-              // Shimmer loading state
-              <div className='px-4 py-4'>
-                <div className='space-y-4'>
-                  {/* User message shimmer */}
-                  <div className='flex justify-end'>
-                    <div className='w-3/4 h-12 bg-muted rounded-xl animate-pulse' />
-                  </div>
-                  {/* Bot message shimmer */}
-                  <div className='flex justify-start'>
-                    <div className='w-full space-y-2'>
-                      <div className='h-4 bg-muted rounded animate-pulse' />
-                      <div className='h-4 bg-muted rounded animate-pulse w-5/6' />
-                      <div className='h-4 bg-muted rounded animate-pulse w-4/6' />
-                    </div>
-                  </div>
-                </div>
+            {hasBackgroundStreamingElsewhere ? (
+              <div className='flex-shrink-0 border-b border-border bg-muted/35 px-4 py-2 text-xs text-muted-foreground'>
+                Another chat is still generating. Open history to see which one is marked{' '}
+                <span className='font-medium text-foreground'>Responding</span>.
               </div>
-            ) : messages.length === 0 ? (
-              isFullscreen ? (
-                <AILandingHeroErrorBoundary>
-                  <AILandingHero
-                    renderInput={
-                      <XyneAIInputSection
-                        ref={xyneAIInputRef}
-                        isOnboarding={false}
-                        showChannelTag={false}
-                        isStreaming={false}
-                        contextPanelPosition='top'
-                        selectedAgentSlug={selectedAgentSlug}
-                        agents={accessibleAgents}
-                        onSelectAgent={handleSelectAgent}
-                        {...sharedInputSectionProps}
-                      />
-                    }
-                  />
-                </AILandingHeroErrorBoundary>
-              ) : aiOnboarding.isActive ? (
-                <div className='flex flex-col h-full px-4 py-6'>
-                  <div className='flex items-start gap-2'>
-                    <div className='mt-0.5 flex-shrink-0'>
-                      <XyneAIStar size={18} />
+            ) : null}
+
+            <div className='min-h-0 flex-1 overflow-hidden'>
+              <div className='flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden'>
+                {isLoadingConversation ? (
+                  <div className='px-4 py-4'>
+                    <div className='space-y-4'>
+                      <div className='flex justify-end'>
+                        <div className='h-12 w-3/4 animate-pulse rounded-xl bg-muted' />
+                      </div>
+                      <div className='flex justify-start'>
+                        <div className='w-full space-y-2'>
+                          <div className='h-4 animate-pulse rounded bg-muted' />
+                          <div className='h-4 w-5/6 animate-pulse rounded bg-muted' />
+                          <div className='h-4 w-4/6 animate-pulse rounded bg-muted' />
+                        </div>
+                      </div>
                     </div>
-                    <p className='text-foreground text-sm leading-relaxed'>
-                      Hi! I&apos;m your AI assistant. I can help you learn about everything Xyne
-                      Spaces has to offer. Try asking me one of the questions below, or ask anything
-                      you&apos;d like!
-                    </p>
                   </div>
-                  {/* Onboarding suggestion chips */}
-                  <div className='flex flex-wrap gap-2 mt-6'>
-                    {visibleSuggestions.map(suggestion => (
-                      <button
-                        key={suggestion}
-                        onClick={() => handleSuggestionClick(suggestion)}
-                        className="px-3 py-1.5 rounded-full border border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-xs leading-5 font-['Inter']"
-                        data-track-category='AIOnboarding'
-                        data-track-name='SuggestionChip'
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <XyneAISuggestions
-                  queries={suggestionQueries}
-                  onSuggestionClick={handleSuggestionClick}
-                  selectedAgentSlug={selectedAgentSlug}
-                />
-              )
-            ) : (
-              <div className={cn(isFullscreen ? 'flex justify-center' : '')}>
-                <div
-                  className={cn(
-                    'py-4',
-                    aiOnboarding.isActive && 'bot-markdown-content',
-                    isFullscreen ? 'w-full max-w-2xl px-4' : 'px-4',
-                  )}
-                >
-                  <div className='space-y-4 max-w-full'>
-                    {/* Onboarding welcome message — persists at top of messages list */}
-                    {aiOnboarding.isActive && (
-                      <div className='flex items-start gap-2 mb-2'>
+                ) : messages.length === 0 ? (
+                  isFullscreen ? (
+                    <AILandingHeroErrorBoundary>
+                      <AILandingHero
+                        renderInput={
+                          <XyneAIInputSection
+                            ref={xyneAIInputRef}
+                            isOnboarding={false}
+                            showChannelTag={false}
+                            isStreaming={false}
+                            contextPanelPosition='top'
+                            selectedAgentSlug={selectedAgentSlug}
+                            agents={accessibleAgents}
+                            onSelectAgent={handleSelectAgent}
+                            {...sharedInputSectionProps}
+                          />
+                        }
+                      />
+                    </AILandingHeroErrorBoundary>
+                  ) : aiOnboarding.isActive ? (
+                    <div className='flex h-full flex-col px-4 py-6'>
+                      <div className='flex items-start gap-2'>
                         <div className='mt-0.5 flex-shrink-0'>
                           <XyneAIStar size={18} />
                         </div>
-                        <p className='text-foreground text-sm leading-relaxed'>
+                        <p className='text-sm leading-relaxed text-foreground'>
                           Hi! I&apos;m your AI assistant. I can help you learn about everything Xyne
                           Spaces has to offer. Try asking me one of the questions below, or ask
                           anything you&apos;d like!
                         </p>
                       </div>
-                    )}
-                    {(() => {
-                      let lastBotIndex = -1;
-                      let lastUserIndex = -1;
-                      for (let i = displayMessages.length - 1; i >= 0; i--) {
-                        if (lastBotIndex === -1 && displayMessages[i]?.type === 'bot') {
-                          lastBotIndex = i;
-                        }
-                        if (lastUserIndex === -1 && displayMessages[i]?.type === 'user') {
-                          lastUserIndex = i;
-                        }
-                        if (lastBotIndex !== -1 && lastUserIndex !== -1) break;
-                      }
-                      // Build sibling info in one O(n) pass over all messages
-                      // so per-message getSiblings calls aren't O(n²) in the render loop
-                      const siblingIndexById = new Map<string, number>();
-                      const parentGroups = new Map<string, string[]>();
-                      for (const m of messages) {
-                        const key = m.parentId ?? BRANCH_ROOT_KEY;
-                        const group = parentGroups.get(key);
-                        if (group) {
-                          group.push(m.id);
-                        } else {
-                          parentGroups.set(key, [m.id]);
-                        }
-                      }
-                      for (const [, group] of parentGroups) {
-                        group.forEach((id, i) => siblingIndexById.set(id, i));
-                      }
-                      return displayMessages.map((message: Message, index: number) => {
-                        const isLatestBotMessage = message.type === 'bot' && index === lastBotIndex;
-                        const isLatestUserMessage =
-                          message.type === 'user' && index === lastUserIndex;
-                        const parentKey = message.parentId ?? BRANCH_ROOT_KEY;
-                        const groupIds = parentGroups.get(parentKey) ?? [];
-                        const siblingCount = groupIds.length;
-                        const siblingIndex = siblingIndexById.get(message.id) ?? 0;
-                        const hasBranches = siblingCount > 1;
-                        return (
-                          <MessageItem
-                            key={message.id}
-                            message={message}
-                            onFeedback={(id, type) => void handleFeedback(id, type)}
-                            onCitationClick={handleCitationClick}
-                            onSummarizerCitationClick={handleSummarizerCitationClick}
-                            feedbackValue={feedbackMap[message.id] || null}
-                            onRegenerate={
-                              !isLegacyConversation && isLatestBotMessage
-                                ? () => void handleRegenerate()
-                                : undefined
-                            }
-                            onEditSubmit={
-                              !isLegacyConversation && isLatestUserMessage
-                                ? (newContent: string) =>
-                                    void handleEditMessage(message.id, newContent)
-                                : undefined
-                            }
-                            onEditMobile={
-                              !isLegacyConversation && isLatestUserMessage && isMobile
-                                ? () => handleEditMobile(message.id)
-                                : undefined
-                            }
-                            isLatestBotMessage={isLatestBotMessage}
-                            branchInfo={
-                              !isLegacyConversation && hasBranches
-                                ? { index: siblingIndex, total: siblingCount }
-                                : undefined
-                            }
-                            onBranchNavigate={
-                              !isLegacyConversation && hasBranches
-                                ? (dir: 'prev' | 'next') => handleBranchNavigate(message.id, dir)
-                                : undefined
-                            }
-                          />
-                        );
-                      });
-                    })()}
-                    {/* Onboarding suggestion chips after messages */}
-                    {aiOnboarding.isActive && visibleSuggestions.length > 0 && (
-                      <div className='flex flex-wrap gap-2 mt-4'>
+                      <div className='mt-6 flex flex-wrap gap-2'>
                         {visibleSuggestions.map(suggestion => (
                           <button
                             key={suggestion}
                             onClick={() => handleSuggestionClick(suggestion)}
-                            className="px-3 py-1.5 rounded-full border border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-xs leading-5 font-['Inter']"
+                            className='rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                             data-track-category='AIOnboarding'
                             data-track-name='SuggestionChip'
                           >
@@ -1882,53 +1840,217 @@ const XyneAISidebar = ({
                           </button>
                         ))}
                       </div>
-                    )}
-                    {aiOnboarding.isActive && visibleSuggestions.length === 0 && (
-                      <p className='text-muted-foreground text-sm mt-4'>
-                        You can also ask me anything else!
-                      </p>
-                    )}
-                    <div ref={messagesEndRef} />
+                    </div>
+                  ) : (
+                    <XyneAISuggestions
+                      queries={suggestionQueries}
+                      onSuggestionClick={handleSuggestionClick}
+                      selectedAgentSlug={selectedAgentSlug}
+                    />
+                  )
+                ) : (
+                  <div className={cn(isFullscreen ? 'flex justify-center' : '')}>
+                    <div
+                      className={cn(
+                        'py-4',
+                        aiOnboarding.isActive && 'bot-markdown-content',
+                        isFullscreen ? 'w-full max-w-2xl px-4' : 'px-4',
+                      )}
+                    >
+                      <div className='max-w-full space-y-4'>
+                        {aiOnboarding.isActive && (
+                          <div className='mb-2 flex items-start gap-2'>
+                            <div className='mt-0.5 flex-shrink-0'>
+                              <XyneAIStar size={18} />
+                            </div>
+                            <p className='text-sm leading-relaxed text-foreground'>
+                              Hi! I&apos;m your AI assistant. I can help you learn about everything
+                              Xyne Spaces has to offer. Try asking me one of the questions below, or
+                              ask anything you&apos;d like!
+                            </p>
+                          </div>
+                        )}
+                        {(() => {
+                          let lastBotIndex = -1;
+                          let lastUserIndex = -1;
+                          for (let i = displayMessages.length - 1; i >= 0; i--) {
+                            if (lastBotIndex === -1 && displayMessages[i]?.type === 'bot') {
+                              lastBotIndex = i;
+                            }
+                            if (lastUserIndex === -1 && displayMessages[i]?.type === 'user') {
+                              lastUserIndex = i;
+                            }
+                            if (lastBotIndex !== -1 && lastUserIndex !== -1) break;
+                          }
+                          const siblingIndexById = new Map<string, number>();
+                          const parentGroups = new Map<string, string[]>();
+                          for (const m of messages) {
+                            const key = m.parentId ?? BRANCH_ROOT_KEY;
+                            const group = parentGroups.get(key);
+                            if (group) {
+                              group.push(m.id);
+                            } else {
+                              parentGroups.set(key, [m.id]);
+                            }
+                          }
+                          for (const [, group] of parentGroups) {
+                            group.forEach((id, i) => siblingIndexById.set(id, i));
+                          }
+                          return displayMessages.map((message: Message, index: number) => {
+                            const isLatestBotMessage =
+                              message.type === 'bot' && index === lastBotIndex;
+                            const isLatestUserMessage =
+                              message.type === 'user' && index === lastUserIndex;
+                            const parentKey = message.parentId ?? BRANCH_ROOT_KEY;
+                            const groupIds = parentGroups.get(parentKey) ?? [];
+                            const siblingCount = groupIds.length;
+                            const siblingIndex = siblingIndexById.get(message.id) ?? 0;
+                            const hasBranches = siblingCount > 1;
+                            const botTurnIndex =
+                              message.type === 'bot'
+                                ? displayMessages
+                                    .slice(0, index + 1)
+                                    .filter(item => item.type === 'bot').length - 1
+                                : -1;
+                            return (
+                              <MessageItem
+                                key={message.id}
+                                message={message}
+                                onFeedback={(id, type) => void handleFeedback(id, type)}
+                                onCitationClick={handleCitationClick}
+                                onSummarizerCitationClick={handleSummarizerCitationClick}
+                                feedbackValue={feedbackMap[message.id] || null}
+                                onRegenerate={
+                                  !isLegacyConversation && isLatestBotMessage
+                                    ? () => void handleRegenerate()
+                                    : undefined
+                                }
+                                onEditSubmit={
+                                  !isLegacyConversation && isLatestUserMessage
+                                    ? (newContent: string) =>
+                                        void handleEditMessage(message.id, newContent)
+                                    : undefined
+                                }
+                                onEditMobile={
+                                  !isLegacyConversation && isLatestUserMessage && isMobile
+                                    ? () => handleEditMobile(message.id)
+                                    : undefined
+                                }
+                                isLatestBotMessage={isLatestBotMessage}
+                                branchInfo={
+                                  !isLegacyConversation && hasBranches
+                                    ? { index: siblingIndex, total: siblingCount }
+                                    : undefined
+                                }
+                                onBranchNavigate={
+                                  !isLegacyConversation && hasBranches
+                                    ? (dir: 'prev' | 'next') =>
+                                        handleBranchNavigate(message.id, dir)
+                                    : undefined
+                                }
+                                onDebug={
+                                  isV2 && message.type === 'bot'
+                                    ? () => {
+                                        setDebugTurnIndex(botTurnIndex);
+                                        setShowDebugger(true);
+                                      }
+                                    : undefined
+                                }
+                              />
+                            );
+                          });
+                        })()}
+                        {aiOnboarding.isActive && visibleSuggestions.length > 0 && (
+                          <div className='mt-4 flex flex-wrap gap-2'>
+                            {visibleSuggestions.map(suggestion => (
+                              <button
+                                key={suggestion}
+                                onClick={() => handleSuggestionClick(suggestion)}
+                                className='rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
+                                data-track-category='AIOnboarding'
+                                data-track-name='SuggestionChip'
+                              >
+                                {suggestion}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {aiOnboarding.isActive && visibleSuggestions.length === 0 && (
+                          <p className='mt-4 text-sm text-muted-foreground'>
+                            You can also ask me anything else!
+                          </p>
+                        )}
+                        <div ref={messagesEndRef} />
+                      </div>
+                    </div>
                   </div>
+                )}
+              </div>
+            </div>
+
+            {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
+              <div className='px-4 py-2'>
+                <button
+                  onClick={completeOnboarding}
+                  className='w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90'
+                  data-track-category='AIOnboarding'
+                  data-track-name='DoneExploring'
+                >
+                  Done exploring — open my workspace
+                </button>
+              </div>
+            )}
+
+            {!(isFullscreen && messages.length === 0) && (
+              <div className={cn(isFullscreen && 'flex justify-center px-4 pb-6')}>
+                <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
+                  <XyneAIInputSection
+                    ref={xyneAIInputRef}
+                    isOnboarding={aiOnboarding.isActive}
+                    showChannelTag={true}
+                    isStreaming={isActiveSessionStreaming}
+                    contextPanelPosition='bottom'
+                    selectedAgentSlug={selectedAgentSlug}
+                    agents={accessibleAgents}
+                    onSelectAgent={handleSelectAgent}
+                    compactToolbar={isCompactSidebar}
+                    tightToolbar={isTightSidebar}
+                    {...sharedInputSectionProps}
+                    kbCollectionId={kbCollectionIdProp}
+                    onSelectedCollectionsChange={setSelectedCollectionIds}
+                  />
                 </div>
               </div>
             )}
           </div>
+        )}
+      </div>
 
-          {/* Done Exploring Button - shown after 3+ questions during onboarding */}
-          {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
-            <div className='px-4 py-2'>
-              <button
-                onClick={completeOnboarding}
-                className='w-full py-2.5 px-4 rounded-xl bg-primary text-primary-foreground font-medium text-sm transition-colors hover:bg-primary/90'
-                data-track-category='AIOnboarding'
-                data-track-name='DoneExploring'
-              >
-                Done exploring — open my workspace
-              </button>
-            </div>
-          )}
-
-          {/* Input Box — hidden in fullscreen landing mode (input is rendered inside AILandingHero) */}
-          {!(isFullscreen && messages.length === 0) && (
-            <div className={cn(isFullscreen && 'flex justify-center px-4 pb-6')}>
-              <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
-                <XyneAIInputSection
-                  ref={xyneAIInputRef}
-                  isOnboarding={aiOnboarding.isActive}
-                  showChannelTag={true}
-                  isStreaming={isActiveSessionStreaming}
-                  contextPanelPosition='bottom'
-                  selectedAgentSlug={selectedAgentSlug}
-                  agents={accessibleAgents}
-                  onSelectAgent={handleSelectAgent}
-                  {...sharedInputSectionProps}
-                  kbCollectionId={kbCollectionIdProp}
-                  onSelectedCollectionsChange={setSelectedCollectionIds}
-                />
-              </div>
-            </div>
-          )}
+      {showInlineDebugger && (
+        <>
+          {/* <button
+            type='button'
+            aria-label='Resize debugger panel'
+            className='group relative z-10 w-2 shrink-0 cursor-col-resize bg-border/60 transition-colors hover:bg-primary/40'
+            onMouseDown={handleDebuggerResizeStart}
+            data-track-category='XyneAI'
+            data-track-name='DEBUG_PANEL_RESIZE'
+          >
+            <span className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-primary/60' />
+          </button> */}
+          <AskAIDebugPanel
+            open={showDebugger && isV2}
+            inline
+            width={debuggerWidth}
+            conversationId={conversationId || streamThreadKey}
+            agentSlug={selectedAgentSlug || 'ask-ai'}
+            liveEvents={debugEvents}
+            running={isActiveSessionStreaming}
+            artifactsReadyVersion={debugArtifactsReadyVersion}
+            selectedTurnIndex={debugTurnIndex}
+            selectedTurnLive={debugTurnIndex !== null && debugTurnIndex === streamingBotTurnIndex}
+            onClose={() => setShowDebugger(false)}
+          />
         </>
       )}
     </div>

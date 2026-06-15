@@ -90,6 +90,15 @@ export interface ClawMessagesResponse {
   invocationsByMsgId?: Record<string, unknown[]>;
 }
 
+export interface ClawDebugArtifactBundle {
+  conversationId: string;
+  debugDir?: string;
+  debugSession: Record<string, unknown> | null;
+  debugEvents: Record<string, unknown>[] | null;
+  runs: Array<{ fileName: string; data: Record<string, unknown> }>;
+  subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
+}
+
 export interface ClawActionApprovalResult {
   success: boolean;
   data?: { content: string };
@@ -219,14 +228,14 @@ export async function listClawAgentsInChannel(channelId: string): Promise<Channe
   const channelParticipants = await db.channelParticipant.findMany({
     where: {
       channelId,
-      userId: { in: installedApps.map(app => app.userId) },
+      userId: { in: installedApps.map((app) => app.userId) },
     },
     select: {
       userId: true,
     },
   });
 
-  const participantUserIds = new Set(channelParticipants.map(p => p.userId));
+  const participantUserIds = new Set(channelParticipants.map((p) => p.userId));
 
   // Get user details for participants
   const users = await db.user.findMany({
@@ -239,7 +248,7 @@ export async function listClawAgentsInChannel(channelId: string): Promise<Channe
     },
   });
 
-  const userMap = new Map(users.map(u => [u.id, u]));
+  const userMap = new Map(users.map((u) => [u.id, u]));
 
   // Extract agent slugs from webhook URLs
   // Production URL format: https://spaces.xyne.juspay.net/claw/api/v1/webhook/{agent-slug}
@@ -255,7 +264,7 @@ export async function listClawAgentsInChannel(channelId: string): Promise<Channe
     // Try to match /webhook/{agent-slug} pattern first (production format)
     // Fallback to extracting the last path segment
     let agentSlug: string | null = null;
-    
+
     const webhookMatch = url.match(/\/webhook\/([^/?#]+)/);
     if (webhookMatch) {
       agentSlug = webhookMatch[1] ?? null;
@@ -263,11 +272,11 @@ export async function listClawAgentsInChannel(channelId: string): Promise<Channe
       // Fallback: extract the last path segment after /claw/
       const pathAfterClaw = url.split('/claw/')[1];
       if (pathAfterClaw) {
-        const segments = pathAfterClaw.split('/').filter(s => s.length > 0);
+        const segments = pathAfterClaw.split('/').filter((s) => s.length > 0);
         agentSlug = segments[segments.length - 1] ?? null;
       }
     }
-    
+
     if (!agentSlug) continue;
 
     agentSlugsFromApps.push({ userId: app.userId, agentSlug });
@@ -298,9 +307,7 @@ export async function listClawAgentsInChannel(channelId: string): Promise<Channe
  *   - Images → forwarded as-is for LLM vision
  *   - Text files → decoded and embedded into the task
  */
-function processAttachmentsForRun(
-  attachments?: ClawRunRequest['attachments'],
-): {
+function processAttachmentsForRun(attachments?: ClawRunRequest['attachments']): {
   imageAttachments: Array<{ fileName: string; mimeType: string; data: string }>;
   textFileContents?: string;
   contextFiles: Array<{ path: string; content: string }>;
@@ -313,7 +320,7 @@ function processAttachmentsForRun(
     return { imageAttachments, contextFiles };
   }
 
-  const withMime = attachments.map(att => ({
+  const withMime = attachments.map((att) => ({
     ...att,
     mimeType: inferMimeType(att.filename, att.mimeType),
   }));
@@ -351,7 +358,7 @@ function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
     parts.push(
       `You have access to the query-codebase and review-pull-request tools for codebase analysis. ` +
         `The user has selected "${req.researchContext.name}" ${req.researchContext.type} for research. ` +
-        `Use these tools when the user asks about code, repositories, technical implementation, or needs a PR review.`,
+        `Use these tools when the user asks about code, repositories, technical implementation, or needs a PR review.`
     );
   }
   if (req.createCanvasEnabled) {
@@ -359,20 +366,20 @@ function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
       `You MUST create a canvas document with your response using the spaces-create-canvas tool (available in the spaces subagent). ` +
         `After completing your analysis, call spaces-create-canvas with a descriptive title and your complete response formatted in markdown. ` +
         `After the tool returns, include the canvas URL in your response so the user can click on it. ` +
-        `This is MANDATORY - the user requires the output in a canvas document with a clickable link.`,
+        `This is MANDATORY - the user requires the output in a canvas document with a clickable link.`
     );
   }
   if (req.webSearchEnabled) {
     parts.push(
       `The user has enabled web search. You have access to the web-search tool to find current information from the internet. ` +
-        `Use it when the user asks about recent events, current data, or any topic requiring up-to-date information beyond your training data.`,
+        `Use it when the user asks about recent events, current data, or any topic requiring up-to-date information beyond your training data.`
     );
   }
   if (req.deepResearchEnabled) {
     parts.push(
       `The user has enabled deep research. You have access to the deep-research tool for comprehensive multi-step research. ` +
         `Use it for complex research questions that require thorough investigation, multiple sources, and a detailed report. ` +
-        `This tool takes 1-10 minutes to complete and generates a comprehensive report.`,
+        `This tool takes 1-10 minutes to complete and generates a comprehensive report.`
     );
   }
 
@@ -385,7 +392,7 @@ function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
 export async function runClawAgentStream(
   req: { headers?: { cookie?: string } },
   res: Response,
-  request: ClawRunRequest,
+  request: ClawRunRequest
 ): Promise<ClawRunStreamResult> {
   const clawAuthUrl = `${getClawBaseUrl()}/claw/api/v1/run/stream`;
   const clawConversationId = request.sessionId || `chat-${randomUUID()}`;
@@ -398,7 +405,7 @@ export async function runClawAgentStream(
 
   // Process attachments
   const { imageAttachments, textFileContents, contextFiles } = processAttachmentsForRun(
-    request.attachments,
+    request.attachments
   );
 
   let enhancedTask = request.query;
@@ -499,7 +506,7 @@ export async function runClawAgentStream(
                   type: 'start',
                   sessionId: clawConversationId,
                   traceId: parsed.sessionId,
-                })}\n\n`,
+                })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'delta') {
@@ -507,7 +514,7 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'delta',
                   content: parsed.content || parsed.delta,
-                })}\n\n`,
+                })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'reasoning') {
@@ -515,7 +522,7 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'reasoning_delta',
                   reasoningDelta: parsed.delta || parsed.reasoningDelta,
-                })}\n\n`,
+                })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'invocation') {
@@ -523,7 +530,7 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'tool_invocation',
                   toolInvocation: parsed,
-                })}\n\n`,
+                })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'attachment') {
@@ -531,7 +538,24 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'attachment',
                   attachment: parsed,
-                })}\n\n`,
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'debug') {
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'debug_event',
+                  debugEvent: parsed.debugEvent,
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'debug_artifacts_ready') {
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'debug_artifacts_ready',
+                  sessionId: parsed.sessionId,
+                  conversationId: parsed.conversationId || clawConversationId,
+                })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'done') {
@@ -543,7 +567,7 @@ export async function runClawAgentStream(
                   status: parsed.status,
                   ...(parsed.attachments?.length && { attachments: parsed.attachments }),
                   ...(parsed.pendingActions?.length && { pendingActions: parsed.pendingActions }),
-                })}\n\n`,
+                })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'error') {
@@ -551,7 +575,7 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'error',
                   error: parsed.error || 'Unknown error',
-                })}\n\n`,
+                })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else {
@@ -601,9 +625,10 @@ interface RawClawAgent {
   }>;
 }
 
-export async function listAccessibleClawAgents(
-  req: { headers?: { cookie?: string }; userId: string },
-): Promise<{ success: boolean; data: AccessibleClawAgent[] }> {
+export async function listAccessibleClawAgents(req: {
+  headers?: { cookie?: string };
+  userId: string;
+}): Promise<{ success: boolean; data: AccessibleClawAgent[] }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agents?userId=${encodeURIComponent(req.userId)}`;
   const response = await fetch(url, {
     headers: {
@@ -619,18 +644,22 @@ export async function listAccessibleClawAgents(
   }
 
   const result = (await response.json()) as { success: boolean; data: RawClawAgent[] };
-  
+
   // Transform raw agent data to extract tool/skill/subagent names from nested structures
-  const transformedData: AccessibleClawAgent[] = result.data.map(agent => {
+  const transformedData: AccessibleClawAgent[] = result.data.map((agent) => {
     return {
       slug: agent.slug,
       name: agent.name,
       color: agent.color || '#6366f1',
       description: agent.description,
       // Extract tool slugs from nested AgentTool -> Tool structure (matches xyne-claw dashboard)
-      tools: agent.tools?.map(at => at.tool?.slug || at.tool?.name || at.toolId).filter((n): n is string => Boolean(n)),
+      tools: agent.tools
+        ?.map((at) => at.tool?.slug || at.tool?.name || at.toolId)
+        .filter((n): n is string => Boolean(n)),
       // Extract skill names from nested AgentSkill -> Skill structure
-      skills: agent.skills?.map(as => as.skill?.name || as.skill?.label || as.skillId).filter((n): n is string => Boolean(n)),
+      skills: agent.skills
+        ?.map((as) => as.skill?.name || as.skill?.label || as.skillId)
+        .filter((n): n is string => Boolean(n)),
       // Subagents are stored in agent.config.tools.subagents (matches xyne-claw dashboard)
       subagents: agent.config?.tools?.subagents ?? [],
     };
@@ -641,7 +670,7 @@ export async function listAccessibleClawAgents(
 
 export async function listClawConversations(
   req: { headers?: { cookie?: string }; userId: string },
-  agentSlug?: string,
+  agentSlug?: string
 ): Promise<{ success: boolean; data: ClawConversationSummary[] }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/conversations?userId=${encodeURIComponent(req.userId)}`;
@@ -664,7 +693,7 @@ export async function listClawConversations(
 export async function getClawConversationMessages(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,
-  agentSlug?: string,
+  agentSlug?: string
 ): Promise<ClawMessagesResponse> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/messages`;
@@ -684,6 +713,31 @@ export async function getClawConversationMessages(
   return (await response.json()) as ClawMessagesResponse;
 }
 
+export async function getClawDebugArtifacts(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string,
+  agentSlug?: string
+): Promise<{ success: boolean; data: ClawDebugArtifactBundle }> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/debug`;
+  const response = await fetch(url, {
+    headers: {
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] getDebugArtifacts failed: ${response.status} ${errorText}`);
+    throw new Error(
+      response.status === 404 ? 'Debug artifacts not found' : 'Failed to fetch debug artifacts'
+    );
+  }
+
+  return (await response.json()) as { success: boolean; data: ClawDebugArtifactBundle };
+}
+
 // ============================================================================
 // Actions
 // ============================================================================
@@ -698,7 +752,7 @@ export async function approveClawAction(
     serverType?: string;
     tool?: string;
     signature?: string;
-  },
+  }
 ): Promise<ClawActionApprovalResult> {
   if (!payload.approved) {
     return { success: true, data: { content: '' } };
@@ -747,8 +801,13 @@ export async function approveClawAction(
 
 export async function downloadClawAttachment(
   req: { headers?: { cookie?: string }; userId: string },
-  attachmentId: string,
-): Promise<{ buffer: Buffer; contentType: string; contentDisposition: string | null; contentLength: string | null }> {
+  attachmentId: string
+): Promise<{
+  buffer: Buffer;
+  contentType: string;
+  contentDisposition: string | null;
+  contentLength: string | null;
+}> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/attachments/${attachmentId}/download`;
   logger.info(`[ClawAgentService] Downloading attachment: ${attachmentId}`);
 
@@ -774,7 +833,6 @@ export async function downloadClawAttachment(
   };
 }
 
-
 /** List enabled Claw agents via S2S (used by email auto-draft agent picker). */
 export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agents`;
@@ -787,7 +845,7 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
     });
   } catch (err) {
     throw new Error(
-      `[ClawAgentService] listS2SClawAgents: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+      `[ClawAgentService] listS2SClawAgents: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
@@ -798,9 +856,11 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
 
   const json = (await res.json()) as { success: boolean; data?: S2SClawAgent[]; error?: string };
   if (!json.success || !Array.isArray(json.data)) {
-    throw new Error(`[ClawAgentService] listS2SClawAgents: bad response shape — ${JSON.stringify(json)}`);
+    throw new Error(
+      `[ClawAgentService] listS2SClawAgents: bad response shape — ${JSON.stringify(json)}`
+    );
   }
-  return json.data.filter(a => a.enabled);
+  return json.data.filter((a) => a.enabled);
 }
 
 /** Run a claw agent via S2S (non-streaming, callback-based). Mirrors legacy clawClient.runAgent(). */
@@ -826,14 +886,14 @@ export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAg
     });
   } catch (err) {
     throw new Error(
-      `[ClawAgentService] runS2SClawAgent: failed to reach claw-auth webhook at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+      `[ClawAgentService] runS2SClawAgent: failed to reach claw-auth webhook at ${url}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
   const json = (await res.json().catch(() => ({}))) as S2SRunAgentResponse;
   if (!res.ok || !json.success) {
     throw new Error(
-      `[ClawAgentService] runS2SClawAgent: webhook rejected the run (HTTP ${res.status}, error=${json.error ?? 'unknown'})`,
+      `[ClawAgentService] runS2SClawAgent: webhook rejected the run (HTTP ${res.status}, error=${json.error ?? 'unknown'})`
     );
   }
   return { success: true, sessionId: json.sessionId ?? sessionId };
@@ -899,7 +959,7 @@ export async function getConversationInsight(params: {
     });
   } catch (err) {
     throw new Error(
-      `[ClawAgentService] getConversationInsight: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+      `[ClawAgentService] getConversationInsight: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
@@ -914,7 +974,7 @@ export async function getConversationInsight(params: {
     invocationsByMsgId?: Record<string, unknown[]>;
   };
   const messages = Array.isArray(json.data) ? json.data : [];
-  const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
   const reasoning =
     lastAssistant?.reasoning && lastAssistant.reasoning.trim() ? lastAssistant.reasoning : null;
   const toolInvocations =

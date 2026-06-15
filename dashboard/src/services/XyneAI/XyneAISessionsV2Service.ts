@@ -8,6 +8,7 @@ import type {
   ConversationHistory as ConversationHistoryType,
   Message,
   ToolInvocation,
+  DebugArtifactBundle,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
 // ============================================================================
@@ -223,4 +224,16 @@ export async function fetchV2ConversationMessages(
   });
 
   return mappedMessages;
+}
+
+export async function fetchV2DebugArtifacts(
+  conversationId: string,
+  agentSlug?: string | null,
+): Promise<DebugArtifactBundle> {
+  const query = agentSlug ? `?agentSlug=${encodeURIComponent(agentSlug)}` : '';
+  const response = await apiInstance.get<{ success: boolean; data: DebugArtifactBundle }>(
+    `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}/debug${query}`,
+  );
+  if (!response.data.success) throw new Error('Failed to fetch debug artifacts');
+  return response.data.data;
 }

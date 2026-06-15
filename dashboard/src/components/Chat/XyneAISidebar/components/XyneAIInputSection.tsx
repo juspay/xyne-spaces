@@ -12,6 +12,8 @@ interface XyneAIInputSectionProps extends XyneAIInputBoxProps {
   onConfirmContext: (selections: ContextSelections) => void;
   contextSelections: ContextSelections;
   contextPanelPosition?: 'top' | 'bottom';
+  compactToolbar?: boolean;
+  tightToolbar?: boolean;
 }
 
 /**
@@ -26,6 +28,8 @@ export const XyneAIInputSection = forwardRef<XyneAIInputBoxHandle, XyneAIInputSe
       onConfirmContext,
       contextSelections,
       contextPanelPosition = 'bottom',
+      compactToolbar = false,
+      tightToolbar = false,
       ...inputBoxProps
     },
     ref,
@@ -64,6 +68,8 @@ export const XyneAIInputSection = forwardRef<XyneAIInputBoxHandle, XyneAIInputSe
         <XyneAIInputBox
           ref={ref}
           {...inputBoxProps}
+          compactToolbar={compactToolbar}
+          tightToolbar={tightToolbar}
           onCloseContextModal={onCloseContextModal}
           isContextModalOpen={showContextModal}
         />

@@ -18,7 +18,9 @@ export class XyneAIControllerFactory {
     const requestVersion = req.body?.version as 'v1' | 'v2' | undefined;
     const version = requestVersion || config.askAI.version;
     const agentSlug = req.body?.agentSlug || req.body?.agent_slug || 'ask-ai';
-    logger.info(`[XyneAI] Routing query to version: ${version} (request override: ${requestVersion || 'none'}, agentSlug: ${agentSlug})`);
+    logger.info(
+      `[XyneAI] Routing query to version: ${version} (request override: ${requestVersion || 'none'}, agentSlug: ${agentSlug})`
+    );
 
     // If v1 is selected but a non-ask-ai claw agent is chosen, route to v2 (unified claw)
     const useV2 = version === 'v2' || agentSlug !== 'ask-ai';
@@ -89,7 +91,7 @@ export class XyneAIControllerFactory {
    */
   getConfig = async (_req: Request, res: Response): Promise<void> => {
     const version = config.askAI.version;
-    
+
     // Return base config with version info
     res.json({
       webSearchAccessible: config.xyneAiExtended.url ? true : false,
@@ -194,7 +196,10 @@ export class XyneAIControllerFactory {
    * Get conversation messages from claw (v2 only)
    */
   getConversationMessages = async (req: Request, res: Response): Promise<void> => {
-    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug || req.body?.agentSlug || req.body?.agent_slug) as string | undefined;
+    const agentSlug = (req.query?.agentSlug ||
+      req.query?.agent_slug ||
+      req.body?.agentSlug ||
+      req.body?.agent_slug) as string | undefined;
     if (config.askAI.version !== 'v2' && !agentSlug) {
       res.status(404).json({ error: 'v2 endpoints not enabled' });
       return;
@@ -202,11 +207,23 @@ export class XyneAIControllerFactory {
     return xyneAIControllerV2.getConversationMessages(req, res);
   };
 
+  getConversationDebug = async (req: Request, res: Response): Promise<void> => {
+    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug) as string | undefined;
+    if (config.askAI.version !== 'v2' && !agentSlug) {
+      res.status(404).json({ error: 'v2 endpoints not enabled' });
+      return;
+    }
+    return xyneAIControllerV2.getConversationDebug(req, res);
+  };
+
   /**
    * Download attachment from claw - v2 only
    */
   downloadAttachment = async (req: Request, res: Response): Promise<void> => {
-    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug || req.body?.agentSlug || req.body?.agent_slug) as string | undefined;
+    const agentSlug = (req.query?.agentSlug ||
+      req.query?.agent_slug ||
+      req.body?.agentSlug ||
+      req.body?.agent_slug) as string | undefined;
     if (config.askAI.version !== 'v2' && !agentSlug) {
       res.status(404).json({ error: 'v2 endpoints not enabled' });
       return;

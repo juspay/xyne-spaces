@@ -310,9 +310,10 @@ export function resolveActivePath<T extends { id: string; parentId?: string | nu
   }
 
   const path: T[] = [];
+  const visitedIds = new Set<string>();
   let currentKey: string = BRANCH_ROOT_KEY;
 
-  for (;;) {
+  for (let step = 0; step < allMessages.length; step += 1) {
     const children = childrenMap.get(currentKey);
     if (!children || children.length === 0) break;
 
@@ -323,7 +324,10 @@ export function resolveActivePath<T extends { id: string; parentId?: string | nu
       ? (children.find(c => c.id === selectedId) ?? children[children.length - 1]!)
       : children[children.length - 1]!;
 
+    if (visitedIds.has(selected.id)) break;
+
     path.push(selected);
+    visitedIds.add(selected.id);
     currentKey = selected.id;
   }
 

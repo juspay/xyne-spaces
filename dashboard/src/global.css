@@ -2028,6 +2028,20 @@ img.inline-emoji,
   color: var(--link-hover-color) !important;
 }
 
+/* Inline citation chip is a Link but reads as a reference badge — it must keep
+ * the paragraph's foreground colour and have no underline, overriding the
+ * blanket markdown anchor styling above. */
+.xyne-ai-markdown a.claw-citation-chip,
+.bot-markdown-content a.claw-citation-chip {
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+.xyne-ai-markdown a.claw-citation-chip:hover,
+.bot-markdown-content a.claw-citation-chip:hover {
+  color: inherit !important;
+}
+
 .bot-markdown-content table {
   width: 100%;
   border-collapse: collapse;

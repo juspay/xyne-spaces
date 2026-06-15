@@ -19,6 +19,7 @@ import type {
   UserTag,
   DraftSource,
   SummarizerOutput,
+  DebugEventRecord,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import type { ResearchContext } from '@xyne/shared';
@@ -61,6 +62,8 @@ export interface StreamState {
   traceId?: string;
   error?: string;
   suppressCompletionToast?: boolean;
+  debugEvents: DebugEventRecord[];
+  debugArtifactsReadyVersion: number;
 }
 
 export interface StreamRequest {
@@ -792,6 +795,8 @@ class XyneAIStreamManager {
       sessionId: initialSessionId,
       status: 'streaming',
       messages: initialMessages,
+      debugEvents: [],
+      debugArtifactsReadyVersion: 0,
       ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
     };
 
@@ -1063,6 +1068,20 @@ class XyneAIStreamManager {
         }
         break;
       }
+
+      case 'debug_event': {
+        const debugEvent = data['debugEvent'] as DebugEventRecord | undefined;
+        if (debugEvent) {
+          currentState.debugEvents = [...currentState.debugEvents, debugEvent];
+          this.notifySubscribers({ ...currentState });
+        }
+        break;
+      }
+
+      case 'debug_artifacts_ready':
+        currentState.debugArtifactsReadyVersion += 1;
+        this.notifySubscribers({ ...currentState });
+        break;
 
       case 'complete':
       case 'done':

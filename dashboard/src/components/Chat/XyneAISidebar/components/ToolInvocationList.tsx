@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { Loader2, ChevronRight, Check, AlertCircle, Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ToolInvocation, ClawCitation } from '../utils/XyneAITypes';
+import { buildClawCitationUrl, getClawCitationLabel } from '../utils/clawCitationUrl';
 
 interface ToolInvocationListProps {
   invocations: ToolInvocation[];
@@ -57,57 +58,6 @@ interface InvocationItemProps {
   children?: ToolInvocation[] | undefined;
 }
 
-/**
- * Build a URL for a citation based on its kind
- */
-function buildCitationUrl(citation: ClawCitation): string | null {
-  if (citation.kind === 'external' && citation.url) {
-    return citation.url;
-  }
-
-  if (citation.kind === 'thread' && citation.channelId && citation.conversationId) {
-    // Use relative URL with hash fragment to open thread panel (matches v1 format)
-    return `/chat/dir/${citation.channelId}/${citation.conversationId}#origin=${citation.conversationId}`;
-  }
-
-  if (citation.kind === 'canvas' && citation.viewAccessId) {
-    // Use relative URL to preserve workspace prefix
-    return `/chat/canvas/${citation.viewAccessId}`;
-  }
-
-  if (
-    citation.kind === 'ticket' &&
-    citation.ticketId &&
-    citation.channelId &&
-    citation.conversationId
-  ) {
-    // Ticket URL format: /chat/dir/{channelId}/{conversationId}/{ticketId}?selectedTab=thread
-    return `/chat/dir/${citation.channelId}/${citation.conversationId}/${citation.ticketId}?selectedTab=thread`;
-  }
-
-  return null;
-}
-
-/**
- * Get a display label for a citation
- */
-function getCitationLabel(citation: ClawCitation): string {
-  if (citation.label) return citation.label;
-
-  if (citation.kind === 'thread') {
-    if (citation.channelName) {
-      return `Thread in #${citation.channelName}`;
-    }
-    return 'Spaces thread';
-  }
-
-  if (citation.kind === 'canvas') return 'Canvas';
-  if (citation.kind === 'ticket') return `Ticket ${citation.ticketId || ''}`.trim();
-  if (citation.kind === 'external') return 'Source link';
-
-  return 'Reference';
-}
-
 interface CitationListProps {
   citations: ClawCitation[];
 }
@@ -135,8 +85,8 @@ function CitationList({ citations }: CitationListProps): ReactElement {
       </button>
       <ul className={`space-y-1 ${expanded ? 'max-h-48 overflow-y-auto pr-1' : ''}`}>
         {(expanded ? citations : citations.slice(0, MAX_VISIBLE)).map((citation, idx) => {
-          const url = buildCitationUrl(citation);
-          const label = getCitationLabel(citation);
+          const url = buildClawCitationUrl(citation);
+          const label = getClawCitationLabel(citation);
 
           return (
             <li key={idx} className='flex items-start gap-1.5'>

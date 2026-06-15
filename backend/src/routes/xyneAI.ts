@@ -181,6 +181,7 @@ router.get('/v2/conversations', authMiddleware.authenticate, xyneAIControllerFac
 
 // GET /api/xyne-ai/v2/conversations/:convId/messages - Get conversation messages from claw
 router.get('/v2/conversations/:convId/messages', authMiddleware.authenticate, xyneAIControllerFactory.getConversationMessages);
+router.get('/v2/conversations/:convId/debug', authMiddleware.authenticate, xyneAIControllerFactory.getConversationDebug);
 
 // GET /api/xyne-ai/v2/attachments/:attachmentId/download - Download attachment from claw
 router.get('/v2/attachments/:attachmentId/download', authMiddleware.authenticate, xyneAIControllerFactory.downloadAttachment);
