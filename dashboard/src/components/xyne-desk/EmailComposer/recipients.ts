@@ -200,7 +200,12 @@ export const makeRecipientKeyDownHandler = (
         return;
       }
     }
-    if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
+    if (
+      e.key === 'Enter' ||
+      e.key === ',' ||
+      e.key === 'Tab' ||
+      (e.key === ' ' && deps.inputValue.includes('@'))
+    ) {
       e.preventDefault();
       const newEmails = splitAndValidateEmails(deps.inputValue, deps.emails);
       if (newEmails.length > 0) {

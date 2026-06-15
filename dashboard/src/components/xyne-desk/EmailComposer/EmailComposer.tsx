@@ -1821,7 +1821,7 @@ export const EmailComposer = ({
                   className={`relative flex-1 flex flex-wrap items-center gap-1.5 cursor-text min-h-[28px] rounded-md transition-colors ${dragOverField === 'to' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
                   onClick={() => toInputRef.current?.focus()}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
+                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
                       e.preventDefault();
                       toInputRef.current?.focus();
                     }
@@ -2016,7 +2016,7 @@ export const EmailComposer = ({
                     className={`relative flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'cc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
                     onClick={() => ccInputRef.current?.focus()}
                     onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
+                      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
                         e.preventDefault();
                         ccInputRef.current?.focus();
                       }
@@ -2099,7 +2099,7 @@ export const EmailComposer = ({
                     className={`relative flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'bcc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
                     onClick={() => bccInputRef.current?.focus()}
                     onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
+                      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
                         e.preventDefault();
                         bccInputRef.current?.focus();
                       }
