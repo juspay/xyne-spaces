@@ -13,6 +13,8 @@
 
 import React from 'react';
 import {
+  $getRoot,
+  $isElementNode,
   DecoratorNode,
   ElementNode,
   TextNode,
@@ -24,8 +26,8 @@ import {
   type SerializedTextNode,
   type Spread,
 } from 'lexical';
-import { Hash, Lock, User } from 'lucide-react';
-import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { Hash, Lock, SignalHigh, User } from 'lucide-react';
+import { ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
 import { MentionType, type MentionData } from './ChannelCommandMenu.types';
 
@@ -43,6 +45,10 @@ export type SerializedFilterChipNode = Spread<
 /** The chip's display text (`prefix name`, e.g. `from: alice` / `in: general`).
  *  Demotion leaves exactly this string, so it parses like a hand-typed filter. */
 export function buildChipText(mentionData: MentionData): string {
+  // Chip always reads lowercase (`priority: high`), independent of the dropdown label.
+  if (mentionData.type === MentionType.PRIORITY) {
+    return `priority: ${mentionData.id.toLowerCase()}`;
+  }
   if (mentionData.prefix) {
     return `${mentionData.prefix} ${mentionData.name}`;
   }
@@ -135,6 +141,17 @@ export type SerializedFilterChipIconNode = Spread<
 // pill, so it tracks the chip text in every theme.
 const ICON_CLASS = 'h-3.5 w-3.5';
 
+// Severity tint for the priority glyph only (pill stays blue). Tracks the severity
+// colors of the app-wide getPriorityIcon, but uses a single compact SignalHigh glyph
+// rather than its per-level bars/triangle. text-* sets currentColor, overriding the
+// inherited --chip-fg.
+export const PRIORITY_ICON_COLOR: Record<string, string> = {
+  [TicketPriority.LOW]: 'text-xyne-green-400',
+  [TicketPriority.MEDIUM]: 'text-xyne-yellow-400',
+  [TicketPriority.HIGH]: 'text-xyne-orange-400',
+  [TicketPriority.CRITICAL]: 'text-xyne-red-500',
+};
+
 /**
  * Resolves a channel chip's glyph by id (keeping MentionData lean): DM → person,
  * public channel → hash, private → lock; hash while the channel isn't cached yet.
@@ -159,6 +176,11 @@ function ChannelChipIcon({ id }: { id: string }): React.JSX.Element {
 }
 
 function ChipIcon({ mentionData }: { mentionData: MentionData }): React.JSX.Element {
+  // Priority — checked first so it never falls through to the channel branch (which
+  // calls `useChannel`). Glyph tinted by severity; pill stays blue.
+  if (mentionData.type === MentionType.PRIORITY) {
+    return <SignalHigh className={`${ICON_CLASS} ${PRIORITY_ICON_COLOR[mentionData.id] ?? ''}`} />;
+  }
   // User filters always get the person glyph. The channel lookup lives in its own
   // component so `useChannel` is never called conditionally (rules of hooks).
   if (mentionData.type === MentionType.USER) {
@@ -298,4 +320,29 @@ export function $createFilterChip(mentionData: MentionData): FilterChipContainer
   const container = new FilterChipContainerNode();
   container.append($createFilterChipIconNode(mentionData), $createFilterChipNode(mentionData));
   return container;
+}
+
+// ---- Priority chip helpers ----
+
+/**
+ * Removes every existing priority chip from the editor so a freshly inserted one
+ * stays the *exclusive* priority filter. Call inside an `editor.update` before
+ * appending the new chip. Collect-then-remove avoids mutating the tree mid-walk.
+ */
+export function $removeExistingPriorityChips(): void {
+  const containers: FilterChipContainerNode[] = [];
+  const visit = (node: LexicalNode): void => {
+    if ($isFilterChipContainerNode(node)) {
+      const label = node.getChildren().find($isFilterChipNode);
+      if (label && label.getMentionData().type === MentionType.PRIORITY) {
+        containers.push(node);
+        return;
+      }
+    }
+    if ($isElementNode(node)) {
+      node.getChildren().forEach(visit);
+    }
+  };
+  $getRoot().getChildren().forEach(visit);
+  containers.forEach(container => container.remove());
 }

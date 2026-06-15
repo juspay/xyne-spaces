@@ -445,7 +445,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // Accumulate unique filters used during session
       const parsedFiltersForImpression = parseSearchFilters(params.queryText);
 
-      if (parsedFiltersForImpression.priority) sessionFiltersRef.current.add('priority');
+      // Priority is chip-only — track it from the chip, not parsed text.
+      if (selectedMentions.some(m => m.type === MentionType.PRIORITY)) {
+        sessionFiltersRef.current.add('priority');
+      }
       if (parsedFiltersForImpression.board) sessionFiltersRef.current.add('board');
       if (parsedFiltersForImpression.tags) sessionFiltersRef.current.add('tags');
       if (parsedFiltersForImpression.before) sessionFiltersRef.current.add('before');
@@ -710,7 +713,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     ) => {
       const {
         searchText,
-        priority: priorityFilter,
         board: boardFilter,
         tags: tagsFilter,
         before: beforeFilter,
@@ -721,6 +723,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         status: statusFilter,
         type: typeFilter,
       } = parseSearchFilters(query);
+
+      // Priority is chip-only: value comes solely from the chip; raw `priority:` text
+      // isn't a filter (falls through to full-text search).
+      const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
 
       // Adjust local results count logic for context
       let localCount = 0;
@@ -1214,7 +1220,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const loadMoreResults = useCallback(async () => {
     const {
       searchText,
-      priority: priorityFilter,
       board: boardFilter,
       tags: tagsFilter,
       before: beforeFilter,
@@ -1225,6 +1230,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       status: statusFilter,
       type: typeFilter,
     } = parseSearchFilters(text);
+
+    // Mirror performSearch: priority is chip-only (value from the chip, not text).
+    const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
 
     const hasFilters =
       priorityFilter ||

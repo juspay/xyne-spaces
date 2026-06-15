@@ -14,17 +14,55 @@ import {
   $createTextNode,
   $getRoot,
 } from 'lexical';
-import { $createFilterChip } from './FilterChipNode';
+import { TicketPriority } from '@xyne/shared';
+import { $createFilterChip, $removeExistingPriorityChips } from './FilterChipNode';
 import { MentionType, type MentionData } from './ChannelCommandMenu.types';
 
 export type ChannelTriggerType = '#' | 'in:' | 'in:#' | 'in:@';
 export type UserTriggerType = '@' | 'from:' | 'with:' | 'assignee:' | 'in:@';
+export type PriorityTriggerType = 'priority:';
+
+// Gate the `priority:` dropdown: open only for an empty value or a prefix of a real
+// TicketPriority, so natural language ("High Priority: Refund rock") can't hijack it.
+function priorityQueryHasMatch(query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return Object.values(TicketPriority).some(value => value.toLowerCase().startsWith(q));
+}
+
+// 'in:#' and 'in:@' are trigger modifiers; the chip prefix is just 'in:'.
+function normalizePrefix(
+  trigger: string,
+): 'from:' | 'with:' | 'in:' | 'assignee:' | 'priority:' | null {
+  if (trigger === 'from:') return 'from:';
+  if (trigger === 'with:') return 'with:';
+  if (trigger === 'assignee:') return 'assignee:';
+  if (trigger === 'priority:') return 'priority:';
+  if (trigger.startsWith('in:')) return 'in:';
+  return null;
+}
+
+function buildMentionData(
+  item: { id: string; name: string; email?: string },
+  type: MentionType,
+  trigger: string,
+): MentionData {
+  const mentionData: MentionData = { id: item.id, name: item.name, type };
+  const prefix = normalizePrefix(trigger);
+  if (prefix) mentionData.prefix = prefix;
+  if (item.email) mentionData.email = item.email;
+  return mentionData;
+}
 
 interface MentionPluginProps {
   onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
   onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
+  // Priority is a value filter (closed enum), so there is no backend lookup —
+  // the parent just tracks the typed query to filter the static value list.
+  onPrioritySearch?: (query: string | null, trigger?: PriorityTriggerType) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
+  availablePriorities?: Array<{ id: string; name: string }>;
   onMentionSelect?: (mention: MentionData) => void;
   mentionSearchType?: MentionType | null;
   selectedMentionIndex?: number;
@@ -40,8 +78,10 @@ type TriggerType = MentionType | null;
 export function MentionPlugin({
   onUserSearch,
   onChannelSearch,
+  onPrioritySearch,
   availableUsers = [],
   availableChannels = [],
+  availablePriorities = [],
   onMentionSelect,
   mentionSearchType,
   selectedMentionIndex = 0,
@@ -80,11 +120,13 @@ export function MentionPlugin({
         const channelTrigger: ChannelTriggerType =
           triggerText.current === '#' ? '#' : triggerText.current === 'in:#' ? 'in:#' : 'in:';
         onChannelSearch(searchTerm, channelTrigger);
+      } else if (triggerType === MentionType.PRIORITY && onPrioritySearch) {
+        onPrioritySearch(searchTerm, 'priority:');
       }
     }, 150); // Reduced debounce for better responsiveness
 
     return () => clearTimeout(timeoutId);
-  }, [searchTerm, triggerType, onUserSearch, onChannelSearch]);
+  }, [searchTerm, triggerType, onUserSearch, onChannelSearch, onPrioritySearch]);
 
   // Insert mention
   const insertMention = useCallback(
@@ -144,24 +186,11 @@ export function MentionPlugin({
             // Set the node text to only the text before trigger
             anchorNode.setTextContent(textBefore);
 
-            // Create mention node
-            const normalizedPrefix: 'from:' | 'with:' | 'in:' | 'assignee:' | null =
-              trigger === 'from:'
-                ? 'from:'
-                : trigger === 'with:'
-                  ? 'with:'
-                  : trigger === 'assignee:'
-                    ? 'assignee:'
-                    : trigger?.startsWith('in:')
-                      ? 'in:'
-                      : null;
-            const mentionData: MentionData = {
-              id: item.id,
-              name: item.name,
-              type: type === MentionType.USER ? MentionType.USER : MentionType.CHANNEL,
-              ...(normalizedPrefix && { prefix: normalizedPrefix }),
-              ...(item.email && { email: item.email }),
-            };
+            const mentionData = buildMentionData(item, type, trigger);
+            // Priority is the exclusive filter — drop any existing priority chip first.
+            if (type === MentionType.PRIORITY) {
+              $removeExistingPriorityChips();
+            }
             // Insert the chip pill (icon + editable label) then a trailing space.
             const chip = $createFilterChip(mentionData);
             const spaceNode = $createTextNode(' ');
@@ -203,27 +232,11 @@ export function MentionPlugin({
         // Set the node text to only the text before trigger
         anchorNode.setTextContent(textBefore);
 
-        // Normalize trigger to the correct prefix
-        // 'in:#' and 'in:@' are trigger modifiers, but the actual prefix should be 'in:'
-        const normalizedPrefix: 'from:' | 'with:' | 'in:' | 'assignee:' | null =
-          trigger === 'from:'
-            ? 'from:'
-            : trigger === 'with:'
-              ? 'with:'
-              : trigger === 'assignee:'
-                ? 'assignee:'
-                : trigger?.startsWith('in:')
-                  ? 'in:'
-                  : null;
-
-        // Create mention node
-        const mentionData: MentionData = {
-          id: item.id,
-          name: item.name,
-          type: type === MentionType.USER ? MentionType.USER : MentionType.CHANNEL,
-          ...(normalizedPrefix && { prefix: normalizedPrefix }),
-          ...(item.email && { email: item.email }),
-        };
+        const mentionData = buildMentionData(item, type, trigger);
+        // Priority is the exclusive filter — drop any existing priority chip first.
+        if (type === MentionType.PRIORITY) {
+          $removeExistingPriorityChips();
+        }
         // Insert the chip pill (icon + editable label) then a trailing space.
         const chip = $createFilterChip(mentionData);
         const spaceNode = $createTextNode(' ');
@@ -257,6 +270,8 @@ export function MentionPlugin({
         onUserSearch('');
       } else if (type === MentionType.CHANNEL && onChannelSearch) {
         onChannelSearch('');
+      } else if (type === MentionType.PRIORITY && onPrioritySearch) {
+        onPrioritySearch('');
       }
 
       // Notify parent that a mention was inserted (keyboard or click path)
@@ -270,6 +285,7 @@ export function MentionPlugin({
       onMentionSelect,
       onUserSearch,
       onChannelSearch,
+      onPrioritySearch,
       setSelectedMentionIndex,
       onMentionInserted,
     ],
@@ -288,7 +304,11 @@ export function MentionPlugin({
     if (!mentionSearchType || !setSelectedMentionIndex) return;
 
     const currentItems =
-      mentionSearchType === MentionType.USER ? availableUsers : availableChannels;
+      mentionSearchType === MentionType.USER
+        ? availableUsers
+        : mentionSearchType === MentionType.PRIORITY
+          ? availablePriorities
+          : availableChannels;
     if (currentItems.length === 0) return;
 
     const removeKeyDownCommand = editor.registerCommand(
@@ -384,6 +404,8 @@ export function MentionPlugin({
             onUserSearch(null);
           } else if (mentionSearchType === 'channel' && onChannelSearch) {
             onChannelSearch(null);
+          } else if (mentionSearchType === MentionType.PRIORITY && onPrioritySearch) {
+            onPrioritySearch(null);
           }
           return true;
         }
@@ -404,11 +426,13 @@ export function MentionPlugin({
     mentionSearchType,
     availableUsers,
     availableChannels,
+    availablePriorities,
     selectedMentionIndex,
     setSelectedMentionIndex,
     insertMention,
     onUserSearch,
     onChannelSearch,
+    onPrioritySearch,
   ]);
 
   // Listen for trigger patterns: "from:", "@", "in:", "#"
@@ -440,6 +464,11 @@ export function MentionPlugin({
         const inMatch = textBeforeCursor.match(/\bin:\s*(.*)$/i);
         const hashMatch = textBeforeCursor.match(/#(\S*)$/);
 
+        // `priority:` trigger. Prefix is case-sensitive (no /i) so it stays in sync with
+        // the lowercase `lastIndexOf('priority:')` insert offset; the value is matched
+        // case-insensitively (priorityQueryHasMatch).
+        const priorityMatch = textBeforeCursor.match(/\bpriority:\s*(.*)$/);
+
         let trigger: { type: TriggerType; text: string; query: string; index: number } | null =
           null;
 
@@ -463,6 +492,13 @@ export function MentionPlugin({
             text: 'assignee:',
             query: (assigneeMatch[1] || '').replace(/^@/, '').trim(),
             index: textBeforeCursor.lastIndexOf('assignee:'),
+          };
+        } else if (priorityMatch && priorityQueryHasMatch(priorityMatch[1] || '')) {
+          trigger = {
+            type: MentionType.PRIORITY,
+            text: 'priority:',
+            query: (priorityMatch[1] || '').trim(),
+            index: textBeforeCursor.lastIndexOf('priority:'),
           };
         } else if (inMatch) {
           const inQuery = (inMatch[1] || '').trim();
@@ -535,6 +571,8 @@ export function MentionPlugin({
                     ? 'in:@'
                     : 'in:';
             onChannelSearch(trigger.query.trim(), channelTrigger);
+          } else if (trigger.type === MentionType.PRIORITY && onPrioritySearch) {
+            onPrioritySearch(trigger.query.trim(), 'priority:');
           }
 
           return;
@@ -554,11 +592,13 @@ export function MentionPlugin({
             onUserSearch(null);
           } else if (triggerType === 'channel' && onChannelSearch) {
             onChannelSearch(null);
+          } else if (triggerType === MentionType.PRIORITY && onPrioritySearch) {
+            onPrioritySearch(null);
           }
         }
       });
     });
-  }, [editor, triggerType, onUserSearch, onChannelSearch]);
+  }, [editor, triggerType, onUserSearch, onChannelSearch, onPrioritySearch]);
 
   // Don't render popup - results will be shown in main search results area
   return null;

@@ -11,7 +11,6 @@ export const TYPE_AUTOCOMPLETE_REGEX = /\btype:([a-z,]+)$/i;
  */
 export function parseSearchFilters(text: string) {
   let searchText = text.trim();
-  let priority: string | undefined;
   let board: string | undefined;
   let tags: string | undefined;
   let before: string | undefined;
@@ -23,12 +22,8 @@ export function parseSearchFilters(text: string) {
   let assignee: string | undefined;
   let type: string | undefined;
 
-  // Parse priority:value
-  const priorityMatch = searchText.match(/\bpriority:\s*(\S+)/i);
-  if (priorityMatch && priorityMatch[1]) {
-    priority = priorityMatch[1].toUpperCase();
-    searchText = searchText.replace(priorityMatch[0], '').trim();
-  }
+  // `priority:` is intentionally NOT parsed: it's a chip-only filter (via
+  // selectedMentions), so raw `priority:` text is left intact for full-text search.
 
   // Parse board:value
   const boardMatch = searchText.match(/\bboard:\s*(\S+)/i);
@@ -125,17 +120,16 @@ export function parseSearchFilters(text: string) {
     searchText = searchText.replace(typeMatch[0], '').trim();
   }
 
-  // Strip from:/in:/assignee: and any trailing text (these are handled as MentionNodes, not text filters)
+  // Strip from:/in:/assignee: and any trailing text (handled as filter chips, not text filters)
   searchText = searchText.replace(/\b(from|in|assignee):\s*\S*/gi, '').trim();
 
-  // Clean incomplete filter patterns
+  // Clean incomplete filter patterns (`priority` omitted on purpose — see note above).
   searchText = searchText
-    .replace(/\b(priority|board|tags|before|after|on|range|stage|status|type):\s*/gi, '')
+    .replace(/\b(board|tags|before|after|on|range|stage|status|type):\s*/gi, '')
     .trim();
 
   return {
     searchText,
-    priority,
     board,
     tags,
     before,

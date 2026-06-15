@@ -25,8 +25,9 @@ import {
   $isFilterChipContainerNode,
 } from './FilterChipNode';
 
-// Replace the whole pill (container + icon + label) with the label as plain
-// text, preserving the caret offset where the user was editing.
+// Replace the whole pill (container + icon + label) with its label as plain text,
+// preserving the caret offset. Plain text re-arms the mention dropdown, so a demoted
+// chip stays editable and re-pickable; promotion only happens on an explicit pick.
 function $demoteChip(chip: FilterChipNode): void {
   const text = chip.getTextContent();
   const selection = $getSelection();
