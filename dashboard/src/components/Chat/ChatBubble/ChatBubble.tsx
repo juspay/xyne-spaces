@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
 import { BotBubble } from '../BotBubble';
@@ -270,6 +272,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   // Check if message has a ticket associated with it
   const hasTicket = metadata && metadata['ticketId'] !== undefined;
+
+  // Ticket backing this thread (for ticket threads)
+  const threadTicketId = useMemo(() => {
+    if (context !== 'thread' || !isTicketThread || !conversation) return '';
+    const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
+    return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
+  }, [context, isTicketThread, conversation]);
+
+  // Subtickets cannot be nested: hide the action when the thread's ticket is itself a subticket
+  const [threadTicketParentSubTickets] = useCachedQuery(
+    queries.subTicketsByMappedTicketId({ mappedTicketId: threadTicketId }),
+    { enabled: !!threadTicketId },
+  );
+  const isThreadTicketSubTicket = (threadTicketParentSubTickets?.length ?? 0) > 0;
 
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
@@ -925,6 +941,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(context === 'thread' &&
         !isMessageDeleted &&
         isTicketThread &&
+        !isThreadTicketSubTicket &&
         !isFirstInThread && {
           onCreateSubTicket: handleCreateSubTicket,
         }),
@@ -1360,18 +1377,18 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       )}
 
       {/* SubTicket Modal for ticket threads */}
-      {conversation && context === 'thread' && isTicketThread && isSubTicketModalOpen && (
-        <SubTicketModal
-          isOpen
-          onClose={() => setIsSubTicketModalOpen(false)}
-          ticketId={(() => {
-            const initMsg =
-              getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
-            return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
-          })()}
-          conversationId={conversation.conversationId}
-        />
-      )}
+      {conversation &&
+        context === 'thread' &&
+        isTicketThread &&
+        !isThreadTicketSubTicket &&
+        isSubTicketModalOpen && (
+          <SubTicketModal
+            isOpen
+            onClose={() => setIsSubTicketModalOpen(false)}
+            ticketId={threadTicketId}
+            conversationId={conversation.conversationId}
+          />
+        )}
 
       {isReminderOptionsOpen && (
         <Dialog

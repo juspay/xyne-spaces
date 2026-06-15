@@ -729,6 +729,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
 
+  // Subtickets cannot be nested: a ticket that is itself a subticket cannot have its own
+  const isSubTicket = (parentSubTickets?.length ?? 0) > 0;
+
   // Query parent tickets through the mappings
   const parentTicketIds = useMemo(
     () =>
@@ -1800,6 +1803,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       </div>
     );
   };
+
+  const createSubTicketButton = (
+    <button
+      onClick={() => setIsSubTicketModalOpen(true)}
+      disabled={isSubTicket}
+      data-testid='create-sub-ticket-button'
+      data-track-event='BUTTON_CLICK'
+      data-track-category='TICKETS'
+      data-track-name='CREATE_SUB_TICKET'
+      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+      className={cn(
+        'flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors',
+        isSubTicket ? 'opacity-50 pointer-events-none' : 'hover:text-foreground',
+      )}
+    >
+      <Plus size={16} />
+      Create Sub-Ticket
+    </button>
+  );
 
   return (
     <div className='mx-auto px-[24px] py-[20px] h-full overflow-scroll bg-background'>
@@ -3210,18 +3232,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   })}
                 </div>
               ) : null}
-              <button
-                onClick={() => setIsSubTicketModalOpen(true)}
-                data-testid='create-sub-ticket-button'
-                data-track-event='BUTTON_CLICK'
-                data-track-category='TICKETS'
-                data-track-name='CREATE_SUB_TICKET'
-                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                className='flex items-center gap-2 mt-3 text-sm text-muted-foreground hover:text-foreground transition-colors'
-              >
-                <Plus size={16} />
-                Create Sub-Ticket
-              </button>
+              {isSubTicket ? (
+                <Tooltip content='Sub-tickets cannot be created under a sub-ticket'>
+                  <span className='inline-flex cursor-not-allowed'>{createSubTicketButton}</span>
+                </Tooltip>
+              ) : (
+                createSubTicketButton
+              )}
             </div>
           </div>
         </div>
