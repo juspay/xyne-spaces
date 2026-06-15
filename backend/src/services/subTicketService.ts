@@ -38,6 +38,17 @@ export async function createSubTicket(
     throw new Error(`Parent ticket "${input.parentTicketId}" not found`);
   }
 
+  // A ticket that is itself mapped as a subticket cannot have its own subtickets
+  const parentAsSubTicket = await db.subTicket.findFirst({
+    where: { mappedTicketId: parent.id },
+    select: { id: true },
+  });
+  if (parentAsSubTicket) {
+    throw new Error(
+      `Cannot create a sub-ticket under a sub-ticket. Parent ticket ${parent.id} is already a sub-ticket.`,
+    );
+  }
+
   await db.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.subTicket.create({
       data: {

@@ -3699,6 +3699,16 @@ export const mutators = defineMutators({
         ctx,
         args: { subTicketId, timestamp, mappingId, title, description, ticketId, conversationId },
       }) => {
+        // A ticket that is itself mapped as a subticket cannot have its own subtickets
+        const parentAsSubTicket = await tx.run(
+          zql.sub_tickets.where('mappedTicketId', ticketId).one(),
+        );
+        if (parentAsSubTicket) {
+          throw new Error(
+            `Cannot create a sub-ticket under a sub-ticket. Parent ticket ${ticketId} is already a sub-ticket.`,
+          );
+        }
+
         // Create the subticket
         await tx.mutate.sub_tickets.insert({
           id: subTicketId,

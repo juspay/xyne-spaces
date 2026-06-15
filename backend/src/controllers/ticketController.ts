@@ -454,6 +454,21 @@ export class TicketController {
         return;
       }
 
+      // Sub-ticket depth is limited to one level: reject before creating the backing ticket
+      // so a failed sub-ticket mapping cannot leave an orphan ticket behind
+      if (parentTicketId) {
+        const parentAsSubTicket = await prisma.subTicket.findFirst({
+          where: { mappedTicketId: parentTicketId },
+          select: { id: true },
+        });
+        if (parentAsSubTicket) {
+          res.status(400).json({
+            error: `Cannot create a sub-ticket under a sub-ticket. Parent ticket ${parentTicketId} is already a sub-ticket.`,
+          });
+          return;
+        }
+      }
+
       // Determine the actual channel to check its type
       let actualChannelId = channelId;
       if (!actualChannelId && sourceConversationId) {
