@@ -2312,6 +2312,19 @@ export const queries = defineQueries({
     ).one();
   }),
 
+  canvasVersions: defineQuery(
+    z.object({ canvasId: z.string() }),
+    ({ ctx, args: { canvasId } }) => {
+      return zql.canvas_versions
+        .where('canvasId', canvasId)
+        .whereExists('canvas', canvas =>
+          applyCanvasVisibilityQueryFilter(canvas, ctx.userID),
+        )
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+    },
+  ),
+
   ticketActivities: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) =>
     zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc')
   ),

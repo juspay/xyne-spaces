@@ -4,6 +4,8 @@ import { CanvasVisibility, CanvasRole, DocType, ChannelScopeType } from '@xyne/s
 export interface CanvasEditorRef {
   handlePresent: () => void;
   handleThemeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  getBlocks: () => PartialBlock[];
+  replaceContent: (blocks: PartialBlock[]) => void;
   selectedTheme: string;
 }
 
@@ -40,6 +42,8 @@ export interface CanvasEditorProps {
 export interface CollaborativeCanvasEditorRef {
   handlePresent: () => void;
   handleThemeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  getBlocks: () => PartialBlock[];
+  replaceContent: (blocks: PartialBlock[]) => void;
   selectedTheme: string;
 }
 

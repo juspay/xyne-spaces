@@ -225,6 +225,34 @@ async function assertCanvasChannelNotArchived(
   }
 }
 
+async function hasCanvasVersionEditAccess(
+  tx: Transaction<Schema>,
+  canvas: { id: string; createdBy: string },
+  userId: string,
+): Promise<boolean> {
+  if (canvas.createdBy === userId) return true;
+
+  const participant = await tx.run(
+    zql.canvas_participants
+      .where('canvasId', canvas.id)
+      .where('role', 'IN', [CanvasRole.EDITOR, CanvasRole.OWNER])
+      .where(({ or, cmp, exists: ex }: any) =>
+        or(
+          cmp('userId', userId),
+          ex('userGroup', (ug: any) =>
+            ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId)),
+          ),
+          ex('channel', (ch: any) =>
+            ch.whereExists('participants', (cp: any) => cp.where('userId', userId)),
+          ),
+        ),
+      )
+      .one(),
+  );
+
+  return Boolean(participant);
+}
+
 // Throw unless the caller is the dashboard's creator OR a participant with
 // role OWNER/EDITOR. VIEWERs and non-participants are rejected. Used by every
 // dashboardComponent mutator (create/update/updatePositions/delete) — without
@@ -5274,6 +5302,117 @@ export const mutators = defineMutators({
           userId: ctx.userID,
           isStarred: true,
           createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  canvasVersion: {
+    save: defineMutator(
+      z.object({
+        id: z.string(),
+        canvasId: z.string(),
+        name: z.string().min(1).max(120),
+        content: z.any(),
+        contentHash: z.string().min(1),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, canvasId, name, content, contentHash, timestamp } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID);
+
+        if (!canEdit) {
+          throw new Error('You do not have permission to edit this canvas');
+        }
+
+        const existingVersion = await tx.run(
+          zql.canvas_versions.where('canvasId', canvasId).where('contentHash', contentHash).one(),
+        );
+
+        if (existingVersion) {
+          await tx.mutate.canvas_versions.update({
+            id: existingVersion.id,
+            updatedAt: timestamp,
+          });
+          return;
+        }
+
+        await tx.mutate.canvas_versions.insert({
+          id,
+          canvasId,
+          name: name.trim(),
+          content,
+          contentHash,
+          createdBy: ctx.userID,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    rename: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string().min(1).max(120),
+      }),
+      async ({ tx, ctx, args: { id, name } }) => {
+        const version = await tx.run(zql.canvas_versions.where('id', id).one());
+        if (!version) {
+          throw new Error('Canvas version not found');
+        }
+
+        const canvas = await tx.run(zql.canvases.where('id', version.canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID);
+
+        if (!canEdit) {
+          throw new Error('You do not have permission to edit this canvas');
+        }
+
+        await tx.mutate.canvas_versions.update({
+          id: version.id,
+          name: name.trim(),
+        });
+      },
+    ),
+    restore: defineMutator(
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, timestamp } }) => {
+        const version = await tx.run(zql.canvas_versions.where('id', id).one());
+        if (!version) {
+          throw new Error('Canvas version not found');
+        }
+
+        const canvas = await tx.run(zql.canvases.where('id', version.canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID);
+
+        if (!canEdit) {
+          throw new Error('You do not have permission to edit this canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvas.id,
+          lastEditedBy: ctx.userID,
+          lastEditedAt: timestamp,
+          updatedAt: timestamp,
+          ...(!canvas.isCollaborative && { content: version.content }),
+        });
+
+        await tx.mutate.canvas_versions.update({
+          id: version.id,
           updatedAt: timestamp,
         });
       },
