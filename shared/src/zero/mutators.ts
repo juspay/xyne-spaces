@@ -4342,27 +4342,49 @@ export const mutators = defineMutators({
         projectId: z.string(),
       }),
       async ({ tx, args: { ticketId, tagName, tagId, projectTagId, mappingId, projectId } }) => {
-        // Write to old table for backward compat
-        await tx.mutate.ticket_tags.upsert({
-          id: tagId,
-          ticketId,
-          name: tagName,
-        });
-        // Write to new project_tags table (upsert by projectId+name)
-        await tx.mutate.project_tags.upsert({
-          id: projectTagId,
-          name: tagName,
-          projectId,
-          createdAt: Date.now(),
-        });
-        // Write to new ticket_tag_mappings table
-        await tx.mutate.ticket_tag_mappings.insert({
-          id: mappingId,
-          ticketId,
-          tagId: projectTagId,
-          tagName,
-          createdAt: Date.now(),
-        });
+        if (!tagName || !tagName.trim()) {
+          throw new Error('Tag name cannot be empty');
+        }
+        const trimmedTagName = tagName.trim();
+
+        const existingTag = await tx.run(
+          zql.ticket_tags.where('ticketId', ticketId).where('name', trimmedTagName).one(),
+        );
+        const existingMapping = await tx.run(
+          zql.ticket_tag_mappings.where('ticketId', ticketId).where('tagName', trimmedTagName).one(),
+        );
+
+        if (existingTag && existingMapping) return;
+
+        if (!existingTag) {
+          await tx.mutate.ticket_tags.insert({
+            id: tagId,
+            name: trimmedTagName,
+            ticketId,
+          });
+        }
+
+        if (!existingMapping) {
+          const existingProjectTag = await tx.run(
+            zql.project_tags.where('projectId', projectId).where('name', trimmedTagName).one(),
+          );
+          const resolvedProjectTagId = existingProjectTag?.id || projectTagId;
+          if (!existingProjectTag) {
+            await tx.mutate.project_tags.insert({
+              id: resolvedProjectTagId,
+              name: trimmedTagName,
+              projectId,
+              createdAt: Date.now(),
+            });
+          }
+          await tx.mutate.ticket_tag_mappings.insert({
+            id: mappingId,
+            ticketId,
+            tagId: resolvedProjectTagId,
+            tagName: trimmedTagName,
+            createdAt: Date.now(),
+          });
+        }
       },
     ),
     delete: defineMutator(
