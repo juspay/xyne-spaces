@@ -402,6 +402,13 @@ export const NotificationHandler: React.FC = () => {
   const handleNotificationRef = useRef(handleNotification);
   const handleNotificationAckConfirmedRef = useRef(handleNotificationAckConfirmed);
   const handleNotificationUpdateRef = useRef(handleNotificationUpdate);
+  const notificationReceivedListenerRef = useRef((n: NotificationData): void =>
+    handleNotificationRef.current(n),
+  );
+  const notificationAckListenerRef = useRef((): void =>
+    handleNotificationAckConfirmedRef.current(),
+  );
+  const notificationUpdatedListenerRef = useRef((): void => handleNotificationUpdateRef.current());
 
   useEffect(() => {
     handleNotificationRef.current = handleNotification;
@@ -417,13 +424,9 @@ export const NotificationHandler: React.FC = () => {
           isConnectedRef.current = true;
 
           // Set up notification listeners after connection is established
-          websocketService.on('notification_received', (n: NotificationData) =>
-            handleNotificationRef.current(n),
-          );
-          websocketService.on('notification_ack_confirmed', () =>
-            handleNotificationAckConfirmedRef.current(),
-          );
-          websocketService.on('notification_updated', () => handleNotificationUpdateRef.current());
+          websocketService.on('notification_received', notificationReceivedListenerRef.current);
+          websocketService.on('notification_ack_confirmed', notificationAckListenerRef.current);
+          websocketService.on('notification_updated', notificationUpdatedListenerRef.current);
 
           // Setup presence listeners after socket is connected
           setupPresenceListeners(user.id, websocketService);
@@ -444,14 +447,17 @@ export const NotificationHandler: React.FC = () => {
       cleanupPresenceListeners(websocketService);
 
       if (isConnectedRef.current) {
-        websocketService.removeListener('notification_received', handleNotificationRef.current);
+        websocketService.removeListener(
+          'notification_received',
+          notificationReceivedListenerRef.current,
+        );
         websocketService.removeListener(
           'notification_ack_confirmed',
-          handleNotificationAckConfirmedRef.current,
+          notificationAckListenerRef.current,
         );
         websocketService.removeListener(
           'notification_updated',
-          handleNotificationUpdateRef.current,
+          notificationUpdatedListenerRef.current,
         );
       }
 
