@@ -106,6 +106,7 @@ import conversationParticipantBackfillRoutes from '@/routes/conversationParticip
 import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
 import dashboardWorkspaceIdBackfillRoutes from '@/routes/dashboardWorkspaceIdBackfill';
 import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
+import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
@@ -385,6 +386,8 @@ export class App {
     this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
     this.app.use('/migrate/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
     this.app.use('/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
+    this.app.use('/migrate/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
+    this.app.use('/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
 
     // Application backfill admin routes (auth required)
     this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);
