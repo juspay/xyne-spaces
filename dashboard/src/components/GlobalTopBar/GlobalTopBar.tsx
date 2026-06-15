@@ -19,7 +19,6 @@ import { invokeShortcut } from '../../shortcuts';
 import { useSearchMode } from '../../hooks/useSearchMode';
 import { toast } from 'sonner';
 import { Tooltip } from '../ui/Tooltip';
-import { WorkspaceSwitcher } from '../AppSidebar/WorkspaceSwitcher';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
 
 interface GlobalTopBarProps {
@@ -277,12 +276,7 @@ const GlobalTopBar = ({
       <div
         style={{ width: '12%', minWidth: '80px' } as React.CSSProperties}
         className='lg:w-[19%]'
-        // no-drag so the button is clickable
-      >
-        <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} className='ml-1 mt-1'>
-          <WorkspaceSwitcher />
-        </div>
-      </div>
+      />
       <div className='absolute left-1/2 -translate-x-1/2 flex items-center'>
         <NavigationAndSearch />
       </div>

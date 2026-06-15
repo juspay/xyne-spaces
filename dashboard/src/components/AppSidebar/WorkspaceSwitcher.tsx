@@ -293,7 +293,7 @@ export const WorkspaceSwitcher: React.FC = () => {
       {isOpen && (
         <div
           ref={popoverRef}
-          className='absolute left-0 top-full mt-1 z-[60] w-64 rounded-xl border border-border bg-background shadow-xl'
+          className='absolute left-full top-0 ml-2 z-[60] w-64 rounded-xl border border-border bg-background shadow-xl'
         >
           {/* Header */}
           <div className='px-3 pt-3 pb-1'>
