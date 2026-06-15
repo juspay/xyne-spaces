@@ -168,11 +168,12 @@ export class CallRepository {
     });
   }
 
-  async findAllActiveCalls(): Promise<Call[]> {
+  async findAllActiveCalls(take: number): Promise<Call[]> {
     const result = await DatabaseClient.getInstance().call.findMany({
       where: {
         status: CallStatus.ACTIVE,
       },
+      take,
     });
     return result;
   }
@@ -182,12 +183,17 @@ export class CallRepository {
    * These are calls that were never started and whose window has expired —
    * the Bull auto-end job may have been missed or lost.
    */
-  async findStaleScheduledCalls(): Promise<Call[]> {
+  async findStaleScheduledCalls(
+    take: number,
+    excludeOrigins?: CallOrigin[],
+  ): Promise<Call[]> {
     return DatabaseClient.getInstance().call.findMany({
       where: {
         status: CallStatus.SCHEDULED,
         endsAt: { lt: new Date() },
+        ...(excludeOrigins?.length && { callOrigin: { notIn: excludeOrigins } }),
       },
+      take,
     });
   }
 
