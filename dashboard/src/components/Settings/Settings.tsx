@@ -51,6 +51,7 @@ const Settings = ({
   const { status: livePresenceStatus, setStatus: setLivePresenceStatus } = useUserPresence(
     user?.id ?? '',
   );
+  const [presencePopoverOpen, setPresencePopoverOpen] = useState(false);
 
   const handleLogout = (): void => {
     logout();
@@ -168,6 +169,8 @@ const Settings = ({
                 <ChevronDown className='size-3 text-muted-foreground' />
               </button>
             }
+            open={presencePopoverOpen}
+            onOpenChange={setPresencePopoverOpen}
             align='start'
             className='w-40 p-1'
           >
@@ -175,6 +178,7 @@ const Settings = ({
               <button
                 onClick={() => {
                   setLivePresenceStatus('ONLINE');
+                  setPresencePopoverOpen(false);
                 }}
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='SETTINGS'
@@ -189,6 +193,7 @@ const Settings = ({
               <button
                 onClick={() => {
                   setLivePresenceStatus('AWAY');
+                  setPresencePopoverOpen(false);
                 }}
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='SETTINGS'
