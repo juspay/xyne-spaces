@@ -3013,6 +3013,7 @@ model Canvas {
   // Relations
   participants CanvasParticipant[]
   userStatuses CanvasUserStatus[]
+  versions     CanvasVersion[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
   // Quarto Doc fields - when docType is Quarto
@@ -3038,6 +3039,26 @@ model Canvas {
   @@index([createdBy, updatedAt(sort: Desc), id])
   @@index([docType, updatedAt(sort: Desc), id])
   @@map("canvases")
+  @@schema("public")
+}
+
+model CanvasVersion {
+  id          String   @id @default(cuid())
+  canvasId    String
+  name        String
+  content     Json
+  contentHash String
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  canvas      Canvas   @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+
+  @@unique([canvasId, contentHash])
+  @@index([canvasId, updatedAt])
+  @@index([createdBy])
+
+  @@map("canvas_versions")
   @@schema("public")
 }
 

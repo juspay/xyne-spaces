@@ -89,6 +89,8 @@ import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
+import { syncToYSweet } from '@/utils/ysweetUtils';
+import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 
 import { nudgeRegistry } from '@/nudges/registry';
 import { initializeRotationForGroup } from '@/utils/rotationEngine';
@@ -217,6 +219,34 @@ async function assertCanvasChannelNotArchived(
   if (channel.isArchived) {
     throw new Error('Channel is archived');
   }
+}
+
+async function hasCanvasVersionEditAccess(
+  tx: Transaction<Schema>,
+  canvas: { id: string; createdBy: string },
+  userId: string,
+): Promise<boolean> {
+  if (canvas.createdBy === userId) return true;
+
+  const participant = await tx.run(
+    zql.canvas_participants
+      .where('canvasId', canvas.id)
+      .where('role', 'IN', [CanvasRole.EDITOR, CanvasRole.OWNER])
+      .where(({ or, cmp, exists: ex }: any) =>
+        or(
+          cmp('userId', userId),
+          ex('userGroup', (ug: any) =>
+            ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId)),
+          ),
+          ex('channel', (ch: any) =>
+            ch.whereExists('participants', (cp: any) => cp.where('userId', userId)),
+          ),
+        ),
+      )
+      .one(),
+  );
+
+  return Boolean(participant);
 }
 
 /**
@@ -7678,6 +7708,130 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdAt: timestamp,
             updatedAt: timestamp,
           });
+        },
+      ),
+    },
+    canvasVersion: {
+      save: defineMutator(
+        z.object({
+          id: z.string(),
+          canvasId: z.string(),
+          name: z.string().min(1).max(120),
+          content: z.any(),
+          contentHash: z.string().min(1),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, canvasId, name, content, contentHash, timestamp } }) => {
+          const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          const canEdit = await hasCanvasVersionEditAccess(tx, canvas, authData.sub);
+
+          if (!canEdit) {
+            throw new Error('You do not have permission to edit this canvas');
+          }
+
+          const existingVersion = await tx.run(
+            zql.canvas_versions
+              .where('canvasId', canvasId)
+              .where('contentHash', contentHash)
+              .one(),
+          );
+
+          if (existingVersion) {
+            await tx.mutate.canvas_versions.update({
+              id: existingVersion.id,
+              updatedAt: timestamp,
+            });
+            return;
+          }
+
+          await tx.mutate.canvas_versions.insert({
+            id,
+            canvasId,
+            name: name.trim(),
+            content,
+            contentHash,
+            createdBy: authData.sub,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      rename: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().min(1).max(120),
+        }),
+        async ({ tx, args: { id, name } }) => {
+          const version = await tx.run(zql.canvas_versions.where('id', id).one());
+          if (!version) {
+            throw new Error('Canvas version not found');
+          }
+
+          const canvas = await tx.run(zql.canvases.where('id', version.canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          const canEdit = await hasCanvasVersionEditAccess(tx, canvas, authData.sub);
+
+          if (!canEdit) {
+            throw new Error('You do not have permission to edit this canvas');
+          }
+
+          await tx.mutate.canvas_versions.update({
+            id: version.id,
+            name: name.trim(),
+          });
+        },
+      ),
+      restore: defineMutator(
+        z.object({
+          id: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, timestamp } }) => {
+          const version = await tx.run(zql.canvas_versions.where('id', id).one());
+          if (!version) {
+            throw new Error('Canvas version not found');
+          }
+
+          const canvas = await tx.run(zql.canvases.where('id', version.canvasId).one());
+          if (!canvas) {
+            throw new Error('Canvas not found');
+          }
+
+          const canEdit = await hasCanvasVersionEditAccess(tx, canvas, authData.sub);
+
+          if (!canEdit) {
+            throw new Error('You do not have permission to edit this canvas');
+          }
+
+          await tx.mutate.canvases.update({
+            id: canvas.id,
+            lastEditedBy: authData.sub,
+            lastEditedAt: timestamp,
+            updatedAt: timestamp,
+            ...(!canvas.isCollaborative && { content: version.content }),
+          });
+
+          await tx.mutate.canvas_versions.update({
+            id: version.id,
+            updatedAt: timestamp,
+          });
+
+          if (canvas.isCollaborative) {
+            asyncTasks.push(async () => {
+              try {
+                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[]);
+              } catch (error) {
+                logger.error('[MUTATOR-CANVAS-VERSION-RESTORE] Failed to sync Y-Sweet:', error);
+              }
+            });
+          }
         },
       ),
     },
