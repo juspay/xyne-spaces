@@ -158,6 +158,8 @@ export interface XyneAIInputBoxProps {
   onSelectAgent?: (slug: string | null) => void;
   kbCollectionId?: string | undefined;
   collectionsList?: CollectionSummary[];
+  compactToolbar?: boolean;
+  tightToolbar?: boolean;
 }
 
 // Interface for the XyneAIInputBox imperative API (matches InputBoxHandle pattern)
@@ -233,6 +235,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       agents = [],
       onSelectAgent,
       collectionsList: collectionsListProp = [],
+      compactToolbar = false,
+      tightToolbar = false,
     },
     ref,
   ): ReactElement => {
@@ -1749,8 +1753,16 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
             {/* Bottom buttons - Context menu, Web Search Toggle and Submit */}
             {!isOnboarding && (
-              <div className='flex items-center justify-between gap-2 px-2'>
-                <div className='flex items-center gap-2'>
+              <div
+                className={`flex items-center ${
+                  compactToolbar ? 'flex-wrap gap-2' : 'justify-between gap-2'
+                } px-2`}
+              >
+                <div
+                  className={`flex items-center ${
+                    compactToolbar ? 'flex-wrap gap-1' : 'gap-2'
+                  } min-w-0`}
+                >
                   {/* Hidden file input */}
                   <input
                     ref={fileInputRef}
@@ -1764,7 +1776,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     type='button'
                     onClick={handleAttachFiles}
-                    className='p-1.5 -ml-1.5 rounded-lg hover:bg-accent transition-colors'
+                    className={`rounded-lg hover:bg-accent transition-colors shrink-0 ${
+                      tightToolbar ? 'p-1 -ml-1' : 'p-1.5 -ml-1.5'
+                    }`}
                     aria-label='Attach files'
                     title='Attach files'
                     data-track-category='XyneAI'
@@ -1786,7 +1800,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         }
                       }}
                       disabled={!webSearchAccessible}
-                      className={`p-1.5 rounded-lg transition-colors ${
+                      className={`rounded-lg transition-colors shrink-0 ${
+                        tightToolbar ? 'p-1' : 'p-1.5'
+                      } ${
                         webSearchEnabled
                           ? 'bg-muted text-status-success hover:bg-accent'
                           : 'hover:bg-accent text-muted-foreground'
@@ -1826,7 +1842,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         }
                       }}
                       disabled={!deepResearchAccessible}
-                      className={`p-1.5 rounded-lg transition-colors ${
+                      className={`rounded-lg transition-colors shrink-0 ${
+                        tightToolbar ? 'p-1' : 'p-1.5'
+                      } ${
                         deepResearchEnabled
                           ? 'bg-muted text-status-pending hover:bg-accent'
                           : 'hover:bg-accent text-muted-foreground'
@@ -1861,7 +1879,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     <button
                       type='button'
                       onClick={onCreateCanvasToggle}
-                      className={`p-1.5 rounded-lg transition-colors ${
+                      className={`rounded-lg transition-colors shrink-0 ${
+                        tightToolbar ? 'p-1' : 'p-1.5'
+                      } ${
                         createCanvasEnabled
                           ? 'bg-muted text-primary hover:bg-accent'
                           : 'hover:bg-accent text-muted-foreground'
@@ -1877,7 +1897,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   )}
                   {/* Agent selector */}
                   {onSelectAgent && (
-                    <div className='flex items-center'>
+                    <div className='flex items-center shrink-0'>
                       <AgentSelector
                         selectedAgentSlug={selectedAgentSlug}
                         agents={agents}
@@ -1890,7 +1910,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 </div>
 
                 {/* Right side: mic + submit */}
-                <div className='flex items-center gap-1'>
+                <div className={`flex items-center ${compactToolbar ? 'gap-1 ml-auto' : 'gap-1'}`}>
                   <VoiceInput
                     ref={voiceInputRef}
                     editor={editor}
@@ -1900,7 +1920,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     onClick={isStreaming ? onAbort : onSubmit}
                     disabled={!isStreaming && !inputValue.trim()}
-                    className={`p-2 rounded-full transition-colors ${
+                    className={`rounded-full transition-colors shrink-0 ${
+                      tightToolbar ? 'p-1.5' : 'p-2'
+                    } ${
                       isStreaming
                         ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                         : inputValue.trim()

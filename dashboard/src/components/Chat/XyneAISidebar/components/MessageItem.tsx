@@ -8,6 +8,7 @@ import {
   Download,
   Check,
   Loader2,
+  Bug,
   AlertTriangle,
 } from 'lucide-react';
 import React from 'react';
@@ -19,8 +20,15 @@ import { createMarkdownComponents } from '../../../../utils/markdownComponents';
 import {
   stripCitationMarks,
   extractInlineCitations,
+  linkifyClawCitations,
+  buildClawCitationToolNumbers,
   type InlineCitation,
 } from '../../../ui/TipTapExtensions/CitationMark';
+import {
+  findCitationForChunk,
+  buildClawCitationUrl,
+  getClawCitationLabel,
+} from '../utils/clawCitationUrl';
 import { genericInstance } from '../../../../services/clients/genericClient';
 import type { Components } from 'react-markdown';
 import {
@@ -50,12 +58,89 @@ import type {
   UserTag,
   Participant,
   SelectionContext,
+  ToolInvocation as ToolInvocationType,
+  ClawCitation,
 } from '../utils/XyneAITypes';
 import { ReasoningBlock } from './ReasoningBlock';
 import { ToolInvocationList } from './ToolInvocationList';
 import { PendingActionBlock } from './PendingActionBlock';
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+
+/**
+ * v3-style inline citation chip for `[clf-<toolCallId>#<chunkIndex>]` tokens.
+ * Resolves to the structured ClawCitation on the parent message's toolInvocations
+ * and renders as a small clickable pill linking into Spaces. Falls back to a
+ * non-clickable badge when no URL can be built (e.g. older agent output that
+ * doesn't carry per-chunk citations).
+ *
+ * Display format `{toolNumber}.{chunkIndex}` matches v3's CitationChip so
+ * users see consistent citation references across both surfaces.
+ */
+interface ClawCitationChipProps {
+  toolCallId: string;
+  chunkIndex: number;
+  toolNumber: number;
+  toolInvocations: ToolInvocationType[] | undefined;
+}
+
+const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
+  if (!citation) return 'Citation';
+  if (citation.kind === 'ticket' && citation.ticketId) {
+    return citation.channelName
+      ? `Ticket ${citation.ticketId} in #${citation.channelName}`
+      : `Ticket ${citation.ticketId}`;
+  }
+  if (citation.kind === 'thread') {
+    return citation.channelName ? `Thread in #${citation.channelName}` : 'Spaces thread';
+  }
+  if (citation.kind === 'canvas') {
+    return citation.label ? `Canvas — ${citation.label}` : 'Canvas';
+  }
+  if (citation.kind === 'external') {
+    return citation.label || citation.url || 'External link';
+  }
+  return getClawCitationLabel(citation);
+};
+
+const ClawCitationChip = ({
+  toolCallId,
+  chunkIndex,
+  toolNumber,
+  toolInvocations,
+}: ClawCitationChipProps): ReactElement => {
+  const citation = findCitationForChunk(toolInvocations, toolCallId, chunkIndex);
+  const url = citation ? buildClawCitationUrl(citation) : null;
+  const label = `${toolNumber}.${chunkIndex}`;
+  const tooltip = buildClawCitationTooltip(citation);
+  // `claw-citation-chip` is the hook for the `!important` override in
+  // global.css that keeps the chip's text the paragraph's foreground colour
+  // and un-underlined — otherwise `.xyne-ai-markdown a` would force link blue.
+  const chipClass =
+    'claw-citation-chip ' +
+    'inline-flex items-center justify-center align-baseline ' +
+    'px-1 min-w-[1.125rem] h-[1.125rem] mx-[2px] rounded ' +
+    'text-[9.5px] font-medium tabular-nums leading-none ' +
+    'bg-muted/60 border border-border/50 ' +
+    'hover:bg-accent hover:border-border ' +
+    'transition-colors';
+
+  const trigger = url ? (
+    <Link to={url} className={chipClass} aria-label={tooltip}>
+      {label}
+    </Link>
+  ) : (
+    <span className={chipClass} aria-label={tooltip}>
+      {label}
+    </span>
+  );
+
+  return (
+    <Tooltip content={tooltip} side='top' delayDuration={200} sideOffset={4}>
+      {trigger}
+    </Tooltip>
+  );
+};
 
 // Inline Citations Component - displays key points with inline citation pill badges
 const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactElement | null => {
@@ -342,6 +427,8 @@ interface MessageContentProps {
   displayContent: string;
   hasKeypoints: boolean | undefined;
   parsedContent: StreamingParsedContent | undefined;
+  /** toolCallId → display number map, used to render inline `[clf-…#N]` chips. */
+  clawCitationToolNumbers: ReadonlyMap<string, number>;
   onCitationClick: (
     messageNumber: number,
     conversationIdMapping: Record<string, string>,
@@ -402,6 +489,7 @@ interface MessageItemProps {
   isLatestBotMessage?: boolean | undefined;
   branchInfo?: { index: number; total: number } | undefined;
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
+  onDebug?: (() => void) | undefined;
 }
 
 // Image preview component that fetches with auth and creates blob URL
@@ -771,6 +859,7 @@ export const MessageItem = React.memo(
     isLatestBotMessage,
     branchInfo,
     onBranchNavigate,
+    onDebug,
   }: MessageItemProps): ReactElement => {
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -803,14 +892,32 @@ export const MessageItem = React.memo(
     // Append a trailing newline during streaming so remark-breaks flushes the
     // current incomplete line and markdown constructs (headings, lists, code
     // blocks) render correctly before the closing token arrives.
+    //
+    // We also build a stable `toolCallId → display number` map from the raw
+    // content and rewrite `[clf-…#N]` tokens into markdown links pointing at
+    // synthetic `cite:` hrefs. Order matters: linkify BEFORE strip so the clf
+    // tokens are converted into markdown links before stripCitationMarks eats
+    // any leftover ones.
+    const clawCitationToolNumbers = useMemo(() => {
+      const raw = message.content || message.streamingContent || '';
+      return buildClawCitationToolNumbers(raw);
+    }, [message.content, message.streamingContent]);
+
     const displayContent = useMemo(() => {
       const raw =
         message.type === 'bot' && message.isStreaming && message.streamingContent
           ? message.streamingContent
           : message.content || message.streamingContent || '';
-      const stripped = stripCitationMarks(raw);
+      const linkified = linkifyClawCitations(raw, clawCitationToolNumbers);
+      const stripped = stripCitationMarks(linkified);
       return message.isStreaming ? stripped + '\n' : stripped;
-    }, [message.type, message.isStreaming, message.streamingContent, message.content]);
+    }, [
+      message.type,
+      message.isStreaming,
+      message.streamingContent,
+      message.content,
+      clawCitationToolNumbers,
+    ]);
 
     const parsedContent = message.parsedContent;
     const hasKeypoints = parsedContent && parsedContent.keypoints.length > 0;
@@ -1082,6 +1189,7 @@ export const MessageItem = React.memo(
                     displayContent={displayContent}
                     hasKeypoints={hasKeypoints}
                     parsedContent={parsedContent}
+                    clawCitationToolNumbers={clawCitationToolNumbers}
                     onCitationClick={onCitationClick}
                     onSummarizerCitationClick={onSummarizerCitationClick}
                   />
@@ -1165,6 +1273,19 @@ export const MessageItem = React.memo(
                 </div>
               )}
 
+              {message.type === 'bot' && onDebug && (
+                <button
+                  type='button'
+                  onClick={onDebug}
+                  className='mt-2 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                  title='Debug this response'
+                  data-track-category='XyneAI'
+                  data-track-name='DEBUG_RESPONSE'
+                >
+                  <Bug size={12} /> Debug this response
+                </button>
+              )}
+
               {/* Branch navigator + Copy/Regenerate/Like/Dislike Buttons */}
               {message.type === 'bot' && !message.isStreaming && !message.isAborted && (
                 <div className='flex items-center justify-between mt-4'>
@@ -1227,6 +1348,7 @@ const MessageContent = ({
   displayContent,
   hasKeypoints,
   parsedContent,
+  clawCitationToolNumbers,
   onCitationClick,
   onSummarizerCitationClick,
 }: MessageContentProps): ReactElement => {
@@ -1358,6 +1480,11 @@ const MessageContent = ({
         <div className="bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal">
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks]}
+            // Preserve `cite:clf-…` hrefs — react-markdown's default sanitizer
+            // strips non-http(s) schemes, which would erase the href before our
+            // `a` override can intercept it and substitute a ClawCitationChip.
+            // Same fix as v3 ChatPageV3.tsx:417.
+            urlTransform={url => url}
             components={{
               ...sidebarMarkdownComponents,
               p: ({ children }) => {
@@ -1377,6 +1504,31 @@ const MessageContent = ({
                 return <th {...props}>{processed}</th>;
               },
               a: ({ href, children, ...props }) => {
+                // v3-style inline citation: `linkifyClawCitations` rewrites
+                // `[clf-<toolCallId>#<N>]` → `[<num>.<N>](cite:clf-<toolCallId>#<N>)`.
+                // Intercept the synthetic `cite:` href and substitute a chip
+                // that resolves to the matching ClawCitation on the parent
+                // message's toolInvocations.
+                if (href && href.startsWith('cite:clf-')) {
+                  const body = href.slice('cite:clf-'.length);
+                  const hashIdx = body.lastIndexOf('#');
+                  if (hashIdx > 0) {
+                    const toolCallId = body.slice(0, hashIdx);
+                    const chunkIndex = Number(body.slice(hashIdx + 1));
+                    const toolNumber = clawCitationToolNumbers.get(toolCallId) ?? 0;
+                    if (toolNumber > 0 && Number.isFinite(chunkIndex)) {
+                      return (
+                        <ClawCitationChip
+                          toolCallId={toolCallId}
+                          chunkIndex={chunkIndex}
+                          toolNumber={toolNumber}
+                          toolInvocations={message.toolInvocations}
+                        />
+                      );
+                    }
+                  }
+                }
+
                 // Check if URL is external
                 const isExternal = (() => {
                   if (!href) return false;

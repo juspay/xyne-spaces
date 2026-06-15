@@ -52,7 +52,7 @@ import {
 import WebView from '../components/WebView/WebView';
 import { useSelector } from '@xstate/react';
 import { webviewActor, setPanelRefs } from '../machines/webviewMachine';
-import { xyneAIActor, setXyneAIPanelRefs } from '../machines/xyneAIMachine';
+import { xyneAIActor, setXyneAIPanelRefs, globalXyneAIPanelRefs } from '../machines/xyneAIMachine';
 import { browserPanelActor, setBrowserPanelRefs } from '../machines/browserPanelMachine';
 import ActivityListView from '../components/Activity/ActivityListView/ActivityListView';
 import Search from '../components/Chat/Search/Search';
@@ -232,6 +232,9 @@ const XyneAISidebarZIndexShell = ({ children }: { children: ReactNode }): ReactE
   );
 };
 
+const XYNE_AI_PANEL_MIN_SIZE = 42;
+const XYNE_AI_PANEL_DEFAULT_SIZE = 35;
+
 const WorkspaceRedirect = (): ReactElement => {
   const email = localStorage.getItem('user_email');
   const workspaceId = email ? getLastActiveWorkspaceId(email) : null;
@@ -266,6 +269,7 @@ const AppRoot = (): ReactElement => {
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [pendingRecording, setPendingRecording] = useState<File | null>(null);
   const [pendingRecordingFilePath, setPendingRecordingFilePath] = useState<string | null>(null);
+  const [isXyneDebuggerOpen, setIsXyneDebuggerOpen] = useState(false);
 
   const { recordingState, recordingSeconds, startRecording, stopRecording } = useScreenRecorder(
     (file: File, filePath: string) => {
@@ -295,6 +299,15 @@ const AppRoot = (): ReactElement => {
       right: browserPanelRightRef,
     });
   }, []);
+
+  useEffect(() => {
+    if (isXyneDebuggerOpen) return;
+    const rafId = window.requestAnimationFrame(() => {
+      globalXyneAIPanelRefs.right.current?.resize(XYNE_AI_PANEL_DEFAULT_SIZE);
+      globalXyneAIPanelRefs.left.current?.resize(100 - XYNE_AI_PANEL_DEFAULT_SIZE);
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [isXyneDebuggerOpen]);
 
   // Register global keyboard shortcuts
   useGlobalShortcuts({ leftPanelRef });
@@ -519,7 +532,12 @@ const AppRoot = (): ReactElement => {
                       <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
                         <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
                       </PanelResizeHandle>
-                      <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50} minSize={25}>
+                      <Panel
+                        ref={xyneAIRightPanelRef}
+                        defaultSize={XYNE_AI_PANEL_DEFAULT_SIZE}
+                        maxSize={isXyneDebuggerOpen ? 55 : 50}
+                        minSize={isXyneDebuggerOpen ? XYNE_AI_PANEL_MIN_SIZE : 25}
+                      >
                         <XyneAISidebarZIndexShell>
                           <XyneAISidebar
                             channelId={xyneAIChannelId}
@@ -528,6 +546,7 @@ const AppRoot = (): ReactElement => {
                             canvasInfo={xyneAICanvasInfo}
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
+                            onDebuggerOpenChange={setIsXyneDebuggerOpen}
                           />
                         </XyneAISidebarZIndexShell>
                       </Panel>
@@ -665,6 +684,7 @@ const AppRoot = (): ReactElement => {
                       canvasInfo={xyneAICanvasInfo}
                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                       kbChannelId={xyneAIKbChannelId ?? ''}
+                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
                     />
                   </Drawer>
                 )}

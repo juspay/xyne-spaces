@@ -14,6 +14,7 @@ import {
   runClawAgentStream,
   listClawConversations,
   getClawConversationMessages,
+  getClawDebugArtifacts,
   approveClawAction,
   downloadClawAttachment,
   listAccessibleClawAgents,
@@ -83,13 +84,13 @@ const XyneAIRequestSchemaV2 = z.object({
         downloadUrl: z.string().optional(),
         width: z.number().optional(),
         height: z.number().optional(),
-      }),
+      })
     )
-    .transform(arr =>
-      arr?.map(att => ({
+    .transform((arr) =>
+      arr?.map((att) => ({
         ...att,
         mimeType: att.mimeType || att.mime_type || 'application/octet-stream',
-      })),
+      }))
     )
     .optional(),
   messageAttachmentIds: z.array(z.string().min(1)).optional(),
@@ -128,7 +129,10 @@ export class XyneAIControllerV2 {
     if (!parseResult.success) {
       res.status(400).json({
         error: 'Invalid input',
-        details: parseResult.error.errors.map(e => ({ field: e.path.join('.'), message: e.message })),
+        details: parseResult.error.errors.map((e) => ({
+          field: e.path.join('.'),
+          message: e.message,
+        })),
       });
       return;
     }
@@ -184,7 +188,7 @@ export class XyneAIControllerV2 {
     const effectiveTicketIds = ticketIds?.length ? ticketIds : ticket_ids;
     const effectiveCallIds = callIds?.length ? callIds : call_ids;
     logger.info(
-      `[XyneAIv2] Request context: ticketIds=${JSON.stringify(effectiveTicketIds)}, canvasIds=${JSON.stringify(effectiveCanvasIds)}, callIds=${JSON.stringify(effectiveCallIds)}, attachedContextCount=${effectiveAttachedContext?.length ?? 0}`,
+      `[XyneAIv2] Request context: ticketIds=${JSON.stringify(effectiveTicketIds)}, canvasIds=${JSON.stringify(effectiveCanvasIds)}, callIds=${JSON.stringify(effectiveCallIds)}, attachedContextCount=${effectiveAttachedContext?.length ?? 0}`
     );
 
     const userId = (req as any).user?.id;
@@ -206,9 +210,9 @@ export class XyneAIControllerV2 {
           select: { channelId: true },
         });
 
-        const accessibleChannelIds = userChannelAccess.map(c => c.channelId);
+        const accessibleChannelIds = userChannelAccess.map((c) => c.channelId);
         const inaccessibleChannels = effectiveChannelIds.filter(
-          (id: string) => !accessibleChannelIds.includes(id),
+          (id: string) => !accessibleChannelIds.includes(id)
         );
 
         if (inaccessibleChannels.length > 0) {
@@ -270,7 +274,7 @@ export class XyneAIControllerV2 {
           deepResearchEnabled,
           researchContext: effectiveResearchContext,
           createCanvasEnabled,
-          sessionId: effectiveSessionId
+          sessionId: effectiveSessionId,
         };
 
         // Set SSE headers
@@ -361,7 +365,10 @@ export class XyneAIControllerV2 {
     if (!parseResult.success) {
       res.status(400).json({
         error: 'Invalid input',
-        details: parseResult.error.errors.map(e => ({ field: e.path.join('.'), message: e.message })),
+        details: parseResult.error.errors.map((e) => ({
+          field: e.path.join('.'),
+          message: e.message,
+        })),
       });
       return;
     }
@@ -398,7 +405,9 @@ export class XyneAIControllerV2 {
         : `${baseUrl}/api/public/scores`;
       const authKey = `${publicKey}:${secretKey}`;
 
-      logger.info(`[XyneAIv2] Submitting feedback to: ${periscopeUrl}, traceId: ${otelTraceId}, value: ${value}`);
+      logger.info(
+        `[XyneAIv2] Submitting feedback to: ${periscopeUrl}, traceId: ${otelTraceId}, value: ${value}`
+      );
 
       const response = await fetch(periscopeUrl, {
         method: 'POST',
@@ -468,7 +477,7 @@ export class XyneAIControllerV2 {
           serverType,
           tool,
           signature,
-        },
+        }
       );
 
       res.json(result);
@@ -532,6 +541,32 @@ export class XyneAIControllerV2 {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] getMessages error:', error);
       res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  getConversationDebug = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { convId } = req.params;
+    if (!convId) {
+      res.status(400).json({ success: false, error: 'convId is required' });
+      return;
+    }
+    try {
+      const result = await getClawDebugArtifacts(
+        { headers: req.headers, userId },
+        convId,
+        (req.query.agentSlug as string) || 'ask-ai'
+      );
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      res
+        .status(message === 'Debug artifacts not found' ? 404 : 503)
+        .json({ success: false, error: message });
     }
   };
 

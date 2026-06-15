@@ -117,6 +117,14 @@ export interface ClawCitation {
   viewAccessId?: string;
   ticketId?: string;
   url?: string;
+  /**
+   * 1-based index of the chunk in the tool's result text this citation
+   * corresponds to. Used to resolve inline `[clf-<toolCallId>#<N>]` tokens
+   * back to the (channelId, conversationId, viewAccessId, ...) tuple they
+   * point at via `citations.find(c => c.chunkIndex === N)`. Optional —
+   * older agent versions don't emit per-chunk citations.
+   */
+  chunkIndex?: number;
 }
 
 /**
@@ -154,6 +162,8 @@ export type StreamEventType =
   | 'delta'
   | 'tool_invocation'
   | 'reasoning_delta'
+  | 'debug_event'
+  | 'debug_artifacts_ready'
   | 'attachment'
   | 'complete'
   | 'error'
@@ -171,6 +181,7 @@ export interface StreamEvent {
   delta?: string;
   reasoningDelta?: string;
   toolInvocation?: ToolInvocation;
+  debugEvent?: DebugEventRecord;
   attachments?: Array<{
     fileName: string;
     mimeType: string;
@@ -179,6 +190,27 @@ export interface StreamEvent {
   pendingActions?: PendingAction[];
   status?: 'completed' | 'failed';
   error?: string;
+}
+
+export interface DebugEventRecord {
+  seq: number;
+  at: string;
+  kind: string;
+  turn?: number;
+  llmCall?: number;
+  toolCallId?: string;
+  parentToolCallId?: string;
+  subagentName?: string;
+  data: Record<string, unknown>;
+}
+
+export interface DebugArtifactBundle {
+  conversationId: string;
+  debugDir?: string;
+  debugSession: Record<string, unknown> | null;
+  debugEvents: Record<string, unknown>[] | null;
+  runs: Array<{ fileName: string; data: Record<string, unknown> }>;
+  subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
 }
 
 export interface ConversationHistory {

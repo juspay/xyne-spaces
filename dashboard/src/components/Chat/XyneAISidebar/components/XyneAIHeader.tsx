@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { Settings, Activity, Brain, SquarePen, X, Info } from 'lucide-react';
+import { Settings, Activity, Brain, SquarePen, X, Info, Bug } from 'lucide-react';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { ChatHistory } from '../../../icons/xyne-ai';
 import { SettingsModal } from './SettingsModal';
@@ -18,6 +18,9 @@ interface XyneAIHeaderProps {
   hideTitle?: boolean;
   hideHistory?: boolean;
   selectedAgent?: AccessibleClawAgent | null;
+  onShowDebugger?: (() => void) | undefined;
+  isCompact?: boolean;
+  isTight?: boolean;
 }
 
 export const XyneAIHeader = ({
@@ -32,6 +35,9 @@ export const XyneAIHeader = ({
   hideTitle = false,
   hideHistory = false,
   selectedAgent,
+  onShowDebugger,
+  isCompact = false,
+  isTight = false,
 }: XyneAIHeaderProps): ReactElement => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAgentInfoModalOpen, setIsAgentInfoModalOpen] = useState(false);
@@ -52,6 +58,17 @@ export const XyneAIHeader = ({
         <div className='h-14 mt-[14px] px-4 flex items-center justify-between gap-2 self-stretch'>
           {/* Left: New Chat Icon + Title + Agent Info */}
           <div className='flex items-center gap-2'>
+            {onShowDebugger && (
+              <button
+                onClick={onShowDebugger}
+                className={mwebActionPillClass}
+                title='Open debugger'
+                data-track-category='XyneAI'
+                data-track-name='OPEN_DEBUGGER_MOBILE'
+              >
+                <Bug size={16} />
+              </button>
+            )}
             <button
               onClick={onNewChat}
               className={mwebActionPillClass}
@@ -149,9 +166,13 @@ export const XyneAIHeader = ({
 
   return (
     <>
-      <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-border'>
-        <div className='flex items-center gap-2'>
-          <span className="text-foreground text-base font-semibold font-['Inter']">
+      <div className='min-h-14 px-4 py-3 flex items-center justify-between gap-2 self-stretch border-border'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <span
+            className={`min-w-0 truncate text-foreground font-semibold font-['Inter'] ${
+              isTight ? 'text-sm' : 'text-base'
+            }`}
+          >
             {!hideTitle && title}
           </span>
           {/* Agent Info Icon - only show when an agent is selected */}
@@ -167,11 +188,22 @@ export const XyneAIHeader = ({
             </button>
           )}
         </div>
-        <div className='flex items-center gap-2'>
+        <div className={`flex items-center ${isCompact ? 'gap-1' : 'gap-2'} flex-wrap justify-end`}>
+          {onShowDebugger && (
+            <button
+              onClick={onShowDebugger}
+              className='p-2 rounded-lg border border-border hover:bg-accent transition-colors text-foreground shrink-0'
+              title='Open debugger'
+              data-track-category='XyneAI'
+              data-track-name='OPEN_DEBUGGER_DESKTOP'
+            >
+              <Bug size={16} />
+            </button>
+          )}
           {/* New Chat Icon */}
           <button
             onClick={onNewChat}
-            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground shrink-0'
             title='New chat'
             data-track-category='XyneAI'
             data-track-name='NEW_CHAT_DESKTOP'
@@ -182,7 +214,7 @@ export const XyneAIHeader = ({
           {!hideHistory && (
             <button
               onClick={onShowHistory}
-              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground shrink-0'
               title='Chat history'
               data-track-category='XyneAI'
               data-track-name='SHOW_HISTORY_DESKTOP'
@@ -191,10 +223,10 @@ export const XyneAIHeader = ({
             </button>
           )}
           {/* Memories Icon */}
-          {!hideMemoriesAndActivity && (
+          {!hideMemoriesAndActivity && !isCompact && (
             <button
               onClick={onShowMemories}
-              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors shrink-0'
               title='Memories'
               data-track-category='XyneAI'
               data-track-name='SHOW_MEMORIES_DESKTOP'
@@ -203,10 +235,10 @@ export const XyneAIHeader = ({
             </button>
           )}
           {/* User Activity Icon */}
-          {!hideMemoriesAndActivity && (
+          {!hideMemoriesAndActivity && !isCompact && (
             <button
               onClick={onShowUserActivity}
-              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground shrink-0'
               title='Your activity'
               data-track-category='XyneAI'
               data-track-name='SHOW_USER_ACTIVITY_DESKTOP'
@@ -217,7 +249,7 @@ export const XyneAIHeader = ({
           {/* Settings Icon */}
           <button
             onClick={() => setIsSettingsModalOpen(true)}
-            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground shrink-0'
             title='Settings'
             data-track-category='XYNE_AI'
             data-track-name='OpenSettings'
@@ -227,7 +259,7 @@ export const XyneAIHeader = ({
           {/* Close Icon */}
           <button
             onClick={handleClose}
-            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground shrink-0'
             data-track-category='XyneAI'
             data-track-name='CLOSE_DESKTOP'
           >

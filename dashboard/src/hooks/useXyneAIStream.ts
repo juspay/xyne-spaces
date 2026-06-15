@@ -4,6 +4,7 @@ import type {
   MessageAttachment,
   SelectionContext,
   UserTag,
+  DebugEventRecord,
 } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../components/Chat/XyneAISidebar/components/ContextPickerPanel';
@@ -36,6 +37,8 @@ interface UseXyneAIStreamParams {
   activities?: UserActivity[]; // User activities to include as context
   /** Selected claw agent slug. If set, the query is routed to that agent instead of Ask AI. */
   agentSlug?: string | null;
+  setDebugEvents?: React.Dispatch<React.SetStateAction<DebugEventRecord[]>>;
+  setDebugArtifactsReadyVersion?: React.Dispatch<React.SetStateAction<number>>;
 }
 
 /**
@@ -93,6 +96,8 @@ export const useXyneAIStream = ({
   attachedContext,
   activities,
   agentSlug,
+  setDebugEvents,
+  setDebugArtifactsReadyVersion,
 }: UseXyneAIStreamParams) => {
   const currentStreamIdRef = useRef<string | null>(null);
 
@@ -129,6 +134,8 @@ export const useXyneAIStream = ({
       if (state.traceId && setCurrentTraceId) {
         setCurrentTraceId(state.traceId);
       }
+      setDebugEvents?.(state.debugEvents);
+      setDebugArtifactsReadyVersion?.(state.debugArtifactsReadyVersion);
     });
 
     const builtThreadId = threadId;
@@ -150,6 +157,8 @@ export const useXyneAIStream = ({
       if (activeStream.traceId && setCurrentTraceId) {
         setCurrentTraceId(activeStream.traceId);
       }
+      setDebugEvents?.(activeStream.debugEvents);
+      setDebugArtifactsReadyVersion?.(activeStream.debugArtifactsReadyVersion);
       currentStreamIdRef.current = activeStream.streamId;
     } else {
       currentStreamIdRef.current = null;
@@ -158,7 +167,15 @@ export const useXyneAIStream = ({
     return () => {
       unsubscribe();
     };
-  }, [threadId, streamSessionKey, setMessages, setConversationId, setCurrentTraceId]);
+  }, [
+    threadId,
+    streamSessionKey,
+    setMessages,
+    setConversationId,
+    setCurrentTraceId,
+    setDebugEvents,
+    setDebugArtifactsReadyVersion,
+  ]);
 
   // Store current messages ref for stream manager
   const messagesRef = useRef<Message[]>([]);

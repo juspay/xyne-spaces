@@ -200,10 +200,110 @@ function sanitizeCitationUrl(url: string): string {
   }
 }
 
+/**
+ * v3 claw inline-citation token: `[clf-<toolCallId>#<chunkIndex>]`. Also
+ * accepts the fullwidth-bracket variants the LLM occasionally emits.
+ *
+ * IMPORTANT: do NOT trail this with `\s?`. Tokens often sit at end-of-line in
+ * markdown lists (`- Item [clf-...#1]\n- Next item`), and consuming the `\n`
+ * collapses every list item into one paragraph (bug seen 2026-06-15).
+ */
+const CLAW_CITATION_TOKEN_RE = /([【[⟦])(clf-[A-Za-z0-9_.:-]+#\d+)([】\]⟧])/g;
+
+/**
+ * Lenient catch-all for malformed clf tokens the LLM sometimes hallucinates.
+ * Real example: `[clf-functions.Xyne_Spaces__spaces-tickets:0#1–20]` (en-dash
+ * range), `[clf-chatcmpl-tool-be9722dab2b59416#1-20]` (wrong toolCallId
+ * format), or any other shape that doesn't match the strict regex above.
+ * Without this pass they'd render as raw bracket text in the prose. We strip
+ * them outright since they're never valid citations.
+ */
+const CLAW_CITATION_MALFORMED_RE = /[【[⟦]\s*clf-[^】\]⟧]*[】\]⟧]/g;
+
 export function stripCitationMarks(html: string): string {
   return html
     .replace(/<cite\b[^>]*>([\s\S]*?)<\/cite>/gi, '$1')
-    .replace(/\n?<citation\b[^>]*>([\s\S]*?)<\/citation>/gi, '');
+    .replace(/\n?<citation\b[^>]*>([\s\S]*?)<\/citation>/gi, '')
+    .replace(CLAW_CITATION_TOKEN_RE, '')
+    .replace(CLAW_CITATION_MALFORMED_RE, '');
+}
+
+export interface ClawCitationRef {
+  /** Raw toolCallId portion of the token (stripped of the leading "clf-"). */
+  toolCallId: string;
+  /** 1-based chunk index — matches Citation.chunkIndex on the matching tool invocation. */
+  chunkIndex: number;
+  /** The original token text, useful for replacement passes. */
+  token: string;
+}
+
+/**
+ * Scan markdown for v3-style `[clf-…#N]` inline citation tokens and return
+ * a parsed list. Returns an empty list when no tokens are present, so callers
+ * can short-circuit without extra checks.
+ */
+export function extractClawCitationRefs(content: string): ClawCitationRef[] {
+  if (!content || content.indexOf('clf-') === -1) return [];
+  const refs: ClawCitationRef[] = [];
+  const re = new RegExp(CLAW_CITATION_TOKEN_RE.source, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const body = m[2];
+    if (!body) continue;
+    const hashIdx = body.lastIndexOf('#');
+    if (hashIdx <= 0) continue;
+    const toolCallId = body.slice('clf-'.length, hashIdx);
+    const chunkIndex = Number(body.slice(hashIdx + 1));
+    if (!toolCallId || !Number.isFinite(chunkIndex)) continue;
+    refs.push({ toolCallId, chunkIndex, token: m[0] });
+  }
+  return refs;
+}
+
+/**
+ * Replace every `[clf-<toolCallId>#<N>]` token in `content` with the markdown
+ * link `[<toolNumber>.<N>](cite:clf-<toolCallId>#<N>)`. Caller passes a
+ * pre-built `toolNumbers` map keyed by toolCallId so the same tool used
+ * across many tokens shares one stable display number (1, 2, 3 …) in the UI.
+ *
+ * Mirrors v3's `linkifyClawCitations` in ChatPageV3.tsx so behavior between
+ * the two surfaces stays consistent.
+ */
+export function linkifyClawCitations(
+  content: string,
+  toolNumbers: ReadonlyMap<string, number>,
+): string {
+  if (!content || content.indexOf('clf-') === -1) return content;
+  return content.replace(CLAW_CITATION_TOKEN_RE, (match, _o, body: string) => {
+    const hashIdx = body.lastIndexOf('#');
+    if (hashIdx <= 0) return match;
+    const toolCallId = body.slice('clf-'.length, hashIdx);
+    const chunkIndex = body.slice(hashIdx + 1);
+    const toolNumber = toolNumbers.get(toolCallId);
+    if (!toolNumber) return match;
+    return `[${toolNumber}.${chunkIndex}](cite:${body})`;
+  });
+}
+
+/**
+ * Build a stable display-number map (`toolCallId` → 1, 2, 3 …) following the
+ * order tokens appear in the rendered markdown — so the first tool the model
+ * cites is always shown as "1.x" regardless of execution order.
+ */
+export function buildClawCitationToolNumbers(content: string): Map<string, number> {
+  const numbers = new Map<string, number>();
+  if (!content || content.indexOf('clf-') === -1) return numbers;
+  const re = new RegExp(CLAW_CITATION_TOKEN_RE.source, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const body = m[2];
+    if (!body) continue;
+    const hashIdx = body.lastIndexOf('#');
+    if (hashIdx <= 0) continue;
+    const toolCallId = body.slice('clf-'.length, hashIdx);
+    if (!numbers.has(toolCallId)) numbers.set(toolCallId, numbers.size + 1);
+  }
+  return numbers;
 }
 
 export function extractCitationBlock(text: string | null | undefined): string {
