@@ -241,7 +241,7 @@ export class InvitationController {
         return;
       }
 
-      // Support both Google (googleId) and Microsoft (providerUserId)
+      // Support both Google (googleId), Microsoft and Email (providerUserId)
       const providerUserId = oauthUser.googleId || oauthUser.providerUserId;
       if (!providerUserId) {
         res.status(401).json({ error: 'Invalid user data. Please login again.' });

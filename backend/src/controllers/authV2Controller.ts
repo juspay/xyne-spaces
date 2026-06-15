@@ -1213,26 +1213,6 @@ export class AuthV2Controller {
           provider = parsed.provider;
           pendingRefreshToken = parsed.pendingRefreshToken;
           pendingAccessToken = parsed.pendingAccessToken;
-        } else if (existingSessionId) {
-
-          const session = await this.userSessionService.getSessionById(existingSessionId);
-          if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
-            res.status(401).json({
-              error: 'Invalid session',
-              message: 'Session not found or expired'
-            });
-            return;
-          }
-
-          oauthUserData = {
-            email: session.user.email,
-            name: session.user.name || '',
-            providerUserId: session.user.providerUserId,
-            picture: session.user.picture || undefined,
-          };
-          provider = session.user.authProvider;
-          pendingRefreshToken = session.refreshToken;
-          pendingAccessToken = session.accessToken || undefined;
         } else {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -1262,7 +1242,7 @@ export class AuthV2Controller {
           providerUserId: session.user.providerUserId,
           picture: session.user.picture || undefined,
         };
-        provider = 'GOOGLE'; // Assume Google for auto-login
+        provider = session.user.authProvider || 'GOOGLE';
         pendingRefreshToken = session.refreshToken;
         pendingAccessToken = session.accessToken || undefined;
       } else {

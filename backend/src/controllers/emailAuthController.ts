@@ -246,6 +246,7 @@ export class EmailAuthController {
         name: workspaceUser.name,
         workspaceId: workspaceUser.workspaceId,
         memberId: workspaceUser.orgMemberId,
+        providerUserId: `email-${workspaceUser.email}`,
       });
 
       res.cookie('google_access_token', jwtToken, {
