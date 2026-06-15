@@ -23,10 +23,10 @@ export interface SlackFilters {
   senderId?: string[];
   participants?: string[]; // Participant filter (user IDs) - matches userId, threadMentions, threadSenders
   // Date filters
-  createdBefore?: string;       // Created before date (multiple formats)
-  createdAfter?: string;        // Created after date (multiple formats)
-  createdOn?: string;           // Created on specific date (multiple formats)
-  createdRange?: string;        // Time keyword (today, yesterday, this week, etc.)
+  createdBefore?: string; // Created before date (multiple formats)
+  createdAfter?: string; // Created after date (multiple formats)
+  createdOn?: string; // Created on specific date (multiple formats)
+  createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
   // When true, exclude messages with messageType="BOT" from chat results.
   // Default behavior (when undefined/false) is to INCLUDE bot messages.
   excludeBotMessages?: boolean;
@@ -77,7 +77,6 @@ export interface MeetingFilters {
   createdRange?: string;
 }
 
-
 export interface MailFilters {
   userEmail?: string;
   channelId?: string[];
@@ -94,37 +93,37 @@ export class YqlBuilder {
     return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
-buildYql(
-  query:string,
-  schemas: VespaSchema[],
-  limit: number,
-  apps: string[],
-  groupBy: string,
-  slackFilters: SlackFilters,
-  ticketFilters: TicketFilters,
-  fileFilters: FileFilters,
-  meetingFilters: MeetingFilters,
-  userId: string,
-  mailFilters: MailFilters = {},
-  useFuzzy: boolean = false,
-  useSemanticAnyway: boolean = true,
-  workspaceId?: string,
-): string {
-  const schemaNames = schemas.join(', ');
-  const whereConditions: string[] = [];
+  buildYql(
+    query: string,
+    schemas: VespaSchema[],
+    limit: number,
+    apps: string[],
+    groupBy: string,
+    slackFilters: SlackFilters,
+    ticketFilters: TicketFilters,
+    fileFilters: FileFilters,
+    meetingFilters: MeetingFilters,
+    userId: string,
+    mailFilters: MailFilters = {},
+    useFuzzy: boolean = false,
+    useSemanticAnyway: boolean = true,
+    workspaceId?: string
+  ): string {
+    const schemaNames = schemas.join(', ');
+    const whereConditions: string[] = [];
 
-  //Build search condition
-  const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
-  const queryLength = query?.length ?? 0;
+    //Build search condition
+    const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
+    const queryLength = query?.length ?? 0;
 
-  // Optimization: Skip semantic search for short queries (< 3 chars) - lexical only
-  const useSemantic = useSemanticAnyway && queryLength > 3;
+    // Optimization: Skip semantic search for short queries (< 3 chars) - lexical only
+    const useSemantic = useSemanticAnyway && queryLength > 3;
 
-  if (query && query !== '*') {
-    if (useFuzzy) {
-      if (useSemantic) {
-        // Hybrid: fuzzy lexical + semantic
-        whereConditions.push(`(
+    if (query && query !== '*') {
+      if (useFuzzy) {
+        if (useSemantic) {
+          // Hybrid: fuzzy lexical + semantic
+          whereConditions.push(`(
       ({defaultIndex: "text_fuzzy"} userInput(@query))
       or ({defaultIndex: "username"} userInput(@query))
       or ({defaultIndex: "mentionChannelName"} userInput(@query))
@@ -155,9 +154,9 @@ buildYql(
       or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
       or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
     )`);
-      } else {
-        // Lexical only: short query, skip semantic
-        whereConditions.push(`(
+        } else {
+          // Lexical only: short query, skip semantic
+          whereConditions.push(`(
       ({defaultIndex: "text_fuzzy"} userInput(@query))
       or ({defaultIndex: "username"} userInput(@query))
       or ({defaultIndex: "mentionChannelName"} userInput(@query))
@@ -186,8 +185,8 @@ buildYql(
       or ({defaultIndex: "subject_fuzzy"} userInput(@query))
       or ({defaultIndex: "chunks_fuzzy"} userInput(@query))
     )`);
-      }
-    } else if (isTranscriptOnly) {
+        }
+      } else if (isTranscriptOnly) {
         // sam_transcript schema uses its own embedding fields; text_embeddings/chunk_embeddings don't exist on it
         whereConditions.push(`(
         (userInput(@query))
@@ -197,43 +196,64 @@ buildYql(
       or ({targetHits:${limit}} nearestNeighbor(others_embeddings, e))
       or ({targetHits:${limit}} nearestNeighbor(qna_embeddings, e))
     )`);
-    } else {
-      // Lexical only: short query 
-      if  (useSemantic){
-        whereConditions.push(`(
+      } else {
+        // Lexical only: short query
+        if (useSemantic) {
+          whereConditions.push(`(
           (userInput(@query))
         or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
         or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
         )`);
-      }
-      else{
-        whereConditions.push(`(userInput(@query))`);
+        } else {
+          whereConditions.push(`(userInput(@query))`);
+        }
       }
     }
-  }
     // Build app-specific conditions.
     // Guarded apps (chat, ticket, file, mail) accept user-supplied filter inputs and
-    // enforce per-document permissions. They are wrapped with a mandatory top-level
-    // permission guard so that any injected OR branch cannot bypass access control.
+    // enforce per-document permissions. Each app's conditions are wrapped with a
+    // mandatory permission guard so that any injected OR branch cannot bypass access
+    // control. The guard is built PER APP because the access-control fields differ
+    // between schemas: referencing a field that exists in none of an app's schemas
+    // makes Vespa reject the whole YQL (e.g. channelPermissions only exists on file).
     // Open apps (user, transcript) have no per-user permission field in Vespa and
     // are kept separate so the permission guard does not exclude their documents.
-    const guardedConditions: string[] = [];
+    const guardedParts: string[] = [];
     const openConditions: string[] = [];
 
+    // Restrict each app's guard to the schemas this query actually selects for it
+    // (`schemas` is the pruned `from sources` list). Vespa validates guard fields
+    // against the selected sources, so e.g. type=messages (chat_message only) must
+    // not emit an `ownerId` clause — chat_message has no ownerId.
+    const selectedFor = (appSchemas: VespaSchema[]): VespaSchema[] =>
+      appSchemas.filter((s) => schemas.includes(s));
+
     if (apps.some((a) => a.toLowerCase() === 'chat')) {
-      guardedConditions.push(this.buildChatConditions(slackFilters, userId));
+      const chatSchemas = selectedFor([messageSchema, channelSchema, attachmentSchema]);
+      guardedParts.push(
+        `(${this.buildChatConditions(slackFilters, userId, chatSchemas)}) and ${this.buildPermGuard(chatSchemas, userId, workspaceId)}`
+      );
     }
 
     if (apps.some((a) => a.toLowerCase() === 'ticket')) {
-      guardedConditions.push(this.buildTicketConditions(ticketFilters, userId));
+      const ticketSchemas = selectedFor([ticketSchema]);
+      guardedParts.push(
+        `(${this.buildTicketConditions(ticketFilters, userId)}) and ${this.buildPermGuard(ticketSchemas, userId, workspaceId)}`
+      );
     }
 
     if (apps.some((a) => a.toLowerCase() === 'file')) {
-      guardedConditions.push(this.buildFileConditions(fileFilters, userId));
+      const fileSchemas = selectedFor([fileSchema]);
+      guardedParts.push(
+        `(${this.buildFileConditions(fileFilters, userId)}) and ${this.buildPermGuard(fileSchemas, userId, workspaceId)}`
+      );
     }
 
-    if (apps.some(a => a.toLowerCase() === 'mail')) {
-      guardedConditions.push(this.buildMailConditions(mailFilters, userId));
+    if (apps.some((a) => a.toLowerCase() === 'mail')) {
+      const mailSchemas = selectedFor([mailSchema]);
+      guardedParts.push(
+        `(${this.buildMailConditions(mailFilters, userId)}) and ${this.buildPermGuard(mailSchemas, userId, workspaceId)}`
+      );
     }
 
     if (apps.some((a) => a.toLowerCase() === 'user')) {
@@ -244,23 +264,13 @@ buildYql(
       openConditions.push(this.buildMeetingConditions(meetingFilters));
     }
 
-    // Combine with non-bypassable permission guard on guarded apps.
-    // Structure: ((guardedConds) AND permGuard) OR (openConds)
-    // Even if a filter injection creates extra OR branches inside guardedConds,
-    // those branches are still bounded by the outer AND permGuard.
-    // workspaceId is included inside permGuard (not just as a top-level AND) so
+    // Combine per-app guarded groups with open conditions.
+    // Structure: ((chatConds) AND chatGuard) OR ((fileConds) AND fileGuard) OR (openConds)
+    // Even if a filter injection creates extra OR branches inside an app's conditions,
+    // those branches are still bounded by that app's mandatory AND permGuard.
+    // workspaceId is included inside each permGuard (not just as a top-level AND) so
     // that an injected OR branch cannot escape workspace isolation.
-    const appConditionParts: string[] = [];
-    if (guardedConditions.length > 0) {
-      const workspaceClause = workspaceId ? ` and workspaceId contains "${this.escapeYqlValue(workspaceId)}"` : '';
-      // permGuard covers all access-control fields used across guarded app types:
-      // - permissions: chat messages, tickets, canvas, mail
-      // - ownerId: file owner access (canvas, attachments)
-      // - channelPermissions: chat/ticket attachment access via channel membership
-      // - isPrivate=false: public documents accessible to all
-      const permGuard = `((permissions contains "${userId}" or ownerId contains "${userId}" or channelPermissions contains "${userId}" or isPrivate contains "false")${workspaceClause})`;
-      appConditionParts.push(`(${guardedConditions.join(' or ')}) and ${permGuard}`);
-    }
+    const appConditionParts: string[] = [...guardedParts];
     if (openConditions.length > 0) {
       appConditionParts.push(openConditions.join(' or '));
     }
@@ -299,6 +309,103 @@ buildYql(
     return `docType contains "user"`;
   }
   /**
+   * Per-schema field presence used to gate YQL clauses. Vespa rejects a query that
+   * references a field absent from EVERY selected source, so each conditional clause
+   * may only be emitted when at least one selected schema declares the field.
+   * Verified against vespa-core/vespa/common/schemas/*.sd (incl. imported fields):
+   * - chat_message:    permissions, isPrivate, messageType, workspaceId  (acl fields imported from channelRef; messageType own)
+   * - chat_container:  permissions, ownerId, isPrivate, workspaceId
+   * - chat_attachment: permissions, workspaceId                          (permissions imported; no ownerId/isPrivate/messageType)
+   * - ticket:          permissions, workspaceId                          (imported from channelRef)
+   * - file:            permissions, ownerId, channelPermissions, isPrivate, workspaceId
+   * - mail:            permissions, workspaceId                          (permissions imported from channelRef)
+   * `permissions` exists in every schema, so the minimum guard is always non-empty.
+   */
+  private static readonly SCHEMA_FIELDS: Record<
+    string,
+    { ownerId: boolean; channelPermissions: boolean; isPrivate: boolean; messageType: boolean }
+  > = {
+    [messageSchema]: {
+      ownerId: false,
+      channelPermissions: false,
+      isPrivate: true,
+      messageType: true,
+    },
+    [channelSchema]: {
+      ownerId: true,
+      channelPermissions: false,
+      isPrivate: true,
+      messageType: false,
+    },
+    [attachmentSchema]: {
+      ownerId: false,
+      channelPermissions: false,
+      isPrivate: false,
+      messageType: false,
+    },
+    [ticketSchema]: {
+      ownerId: false,
+      channelPermissions: false,
+      isPrivate: false,
+      messageType: false,
+    },
+    [fileSchema]: { ownerId: true, channelPermissions: true, isPrivate: true, messageType: false },
+    [mailSchema]: {
+      ownerId: false,
+      channelPermissions: false,
+      isPrivate: false,
+      messageType: false,
+    },
+  };
+
+  /**
+   * Returns true if ANY of the selected schemas declares the given field.
+   * Vespa rejects YQL referencing a field absent from every selected source, so a clause
+   * may only be emitted when at least one selected schema has the field.
+   */
+  private schemasHaveField(
+    selectedSchemas: VespaSchema[],
+    pick: (f: (typeof YqlBuilder.SCHEMA_FIELDS)[string]) => boolean
+  ): boolean {
+    return selectedSchemas.some((s) => {
+      const fields = YqlBuilder.SCHEMA_FIELDS[s];
+      return fields ? pick(fields) : false;
+    });
+  }
+
+  /**
+   * Build the non-bypassable permission guard for a guarded app.
+   * The guard references only the access-control fields present in at least one of
+   * the schemas this query actually selects (`from sources ...`) for the app —
+   * Vespa rejects YQL referencing a field absent from EVERY selected source.
+   * `selectedSchemas` is the pruned source list (e.g. for type=messages the chat app
+   * selects only chat_message, which has no ownerId), so the guard adapts accordingly.
+   * A field existing in ≥1 selected source is also semantically safe: docs in sources
+   * lacking that field simply don't match its clause. `permissions` exists everywhere,
+   * so the guard is never empty.
+   */
+  private buildPermGuard(
+    selectedSchemas: VespaSchema[],
+    userId: string,
+    workspaceId?: string
+  ): string {
+    const accessConditions: string[] = [`permissions contains "${userId}"`];
+    if (this.schemasHaveField(selectedSchemas, (f) => f.ownerId)) {
+      accessConditions.push(`ownerId contains "${userId}"`);
+    }
+    if (this.schemasHaveField(selectedSchemas, (f) => f.channelPermissions)) {
+      accessConditions.push(`channelPermissions contains "${userId}"`);
+    }
+    if (this.schemasHaveField(selectedSchemas, (f) => f.isPrivate)) {
+      accessConditions.push(`isPrivate contains "false"`);
+    }
+    const workspaceClause = workspaceId
+      ? ` and workspaceId contains "${this.escapeYqlValue(workspaceId)}"`
+      : '';
+    return `((${accessConditions.join(' or ')})${workspaceClause})`;
+  }
+
+  /**
    * Build YQL condition for file search
    * Applies to file schemas
    */
@@ -326,7 +433,9 @@ buildYql(
 
     // Owner filter (created_by)
     if (filters.ownerId && filters.ownerId.length > 0) {
-      const ownerIds = filters.ownerId.map((id) => `ownerId contains "${this.escapeYqlValue(id.trim())}"`).join(' or ');
+      const ownerIds = filters.ownerId
+        .map((id) => `ownerId contains "${this.escapeYqlValue(id.trim())}"`)
+        .join(' or ');
       conditions.push(`(${ownerIds})`);
     }
 
@@ -354,10 +463,12 @@ buildYql(
     }
 
     // Collections: require owner/permissions/isPrivate check + project scoping
-    if (subApps.some(s => s === 'collections')) {
+    if (subApps.some((s) => s === 'collections')) {
       let collectionCondition = `(subApp contains "collections") and (ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false")`;
       if (filters.projectId && filters.projectId.length > 0) {
-        const projectCondition = filters.projectId.map(id => `projectId contains "${this.escapeYqlValue(id)}"`).join(' or ');
+        const projectCondition = filters.projectId
+          .map((id) => `projectId contains "${this.escapeYqlValue(id)}"`)
+          .join(' or ');
         collectionCondition += ` and (${projectCondition})`;
       }
       subAppConditions.push(`(${collectionCondition})`);
@@ -369,19 +480,25 @@ buildYql(
 
     // Collection ID filter (scope to specific collections)
     if (filters.collectionId && filters.collectionId.length > 0) {
-      const orCondition = filters.collectionId.map(id => `clId contains "${this.escapeYqlValue(id)}"`).join(' or ');
+      const orCondition = filters.collectionId
+        .map((id) => `clId contains "${this.escapeYqlValue(id)}"`)
+        .join(' or ');
       conditions.push(`(${orCondition})`);
     }
 
     // callType filter (e.g. HEADLESS for recordings)
     if (filters.callType && filters.callType.length > 0) {
-      const types = filters.callType.map((t) => `callType contains "${this.escapeYqlValue(t.trim())}"`).join(' or ');
+      const types = filters.callType
+        .map((t) => `callType contains "${this.escapeYqlValue(t.trim())}"`)
+        .join(' or ');
       conditions.push(`(${types})`);
     }
 
     // createdBy filter (for from: functionality - files uploaded by specific user)
     if (filters.createdBy && filters.createdBy.length > 0) {
-      const creators = filters.createdBy.map(id => `createdBy contains "${this.escapeYqlValue(id.trim())}"`).join(' or ');
+      const creators = filters.createdBy
+        .map((id) => `createdBy contains "${this.escapeYqlValue(id.trim())}"`)
+        .join(' or ');
       conditions.push(`(${creators})`);
     }
 
@@ -420,11 +537,17 @@ buildYql(
    * Build YQL condition for Slack app
    * Applies to message, channel, and attachment schemas
    */
-  private buildChatConditions(filters: SlackFilters, userId: string): string {
+  private buildChatConditions(
+    filters: SlackFilters,
+    userId: string,
+    selectedSchemas: VespaSchema[]
+  ): string {
     const conditions: string[] = [];
     // DocType filter
     if (filters.docType && filters.docType.length > 0) {
-      const docTypes = filters.docType.map((t) => `docType contains "${this.escapeYqlValue(t.trim())}"`).join(' or ');
+      const docTypes = filters.docType
+        .map((t) => `docType contains "${this.escapeYqlValue(t.trim())}"`)
+        .join(' or ');
       conditions.push(`(${docTypes})`);
     } else {
       conditions.push(
@@ -450,7 +573,9 @@ buildYql(
 
     // Sender filter
     if (filters.senderId && filters.senderId.length > 0) {
-      const senders = filters.senderId.map((id) => `userId contains "${this.escapeYqlValue(id.trim())}"`).join(' or ');
+      const senders = filters.senderId
+        .map((id) => `userId contains "${this.escapeYqlValue(id.trim())}"`)
+        .join(' or ');
       conditions.push(`(${senders})`);
     }
 
@@ -499,14 +624,24 @@ buildYql(
         );
       }
     }
-    // Permissions check: user must have explicit permissions OR channel is public
-    conditions.push(`(permissions contains "${userId}" or isPrivate contains "false")`);
-    // Exclude system messages
-    conditions.push(`!(messageType contains "SYSTEM")`);
+    // Permissions check: user must have explicit permissions OR channel is public.
+    // isPrivate exists only on chat_message/chat_container — omit it when the query is
+    // pruned to chat_attachment only (else Vespa rejects the field reference).
+    const accessClauses: string[] = [`permissions contains "${userId}"`];
+    if (this.schemasHaveField(selectedSchemas, (f) => f.isPrivate)) {
+      accessClauses.push(`isPrivate contains "false"`);
+    }
+    conditions.push(`(${accessClauses.join(' or ')})`);
+    // messageType exists only on chat_message — omit these clauses when the query is
+    // pruned to chat_attachment only (else Vespa rejects the field reference).
+    if (this.schemasHaveField(selectedSchemas, (f) => f.messageType)) {
+      // Exclude system messages
+      conditions.push(`!(messageType contains "SYSTEM")`);
 
-    // Optionally exclude bot messages (cmd-K toggle, default off → exclude)
-    if (filters.excludeBotMessages) {
-      conditions.push(`!(messageType contains "BOT")`);
+      // Optionally exclude bot messages (cmd-K toggle, default off → exclude)
+      if (filters.excludeBotMessages) {
+        conditions.push(`!(messageType contains "BOT")`);
+      }
     }
 
     return conditions.join(' and ');
@@ -550,7 +685,9 @@ buildYql(
 
     // Ticket ID filter
     if (filters.ticketId && filters.ticketId.length > 0) {
-      const tickets = filters.ticketId.map((id) => `docId contains "${this.escapeYqlValue(id.trim())}"`).join(' or ');
+      const tickets = filters.ticketId
+        .map((id) => `docId contains "${this.escapeYqlValue(id.trim())}"`)
+        .join(' or ');
       conditions.push(`(${tickets})`);
     }
 
@@ -571,7 +708,9 @@ buildYql(
 
     // Board filter (array - comma-separated)
     if (filters.boardId && filters.boardId.length > 0) {
-      const boards = filters.boardId.map((id) => `boardId contains "${this.escapeYqlValue(id.trim())}"`).join(' or ');
+      const boards = filters.boardId
+        .map((id) => `boardId contains "${this.escapeYqlValue(id.trim())}"`)
+        .join(' or ');
       conditions.push(`(${boards})`);
     }
 
@@ -599,7 +738,7 @@ buildYql(
           const uniqueValues = Array.from(new Set(fieldValues));
           const missingRequested = uniqueValues.includes(VESPA_MISSING_DYNAMIC_FIELD_VALUE);
           const concreteValues = uniqueValues.filter(
-            (fieldValue) => fieldValue !== VESPA_MISSING_DYNAMIC_FIELD_VALUE,
+            (fieldValue) => fieldValue !== VESPA_MISSING_DYNAMIC_FIELD_VALUE
           );
           const valueConditions: string[] = [];
 
@@ -608,13 +747,13 @@ buildYql(
               .map((fieldValue) => `fieldValue contains "${this.escapeYqlValue(fieldValue)}"`)
               .join(' or ');
             valueConditions.push(
-              `formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}" and (${valueClause}))`,
+              `formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}" and (${valueClause}))`
             );
           }
 
           if (missingRequested) {
             valueConditions.push(
-              `!(formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}"))`,
+              `!(formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}"))`
             );
           }
 
@@ -693,7 +832,9 @@ buildYql(
 
     // Platform filter
     if (filters.platform && filters.platform.length > 0) {
-      const platforms = filters.platform.map((p) => `platform contains "${this.escapeYqlValue(p.trim())}"`).join(' or ');
+      const platforms = filters.platform
+        .map((p) => `platform contains "${this.escapeYqlValue(p.trim())}"`)
+        .join(' or ');
       conditions.push(`(${platforms})`);
     }
 
@@ -707,7 +848,9 @@ buildYql(
 
     // Type filter
     if (filters.type && filters.type.length > 0) {
-      const types = filters.type.map((t) => `type contains "${this.escapeYqlValue(t.trim())}"`).join(' or ');
+      const types = filters.type
+        .map((t) => `type contains "${this.escapeYqlValue(t.trim())}"`)
+        .join(' or ');
       conditions.push(`(${types})`);
     }
 
@@ -789,7 +932,7 @@ buildYql(
 
     if (filters.channelId && filters.channelId.length > 0) {
       const channels = filters.channelId
-        .map(id => `channelId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((id) => `channelId contains "${this.escapeYqlValue(id.trim())}"`)
         .join(' or ');
       conditions.push(`(${channels})`);
     }
