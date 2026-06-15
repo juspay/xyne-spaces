@@ -10,6 +10,8 @@ export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 export const Event = {
   OTEL_INSTANCE_REGISTERED: "otel_instance_registered",
   JS_HEAP_SNAPSHOT: "js_heap_snapshot",
+  WEB_VITAL_INP_SLOW: "web_vital_inp_slow",
+  LONG_TASK_SLOW: "long_task_slow",
   API_CALL_SUCCESSFUL: "api_call_successful",
   API_CALL_FAILED: "api_call_failed",
   WEBSOCKET_CONNECTED: "websocket_connection_successful",
