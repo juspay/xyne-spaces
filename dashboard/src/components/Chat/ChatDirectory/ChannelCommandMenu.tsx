@@ -23,11 +23,13 @@ import {
   ArrowRight,
   ListFilter,
   User,
+  SignalHigh,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Popover from '@radix-ui/react-popover';
 import * as Switch from '@radix-ui/react-switch';
-import { Channel, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
+import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
+import { PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -452,6 +454,11 @@ const ChannelCommandMenu = ({
     const withIds = withMentions.map(m => m.id);
     if (withIds.length > 0) params.set('with', withIds.join(','));
 
+    // Priority's value reaches the results screen only via this param (the chip text is
+    // stripped from `query`). `id` is the canonical uppercase enum.
+    const priorityMention = mentions.find(m => m.type === MentionType.PRIORITY);
+    if (priorityMention) params.set('priority', priorityMention.id);
+
     // Build human-readable display string for the global search bar
     const displayParts: string[] = [];
     if (fromMentions.length > 0) {
@@ -480,6 +487,10 @@ const ChannelCommandMenu = ({
         })
         .filter(Boolean);
       if (names.length > 0) displayParts.push(`assignee:${names.join(' ')}`);
+    }
+    if (priorityMention) {
+      // Display string lowercase for consistency; the functional param above stays uppercase.
+      displayParts.push(`priority:${priorityMention.id.toLowerCase()}`);
     }
     if (text.trim()) displayParts.push(text.trim());
     if (displayParts.length > 0) params.set('display', displayParts.join(' '));
@@ -686,6 +697,21 @@ const ChannelCommandMenu = ({
     [],
   );
 
+  // Handle priority search from mention plugin. Priority is a closed enum, so
+  // there is no backend lookup — we just track the typed query to filter the
+  // static value list (availablePriorities).
+  const handlePrioritySearch = useCallback((query: string | null) => {
+    if (query === null) {
+      setMentionSearchType(null);
+      setMentionSearchQuery('');
+      setSelectedMentionIndex(0);
+      return;
+    }
+    setMentionSearchQuery(query);
+    setMentionSearchType(MentionType.PRIORITY);
+    setSelectedMentionIndex(0);
+  }, []);
+
   // `from:` typeahead user candidates. Uses the same data source and rank as
   // plain user search (useUserSearch + rankUsers) so a query like "abhi"
   // returns the same Abhisheks in the same order regardless of how the user
@@ -865,6 +891,17 @@ const ChannelCommandMenu = ({
   const availableChannels = useMemo(() => {
     return [...availableRegularChannels, ...availableDMs];
   }, [availableRegularChannels, availableDMs]);
+
+  // Priority typeahead — the closed TicketPriority enum, prefix-filtered by the query.
+  // `id` is the canonical uppercase value (wire/backend); `name` is the capitalized
+  // dropdown label. The chip renders lowercase (buildChipText), so the two are decoupled.
+  const availablePriorities = useMemo(() => {
+    if (mentionSearchType !== MentionType.PRIORITY) return [];
+    const query = mentionSearchQuery.trim().toLowerCase();
+    return Object.values(TicketPriority)
+      .map(value => ({ id: value, name: value.charAt(0) + value.slice(1).toLowerCase() }))
+      .filter(({ id }) => (query ? id.toLowerCase().startsWith(query) : true));
+  }, [mentionSearchType, mentionSearchQuery]);
 
   // Track search performed in command menu (debounced)
   useEffect(() => {
@@ -1978,6 +2015,17 @@ const ChannelCommandMenu = ({
         return;
       }
 
+      // Handle priority value selection (closed enum, no backend)
+      if (mentionSearchType === MentionType.PRIORITY && availablePriorities[selectedMentionIndex]) {
+        const priority = availablePriorities[selectedMentionIndex];
+        void handleMentionSelect({
+          id: priority.id,
+          name: priority.name,
+          type: MentionType.PRIORITY,
+        });
+        return;
+      }
+
       // Handle regular user mention search (@, from:, with:, assignee:)
       if (mentionSearchType === MentionType.USER && availableUsers[selectedMentionIndex]) {
         const user = availableUsers[selectedMentionIndex];
@@ -2065,11 +2113,13 @@ const ChannelCommandMenu = ({
             onChange={handleEditorChange}
             onUserSearch={handleUserSearch}
             onChannelSearch={handleChannelSearch}
+            onPrioritySearch={handlePrioritySearch}
             availableUsers={availableUsers}
             availableChannels={availableChannels.map(({ channel, displayName }) => ({
               id: channel.id,
               name: displayName,
             }))}
+            availablePriorities={availablePriorities}
             className='flex-1'
             open={open}
             mentionSearchType={mentionSearchType}
@@ -2320,19 +2370,30 @@ const ChannelCommandMenu = ({
                   <span className='flex items-center flex-wrap gap-1'>
                     <span className='text-sm'>Show results for:</span>
                     {selectedMentions.map(m => {
+                      const isPriority = m.type === MentionType.PRIORITY;
                       const isUser = m.type === MentionType.USER;
-                      const name = isUser
-                        ? getUserDisplayName(
-                            usersById.get(m.id) ?? { displayName: m.id, email: '' },
-                          )
-                        : (allChannels.find(c => c.channel.id === m.id)?.channel.name ?? m.id);
-                      const prefix = m.prefix ?? (isUser ? 'from:' : 'in:');
+                      const name = isPriority
+                        ? m.id.toLowerCase()
+                        : isUser
+                          ? getUserDisplayName(
+                              usersById.get(m.id) ?? { displayName: m.id, email: '' },
+                            )
+                          : (allChannels.find(c => c.channel.id === m.id)?.channel.name ?? m.id);
+                      const prefix =
+                        m.prefix ?? (isPriority ? 'priority:' : isUser ? 'from:' : 'in:');
                       return (
                         <span
                           key={`${m.prefix}-${m.id}`}
                           className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
                         >
-                          {isUser ? (
+                          {isPriority ? (
+                            <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                              <SignalHigh
+                                size={12}
+                                className={PRIORITY_ICON_COLOR[m.id] ?? 'text-foreground'}
+                              />
+                            </div>
+                          ) : isUser ? (
                             <Avatar
                               userId={m.id}
                               size='sm'
@@ -2732,6 +2793,50 @@ const ChannelCommandMenu = ({
                       No users found for &quot;{mentionSearchQuery}&quot;
                     </Command.Empty>
                   )}
+
+                {/* 'priority:' trigger — the closed TicketPriority value list */}
+                {mentionSearchType === MentionType.PRIORITY && availablePriorities.length > 0 && (
+                  <Command.Group
+                    heading='Priority'
+                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                  >
+                    {availablePriorities.map((priority, index) => (
+                      <Command.Item
+                        key={priority.id}
+                        value={`mention-priority-${priority.id}`}
+                        onSelect={() => {
+                          void handleMentionSelect({
+                            id: priority.id,
+                            name: priority.name,
+                            type: MentionType.PRIORITY,
+                          });
+                        }}
+                        onMouseEnter={() => {
+                          if (setSelectedMentionIndex) {
+                            setSelectedMentionIndex(index);
+                          }
+                        }}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                          index === selectedMentionIndex ? 'bg-muted' : ''
+                        } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                        style={{ WebkitTapHighlightColor: 'transparent' }}
+                      >
+                        <div
+                          className={`flex items-center justify-center h-4 w-5 flex-shrink-0 ${
+                            PRIORITY_ICON_COLOR[priority.id] ?? 'text-muted-foreground'
+                          }`}
+                        >
+                          <SignalHigh size={16} />
+                        </div>
+                        <div className='flex-1 min-w-0'>
+                          <div className='font-semibold text-sm text-foreground truncate'>
+                            {priority.name}
+                          </div>
+                        </div>
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                )}
               </>
             )}
 

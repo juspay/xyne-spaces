@@ -25,6 +25,7 @@ import { cn } from '../../../utils/classNames';
 import { CompareSelectRow } from './compare/CompareSelectRow';
 import { SearchCompareDialog } from './compare/SearchCompareDialog';
 import { hasRankingData } from './compare/rankingFeatures';
+import { TicketPriority } from '@xyne/shared';
 
 type SidePanelState =
   | { kind: 'thread'; thread: SearchResultsThread }
@@ -55,6 +56,40 @@ function docTypeToTabType(docType: SearchResultsFilters['docType']): TabType {
   }
 }
 
+type ResultsMention = {
+  id: string;
+  type: MentionType;
+  prefix: 'from:' | 'in:' | 'assignee:' | 'priority:';
+};
+
+// `in:` channels: explicit selection wins, else all visible channels when "only my
+// channels" is on, else none.
+function resolveChannelIds(
+  inChannelIds: string[],
+  onlyMyChannels: boolean,
+  allChannels: { id: string }[],
+): string[] {
+  return inChannelIds.length > 0 ? inChannelIds : onlyMyChannels ? allChannels.map(c => c.id) : [];
+}
+
+// Build the hook's selectedMentions from resolved filter ids. Priority is appended from
+// the URL — it has no results-screen UI, so it's pinned rather than read from `filters`.
+function buildSelectedMentions(
+  fromUserIds: string[],
+  channelIds: string[],
+  assigneeIds: string[],
+  priority: string,
+): ResultsMention[] {
+  return [
+    ...fromUserIds.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
+    ...channelIds.map(id => ({ id, type: MentionType.CHANNEL, prefix: 'in:' as const })),
+    ...assigneeIds.map(id => ({ id, type: MentionType.USER, prefix: 'assignee:' as const })),
+    ...(priority
+      ? [{ id: priority, type: MentionType.PRIORITY, prefix: 'priority:' as const }]
+      : []),
+  ];
+}
+
 const SearchResults = (): ReactElement => {
   const [searchParams] = useSearchParams();
   const { isMobile } = usePlatform();
@@ -62,6 +97,14 @@ const SearchResults = (): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const query = searchParams.get('query')?.trim() ?? '';
+
+  // Priority has no results-screen UI, so it isn't in `filters` — it's pinned from the
+  // URL into selectedMentions wherever they're rebuilt. Validated against the enum so a
+  // hand-crafted `?priority=garbage` can't inject a bogus filter.
+  const priorityParam = searchParams.get('priority')?.toUpperCase() ?? '';
+  const priorityFilter = (Object.values(TicketPriority) as string[]).includes(priorityParam)
+    ? priorityParam
+    : '';
 
   const [filters, setFilters] = useState<SearchResultsFilters>(() => {
     const fromParam = searchParams.get('from') ?? '';
@@ -183,33 +226,22 @@ const SearchResults = (): ReactElement => {
 
   // Channels to pass as in: mentions — explicit selection takes precedence over "only my channels"
   const channelIdsForSearch = useMemo(
-    () =>
-      filters.inChannelIds.length > 0
-        ? filters.inChannelIds
-        : filters.onlyMyChannels
-          ? allChannels.map(c => c.id)
-          : [],
+    () => resolveChannelIds(filters.inChannelIds, filters.onlyMyChannels, allChannels),
     [filters.inChannelIds, filters.onlyMyChannels, allChannels],
   );
 
-  // Sync from/in/assignee filters → hook selected mentions
+  // Sync from/in/assignee/priority filters → hook selected mentions
   useEffect(() => {
-    const mentions = [
-      ...filters.fromUserIds.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
-      ...channelIdsForSearch.map(id => ({
-        id,
-        type: MentionType.CHANNEL,
-        prefix: 'in:' as const,
-      })),
-      ...filters.assigneeIds.map(id => ({
-        id,
-        type: MentionType.USER,
-        prefix: 'assignee:' as const,
-      })),
-    ];
-    setSelectedMentions(mentions);
+    setSelectedMentions(
+      buildSelectedMentions(
+        filters.fromUserIds,
+        channelIdsForSearch,
+        filters.assigneeIds,
+        priorityFilter,
+      ),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.fromUserIds, channelIdsForSearch, filters.assigneeIds]);
+  }, [filters.fromUserIds, channelIdsForSearch, filters.assigneeIds, priorityFilter]);
 
   const handleFiltersChange = useCallback(
     (newFilters: SearchResultsFilters) => {
@@ -218,32 +250,18 @@ const SearchResults = (): ReactElement => {
       if (newFilters.docType !== 'channels') {
         setActiveTab(docTypeToTabType(newFilters.docType));
       }
-      const resolvedChannelIds =
-        newFilters.inChannelIds.length > 0
-          ? newFilters.inChannelIds
-          : newFilters.onlyMyChannels
-            ? allChannels.map(c => c.id)
-            : [];
-      const mentions = [
-        ...newFilters.fromUserIds.map(id => ({
-          id,
-          type: MentionType.USER,
-          prefix: 'from:' as const,
-        })),
-        ...resolvedChannelIds.map(id => ({
-          id,
-          type: MentionType.CHANNEL,
-          prefix: 'in:' as const,
-        })),
-        ...newFilters.assigneeIds.map(id => ({
-          id,
-          type: MentionType.USER,
-          prefix: 'assignee:' as const,
-        })),
-      ];
-      setSelectedMentions(mentions);
+      // priorityFilter re-pinned from the URL (not in newFilters) so toggling another
+      // filter keeps it.
+      setSelectedMentions(
+        buildSelectedMentions(
+          newFilters.fromUserIds,
+          resolveChannelIds(newFilters.inChannelIds, newFilters.onlyMyChannels, allChannels),
+          newFilters.assigneeIds,
+          priorityFilter,
+        ),
+      );
     },
-    [setActiveTab, setSelectedMentions, allChannels],
+    [setActiveTab, setSelectedMentions, allChannels, priorityFilter],
   );
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
     if (!isChannelsMode && filters.docType !== 'all') return [];
@@ -280,8 +298,10 @@ const SearchResults = (): ReactElement => {
   // showing "No results" before the first search fires (300ms debounce window)
   const hasEverLoadedRef = useRef(false);
   const autoOpenedRef = useRef(false);
-  const prevSearchKeyRef = useRef(`${query}|${fromParam}|${inParam}|${assigneeParam}`);
-  const currentSearchKey = `${query}|${fromParam}|${inParam}|${assigneeParam}`;
+  const prevSearchKeyRef = useRef(
+    `${query}|${fromParam}|${inParam}|${assigneeParam}|${priorityFilter}`,
+  );
+  const currentSearchKey = `${query}|${fromParam}|${inParam}|${assigneeParam}|${priorityFilter}`;
   // Full key includes all local filter state so auto-open resets on any filter change
   const fullSearchKey = `${currentSearchKey}|${filters.docType}|${filters.sortBy}|${filters.includeBotMessages}|${filters.onlyMyChannels}`;
   if (currentSearchKey !== prevSearchKeyRef.current) {
@@ -397,7 +417,8 @@ const SearchResults = (): ReactElement => {
             filters.fromUserIds.length > 0 ||
             filters.inChannelIds.length > 0 ||
             filters.assigneeIds.length > 0 ||
-            filters.onlyMyChannels
+            filters.onlyMyChannels ||
+            !!priorityFilter
           }
           hasEverLoaded={hasEverLoadedRef.current}
           isLoading={isLoading}

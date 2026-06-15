@@ -22,7 +22,12 @@ import {
   $createFilterChip,
 } from './FilterChipNode';
 import { FilterChipPlugin } from './FilterChipPlugin';
-import { MentionPlugin, UserTriggerType, ChannelTriggerType } from './MentionPlugin';
+import {
+  MentionPlugin,
+  UserTriggerType,
+  ChannelTriggerType,
+  PriorityTriggerType,
+} from './MentionPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
 import { MentionType, type MentionData } from './ChannelCommandMenu.types';
@@ -38,8 +43,10 @@ interface LexicalSearchInputProps {
   ) => void;
   onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
   onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
+  onPrioritySearch?: (query: string | null, trigger?: PriorityTriggerType) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
+  availablePriorities?: Array<{ id: string; name: string }>;
   className?: string;
   open?: boolean;
   mentionSearchType?: MentionType | null;
@@ -300,8 +307,10 @@ export function LexicalSearchInput({
   onChange,
   onUserSearch,
   onChannelSearch,
+  onPrioritySearch,
   availableUsers = [],
   availableChannels = [],
+  availablePriorities = [],
   className,
   open,
   mentionSearchType,
@@ -386,8 +395,10 @@ export function LexicalSearchInput({
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}
+            {...(onPrioritySearch ? { onPrioritySearch } : {})}
             availableUsers={availableUsers}
             availableChannels={availableChannels}
+            availablePriorities={availablePriorities}
             {...(mentionSearchType !== undefined ? { mentionSearchType } : {})}
             {...(selectedMentionIndex !== undefined ? { selectedMentionIndex } : {})}
             {...(setSelectedMentionIndex ? { setSelectedMentionIndex } : {})}

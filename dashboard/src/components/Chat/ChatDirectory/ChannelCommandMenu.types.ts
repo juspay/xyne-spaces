@@ -82,6 +82,9 @@ export type VespaDocTypes = (typeof VespaDocTypes)[keyof typeof VespaDocTypes];
 export const MentionType = {
   USER: 'user',
   CHANNEL: 'channel',
+  // Value filter (not an entity): the exclusive priority chip. `id` holds the
+  // canonical TicketPriority value (e.g. 'HIGH'), `name` the display label.
+  PRIORITY: 'priority',
 } as const;
 
 export type MentionType = (typeof MentionType)[keyof typeof MentionType];
@@ -93,8 +96,8 @@ export type MentionType = (typeof MentionType)[keyof typeof MentionType];
 export interface MentionData {
   id: string;
   name: string;
-  type: 'user' | 'channel';
-  prefix?: 'from:' | 'with:' | 'in:' | 'assignee:';
+  type: 'user' | 'channel' | 'priority';
+  prefix?: 'from:' | 'with:' | 'in:' | 'assignee:' | 'priority:';
   email?: string;
   photoLink?: string;
 }
