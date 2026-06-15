@@ -58,7 +58,10 @@ const convertCustomEmojiUrls = (htmlContent: string): string => {
 };
 
 // Helper to render emoji
-const renderEmoji = (emojiName: string | null | undefined): ReactElement => {
+const renderEmoji = (
+  emojiName: string | null | undefined,
+  customSizeClass = 'w-5 h-5',
+): ReactElement => {
   if (!emojiName) return <span className='text-base leading-none' />;
 
   const customEmoji = parseCustomEmoji(emojiName);
@@ -66,7 +69,9 @@ const renderEmoji = (emojiName: string | null | undefined): ReactElement => {
     const imageUrl = `${API_BASE_URL}/emojis/${customEmoji.emojiId}/stream`;
 
     return (
-      <span className='group inline-flex items-center justify-center w-5 h-5 flex-shrink-0'>
+      <span
+        className={`group inline-flex items-center justify-center flex-shrink-0 ${customSizeClass}`}
+      >
         <img
           src={imageUrl}
           alt={customEmoji.name}

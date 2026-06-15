@@ -10,7 +10,6 @@ import {
   Search,
   CornerDownRight,
   Sparkles,
-  HelpCircle,
   FileEdit,
   Clock,
   Pencil,
@@ -19,6 +18,9 @@ import {
   Check,
   BellDot,
   X,
+  Star,
+  Hash,
+  MessageCircle,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -26,9 +28,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { useWalkthrough } from '../../../hooks/useWalkthrough';
 import { useAuthContextValues, useAuth } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
+import { sumSectionUnread } from './ChatDirectory.utils';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useMutation } from '@tanstack/react-query';
 import { useSelector } from '@xstate/react';
@@ -143,13 +146,14 @@ const ChatDirectory = ({
   }, [sectioned]);
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
 
-  const { startWalkthrough } = useWalkthrough({
-    feature: 'direct_messages',
-    autoPlay: false,
-  });
-
   // Get unread counts for all channels (for DMs)
   const unreadCounts = useAllUnreadCount();
+  const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);
+  const channelsUnreadCount = sumSectionUnread(
+    defaultDisplayChannels,
+    unreadCounts,
+    activeChannelId,
+  );
 
   const createChannelMutation = useMutation({
     mutationFn: (data: CreateChannelFormData) => channelService.createChannel(data),
@@ -500,14 +504,20 @@ const ChatDirectory = ({
           {starred.length > 0 && (
             <Accordion.Item value={ChannelCategory.STARRED}>
               <Accordion.Trigger asChild>
-                <button className='group flex items-center justify-start gap-1 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
-                  <span className='text-left truncate block'>Starred</span>
-                  <span className='flex items-center justify-center shrink-0'>
+                <button className='group flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium px-1'>
+                  <span className='size-4 flex items-center justify-center shrink-0'>
+                    <Star className='size-3.5 group-hover:hidden' />
                     <ChevronRight
                       strokeWidth={2.33}
-                      className='size-3 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                      className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
                     />
                   </span>
+                  <span className='text-left truncate block'>Starred</span>
+                  {starredUnreadCount > 0 && (
+                    <Badge className='ml-auto mr-0.5 hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+                      {starredUnreadCount > 9 ? '9+' : starredUnreadCount}
+                    </Badge>
+                  )}
                 </button>
               </Accordion.Trigger>
               <Accordion.Content>
@@ -556,7 +566,8 @@ const ChatDirectory = ({
                   </div>
                 ) : activeOverlaySection ? (
                   <div className='flex items-center gap-1 h-8 px-2 rounded-md bg-sidebar-item-hover text-xs font-medium text-sidebar-secondary-foreground shadow-lg cursor-grabbing'>
-                    {activeOverlaySection.emoji && <span>{activeOverlaySection.emoji}</span>}
+                    {activeOverlaySection.emoji &&
+                      renderEmoji(activeOverlaySection.emoji, 'size-4')}
                     <span className='truncate'>{activeOverlaySection.name}</span>
                   </div>
                 ) : null}
@@ -569,16 +580,22 @@ const ChatDirectory = ({
               <Accordion.Header asChild>
                 <div className='group px-1 flex items-center justify-between gap-2 '>
                   <Accordion.Trigger asChild>
-                    <button className=' flex items-center justify-start gap-1 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
-                      <span className='text-left truncate block'>Channels</span>
+                    <button className=' flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
                       <span className='size-4 flex items-center justify-center shrink-0'>
+                        <Hash className='size-3.5 group-hover:hidden' />
                         <ChevronRight
                           strokeWidth={2.33}
-                          className='size-3 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                          className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
                         />
                       </span>
+                      <span className='text-left truncate block'>Channels</span>
                     </button>
                   </Accordion.Trigger>
+                  {channelsUnreadCount > 0 && (
+                    <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+                      {channelsUnreadCount > 9 ? '9+' : channelsUnreadCount}
+                    </Badge>
+                  )}
                   <div
                     className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSortDropdownOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                   >
@@ -741,30 +758,17 @@ const ChatDirectory = ({
             <Accordion.Header asChild>
               <div className='group px-1 flex items-center justify-between gap-2 '>
                 <Accordion.Trigger asChild>
-                  <button className='flex items-center justify-start gap-1 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
-                    <span className='text-left truncate block'>Direct Messages</span>
-                    <span className='size-3.5 flex items-center justify-center shrink-0'>
+                  <button className='flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium px-1'>
+                    <span className='size-4 flex items-center justify-center shrink-0'>
+                      <MessageCircle className='size-3.5 group-hover:hidden' />
                       <ChevronRight
                         strokeWidth={2.33}
-                        className='size-3 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                        className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
                       />
                     </span>
+                    <span className='text-left truncate block'>Direct Messages</span>
                   </button>
                 </Accordion.Trigger>
-                <button
-                  onClick={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    startWalkthrough(true);
-                  }}
-                  className='ml-1 flex items-center justify-center p-0.5 rounded focus:outline-none'
-                  title='Replay Direct Messages Tour'
-                  aria-label='Replay Direct Messages Tour'
-                  data-track-category='CHAT_SIDEBAR'
-                  data-track-name='REPLAY_TOUR_DIRECTORY'
-                >
-                  <HelpCircle className='size-3.5 text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground transition-colors' />
-                </button>
                 <Tooltip content='Add direct message' side='top' sideOffset={0} delayDuration={500}>
                   <button
                     id='sidebar-add-dm-btn'
@@ -903,8 +907,8 @@ const ChatDirectory = ({
           <div className='space-y-3 text-sm text-foreground'>
             <p>
               Any channels you added to{' '}
-              <span className='font-semibold'>
-                {sectionToDelete?.emoji ? `${sectionToDelete.emoji} ` : ''}
+              <span className='font-semibold inline-flex items-center gap-1'>
+                {sectionToDelete?.emoji && renderEmoji(sectionToDelete.emoji, 'size-4')}
                 {sectionToDelete?.name}
               </span>{' '}
               will move back to the Channels list.

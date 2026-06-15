@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Smile } from 'lucide-react';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { useTheme } from '../../hooks/useTheme';
+import { useCustomEmojis } from '../../hooks/useCustomEmojis';
+import { renderEmoji } from '../../utils/customEmojiUtils';
 
 interface SectionEmojiPickerProps {
   value: string;
@@ -18,6 +20,7 @@ export const SectionEmojiPicker = ({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
+  const { data: customEmojis } = useCustomEmojis();
   const pickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
 
   useEffect(() => {
@@ -41,15 +44,20 @@ export const SectionEmojiPicker = ({
         data-track-name={trackName}
         className='flex w-7 items-center justify-center rounded text-base text-muted-foreground outline-none hover:text-foreground'
       >
-        {value ? value : <Smile className='size-4' />}
+        {value ? renderEmoji(value) : <Smile className='size-4' />}
       </button>
       {open && (
         <div className='absolute left-0 top-full z-[60] mt-1 overflow-hidden rounded-lg shadow-lg'>
           <EmojiPicker
             emojiStyle={EmojiStyle.NATIVE}
             theme={pickerTheme}
+            customEmojis={customEmojis || []}
             onEmojiClick={emojiData => {
-              onChange(emojiData.emoji);
+              onChange(
+                emojiData.isCustom
+                  ? `custom:${emojiData.emoji}:${emojiData.names[0] || emojiData.emoji}`
+                  : emojiData.emoji,
+              );
               setOpen(false);
             }}
             width={320}
