@@ -740,7 +740,8 @@ const ActivityListView = (): ReactElement => {
                 }
               }}
               computeItemKey={(_, activity) => activity.id}
-              overscan={{ main: 2000, reverse: 500 }}
+              increaseViewportBy={1000}
+              minOverscanItemCount={{ top: 5, bottom: 10 }}
               itemsRendered={restoreSelectedRow}
               itemContent={(_, activity) => (
                 <ActivityItem activity={activity} isExpanded={isExpanded} />
