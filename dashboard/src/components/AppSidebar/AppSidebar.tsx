@@ -55,6 +55,7 @@ import { cn } from '../../utils/classNames';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 const mobileNavigationItems = [
   {
@@ -338,7 +339,8 @@ const AppSidebar = (): ReactElement => {
 
   return (
     <aside className='h-full pl-1 pr-3 pt-5 pb-6 flex flex-col items-center justify-between'>
-      <div className='space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
+      <WorkspaceSwitcher />
+      <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
         {isSupportContext ? (
           <SupportRail
             prefixWs={prefixWs}
