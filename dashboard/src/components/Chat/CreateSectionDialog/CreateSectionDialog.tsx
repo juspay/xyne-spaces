@@ -8,6 +8,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { keyBetween } from '../ChatDirectory/ChatDirectory.utils';
 import { SectionEmojiPicker } from '../SectionEmojiPicker';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 
 interface CreateSectionDialogProps {
@@ -217,9 +218,9 @@ export const CreateSectionDialog = ({
       <div className='flex items-start justify-between gap-2'>
         <div>
           <div className='text-xl font-medium text-foreground'>Add channels</div>
-          <div className='text-sm text-muted-foreground'>
-            {emoji.trim() ? `${emoji.trim()} ` : ''}
-            {trimmedName}
+          <div className='flex items-center gap-1 text-sm text-muted-foreground'>
+            {emoji.trim() && renderEmoji(emoji.trim(), 'size-4')}
+            <span>{trimmedName}</span>
           </div>
         </div>
         {closeButton}

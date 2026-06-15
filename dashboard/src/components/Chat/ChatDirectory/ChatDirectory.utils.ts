@@ -36,6 +36,17 @@ export const suppressNextClick = (): void => {
   window.setTimeout(() => window.removeEventListener('click', handler, true), 350);
 };
 
+export const sumSectionUnread = (
+  channels: VisibleChannel[],
+  unreadCounts: Record<string, number>,
+  activeChannelId?: string,
+): number =>
+  channels.reduce(
+    (total, channel) =>
+      total + (channel.id === activeChannelId ? 0 : (unreadCounts[channel.id] ?? 0)),
+    0,
+  );
+
 // Optimized function to group channels by scope type (single pass)
 export const groupChannelsByScope = (
   channelData: VisibleChannel[],

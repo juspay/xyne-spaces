@@ -1,7 +1,7 @@
 import { memo, ReactElement, useRef, useState, useEffect } from 'react';
 import { withProfiler } from '../../../utils/withProfiler';
 import { Link, useNavigate } from 'react-router-dom';
-import { Hash, Pencil, Headphones, X, MoreHorizontal, Check } from 'lucide-react';
+import { Hash, Pencil, Headphones, X, MoreVertical, Check } from 'lucide-react';
 import {
   ChannelVisibility,
   ChannelScopeType,
@@ -31,6 +31,7 @@ import {
 } from '../../ui/dropdown-menu';
 import { stripHtml } from '../../xyne-desk/EmailComposer/helpers';
 import { cn } from '../../../utils/classNames';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -189,7 +190,7 @@ const ChannelItemV2 = memo(
         >
           <div
             className={cn(
-              'flex items-center gap-2 h-8 group rounded-md px-1.5 transition-colors',
+              'flex items-center gap-2 h-8 group rounded-md pl-5 pr-1.5 transition-colors',
               isActive
                 ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
                 : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
@@ -225,7 +226,7 @@ const ChannelItemV2 = memo(
               </Tooltip>
             )}
             {unreadCount > 0 && !isActive && (
-              <Badge className='font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+              <Badge className='order-last font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
                 {unreadCount > 9 ? '9+' : unreadCount}
               </Badge>
             )}
@@ -246,7 +247,7 @@ const ChannelItemV2 = memo(
                     data-track-category='CHAT_SIDEBAR'
                     data-track-name='CHANNEL_SECTION_MENU'
                   >
-                    <MoreHorizontal size={14} className='shrink-0' />
+                    <MoreVertical size={14} className='shrink-0' />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
@@ -274,7 +275,11 @@ const ChannelItemV2 = memo(
                               onMoveToSection?.(channel.id, section.id);
                             }}
                           >
-                            {section.emoji && <span className='shrink-0'>{section.emoji}</span>}
+                            {section.emoji && (
+                              <span className='shrink-0'>
+                                {renderEmoji(section.emoji, 'size-4')}
+                              </span>
+                            )}
                             <span className='flex-1 truncate'>{section.name}</span>
                             {currentSectionId === section.id && (
                               <Check size={14} className='shrink-0' />

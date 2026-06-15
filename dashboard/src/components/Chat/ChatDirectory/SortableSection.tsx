@@ -7,7 +7,8 @@ import {
   ChevronRight,
   FolderPlus,
   GripVertical,
-  MoreHorizontal,
+  ListTree,
+  MoreVertical,
   Pencil,
   Trash2,
 } from 'lucide-react';
@@ -21,7 +22,10 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { cn } from '../../../utils/classNames';
+import Badge from '../../ui/Badge';
 import SortableChannelItem from './SortableChannelItem';
+import { sumSectionUnread } from './ChatDirectory.utils';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 
 interface SortableSectionProps {
   section: ChannelSection;
@@ -63,8 +67,10 @@ const SortableSection = ({
     opacity: isDragging ? 0.5 : undefined,
   };
 
+  const sectionUnreadCount = sumSectionUnread(channels, unreadCounts, activeChannelId);
+
   return (
-    <Accordion.Item ref={setNodeRef} style={style} value={section.id}>
+    <Accordion.Item ref={setNodeRef} style={style} value={section.id} className='group/item'>
       {/* Only the label is the Accordion.Trigger; grip + menu are siblings (no nested button). */}
       <div className='group relative flex items-center justify-between gap-2'>
         <button
@@ -79,17 +85,28 @@ const SortableSection = ({
           <GripVertical className='size-3.5' />
         </button>
         <Accordion.Trigger asChild>
-          <button className='group/trigger flex items-center justify-start gap-1 flex-1 min-w-0 h-8 text-sidebar-secondary-foreground text-xs font-medium'>
-            {section.emoji && <span className='shrink-0'>{section.emoji}</span>}
-            <span className='text-left truncate block'>{section.name}</span>
+          <button className='group/trigger flex items-center justify-start gap-2 flex-1 min-w-0 h-8 text-sidebar-secondary-foreground text-xs font-semibold px-1'>
             <span className='size-4 flex items-center justify-center shrink-0'>
+              <span className='group-hover:hidden'>
+                {section.emoji ? (
+                  renderEmoji(section.emoji, 'size-4')
+                ) : (
+                  <ListTree className='size-3.5' />
+                )}
+              </span>
               <ChevronRight
                 strokeWidth={2.33}
-                className='size-3 transition-transform duration-200 group-data-[state=open]/trigger:rotate-90'
+                className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]/trigger:rotate-90'
               />
             </span>
+            <span className='text-left truncate block'>{section.name}</span>
           </button>
         </Accordion.Trigger>
+        {sectionUnreadCount > 0 && (
+          <Badge className='order-last mr-0.5 hidden group-data-[state=closed]/item:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+            {sectionUnreadCount > 9 ? '9+' : sectionUnreadCount}
+          </Badge>
+        )}
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger asChild>
             <button
@@ -101,7 +118,7 @@ const SortableSection = ({
               data-track-category='CHAT_SIDEBAR'
               data-track-name='SECTION_OPTIONS_MENU'
             >
-              <MoreHorizontal strokeWidth={2.33} className='size-3.5 shrink-0' />
+              <MoreVertical strokeWidth={2.33} className='size-3.5 shrink-0' />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -109,9 +126,9 @@ const SortableSection = ({
             onCloseAutoFocus={e => e.preventDefault()}
             className='min-w-[180px]'
           >
-            <div className='px-2 py-1.5 text-xs font-semibold text-sidebar-secondary-foreground truncate'>
-              {section.emoji ? `${section.emoji} ` : ''}
-              {section.name}
+            <div className='flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-sidebar-secondary-foreground'>
+              {section.emoji && renderEmoji(section.emoji, 'size-4')}
+              <span className='truncate'>{section.name}</span>
             </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem
