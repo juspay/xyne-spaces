@@ -67,7 +67,7 @@ import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { AUTODRAFT_SESSION_TAG } from '@/controllers/xyneAIController';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
-import { runS2SClawAgent } from '@/services/clawAgentService';
+import { runClawAgent } from '@/services/clawAgentService';
 import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
@@ -592,24 +592,30 @@ export class EmailService {
         conversationId,
       });
       const callbackUrl = `${config.backendUrl.replace(/\/$/, '')}/api/internal/email/autodraft-callback/${encodeURIComponent(conversationId)}/${encodeURIComponent(channelId)}`;
-      const { sessionId } = await runS2SClawAgent({
+      const { dispatched } = await runClawAgent({
         agentSlug: effectiveAgentSlug,
         task: clawTask,
         userId: personaUserId,
         userName: userInfo.userName,
-        userEmail: userInfo.userEmail,
         conversationId,
         channelId,
-        ticketIds: [ticketId],
-        webSearchEnabled: true,
-        callbackUrl,
+        resultForwardUrl: callbackUrl,
       });
-      logger.info('[AutoDraft] claw agent fired (awaiting callback)', {
+      if (!dispatched) {
+        logger.warn('[AutoDraft] no installed-app webhook for agent — skipping', {
+          mode: 'autodraft',
+          ticketId,
+          conversationId,
+          agentSlug: effectiveAgentSlug,
+        });
+        await this.clearAutoDraftGenerating(conversationId);
+        return;
+      }
+      logger.info('[AutoDraft] claw agent fired via APP_MENTIONED (awaiting callback)', {
         mode: 'autodraft',
         ticketId,
         conversationId,
         agentSlug: effectiveAgentSlug,
-        sessionId,
         fireDurationMs: Date.now() - streamStart,
       });
       return;

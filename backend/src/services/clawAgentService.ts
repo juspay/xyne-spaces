@@ -9,6 +9,9 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
+import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
+import { BaseAppEvent, AppEventType } from '@/apps/types';
+import { decrypt } from '@/services/encryptionService';
 
 export interface ChannelClawAgent {
   id: string;
@@ -834,6 +837,49 @@ export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAg
     );
   }
   return { success: true, sessionId: json.sessionId ?? sessionId };
+}
+
+export interface AppMentionAgentRequest {
+  agentSlug: string;
+  task: string;
+  userId: string;
+  userName: string;
+  conversationId: string;
+  channelId: string;
+  resultForwardUrl: string;
+}
+
+export async function runClawAgent(
+  req: AppMentionAgentRequest,
+): Promise<{ dispatched: boolean }> {
+  const installedApp = await db.installedApps.findFirst({
+    where: { webhookUrl: { endsWith: `/webhook/${req.agentSlug}` } },
+    select: { webhookUrl: true, signingSecret: true },
+  });
+  if (!installedApp?.webhookUrl) {
+    logger.warn('[ClawAgentService] runClawAgent: no installed-app webhook for agent', {
+      agentSlug: req.agentSlug,
+    });
+    return { dispatched: false };
+  }
+
+  const event: BaseAppEvent = {
+    eventType: AppEventType.APP_MENTION,
+    payload: {
+      conversationId: req.conversationId,
+      messageId: randomUUID(),
+      content: req.task,
+      cleanContent: req.task,
+      createdAt: Date.now(),
+      userId: req.userId,
+      senderName: req.userName,
+      channelId: req.channelId,
+      metadata: { resultForwardUrl: req.resultForwardUrl },
+    },
+    timestamp: new Date().toISOString(),
+  };
+  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(installedApp.signingSecret));
+  return { dispatched: true };
 }
 
 /** Fetch the latest assistant reasoning and tool invocations from a claw conversation. Used by email auto-draft. */

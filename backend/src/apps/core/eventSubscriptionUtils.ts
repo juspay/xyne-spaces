@@ -15,7 +15,7 @@ function signWebhookPayload(payload: string, signingSecret: string): string {
         .digest('hex');
 }
 
-async function sendWebhookNotification(
+export async function sendWebhookNotification(
     webhookUrl: string,
     event: BaseAppEvent,
     signingSecret: string
