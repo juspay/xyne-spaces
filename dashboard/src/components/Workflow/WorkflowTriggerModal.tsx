@@ -143,8 +143,21 @@ export default function WorkflowTriggerModal({
       }
     },
     onError: error => {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to trigger workflow';
-      setValidationErrors([`Error: ${errorMessage}`]);
+      const fieldErrors = (
+        error as Error & { responseData?: { fieldErrors?: Record<string, string> } }
+      ).responseData?.fieldErrors;
+
+      if (fieldErrors && Object.keys(fieldErrors).length > 0) {
+        for (const [fieldName, message] of Object.entries(fieldErrors)) {
+          form.setError(`customFields.${fieldName}` as Path<TriggerWorkflowFormData>, {
+            type: 'server',
+            message,
+          });
+        }
+      } else {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to trigger workflow';
+        setValidationErrors([`Error: ${errorMessage}`]);
+      }
     },
   });
 
@@ -158,18 +171,19 @@ export default function WorkflowTriggerModal({
 
     // Only validate if we have a selected workflow with schema
     if (selectedWorkflow?.schema) {
-      const customFieldErrors: string[] = [];
+      let hasFieldErrors = false;
       for (const field of selectedWorkflow.schema) {
         const fieldValue = data.customFields[field.name];
         const error = validateCustomField(field, fieldValue);
         if (error) {
-          customFieldErrors.push(error);
+          form.setError(`customFields.${field.name}` as Path<TriggerWorkflowFormData>, {
+            type: 'manual',
+            message: error,
+          });
+          hasFieldErrors = true;
         }
       }
-      if (customFieldErrors.length > 0) {
-        setValidationErrors(customFieldErrors);
-        return;
-      }
+      if (hasFieldErrors) return;
     }
 
     createWorkflowMutation.mutate(data);
@@ -530,7 +544,7 @@ export default function WorkflowTriggerModal({
               />
             ) : field.type === 'string' || (!field.type && !field.enumValues) ? (
               <textarea
-                className='w-full px-3 py-2 bg-background text-foreground border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[80px] text-sm placeholder:text-muted-foreground'
+                className={`w-full px-3 py-2 bg-background text-foreground border rounded-md shadow-sm focus:outline-none focus:ring-2 resize-y min-h-[80px] text-sm placeholder:text-muted-foreground ${fieldState.error ? 'border-orange-400 focus:ring-orange-400' : 'border-input focus:ring-blue-500'}`}
                 data-track-category='Workflows'
                 data-track-name='WorkflowParameterInput'
                 data-track-metadata={JSON.stringify({
@@ -551,7 +565,7 @@ export default function WorkflowTriggerModal({
             ) : (
               <input
                 type={field.type === 'number' ? 'number' : 'text'}
-                className='w-full px-3 py-2 bg-background text-foreground border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-muted-foreground'
+                className={`w-full px-3 py-2 bg-background text-foreground border rounded-md shadow-sm focus:outline-none focus:ring-2 placeholder:text-muted-foreground ${fieldState.error ? 'border-orange-400 focus:ring-orange-400' : 'border-input focus:ring-blue-500'}`}
                 data-track-category='Workflows'
                 data-track-name='WorkflowParameterInput'
                 data-track-metadata={JSON.stringify({
@@ -631,6 +645,11 @@ export default function WorkflowTriggerModal({
                           : field.description || `Enter ${field.name}`
                 }
               />
+            )}
+            {field.type !== 'arrayOfObjects' && fieldState.error?.message && (
+              <p className='text-sm text-orange-600 dark:text-orange-400 px-3 py-1.5 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-md mt-1'>
+                {fieldState.error.message}
+              </p>
             )}
           </div>
         )}

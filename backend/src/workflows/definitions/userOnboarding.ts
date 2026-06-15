@@ -24,7 +24,7 @@ export interface UserOnboardingPreExecuteResult {
 }
 
 export const userOnboardingInputSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email("Must be a valid email address"),
   userType: z.string(),
 });
 
