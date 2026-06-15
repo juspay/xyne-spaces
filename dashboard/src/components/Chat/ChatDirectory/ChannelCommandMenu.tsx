@@ -47,6 +47,7 @@ import {
   ChannelCommandMenuProps,
   TYPE_SUGGESTIONS,
   SearchableTypes,
+  GROUP_KEY_TO_DOC_TYPE,
 } from './ChannelCommandMenu.types';
 import { loadRecents } from '../../../utils/contextPickerRecents';
 import ThreadContextPanel from '../ThreadContextPanel/ThreadContextPanel';
@@ -85,6 +86,9 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
 import { TicketPreviewPanel } from './TicketPreviewPanel';
+import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
+
+type SearchResultsDocType = SearchResultsFilters['docType'];
 
 function stripHtmlTags(html: string): string {
   const div = document.createElement('div');
@@ -178,6 +182,7 @@ const ChannelCommandMenu = ({
   onContextItemToggle,
   onContextSelectionConfirm,
   initialMention,
+  initialQuery,
   enabledTabs,
   inline = false,
   onTabChange,
@@ -381,6 +386,35 @@ const ChannelCommandMenu = ({
       m.prefix === 'with:' ||
       (m.prefix === 'in:' && m.type === MentionType.CHANNEL),
   );
+
+  // Shared Cmd+K user rank for the plain-search USERS section. Hoisted so the
+  // strong-match check below and the rendered section use the exact same order.
+  const rankedLocalUsers = useMemo(
+    () => rankUsers(filteredLocalUsers, cleanedSearchText, dmContactRecency),
+    [filteredLocalUsers, cleanedSearchText, dmContactRecency],
+  );
+
+  // Slack-style strong user match: when the top-ranked user's full name
+  // prefix-matches the query, the USERS section renders ABOVE the "Show
+  // results for" row and the default Enter target becomes that top user.
+  // Only applies to plain search (no from:/in:/with: chips, USERS section
+  // shown and non-empty) — filter-chip ordering otherwise wins.
+  //
+  // The full-name-prefix test is intentionally the SAME rule `rankUsers` uses
+  // for its top tier (rank 0/1 via `name.startsWith(q)`); gating on rankUsers'
+  // own top-tier signal keeps ranking and the Enter target from drifting
+  // apart. A user surfaced to #0 only by DM recency (rank 2, no name match)
+  // therefore does NOT steal the default Enter target — Enter targets the user
+  // only when the query is clearly naming them.
+  const hasStrongUserMatch = useMemo(() => {
+    if (hasFromOrInFilter || hasWithFilter || !showGroupedUsers) return false;
+    const topUser = rankedLocalUsers[0];
+    if (!topUser) return false;
+    const q = cleanedSearchText.toLowerCase().trim();
+    if (!q) return false;
+    return topUser.name.toLowerCase().startsWith(q);
+  }, [hasFromOrInFilter, hasWithFilter, showGroupedUsers, rankedLocalUsers, cleanedSearchText]);
+
   // Which trigger opened the channel typeahead: '#' acts like Slack's quick
   // switcher (navigate on select, show only regular channels); 'in:' creates a
   // filter chip and includes DMs/Group DMs.
@@ -430,9 +464,11 @@ const ChannelCommandMenu = ({
     mentions: typeof selectedMentions,
     byId: typeof usersById,
     channels: typeof allChannels,
+    tab?: SearchResultsDocType,
   ): URLSearchParams {
     const params = new URLSearchParams();
     if (text.trim()) params.set('query', text.trim());
+    if (tab) params.set('tab', tab);
 
     const fromMentions = mentions.filter(
       m => m.type === MentionType.USER && (m.prefix === 'from:' || !m.prefix),
@@ -497,6 +533,15 @@ const ChannelCommandMenu = ({
 
     return params;
   }
+
+  // Navigate to the full results page with a specific section's tab pre-selected
+  // (from the screen-mode "See N more" links).
+  const handleSeeMoreNavigate = (tab: SearchResultsDocType): void => {
+    onOpenChange(false);
+    void navigate(
+      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, tab).toString()}`,
+    );
+  };
 
   const acceptTypeAutocomplete = useCallback(() => {
     if (!typeAutocomplete.suggestion || !typeAutocomplete.match) return;
@@ -1067,6 +1112,29 @@ const ChannelCommandMenu = ({
     lastModifierRef.current = e.metaKey || e.ctrlKey;
   };
 
+  // Mouse hover and keyboard selection both write `aria-selected`, but through
+  // different mechanisms: cmdk drives the hovered item declaratively from its
+  // own `value` state (onPointerMove), while the auto-select effect and the
+  // ArrowUp/Down handler set `aria-selected` directly via setAttribute. cmdk
+  // only re-renders (and so only clears) the item it tracks, leaving the
+  // manually-set row stuck as a second highlighted "selected" row — and the
+  // Enter handler reads the first such row, so it can act on a different item
+  // than the one under the cursor. On mouse movement, reconcile to a single
+  // source of truth: the row under the pointer wins (cmdk's own hover target),
+  // matching the conventional cmdk/Slack behaviour where the mouse moves the
+  // selection. Deferred to rAF so cmdk's pointer-driven re-render lands first.
+  const reconcileHoverSelection = useCallback((): void => {
+    requestAnimationFrame(() => {
+      const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
+      if (!items || items.length === 0) return;
+      const hovered = Array.from(items).find(item => item.matches(':hover'));
+      if (!hovered) return;
+      items.forEach(item => {
+        item.setAttribute('aria-selected', item === hovered ? 'true' : 'false');
+      });
+    });
+  }, []);
+
   const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
     // Handle attachment preview - show file preview modal
     if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
@@ -1177,6 +1245,32 @@ const ChannelCommandMenu = ({
     });
     return groups;
   }, [filteredLocalChannels]);
+
+  // Slack-style strong channel match: when the top-ranked regular channel's
+  // name prefix-matches the query, the CHANNELS section renders ABOVE the
+  // "Show results for" row and the default Enter target becomes that channel.
+  // Mirrors `hasStrongUserMatch` exactly — only applies to plain search (no
+  // from:/in:/with: chips, CHANNELS section shown and non-empty) and only when
+  // a strong USER match does NOT already win (users take precedence).
+  //
+  // `name.startsWith(q)` is the SAME full-name-prefix signal `searchChannels`
+  // boosts to the top tier, so the ranking and the Enter target stay aligned.
+  const hasStrongChannelMatch = useMemo(() => {
+    if (hasStrongUserMatch) return false;
+    if (hasFromOrInFilter || hasWithFilter || !showGroupedLocalResults) return false;
+    const topChannel = groupedChannels['channels']?.[0]?.channel;
+    if (!topChannel) return false;
+    const q = cleanedSearchText.toLowerCase().trim();
+    if (!q) return false;
+    return topChannel.name.toLowerCase().startsWith(q);
+  }, [
+    hasStrongUserMatch,
+    hasFromOrInFilter,
+    hasWithFilter,
+    showGroupedLocalResults,
+    groupedChannels,
+    cleanedSearchText,
+  ]);
 
   const iconSize = isMobile ? 14 : 12;
 
@@ -1314,14 +1408,16 @@ const ChannelCommandMenu = ({
               ? paginationState[activeTab].cumulativeCount
               : items.length;
 
-          const displayItems =
-            searchMode === 'screen' && activeTab === TabType.ALL ? items.slice(0, 2) : items;
+          const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
+          const displayItems = isScreenAll ? items.slice(0, 2) : items;
+          const hiddenCount = items.length - displayItems.length;
+          const sectionTab = GROUP_KEY_TO_DOC_TYPE[groupKey];
 
           return (
             <div key={groupKey} className='mb-4'>
               <Command.Group
                 heading={
-                  searchMode === 'screen' && activeTab === TabType.ALL
+                  isScreenAll
                     ? getGroupLabel(groupKey)
                     : `${getGroupLabel(groupKey)} (${displayCount})`
                 }
@@ -1339,6 +1435,21 @@ const ChannelCommandMenu = ({
                     isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
                   />
                 ))}
+                {isScreenAll && hiddenCount > 0 && sectionTab && (
+                  <button
+                    onClick={() => handleSeeMoreNavigate(sectionTab)}
+                    className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                    style={{
+                      WebkitTapHighlightColor: 'transparent',
+                      userSelect: 'none',
+                    }}
+                    data-track-category='SEARCH'
+                    data-track-name='SEE_MORE_SECTION'
+                    data-track-metadata={JSON.stringify({ tab: sectionTab })}
+                  >
+                    See {hiddenCount} more
+                  </button>
+                )}
               </Command.Group>
             </div>
           );
@@ -1449,8 +1560,147 @@ const ChannelCommandMenu = ({
     </>
   );
 
-  // Render the local sections (Starred, Users, Group DMs, Channels) for the search branch
-  const renderSearchLocalSections = () => (
+  // Render the plain-search USERS section. Extracted so it can be rendered
+  // above the "Show results for" row when there is a strong user match.
+  const renderSearchUsersSection = () =>
+    (activeTab === TabType.ALL || activeTab === TabType.USERS) &&
+    showGroupedUsers &&
+    filteredLocalUsers.length > 0 ? (
+      <div className='mb-4'>
+        {(() => {
+          // Use the shared, hoisted Cmd+K user rank, then map to DisplaySearchResult.
+          const allItems: DisplaySearchResult[] = rankedLocalUsers.map(user => ({
+            id: user.id,
+            type: 'user' as const,
+            title: user.name,
+            subtitle: user.email || '',
+            relevanceScore: 1,
+            metadata: {},
+          }));
+
+          const totalItemsCount = allItems.length;
+          const displayCount = totalItemsCount;
+
+          const isExpanded = expandedCategories.has('user');
+          const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
+          const hasMore = totalItemsCount > DISPLAY_LIMIT;
+
+          const displayItems = !isExpanded && hasMore ? allItems.slice(0, DISPLAY_LIMIT) : allItems;
+
+          const hiddenCount = totalItemsCount - DISPLAY_LIMIT;
+
+          return (
+            <Command.Group
+              heading={`${getGroupLabel('user')} (${displayCount})`}
+              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+            >
+              {displayItems.map((item, index) => (
+                <SearchResultItem
+                  key={item.id}
+                  result={item}
+                  onSelect={res => handleBackendResultSelect(res, index + 1)}
+                  onItemMouseDown={handleItemMouseDown}
+                  isSelected={contextItems.some(c => c.id === `${item.type}-${item.id}`)}
+                />
+              ))}
+              {hasMore && (
+                <button
+                  onClick={() =>
+                    isScreenAll ? handleSeeMoreNavigate('people') : toggleCategoryExpansion('user')
+                  }
+                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                  style={{
+                    WebkitTapHighlightColor: 'transparent',
+                    userSelect: 'none',
+                  }}
+                  data-track-category={isScreenAll ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                  data-track-name={isScreenAll ? 'SEE_MORE_SECTION' : 'TOGGLE_CATEGORY_EXPANSION'}
+                  data-track-metadata={JSON.stringify({
+                    category: 'user',
+                    isExpanded,
+                  })}
+                >
+                  {isScreenAll
+                    ? `See ${hiddenCount} more`
+                    : isExpanded
+                      ? 'See less'
+                      : `See ${hiddenCount} more`}
+                </button>
+              )}
+            </Command.Group>
+          );
+        })()}
+      </div>
+    ) : null;
+
+  // Render the plain-search CHANNELS section. Extracted (like
+  // renderSearchUsersSection) so it can be rendered above the "Show results
+  // for" row when there is a strong channel match.
+  const renderSearchChannelsSection = () =>
+    (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+    showGroupedLocalResults &&
+    groupedChannels['channels'] &&
+    groupedChannels['channels'].length > 0 ? (
+      <div className='mb-4'>
+        {(() => {
+          const items = groupedChannels['channels'];
+          const category = ChannelCategory.CHANNELS;
+          const isExpanded = expandedCategories.has(category);
+          const hasMore = items.length > DISPLAY_LIMIT;
+          const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+          const hiddenCount = items.length - DISPLAY_LIMIT;
+
+          return (
+            <Command.Group
+              heading={getCategoryLabel(category)}
+              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+            >
+              {displayItems.map(({ channel }, index) => {
+                const unreadCount = unreadCounts[channel.id] ?? 0;
+                return (
+                  <ChannelCommandItem
+                    key={channel.id}
+                    channel={channel}
+                    currentUserID={currentUserID}
+                    unreadCount={unreadCount}
+                    onSelect={displayName => {
+                      void handleChannelSelect(channel, displayName, index + 1);
+                    }}
+                    onItemMouseDown={handleItemMouseDown}
+                    getChannelIcon={getChannelIcon}
+                    isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+                  />
+                );
+              })}
+              {hasMore && (
+                <button
+                  onClick={() => toggleCategoryExpansion(category)}
+                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                  style={{
+                    WebkitTapHighlightColor: 'transparent',
+                    userSelect: 'none',
+                  }}
+                  data-track-category='CHANNEL_SEARCH'
+                  data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                  data-track-metadata={JSON.stringify({
+                    category: category as string,
+                    isExpanded,
+                  })}
+                >
+                  {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                </button>
+              )}
+            </Command.Group>
+          );
+        })()}
+      </div>
+    ) : null;
+
+  // Render the local sections (Starred, Users, Group DMs, Channels) for the search branch.
+  // `includeUsers` is false when the USERS section is hoisted above the "Show
+  // results for" row (strong user match); `includeChannels` is false when the
+  // CHANNELS section is hoisted (strong channel match) — both avoid a double-render.
+  const renderSearchLocalSections = (includeUsers = true, includeChannels = true) => (
     <>
       {/* 0. Starred (from local channels) */}
       {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
@@ -1509,74 +1759,7 @@ const ChannelCommandMenu = ({
         )}
 
       {/* 1. Users (from local) */}
-      {(activeTab === TabType.ALL || activeTab === TabType.USERS) &&
-        showGroupedUsers &&
-        filteredLocalUsers.length > 0 && (
-          <div className='mb-4'>
-            {(() => {
-              // Apply the shared Cmd+K user rank, then map to DisplaySearchResult.
-              const rankedUsers = rankUsers(
-                filteredLocalUsers,
-                cleanedSearchText,
-                dmContactRecency,
-              );
-              const allItems: DisplaySearchResult[] = rankedUsers.map(user => ({
-                id: user.id,
-                type: 'user' as const,
-                title: user.name,
-                subtitle: user.email || '',
-                relevanceScore: 1,
-                metadata: {},
-              }));
-
-              const totalItemsCount = allItems.length;
-              const displayCount = totalItemsCount;
-
-              const isExpanded = expandedCategories.has('user');
-              const hasMore = totalItemsCount > DISPLAY_LIMIT;
-
-              const displayItems =
-                !isExpanded && hasMore ? allItems.slice(0, DISPLAY_LIMIT) : allItems;
-
-              const hiddenCount = totalItemsCount - DISPLAY_LIMIT;
-
-              return (
-                <Command.Group
-                  heading={`${getGroupLabel('user')} (${displayCount})`}
-                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                >
-                  {displayItems.map((item, index) => (
-                    <SearchResultItem
-                      key={item.id}
-                      result={item}
-                      onSelect={res => handleBackendResultSelect(res, index + 1)}
-                      onItemMouseDown={handleItemMouseDown}
-                      isSelected={contextItems.some(c => c.id === `${item.type}-${item.id}`)}
-                    />
-                  ))}
-                  {hasMore && (
-                    <button
-                      onClick={() => toggleCategoryExpansion('user')}
-                      className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                      style={{
-                        WebkitTapHighlightColor: 'transparent',
-                        userSelect: 'none',
-                      }}
-                      data-track-category='CHANNEL_SEARCH'
-                      data-track-name='TOGGLE_CATEGORY_EXPANSION'
-                      data-track-metadata={JSON.stringify({
-                        category: 'user',
-                        isExpanded,
-                      })}
-                    >
-                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                    </button>
-                  )}
-                </Command.Group>
-              );
-            })()}
-          </div>
-        )}
+      {includeUsers && renderSearchUsersSection()}
 
       {/* 2. Group DMs (from local channels) */}
       {(() => {
@@ -1617,64 +1800,7 @@ const ChannelCommandMenu = ({
       })()}
 
       {/* 3. Channels (from local channels) */}
-      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-        showGroupedLocalResults &&
-        groupedChannels['channels'] &&
-        groupedChannels['channels'].length > 0 && (
-          <div className='mb-4'>
-            {(() => {
-              const items = groupedChannels['channels'];
-              const category = ChannelCategory.CHANNELS;
-              const isExpanded = expandedCategories.has(category);
-              const hasMore = items.length > DISPLAY_LIMIT;
-              const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-              const hiddenCount = items.length - DISPLAY_LIMIT;
-
-              return (
-                <Command.Group
-                  heading={getCategoryLabel(category)}
-                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                >
-                  {displayItems.map(({ channel }, index) => {
-                    const unreadCount = unreadCounts[channel.id] ?? 0;
-                    return (
-                      <ChannelCommandItem
-                        key={channel.id}
-                        channel={channel}
-                        currentUserID={currentUserID}
-                        unreadCount={unreadCount}
-                        onSelect={displayName => {
-                          void handleChannelSelect(channel, displayName, index + 1);
-                        }}
-                        onItemMouseDown={handleItemMouseDown}
-                        getChannelIcon={getChannelIcon}
-                        isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                      />
-                    );
-                  })}
-                  {hasMore && (
-                    <button
-                      onClick={() => toggleCategoryExpansion(category)}
-                      className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                      style={{
-                        WebkitTapHighlightColor: 'transparent',
-                        userSelect: 'none',
-                      }}
-                      data-track-category='CHANNEL_SEARCH'
-                      data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
-                      data-track-metadata={JSON.stringify({
-                        category: category as string,
-                        isExpanded,
-                      })}
-                    >
-                      {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                    </button>
-                  )}
-                </Command.Group>
-              );
-            })()}
-          </div>
-        )}
+      {includeChannels && renderSearchChannelsSection()}
     </>
   );
 
@@ -2133,6 +2259,7 @@ const ChannelCommandMenu = ({
               insertTextRef.current = insertText;
             }}
             initialMention={initialMention}
+            initialQuery={initialQuery}
           />
           {/* Search/Close Icon */}
           {isMobile && (
@@ -2349,6 +2476,25 @@ const ChannelCommandMenu = ({
               }
             }}
           >
+            {/* Strong user match — render the USERS section ABOVE the
+                "Show results for" row so the top user becomes the default
+                Enter target (Slack-style). Screen mode only. */}
+            {hideTabs &&
+              searchMode === 'screen' &&
+              hasStrongUserMatch &&
+              !mentionSearchType &&
+              renderSearchUsersSection()}
+
+            {/* Strong channel match — render the CHANNELS section ABOVE the
+                "Show results for" row so the top channel becomes the default
+                Enter target (Slack-style). Screen mode only. Only fires when a
+                strong USER match does not already win (user precedence). */}
+            {hideTabs &&
+              searchMode === 'screen' &&
+              hasStrongChannelMatch &&
+              !mentionSearchType &&
+              renderSearchChannelsSection()}
+
             {/* Show results for: [query] — screen mode only */}
             {hideTabs &&
               searchMode === 'screen' &&
@@ -2362,7 +2508,7 @@ const ChannelCommandMenu = ({
                       `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
                     );
                   }}
-                  className='flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground hover:bg-muted'
+                  className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
                   data-track-category='SEARCH'
                   data-track-name='SHOW_RESULTS_FOR'
                 >
@@ -2942,7 +3088,14 @@ const ChannelCommandMenu = ({
                       </>
                     ) : (
                       <>
-                        {!hasWithFilter && renderSearchLocalSections()}
+                        {!hasWithFilter &&
+                          renderSearchLocalSections(
+                            // USERS already rendered above the "Show results for"
+                            // row on a strong match — don't render it twice.
+                            !(hideTabs && searchMode === 'screen' && hasStrongUserMatch),
+                            // CHANNELS likewise hoisted on a strong channel match.
+                            !(hideTabs && searchMode === 'screen' && hasStrongChannelMatch),
+                          )}
                         {backendResults.length > 0 && renderSearchBackendResults()}
                       </>
                     )}
@@ -3110,6 +3263,7 @@ const ChannelCommandMenu = ({
               });
             setSuppressHover(false);
           }
+          reconcileHoverSelection();
         }}
         onKeyDownCapture={handleCommandKeyDown}
       >
@@ -3133,6 +3287,7 @@ const ChannelCommandMenu = ({
             });
           setSuppressHover(false);
         }
+        reconcileHoverSelection();
       }}
       className={cn(
         'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',

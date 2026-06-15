@@ -17,7 +17,12 @@ import { SearchFilterBar } from './SearchFilterBar';
 import { useAllVisibleChannels, useAllChannels } from '../../../hooks/useChannels';
 import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
-import { TabType, MentionType } from '../ChatDirectory/ChannelCommandMenu.types';
+import {
+  TabType,
+  MentionType,
+  VALID_DOC_TYPES,
+  DOC_TYPE_TO_TAB,
+} from '../ChatDirectory/ChannelCommandMenu.types';
 import { navigateToSearchResult } from '../../../utils/searchNavigation';
 import Avatar from '../../ui/Avatar/Avatar';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -39,21 +44,14 @@ type SidePanelState =
     }
   | null;
 
+function parseDocTypeParam(value: string | null): SearchResultsFilters['docType'] | null {
+  return value && (VALID_DOC_TYPES as string[]).includes(value)
+    ? (value as SearchResultsFilters['docType'])
+    : null;
+}
+
 function docTypeToTabType(docType: SearchResultsFilters['docType']): TabType {
-  switch (docType) {
-    case 'messages':
-      return TabType.MESSAGES;
-    case 'files':
-      return TabType.ATTACHMENTS;
-    case 'tickets':
-      return TabType.TICKETS;
-    case 'desk':
-      return TabType.DESK;
-    case 'people':
-      return TabType.USERS;
-    default:
-      return TabType.ALL;
-  }
+  return DOC_TYPE_TO_TAB[docType] ?? TabType.ALL;
 }
 
 type ResultsMention = {
@@ -110,8 +108,10 @@ const SearchResults = (): ReactElement => {
     const fromParam = searchParams.get('from') ?? '';
     const inParam = searchParams.get('in') ?? '';
     const assigneeParam = searchParams.get('assignee') ?? '';
+    const tabParam = parseDocTypeParam(searchParams.get('tab'));
     return {
       ...DEFAULT_SEARCH_FILTERS,
+      ...(tabParam ? { docType: tabParam } : {}),
       fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
       inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
       assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
@@ -171,19 +171,24 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  // Sync from/in/assignee URL params → filter state on navigation (popup → search screen while already mounted)
+  // Sync from/in/assignee/tab URL params → filter state on navigation (popup → search screen while already mounted)
   const fromParam = searchParams.get('from') ?? '';
   const inParam = searchParams.get('in') ?? '';
   const assigneeParam = searchParams.get('assignee') ?? '';
+  const tabParam = searchParams.get('tab') ?? '';
   useEffect(() => {
+    const parsedTab = parseDocTypeParam(tabParam);
     setFilters(prev => ({
       ...prev,
+      // Only the "See N more" links pass a tab; absent it, keep the user's
+      // current tab so unrelated URL changes don't reset it.
+      ...(parsedTab ? { docType: parsedTab } : {}),
       fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
       inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
       assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromParam, inParam, assigneeParam]);
+  }, [fromParam, inParam, assigneeParam, tabParam]);
 
   // Sync docType filter → hook active tab
   useEffect(() => {

@@ -1,6 +1,10 @@
 // Types for ChannelCommandMenu component (using const objects due to erasableSyntaxOnly)
 import type { Channel } from '@xyne/shared';
+import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import type { ContextItem } from '../ThreadContextPanel/ThreadContextPanel.types';
+import type { InitialQueryData } from './LexicalSearchInput';
+
+type SearchResultsDocType = SearchResultsFilters['docType'];
 
 /**
  * Searchable type constants for the type: filter
@@ -59,6 +63,55 @@ export const TabType = {
 } as const;
 
 export type TabType = (typeof TabType)[keyof typeof TabType];
+
+/**
+ * Single source of truth for results-page docTypes.
+ *
+ * Each entry defines, per docType:
+ *  - `tab`: the results-page TabType it maps to.
+ *  - `groupKeys`: the backend-result group key(s) that resolve to this docType
+ *    (empty when no backend group maps to it, e.g. 'all' / 'channels').
+ *
+ * Adding a new tab/docType means editing exactly ONE entry here — the three
+ * derived maps below (VALID_DOC_TYPES, DOC_TYPE_TO_TAB, GROUP_KEY_TO_DOC_TYPE)
+ * pick it up automatically.
+ *
+ * NOTE: both 'all' and 'channels' intentionally map to TabType.ALL to preserve
+ * existing behavior (the old `docTypeToTabType` switch returned ALL for both via
+ * its `default` case).
+ */
+export const DOC_TYPE_REGISTRY = {
+  all: { tab: TabType.ALL, groupKeys: [] },
+  messages: { tab: TabType.MESSAGES, groupKeys: ['conversation'] },
+  files: {
+    tab: TabType.ATTACHMENTS,
+    groupKeys: ['attachment', 'canvas', 'transcript', 'recording'],
+  },
+  tickets: { tab: TabType.TICKETS, groupKeys: ['ticket'] },
+  channels: { tab: TabType.ALL, groupKeys: [] },
+  desk: { tab: TabType.DESK, groupKeys: ['desk'] },
+  people: { tab: TabType.USERS, groupKeys: ['user'] },
+} as const satisfies Record<SearchResultsDocType, { tab: TabType; groupKeys: readonly string[] }>;
+
+/** Valid docType strings — derived from the registry keys. */
+export const VALID_DOC_TYPES = Object.keys(DOC_TYPE_REGISTRY) as SearchResultsDocType[];
+
+/** docType -> results-page TabType — derived from the registry. */
+export const DOC_TYPE_TO_TAB = Object.fromEntries(
+  (Object.entries(DOC_TYPE_REGISTRY) as [SearchResultsDocType, { tab: TabType }][]).map(
+    ([docType, { tab }]) => [docType, tab],
+  ),
+) as Record<SearchResultsDocType, TabType>;
+
+/**
+ * Backend-result group key -> results-page docType — derived by inverting each
+ * registry entry's `groupKeys`.
+ */
+export const GROUP_KEY_TO_DOC_TYPE = Object.fromEntries(
+  (
+    Object.entries(DOC_TYPE_REGISTRY) as [SearchResultsDocType, { groupKeys: readonly string[] }][]
+  ).flatMap(([docType, { groupKeys }]) => groupKeys.map(groupKey => [groupKey, docType])),
+) as Record<string, SearchResultsDocType>;
 
 export const VespaApps = {
   CHAT: 'chat',
@@ -128,6 +181,11 @@ export interface ChannelCommandMenuProps {
   onContextSelectionConfirm?: () => void;
   /** Pre-populated mention filter (e.g., from Cmd+F for current channel) */
   initialMention?: MentionData | null;
+  /**
+   * Pre-populated full query (mention chips + trailing text) used to restore
+   * the previous search when reopening the overlay from the results-page header.
+   */
+  initialQuery?: InitialQueryData | null;
   /**
    * Controls which tabs are visible. When omitted, defaults to all
    * pre-existing tabs (users, channels, messages, desk, tickets, attachments).
