@@ -44,6 +44,7 @@ export { trackNudgeActed, trackNudgeDismissed } from './nudgeMetrics';
 
 export {
   componentRenderDuration,
+  componentRenderTotal,
   registerMemoryGauge,
   registerLongTaskObserver,
   registerWebVitals,

@@ -1,9 +1,17 @@
 import React, { Profiler, forwardRef } from 'react';
-import { componentRenderDuration, safeRecordMetric } from '../services/otel';
+import { componentRenderDuration, componentRenderTotal, safeRecordMetric } from '../services/otel';
 
 const SLOW_RENDER_THRESHOLD_MS = 16; // ~1 frame at 60fps
 
 function onRender(id: string, phase: 'mount' | 'update' | 'nested-update', actualDuration: number) {
+  // Count every render (frequency axis) — this is what catches a component that
+  // re-renders thousands of times cheaply, which the >16ms duration gate hides.
+  safeRecordMetric(() => {
+    componentRenderTotal.add(1, {
+      component: id,
+      phase,
+    });
+  });
   if (actualDuration < SLOW_RENDER_THRESHOLD_MS) return;
   safeRecordMetric(() => {
     componentRenderDuration.record(actualDuration, {
