@@ -495,6 +495,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         const hasFiles = files && files.length > 0;
         const hasThreadBroadcastMention =
           !!conversationId &&
+          !messageId &&
+          !isDM &&
           !allowThreadBroadcastMentions &&
           containsSpecialBroadcastMention(processedHtml);
 
@@ -757,6 +759,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       [
         zero,
         messageId,
+        isDM,
         conversationId,
         channelId,
         onEditComplete,
@@ -782,6 +785,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         const hasFiles = files.length > 0;
         const hasThreadBroadcastMention =
           !!conversationId &&
+          !messageId &&
+          !isDM &&
           !allowThreadBroadcastMentions &&
           containsSpecialBroadcastMention(processedHtml);
         if (hasThreadBroadcastMention) {
@@ -822,6 +827,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         user,
         channelId,
         conversationId,
+        messageId,
+        isDM,
         allUsersForMentionResolution,
         lookupId,
         setRecentScheduledFor,
