@@ -218,7 +218,7 @@ const ProfileView = ({
             data-track-category='PROFILE'
             data-track-name='ChangePicture'
           >
-            <Avatar userId={user?.id || ''} size='lg' showActiveStatus={true} />
+            <Avatar userId={user?.id || ''} size='lg' showActiveStatus={false} />
             <div className='absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity'>
               <Camera className='size-4 text-white' />
             </div>
