@@ -412,6 +412,7 @@ export class ExternalSourceCore {
             emailFrom: normalizedData.emailData.from || '',
             emailCc: normalizedData.emailData.cc || [],
             emailBcc: normalizedData.emailData.bcc || [],
+            emailReplyTo: normalizedData.emailData.replyTo || [],
             externalThreadId: normalizedData.externalThreadId,
             externalMessageId: normalizedData.externalId,
             emailType: EmailType.DEFAULT,

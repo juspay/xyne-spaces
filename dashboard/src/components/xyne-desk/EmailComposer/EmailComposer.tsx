@@ -971,8 +971,8 @@ export const EmailComposer = ({
             }
           };
 
-          // Sender first (prefer Reply-To over From for list-relayed emails).
-          if (source.replyTo?.length) addUnique(nextTo, [source.replyTo[0]!]);
+          // Sender first (prefer all Reply-To addresses over From for list-relayed emails).
+          if (source.replyTo?.length) addUnique(nextTo, source.replyTo);
           else if (source.from) addUnique(nextTo, [source.from]);
           // All original To recipients of the latest message.
           addUnique(nextTo, source.to || []);
@@ -988,7 +988,7 @@ export const EmailComposer = ({
           if (senderIsSelf) {
             nextTo = (targetEmail.to || []).filter(addr => !isSelf(addr));
           } else if (targetEmail.replyTo?.length) {
-            nextTo = [targetEmail.replyTo[0]!];
+            nextTo = [...targetEmail.replyTo];
           } else if (targetEmail.from) {
             nextTo = [targetEmail.from];
           }

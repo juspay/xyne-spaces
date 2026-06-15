@@ -225,6 +225,7 @@ interface PreviewEmail {
   from?: string | null;
   to?: ReadonlyArray<string> | null;
   cc?: ReadonlyArray<string> | null;
+  replyTo?: ReadonlyArray<string> | null;
   createdAt?: number | null;
 }
 
@@ -258,13 +259,16 @@ export const computePreviewRecipients = (
   };
 
   if (mode === 'replyAll') {
-    if (target.from) push([target.from]);
+    if (target.replyTo?.length) push(target.replyTo);
+    else if (target.from) push([target.from]);
     push(target.to);
     push(target.cc);
   } else {
     const senderIsSelf = !!target.from && isSelf(target.from);
     if (senderIsSelf) {
       push((target.to || []).filter(addr => !isSelf(addr)));
+    } else if (target.replyTo?.length) {
+      push(target.replyTo);
     } else if (target.from) {
       push([target.from]);
     }
