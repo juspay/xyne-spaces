@@ -439,6 +439,10 @@ export class SearchService {
         : filters.dynamicFieldValues;
     }
 
+    if (filters.dynamicFieldDateRanges) {
+      params['dynamicFieldDateRanges'] = JSON.stringify(filters.dynamicFieldDateRanges);
+    }
+
     if (filters.subApp) {
       params['subApp'] = filters.subApp;
     }

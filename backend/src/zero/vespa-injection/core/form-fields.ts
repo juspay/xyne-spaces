@@ -32,6 +32,53 @@ export const normalizeVespaFieldValue = (value: Prisma.JsonValue): string | null
   return null;
 };
 
+const normalizeVespaDateFieldValue = (value: Prisma.JsonValue): string | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString().slice(0, 10);
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^\d+$/.test(trimmed)) {
+    const timestamp = Number(trimmed);
+    if (!Number.isFinite(timestamp)) return null;
+    return new Date(timestamp).toISOString().slice(0, 10);
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return trimmed.length >= 10 ? trimmed.slice(0, 10) : null;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+};
+
+const normalizeVespaDateFieldLong = (value: Prisma.JsonValue): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^\d+$/.test(trimmed)) {
+    const timestamp = Number(trimmed);
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+};
+
 /**
  * Convert ticket form values into the Vespa wire format:
  * [{ fieldId, fieldValue }].
@@ -59,6 +106,16 @@ export const buildFormFields = (
         rawValue.forEach(item => pushValue(normalizeVespaFieldValue(item)));
       } else {
         pushValue(normalizeVespaFieldValue(rawValue));
+      }
+    } else if (fieldType === FormFieldType.DATE) {
+      const fieldValueLong = normalizeVespaDateFieldLong(rawValue);
+      const fieldValue = normalizeVespaDateFieldValue(rawValue);
+      if (fieldValueLong !== null && fieldValue !== null) {
+        formFields.push({
+          fieldId: value.fieldId,
+          fieldValue,
+          fieldValueLong,
+        });
       }
     } else if (Array.isArray(rawValue)) {
       rawValue.forEach(item => pushValue(normalizeVespaFieldValue(item)));

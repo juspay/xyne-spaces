@@ -11,6 +11,7 @@ import type { TicketFilters } from '../../components/Tickets/TicketFilters/types
 import { FormFieldType } from '@xyne/shared';
 import { useVespaTicketSearch } from '../../hooks/useVespaTicketSearch';
 import { useCachedQuery } from '@xyne/shared/hooks';
+import { sortByKanbanPosition } from './KanbanBoardScreen.utils';
 
 export type KanbanTicketsPageRow = Ticket & {
   assignments?: TicketAssignment[];
@@ -45,14 +46,22 @@ export type KanbanTicketsPageBaseArgs = {
   filters?: TicketFilters;
   formEntityValueFieldIds?: string[];
   dynamicFieldVespaTokens?: string[];
-  arrayBackedDynamicFieldIds?: string[];
+  dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
+  zeroOnlyDynamicFieldIds?: string[];
   vespaTicketIds?: string[];
   showOverdueOnly?: boolean;
   overdueReferenceTime?: number | null;
 };
 
-type KanbanTicketsPageQueryArgs = Parameters<typeof queries.kanbanTicketsPage>[0];
-type KanbanCursor = NonNullable<KanbanTicketsPageQueryArgs['start']>;
+type KanbanCursor = {
+  createdAt: number;
+  id: string;
+};
+
+type KanbanTicketsPageQueryArgs = Omit<Parameters<typeof queries.kanbanTicketsPage>[0], 'start'> & {
+  start: KanbanCursor | null;
+  dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
+};
 
 type DynamicFieldScalarFilter = NonNullable<
   KanbanTicketsPageQueryArgs['dynamicFieldScalarFilters']
@@ -90,7 +99,8 @@ type FetchCursorState = {
 
 const hasZeroOnlyFilters = (
   filters: TicketFilters | undefined,
-  arrayBackedDynamicFieldIds: string[] | undefined,
+  zeroOnlyDynamicFieldIds: string[] | undefined,
+  dynamicFieldDateRanges: Record<string, { start?: number; end?: number }> | undefined,
 ): boolean => {
   if (!filters) return false;
 
@@ -125,10 +135,12 @@ const hasZeroOnlyFilters = (
 
   if (!dynamicFields) return false;
 
-  const arrayBackedFieldIds = new Set(arrayBackedDynamicFieldIds ?? []);
+  const zeroOnlyFieldIds = new Set(zeroOnlyDynamicFieldIds ?? []);
+  const vespaDateRangeFieldIds = new Set(Object.keys(dynamicFieldDateRanges ?? {}));
   return Object.entries(dynamicFields).some(([fieldId, value]) => {
-    if (!arrayBackedFieldIds.has(fieldId)) return true;
-    return !Array.isArray(value);
+    if (zeroOnlyFieldIds.has(fieldId)) return true;
+    if (Array.isArray(value)) return false;
+    return !vespaDateRangeFieldIds.has(fieldId);
   });
 };
 
@@ -143,23 +155,21 @@ const canRepresentGroupInVespa = (
   if (typeof groupBy !== 'object' || groupBy.type !== 'formField') return false;
   if (!groupKey) return false;
   if (MISSING_FORM_FIELD_GROUP_KEYS.has(groupKey)) return true;
-  return (
-    groupBy.fieldType === FormFieldType.MULTI_SELECT || groupBy.fieldType === FormFieldType.USER
-  );
+  return groupBy.fieldType !== FormFieldType.DATE;
 };
 
 const getDynamicFieldScalarFilters = (
   filters: TicketFilters | undefined,
-  arrayBackedDynamicFieldIds: string[] | undefined,
+  zeroOnlyDynamicFieldIds: string[] | undefined,
 ): DynamicFieldScalarFilter[] | undefined => {
   const dynamicFields = filters?.dynamicFields;
   if (!dynamicFields) return undefined;
 
   const scalarFilters: DynamicFieldScalarFilter[] = [];
-  const arrayBackedFieldIds = new Set(arrayBackedDynamicFieldIds ?? []);
+  const zeroOnlyFieldIds = new Set(zeroOnlyDynamicFieldIds ?? []);
 
   for (const [fieldId, value] of Object.entries(dynamicFields)) {
-    if (arrayBackedFieldIds.has(fieldId)) continue;
+    if (zeroOnlyFieldIds.has(fieldId)) continue;
     if (!Array.isArray(value) || value.length === 0) continue;
 
     // Zero can express scalar equality for JSON values. Date ranges and array containment
@@ -230,29 +240,16 @@ export const buildKanbanTicketsPageArgs = (
   vespaTicketIds: options.vespaTicketIds,
   dynamicFieldScalarFilters: getDynamicFieldScalarFilters(
     options.filters,
-    options.arrayBackedDynamicFieldIds,
+    options.zeroOnlyDynamicFieldIds,
   ),
   filters: toQueryFilters(options.filters),
   formEntityValueFieldIds: options.formEntityValueFieldIds,
+  ...(options.dynamicFieldDateRanges
+    ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
+    : {}),
   showOverdueOnly: options.showOverdueOnly,
   overdueReferenceTime: options.overdueReferenceTime ?? undefined,
 });
-
-const sortByCursorOrder = (rows: KanbanTicketsPageRow[]): KanbanTicketsPageRow[] =>
-  [...rows].sort((a, b) => {
-    const aPos = a.kanbanPosition;
-    const bPos = b.kanbanPosition;
-
-    if (aPos !== null && aPos !== undefined && bPos !== null && bPos !== undefined) {
-      if (aPos < bPos) return -1;
-      if (aPos > bPos) return 1;
-    }
-
-    if ((aPos === null || aPos === undefined) && bPos !== null && bPos !== undefined) return 1;
-    if (aPos !== null && aPos !== undefined && (bPos === null || bPos === undefined)) return -1;
-
-    return a.id.localeCompare(b.id);
-  });
 
 const normalizeIdentity = (value: string | null | undefined): string =>
   (value ?? '').replace(/^user:/, '');
@@ -341,12 +338,11 @@ export const useKanbanTicketsPage = (
   const overdueReferenceTimeRef = useRef<number | null>(null);
   const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
   const pageVespaTokensSet = new Set(options.dynamicFieldVespaTokens ?? []);
+  const pageVespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;
   if (
     typeof options.groupBy === 'object' &&
     options.groupBy?.type === 'formField' &&
-    (options.groupBy.fieldType === FormFieldType.MULTI_SELECT ||
-      options.groupBy.fieldType === FormFieldType.USER ||
-      MISSING_FORM_FIELD_GROUP_KEYS.has(options.groupKey ?? ''))
+    options.groupBy.fieldType !== FormFieldType.DATE
   ) {
     if (MISSING_FORM_FIELD_GROUP_KEYS.has(options.groupKey ?? '')) {
       pageVespaTokensSet.add(`${options.groupBy.fieldId}::${VESPA_MISSING_DYNAMIC_FIELD_VALUE}`);
@@ -356,13 +352,18 @@ export const useKanbanTicketsPage = (
   }
   const pageVespaTokens = Array.from(pageVespaTokensSet).sort();
   const hasSearchTerm = trimmedSearchTerm.length > 0;
-  const requiresVespaTicketIds = pageVespaTokens.length > 0 || hasSearchTerm;
+  const requiresVespaTicketIds =
+    pageVespaTokens.length > 0 || pageVespaDateRangeCount > 0 || hasSearchTerm;
   const effectiveVespaBoardId =
     options.boardId ??
     (options.filters?.boards?.length === 1 ? options.filters.boards[0] : undefined);
   const shouldUseDirectVespaRows =
     requiresVespaTicketIds &&
-    !hasZeroOnlyFilters(options.filters, options.arrayBackedDynamicFieldIds) &&
+    !hasZeroOnlyFilters(
+      options.filters,
+      options.zeroOnlyDynamicFieldIds,
+      options.dynamicFieldDateRanges,
+    ) &&
     canRepresentGroupInVespa(options.groupBy, options.groupKey) &&
     !options.showOverdueOnly;
 
@@ -372,6 +373,10 @@ export const useKanbanTicketsPage = (
     enabled: requiresVespaTicketIds,
     limit: 200,
     fetchAllDynamicFieldMatches: true,
+    maxFetchedResults: 400,
+    ...(options.dynamicFieldDateRanges
+      ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
+      : {}),
     ...(options.projectId ? { projectId: options.projectId } : {}),
     ...(effectiveVespaBoardId ? { boardId: effectiveVespaBoardId } : {}),
     ...(options.columnType === 'status' ? { status: options.stageName } : {}),
@@ -407,20 +412,24 @@ export const useKanbanTicketsPage = (
   const overdueReferenceTime = overdueReferenceTimeRef.current;
   const pageOptions = {
     ...options,
-    ...(vespaTicketIds !== undefined ? { vespaTicketIds } : {}),
+    ...(!shouldUseDirectVespaRows && vespaTicketIds !== undefined ? { vespaTicketIds } : {}),
     overdueReferenceTime,
   };
   const basePageArgs = buildKanbanTicketsPageArgs(pageOptions, null);
-  const queryKey = JSON.stringify(basePageArgs);
+  const { start: _start, ...queryKeyArgs } = basePageArgs;
+  const queryKey = JSON.stringify(queryKeyArgs);
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
   const pageArgs = buildKanbanTicketsPageArgs(pageOptions, fetchCursor);
-  const [page, pageDetails] = useCachedQuery(queries.kanbanTicketsPage(pageArgs), {
-    enabled:
-      (options.enabled ?? true) &&
-      !shouldUseDirectVespaRows &&
-      (!requiresVespaTicketIds || vespaTicketSearch.searchResults !== null),
-  });
+  const [page, pageDetails] = useCachedQuery(
+    queries.kanbanTicketsPage(pageArgs as Parameters<typeof queries.kanbanTicketsPage>[0]),
+    {
+      enabled:
+        (options.enabled ?? true) &&
+        !shouldUseDirectVespaRows &&
+        (!requiresVespaTicketIds || vespaTicketSearch.searchResults !== null),
+    },
+  );
   const effectivePage = shouldUseDirectVespaRows ? directVespaPage : page;
   const effectivePageDetailsType = shouldUseDirectVespaRows
     ? directVespaPage === null
@@ -442,7 +451,19 @@ export const useKanbanTicketsPage = (
     if (effectivePageDetailsType !== 'complete') return;
     isLoadingMoreRef.current = false;
 
-    const pageRows = (effectivePage ?? []) as KanbanTicketsPageRow[];
+    const rawPageRows = (effectivePage ?? []) as KanbanTicketsPageRow[];
+    const pageRows = sortByKanbanPosition(rawPageRows);
+    if (typeof window !== 'undefined') {
+      const debugDynamicFieldIds = new Set<string>();
+      if (options.filters?.dynamicFields) {
+        Object.keys(options.filters.dynamicFields).forEach(fieldId =>
+          debugDynamicFieldIds.add(fieldId),
+        );
+      }
+      if (typeof options.groupBy === 'object' && options.groupBy?.type === 'formField') {
+        debugDynamicFieldIds.add(options.groupBy.fieldId);
+      }
+    }
     if (pageRows.length === 0) {
       if (fetchCursor === null) {
         setTicketsState(prev =>
@@ -457,14 +478,14 @@ export const useKanbanTicketsPage = (
     }
 
     setTicketsState(prev => {
-      if (fetchCursor === null || shouldUseDirectVespaRows) {
+      if (shouldUseDirectVespaRows || fetchCursor === null) {
         return { queryKey, tickets: pageRows };
       }
 
       const previousTickets = prev.queryKey === queryKey ? prev.tickets : [];
       const combined = [...previousTickets, ...pageRows];
       const unique = Array.from(new Map(combined.map(ticket => [ticket.id, ticket])).values());
-      return { queryKey, tickets: sortByCursorOrder(unique) };
+      return { queryKey, tickets: unique };
     });
 
     if (shouldUseDirectVespaRows) {
@@ -475,15 +496,14 @@ export const useKanbanTicketsPage = (
 
     setHasMore(pageRows.length >= (options.pageSize ?? DEFAULT_PAGE_SIZE));
 
-    const lastItemOfPage = pageRows.at(-1);
-    if (lastItemOfPage?.kanbanPosition) {
+    const lastItemOfPage = rawPageRows.at(-1);
+    if (lastItemOfPage) {
       setNextCursor({
-        kanbanPosition: lastItemOfPage.kanbanPosition,
+        createdAt: lastItemOfPage.createdAt,
         id: lastItemOfPage.id,
       });
     } else {
       setNextCursor(null);
-      setHasMore(false);
     }
   }, [
     fetchCursor,

@@ -18,7 +18,6 @@ import {
   type KanbanTicketsPageBaseArgs,
   useKanbanTicketsPage,
 } from '../../../routes/KanbanBoardScreen/useKanbanTicketsPage';
-import { sortByKanbanPosition } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { TicketCard } from '../TicketCard/TicketCard';
 import Button from '../../ui/Button';
 import { CollapseIcon } from '../../../assets/icons/CollapseIcon';
@@ -238,7 +237,7 @@ const PaginatedStageList: React.FC<{
       renderedTicketsById.set(ticket.id, ticket);
     }
 
-    return sortByKanbanPosition([...renderedTicketsById.values()]);
+    return [...renderedTicketsById.values()];
   }, [allKnownTickets, columnStatus, columnType, columnValue, tickets]);
 
   const fetchedTicketIdsSignature = React.useMemo(

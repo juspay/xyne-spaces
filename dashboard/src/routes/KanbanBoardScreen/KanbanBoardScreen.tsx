@@ -72,6 +72,7 @@ import {
   groupTicketsByStatus,
   applyTicketFilters,
   groupTicketsByFormField,
+  extractBoardFormFields,
   extractGroupableFormFields,
 } from './KanbanBoardScreen.utils';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
@@ -200,9 +201,6 @@ function isFormFieldGroup(value: unknown): value is FormFieldGroup {
     typeof value === 'object' && value !== null && 'type' in value && value.type === 'formField'
   );
 }
-
-const isArrayBackedFormFieldType = (fieldType?: string): boolean =>
-  fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
 
 type KanbanLocalTicket = Ticket & {
   assignments?: TicketAssignment[];
@@ -403,10 +401,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Determine view mode based on URL params or prop
   const viewMode = useMemo(() => {
     if (viewModeProp === 'my-tickets') return 'my-tickets'; // Show user's tickets
-    if (boardId && projectIdParam) return 'board'; // Show specific board
-    if (projectIdParam || channel) return 'project'; // Show all boards in project
     if (viewModeProp === 'user-tickets') return 'user-tickets'; // Show specific user's tickets
     if (viewModeProp === 'group-tickets') return 'group-tickets'; // Show specific group's tickets
+    if (viewModeProp === 'board') return 'board';
+    if (boardId) return 'board'; // Show specific board
+    if (viewModeProp === 'project') return 'project';
+    if (projectIdParam || channel) return 'project'; // Show all boards in project
     return 'project'; // Default to project view
   }, [viewModeProp, projectIdParam, boardId, channel]);
 
@@ -425,10 +425,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     () => parseGroupBy(state.context.groupBy),
     [state.context.groupBy],
   );
-  const isArrayBackedFormFieldGroup =
-    isFormFieldGroup(groupBy) && isArrayBackedFormFieldType(groupBy.fieldType);
-  const shouldUseLegacyTicketsQuery =
-    !isKanbanLayout || (isFormFieldGroup(groupBy) && !isArrayBackedFormFieldGroup);
+  const shouldUseLegacyTicketsQuery = !isKanbanLayout;
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
   const activeViewKey = `active-view-${state.context.storageKey}`;
   const hasRestoredActiveView = useRef<string | null>(null);
@@ -616,6 +613,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       activeViewKey,
       projectIdParam,
       navigate,
+      filters,
+      boardId,
+      channelId,
     ],
   );
 
@@ -683,33 +683,54 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     },
   );
 
-  // Create memo of form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
-  // Uses selectedBoardDetail (lazily fetched when a single board is selected)
+  // Split board form metadata into two independent views:
+  // - groupable fields: only the subset that can be used for group-by
+  // - dynamic fields: all board fields used to drive Vespa-backed filters
+  const boardFormFields = useMemo(
+    () => extractBoardFormFields(filters, selectedBoardDetail ? [selectedBoardDetail] : []),
+    [filters.boards, selectedBoardDetail],
+  );
+
+  // Create memo of form fields eligible for grouped kanban pagination.
   const groupByFormFields = useMemo(
     () => extractGroupableFormFields(filters, selectedBoardDetail ? [selectedBoardDetail] : []),
     [filters.boards, selectedBoardDetail],
   );
-  const arrayBackedDynamicFieldIds = useMemo(() => {
+  const boardFieldTypesById = useMemo(
+    () => new Map(boardFormFields.map(field => [field.id, field.fieldType])),
+    [boardFormFields],
+  );
+  const dynamicFieldDateRanges = useMemo(() => {
+    if (!filters.dynamicFields) return {};
+
+    const ranges: Record<string, { start?: number; end?: number }> = {};
+    for (const [fieldId, value] of Object.entries(filters.dynamicFields)) {
+      const fieldType = boardFieldTypesById.get(fieldId);
+      if (fieldType !== FormFieldType.DATE || Array.isArray(value)) continue;
+
+      const range = value as { start?: number; end?: number };
+      if (range.start === undefined && range.end === undefined) continue;
+      ranges[fieldId] = {
+        ...(range.start !== undefined ? { start: range.start } : {}),
+        ...(range.end !== undefined ? { end: range.end } : {}),
+      };
+    }
+    return ranges;
+  }, [filters.dynamicFields, boardFieldTypesById]);
+  const dynamicFieldVespaTokens = useMemo(() => {
     if (!filters.dynamicFields) return [];
 
-    const fieldTypesById = new Map(groupByFormFields.map(field => [field.id, field.fieldType]));
-    return Object.keys(filters.dynamicFields).filter(fieldId =>
-      isArrayBackedFormFieldType(fieldTypesById.get(fieldId)),
-    );
-  }, [filters.dynamicFields, groupByFormFields]);
-  const dynamicFieldVespaTokens = useMemo(() => {
-    if (!filters.dynamicFields || arrayBackedDynamicFieldIds.length === 0) return [];
-
-    const arrayBackedFieldIds = new Set(arrayBackedDynamicFieldIds);
     const tokens = new Set<string>();
     for (const [fieldId, value] of Object.entries(filters.dynamicFields)) {
-      if (!arrayBackedFieldIds.has(fieldId) || !Array.isArray(value)) continue;
+      if (!Array.isArray(value)) continue;
       value.forEach(item => {
         if (item !== '') tokens.add(`${fieldId}::${item}`);
       });
     }
-    return Array.from(tokens).sort();
-  }, [filters.dynamicFields, arrayBackedDynamicFieldIds]);
+    const result = Array.from(tokens).sort();
+    return result;
+  }, [filters.dynamicFields]);
+  const zeroOnlyDynamicFieldIds = useMemo<string[]>(() => [], []);
 
   // Dynamic grouping options based on form fields
   const groupingOptions = useMemo(() => {
@@ -934,14 +955,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   //   - groupByFieldId: needed so groupTicketsByFormField can read the value directly from the ticket
   const fevFieldIds = useMemo(() => {
     const ids = new Set<string>();
-    // Add all dynamic field filter fieldIds
+    // Add only dynamic field filter fieldIds that still need Zero-side filtering.
     if (filters.dynamicFields) {
-      Object.keys(filters.dynamicFields).forEach(fieldId => ids.add(fieldId));
+      zeroOnlyDynamicFieldIds.forEach(fieldId => ids.add(fieldId));
     }
     // Add groupBy fieldId if grouping by form field
     if (groupByFieldId) ids.add(groupByFieldId);
     return Array.from(ids);
-  }, [filters.dynamicFields, groupByFieldId]);
+  }, [groupByFieldId, zeroOnlyDynamicFieldIds]);
 
   // CENTRALIZED TICKET QUERY - fetch only tickets relevant to the current context.
   // Dynamic field filtering is done CLIENT-SIDE via applyTicketFilters.
@@ -1004,7 +1025,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     queries.ticketsQueryV2(ticketsQueryParams),
     {
       enabled:
-        shouldUseLegacyTicketsQuery &&
+        !isKanbanLayout &&
         ((viewMode === 'board' && !!boardId) ||
           (viewMode === 'project' && !!effectiveProjectId) ||
           viewMode === 'my-tickets' ||
@@ -1233,7 +1254,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
 
     return { formValuesByTicketId: valuesMap, formFieldsById: fieldsMap };
-  }, [fevFieldIds, groupBy, kanbanSourceTickets]);
+  }, [fevFieldIds, kanbanSourceTickets]);
   if (
     shouldUseLegacyTicketsQuery &&
     (fevFieldIds.length === 0 || ticketsDetails.type === 'complete')
@@ -1303,33 +1324,32 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     logEntityTiming('filteredTickets');
   }
 
+  const shouldUseStatusColumns =
+    (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
+    (channelId && viewMode === 'project' && channelViewType !== 'stage');
+
   const kanbanColumnQueryKey = useMemo(
     () =>
       JSON.stringify({
         ticketsQueryParams,
         searchTerm: searchTerm.trim(),
-        columnType:
-          (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
-          (channelId && viewMode === 'project' && channelViewType !== 'stage')
-            ? 'status'
-            : 'stage',
+        columnType: shouldUseStatusColumns ? 'status' : 'stage',
         filters: deferredFilters,
         groupBy,
         showOverdueOnly,
         dynamicFieldVespaTokens,
-        arrayBackedDynamicFieldIds,
+        dynamicFieldDateRanges,
+        zeroOnlyDynamicFieldIds,
         formEntityValueFieldIds: fevFieldIds,
       }),
     [
-      arrayBackedDynamicFieldIds,
       deferredFilters,
       dynamicFieldVespaTokens,
+      dynamicFieldDateRanges,
+      zeroOnlyDynamicFieldIds,
       fevFieldIds,
       groupBy,
-      filteredSingleBoardId,
-      channelId,
-      channelViewType,
-      viewMode,
+      shouldUseStatusColumns,
       showOverdueOnly,
       searchTerm,
       ticketsQueryParams,
@@ -1338,7 +1358,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const lastKanbanColumnQueryKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isKanbanLayout || shouldUseLegacyTicketsQuery) {
+    if (!isKanbanLayout) {
       lastKanbanColumnQueryKeyRef.current = null;
       return;
     }
@@ -1355,10 +1375,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       setLocalTickets(null);
       setKanbanTicketsByColumn({});
     }
-  }, [isKanbanLayout, kanbanColumnQueryKey, searchTerm, shouldUseLegacyTicketsQuery]);
+  }, [isKanbanLayout, kanbanColumnQueryKey, searchTerm]);
 
   useEffect(() => {
-    if (isKanbanLayout && !shouldUseLegacyTicketsQuery) {
+    if (isKanbanLayout) {
       if (isDraggingRef.current) {
         return;
       }
@@ -1391,13 +1411,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       }
       setLocalTickets(filteredTickets); // 🔄 SYNC!
     }
-  }, [
-    filteredTickets,
-    isKanbanLayout,
-    kanbanTicketsByColumn,
-    localTickets,
-    shouldUseLegacyTicketsQuery,
-  ]);
+  }, [filteredTickets, isKanbanLayout, kanbanTicketsByColumn, localTickets]);
 
   useEffect(() => {
     if (!isKanbanLayout) {
@@ -1611,10 +1625,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // do not need to choose it again.
   const currentBoardId = filteredSingleBoardId ?? null;
 
-  const shouldUseStatusColumns =
-    (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
-    (channelId && viewMode === 'project' && channelViewType !== 'stage');
-
   const hasSearchTerm = searchTerm.trim().length > 0;
   const canUseKanbanColumnPagination = isKanbanLayout;
   const shouldFetchKanbanCounts = canUseKanbanColumnPagination && !hasSearchTerm;
@@ -1630,6 +1640,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const lastKnownKanbanGroupsRef = useRef<{
     groups: typeof kanbanCounts.groups;
   } | null>(null);
+  const lastKnownKanbanGroupsQueryKeyRef = useRef<string | null>(null);
   const lastKnownKanbanTicketsRef = useRef<{
     tickets: Ticket[];
   } | null>(null);
@@ -1637,11 +1648,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   useEffect(() => {
     if (!isKanbanLayout) return;
     if (hasSearchTerm) return;
-    if (kanbanCounts.groups.length === 0) return;
+    if (lastKnownKanbanGroupsQueryKeyRef.current !== kanbanColumnQueryKey) {
+      lastKnownKanbanGroupsRef.current = null;
+      lastKnownKanbanGroupsQueryKeyRef.current = kanbanColumnQueryKey;
+    }
+
+    if (kanbanCounts.groups.length === 0) {
+      return;
+    }
     lastKnownKanbanGroupsRef.current = {
       groups: kanbanCounts.groups,
     };
-  }, [hasSearchTerm, isKanbanLayout, kanbanCounts.groups]);
+  }, [hasSearchTerm, isKanbanLayout, kanbanCounts.groups, kanbanColumnQueryKey]);
 
   useEffect(() => {
     if (!isKanbanLayout) return;
@@ -1651,6 +1669,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       tickets: localTickets,
     };
   }, [isKanbanLayout, localTickets]);
+
+  const hasMatchingLastKnownKanbanGroups =
+    lastKnownKanbanGroupsQueryKeyRef.current === kanbanColumnQueryKey &&
+    (lastKnownKanbanGroupsRef.current?.groups.length ?? 0) > 0;
 
   const isTicketsSyncing = isKanbanLayout
     ? !hasSearchTerm && kanbanCounts.isLoading
@@ -1682,8 +1704,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               stages: {},
               statuses: {},
             }))
-          : (lastKnownKanbanGroupsRef.current?.groups ?? kanbanCounts.groups)
-        : (lastKnownKanbanGroupsRef.current?.groups ?? kanbanCounts.groups)
+          : hasMatchingLastKnownKanbanGroups
+            ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
+            : kanbanCounts.groups
+        : hasMatchingLastKnownKanbanGroups
+          ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
+          : kanbanCounts.groups
       : [];
     const serverGroupKeys = new Set(serverGroups.map(group => group.groupKey));
 
@@ -1737,13 +1763,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           .replace('group:', '')
           .replace('Unassigned', 'Unassigned');
       }
+      const isSpecialMissingGroup = groupName === 'No Value' || groupName === 'Unassigned';
+      const fallbackCount = isSpecialMissingGroup ? 0 : groupTickets.length;
+      const count = hasSearchTerm
+        ? groupTickets.length
+        : (serverCountGroup?.totalCount ?? fallbackCount);
 
       return {
         key: groupName,
         displayName,
-        count: hasSearchTerm
-          ? groupTickets.length
-          : (serverCountGroup?.totalCount ?? groupTickets.length),
+        count,
         allTickets: groupTickets,
         columnData: ticketsByColumn,
         entityType,
@@ -1766,6 +1795,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     searchTerm,
     kanbanCounts.groups,
     kanbanCounts.groupsByKey,
+    kanbanColumnQueryKey,
+    hasMatchingLastKnownKanbanGroups,
   ]);
 
   // Auto-expand the first group when groups change
@@ -2435,7 +2466,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         filters: deferredFilters,
                         formEntityValueFieldIds: fevFieldIds,
                         dynamicFieldVespaTokens,
-                        arrayBackedDynamicFieldIds,
+                        dynamicFieldDateRanges,
+                        zeroOnlyDynamicFieldIds,
                         showOverdueOnly,
                         groupBy,
                         ...(groupBy !== 'none' ? { groupKey: group.key } : {}),

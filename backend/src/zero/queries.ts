@@ -60,7 +60,12 @@ const kanbanTicketsPageArgsSchema = z.object({
   columnType: z.enum(['stage', 'status']).optional(),
   stageName: z.string(),
   limit: z.number(),
-  start: z.object({ kanbanPosition: z.string(), id: z.string() }).nullable(),
+  start: z
+    .object({
+      createdAt: z.number(),
+      id: z.string(),
+    })
+    .nullable(),
   groupBy: z
     .union([
       z.enum(['none', 'assignee', 'status', 'priority']),
@@ -95,6 +100,11 @@ const prefixedKanbanIdentityValues = (id: string): string[] => [
   `group:${id}`,
   `userGroup:${id}`,
 ];
+
+const toActualFieldValueQueryValue = (
+  value: string | number | boolean,
+): string | number | boolean =>
+  typeof value === 'string' ? JSON.stringify(value) : value;
 
 const applyKanbanTicketPageConditions = (
   query: any,
@@ -194,6 +204,12 @@ const applyKanbanTicketPageConditions = (
     query = query.where('userGroupId', 'IN', filters.userGroups);
   }
 
+  if (filters?.tags?.length) {
+    query = query.whereExists('tagMappings', (tagMapping: any) =>
+      tagMapping.where('tagName', 'IN', filters.tags),
+    );
+  }
+
   if (filters?.prReviewers?.length) {
     query = query.whereExists('assignments', (assignment: any) =>
       assignment
@@ -280,7 +296,7 @@ const applyKanbanTicketPageConditions = (
           .where((helpers: any) =>
             helpers.or(
               ...dynamicFieldFilter.values.map((value: string | number | boolean) =>
-                helpers.cmp('fieldValue', String(value)),
+                helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
               ),
             ),
           ),
@@ -302,7 +318,7 @@ const applyKanbanTicketPageConditions = (
       formEntityValue
         .where('entityType', 'TICKET')
         .where('fieldId', groupBy.fieldId)
-        .where('fieldValue', '=', String(formFieldValue)),
+        .where('actualFieldValue', '=', toActualFieldValueQueryValue(formFieldValue)),
     );
   }
 
@@ -747,15 +763,11 @@ export const queries = defineQueries({
     kanbanTicketsPageArgsSchema,
     ({ ctx, args }) => {
       let query = applyKanbanTicketPageConditions(zql.tickets, ctx, args)
-        .where('kanbanPosition', 'IS NOT', null)
-        .orderBy('kanbanPosition', 'asc')
+        .orderBy('createdAt', 'desc')
         .orderBy('id', 'asc');
 
       if (args.start) {
-        query = query.start(
-          { kanbanPosition: args.start.kanbanPosition, id: args.start.id },
-          { inclusive: false },
-        );
+        query = query.start({ createdAt: args.start.createdAt, id: args.start.id }, { inclusive: false });
       }
 
       let finalQuery = query

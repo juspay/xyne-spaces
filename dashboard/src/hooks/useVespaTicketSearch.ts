@@ -15,9 +15,11 @@ interface UseVespaTicketSearchParams {
   status?: string;
   stage?: string;
   dynamicFieldValues?: string[];
+  dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   enabled?: boolean;
   limit?: number;
   fetchAllDynamicFieldMatches?: boolean;
+  maxFetchedResults?: number;
 }
 
 interface UseVespaTicketSearchResult {
@@ -45,6 +47,11 @@ const getFilterOnlyDynamicFieldCacheKey = (filters: VespaSearchFilters): string 
     status: filters.status ?? null,
     stage: filters.stage ?? null,
     dynamicFieldValues: filters.dynamicFieldValues ?? null,
+    dynamicFieldDateRanges: filters.dynamicFieldDateRanges
+      ? Object.entries(filters.dynamicFieldDateRanges).sort(([left], [right]) =>
+          left.localeCompare(right),
+        )
+      : null,
     filterOnly: filters.filterOnly ?? null,
     limit: filters.limit ?? null,
   });
@@ -52,6 +59,7 @@ const getFilterOnlyDynamicFieldCacheKey = (filters: VespaSearchFilters): string 
 const fetchAllFilterOnlyDynamicFieldResults = async (
   vespaFilters: VespaSearchFilters,
   pageLimit: number,
+  maxFetchedResults: number,
 ): Promise<DisplaySearchResult[]> => {
   const cacheKey = getFilterOnlyDynamicFieldCacheKey(vespaFilters);
   const cached = filterOnlyDynamicFieldCache.get(cacheKey);
@@ -68,12 +76,9 @@ const fetchAllFilterOnlyDynamicFieldResults = async (
     const firstResponse: VespaTicketSearchResponse = await searchService.vespaSearch(vespaFilters);
     const allResults = [...firstResponse.results];
     const totalToFetch = firstResponse.totalCount;
+    const cappedTotal = Math.min(totalToFetch, maxFetchedResults);
 
-    for (
-      let offset = firstResponse.offset + pageLimit;
-      offset < totalToFetch;
-      offset += pageLimit
-    ) {
+    for (let offset = firstResponse.offset + pageLimit; offset < cappedTotal; offset += pageLimit) {
       const pageResponse = await searchService.vespaSearch({
         ...vespaFilters,
         offset,
@@ -165,9 +170,11 @@ export const useVespaTicketSearch = ({
   status,
   stage,
   dynamicFieldValues = EMPTY_DYNAMIC_FIELD_VALUES,
+  dynamicFieldDateRanges = {},
   enabled = true,
   limit = MAX_VESPA_TICKET_SEARCH_LIMIT,
   fetchAllDynamicFieldMatches = false,
+  maxFetchedResults = 400,
 }: UseVespaTicketSearchParams): UseVespaTicketSearchResult => {
   const [searchResults, setSearchResults] = useState<Ticket[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -180,6 +187,23 @@ export const useVespaTicketSearch = ({
       dynamicFieldValuesKey ? dynamicFieldValuesKey.split('\u001f') : EMPTY_DYNAMIC_FIELD_VALUES,
     [dynamicFieldValuesKey],
   );
+  const dynamicFieldDateRangesKey = JSON.stringify(
+    Object.entries(dynamicFieldDateRanges).sort(([left], [right]) => left.localeCompare(right)),
+  );
+  const normalizedDynamicFieldDateRanges = useMemo(() => {
+    if (!dynamicFieldDateRangesKey) return {};
+
+    const entries = Object.entries(dynamicFieldDateRanges)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([fieldId, range]) => {
+        const normalizedRange: { start?: number; end?: number } = {};
+        if (range.start !== undefined) normalizedRange.start = range.start;
+        if (range.end !== undefined) normalizedRange.end = range.end;
+        return [fieldId, normalizedRange] as const;
+      });
+
+    return Object.fromEntries(entries) as Record<string, { start?: number; end?: number }>;
+  }, [dynamicFieldDateRangesKey]);
   const safeLimit = Math.min(limit, MAX_VESPA_TICKET_SEARCH_LIMIT);
 
   const performSearch = useCallback(
@@ -191,9 +215,12 @@ export const useVespaTicketSearch = ({
       abortControllerRef.current = abortController;
 
       const isFilterOnlyDynamicSearch =
-        normalizedDynamicFieldValues.length > 0 && (!query.trim() || query.trim() === '*');
+        (normalizedDynamicFieldValues.length > 0 ||
+          Object.keys(normalizedDynamicFieldDateRanges).length > 0) &&
+        (!query.trim() || query.trim() === '*');
       const shouldFetchAllDynamicMatches = fetchAllDynamicFieldMatches && isFilterOnlyDynamicSearch;
       const pageLimit = shouldFetchAllDynamicMatches ? MAX_VESPA_TICKET_SEARCH_LIMIT : safeLimit;
+      const cappedMaxResults = Math.max(pageLimit, maxFetchedResults);
       const vespaFilters: VespaSearchFilters = {
         query,
         type: 'tickets',
@@ -210,10 +237,18 @@ export const useVespaTicketSearch = ({
         vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
         vespaFilters.filterOnly = isFilterOnlyDynamicSearch;
       }
+      if (Object.keys(normalizedDynamicFieldDateRanges).length > 0) {
+        vespaFilters.dynamicFieldDateRanges = normalizedDynamicFieldDateRanges;
+        vespaFilters.filterOnly = isFilterOnlyDynamicSearch;
+      }
 
       try {
         if (shouldFetchAllDynamicMatches) {
-          const results = await fetchAllFilterOnlyDynamicFieldResults(vespaFilters, pageLimit);
+          const results = await fetchAllFilterOnlyDynamicFieldResults(
+            vespaFilters,
+            pageLimit,
+            cappedMaxResults,
+          );
           if (!abortController.signal.aborted) {
             setSearchResults(results.map(toTicket));
           }
@@ -240,8 +275,10 @@ export const useVespaTicketSearch = ({
       status,
       stage,
       normalizedDynamicFieldValues,
+      normalizedDynamicFieldDateRanges,
       safeLimit,
       fetchAllDynamicFieldMatches,
+      maxFetchedResults,
     ],
   );
 
@@ -251,7 +288,9 @@ export const useVespaTicketSearch = ({
     }
 
     const trimmed = searchTerm.trim();
-    const hasDynamicFieldFilters = normalizedDynamicFieldValues.length > 0;
+    const hasDynamicFieldFilters =
+      normalizedDynamicFieldValues.length > 0 ||
+      Object.keys(normalizedDynamicFieldDateRanges).length > 0;
     if (!enabled || (!trimmed && !hasDynamicFieldFilters)) {
       setSearchResults(null);
       setIsSearching(false);
@@ -271,7 +310,13 @@ export const useVespaTicketSearch = ({
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [searchTerm, normalizedDynamicFieldValues, enabled, performSearch]);
+  }, [
+    searchTerm,
+    normalizedDynamicFieldValues,
+    normalizedDynamicFieldDateRanges,
+    enabled,
+    performSearch,
+  ]);
 
   useEffect(() => {
     return (): void => {

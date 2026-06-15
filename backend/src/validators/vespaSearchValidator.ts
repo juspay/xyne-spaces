@@ -152,6 +152,10 @@ export const vespaSearchQuerySchema = Joi.object({
       'alternatives.types': 'dynamicFieldValues must be a string or array'
     }),
 
+  dynamicFieldDateRanges: Joi.string().optional().messages({
+    'string.base': 'dynamicFieldDateRanges must be a JSON string'
+  }),
+
   before: Joi.string().optional().messages({
     'string.base': 'Before date must be a string'
   }),
