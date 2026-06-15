@@ -67,10 +67,23 @@ export const useAuth = (): UseAuthReturn => {
           pendingUserData: { email: string; name: string; picture?: string };
           userExistsButRemoved: boolean;
           autoLoginWorkspace?: string;
+          invitationPending?: boolean;
+          invitationId?: string;
         };
 
         if (!data.success) {
           send({ type: 'AUTH_ERROR', message: 'Email login failed' });
+          return;
+        }
+
+        // If this is an invited user who hasn't accepted yet, redirect to the
+        // invitation page
+        if (data.invitationPending && data.invitationId) {
+          window.location.replace(
+            `/invite?invitationId=${encodeURIComponent(data.invitationId)}` +
+              `&loginComplete=true` +
+              `&loggedInEmail=${encodeURIComponent(data.pendingUserData.email)}`,
+          );
           return;
         }
 

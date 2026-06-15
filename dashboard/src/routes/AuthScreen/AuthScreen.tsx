@@ -150,7 +150,10 @@ const AuthScreen = (): ReactElement => {
   const handleEmailSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     clearError();
-    const invitationId = searchParams.get('invitationId')?.trim() || undefined;
+    const invitationId =
+      localStorage.getItem('pending_invitation_id')?.trim() ||
+      searchParams.get('invitationId')?.trim() ||
+      undefined;
     await signInWithEmail(email.trim(), password, invitationId);
   };
 
