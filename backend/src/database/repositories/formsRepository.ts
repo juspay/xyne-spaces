@@ -2,6 +2,12 @@ import { randomUUID } from 'crypto';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Form, FormFields, Prisma } from '@prisma/client';
+import { logger } from '@/utils/logger';
+
+export interface UpsertTicketFormFieldsResult {
+  updatedFields: string[];
+  skippedFields: string[];
+}
 
 export interface CreateFormInput {
   formName: string;
@@ -308,6 +314,70 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       })),
       skipDuplicates: true,
     });
+  }
+
+  async upsertTicketFormFields(
+    ticketId: string,
+    boardId: string,
+    fieldPairs: Array<{ fieldName: string; value: string | null | undefined }>,
+  ): Promise<UpsertTicketFormFieldsResult> {
+    const formMapping = await this.db.formContextMapping.findFirst({
+      where: { contextId: boardId, contextType: 'BOARD', entityType: 'TICKET' },
+    });
+
+    if (!formMapping) {
+      logger.warn('[FormsRepository] upsertTicketFormFields — no form mapped to board', { ticketId, boardId });
+      return { updatedFields: [], skippedFields: fieldPairs.map(f => f.fieldName) };
+    }
+
+    const formFields = await this.db.formFields.findMany({ where: { formId: formMapping.formId } });
+    const fieldsByName = new Map(formFields.map(f => [f.fieldName, f]));
+
+    const updatedFields: string[] = [];
+    const skippedFields: string[] = [];
+    const now = new Date();
+
+    for (const { fieldName, value } of fieldPairs) {
+      const valueStr = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+      if (!valueStr) { skippedFields.push(fieldName); continue; }
+
+      const field = fieldsByName.get(fieldName);
+      if (!field) {
+        logger.warn('[FormsRepository] upsertTicketFormFields — field not found on form', { ticketId, fieldName, formId: formMapping.formId });
+        skippedFields.push(fieldName);
+        continue;
+      }
+
+      const isMulti = field.fieldType === 'MULTI_SELECT' || field.fieldType === 'USER';
+      const actualFieldValue = isMulti ? [valueStr] : valueStr;
+
+      await this.db.formEntityValues.upsert({
+        where: {
+          entityId_entityType_fieldId_contextId: {
+            entityId: ticketId,
+            entityType: 'TICKET',
+            fieldId: field.id,
+            contextId: boardId,
+          },
+        },
+        create: {
+          id: randomUUID(),
+          formId: formMapping.formId,
+          entityId: ticketId,
+          entityType: 'TICKET',
+          fieldId: field.id,
+          contextId: boardId,
+          fieldValue: valueStr,
+          actualFieldValue,
+          createdAt: now,
+          updatedAt: now,
+        },
+        update: { fieldValue: valueStr, actualFieldValue, updatedAt: now },
+      });
+      updatedFields.push(fieldName);
+    }
+
+    return { updatedFields, skippedFields };
   }
 
   async getFormEntityValuesByEntityId(

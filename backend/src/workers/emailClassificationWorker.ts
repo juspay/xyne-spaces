@@ -2,6 +2,7 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { emailClassificationQueue, type EmailClassificationJobData } from '@/queues/emailClassificationQueue';
 import { EmailClassificationService } from '@/services/emailClassificationService';
+import { buildEmailMetadata } from '@/types/classification';
 import { DatabaseClient } from '@/database/client';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
@@ -56,8 +57,17 @@ class EmailClassificationWorker {
   }
 
   private async processJob(job: Bull.Job<EmailClassificationJobData>): Promise<void> {
-    const { ticketId, channelId, subject, body, groupId } = job.data;
+    const { ticketId, channelId, emailId, groupId } = job.data;
     logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId}`);
+
+    const emailRecord = await prisma.email.findUnique({
+      where: { id: emailId },
+      select: { subject: true, body: true, from: true, to: true, cc: true, bcc: true, replyTo: true, createdAt: true },
+    });
+    if (!emailRecord) {
+      logger.warn(`[EMAIL-CLASSIFICATION-WORKER] Email ${emailId} not found, skipping classification for ticket ${ticketId}`);
+      return;
+    }
 
     let classificationData: {
       result: { category: string; subCategory: string | null; rawOutput: Record<string, unknown>; priority?: any };
@@ -65,7 +75,9 @@ class EmailClassificationWorker {
     } | null = null;
 
     try {
-      classificationData = await emailClassificationService.classify(channelId, subject, body);
+      classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
+        emailMetadata: buildEmailMetadata(emailRecord),
+      });
     } catch (error) {
       logger.error(
         `[EMAIL-CLASSIFICATION-WORKER] Classification failed for ticket ${ticketId}:`,
@@ -80,7 +92,7 @@ class EmailClassificationWorker {
     if (classificationData) {
       const { result, config } = classificationData;
       resolvedGroupId = await emailClassificationService.resolveUserGroup(result, config);
-      effectiveGroupId = resolvedGroupId ?? groupId ?? null;
+      effectiveGroupId = resolvedGroupId ?? null;
 
       // Only store if classification actually produced data
       if (result && Object.keys(result.rawOutput ?? {}).length > 0) {

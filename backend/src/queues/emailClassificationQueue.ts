@@ -5,8 +5,7 @@ import { redisService } from '@/services/redisService';
 export interface EmailClassificationJobData {
   ticketId: string;
   channelId: string;
-  subject: string;
-  body: string;
+  emailId: string;
   groupId: string | null;
 }
 

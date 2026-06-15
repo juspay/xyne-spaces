@@ -31,6 +31,7 @@ import { runAgentStep } from './steps/run-agent.step';
 import { createEmailDraftStep } from './steps/create-email-draft.step';
 import { replyOnMessageStep } from './steps/reply-on-message.step';
 import { promoteMessageToTicketStep } from './steps/promote-message-to-ticket.step';
+import { updateFormFieldsStep } from './steps/update-form-fields.step';
 
 import { automationQueue } from './queue/automation.queue';
 
@@ -69,6 +70,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(createEmailDraftStep);
   stepRegistry.register(replyOnMessageStep);
   stepRegistry.register(promoteMessageToTicketStep);
+  stepRegistry.register(updateFormFieldsStep);
 
   await automationQueue.initialize();
 

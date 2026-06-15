@@ -1067,8 +1067,7 @@ export class EmailService {
     await emailClassificationQueue.getQueue().add('classify', {
       ticketId: ticket.id,
       channelId,
-      subject: emailSubject,
-      body: emailBody,
+      emailId: email.id,
       groupId: groupId ?? null,
     }).catch((err: unknown) => {
       logger.error(`[Classification] Failed to enqueue classification job for ticket ${ticket.id}`, err);
@@ -2102,8 +2101,7 @@ export class EmailService {
       await emailClassificationQueue.getQueue().add('classify', {
         ticketId: txResult.ticketId,
         channelId,
-        subject: firstEmail.subject ?? '',
-        body: firstEmail.body ?? '',
+        emailId: insertedEmails[0]!.id,
         groupId: groupId ?? null,
       }).catch((err: unknown) => {
         logger.error(`[Classification] Failed to enqueue classification job for ticket ${txResult.ticketId}`, err);

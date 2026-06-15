@@ -7,6 +7,35 @@ import { TicketPriority } from '@prisma/client';
 /** Raw output from AI — shape depends entirely on the channel's prompt */
 export type ClassificationRawOutput = Record<string, unknown>;
 
+/** Email metadata passed to classification for prompt context */
+export interface EmailMetadata {
+  fromEmail?: string;
+  toEmails?: string[];
+  ccEmails?: string[];
+  bccEmails?: string[];
+  replyTo?: string[];
+  receivedAt?: string;
+}
+
+/** Build EmailMetadata from a Prisma email record */
+export function buildEmailMetadata(record: {
+  from: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  replyTo: string[];
+  createdAt: Date;
+}): EmailMetadata {
+  return {
+    fromEmail: record.from,
+    toEmails: record.to,
+    ccEmails: record.cc,
+    bccEmails: record.bcc,
+    replyTo: record.replyTo,
+    receivedAt: record.createdAt.toISOString(),
+  };
+}
+
 /** Structured result after classification */
 export interface ClassificationResult {
   category: string;           // Always filled — "Other" if nothing fits
