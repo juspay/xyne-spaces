@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { Call, CallStatus } from '@prisma/client';
+import { Call, CallStatus, CallOrigin } from '@prisma/client';
 import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
@@ -89,8 +89,7 @@ export class CallValidationWorker {
 
   private async validateLiveActiveCalls(): Promise<void> {
     try {
-      // Fetch all active calls
-      const activeCalls = await repositories.calls.findAllActiveCalls();
+      const activeCalls = await repositories.calls.findAllActiveCalls(10);
 
       if (activeCalls.length === 0) {
         logger.debug('[CallValidationWorker] No active calls to validate');
@@ -125,7 +124,10 @@ export class CallValidationWorker {
    */
   private async cleanupStaleScheduledCalls(): Promise<void> {
     try {
-      const staleCalls = await repositories.calls.findStaleScheduledCalls();
+      const staleCalls = await repositories.calls.findStaleScheduledCalls(10, [
+        CallOrigin.GOOGLE_CALENDAR,
+        CallOrigin.MICROSOFT_CALENDAR,
+      ]);
 
       if (staleCalls.length === 0) {
         logger.debug('[CallValidationWorker] No stale scheduled calls found');
