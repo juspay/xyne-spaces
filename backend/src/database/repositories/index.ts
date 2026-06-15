@@ -63,6 +63,7 @@ export { DataSourceTableRepository } from './dataSourceTables';
 export { DataSourceColumnRepository } from './dataSourceColumns';
 export { DataSourceRelationshipRepository } from './dataSourceRelationships';
 export { DashboardActivityRepository } from './dashboardActivity';
+export { FormsRepository } from './formsRepository';
 
 // Import statements for the container
 import { AgentRepository } from './agents';
@@ -118,6 +119,7 @@ import { DataSourceTableRepository } from './dataSourceTables';
 import { DataSourceColumnRepository } from './dataSourceColumns';
 import { DataSourceRelationshipRepository } from './dataSourceRelationships';
 import { DashboardActivityRepository } from './dashboardActivity';
+import { FormsRepository } from './formsRepository';
 
 // Repository container for dependency injection
 export class RepositoryContainer {
@@ -173,6 +175,7 @@ export class RepositoryContainer {
   public dataSourceColumns: DataSourceColumnRepository;
   public dataSourceRelationships: DataSourceRelationshipRepository;
   public dashboardActivity: DashboardActivityRepository;
+  public forms: FormsRepository;
 
   private constructor() {
     this.agents = new AgentRepository();
@@ -226,6 +229,7 @@ export class RepositoryContainer {
     this.dataSourceColumns = new DataSourceColumnRepository();
     this.dataSourceRelationships = new DataSourceRelationshipRepository();
     this.dashboardActivity = new DashboardActivityRepository();
+    this.forms = new FormsRepository();
   }
 
   static getInstance(): RepositoryContainer {

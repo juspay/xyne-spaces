@@ -14,6 +14,7 @@ import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agents/agentLogg
 import type {
   ClassificationRawOutput,
   ClassificationResult,
+  EmailMetadata,
   TicketClassificationData,
   TicketClassificationDataWithPriority,
   PriorityClassificationResult,
@@ -63,10 +64,18 @@ export class EmailClassificationService {
     channelId: string,
     emailSubject: string,
     emailBody: string,
-    { ignoreEnabled = false, agentsConfig }: { ignoreEnabled?: boolean; agentsConfig?: AgentsConfig } = {}
-  ): Promise<{ 
-    result: ClassificationResult & { priority?: PriorityClassificationResult }; 
-    config: any 
+    {
+      ignoreEnabled = false,
+      agentsConfig,
+      emailMetadata,
+    }: {
+      ignoreEnabled?: boolean;
+      agentsConfig?: AgentsConfig;
+      emailMetadata?: EmailMetadata;
+    } = {}
+  ): Promise<{
+    result: ClassificationResult & { priority?: PriorityClassificationResult };
+    config: any
   } | null> {
     const config = await this.repo.findConfigByChannelId(channelId);
     if (!config || (!config.enabled && !ignoreEnabled)) {
@@ -75,7 +84,18 @@ export class EmailClassificationService {
 
     const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
     const modelName = cacConfig.classificationModelName;
-    const userMessage = `Subject: ${emailSubject}\n\n${emailBody}`;
+
+    const metadataLines = [
+      emailMetadata?.fromEmail ? `From: ${emailMetadata.fromEmail}` : null,
+      emailMetadata?.toEmails?.length ? `To: ${emailMetadata.toEmails.join(', ')}` : null,
+      emailMetadata?.ccEmails?.length ? `CC: ${emailMetadata.ccEmails.join(', ')}` : null,
+      emailMetadata?.bccEmails?.length ? `BCC: ${emailMetadata.bccEmails.join(', ')}` : null,
+      emailMetadata?.replyTo?.length ? `Reply-To: ${emailMetadata.replyTo.join(', ')}` : null,
+      emailMetadata?.receivedAt ? `Date: ${emailMetadata.receivedAt}` : null,
+      `Subject: ${emailSubject}`,
+    ].filter(Boolean).join('\n');
+
+    const userMessage = `${metadataLines}\n\n${emailBody}`;
 
     try {
       // Run category and priority classification in PARALLEL
