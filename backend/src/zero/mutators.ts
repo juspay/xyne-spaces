@@ -6599,9 +6599,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .where('name', trimmedTagName)
                 .one(),
             );
-            const projectTagId = existingProjectTag?.id || `pt_${tagId}`;
+            const projectTagId = existingProjectTag?.id || uuidv4();
             if (!existingProjectTag) {
-              await tx.mutate.project_tags.upsert({
+              await tx.mutate.project_tags.insert({
                 id: projectTagId,
                 name: trimmedTagName,
                 projectId: ticket.projectId,
@@ -6609,7 +6609,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
             await tx.mutate.ticket_tag_mappings.insert({
-              id: `tm_${tagId}`,
+              id: uuidv4(),
               ticketId,
               tagId: projectTagId,
               tagName: trimmedTagName,
@@ -6656,36 +6656,49 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           projectId: z.string(),
         }),
         async ({ tx, args: { ticketId, tagName, tagId, projectTagId, mappingId, projectId } }) => {
-          // Validate tag name
           if (!tagName || !tagName.trim()) {
             throw new Error('Tag name cannot be empty');
           }
-
           const trimmedTagName = tagName.trim();
 
-          // Dual-write: upsert into ticket_tags (old model)
-          await tx.mutate.ticket_tags.upsert({
-            id: tagId,
-            name: trimmedTagName,
-            ticketId,
-          });
+          const existingTag = await tx.run(
+            zql.ticket_tags.where('ticketId', ticketId).where('name', trimmedTagName).one(),
+          );
+          const existingMapping = await tx.run(
+            zql.ticket_tag_mappings.where('ticketId', ticketId).where('tagName', trimmedTagName).one(),
+          );
 
-          // Dual-write: upsert into project_tags (new model)
-          await tx.mutate.project_tags.upsert({
-            id: projectTagId,
-            name: trimmedTagName,
-            projectId,
-            createdAt: Date.now(),
-          });
+          if (existingTag && existingMapping) return;
 
-          // Insert into ticket_tag_mappings (new model)
-          await tx.mutate.ticket_tag_mappings.insert({
-            id: mappingId,
-            ticketId,
-            tagId: projectTagId,
-            tagName: trimmedTagName,
-            createdAt: Date.now(),
-          });
+          if (!existingTag) {
+            await tx.mutate.ticket_tags.insert({
+              id: tagId,
+              name: trimmedTagName,
+              ticketId,
+            });
+          }
+
+          if (!existingMapping) {
+            const existingProjectTag = await tx.run(
+              zql.project_tags.where('projectId', projectId).where('name', trimmedTagName).one(),
+            );
+            const resolvedProjectTagId = existingProjectTag?.id || projectTagId;
+            if (!existingProjectTag) {
+              await tx.mutate.project_tags.insert({
+                id: resolvedProjectTagId,
+                name: trimmedTagName,
+                projectId,
+                createdAt: Date.now(),
+              });
+            }
+            await tx.mutate.ticket_tag_mappings.insert({
+              id: mappingId,
+              ticketId,
+              tagId: resolvedProjectTagId,
+              tagName: trimmedTagName,
+              createdAt: Date.now(),
+            });
+          }
         },
       ),
       delete: defineMutator(
