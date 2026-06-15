@@ -386,10 +386,20 @@ export class WorkflowController {
             ...customFields,
           });
         } catch (err: any) {
+          const fieldErrors: Record<string, string> = {};
+          if (Array.isArray(err?.issues)) {
+            for (const { path, message } of err.issues) {
+              if (path?.length > 0) {
+                const key = String(path[0]);
+                fieldErrors[key] ??= message;
+              }
+            }
+          }
           res.status(400).json({
             error: 'Workflow input validation failed',
             details:
               err?.message || 'Workflow input validation failed. Please check the provided data.',
+            fieldErrors,
           });
           return;
         }
