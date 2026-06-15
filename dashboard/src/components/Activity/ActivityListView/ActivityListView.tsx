@@ -510,7 +510,16 @@ const ActivityListView = (): ReactElement => {
     const container = document.querySelector('[data-component="ActivityList"]');
     if (!container) return;
     const handler = (e: Event) => {
-      const activityEl = (e.target as HTMLElement).closest<HTMLElement>('[data-activity-id]');
+      const target = e.target as HTMLElement;
+      // Skip selection stamping if the click is on "Mark as read" or "Mark as unread"
+      // buttons — those should not highlight the row as "open".
+      if (
+        target.closest('[data-track-name="MARK_AS_READ"]') ||
+        target.closest('[data-track-name="MARK_AS_UNREAD"]')
+      ) {
+        return;
+      }
+      const activityEl = target.closest<HTMLElement>('[data-activity-id]');
       const id = activityEl?.getAttribute('data-activity-id');
       if (id && activityEl) {
         selectedActivityIdRef.current = id;
