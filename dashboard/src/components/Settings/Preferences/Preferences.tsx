@@ -43,6 +43,7 @@ import { logger } from '../../../utils/logger';
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
+import HuddleIcon from '../../icons/HuddleIcon';
 import { useGlobalNotificationSettings } from '../../../hooks/useGlobalNotificationSettings';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
@@ -57,6 +58,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'notifications', label: 'Notifications', icon: <Bell className='size-4' /> },
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
+  { id: 'calls', label: 'Calls', icon: <HuddleIcon size={16} /> },
   {
     id: 'messaging',
     label: 'Messaging',
@@ -346,6 +348,39 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
       >
         {state.hasVoiceSignature ? 'Update' : 'Set up'}
       </button>
+    </div>
+  </div>
+);
+
+// ─── Calls ──────────────────────────────────────────────────────────────────
+const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
+  <div className='space-y-4'>
+    <SectionHeader title='Calls' subtitle='Configure your default call join settings' />
+
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Join with microphone turned off</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>Mute your mic when joining a call</p>
+      </div>
+      <Switch
+        id='call-join-muted'
+        checked={state.callJoinMuted}
+        onCheckedChange={state.setCallJoinMuted}
+      />
+    </div>
+
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Join with camera turned off</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Disable your camera when joining a call
+        </p>
+      </div>
+      <Switch
+        id='call-join-without-video'
+        checked={state.callJoinWithoutVideo}
+        onCheckedChange={state.setCallJoinWithoutVideo}
+      />
     </div>
   </div>
 );
@@ -731,6 +766,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   notifications: NotificationsSection,
   availability: AvailabilitySection,
   voice: VoiceSection,
+  calls: CallsSection,
   messaging: MessagingSection,
   launch: LaunchSection,
   search: SearchSection,
