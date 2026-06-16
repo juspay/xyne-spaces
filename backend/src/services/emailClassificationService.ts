@@ -366,6 +366,14 @@ export class EmailClassificationService {
     const now = new Date();
     const writableFields = formFields.filter(field => !AI_FORM_FIELD_SKIP_KEYS.has(field.fieldName));
 
+    // Resolve current visit version so revisits don't overwrite prior-visit form values.
+    const latestValue = await db.formEntityValues.findFirst({
+      where: { entityId: ticketId, entityType: 'TICKET', contextId: ticket.boardId },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    const currentVersion = latestValue?.version ?? 1;
+
     for (const field of writableFields) {
       const aiValue = rawOutput[field.fieldName];
       if (aiValue === undefined || aiValue === null || aiValue === 'null' || aiValue === '') continue;
@@ -380,11 +388,12 @@ export class EmailClassificationService {
       try {
         await db.formEntityValues.upsert({
           where: {
-            entityId_entityType_fieldId_contextId: {
+            entityId_entityType_fieldId_contextId_version: {
               entityId: ticketId,
               entityType: 'TICKET',
               fieldId: field.id,
               contextId: ticket.boardId,
+              version: currentVersion,
             },
           },
           create: {
@@ -392,6 +401,7 @@ export class EmailClassificationService {
             formId: formMapping.formId,
             entityId: ticketId,
             entityType: 'TICKET',
+            version: currentVersion,
             fieldId: field.id,
             contextId: ticket.boardId,
             fieldValue: valueStr,

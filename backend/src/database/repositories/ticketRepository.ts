@@ -692,7 +692,8 @@ export class TicketRepository {
         id: true,
         boardId: true,
         stageName: true,
-        updatedBy: true
+        updatedBy: true,
+        board: { select: { boardType: true } },
       }
     });
   }

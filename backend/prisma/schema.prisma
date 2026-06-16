@@ -705,15 +705,16 @@ model TicketReferenceMapping {
 }
 
 model TicketStageEta {
-  id                String    @id @default(cuid())
-  ticketId          String    
-  stageId           String  
-  stageEnteredAt    DateTime  
-  stageLeftAt       DateTime? 
-  stageEta          DateTime                 // Deadline = stageEnteredAt + stage.eta hours
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime? @updatedAt
-  updatedBy         String?   // User ID (no FK constraint)
+  id             String    @id @default(cuid())
+  ticketId       String
+  stageId        String
+  version        Int       @default(1) // visit version: 1, 2, 3... per (ticketId, stageId)
+  stageEnteredAt DateTime
+  stageLeftAt    DateTime?
+  stageEta       DateTime  // Deadline = stageEnteredAt + stage.eta hours
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime? @updatedAt
+  updatedBy      String?   // User ID (no FK constraint)
 
   // Relations
   ticket Ticket @relation(fields: [ticketId], references: [id])
@@ -721,6 +722,7 @@ model TicketStageEta {
 
   @@index([ticketId])
   @@index([ticketId, stageId])
+  @@index([ticketId, stageId, version])
   @@index([stageId])
   @@map("ticket_stage_eta")
   @@index([stageLeftAt])
@@ -1950,6 +1952,38 @@ model StagePRStatusMapping {
 
   @@unique([stageId, prStatus])
   @@map("stage_pr_status_mappings")
+  @@schema("public")
+}
+
+// Stage transition table — defines allowed movements and gates for NON_LINEAR boards
+model StageTransition {
+  id                          String       @id @default(cuid())
+  boardId                     String
+  fromStageId                 String?      // null = global transition (from any)
+  toStageId                   String
+  formId                      String?
+  requiresApproval            Boolean      @default(false)
+  bypassApprovalForAutomation Boolean      @default(false)
+  visitSlaMode                VisitSlaMode @default(STAGE_DEFAULT)
+  fixedEtaHours               Int?
+  onReenter                   ReenterMode  @default(RESET)
+  createdAt                   DateTime     @default(now())
+  updatedAt                   DateTime     @updatedAt
+
+  transitionApprovers StageApprovers[]
+
+  @@unique([boardId, fromStageId, toStageId])
+  @@index([boardId])
+  @@index([fromStageId])
+  @@index([boardId, toStageId])
+  @@index([toStageId])
+  @@map("stage_transitions")
+  @@schema("public")
+}
+
+enum ApproverType {
+  USER
+  ROLE
   @@schema("public")
 }
 
@@ -3271,6 +3305,20 @@ enum FormContextType {
 enum BoardType {
   DEFAULT
   RELEASE
+  NON_LINEAR
+  @@schema("public")
+}
+
+enum VisitSlaMode {
+  STAGE_DEFAULT
+  NONE
+  FIXED_HOURS
+  @@schema("public")
+}
+
+enum ReenterMode {
+  RESET
+  CONTINUE
   @@schema("public")
 }
 
@@ -3381,6 +3429,7 @@ model FormEntityValues {
   formId          String   // Reference to Form
   fieldId         String   // Reference to FormFieldsMapping.id
   contextId       String?  // Context ID (e.g., stageId) for scoping values per context
+  version         Int      @default(1)
   fieldValue      String   // Value stored as String (backward compatibility)
   actualFieldValue Json?   // Value stored as Json for structured data (parse based on fieldType)
   createdAt       DateTime @default(now())
@@ -3388,8 +3437,7 @@ model FormEntityValues {
 
   @@index([entityId, entityType])
   @@index([fieldId])
-  @@index([contextId]) // releaseChangeFormValuesByReleaseId filters on contextId (= releaseId)
-  @@unique([entityId, entityType, fieldId, contextId]) // One value per field per entity per context
+  @@unique([entityId, entityType, fieldId, contextId, version])
   @@map("form_entity_values")
   @@schema("public")
 }
@@ -3580,13 +3628,22 @@ model CollectionPermission {
 
 model StageApprovers {
   id                   String       @id @default(cuid())
-  userId               String
-  stageId              String       // Stage ID (no FK constraint)
+  userId               String?      // set when approverType = USER
+  roleId               String?      // set when approverType = ROLE
+  approverType         ApproverType @default(USER)
+  stageId              String?      // Stage ID for linear boards (no FK constraint)
+  transitionId         String?      // Transition ID for NON_LINEAR boards
   createdAt            DateTime     @default(now())
   updatedAt            DateTime?    @updatedAt
 
-  @@unique([stageId, userId])
+  transition StageTransition? @relation(fields: [transitionId], references: [id])
+
+  @@unique([stageId, userId, approverType])
+  @@unique([transitionId, userId, approverType])
+  @@unique([stageId, roleId, approverType])
+  @@unique([transitionId, roleId, approverType])
   @@index([stageId])
+  @@index([transitionId])
   @@map("stage_approvers")
   @@schema("public")
 }

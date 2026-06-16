@@ -76,6 +76,8 @@ export interface TicketFiltersProps {
   selectedBoardName?: string | undefined;
   onBoardDropdownOpenChange?: (open: boolean) => void;
   isTicketsSyncing?: boolean;
+  /** True when the selected board is a non-linear board */
+  isNonLinearBoard?: boolean;
   channelId?: string;
   groupBy?: string; // serialized groupBy — included in save view and hasActiveFilters check
   hasActiveView?: boolean; // hides Save view button when a saved view is already active

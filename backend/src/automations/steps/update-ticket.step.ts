@@ -4,7 +4,9 @@ import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
-import { TicketStatusV2, TicketPriority } from '@prisma/client';
+import { TicketStatusV2, TicketPriority, BoardType } from '@prisma/client';
+import { DatabaseClient } from '@/database/client';
+import { ticketStageTransitionService } from '@/services/stageTransition/ticketStageTransitionService';
 
 const UpdateTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -45,7 +47,25 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     }
 
     if (config.stageName !== undefined) {
-      await repositories.tickets.updateTicketStage(ticketId, config.stageName as string, updatedBy);
+      const prisma = DatabaseClient.getInstance();
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { board: { select: { boardType: true } } },
+      });
+
+      if (ticket?.board?.boardType === BoardType.NON_LINEAR) {
+        const result = await ticketStageTransitionService.transitionTicket(
+          ticketId,
+          updatedBy,
+          config.stageName as string,
+          { isAutomation: true },
+        );
+        if (!result.success) {
+          throw new Error(result.message ?? 'Stage transition failed');
+        }
+      } else {
+        await repositories.tickets.updateTicketStage(ticketId, config.stageName as string, updatedBy);
+      }
     }
 
     const fields: Parameters<typeof repositories.tickets.updateTicketFields>[1] = {};

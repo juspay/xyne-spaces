@@ -1999,6 +1999,14 @@ export const queries = defineQueries({
         .orderBy('sequenceNumber', 'asc');
     },
   ),
+  getStageTransitionsByBoardId: defineQuery(
+    z.object({ boardId: z.string() }),
+    ({ args: { boardId } }) => {
+      return zql.stage_transitions
+        .where('boardId', boardId)
+        .related('transitionApprovers');
+    },
+  ),
   ticketActivities: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc');
   }),

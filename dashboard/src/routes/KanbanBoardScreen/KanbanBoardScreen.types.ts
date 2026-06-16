@@ -8,7 +8,11 @@ export interface Stage {
   defaultTicketStatusV2?: TicketStatusV2;
   sequenceNumber?: number;
   formId?: string | null;
-  approvers?: readonly { userId: string; stageId: string }[];
+  approvers?: readonly {
+    userId: string | null;
+    roleId: string | null | undefined;
+    stageId: string | null;
+  }[];
   formContextMappings?: readonly {
     id: string;
     contextId: string;

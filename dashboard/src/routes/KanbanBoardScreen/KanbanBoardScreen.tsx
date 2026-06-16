@@ -44,7 +44,7 @@ import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
-import { useDragAndDrop } from '../../hooks/useDragAndDrop';
+import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
 import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
@@ -63,6 +63,8 @@ import {
   FormEntityType,
   FormFieldType,
   ChannelType,
+  BoardType,
+  TicketStageRequestStatus,
 } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
@@ -683,6 +685,35 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     [filters.boards, selectedBoardDetail],
   );
 
+  // Detect non-linear board type
+  const isNonLinearBoard = selectedBoardDetail?.boardType === BoardType.NON_LINEAR;
+
+  // Transitions (with approvers) are fetched via the dedicated query, not embedded in boardDetailById.
+  const [boardStageTransitions] = useCachedQuery(
+    queries.getStageTransitionsByBoardId({ boardId: filteredSingleBoardId || '' }),
+    {
+      enabled: !!filteredSingleBoardId && isNonLinearBoard,
+    },
+  );
+
+  const transitions: StageTransitionInfo[] = useMemo(() => {
+    // Only NON_LINEAR boards use transition-based gating; linear boards keep the legacy path.
+    if (!isNonLinearBoard || !boardStageTransitions) return [];
+    return boardStageTransitions.map(t => ({
+      id: t.id,
+      fromStageId: t.fromStageId,
+      toStageId: t.toStageId,
+      formId: t.formId,
+      requiresApproval: t.requiresApproval,
+      approvers: (t.transitionApprovers ?? []).map(
+        (a: { userId: string | null; roleId: string | null; approverType: string }) => ({
+          approverId: a.userId ?? a.roleId ?? '',
+          approverType: a.approverType as 'USER' | 'ROLE',
+        }),
+      ),
+    }));
+  }, [isNonLinearBoard, boardStageTransitions]);
+
   // Create memo of form fields eligible for grouped kanban pagination.
   const groupByFormFields = useMemo(
     () => extractGroupableFormFields(filters, selectedBoardDetail ? [selectedBoardDetail] : []),
@@ -1169,7 +1200,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     { enabled: !!effectiveProjectId },
   );
 
-  // Create a map of stageId -> formId for quick lookup (from stages.formId)
+  // Create a map of stageId -> formId for quick lookup (from stages.formId).
+  // NON_LINEAR boards also include transition-level forms (toStageId -> formId).
   const stageFormMap = useMemo(() => {
     const map = new Map<string, string>();
     if (stages) {
@@ -1179,8 +1211,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         }
       });
     }
+    if (isNonLinearBoard && boardStageTransitions) {
+      boardStageTransitions.forEach(t => {
+        if (t.formId) {
+          map.set(t.toStageId, t.formId);
+        }
+      });
+    }
     return map;
-  }, [stages]);
+  }, [stages, isNonLinearBoard, boardStageTransitions]);
 
   const tagsByTicketId = useMemo(() => {
     const map = new Map<string, { id: string; name: string; ticketId: string }[]>();
@@ -1464,21 +1503,32 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Handler for when stage form is required
   const handleStageFormRequired = useCallback(
     async (data: { ticket: Ticket; targetStage: Stage; formId: string; hasApprovers: boolean }) => {
-      // Find the source stage (current stage of the ticket)
       const sourceStage = stages.find(s => s.name === data.ticket.stageName);
-
-      // Fetch requests for this ticket on-demand
-      const ticketRequests = await zero.run(
-        queries.getTicketStageRequests({ ticketId: data.ticket.id }),
-        { type: 'complete' },
-      );
-      const existingRequest = ticketRequests?.find(r => r.stageId === data.targetStage.id);
-
+      // Open immediately so the form never blocks on a network call
       setStageFormModal({
         ...data,
-        sourceStageName: sourceStage?.name || data.ticket.stageName,
-        existingRequest: existingRequest || null,
+        sourceStageName: sourceStage?.name || data.ticket.stageName || '',
+        existingRequest: null,
       });
+      // Then enrich with any existing request for pre-fill / status display
+      try {
+        const ticketRequests = await zero.run(
+          queries.getTicketStageRequests({ ticketId: data.ticket.id }),
+          { type: 'complete' },
+        );
+        // Only enrich with active (SUBMITTED/DRAFT) requests — APPROVED/REJECTED would block revisits.
+        const existingRequest = ticketRequests?.find(
+          r =>
+            r.stageId === data.targetStage.id &&
+            (r.status === TicketStageRequestStatus.SUBMITTED ||
+              r.status === TicketStageRequestStatus.DRAFT),
+        );
+        if (existingRequest) {
+          setStageFormModal(prev => (prev ? { ...prev, existingRequest } : prev));
+        }
+      } catch {
+        // Modal already open — existing request stays null, which is safe
+      }
     },
     [stages, zero],
   );
@@ -1537,6 +1587,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     onStageFormRequired: handleStageFormRequired,
     onBackwardStageChange: handleBackwardStageChange,
     stageFormMap,
+    isNonLinearBoard,
+    transitions,
   });
 
   useEffect(() => {
@@ -1857,6 +1909,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
               isTicketsSyncing={isTicketsSyncing}
               onBoardDropdownOpenChange={handleBoardDropdownOpenChange}
+              isNonLinearBoard={isNonLinearBoard}
               formMappings={
                 filters.boards?.length === 1 && selectedBoardDetail
                   ? selectedBoardDetail.formContextMappings || []
@@ -2577,6 +2630,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           existingRequest={stageFormModal.existingRequest ?? null}
           formId={stageFormModal.formId}
           hasApprovers={stageFormModal.hasApprovers ?? false}
+          isNonLinearBoard={isNonLinearBoard}
           onSuccess={() => {
             setStageFormModal(null);
           }}

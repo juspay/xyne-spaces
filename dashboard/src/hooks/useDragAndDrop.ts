@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { toast } from 'sonner';
 import type { Ticket, TicketStatusV2 } from '@xyne/shared';
@@ -11,6 +11,16 @@ import type { Stage } from '../routes/KanbanBoardScreen/KanbanBoardScreen.types'
 import { sortByKanbanPosition } from '../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { useAuth } from './useAuth';
 import { v4 as uuidv4 } from 'uuid';
+import { isCurrentStageRestricted, findMatchingTransition } from '../utils/stageTransitionUtils';
+
+export interface StageTransitionInfo {
+  id: string;
+  fromStageId?: string | null;
+  toStageId: string;
+  formId?: string | null;
+  requiresApproval: boolean;
+  approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+}
 
 interface UseDragAndDropProps {
   localTickets: Ticket[];
@@ -32,6 +42,8 @@ interface UseDragAndDropProps {
     newStatus?: TicketStatusV2;
   }) => void;
   stageFormMap?: Map<string, string>; // Map of stageId -> formId
+  isNonLinearBoard?: boolean;
+  transitions?: StageTransitionInfo[];
 }
 
 export const useDragAndDrop = ({
@@ -44,6 +56,8 @@ export const useDragAndDrop = ({
   onStageFormRequired,
   onBackwardStageChange,
   stageFormMap = new Map(),
+  isNonLinearBoard = false,
+  transitions,
 }: UseDragAndDropProps): {
   activeTicket: Ticket | null;
   handleDragStart: (event: DragStartEvent) => void;
@@ -63,6 +77,10 @@ export const useDragAndDrop = ({
     requestId: string;
   } | null>(null);
   const { user: currentUser } = useAuth();
+
+  // Always-current ref so the async .server.then() handler sees up-to-date transitions.
+  const transitionsRef = useRef(transitions ?? []);
+  transitionsRef.current = transitions ?? [];
 
   const getColumnTickets = useCallback(
     (columnKey: string): Ticket[] => {
@@ -162,121 +180,206 @@ export const useDragAndDrop = ({
           const currentStage = stages.find(s => s.name === activeTicket.stageName);
 
           if (currentStage && targetStage) {
-            // Check if board has any stage with approvers
-            const boardHasStagesWithApproval =
-              stages.some(s => s.approvers && s.approvers.length > 0) ?? false;
-            // Check if board has any stage with forms
-            const boardHasStagesWithForms = stageFormMap.size > 0;
-            // Enforce sequential movement if board has EITHER approvers OR forms
-            const shouldEnforceSequentialMovement =
-              boardHasStagesWithApproval || boardHasStagesWithForms;
+            if (transitions) {
+              const hasTransitions = transitions.length > 0;
 
-            if (shouldEnforceSequentialMovement) {
-              // Check if moving backward
-              const isMovingBackward =
-                targetStage.sequenceNumber !== undefined &&
-                currentStage.sequenceNumber !== undefined &&
-                targetStage.sequenceNumber < currentStage.sequenceNumber;
+              if (hasTransitions) {
+                const restricted = isCurrentStageRestricted(transitions, currentStage.id);
+                const matchingTransition = restricted
+                  ? findMatchingTransition(transitions, currentStage.id, targetStage.id)
+                  : undefined;
 
-              if (isMovingBackward) {
-                // Trigger callback to show confirmation dialog
-                onBackwardStageChange?.({
-                  ticket: activeTicket,
-                  stageName: newStageName,
-                  fromSequenceNumber: targetStage.sequenceNumber!,
-                  ...(newStatus !== undefined && { newStatus }),
-                });
-                return;
-              }
+                if (restricted && !matchingTransition) {
+                  if (isNonLinearBoard) {
+                    toast.error('This stage transition is not allowed');
+                    return;
+                  }
+                  // Linear board: no explicit transition defined — fall through to legacy gate
+                } else if (matchingTransition) {
+                  // NON_LINEAR: use edge formId only (not stageFormMap) to avoid form on every move.
+                  const formId: string | null = isNonLinearBoard
+                    ? (matchingTransition.formId ?? null)
+                    : (matchingTransition.formId ?? stageFormMap?.get(targetStage.id) ?? null);
 
-              // Forward movement - enforce sequential movement
-              const isNextStage =
-                currentStage.sequenceNumber !== undefined &&
-                targetStage.sequenceNumber === currentStage.sequenceNumber + 1;
-
-              if (!isNextStage) {
-                // Block movement - only sequential forward movement allowed
-                toast.warning('Can only move to next stage in this Board');
-                return;
-              }
-
-              // Check target stage properties
-              const targetStageApprovers = targetStage.approvers;
-              const targetStageFormId = stageFormMap.get(targetStage.id);
-              const hasApprovers = targetStageApprovers && targetStageApprovers.length > 0;
-              const isApprover = hasApprovers
-                ? (targetStageApprovers.some(a => a.userId === currentUser?.id) ?? false)
-                : false;
-
-              const ticketRequests = await zero.run(
-                queries.getTicketStageRequests({ ticketId: activeTicket.id }),
-                { type: 'complete' },
-              );
-              const existingRequest = ticketRequests?.find(
-                (r: TicketStageRequest) => r.stageId === targetStage.id,
-              );
-              const isRejectedRequest =
-                existingRequest?.status === TicketStageRequestStatus.REJECTED;
-
-              // If stage has a form, open modal for everyone
-              if (targetStageFormId) {
-                void onStageFormRequired?.({
-                  ticket: activeTicket,
-                  targetStage,
-                  formId: targetStageFormId,
-                  hasApprovers: hasApprovers ?? false,
-                });
-                return;
-              }
-
-              // No form - handle approval workflow
-              if (hasApprovers) {
-                // Stage has approvers - handle approval
-                if (isApprover) {
-                  // Approver: approve the request
-                  if (isRejectedRequest && existingRequest) {
-                    // Show confirmation dialog for rejected request
-                    setRejectedApprovalConfirm({
+                  if (formId) {
+                    void onStageFormRequired?.({
                       ticket: activeTicket,
                       targetStage,
-                      requestId: existingRequest.id,
+                      formId,
+                      hasApprovers: matchingTransition.requiresApproval,
                     });
                     return;
-                  } else if (!existingRequest) {
+                  }
+
+                  if (matchingTransition.requiresApproval) {
+                    const isApprover =
+                      matchingTransition.approvers?.some(
+                        a => a.approverType === 'USER' && a.approverId === (currentUser?.id ?? ''),
+                      ) ?? false;
+
+                    if (!isApprover) {
+                      // Reuse the existing record's ID for revisits (unique constraint on ticketId+stageId)
+                      const existingForTarget = (
+                        activeTicket as Ticket & {
+                          ticketStageRequests?: TicketStageRequest[];
+                        }
+                      ).ticketStageRequests?.find(
+                        (r: TicketStageRequest) => r.stageId === targetStage.id,
+                      );
+                      void zero.mutate(
+                        mutators.ticketStageRequest.upsert({
+                          id: existingForTarget?.id ?? uuidv4(),
+                          ticketId: activeTicket.id,
+                          stageId: targetStage.id,
+                          status: TicketStageRequestStatus.SUBMITTED,
+                          updatedBy: currentUser?.id || '',
+                          updatedAt: Date.now(),
+                          requestActivityId: uuidv4(),
+                        }),
+                      );
+                      toast.success('Stage change request submitted for approval');
+                      return;
+                    }
+                    // Approver falls through to nonLinear.transition (self-approval)
+                  }
+
+                  // Valid transition (with or without form/approval handled above)
+                  // Fall through to nonLinear.transition call
+                }
+                // Unrestricted source / no matching edge on a NON_LINEAR board: forms are
+                // edge-specific, so with no matching transition there is no form gate. Fall
+                // through to the transition mutator. (Previously this opened a form via
+                // stageFormMap keyed by target stage, which fired the form on every move into
+                // the stage.)
+              }
+            }
+
+            // Legacy sequential enforcement + stage-level form/approval gates
+            // Used for linear boards without explicitly defined transitions.
+            if (!isNonLinearBoard && (!transitions || transitions.length === 0)) {
+              const boardHasStagesWithApproval =
+                stages.some(s => s.approvers && s.approvers.length > 0) ?? false;
+              // Check if board has any stage with forms
+              const boardHasStagesWithForms = stageFormMap.size > 0;
+              // Enforce sequential movement if board has EITHER approvers OR forms
+              const shouldEnforceSequentialMovement =
+                boardHasStagesWithApproval || boardHasStagesWithForms;
+
+              if (shouldEnforceSequentialMovement) {
+                // Check if moving backward
+                const isMovingBackward =
+                  targetStage.sequenceNumber !== undefined &&
+                  currentStage.sequenceNumber !== undefined &&
+                  targetStage.sequenceNumber < currentStage.sequenceNumber;
+
+                if (isMovingBackward) {
+                  // Trigger callback to show confirmation dialog
+                  onBackwardStageChange?.({
+                    ticket: activeTicket,
+                    stageName: newStageName,
+                    fromSequenceNumber: targetStage.sequenceNumber!,
+                    ...(newStatus !== undefined && { newStatus }),
+                  });
+                  return;
+                }
+
+                // Forward movement - enforce sequential movement
+                const isNextStage =
+                  currentStage.sequenceNumber !== undefined &&
+                  targetStage.sequenceNumber === currentStage.sequenceNumber + 1;
+
+                if (!isNextStage) {
+                  // Block movement - only sequential forward movement allowed
+                  toast.warning('Can only move to next stage in this Board');
+                  return;
+                }
+
+                // Check target stage properties
+                const targetStageApprovers = targetStage.approvers;
+                const targetStageFormId = stageFormMap.get(targetStage.id);
+                const hasApprovers = targetStageApprovers && targetStageApprovers.length > 0;
+                const isApprover = hasApprovers
+                  ? (targetStageApprovers.some(a => a.userId === currentUser?.id) ?? false)
+                  : false;
+
+                const ticketRequests = await zero.run(
+                  queries.getTicketStageRequests({ ticketId: activeTicket.id }),
+                  { type: 'complete' },
+                );
+                // Find active (non-APPROVED) request for status-checking purposes (rejected flow etc.)
+                const existingRequest = ticketRequests?.find(
+                  (r: TicketStageRequest) =>
+                    r.stageId === targetStage.id && r.status !== TicketStageRequestStatus.APPROVED,
+                );
+                // Also find ANY request including APPROVED — needed for ID reuse on revisits.
+                // ticket_stage_requests has @@unique([ticketId, stageId]): inserting a new UUID
+                // for the same stage fails; reusing the existing ID converts INSERT to UPDATE.
+                const existingForStageId = ticketRequests?.find(
+                  (r: TicketStageRequest) => r.stageId === targetStage.id,
+                )?.id;
+                const isRejectedRequest =
+                  existingRequest?.status === TicketStageRequestStatus.REJECTED;
+
+                // If stage has a form, open modal for everyone
+                if (targetStageFormId) {
+                  void onStageFormRequired?.({
+                    ticket: activeTicket,
+                    targetStage,
+                    formId: targetStageFormId,
+                    hasApprovers: hasApprovers ?? false,
+                  });
+                  return;
+                }
+
+                // No form - handle approval workflow
+                if (hasApprovers) {
+                  // Stage has approvers - handle approval
+                  if (isApprover) {
+                    // Approver: approve the request
+                    if (isRejectedRequest && existingRequest) {
+                      // Show confirmation dialog for rejected request
+                      setRejectedApprovalConfirm({
+                        ticket: activeTicket,
+                        targetStage,
+                        requestId: existingRequest.id,
+                      });
+                      return;
+                    } else if (!existingRequest) {
+                      void zero.mutate(
+                        mutators.ticketStageRequest.upsert({
+                          id: existingForStageId ?? uuidv4(),
+                          ticketId: activeTicket.id,
+                          stageId: targetStage.id,
+                          status: TicketStageRequestStatus.APPROVED,
+                          updatedBy: currentUser?.id || '',
+                          reviewedBy: currentUser?.id || '',
+                          updatedAt: Date.now(),
+                          approvedActivityId: uuidv4(),
+                        }),
+                      );
+                      toast.success('Request approved');
+                    }
+                  } else {
+                    // Non-approver: submit for approval
                     void zero.mutate(
                       mutators.ticketStageRequest.upsert({
-                        id: uuidv4(),
+                        id: existingRequest?.id ?? existingForStageId ?? uuidv4(),
                         ticketId: activeTicket.id,
                         stageId: targetStage.id,
-                        status: TicketStageRequestStatus.APPROVED,
+                        status: TicketStageRequestStatus.SUBMITTED,
                         updatedBy: currentUser?.id || '',
-                        reviewedBy: currentUser?.id || '',
                         updatedAt: Date.now(),
-                        approvedActivityId: uuidv4(),
+                        requestActivityId: uuidv4(),
                       }),
                     );
-                    toast.success('Request approved');
+                    toast.success(
+                      existingRequest
+                        ? 'Stage change request resubmitted for approval'
+                        : 'Stage change request submitted for approval',
+                    );
                   }
-                } else {
-                  // Non-approver: submit for approval
-                  void zero.mutate(
-                    mutators.ticketStageRequest.upsert({
-                      id: existingRequest ? existingRequest.id : uuidv4(),
-                      ticketId: activeTicket.id,
-                      stageId: targetStage.id,
-                      status: TicketStageRequestStatus.SUBMITTED,
-                      updatedBy: currentUser?.id || '',
-                      updatedAt: Date.now(),
-                      requestActivityId: uuidv4(),
-                    }),
-                  );
-                  toast.success(
-                    existingRequest
-                      ? 'Stage change request resubmitted for approval'
-                      : 'Stage change request submitted for approval',
-                  );
+                  return;
                 }
-                return;
               }
             }
           }
@@ -286,6 +389,29 @@ export const useDragAndDrop = ({
             canReorder && targetStage
               ? computeNewPosition(targetStage.id, activeTicket.id, overTicket?.id ?? null)
               : undefined;
+
+          // Capture the pre-move state so the optimistic update can be rolled back if the server
+          // rejects the transition. Zero rolls back its OWN cache automatically, but this separate
+          // React `localTickets` state is not tied to Zero — without an explicit revert the ticket
+          // stays in the wrong column / vanishes (the re-sync effect compares only ticket IDs, not
+          // stageName, so it won't correct a same-ID stage mismatch) until the next unrelated action.
+          const preMoveStageName = activeTicket.stageName;
+          const preMoveStatusV2 = activeTicket.statusV2;
+          const preMoveKanbanPosition = activeTicket.kanbanPosition;
+          const revertOptimisticMove = (): void => {
+            setLocalTickets(prev =>
+              prev.map(t =>
+                t.id === activeTicket.id
+                  ? {
+                      ...t,
+                      stageName: preMoveStageName,
+                      statusV2: preMoveStatusV2,
+                      kanbanPosition: preMoveKanbanPosition,
+                    }
+                  : t,
+              ),
+            );
+          };
 
           setLocalTickets(prev =>
             prev.map(t =>
@@ -300,15 +426,166 @@ export const useDragAndDrop = ({
             ),
           );
 
-          void zero.mutate(
-            mutators.ticket.update({
-              id: activeTicket.id,
-              stageName: newStageName,
-              ...(newStatus && { statusV2: newStatus }),
-              ...(kanbanPosition !== undefined && { kanbanPosition }),
-              updatedAt: Date.now(),
-            }),
-          );
+          if (isNonLinearBoard) {
+            // NON_LINEAR boards: use the nonLinear.transition Zero mutator.
+            // The frontend form/approval gates run before reaching this point, so
+            // at this call site the transition is pre-validated (no form required, or
+            // approver self-approving). The mutator handles ETA + visitIndex server-side.
+            const transitionResult = zero.mutate(
+              mutators.nonLinear.transition({
+                ticketId: activeTicket.id,
+                toStageName: newStageName,
+                now: Date.now(),
+              }),
+            );
+            // MutatorResult is { client: Promise, server: Promise }, not a Promise itself.
+            // Watch .server to catch application errors (e.g. "not allowed", "form required").
+            // Capture these for the async callback (closure over current loop iteration).
+            const capturedTicket = activeTicket;
+            const capturedTargetStage = targetStage;
+            const handleFormRequiredRecovery = async (errorMessage: string): Promise<void> => {
+              if (
+                errorMessage !== 'This transition requires a form to be submitted' ||
+                !onStageFormRequired ||
+                !capturedTargetStage
+              ) {
+                // Server rejected the move (e.g. "stage transition is not allowed") — roll the
+                // optimistic move back so the ticket returns to its source column.
+                revertOptimisticMove();
+                toast.error(errorMessage);
+                return;
+              }
+
+              const latestTransitions = transitionsRef.current;
+              const currentStageObj = stages.find(s => s.name === capturedTicket.stageName);
+              const mt =
+                latestTransitions.length > 0 && currentStageObj
+                  ? findMatchingTransition(
+                      latestTransitions,
+                      currentStageObj.id,
+                      capturedTargetStage.id,
+                    )
+                  : undefined;
+              // Use formId from the matched transition only — latestFormMap is ambiguous when
+              // multiple transitions go to the same stage with different formIds.
+              let recoveredFormId: string | null = mt?.formId ?? null;
+              let recoveredMt = mt;
+
+              // Cache miss: force-fetch from Zero server with type:'complete' to get latest formId.
+              // No try/catch: Zero queries resolve through the cache and don't throw here.
+              if (!recoveredFormId && capturedTicket.boardId) {
+                const freshTransitions = await zero.run(
+                  queries.getStageTransitionsByBoardId({ boardId: capturedTicket.boardId }),
+                  { type: 'complete' },
+                );
+                if (freshTransitions) {
+                  const currentStageId = currentStageObj?.id;
+                  const freshMt = freshTransitions.find(
+                    t => t.fromStageId === currentStageId && t.toStageId === capturedTargetStage.id,
+                  );
+                  recoveredFormId = freshMt?.formId || null;
+                  recoveredMt = freshMt
+                    ? {
+                        id: freshMt.id,
+                        fromStageId: freshMt.fromStageId ?? null,
+                        toStageId: freshMt.toStageId,
+                        formId: freshMt.formId ?? null,
+                        requiresApproval: freshMt.requiresApproval ?? false,
+                      }
+                    : undefined;
+                }
+              }
+
+              if (recoveredFormId) {
+                // Form gate: keep the optimistic move — the form modal will confirm (on submit)
+                // or it will be rolled back by the regular re-sync if abandoned.
+                void onStageFormRequired({
+                  ticket: capturedTicket,
+                  targetStage: capturedTargetStage,
+                  formId: recoveredFormId,
+                  hasApprovers: recoveredMt?.requiresApproval ?? false,
+                });
+              } else {
+                // Couldn't resolve a form to satisfy the gate — roll back the optimistic move.
+                revertOptimisticMove();
+                toast.error(errorMessage);
+              }
+            };
+
+            // Zero RESOLVES .server (never rejects) for ApplicationErrors:
+            // { type: "error", error: { type: "app", message: "...", details?: {...} } }
+            // See mutator-proxy.js #makeApplicationErrorResultDetails.
+            const serverPromise = (
+              transitionResult as {
+                server: Promise<
+                  | { type: string; error?: { message?: string; details?: { formId?: string } } }
+                  | undefined
+                >;
+              }
+            ).server;
+            void serverPromise
+              .then(async result => {
+                if (result?.type === 'error' && result.error?.message) {
+                  // Fast path: server included formId in error details — open form directly.
+                  const directFormId = result.error.details?.formId;
+                  if (
+                    directFormId &&
+                    result.error.message === 'This transition requires a form to be submitted' &&
+                    onStageFormRequired &&
+                    capturedTargetStage
+                  ) {
+                    const currentStageId2 = stages.find(
+                      s => s.name === capturedTicket.stageName,
+                    )?.id;
+                    const fastPathMt =
+                      transitionsRef.current.length > 0 && currentStageId2
+                        ? findMatchingTransition(
+                            transitionsRef.current,
+                            currentStageId2,
+                            capturedTargetStage.id,
+                          )
+                        : undefined;
+                    void onStageFormRequired({
+                      ticket: capturedTicket,
+                      targetStage: capturedTargetStage,
+                      formId: directFormId,
+                      hasApprovers: fastPathMt?.requiresApproval ?? false,
+                    });
+                    return;
+                  }
+                  await handleFormRequiredRecovery(result.error.message);
+                }
+              })
+              .catch(async (err: unknown) => {
+                // Catch unexpected rejections (network errors, etc.)
+                const msg =
+                  err instanceof Error
+                    ? err.message
+                    : ((err as { message?: string })?.message ?? String(err));
+                await handleFormRequiredRecovery(msg);
+              });
+            if (kanbanPosition !== undefined || newStatus) {
+              void zero.mutate(
+                mutators.ticket.update({
+                  id: activeTicket.id,
+                  ...(newStatus && { statusV2: newStatus }),
+                  ...(kanbanPosition !== undefined && { kanbanPosition }),
+                  updatedAt: Date.now(),
+                }),
+              );
+            }
+          } else {
+            // DEFAULT/RELEASE boards: use Zero mutation for optimistic, instant updates.
+            void zero.mutate(
+              mutators.ticket.update({
+                id: activeTicket.id,
+                stageName: newStageName,
+                ...(newStatus && { statusV2: newStatus }),
+                ...(kanbanPosition !== undefined && { kanbanPosition }),
+                updatedAt: Date.now(),
+              }),
+            );
+          }
         }
         // Handle reordering within the same stage
         else if (
@@ -383,6 +660,8 @@ export const useDragAndDrop = ({
       onBackwardStageChange,
       stageFormMap,
       currentUser,
+      isNonLinearBoard,
+      transitions,
     ],
   );
 

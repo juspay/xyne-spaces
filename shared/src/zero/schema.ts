@@ -581,7 +581,7 @@ export enum FormContextType {
 export enum BoardType {
   DEFAULT = 'DEFAULT',
   RELEASE = 'RELEASE',
-
+  NON_LINEAR = 'NON_LINEAR',
 }
 
 // @ts-ignore TS1294
@@ -790,6 +790,19 @@ export enum AttachmentUploadStatus {
 }
 
 // @ts-ignore TS1294
+export enum VisitSlaMode {
+  STAGE_DEFAULT = 'STAGE_DEFAULT',
+  NONE = 'NONE',
+  FIXED_HOURS = 'FIXED_HOURS',
+}
+
+// @ts-ignore TS1294
+export enum ReenterMode {
+  RESET = 'RESET',
+  CONTINUE = 'CONTINUE',
+}
+
+// @ts-ignore TS1294
 export enum CollectionRole {
   OWNER = 'OWNER',
   EDITOR = 'EDITOR',
@@ -810,6 +823,11 @@ export enum TagMethod {
   MANUAL = 'MANUAL',
   LLM = 'LLM',
   AUTOMATED = 'AUTOMATED',
+}
+
+export enum ApproverType {
+  USER = 'USER',
+  ROLE = 'ROLE',
 }
 
 // Define tables
@@ -1010,6 +1028,7 @@ export const ticketStageEtaTable = table('ticket_stage_eta')
     id: string(),
     ticketId: string(),
     stageId: string(),
+    version: number(),
     stageEnteredAt: number(),
     stageLeftAt: number().optional(),
     stageEta: number(),
@@ -2087,6 +2106,7 @@ export const formEntityValuesTable = table('form_entity_values')
     formId: string(),
     fieldId: string(),
     contextId: string().optional(),
+    version: number(),
     fieldValue: string(),
     actualFieldValue: json().optional(),
     createdAt: number(),
@@ -2097,12 +2117,56 @@ export const formEntityValuesTable = table('form_entity_values')
 export const stageApproversTable = table('stage_approvers')
   .columns({
     id: string(),
-    userId: string(),
-    stageId: string(),
+    userId: string().optional(), // set when approverType = USER
+    roleId: string().optional(), // set when approverType = ROLE
+    approverType: enumeration<ApproverType>(),
+    stageId: string().optional(),
+    transitionId: string().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
   .primaryKey('id');
+
+export const stageTransitionTable = table('stage_transitions') // Prisma: StageTransition
+  .columns({
+    id: string(),
+    boardId: string(),
+    fromStageId: string().optional(),
+    toStageId: string(),
+    formId: string().optional(),
+    requiresApproval: boolean(),
+    bypassApprovalForAutomation: boolean(),
+    visitSlaMode: enumeration<VisitSlaMode>(),
+    fixedEtaHours: number().optional(),
+    onReenter: enumeration<ReenterMode>(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const stageTransitionTableRelationships = relationships(stageTransitionTable, ({ one, many }) => ({
+  // Transition approvers now live in stage_approvers (keyed by transitionId), merged from the
+  // former stage_transition_approvers table.
+  transitionApprovers: many({
+    sourceField: ['id'],
+    destField: ['transitionId'],
+    destSchema: stageApproversTable,
+  }),
+  // Owning board — used by StageTransitionsACL to scope reads to the caller's workspace.
+  board: one({
+    sourceField: ['boardId'],
+    destField: ['id'],
+    destSchema: boardTable,
+  }),
+}));
+
+export const stageApproversTableRelationships = relationships(stageApproversTable, ({ one }) => ({
+  transition: one({
+    sourceField: ['transitionId'],
+    destField: ['id'],
+    destSchema: stageTransitionTable,
+  })
+}));
 
 export const ticketStageRequestTable = table('ticket_stage_requests')
   .columns({
@@ -2912,6 +2976,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     destField: ['boardId'],
     destSchema: stageTable,
   }),
+  stageTransitions: many({
+    sourceField: ['id'],
+    destField: ['boardId'],
+    destSchema: stageTransitionTable,
+  }),
   tickets: many({
     sourceField: ['id'],
     destField: ['boardId'],
@@ -2969,6 +3038,11 @@ export const stageTableRelationships = relationships(stageTable, ({ one, many })
     sourceField: ['id'],
     destField: ['contextId'],
     destSchema: formContextMappingTable,
+  }),
+  outgoingTransitions: many({
+    sourceField: ['id'],
+    destField: ['fromStageId'],
+    destSchema: stageTransitionTable,
   }),
 }));
 
@@ -4211,6 +4285,11 @@ export const ticketStageRequestTableRelationships = relationships(ticketStageReq
     destField: ['id'],
     destSchema: formTable,
   }),
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
 }));
 
 export const dashboardTableRelationships = relationships(dashboardTable, ({ many }) => ({
@@ -4560,6 +4639,7 @@ export const schema = createSchema({
     formEntityValuesTable,
     stageApproversTable,
     ticketStageRequestTable,
+    stageTransitionTable,
     dashboardTable,
     dashboardParticipantTable,
     queryTable,
@@ -4677,6 +4757,8 @@ export const schema = createSchema({
     formFieldsTableRelationships,
     formEntityValuesTableRelationships,
     ticketStageRequestTableRelationships,
+    stageTransitionTableRelationships,
+    stageApproversTableRelationships,
     dashboardTableRelationships,
     dashboardParticipantTableRelationships,
     queryTableRelationships,
@@ -4798,6 +4880,9 @@ export type Query = Row<typeof schema.tables.queries>;
 export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
 export type Merchant = Row<typeof schema.tables.merchants>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
+
+// Stage Transition Types
+export type StageTransition = Row<typeof schema.tables.stage_transitions>;
 
 // Release Management Types
 export type Application = Row<typeof schema.tables.applications>;

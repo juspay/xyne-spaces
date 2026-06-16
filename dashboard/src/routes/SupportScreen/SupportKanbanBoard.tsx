@@ -18,7 +18,7 @@ import {
   KeyboardSensor,
 } from '@dnd-kit/core';
 import type { Ticket, BoardMetadata, TicketStageRequest } from '@xyne/shared';
-import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { TicketPriority, TicketStatusV2, BoardType, TicketStageRequestStatus } from '@xyne/shared';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -27,7 +27,7 @@ import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
-import { useDragAndDrop } from '../../hooks/useDragAndDrop';
+import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
@@ -156,6 +156,7 @@ export const SupportKanbanBoard = ({
   });
   const isBoardPrioritySla =
     (boardForSla?.metadata as BoardMetadata | null | undefined)?.slaPolicyType === 'priority';
+  const isNonLinearBoard = boardForSla?.boardType === BoardType.NON_LINEAR;
 
   // SLA policies only when the board uses priority-based SLA. Boards using
   // stage-based SLA (the default) have no active entries, so we skip the
@@ -198,7 +199,14 @@ export const SupportKanbanBoard = ({
     });
   }, [stages]);
 
-  // Map of stageId -> formId for quick lookup during drag-and-drop.
+  // All stage transitions for this board, fetched in a single direct table query
+  // rather than stitching together per-stage outgoingTransitions relationships.
+  const [allStageTransitions] = useCachedQuery(
+    queries.getStageTransitionsByBoardId({ boardId: effectiveBoardId || '' }),
+    { enabled: !!effectiveBoardId && isNonLinearBoard },
+  );
+
+  // Map of stageId -> formId for drag-and-drop form gate.
   const stageFormMap = useMemo(() => {
     const map = new Map<string, string>();
     stagesForDragDrop.forEach(stage => {
@@ -206,8 +214,35 @@ export const SupportKanbanBoard = ({
         map.set(stage.id, stage.formId);
       }
     });
+    // NON_LINEAR boards also gate forms per transition edge (toStageId -> formId).
+    if (isNonLinearBoard) {
+      (allStageTransitions ?? []).forEach(t => {
+        if (t.formId) {
+          map.set(t.toStageId, t.formId);
+        }
+      });
+    }
     return map;
-  }, [stagesForDragDrop]);
+  }, [stagesForDragDrop, allStageTransitions, isNonLinearBoard]);
+
+  const transitions = useMemo<StageTransitionInfo[]>(() => {
+    // Only NON_LINEAR boards use transition-based gating; linear boards keep the legacy path.
+    if (!isNonLinearBoard) return [];
+    if (!allStageTransitions) return [];
+    return allStageTransitions.map(t => ({
+      id: t.id,
+      fromStageId: t.fromStageId ?? null,
+      toStageId: t.toStageId,
+      formId: t.formId ?? null,
+      requiresApproval: t.requiresApproval,
+      approvers: (t.transitionApprovers ?? []).map(
+        (a: { userId: string | null; roleId: string | null; approverType: string }) => ({
+          approverId: a.userId ?? a.roleId ?? '',
+          approverType: a.approverType as 'USER' | 'ROLE',
+        }),
+      ),
+    }));
+  }, [allStageTransitions, isNonLinearBoard]);
 
   // Defer the grouping input so a burst of ticket updates (or a filter change)
   // doesn't block the UI while we re-bucket every ticket into its column. The
@@ -242,18 +277,29 @@ export const SupportKanbanBoard = ({
   const handleStageFormRequired = useCallback(
     async (data: { ticket: Ticket; targetStage: Stage; formId: string; hasApprovers: boolean }) => {
       const sourceStage = stagesForDragDrop.find(s => s.name === data.ticket.stageName);
+      // Open immediately so drag never blocks on a network call
+      setStageFormModal({
+        ...data,
+        sourceStageName: sourceStage?.name || data.ticket.stageName || '',
+        existingRequest: null,
+      });
+      // Enrich with existing request for pre-fill / status display.
+      // No try/catch: Zero queries resolve through the local cache and don't throw here.
       const ticketRequests = await zero.run(
         queries.getTicketStageRequests({ ticketId: data.ticket.id }),
         { type: 'complete' },
       );
+      // Only enrich with an active (SUBMITTED/DRAFT) request — an APPROVED/REJECTED request
+      // from a prior visit would lock the form fields and block revisits.
       const existingRequest = ticketRequests?.find(
-        (r: TicketStageRequest) => r.stageId === data.targetStage.id,
+        (r: TicketStageRequest) =>
+          r.stageId === data.targetStage.id &&
+          (r.status === TicketStageRequestStatus.SUBMITTED ||
+            r.status === TicketStageRequestStatus.DRAFT),
       );
-      setStageFormModal({
-        ...data,
-        sourceStageName: sourceStage?.name || data.ticket.stageName || '',
-        existingRequest: existingRequest || null,
-      });
+      if (existingRequest) {
+        setStageFormModal(prev => (prev ? { ...prev, existingRequest } : prev));
+      }
     },
     [stagesForDragDrop, zero],
   );
@@ -287,6 +333,8 @@ export const SupportKanbanBoard = ({
     onStageFormRequired: handleStageFormRequired,
     onBackwardStageChange: handleBackwardStageChange,
     stageFormMap,
+    isNonLinearBoard,
+    transitions,
   });
 
   const sensors = useSensors(
@@ -345,6 +393,7 @@ export const SupportKanbanBoard = ({
           existingRequest={stageFormModal.existingRequest ?? null}
           formId={stageFormModal.formId}
           hasApprovers={stageFormModal.hasApprovers ?? false}
+          isNonLinearBoard={isNonLinearBoard}
           onSuccess={() => setStageFormModal(null)}
         />
       )}

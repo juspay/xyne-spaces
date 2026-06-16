@@ -37,6 +37,9 @@ import {
   ActivityClassification,
   AccessType,
   BoardType,
+  ReenterMode,
+  VisitSlaMode,
+  ApproverType,
   TicketStageRequestStatus,
   ActivityType,
   RCAStatus,
@@ -4287,6 +4290,7 @@ export const mutators = defineMutators({
                 await tx.mutate.stage_approvers.insert({
                   id: `${stageId}-${approverId}`,
                   userId: approverId,
+                  approverType: ApproverType.USER,
                   stageId: stageId,
                   createdAt: timestamp,
                 });
@@ -4504,7 +4508,24 @@ export const mutators = defineMutators({
           rejectedActivityId,
         },
       }) => {
-        const existingApproval = await tx.run(zql.ticket_stage_requests.where('id', id).one());
+        let existingApproval = await tx.run(zql.ticket_stage_requests.where('id', id).one());
+
+        // Revisit safety: if no record found by the client-provided ID, fall back to any
+        // existing record for (ticketId, stageId). The unique constraint on that pair means
+        // a new-UUID INSERT would fail; reusing the existing ID converts it to an UPDATE.
+        let effectiveId = id;
+        if (!existingApproval) {
+          const existingForTicketStage = await tx.run(
+            zql.ticket_stage_requests
+              .where('ticketId', ticketId)
+              .where('stageId', stageId)
+              .one(),
+          );
+          if (existingForTicketStage) {
+            existingApproval = existingForTicketStage;
+            effectiveId = existingForTicketStage.id;
+          }
+        }
 
         const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
         const stage = await tx.run(zql.stages.where('id', stageId).one());
@@ -4521,7 +4542,7 @@ export const mutators = defineMutators({
 
         // Prepare payload - preserve immutable fields from existing record
         const payload = {
-          id,
+          id: effectiveId,
           ticketId,
           stageId,
           ...(formId && { formId }),
@@ -4544,8 +4565,9 @@ export const mutators = defineMutators({
         await tx.mutate.ticket_stage_requests.upsert(payload);
 
         // Handle activities based on whether this is create or update
-        if (!existingApproval && requestActivityId) {
-          // Create message for approval request
+        const isNewRequest = !existingApproval; // true only when no prior record existed (checked after fallback lookup)
+        if (isNewRequest && requestActivityId) {
+          // Create message for a fresh approval request
           const actorName = actor?.name || 'Someone';
           const hasForm = !!formId;
           const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
@@ -4564,11 +4586,38 @@ export const mutators = defineMutators({
             showInChannel: false,
             createdAt: payload.createdAt,
             metadata: {
-              activityType: ActivityType.STAGE_CHANGE_APPROVED,
+              activityType: ActivityType.STAGE_CHANGE_REQUEST,
               isTicketActivity: true,
               fromStage: ticket.stageName,
               toStage: stage.name,
               hasForm,
+            },
+          });
+        } else if (
+          status === TicketStageRequestStatus.SUBMITTED &&
+          existingApproval?.status === TicketStageRequestStatus.APPROVED &&
+          requestActivityId
+        ) {
+          // Revisit: transitioning from APPROVED → SUBMITTED (new visit to an already-visited stage)
+          const actorName = actor?.name || 'Someone';
+          const hasForm = !!formId;
+          const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
+
+          await tx.mutate.messages.insert({
+            messageId: requestActivityId,
+            conversationId: ticket.conversationId,
+            senderId: updatedBy,
+            content: `${actorName} ${actionText} ${stage.name}`,
+            msgType: MessageType.SYSTEM,
+            hasAttachment: false,
+            edited: false,
+            isDeleted: false,
+            isSent: false,
+            showInChannel: false,
+            createdAt: updatedAt,
+            metadata: {
+              activityType: ActivityType.STAGE_CHANGE_REQUEST,
+              isTicketActivity: true,
             },
           });
         } else if (
@@ -6940,10 +6989,11 @@ export const mutators = defineMutators({
         newValue: z.array(z.string()),
         timestamp: z.number(),
         contextId: z.string().optional(),
+        version: z.number().optional(),
       }),
       async ({
         tx,
-        args: { id, entityId, entityType, fieldId, newValue, timestamp, contextId },
+        args: { id, entityId, entityType, fieldId, newValue, timestamp, contextId, version },
       }) => {
         // Fetch the form field to determine field type
         const formField = await tx.run(zql.form_fields.where('id', fieldId).one());
@@ -6967,6 +7017,7 @@ export const mutators = defineMutators({
           fieldId,
           formId: formField.formId,
           ...(contextId && { contextId }),
+          version: version ?? 1,
           fieldValue: '',
           actualFieldValue,
           createdAt: timestamp,
@@ -10408,6 +10459,115 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.collection_permissions.delete({ id });
+      },
+    ),
+  },
+  nonLinear: {
+    /**
+     * Client-side optimistic mutator for NON_LINEAR board stage transitions.
+     * Immediately updates ticket.stageName so the UI reflects the move without waiting for
+     * the server-side Zero mutator to execute (which handles ETA, form values, validation).
+     */
+    transition: defineMutator(
+      z.object({
+        ticketId: z.string(),
+        toStageName: z.string(),
+        // Caller-supplied timestamp. Zero replays this mutator on both the client (optimistic)
+        // and the server (authoritative) with the same args, so passing `now` keeps the two runs
+        // consistent instead of each calling Date.now() and diverging.
+        now: z.number(),
+        formValuesJson: z.string().optional(),
+      }),
+      async ({ tx, args: { ticketId, toStageName, now } }) => {
+        const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+        if (!ticket || ticket.stageName === toStageName) return;
+        // Mirror the server mutator: also advance statusV2 from the target stage's default so the
+        // optimistic UI doesn't briefly show a stale status before the server run lands.
+        const targetStage = await tx.run(
+          zql.stages.where('boardId', ticket.boardId).where('name', toStageName).one(),
+        );
+        await tx.mutate.tickets.update({
+          id: ticketId,
+          stageName: toStageName,
+          ...(targetStage?.defaultTicketStatusV2 && {
+            statusV2: targetStage.defaultTicketStatusV2,
+          }),
+          updatedAt: now,
+        });
+      },
+    ),
+
+    syncTransitions: defineMutator(
+      z.object({
+        boardId: z.string(),
+        transitions: z.array(
+          z.object({
+            id: z.string(),
+            fromStageId: z.string().nullable().optional(),
+            toStageId: z.string(),
+            formId: z.string().nullable().optional(),
+            requiresApproval: z.boolean().optional(),
+            bypassApprovalForAutomation: z.boolean().optional(),
+            visitSlaMode: z.string().optional(),
+            fixedEtaHours: z.number().nullable().optional(),
+            onReenter: z.string().optional(),
+            approvers: z
+              .array(
+                z.object({
+                  id: z.string(),
+                  approverId: z.string(),
+                  approverType: z.string(),
+                }),
+              )
+              .optional(),
+          }),
+        ),
+        // Caller-supplied timestamp — see nonLinear.transition. Keeps client/server runs aligned.
+        now: z.number(),
+      }),
+      async ({ tx, args: { boardId, transitions, now } }) => {
+
+        // Optimistically replace local Zero cache: delete existing then insert new.
+        const existing = await tx.run(zql.stage_transitions.where('boardId', boardId));
+        for (const t of existing) {
+          const approvers = await tx.run(
+            zql.stage_approvers.where('transitionId', t.id),
+          );
+          for (const a of approvers) {
+            await tx.mutate.stage_approvers.delete({ id: a.id });
+          }
+          await tx.mutate.stage_transitions.delete({ id: t.id });
+        }
+
+        for (const t of transitions) {
+          await tx.mutate.stage_transitions.insert({
+            id: t.id,
+            boardId,
+            ...(t.fromStageId != null && { fromStageId: t.fromStageId }),
+            toStageId: t.toStageId,
+            ...(t.formId != null && { formId: t.formId }),
+            requiresApproval: t.requiresApproval ?? false,
+            bypassApprovalForAutomation: t.bypassApprovalForAutomation ?? false,
+            visitSlaMode: (t.visitSlaMode as VisitSlaMode) ?? VisitSlaMode.STAGE_DEFAULT,
+            ...(t.fixedEtaHours != null && { fixedEtaHours: t.fixedEtaHours }),
+            onReenter: (t.onReenter as ReenterMode) ?? ReenterMode.RESET,
+            createdAt: now,
+            updatedAt: now,
+          });
+          for (const a of t.approvers ?? []) {
+            const approverType = (a.approverType as ApproverType) ?? ApproverType.USER;
+            await tx.mutate.stage_approvers.insert({
+              id: a.id,
+              transitionId: t.id,
+              // roleId holds the identifier for ROLE approvers, userId for USER approvers
+              ...(approverType === ApproverType.ROLE
+                ? { roleId: a.approverId }
+                : { userId: a.approverId }),
+              approverType,
+              createdAt: now,
+            });
+          }
+        }
       },
     ),
   },

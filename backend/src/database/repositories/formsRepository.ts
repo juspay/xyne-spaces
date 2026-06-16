@@ -345,6 +345,14 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     const skippedFields: string[] = [];
     const now = new Date();
 
+    // Resolve current visit version so revisits don't overwrite prior-visit form values.
+    const latestValue = await this.db.formEntityValues.findFirst({
+      where: { entityId: ticketId, entityType: 'TICKET', contextId: boardId },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    const currentVersion = latestValue?.version ?? 1;
+
     for (const { fieldName, value } of fieldPairs) {
       const valueStr = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
       if (!valueStr) { skippedFields.push(fieldName); continue; }
@@ -361,11 +369,12 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
 
       await this.db.formEntityValues.upsert({
         where: {
-          entityId_entityType_fieldId_contextId: {
+          entityId_entityType_fieldId_contextId_version: {
             entityId: ticketId,
             entityType: 'TICKET',
             fieldId: field.id,
             contextId: boardId,
+            version: currentVersion,
           },
         },
         create: {
@@ -375,6 +384,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           entityType: 'TICKET',
           fieldId: field.id,
           contextId: boardId,
+          version: currentVersion,
           fieldValue: valueStr,
           actualFieldValue,
           createdAt: now,
