@@ -818,17 +818,11 @@ export enum IngestionStatus {
   FAILED = 'FAILED',
 }
 
-// @ts-ignore TS1294
-export enum TagMethod {
-  MANUAL = 'MANUAL',
-  LLM = 'LLM',
-  AUTOMATED = 'AUTOMATED',
-}
-
 export enum ApproverType {
   USER = 'USER',
   ROLE = 'ROLE',
 }
+
 
 // Define tables
 
@@ -4484,40 +4478,6 @@ export const savedUserConfigurationValueTableRelationships = relationships(
   }),
 );
 
-// Tag Framework
-export const tagTable = table('tags')
-  .columns({
-    id: string(),
-    sourceId: string(),
-    sourceType: string(),
-    workspaceId: string(),
-    tagCategory: string(),
-    tag: string(),
-    method: enumeration<TagMethod>(),
-    reason: string().optional(),
-    createdBy: string().optional(),
-    updatedBy: string().optional(),
-    createdAt: number(),
-    updatedAt: number(),
-    isDeleted: boolean(),
-  })
-  .primaryKey('id');
-
-export const tagsConfigTable = table('tags_config') // Prisma: TagsConfig
-  .columns({
-    id: string(),
-    configKey: string(),
-    sourceType: string(),
-    workspaceId: string(),
-    config: json(),
-    createdBy: string().optional(),
-    updatedBy: string().optional(),
-    createdAt: number(),
-    updatedAt: number(),
-    isDeleted: boolean(),
-  })
-  .primaryKey('id');
-
 // Define schema
 
 export const schema = createSchema({
@@ -4641,9 +4601,6 @@ export const schema = createSchema({
     collectionTable,
     collectionItemTable,
     collectionPermissionTable,
-    // Tag Framework
-    tagTable,
-    tagsConfigTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -4885,10 +4842,6 @@ export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_co
 export type Collection = Row<typeof schema.tables.collections>;
 export type CollectionItem = Row<typeof schema.tables.collection_items>;
 export type CollectionPermission = Row<typeof schema.tables.collection_permissions>;
-
-// Tag Framework Types
-export type Tag = Row<typeof schema.tables.tags>;
-export type TagsConfig = Row<typeof schema.tables.tags_config>;
 
 export type Context = {
   userID: string;

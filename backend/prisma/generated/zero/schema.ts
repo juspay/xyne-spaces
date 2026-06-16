@@ -791,12 +791,6 @@ export enum AppPermissionStatus {
   PENDINGDELETE = "PENDINGDELETE",
 }
 
-export enum TagMethod {
-  MANUAL = "MANUAL",
-  LLM = "LLM",
-  AUTOMATED = "AUTOMATED",
-}
-
 // Define tables
 
 export const agentTable = table("agents")
@@ -3067,39 +3061,6 @@ export const installedAppPermissionTable = table("installed_app_permissions")
   })
   .primaryKey("id");
 
-export const tagTable = table("tags")
-  .columns({
-    id: string(),
-    sourceId: string(),
-    sourceType: string(),
-    workspaceId: string(),
-    tagCategory: string(),
-    tag: string(),
-    method: enumeration<TagMethod>(),
-    reason: string().optional(),
-    createdBy: string().optional(),
-    updatedBy: string().optional(),
-    createdAt: number(),
-    updatedAt: number(),
-    isDeleted: boolean(),
-  })
-  .primaryKey("id");
-
-export const tagsConfigTable = table("tags_config")
-  .columns({
-    id: string(),
-    configKey: string(),
-    sourceType: string(),
-    workspaceId: string(),
-    config: json(),
-    createdBy: string().optional(),
-    updatedBy: string().optional(),
-    createdAt: number(),
-    updatedAt: number(),
-    isDeleted: boolean(),
-  })
-  .primaryKey("id");
-
 
 // Define relationships
 
@@ -4859,8 +4820,6 @@ export const schema = createSchema(
       availableAppPermissionTable,
       appPermissionTable,
       installedAppPermissionTable,
-      tagTable,
-      tagsConfigTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5110,5 +5069,3 @@ export type DynamicDashboardQueryMapping = Row<typeof schema.tables.dynamic_dash
 export type AvailableAppPermission = Row<typeof schema.tables.available_app_permissions>;
 export type AppPermission = Row<typeof schema.tables.app_permission>;
 export type InstalledAppPermission = Row<typeof schema.tables.installed_app_permissions>;
-export type Tag = Row<typeof schema.tables.tags>;
-export type TagsConfig = Row<typeof schema.tables.tags_config>;
