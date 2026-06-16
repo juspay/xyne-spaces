@@ -1015,10 +1015,14 @@ async function buildMimeMessage(opts: MimeOptions): Promise<Buffer> {
     ...(opts.references && { references: opts.references }),
     ...(opts.attachments?.length && {
       attachments: opts.attachments.map(a => ({
-        filename: a.name,
+        ...(a.cid ? {} : { filename: a.name }),
         content: a.content,
         contentType: a.contentType,
-        ...(a.cid && { cid: a.cid }),
+        ...(a.cid && {
+          cid: a.cid,
+          contentDisposition: 'inline',
+          headers: { 'X-Attachment-Id': a.cid },
+        }),
       })),
     }),
   } as never).compile().build() as unknown as Promise<Buffer>;

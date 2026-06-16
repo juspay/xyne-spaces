@@ -15,6 +15,7 @@ export const useCidImageResolver = (
   attachments?: ReadonlyArray<{ id: string; metadata?: unknown }>,
 ): {
   rewrite: (html: string) => string;
+  blobUrlToAttachmentId: Map<string, string>;
 } => {
   // Map contentId → MessageAttachment.id (pure derivation, no effects).
   const cidToAttachmentId = useMemo(() => {
@@ -66,7 +67,17 @@ export const useCidImageResolver = (
     };
   }, [cidToBlobUrl]);
 
-  return { rewrite };
+  // Reverse map: blobUrl → attachmentId (for click-to-open via the viewer actor)
+  const blobUrlToAttachmentId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [cid, blobUrl] of Object.entries(cidToBlobUrl)) {
+      const attId = cidToAttachmentId.get(cid);
+      if (attId) map.set(blobUrl, attId);
+    }
+    return map;
+  }, [cidToBlobUrl, cidToAttachmentId]);
+
+  return { rewrite, blobUrlToAttachmentId };
 };
 
 /** Inline SVG — a muted square with a small image glyph. Data-URL so it

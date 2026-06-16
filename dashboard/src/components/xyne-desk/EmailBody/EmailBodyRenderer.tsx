@@ -2,6 +2,10 @@ import DOMPurify, { type DOMPurify as DOMPurifyInstance } from 'dompurify';
 import { Image as ImageIcon } from 'lucide-react';
 import { JSX, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import {
+  attachmentViewerActor,
+  type AttachmentRef,
+} from '../../../machines/attachmentViewerMachine';
 import { preprocessEmailHtml } from './preprocessEmailHtml';
 import { collapseQuotedHistory } from './collapseQuotedHistory';
 import { useCidImageResolver } from './useCidImageResolver';
@@ -11,9 +15,15 @@ interface EmailBodyRendererProps {
   /** Unique key so each email's blocked-images choice is independent */
   emailId?: string;
   /** Email attachments (loaded via Zero relation) — used to resolve cid: refs */
-  attachments?: ReadonlyArray<{ id: string; metadata?: unknown }>;
   /** Called when a mailto link inside the email body is clicked */
   onMailtoClick?: ((email: string) => void) | undefined;
+  attachments?: ReadonlyArray<{
+    id: string;
+    metadata?: unknown;
+    mimetype?: string | null;
+    originalFilename?: string | null;
+    size?: number | null;
+  }>;
 }
 
 const TRANSPARENT_PIXEL =
@@ -381,7 +391,14 @@ export const EmailBodyRenderer = ({
     setShowRemoteImages(false);
   }, [emailId]);
 
-  const { rewrite: rewriteCidRefs } = useCidImageResolver(attachments);
+  const { rewrite: rewriteCidRefs, blobUrlToAttachmentId } = useCidImageResolver(attachments);
+
+  // Refs so the iframe's event handler always sees the latest values without
+  // needing to re-register on every render.
+  const blobUrlToAttIdRef = useRef<Map<string, string>>(new Map());
+  blobUrlToAttIdRef.current = blobUrlToAttachmentId;
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
 
   const { srcdoc, hasBlockedImages } = useMemo(
     () => buildIframeSrcdoc(body, showRemoteImages, rewriteCidRefs),
@@ -415,6 +432,52 @@ export const EmailBodyRenderer = ({
         img.addEventListener('load', measure);
         img.addEventListener('error', measure);
       });
+
+      // Capture-phase image click handler — registered before the anchor handler
+      // below so it intercepts first. Uses refs for latest blobUrl→attachmentId
+      // and attachment metadata without needing to re-register on every render.
+      contentDoc.addEventListener(
+        'click',
+        e => {
+          const img = (e.target as HTMLElement | null)?.closest?.('img');
+          if (!img) return;
+          e.preventDefault();
+          const src = img.getAttribute('src');
+          if (
+            !src ||
+            src === TRANSPARENT_PIXEL ||
+            img.getAttribute('data-xd-blocked') ||
+            src.startsWith('cid:')
+          )
+            return;
+          e.stopPropagation();
+
+          const blobMap = blobUrlToAttIdRef.current;
+          const atts = attachmentsRef.current;
+          const clickedAttId = blobMap.get(src);
+          if (!clickedAttId || !atts) return;
+
+          // Build gallery in attachments order (not blobMap insertion order which
+          // is async blob-fetch completion order). Track startIndex as we go.
+          const inlineAttIds = new Set(blobMap.values());
+          const inlineRefs: AttachmentRef[] = [];
+          let startIndex = 0;
+          for (const att of atts) {
+            if (!inlineAttIds.has(att.id)) continue;
+            if (att.id === clickedAttId) startIndex = inlineRefs.length;
+            inlineRefs.push({
+              attachmentId: att.id,
+              fileName: att.originalFilename ?? 'image',
+              fileUrl: `/attachments/${att.id}/download`,
+              mimeType: att.mimetype ?? 'image/jpeg',
+              fileSize: att.size ?? 0,
+            });
+          }
+
+          attachmentViewerActor.send({ type: 'OPEN', attachments: inlineRefs, startIndex });
+        },
+        true,
+      );
 
       const findScrollContainer = (el: HTMLElement): HTMLElement | Window => {
         let cur: HTMLElement | null = el.parentElement;
