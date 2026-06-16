@@ -11,6 +11,7 @@ export const useUnreadThreadsCount = (): number => {
       if (activity.isThreadActivity !== true) return false;
       const classification = activity.classification ?? ActivityClassification.PENDING;
       if (classification === ActivityClassification.SKIP) return false;
+      if (activity.actorAction === 'group_mention') return false;
       return true;
     }).length;
   }, [unreadActivities]);

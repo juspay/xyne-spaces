@@ -3019,6 +3019,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               isSubscribed: true,
               joinedAt: timestamp,
               channelId: conversation.channelId,
+              lastReplyAt: timestamp,
             });
           }
 
@@ -3049,6 +3050,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   isSubscribed: true,
                   joinedAt: timestamp,
                   channelId: conversation.channelId,
+                  lastReplyAt: timestamp,
                 });
               }
             }
