@@ -239,6 +239,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // For recurring calls in edit mode — checkbox to edit the whole series
   const [editEntireSeries, setEditEntireSeries] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
   // Post call updates feature
   const [postCallUpdates, setPostCallUpdates] = useState(false);
@@ -512,7 +513,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // ── On modal open: pre-fill form from initialCall ────────────────────────
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setInitialized(false);
+      return;
+    }
+
+    if (initialized) return;
 
     if (isEditMode && initialCall) {
       const callStart = new Date(initialCall.startsAt);
@@ -560,6 +566,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       // Set isRecurring based on whether this is a recurring series call
       setIsRecurring(!!initialCall.recurringSeriesId);
       validateTimes(callStart, callEnd);
+      setInitialized(true);
     } else {
       const displayName = getUserDisplayName(user);
       const start = initialStartsAt ?? defaultStart;
@@ -572,12 +579,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           endsAt: end,
           participants: prefilledParticipants,
         });
+        setRecurringStartTime(toHHMM(start));
+        setRecurringEndTime(toHHMM(end));
+        validateTimes(start, end);
+        setInitialized(true);
       }
-      setRecurringStartTime(toHHMM(start));
-      setRecurringEndTime(toHHMM(end));
-      validateTimes(start, end);
     }
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen, user, initialized]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── When series data arrives: pre-fill recurrence UI ────────────────────
   useEffect(() => {
@@ -620,21 +628,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       setChannelSearchQuery('');
     }
   }, [showPostCallUpdates]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Legacy: keep default title in sync on first load (create mode)
-  useEffect(() => {
-    if (isEditMode) return;
-    const displayName = getUserDisplayName(user);
-    if (displayName !== 'Unknown') {
-      const firstName = displayName.split(' ')[0];
-      reset({
-        title: initialTitle ?? `${firstName}'s Call`,
-        startsAt: defaultStart,
-        endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
-        participants: [],
-      });
-    }
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initialize default day when custom panel opens for WEEK frequency
   useEffect(() => {
