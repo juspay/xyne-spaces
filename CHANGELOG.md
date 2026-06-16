@@ -1,3 +1,35 @@
+## [1.162.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.161.0...v1.162.0) (2026-06-16)
+
+
+### Features
+
+* add workspaceId as a separate field in SAM meet-meta payload ([0910b9d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0910b9dd0abfda5aa07df1ecdd8399ffc18c8619)), closes [#7572](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7572)
+* added debugger to ask ai ([026b6fd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/026b6fddeb14ff31bee56697f7f3f9d609951328)), closes [#7302](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7302)
+* backfill for defaults ([301c165](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/301c1657bc5575e62e1cb2daa8aab60168dcaec0)), closes [#7548](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7548)
+* batching in validation worker ([eef5340](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eef53400aa1428650a75faf34a32a34547609719)), closes [#7535](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7535)
+* fix for kanban ([5a4a107](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5a4a107a8455bab170faaf20cf5e41647b97a040))
+* moved migrated ticket from one channel to another channel ([965ddc0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/965ddc0b7ff036a4210deb815987d61a512c361f)), closes [#7545](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7545)
+* section unread counts, icons, and custom emoji ([3b2f46d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3b2f46d3c57a0bc04b770ef88529848bba5cb643)), closes [#7550](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7550)
+* workspace-switcher in sidebar ([add3853](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/add385375216b8a6c1096621c836395ddd4d27c8)), closes [#7534](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7534)
+
+
+### Bug Fixes
+
+* [XYNE-DESK] Added field level input validation message ([527350b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/527350bc3d81b750eef6f1317967c0fcc100d401)), closes [#7135](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7135)
+* [XYNE-DESK] added spaces support for fullname in desk ([0b7a217](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0b7a21794320297e1bb6fcc6ae3ebe7b36fedb30)), closes [#7140](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7140)
+* Activity perf metrics impr ([e927a1b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e927a1b7a8514d62fc872bd2da37fa38012d6627)), closes [#7542](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7542)
+* added feature of canvas versioning ([8c4ce34](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8c4ce34369dd908f679dfed48d4be7b2183f1cba)), closes [#7552](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7552)
+* fix for @channel/[@here](https://ssh.bitbucket.juspay.net/here) edit in group DMs ([eeb270a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eeb270a8c2f24c71ea59758748a45151e3514deb))
+* fix notification handler ([be5b9f7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/be5b9f7bdf2df6e01f53af4db1e5afe8ae555b62))
+* fix sub ticket depth to one level ([5a8ba03](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5a8ba0301f912cddef04f0e77a137c17b7665192))
+* fixed selection for mark read unread ([f789335](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f789335a97d95313fc1bf7ad3a477d60f4ab0ff6))
+* fixed user group notificaiton ([87660eb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/87660ebdcb28be93b3eaba67af94dd6f98656677))
+* fixes for 403, 401 and mitigate cross-account session re-usage ([dbc87ce](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dbc87ce66cc92914af6e9909309530d0814ac5a6))
+* full page Cmd+K search fixes ([971483b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/971483b6a91eb7622437fd3c097c5e2b063882f6)), closes [#7472](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7472)
+* reduce overscan for activity ([0f7fde1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0f7fde1a15302b7ed75f247733e9d80d977c54f6)), closes [#7563](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7563)
+* ticket tag insert fix ([921137d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/921137d4bfc65c66261af665a3b5c42dd5d57fc0)), closes [#7543](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7543)
+* Voice input fix ([636e16c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/636e16c3620100d3027bcc0a9e7d106c6630b537)), closes [#7511](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7511)
+
 ## [1.161.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.160.0...v1.161.0) (2026-06-15)
 
 
