@@ -57,6 +57,7 @@ import { webviewActor, setPanelRefs } from '../machines/webviewMachine';
 import { xyneAIActor, setXyneAIPanelRefs, globalXyneAIPanelRefs } from '../machines/xyneAIMachine';
 import { browserPanelActor, setBrowserPanelRefs } from '../machines/browserPanelMachine';
 import ActivityListView from '../components/Activity/ActivityListView/ActivityListView';
+import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/ActivitySupportTicket';
 import Search from '../components/Chat/Search/Search';
 import SearchResults from '../components/Chat/SearchResults/SearchResults';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
@@ -891,7 +892,16 @@ export const router = createBrowserRouter([
                   {
                     path: 'activity',
                     element: <ActivityListView />,
-                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                    children: [
+                      { index: true, element: null },
+                      // Desk/Support tickets opened from the Activity list render
+                      // here so the list stays mounted (instead of redirecting to
+                      // the full /support inbox). Static `ticket` segment is matched
+                      // ahead of the shared `:channelId` route.
+                      { path: 'ticket/:channelId', element: <ActivitySupportTicket /> },
+                      { path: 'ticket/:channelId/:ticketId', element: <ActivitySupportTicket /> },
+                      ...sharedChatRoutes,
+                    ],
                   },
                   // Search (full screen)
                   {

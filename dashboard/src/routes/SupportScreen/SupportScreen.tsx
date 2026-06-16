@@ -2119,12 +2119,26 @@ type SupportTicketDetailProps = {
   };
   isMember: boolean;
   onMailtoClick: (email: string) => void;
+  /**
+   * Base path used to build in-detail ticket navigation (e.g. next/prev ticket).
+   * Defaults to the Support inbox base (`/{workspaceId}/support`). Embedded
+   * surfaces (e.g. the Activity panel) pass their own base so navigation stays
+   * within that surface instead of jumping to the Support inbox.
+   */
+  navBasePath?: string;
+  /**
+   * Overrides the back-button behaviour. Defaults to navigating to the Support
+   * channel ticket list.
+   */
+  onBack?: () => void;
 };
 
-const SupportTicketDetail = ({
+export const SupportTicketDetail = ({
   ticketFilter,
   isMember,
   onMailtoClick,
+  navBasePath,
+  onBack,
 }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
@@ -2432,7 +2446,7 @@ const SupportTicketDetail = ({
     if (!t.xyneId) return;
     const nextChannelId = t.channelId || channelIdParam;
     if (!nextChannelId) return;
-    void navigate(`${supportBase}/${nextChannelId}/${t.xyneId}`, {
+    void navigate(`${navBasePath ?? supportBase}/${nextChannelId}/${t.xyneId}`, {
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
@@ -2722,6 +2736,10 @@ const SupportTicketDetail = ({
                 <button
                   type='button'
                   onClick={() => {
+                    if (onBack) {
+                      onBack();
+                      return;
+                    }
                     const back = channelIdParam ? `${supportBase}/${channelIdParam}` : supportBase;
                     void navigate(back);
                   }}
