@@ -4,12 +4,10 @@ import { Outlet, useNavigate, useParams } from 'react-router-dom';
 import { LayoutDashboard, Plus, Trash2, Database, Workflow, Bell, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCachedQuery } from '@xyne/shared/hooks';
-import { useZero } from '../../hooks/useZero';
 import { useAuth } from '../../hooks/useAuth';
-import { mutators } from '../../zero/mutators';
-import { queries } from '../../zero/queries';
+import { useDashboardList, useDashboardMutations } from '../../hooks/useDashboards';
 import { listDataSources } from '../../services/DynamicDashboard/dataSourcesService';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { websocketService } from '../../services/clients/socketClient';
 import { Dialog } from '../ui/Dialog';
 import { DashboardDeleteModal } from './DashboardDeleteModal';
@@ -21,91 +19,47 @@ import { EmptyState } from './panel/EmptyState';
 import { NoSourceEmptyState } from './panel/NoSourceEmptyState';
 
 const DynamicDashboardPanel = (): ReactElement => {
-  const z = useZero();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { dashboardId } = useParams<{ dashboardId?: string }>();
 
   const PAGE_SIZE = 50;
   type DashboardTab = 'mine' | 'shared' | 'all';
-  type Cursor = { id: string; updatedAt: number };
   const [activeTab, setActiveTab] = useState<DashboardTab>('mine');
 
-  const [mineCursor, setMineCursor] = useState<Cursor | null>(null);
-  const [minePage, mineDetails] = useCachedQuery(
-    queries.myDashboards({ limit: PAGE_SIZE, cursor: mineCursor }),
-    { enabled: activeTab === 'mine' },
-  );
-  type DashboardRow = NonNullable<typeof minePage>[number];
-  const [mineItems, setMineItems] = useState<DashboardRow[]>([]);
-  const [mineHasMore, setMineHasMore] = useState(true);
-  useEffect(() => {
-    if (!minePage) return;
-    setMineItems(prev => {
-      const seen = new Set(prev.map(r => r.id));
-      const next = minePage.filter(r => !seen.has(r.id));
-      return next.length > 0 ? [...prev, ...next] : prev;
-    });
-    if (mineDetails?.type === 'complete' && minePage.length < PAGE_SIZE) {
-      setMineHasMore(false);
-    }
-  }, [minePage, mineDetails]);
+  // Growing-limit window per tab — increase `limit` by PAGE_SIZE when the
+  // user scrolls to the bottom. Only the active tab's query runs.
+  const [mineLimit, setMineLimit] = useState(PAGE_SIZE);
+  const { data: mineData } = useDashboardList('mine', mineLimit, {
+    enabled: activeTab === 'mine',
+  });
 
-  const [sharedCursor, setSharedCursor] = useState<Cursor | null>(null);
-  const [sharedPage, sharedDetails] = useCachedQuery(
-    queries.sharedDashboards({ limit: PAGE_SIZE, cursor: sharedCursor }),
-    { enabled: activeTab === 'shared' },
-  );
-  const [sharedItems, setSharedItems] = useState<DashboardRow[]>([]);
-  const [sharedHasMore, setSharedHasMore] = useState(true);
-  useEffect(() => {
-    if (!sharedPage) return;
-    setSharedItems(prev => {
-      const seen = new Set(prev.map(r => r.id));
-      const next = sharedPage.filter(r => !seen.has(r.id));
-      return next.length > 0 ? [...prev, ...next] : prev;
-    });
-    if (sharedDetails?.type === 'complete' && sharedPage.length < PAGE_SIZE) {
-      setSharedHasMore(false);
-    }
-  }, [sharedPage, sharedDetails]);
+  const [sharedLimit, setSharedLimit] = useState(PAGE_SIZE);
+  const { data: sharedData } = useDashboardList('shared', sharedLimit, {
+    enabled: activeTab === 'shared',
+  });
 
-  const [allCursor, setAllCursor] = useState<Cursor | null>(null);
-  const [allPage, allDetails] = useCachedQuery(
-    queries.allDashboards({ limit: PAGE_SIZE, cursor: allCursor }),
-    { enabled: activeTab === 'all' },
-  );
-  const [allItems, setAllItems] = useState<DashboardRow[]>([]);
-  const [allHasMore, setAllHasMore] = useState(true);
-  useEffect(() => {
-    if (!allPage) return;
-    setAllItems(prev => {
-      const seen = new Set(prev.map(r => r.id));
-      const next = allPage.filter(r => !seen.has(r.id));
-      return next.length > 0 ? [...prev, ...next] : prev;
-    });
-    if (allDetails?.type === 'complete' && allPage.length < PAGE_SIZE) {
-      setAllHasMore(false);
-    }
-  }, [allPage, allDetails]);
+  const [allLimit, setAllLimit] = useState(PAGE_SIZE);
+  const { data: allData } = useDashboardList('all', allLimit, {
+    enabled: activeTab === 'all',
+  });
 
   const dashboardList =
-    activeTab === 'mine' ? mineItems : activeTab === 'shared' ? sharedItems : allItems;
+    activeTab === 'mine'
+      ? (mineData?.dashboards ?? [])
+      : activeTab === 'shared'
+        ? (sharedData?.dashboards ?? [])
+        : (allData?.dashboards ?? []);
   const handleEndReached = useCallback(() => {
-    const advance = (last: { id: string; updatedAt: number }): Cursor => ({
-      id: last.id,
-      updatedAt: last.updatedAt,
-    });
-    if (activeTab === 'mine' && mineHasMore && mineItems.length > 0) {
-      setMineCursor(advance(mineItems[mineItems.length - 1]!));
-    } else if (activeTab === 'shared' && sharedHasMore && sharedItems.length > 0) {
-      setSharedCursor(advance(sharedItems[sharedItems.length - 1]!));
-    } else if (activeTab === 'all' && allHasMore && allItems.length > 0) {
-      setAllCursor(advance(allItems[allItems.length - 1]!));
+    if (activeTab === 'mine' && mineData?.hasMore) {
+      setMineLimit(l => l + PAGE_SIZE);
+    } else if (activeTab === 'shared' && sharedData?.hasMore) {
+      setSharedLimit(l => l + PAGE_SIZE);
+    } else if (activeTab === 'all' && allData?.hasMore) {
+      setAllLimit(l => l + PAGE_SIZE);
     }
-  }, [activeTab, mineHasMore, mineItems, sharedHasMore, sharedItems, allHasMore, allItems]);
+  }, [activeTab, mineData?.hasMore, sharedData?.hasMore, allData?.hasMore]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [dataSourcesOpen, setDataSourcesOpen] = useState(false);
 
@@ -136,43 +90,32 @@ const DynamicDashboardPanel = (): ReactElement => {
     s => s.ingestionStatus === 'pending' || s.ingestionStatus === 'in_progress',
   );
 
+  const { remove } = useDashboardMutations();
+  const isDeleting = remove.isPending;
+
   const handleConfirmDelete = useCallback(() => {
-    if (!deletingId || isDeleting) return;
+    if (!deletingId || remove.isPending) return;
     const idBeingDeleted = deletingId;
-    setIsDeleting(true);
-    const onFailure = (detail?: string): void => {
-      toast.error('Failed to delete dashboard', {
-        ...(detail ? { description: detail } : { description: 'Unknown error' }),
-      });
-    };
-    try {
-      const result = z.mutate(mutators.dashboard.deleteV2({ id: idBeingDeleted }));
-      result.server
-        .then(r => {
-          if (r.type === 'error') {
-            onFailure(r.error instanceof Error ? r.error.message : undefined);
-            return;
-          }
-          toast.success('Dashboard deleted');
-          if (dashboardId === idBeingDeleted && user?.workspaceId) {
-            void navigate(`/${user.workspaceId}/dashboards`);
-          }
-          setDeletingId(null);
-        })
-        .catch((e: unknown) => onFailure(e instanceof Error ? e.message : undefined))
-        .finally(() => setIsDeleting(false));
-    } catch (err) {
-      onFailure(err instanceof Error ? err.message : undefined);
-      setIsDeleting(false);
-    }
-  }, [z, deletingId, isDeleting, dashboardId, user, navigate]);
+    remove.mutate(idBeingDeleted, {
+      onSuccess: () => {
+        toast.success('Dashboard deleted');
+        if (dashboardId === idBeingDeleted && user?.workspaceId) {
+          void navigate(`/${user.workspaceId}/dashboards`);
+        }
+        setDeletingId(null);
+      },
+      onError: (err: unknown) => {
+        toast.error('Failed to delete dashboard', { description: getApiErrorMessage(err) });
+      },
+    });
+  }, [deletingId, remove, dashboardId, user?.workspaceId, navigate]);
 
   const deletingDashboard = dashboardList.find(d => d.id === deletingId);
 
   const showInnerSidebar = hasDataSources || !!dashboardId;
 
   return (
-    <div className='flex h-full bg-white overflow-hidden'>
+    <div className='flex h-full bg-white md:rounded-2xl overflow-hidden shadow-md'>
       {showInnerSidebar && (
         <aside className='w-[280px] shrink-0 border-r border-xyne-gray-200 bg-xyne-gray-25 flex flex-col min-h-0'>
           <div className='px-4 h-[52px] flex items-center gap-2'>

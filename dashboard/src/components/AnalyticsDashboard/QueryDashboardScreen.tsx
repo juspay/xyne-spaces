@@ -89,7 +89,7 @@ export const QueryDashboardScreen: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const [currentDashboard] = useCachedQuery(
-    queries.getDashboardByIdV2({ dashboardId: dashboardId || '' }),
+    queries.getDashboardById({ dashboardId: dashboardId || '' }),
     { enabled: !!dashboardId },
   );
 

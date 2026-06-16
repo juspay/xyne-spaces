@@ -19,8 +19,6 @@ import {
   AutoDraftMode,
   CanvasVisibility,
   CanvasRole,
-  DashboardVisibility,
-  DashboardRole,
   BookmarkEntityType,
   AttachmentEntityType,
   UserPresenceStatus,
@@ -138,10 +136,6 @@ function buildParentMessageMd(msg: {
 }
 import { zql } from './builder.js';
 import {
-  parseDashboardConfig,
-  validateDashboardConfig,
-} from '../dashboard/dashboardConfig.js';
-import {
   buildRepliesMdFromMessages,
   isChatMessageType,
   resolveMessage,
@@ -256,53 +250,6 @@ async function hasCanvasVersionEditAccess(
   );
 
   return Boolean(participant);
-}
-
-// Throw unless the caller is the dashboard's creator OR a participant with
-// role OWNER/EDITOR. VIEWERs and non-participants are rejected. Used by every
-// dashboardComponent mutator (create/update/updatePositions/delete) — without
-// it any authenticated user who knows a dashboardId or queryId could write to
-// it. The corresponding read-side guard lives in `DashboardsACL.canSelect`.
-async function assertDashboardEditAccess(
-  tx: Transaction<Schema>,
-  userId: string,
-  dashboardId: string,
-): Promise<void> {
-  const dashboard = await tx.run(zql.dashboards.where('id', dashboardId).one());
-  if (!dashboard) {
-    throw new Error('Dashboard not found');
-  }
-  if (dashboard.createdBy === userId) return;
-  const participant = await tx.run(
-    zql.dashboard_participants
-      .where('dashboardId', dashboardId)
-      .where('userId', userId)
-      .one(),
-  );
-  if (
-    participant &&
-    (participant.role === DashboardRole.OWNER ||
-      participant.role === DashboardRole.EDITOR)
-  ) {
-    return;
-  }
-  throw new Error('You do not have permission to edit this dashboard');
-}
-
-// `dashboardComponent.update / delete / updatePositions` receive the query id
-// (the tile id), not the dashboard id. Resolve via the mapping table; throw
-// if the tile is orphaned or doesn't exist (caller will surface the message).
-async function resolveDashboardIdForQuery(
-  tx: Transaction<Schema>,
-  queryId: string,
-): Promise<string> {
-  const mapping = await tx.run(
-    zql.dashboard_queries_mapping.where('queryId', queryId).one(),
-  );
-  if (!mapping) {
-    throw new Error(`Component ${queryId} is not linked to a dashboard`);
-  }
-  return mapping.dashboardId;
 }
 
 export const mutators = defineMutators({
@@ -7067,316 +7014,18 @@ export const mutators = defineMutators({
         createdBy: z.string(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, name, description, createdBy, timestamp } }) => {
+      async ({ tx, args: { id, name, description, createdBy, timestamp } }) => {
         const now = timestamp;
 
         const existingDashboard = await tx.run(zql.dashboards.where('id', id).one());
 
         await tx.mutate.dashboards.upsert({
           id: id,
-          workspaceId: existingDashboard?.workspaceId ?? ctx.workspaceId,
           name: name.trim(),
           description: description?.trim(),
           createdBy: existingDashboard?.createdBy ?? createdBy,
-          visibility: existingDashboard?.visibility ?? DashboardVisibility.PRIVATE,
-          config: existingDashboard?.config ?? '{}',
           updatedAt: now,
           createdAt: existingDashboard?.createdAt ?? now,
-        });
-      },
-    ),
-    upsertV2: defineMutator(
-      z.object({
-        id: z.string(),
-        workspaceId: z.string().optional(),
-        name: z.string(),
-        description: z.string().optional(),
-        createdBy: z.string(),
-        visibility: z.nativeEnum(DashboardVisibility).optional(),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { id, workspaceId, name, description, createdBy, visibility, timestamp } }) => {
-        const now = timestamp;
-
-        const existingDashboard = await tx.run(zql.dashboards.where('id', id).one());
-
-        // Insert branch: ignore the caller-supplied workspaceId/createdBy and
-        // pin to the authenticated caller. Without this, any caller could pass
-        // a foreign `workspaceId` + arbitrary `createdBy` and create a row
-        // under another workspace (the `dashboards` table has no canInsert
-        // ACL, so Zero would accept the write).
-        // Update branch: workspaceId is immutable; createdBy is preserved from
-        // the existing row. The caller args for those two are ignored.
-        const resolvedWorkspaceId = existingDashboard?.workspaceId ?? ctx.workspaceId;
-        const resolvedCreatedBy = existingDashboard?.createdBy ?? ctx.userID;
-
-        // Don't let the caller move a dashboard between workspaces by passing
-        // a different `workspaceId` on update. Existing column is source of
-        // truth; if the caller insists otherwise it's a bug or an attack.
-        if (
-          existingDashboard &&
-          workspaceId !== undefined &&
-          workspaceId !== existingDashboard.workspaceId
-        ) {
-          throw new Error('Cannot change workspaceId of an existing dashboard');
-        }
-        if (
-          existingDashboard &&
-          createdBy !== existingDashboard.createdBy
-        ) {
-          throw new Error('Cannot change createdBy of an existing dashboard');
-        }
-
-        const trimmedName = name.trim();
-        // For inserts and for true renames (name actually changing), check the
-        // (workspaceId, name) unique constraint up front so we can surface a
-        // friendly message instead of the raw Postgres duplicate-key error.
-        if (!existingDashboard || trimmedName !== existingDashboard.name) {
-          const clash = await tx.run(
-            zql.dashboards
-              .where('workspaceId', resolvedWorkspaceId)
-              .where('name', trimmedName)
-              .one(),
-          );
-          if (clash && clash.id !== id) {
-            throw new Error(
-              `A dashboard named "${trimmedName}" already exists in this workspace.`,
-            );
-          }
-        }
-
-        await tx.mutate.dashboards.upsert({
-          id: id,
-          workspaceId: resolvedWorkspaceId,
-          name: trimmedName,
-          description: description?.trim(),
-          createdBy: resolvedCreatedBy,
-          visibility: existingDashboard?.visibility ?? visibility ?? DashboardVisibility.PRIVATE,
-          config: existingDashboard?.config ?? '{}',
-          updatedAt: now,
-          createdAt: existingDashboard?.createdAt ?? now,
-        });
-      },
-    ),
-    // Canvas-mirror create. Inserts the dashboard row AND the OWNER
-    // participant row in the same Zero transaction (caller supplies a
-    // client-generated participantId UUID, like canvas.create does).
-    create: defineMutator(
-      z.object({
-        id: z.string(),
-        workspaceId: z.string(),
-        name: z.string(),
-        description: z.string().optional(),
-        visibility: z.nativeEnum(DashboardVisibility).optional(),
-        timestamp: z.number(),
-        participantId: z.string(),
-      }),
-      async ({
-        tx,
-        ctx,
-        args: {
-          id,
-          workspaceId,
-          name,
-          description,
-          visibility,
-          timestamp,
-          participantId,
-        },
-      }) => {
-        const now = timestamp;
-        const trimmedName = name.trim();
-
-        const clash = await tx.run(
-          zql.dashboards.where('workspaceId', workspaceId).where('name', trimmedName).one(),
-        );
-        if (clash) {
-          throw new Error(
-            `A dashboard named "${trimmedName}" already exists in this workspace.`,
-          );
-        }
-
-        await tx.mutate.dashboards.insert({
-          id,
-          workspaceId,
-          name: trimmedName,
-          description: description?.trim(),
-          createdBy: ctx.userID,
-          visibility: visibility || DashboardVisibility.PRIVATE,
-          config: '{}',
-          createdAt: now,
-          updatedAt: now,
-        });
-
-        await tx.mutate.dashboard_participants.insert({
-          id: participantId,
-          dashboardId: id,
-          userId: ctx.userID,
-          role: DashboardRole.OWNER,
-          joinedAt: now,
-          updatedAt: now,
-        });
-      },
-    ),
-    // dashboard + participant + all components inserted in one tx.
-    createWithComponents: defineMutator(
-      z.object({
-        id: z.string(),
-        workspaceId: z.string(),
-        name: z.string(),
-        description: z.string().optional(),
-        visibility: z.nativeEnum(DashboardVisibility).optional(),
-        timestamp: z.number(),
-        participantId: z.string(),
-        components: z.array(
-          z.object({
-            id: z.string(),
-            visualType: z.nativeEnum(QueryVisualizationType),
-            title: z.string().optional(),
-            queryJson: z.any(),
-            position: z.string(),
-            config: z.string().optional(),
-            mappingId: z.string(),
-          }),
-        ),
-      }),
-      async ({
-        tx,
-        ctx,
-        args: {
-          id,
-          workspaceId,
-          name,
-          description,
-          visibility,
-          timestamp,
-          participantId,
-          components,
-        },
-      }) => {
-        const now = timestamp;
-        const trimmedName = name.trim();
-
-        const clash = await tx.run(
-          zql.dashboards.where('workspaceId', workspaceId).where('name', trimmedName).one(),
-        );
-        if (clash) {
-          throw new Error(
-            `A dashboard named "${trimmedName}" already exists in this workspace.`,
-          );
-        }
-
-        await tx.mutate.dashboards.insert({
-          id,
-          workspaceId,
-          name: trimmedName,
-          description: description?.trim(),
-          createdBy: ctx.userID,
-          visibility: visibility || DashboardVisibility.PRIVATE,
-          config: '{}',
-          createdAt: now,
-          updatedAt: now,
-        });
-        await tx.mutate.dashboard_participants.insert({
-          id: participantId,
-          dashboardId: id,
-          userId: ctx.userID,
-          role: DashboardRole.OWNER,
-          joinedAt: now,
-          updatedAt: now,
-        });
-        for (let i = 0; i < components.length; i++) {
-          const c = components[i]!;
-          await tx.mutate.queries.insert({
-            id: c.id,
-            title: c.title ?? null,
-            queryType: 'external',
-            queryJson: c.queryJson as ReadonlyJSONValue,
-            entityType: null,
-            targetEntity: null,
-            visualType: c.visualType,
-            position: c.position,
-            config: c.config ?? '{}',
-            createdBy: ctx.userID,
-            createdAt: now,
-            updatedAt: now,
-          });
-          await tx.mutate.dashboard_queries_mapping.insert({
-            id: c.mappingId,
-            dashboardId: id,
-            queryId: c.id,
-            sequence: i,
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-      },
-    ),
-    update: defineMutator(
-      z.object({
-        id: z.string(),
-        name: z.string().min(1).max(120).optional(),
-        description: z.string().max(500).optional(),
-        visibility: z.nativeEnum(DashboardVisibility).optional(),
-        config: z.string().optional(),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { id, name, description, visibility, config, timestamp } }) => {
-        // Auth: must be creator OR an OWNER participant for any change.
-        // EDITOR may change description + config (their dashboard view
-        // state), but not name or visibility. VIEWER + non-participants
-        // are blocked entirely.
-        const dashboard = await tx.run(zql.dashboards.where('id', id).one());
-        if (!dashboard) {
-          throw new Error('Dashboard not found');
-        }
-        const participant = await tx.run(
-          zql.dashboard_participants
-            .where('dashboardId', id)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-        const isOwner =
-          dashboard.createdBy === ctx.userID ||
-          (participant && participant.role === DashboardRole.OWNER);
-        const isEditor = participant && participant.role === DashboardRole.EDITOR;
-        if (!isOwner && !isEditor) {
-          throw new Error('You do not have permission to edit this dashboard');
-        }
-        if (!isOwner && (name !== undefined || visibility !== undefined)) {
-          throw new Error('Only dashboard owners can rename or change visibility');
-        }
-
-        if (name !== undefined) {
-          const trimmedName = name.trim();
-          if (trimmedName !== dashboard.name) {
-            const clash = await tx.run(
-              zql.dashboards
-                .where('workspaceId', dashboard.workspaceId)
-                .where('name', trimmedName)
-                .one(),
-            );
-            if (clash && clash.id !== id) {
-              throw new Error(
-                `A dashboard named "${trimmedName}" already exists in this workspace.`,
-              );
-            }
-          }
-        }
-
-        // Validate config JSON before writing. Throws on malformed JSON,
-        // oversize payload, or shape mismatch.
-        if (config !== undefined) {
-          parseDashboardConfig(config);
-        }
-
-        await tx.mutate.dashboards.update({
-          id,
-          updatedAt: timestamp,
-          ...(name !== undefined && { name: name.trim() }),
-          ...(description !== undefined && { description: description?.trim() }),
-          ...(visibility !== undefined && { visibility }),
-          ...(config !== undefined && { config }),
         });
       },
     ),
@@ -7391,330 +7040,6 @@ export const mutators = defineMutators({
           await tx.mutate.queries.delete({ id: mapping.queryId });
         }
         await tx.mutate.dashboards.delete({ id });
-      },
-    ),
-    deleteV2: defineMutator(
-      z.object({ id: z.string() }),
-      async ({ tx, ctx, args: { id } }) => {
-        const dashboard = await tx.run(zql.dashboards.where('id', id).one());
-        if (!dashboard) {
-          throw new Error('Dashboard not found');
-        }
-        const requestingParticipant = await tx.run(
-          zql.dashboard_participants
-            .where('dashboardId', id)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-        const isOwner =
-          dashboard.createdBy === ctx.userID ||
-          (requestingParticipant && requestingParticipant.role === DashboardRole.OWNER);
-        if (!isOwner) {
-          throw new Error('Only dashboard owners can delete the dashboard');
-        }
-        // App-side cascade (relationMode = "prisma" — no DB FKs).
-        // Delete every mapped query (covers both internal QueryBuilder saved
-        // queries AND external dashboard tiles — they all live in `queries`
-        // and link via dashboard_queries_mapping) plus the mappings.
-        const mappings = await tx.run(zql.dashboard_queries_mapping.where('dashboardId', id));
-        for (const mapping of mappings) {
-          await tx.mutate.dashboard_queries_mapping.delete({ id: mapping.id });
-          await tx.mutate.queries.delete({ id: mapping.queryId });
-        }
-        const participants = await tx.run(zql.dashboard_participants.where('dashboardId', id));
-        for (const participant of participants) {
-          await tx.mutate.dashboard_participants.delete({ id: participant.id });
-        }
-        await tx.mutate.dashboards.delete({ id });
-      },
-    ),
-    addParticipants: defineMutator(
-      z.object({
-        dashboardId: z.string(),
-        participants: z.array(z.object({
-          userId: z.string(),
-          participantId: z.string(),
-          role: z.nativeEnum(DashboardRole),
-        })),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { dashboardId, participants, timestamp } }) => {
-        const dashboard = await tx.run(zql.dashboards.where('id', dashboardId).one());
-        if (!dashboard) {
-          throw new Error("Dashboard doesn't exist");
-        }
-
-        const requestingUserParticipant = await tx.run(
-          zql.dashboard_participants
-            .where('dashboardId', dashboardId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-
-        const isOwner =
-          dashboard.createdBy === ctx.userID ||
-          (requestingUserParticipant && requestingUserParticipant.role === DashboardRole.OWNER);
-
-        const isEditor =
-          requestingUserParticipant && requestingUserParticipant.role === DashboardRole.EDITOR;
-
-        if (!isOwner && !isEditor) {
-          throw new Error('Only dashboard owners or editors can add participants');
-        }
-        if (isEditor && participants.some(p => p.role === DashboardRole.OWNER)) {
-          throw new Error('Editors cannot grant owner role');
-        }
-
-        const now = timestamp;
-        for (const p of participants) {
-          const user = await tx.run(zql.users.where('id', p.userId).one());
-          if (!user) {
-            continue;
-          }
-
-          const existingParticipant = await tx.run(
-            zql.dashboard_participants
-              .where('dashboardId', dashboardId)
-              .where('userId', p.userId)
-              .one(),
-          );
-          if (existingParticipant) {
-            continue;
-          }
-
-          await tx.mutate.dashboard_participants.insert({
-            id: p.participantId,
-            dashboardId,
-            userId: p.userId,
-            role: p.role,
-            joinedAt: now,
-            updatedAt: now,
-          });
-        }
-      },
-    ),
-    removeParticipant: defineMutator(
-      z.object({ dashboardId: z.string(), userId: z.string() }),
-      async ({ tx, ctx, args: { dashboardId, userId } }) => {
-        const dashboard = await tx.run(zql.dashboards.where('id', dashboardId).one());
-        if (!dashboard) {
-          throw new Error("Dashboard doesn't exist");
-        }
-
-        const requestingUserParticipant = await tx.run(
-          zql.dashboard_participants
-            .where('dashboardId', dashboardId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-
-        const isOwner =
-          dashboard.createdBy === ctx.userID ||
-          (requestingUserParticipant && requestingUserParticipant.role === DashboardRole.OWNER);
-
-        const isEditor =
-          requestingUserParticipant && requestingUserParticipant.role === DashboardRole.EDITOR;
-
-        if (!isOwner && !isEditor) {
-          throw new Error('Only dashboard owners or editors can remove participants');
-        }
-
-        const targetParticipant = await tx.run(
-          zql.dashboard_participants
-            .where('dashboardId', dashboardId)
-            .where('userId', userId)
-            .one(),
-        );
-        if (!targetParticipant) {
-          throw new Error('User is not a participant');
-        }
-
-        if (userId === ctx.userID && dashboard.createdBy === ctx.userID) {
-          throw new Error('Dashboard creator cannot be removed');
-        }
-
-        if (isEditor && targetParticipant.role === DashboardRole.OWNER) {
-          throw new Error('Editors cannot remove owners');
-        }
-
-        await tx.mutate.dashboard_participants.delete({ id: targetParticipant.id });
-      },
-    ),
-    updateParticipantRole: defineMutator(
-      z.object({
-        dashboardId: z.string(),
-        userId: z.string(),
-        role: z.nativeEnum(DashboardRole),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { dashboardId, userId, role, timestamp } }) => {
-        const dashboard = await tx.run(zql.dashboards.where('id', dashboardId).one());
-        if (!dashboard) {
-          throw new Error("Dashboard doesn't exist");
-        }
-
-        const requestingUserParticipant = await tx.run(
-          zql.dashboard_participants
-            .where('dashboardId', dashboardId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-
-        const isOwner =
-          dashboard.createdBy === ctx.userID ||
-          (requestingUserParticipant && requestingUserParticipant.role === DashboardRole.OWNER);
-
-        const isEditor =
-          requestingUserParticipant && requestingUserParticipant.role === DashboardRole.EDITOR;
-
-        if (!isOwner && !isEditor) {
-          throw new Error('Only dashboard owners or editors can update participant roles');
-        }
-
-        const targetParticipant = await tx.run(
-          zql.dashboard_participants
-            .where('dashboardId', dashboardId)
-            .where('userId', userId)
-            .one(),
-        );
-        if (!targetParticipant) {
-          throw new Error('User is not a participant');
-        }
-
-        if (isEditor && role === DashboardRole.OWNER) {
-          throw new Error('Editors cannot grant owner role');
-        }
-        if (isEditor && targetParticipant.role === DashboardRole.OWNER) {
-          throw new Error('Editors cannot modify owner roles');
-        }
-        if (userId === dashboard.createdBy) {
-          throw new Error("Cannot change dashboard creator's role");
-        }
-
-        await tx.mutate.dashboard_participants.update({
-          id: targetParticipant.id,
-          role,
-          updatedAt: timestamp,
-        });
-      },
-    ),
-  },
-  // Dashboard tiles are unified into the `queries` table (queryType='external')
-  // and linked to a dashboard one-to-many via dashboard_queries_mapping.
-  //
-  // Each mutator gates on `assertDashboardEditAccess`: only the dashboard's
-  // creator or a participant with role OWNER/EDITOR may write tiles. VIEWERs
-  // and non-participants are rejected at the mutator layer — Zero's `canSelect`
-  // already prevents read sync to outsiders, but writes need a parallel check
-  // so a snooping client (or a participant who lost edit access mid-session)
-  // can't slip a mutation through. Mirrors the `dashboard.update` pattern.
-  dashboardComponent: {
-    create: defineMutator(
-      z.object({
-        id: z.string(),
-        dashboardId: z.string(),
-        visualType: z.nativeEnum(QueryVisualizationType),
-        title: z.string().optional(),
-        queryJson: z.any(), // QueryPlan
-        position: z.string(),
-        config: z.string().optional(),
-        createdBy: z.string(),
-        mappingId: z.string(),
-        sequence: z.number().optional(),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { id, dashboardId, visualType, title, queryJson, position, config, createdBy, mappingId, sequence, timestamp } }) => {
-        await assertDashboardEditAccess(tx, ctx.userID, dashboardId);
-        const now = timestamp;
-        await tx.mutate.queries.insert({
-          id,
-          title: title ?? null,
-          queryType: 'external',
-          queryJson: queryJson as ReadonlyJSONValue,
-          entityType: null,
-          targetEntity: null,
-          visualType,
-          position,
-          config: config ?? '{}',
-          // Never trust the client-supplied createdBy — pin to the caller.
-          createdBy: ctx.userID,
-          createdAt: now,
-          updatedAt: now,
-        });
-        await tx.mutate.dashboard_queries_mapping.insert({
-          id: mappingId,
-          dashboardId,
-          queryId: id,
-          sequence: sequence ?? 0,
-          createdAt: now,
-          updatedAt: now,
-        });
-      },
-    ),
-    update: defineMutator(
-      z.object({
-        id: z.string(),
-        visualType: z.nativeEnum(QueryVisualizationType).optional(),
-        title: z.string().optional(),
-        queryJson: z.any().optional(),
-        position: z.string().optional(),
-        config: z.string().optional(),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { id, visualType, title, queryJson, position, config, timestamp } }) => {
-        const dashboardId = await resolveDashboardIdForQuery(tx, id);
-        await assertDashboardEditAccess(tx, ctx.userID, dashboardId);
-        await tx.mutate.queries.update({
-          id,
-          updatedAt: timestamp,
-          ...(visualType !== undefined && { visualType }),
-          ...(title !== undefined && { title }),
-          ...(queryJson !== undefined && { queryJson: queryJson as ReadonlyJSONValue }),
-          ...(position !== undefined && { position }),
-          ...(config !== undefined && { config }),
-        });
-      },
-    ),
-    // batched position update from drag/resize. We resolve the dashboard once
-    // (every update is for a tile on the same dashboard — the grid only edits
-    // its own dashboard) and check ACL once; a per-update ACL lookup would
-    // turn a single drag-stop into N queries for no extra safety.
-    updatePositions: defineMutator(
-      z.object({
-        updates: z.array(z.object({ id: z.string(), position: z.string() })).min(1),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { updates, timestamp } }) => {
-        const dashboardIds = new Set<string>();
-        for (const u of updates) {
-          dashboardIds.add(await resolveDashboardIdForQuery(tx, u.id));
-        }
-        // Every batch must target one dashboard — surfaces any spoofed id
-        // (different tile mixed into the array) as an explicit reject.
-        if (dashboardIds.size !== 1) {
-          throw new Error('updatePositions: tiles must all belong to the same dashboard');
-        }
-        const [dashboardId] = [...dashboardIds];
-        await assertDashboardEditAccess(tx, ctx.userID, dashboardId!);
-        for (const u of updates) {
-          await tx.mutate.queries.update({
-            id: u.id,
-            position: u.position,
-            updatedAt: timestamp,
-          });
-        }
-      },
-    ),
-    delete: defineMutator(
-      z.object({ id: z.string() }),
-      async ({ tx, ctx, args: { id } }) => {
-        const dashboardId = await resolveDashboardIdForQuery(tx, id);
-        await assertDashboardEditAccess(tx, ctx.userID, dashboardId);
-        const mappings = await tx.run(zql.dashboard_queries_mapping.where('queryId', id));
-        for (const m of mappings) {
-          await tx.mutate.dashboard_queries_mapping.delete({ id: m.id });
-        }
-        await tx.mutate.queries.delete({ id });
       },
     ),
   },
@@ -7744,78 +7069,11 @@ export const mutators = defineMutators({
         await tx.mutate.queries.upsert({
           id: id,
           title: title.trim(),
-          queryType: existingQuery?.queryType ?? 'internal',
           queryJson: queryJson as ReadonlyJSONValue,
           entityType: entityType ?? null,
           targetEntity: targetEntity ?? null,
           visualType: (visualType as QueryVisualizationType | undefined) ?? null,
-          position: position ?? existingQuery?.position ?? '{}',
-          config: existingQuery?.config ?? '{}',
-          createdBy: existingQuery?.createdBy ?? createdBy,
-          updatedAt: now,
-          createdAt: existingQuery?.createdAt ?? now,
-        });
-
-        // If dashboardId is provided, create the mapping
-        if (dashboardId) {
-          // Check for duplicate mapping
-          const duplicate = await tx.run(
-            zql.dashboard_queries_mapping
-              .where('dashboardId', dashboardId)
-              .where('queryId', id)
-              .one(),
-          );
-          if (!duplicate) {
-            const newMappingId = mappingId;
-            if (!newMappingId) {
-              throw new Error('mappingId is required when creating a new dashboard query mapping');
-            }
-            const existingMappings = await tx.run(
-              zql.dashboard_queries_mapping.where('dashboardId', dashboardId),
-            );
-            await tx.mutate.dashboard_queries_mapping.insert({
-              id: newMappingId,
-              dashboardId,
-              queryId: id,
-              sequence: existingMappings.length,
-              createdAt: now,
-              updatedAt: now,
-            });
-          }
-        }
-      },
-    ),
-    upsertV2: defineMutator(
-      z.object({
-        id: z.string(),
-        title: z.string(),
-        queryJson: z.any(),
-        entityType: z.nativeEnum(FormEntityType).optional(),
-        targetEntity: z.string().optional(),
-        visualType: z.string().optional(),
-        dashboardId: z.string().optional(),
-        createdBy: z.string(),
-        timestamp: z.number(),
-        mappingId: z.string().optional(),
-      }),
-      async ({
-        tx,
-        args: { id, title, queryJson, entityType, targetEntity, visualType, dashboardId, createdBy, timestamp, mappingId },
-      }) => {
-        const now = timestamp;
-
-        const existingQuery = await tx.run(zql.queries.where('id', id).one());
-
-        await tx.mutate.queries.upsert({
-          id: id,
-          title: title.trim(),
-          queryType: 'internal', // v1 QueryBuilder saved query
-          queryJson: queryJson as ReadonlyJSONValue,
-          entityType: entityType ?? null,
-          targetEntity: targetEntity ?? null,
-          visualType: (visualType as QueryVisualizationType | undefined) ?? null,
-          position: existingQuery?.position ?? '{}',
-          config: existingQuery?.config ?? '{}',
+          ...(position !== undefined && { position }),
           createdBy: existingQuery?.createdBy ?? createdBy,
           updatedAt: now,
           createdAt: existingQuery?.createdAt ?? now,
@@ -7873,6 +7131,25 @@ export const mutators = defineMutators({
           await tx.mutate.dashboard_queries_mapping.update({
             id: mappingId,
             sequence: i,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+  },
+  dashboardComponent: {
+    // Batched position update from AnalyticsDashboard drag/resize. Guard-free to
+    // match the sibling query.* mutators (reorder/upsert) on this branch.
+    updatePositions: defineMutator(
+      z.object({
+        updates: z.array(z.object({ id: z.string(), position: z.string() })).min(1),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { updates, timestamp } }) => {
+        for (const u of updates) {
+          await tx.mutate.queries.update({
+            id: u.id,
+            position: u.position,
             updatedAt: timestamp,
           });
         }

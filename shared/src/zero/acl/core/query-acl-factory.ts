@@ -16,8 +16,6 @@ import {
   CanvasParticipantsACL,
   CanvasUserStatusACL,
   CanvasesACL,
-  DashboardsACL,
-  DashboardParticipantsACL,
   ChannelDailyRecapsACL,
   ChannelRecapsACL,
   RecapsACL,
@@ -231,16 +229,8 @@ export class QueryACLFactory {
       case 'forms_context_mapping':
         return new FormContextMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'dashboards':
-        return new DashboardsACL(ctx) as BaseQueryACL<TTable>;
-      case 'dashboard_participants':
-        return new DashboardParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'queries':
       case 'dashboard_queries_mapping':
-        // These tables have no workspaceId column, so they can't be
-        // workspace-scoped here. They're only read as related data off a
-        // dashboard (getDashboardById -> queryMappings -> query), which
-        // already inherits the parent dashboard's creator/participant
-        // filter, so the default (unfiltered) ACL is acceptable for them.
         return new BaseQueryACL(ctx, table);
     }
   }

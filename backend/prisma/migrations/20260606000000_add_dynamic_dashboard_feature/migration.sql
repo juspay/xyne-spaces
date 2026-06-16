@@ -1,11 +1,11 @@
 -- CreateEnum
-CREATE TYPE "public"."DashboardVisibility" AS ENUM ('PUBLIC', 'PRIVATE');
+CREATE TYPE "non_zero"."DashboardVisibility" AS ENUM ('PUBLIC', 'PRIVATE');
 
 -- CreateEnum
-CREATE TYPE "public"."DashboardRole" AS ENUM ('OWNER', 'EDITOR', 'VIEWER');
+CREATE TYPE "non_zero"."DashboardRole" AS ENUM ('OWNER', 'EDITOR', 'VIEWER');
 
 -- CreateEnum
-CREATE TYPE "public"."QueryType" AS ENUM ('internal', 'external');
+CREATE TYPE "non_zero"."QueryType" AS ENUM ('internal', 'external');
 
 -- AlterEnum
 -- This migration adds more than one value to an enum.
@@ -19,23 +19,10 @@ ALTER TYPE "public"."QueryVisualizationType" ADD VALUE 'AREA_CHART';
 ALTER TYPE "public"."QueryVisualizationType" ADD VALUE 'KPI_COMPARE';
 ALTER TYPE "public"."QueryVisualizationType" ADD VALUE 'SCATTER_CHART';
 
--- AlterTable
--- `workspaceId` defaults to '' for existing rows; run the backfill endpoint
--- (POST /api/admin/dashboard-workspace-id-backfill) to populate from each
--- dashboard's creator workspace. A follow-up migration drops the DEFAULT and
--- adds the (workspaceId, name) UNIQUE INDEX once all environments are backfilled.
-ALTER TABLE "public"."dashboards" ADD COLUMN     "config" TEXT NOT NULL DEFAULT '{}',
-ADD COLUMN     "visibility" "public"."DashboardVisibility" NOT NULL DEFAULT 'PRIVATE',
-ADD COLUMN     "workspaceId" TEXT NOT NULL DEFAULT '';
-
--- AlterTable
-ALTER TABLE "public"."queries" ADD COLUMN     "config" TEXT NOT NULL DEFAULT '{}',
-ADD COLUMN     "position" TEXT NOT NULL DEFAULT '{}',
-ADD COLUMN     "queryType" "public"."QueryType" NOT NULL DEFAULT 'internal',
-ALTER COLUMN "title" DROP NOT NULL;
+ALTER TABLE "public"."queries" ADD COLUMN IF NOT EXISTS "position" TEXT;
 
 -- CreateTable
-CREATE TABLE "workflow"."data_sources" (
+CREATE TABLE "non_zero"."data_sources" (
     "id" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -52,7 +39,7 @@ CREATE TABLE "workflow"."data_sources" (
 );
 
 -- CreateTable
-CREATE TABLE "workflow"."data_source_tables" (
+CREATE TABLE "non_zero"."data_source_tables" (
     "id" TEXT NOT NULL,
     "dataSourceId" TEXT NOT NULL,
     "schemaName" TEXT NOT NULL,
@@ -66,7 +53,7 @@ CREATE TABLE "workflow"."data_source_tables" (
 );
 
 -- CreateTable
-CREATE TABLE "workflow"."data_source_columns" (
+CREATE TABLE "non_zero"."data_source_columns" (
     "id" TEXT NOT NULL,
     "tableId" TEXT NOT NULL,
     "columnName" TEXT NOT NULL,
@@ -86,7 +73,7 @@ CREATE TABLE "workflow"."data_source_columns" (
 );
 
 -- CreateTable
-CREATE TABLE "workflow"."data_source_relationships" (
+CREATE TABLE "non_zero"."data_source_relationships" (
     "id" TEXT NOT NULL,
     "dataSourceId" TEXT NOT NULL,
     "fromColumnId" TEXT NOT NULL,
@@ -99,11 +86,26 @@ CREATE TABLE "workflow"."data_source_relationships" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."dashboard_participants" (
+CREATE TABLE "non_zero"."dynamic_dashboards" (
+    "id" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "createdBy" TEXT NOT NULL,
+    "visibility" "non_zero"."DashboardVisibility" NOT NULL DEFAULT 'PRIVATE',
+    "config" TEXT NOT NULL DEFAULT '{}',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "dynamic_dashboards_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "non_zero"."dashboard_participants" (
     "id" TEXT NOT NULL,
     "dashboardId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "role" "public"."DashboardRole" NOT NULL DEFAULT 'VIEWER',
+    "role" "non_zero"."DashboardRole" NOT NULL DEFAULT 'VIEWER',
     "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -111,7 +113,7 @@ CREATE TABLE "public"."dashboard_participants" (
 );
 
 -- CreateTable
-CREATE TABLE "workflow"."dashboard_activity" (
+CREATE TABLE "non_zero"."dashboard_activity" (
     "id" TEXT NOT NULL,
     "entityType" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
@@ -123,68 +125,99 @@ CREATE TABLE "workflow"."dashboard_activity" (
     CONSTRAINT "dashboard_activity_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE INDEX "data_sources_workspaceId_idx" ON "workflow"."data_sources"("workspaceId");
+-- CreateTable
+CREATE TABLE "non_zero"."dynamic_dashboard_queries" (
+    "id" TEXT NOT NULL,
+    "title" TEXT,
+    "queryType" "non_zero"."QueryType" NOT NULL DEFAULT 'internal',
+    "queryJson" JSONB NOT NULL,
+    "entityType" "public"."FormEntityType",
+    "targetEntity" TEXT,
+    "visualType" "public"."QueryVisualizationType",
+    "position" TEXT NOT NULL DEFAULT '{}',
+    "config" TEXT NOT NULL DEFAULT '{}',
+    "createdBy" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "dynamic_dashboard_queries_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "non_zero"."dynamic_dashboard_queries_mapping" (
+    "id" TEXT NOT NULL,
+    "dashboardId" TEXT NOT NULL,
+    "queryId" TEXT NOT NULL,
+    "sequence" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "dynamic_dashboard_queries_mapping_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateIndex
-CREATE UNIQUE INDEX "data_sources_workspaceId_name_key" ON "workflow"."data_sources"("workspaceId", "name");
+CREATE INDEX "data_sources_workspaceId_idx" ON "non_zero"."data_sources"("workspaceId");
 
 -- CreateIndex
-CREATE INDEX "data_source_tables_dataSourceId_idx" ON "workflow"."data_source_tables"("dataSourceId");
+CREATE UNIQUE INDEX "data_sources_workspaceId_name_key" ON "non_zero"."data_sources"("workspaceId", "name");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "data_source_tables_dataSourceId_schemaName_tableName_key" ON "workflow"."data_source_tables"("dataSourceId", "schemaName", "tableName");
+CREATE INDEX "data_source_tables_dataSourceId_idx" ON "non_zero"."data_source_tables"("dataSourceId");
 
 -- CreateIndex
-CREATE INDEX "data_source_columns_tableId_idx" ON "workflow"."data_source_columns"("tableId");
+CREATE UNIQUE INDEX "data_source_tables_dataSourceId_schemaName_tableName_key" ON "non_zero"."data_source_tables"("dataSourceId", "schemaName", "tableName");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "data_source_columns_tableId_columnName_key" ON "workflow"."data_source_columns"("tableId", "columnName");
+CREATE INDEX "data_source_columns_tableId_idx" ON "non_zero"."data_source_columns"("tableId");
 
 -- CreateIndex
-CREATE INDEX "data_source_relationships_dataSourceId_idx" ON "workflow"."data_source_relationships"("dataSourceId");
+CREATE UNIQUE INDEX "data_source_columns_tableId_columnName_key" ON "non_zero"."data_source_columns"("tableId", "columnName");
 
 -- CreateIndex
-CREATE INDEX "data_source_relationships_fromColumnId_idx" ON "workflow"."data_source_relationships"("fromColumnId");
+CREATE INDEX "data_source_relationships_dataSourceId_idx" ON "non_zero"."data_source_relationships"("dataSourceId");
 
 -- CreateIndex
-CREATE INDEX "data_source_relationships_toColumnId_idx" ON "workflow"."data_source_relationships"("toColumnId");
+CREATE INDEX "data_source_relationships_fromColumnId_idx" ON "non_zero"."data_source_relationships"("fromColumnId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "data_source_relationships_fromColumnId_toColumnId_key" ON "workflow"."data_source_relationships"("fromColumnId", "toColumnId");
+CREATE INDEX "data_source_relationships_toColumnId_idx" ON "non_zero"."data_source_relationships"("toColumnId");
 
 -- CreateIndex
-CREATE INDEX "dashboard_participants_dashboardId_idx" ON "public"."dashboard_participants"("dashboardId");
+CREATE UNIQUE INDEX "data_source_relationships_fromColumnId_toColumnId_key" ON "non_zero"."data_source_relationships"("fromColumnId", "toColumnId");
 
 -- CreateIndex
-CREATE INDEX "dashboard_participants_userId_idx" ON "public"."dashboard_participants"("userId");
+CREATE INDEX "dynamic_dashboards_workspaceId_idx" ON "non_zero"."dynamic_dashboards"("workspaceId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "dashboard_participants_dashboardId_userId_key" ON "public"."dashboard_participants"("dashboardId", "userId");
+CREATE INDEX "dynamic_dashboards_createdBy_idx" ON "non_zero"."dynamic_dashboards"("createdBy");
 
 -- CreateIndex
-CREATE INDEX "dashboard_activity_entityType_entityId_createdAt_idx" ON "workflow"."dashboard_activity"("entityType", "entityId", "createdAt" DESC);
+CREATE UNIQUE INDEX "dynamic_dashboards_workspaceId_name_key" ON "non_zero"."dynamic_dashboards"("workspaceId", "name");
 
 -- CreateIndex
-CREATE INDEX "dashboard_activity_createdAt_idx" ON "workflow"."dashboard_activity"("createdAt" DESC);
+CREATE INDEX "dashboard_participants_dashboardId_idx" ON "non_zero"."dashboard_participants"("dashboardId");
 
 -- CreateIndex
-CREATE INDEX "dashboard_activity_actorUserId_idx" ON "workflow"."dashboard_activity"("actorUserId");
+CREATE INDEX "dashboard_participants_userId_idx" ON "non_zero"."dashboard_participants"("userId");
 
 -- CreateIndex
-CREATE INDEX "dashboards_workspaceId_idx" ON "public"."dashboards"("workspaceId");
+CREATE UNIQUE INDEX "dashboard_participants_dashboardId_userId_key" ON "non_zero"."dashboard_participants"("dashboardId", "userId");
 
 -- CreateIndex
-CREATE INDEX "dashboards_createdBy_idx" ON "public"."dashboards"("createdBy");
-
--- NOTE: UNIQUE INDEX "dashboards_workspaceId_name_key" on ("workspaceId", "name")
--- is intentionally deferred to a follow-up migration. Existing rows default to
--- workspaceId='', so any two dashboards sharing a name would collide here.
--- Run the backfill endpoint first, then the follow-up migration adds the index
--- and drops the '' DEFAULT.
+CREATE INDEX "dashboard_activity_entityType_entityId_createdAt_idx" ON "non_zero"."dashboard_activity"("entityType", "entityId", "createdAt" DESC);
 
 -- CreateIndex
-CREATE INDEX "queries_queryType_idx" ON "public"."queries"("queryType");
+CREATE INDEX "dashboard_activity_createdAt_idx" ON "non_zero"."dashboard_activity"("createdAt" DESC);
 
 -- CreateIndex
-CREATE INDEX "dashboard_queries_mapping_queryId_idx" ON "public"."dashboard_queries_mapping"("queryId");
+CREATE INDEX "dashboard_activity_actorUserId_idx" ON "non_zero"."dashboard_activity"("actorUserId");
+
+-- CreateIndex
+CREATE INDEX "dynamic_dashboard_queries_queryType_idx" ON "non_zero"."dynamic_dashboard_queries"("queryType");
+
+-- CreateIndex
+CREATE INDEX "dynamic_dashboard_queries_mapping_dashboardId_idx" ON "non_zero"."dynamic_dashboard_queries_mapping"("dashboardId");
+
+-- CreateIndex
+CREATE INDEX "dynamic_dashboard_queries_mapping_queryId_idx" ON "non_zero"."dynamic_dashboard_queries_mapping"("queryId");
+

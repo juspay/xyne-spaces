@@ -104,7 +104,6 @@ import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
 import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
-import dashboardWorkspaceIdBackfillRoutes from '@/routes/dashboardWorkspaceIdBackfill';
 import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
 import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
@@ -115,6 +114,7 @@ import ysweetRoutes from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter } from '@/routes/dynamicDashboard';
+import { dashboardCrudRouter } from '@/routes/dashboardCrud';
 import pythonQueryRoutes from '@/routes/pythonQuery';
 import formsRoutes from '@/routes/forms';
 import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
@@ -381,8 +381,6 @@ export class App {
     this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
     this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
     this.app.use('/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
-    this.app.use('/migrate/api/admin/dashboard-workspace-id-backfill', dashboardWorkspaceIdBackfillRoutes);
-    this.app.use('/api/admin/dashboard-workspace-id-backfill', dashboardWorkspaceIdBackfillRoutes);
     // Product insights recluster route (admin-only)
     this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
     this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
@@ -549,6 +547,8 @@ export class App {
     this.app.use('/api/canvas', authMiddleware.authenticate, canvasRoutes);
 
     this.app.use('/api/dashboard', authMiddleware.authenticate, dashboardRouter);
+
+    this.app.use('/api/dashboards', authMiddleware.authenticate, dashboardCrudRouter);
 
     // Custom emoji routes (auth required)
     this.app.use('/api/emojis', authMiddleware.authenticate, emojiRoutes);

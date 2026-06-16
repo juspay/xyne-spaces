@@ -1,25 +1,22 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { toast } from 'sonner';
 import { DashboardRole, DashboardVisibility } from '@xyne/shared';
 import type { User } from '@xyne/shared';
 import * as Select from '@radix-ui/react-select';
 import { Crown, Shield, Eye, X, ChevronDown, Check, Globe } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
-import { useZero } from '../../hooks/useZero';
 import { useAuth } from '../../hooks/useAuth';
 import { useUsers } from '../../hooks/useUsers';
-import { useCachedQuery } from '@xyne/shared/hooks';
-import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
-import { queries } from '../../zero/queries';
-import { mutators } from '../../zero/mutators';
+import {
+  useDashboardParticipants,
+  useParticipantMutations,
+  useUpdateDashboard,
+} from '../../hooks/useDashboards';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { SearchUser } from '../ui/SearchUser/SearchUser';
 import Avatar from '../ui/Avatar/Avatar';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { usePlatform } from '../../hooks/usePlatform';
-
-const PAGE_SIZE = 50;
-type Cursor = { id: string; updatedAt: number };
 
 interface DashboardSummary {
   id: string;
@@ -46,7 +43,6 @@ export const DashboardShareModal = ({
   preloadedParticipants,
 }: DashboardShareModalProps): ReactElement => {
   const { user: currentUser } = useAuth();
-  const z = useZero();
   const { isMobile } = usePlatform();
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isAddingUser, setIsAddingUser] = useState(false);
@@ -56,43 +52,13 @@ export const DashboardShareModal = ({
     userId: string | null;
   }>({ isOpen: false, userId: null });
 
-  const paginate = Boolean(dashboard.id) && !preloadedParticipants;
+  const fetchParticipants = Boolean(dashboard.id) && !preloadedParticipants;
 
-  const [cursor, setCursor] = useState<Cursor | null>(null);
-  const [page, pageDetails] = useCachedQuery(
-    queries.dashboardParticipants({
-      dashboardId: dashboard.id,
-      limit: PAGE_SIZE,
-      cursor,
-    }),
-    { enabled: paginate },
-  );
-  type ParticipantRow = NonNullable<typeof page>[number];
-  const [pagedItems, setPagedItems] = useState<ParticipantRow[]>([]);
-  const [hasMore, setHasMore] = useState(true);
-  useEffect(() => {
-    if (!page) return;
-    setPagedItems(prev => {
-      const seen = new Set(prev.map(r => r.id));
-      const next = page.filter(r => !seen.has(r.id));
-      return next.length > 0 ? [...prev, ...next] : prev;
-    });
-    if (pageDetails?.type === 'complete' && page.length < PAGE_SIZE) {
-      setHasMore(false);
-    }
-  }, [page, pageDetails]);
-
-  const handleEndReached = useCallback(() => {
-    if (!hasMore || pagedItems.length === 0) return;
-    const last = pagedItems[pagedItems.length - 1]!;
-    setCursor({ id: last.id, updatedAt: last.updatedAt });
-  }, [hasMore, pagedItems]);
-  const loadMoreRef = useIntersectionObserver(handleEndReached, {
-    threshold: 0.1,
-    triggerOnce: false,
+  const { data: fetchedParticipants } = useDashboardParticipants(dashboard.id, {
+    enabled: fetchParticipants,
   });
 
-  const participants = preloadedParticipants ?? pagedItems;
+  const participants = preloadedParticipants ?? fetchedParticipants ?? [];
   const participantUserIds = participants.map(p => p.userId);
   const allUsers = useUsers();
   const usersById = useMemo(() => {
@@ -106,66 +72,38 @@ export const DashboardShareModal = ({
   const canManageParticipants = isOwner || isEditor;
   const isPublic = localVisibility === DashboardVisibility.PUBLIC;
 
+  const visibilityMutation = useUpdateDashboard(dashboard.id);
+  const participantMutations = useParticipantMutations(dashboard.id);
+
   const handleVisibilityToggle = async (): Promise<void> => {
-    if (!isOwner || !z) return;
+    if (!isOwner) return;
     const prev = localVisibility;
     const next =
       prev === DashboardVisibility.PUBLIC
         ? DashboardVisibility.PRIVATE
         : DashboardVisibility.PUBLIC;
     setLocalVisibility(next);
-    const result = z.mutate(
-      mutators.dashboard.update({
-        id: dashboard.id,
-        visibility: next,
-        timestamp: Date.now(),
-      }),
-    );
     try {
-      const res = await result.server;
-      if (res.type === 'error') {
-        setLocalVisibility(prev);
-        toast.error('Failed to update visibility', {
-          description: res.error instanceof Error ? res.error.message : undefined,
-        });
-      }
+      await visibilityMutation.mutateAsync({ visibility: next });
     } catch (err) {
       setLocalVisibility(prev);
       toast.error('Failed to update visibility', {
-        description: err instanceof Error ? err.message : undefined,
+        description: getApiErrorMessage(err),
       });
     }
   };
 
   const handleAddParticipants = async (role: DashboardRole): Promise<void> => {
-    if (!z || selectedUsers.length === 0) return;
+    if (selectedUsers.length === 0) return;
     const count = selectedUsers.length;
     setIsAddingUser(true);
     try {
-      const participants = selectedUsers.map(u => ({
-        userId: u.id,
-        participantId: uuidv4(),
-        role,
-      }));
-      const result = z.mutate(
-        mutators.dashboard.addParticipants({
-          dashboardId: dashboard.id,
-          participants,
-          timestamp: Date.now(),
-        }),
-      );
-      const res = await result.server;
-      if (res.type === 'error') {
-        toast.error('Failed to add participants', {
-          description: res.error instanceof Error ? res.error.message : undefined,
-        });
-        return;
-      }
+      await participantMutations.add.mutateAsync(selectedUsers.map(u => ({ userId: u.id, role })));
       setSelectedUsers([]);
       toast.success(`${count} participant(s) added`);
     } catch (err) {
       toast.error('Failed to add participants', {
-        description: err instanceof Error ? err.message : undefined,
+        description: getApiErrorMessage(err),
       });
     } finally {
       setIsAddingUser(false);
@@ -173,32 +111,18 @@ export const DashboardShareModal = ({
   };
 
   const handleRemoveParticipant = (userId: string): void => {
-    if (!z) return;
     setConfirmationModal({ isOpen: true, userId });
   };
 
   const confirmRemoveParticipant = async (): Promise<void> => {
-    if (!z || !confirmationModal.userId) return;
+    if (!confirmationModal.userId) return;
     const targetUserId = confirmationModal.userId;
     try {
-      const result = z.mutate(
-        mutators.dashboard.removeParticipant({
-          dashboardId: dashboard.id,
-          userId: targetUserId,
-        }),
-      );
-      const res = await result.server;
-      if (res.type === 'error') {
-        toast.error('Failed to remove participant', {
-          description: res.error instanceof Error ? res.error.message : undefined,
-        });
-        return;
-      }
-      setPagedItems(prev => prev.filter(p => p.userId !== targetUserId));
+      await participantMutations.remove.mutateAsync(targetUserId);
       toast.success('Participant removed');
     } catch (err) {
       toast.error('Failed to remove participant', {
-        description: err instanceof Error ? err.message : undefined,
+        description: getApiErrorMessage(err),
       });
     } finally {
       setConfirmationModal({ isOpen: false, userId: null });
@@ -206,27 +130,12 @@ export const DashboardShareModal = ({
   };
 
   const handleUpdateRole = async (userId: string, role: DashboardRole): Promise<void> => {
-    if (!z) return;
     try {
-      const result = z.mutate(
-        mutators.dashboard.updateParticipantRole({
-          dashboardId: dashboard.id,
-          userId,
-          role,
-          timestamp: Date.now(),
-        }),
-      );
-      const res = await result.server;
-      if (res.type === 'error') {
-        toast.error('Failed to update role', {
-          description: res.error instanceof Error ? res.error.message : undefined,
-        });
-        return;
-      }
+      await participantMutations.updateRole.mutateAsync({ userId, role });
       toast.success('Role updated');
     } catch (err) {
       toast.error('Failed to update role', {
-        description: err instanceof Error ? err.message : undefined,
+        description: getApiErrorMessage(err),
       });
     }
   };
@@ -446,9 +355,6 @@ export const DashboardShareModal = ({
               </div>
             );
           })}
-          {paginate && hasMore && pagedItems.length > 0 && (
-            <div ref={loadMoreRef} className='h-4' aria-hidden='true' />
-          )}
         </div>
       </div>
 

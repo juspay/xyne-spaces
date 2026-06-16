@@ -137,7 +137,7 @@ enum QueryVisualizationType {
   DATA_TABLE
   AREA_CHART
   KPI_COMPARE
-  SCATTER_CHART 
+  SCATTER_CHART
   @@schema("public")
 }
 
@@ -3442,6 +3442,46 @@ model FormEntityValues {
   @@schema("public")
 }
 
+model Dashboard {
+  id           String    @id @default(cuid())
+  name         String
+  description  String?
+  createdBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("dashboards")
+  @@schema("public")
+}
+
+model Query {
+  id             String          @id @default(cuid())
+  title          String
+  queryJson      Json
+  entityType     FormEntityType? // Deprecated: use targetEntity instead
+  targetEntity   String?         // Entity/table being queried (e.g., TICKET, USER_WORKLOAD_MAPPING)
+  visualType     QueryVisualizationType?
+  position       String?
+  createdBy      String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@map("queries")
+  @@schema("public")
+}
+
+model dashboardQueryMapping {
+  id          String    @id @default(cuid())
+  dashboardId String
+  queryId     String
+  sequence    Int       @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([dashboardId])
+  @@map("dashboard_queries_mapping")
+  @@schema("public")
+}
 
 // Merchant table for Xyne Desk support screen dropdown
 model Merchant {
@@ -4258,7 +4298,7 @@ model DataSource {
   @@unique([workspaceId, name])
   @@index([workspaceId])
   @@map("data_sources")
-  @@schema("workflow")
+  @@schema("non_zero")
 }
 
 model DataSourceTable {
@@ -4278,7 +4318,7 @@ model DataSourceTable {
   @@unique([dataSourceId, schemaName, tableName])
   @@index([dataSourceId])
   @@map("data_source_tables")
-  @@schema("workflow")
+  @@schema("non_zero")
 }
 
 model DataSourceColumn {
@@ -4305,7 +4345,7 @@ model DataSourceColumn {
   @@unique([tableId, columnName])
   @@index([tableId])
   @@map("data_source_columns")
-  @@schema("workflow")
+  @@schema("non_zero")
 }
 
 model DataSourceRelationship {
@@ -4327,24 +4367,24 @@ model DataSourceRelationship {
   @@index([fromColumnId])
   @@index([toColumnId])
   @@map("data_source_relationships")
-  @@schema("workflow")
+  @@schema("non_zero")
 }
 
 
 enum DashboardVisibility {
   PUBLIC
   PRIVATE
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 enum DashboardRole {
   OWNER
   EDITOR
   VIEWER
-  @@schema("public")
+  @@schema("non_zero")
 }
 
-model Dashboard {
+model DynamicDashboard {
   id           String              @id @default(cuid())
   workspaceId  String
   name         String
@@ -4357,13 +4397,13 @@ model Dashboard {
 
   // Relations
   participants DashboardParticipant[]
-  queryMappings DashboardQueryMapping[]
+  queryMappings DynamicDashboardQueryMapping[]
 
   @@unique([workspaceId, name])
   @@index([workspaceId])
   @@index([createdBy])
-  @@map("dashboards")
-  @@schema("public")
+  @@map("dynamic_dashboards")
+  @@schema("non_zero")
 }
 
 model DashboardParticipant {
@@ -4374,13 +4414,13 @@ model DashboardParticipant {
   joinedAt    DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  dashboard Dashboard @relation(fields: [dashboardId], references: [id])
+  dashboard DynamicDashboard @relation(fields: [dashboardId], references: [id])
 
   @@unique([dashboardId, userId])
   @@index([dashboardId])
   @@index([userId])
   @@map("dashboard_participants")
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 
@@ -4397,7 +4437,7 @@ model DashboardActivity {
   @@index([createdAt(sort: Desc)])
   @@index([actorUserId])
   @@map("dashboard_activity")
-  @@schema("workflow")
+  @@schema("non_zero")
 }
 
 
@@ -4405,10 +4445,10 @@ enum QueryType {
   internal
   external
 
-  @@schema("public")
+  @@schema("non_zero")
 }
 
-model Query {
+model DynamicDashboardQuery {
   id           String                  @id @default(cuid())
   title        String?
   queryType    QueryType               @default(internal)
@@ -4422,14 +4462,14 @@ model Query {
   createdAt    DateTime                @default(now())
   updatedAt    DateTime                @updatedAt
 
-  dashboardMappings DashboardQueryMapping[]
+  dashboardMappings DynamicDashboardQueryMapping[]
 
   @@index([queryType])
-  @@map("queries")
-  @@schema("public")
+  @@map("dynamic_dashboard_queries")
+  @@schema("non_zero")
 }
 
-model DashboardQueryMapping {
+model DynamicDashboardQueryMapping {
   id          String    @id @default(cuid())
   dashboardId String
   queryId     String
@@ -4438,13 +4478,13 @@ model DashboardQueryMapping {
   updatedAt   DateTime @updatedAt
 
   // Relations (relationMode="prisma": emulated in the client, no DB FKs).
-  dashboard Dashboard @relation(fields: [dashboardId], references: [id])
-  query     Query     @relation(fields: [queryId], references: [id])
+  dashboard DynamicDashboard      @relation(fields: [dashboardId], references: [id])
+  query     DynamicDashboardQuery @relation(fields: [queryId], references: [id])
 
   @@index([dashboardId])
   @@index([queryId])
-  @@map("dashboard_queries_mapping")
-  @@schema("public")
+  @@map("dynamic_dashboard_queries_mapping")
+  @@schema("non_zero")
 }
 
 // Action/access type for a permission scope (the part after the colon, e.g. chat:WRITE)

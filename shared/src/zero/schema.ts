@@ -2187,24 +2187,10 @@ export const ticketStageRequestTable = table('ticket_stage_requests')
 export const dashboardTable = table('dashboards')
   .columns({
     id: string(),
-    workspaceId: string(),
     name: string(),
     description: string().optional(),
     createdBy: string(),
-    visibility: enumeration<DashboardVisibility>(),
-    config: string(),
     createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey('id');
-
-export const dashboardParticipantTable = table('dashboard_participants')
-  .columns({
-    id: string(),
-    dashboardId: string(),
-    userId: string(),
-    role: enumeration<DashboardRole>(),
-    joinedAt: number(),
     updatedAt: number(),
   })
   .primaryKey('id');
@@ -2212,14 +2198,12 @@ export const dashboardParticipantTable = table('dashboard_participants')
 export const queryTable = table('queries')
   .columns({
     id: string(),
-    title: string().optional(),
-    queryType: string(), // 'internal' | 'external' — discriminates v1 entity query vs v2 dashboard tile (QueryPlan)
+    title: string(),
     queryJson: json(),
     entityType: enumeration<FormEntityType>().optional(),
     targetEntity: string().optional(),
     visualType: enumeration<QueryVisualizationType>().optional(),
-    position: string(), // PositionSchema {x,y,w,h} — external/tile only
-    config: string(), // per-tile config {timeColumn?,...}
+    position: string().optional(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -4293,26 +4277,10 @@ export const ticketStageRequestTableRelationships = relationships(ticketStageReq
 }));
 
 export const dashboardTableRelationships = relationships(dashboardTable, ({ many }) => ({
-  participants: many({
-    sourceField: ['id'],
-    destField: ['dashboardId'],
-    destSchema: dashboardParticipantTable,
-  }),
-  // A dashboard's tiles are now `queries` rows (queryType='external') linked
-  // one-to-many through dashboard_queries_mapping. The same mapping also
-  // carries the legacy QueryBuilder saved queries (queryType='internal').
   queryMappings: many({
     sourceField: ['id'],
     destField: ['dashboardId'],
     destSchema: dashboardQueryMappingTable,
-  }),
-}));
-
-export const dashboardParticipantTableRelationships = relationships(dashboardParticipantTable, ({ one }) => ({
-  dashboard: one({
-    sourceField: ['dashboardId'],
-    destField: ['id'],
-    destSchema: dashboardTable,
   }),
 }));
 
@@ -4641,7 +4609,6 @@ export const schema = createSchema({
     ticketStageRequestTable,
     stageTransitionTable,
     dashboardTable,
-    dashboardParticipantTable,
     queryTable,
     dashboardQueryMappingTable,
     merchantTable,
@@ -4760,7 +4727,6 @@ export const schema = createSchema({
     stageTransitionTableRelationships,
     stageApproversTableRelationships,
     dashboardTableRelationships,
-    dashboardParticipantTableRelationships,
     queryTableRelationships,
     dashboardQueryMappingTableRelationships,
     merchantTableRelationships,

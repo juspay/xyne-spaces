@@ -310,6 +310,17 @@ export enum ProjectType {
   DM = "DM",
 }
 
+export enum VCSProviderType {
+  GITHUB = "GITHUB",
+  BITBUCKET_CLOUD = "BITBUCKET_CLOUD",
+  BITBUCKET_SERVER = "BITBUCKET_SERVER",
+}
+
+export enum ReleaseTrackingMode {
+  COMMIT_RANGE = "COMMIT_RANGE",
+  VERSION = "VERSION",
+}
+
 export enum WorkflowEventType {
   NO_OP = "NO_OP",
   TICKET_CREATED = "TICKET_CREATED",
@@ -658,14 +669,6 @@ export enum CollectionRole {
   VIEWER = "VIEWER",
 }
 
-export enum ApplicationReleaseTicketStatus {
-  NOT_TESTED = "NOT_TESTED",
-  TESTING = "TESTING",
-  PASSED = "PASSED",
-  FAILED = "FAILED",
-  EXCLUDED = "EXCLUDED",
-}
-
 export enum ReleaseEventType {
   RELEASE = "RELEASE",
   TICKET = "TICKET",
@@ -724,6 +727,19 @@ export enum SessionRecordingProcessStatus {
   PROCESSING = "PROCESSING",
   COMPLETED = "COMPLETED",
   FAILED = "FAILED",
+}
+
+export enum CommandType {
+  COMMAND = "COMMAND",
+  SHORTCUT = "SHORTCUT",
+}
+
+export enum CommandAccessibility {
+  CHAT = "CHAT",
+  THREAD = "THREAD",
+  BOTH = "BOTH",
+  MESSAGE = "MESSAGE",
+  GLOBAL = "GLOBAL",
 }
 
 export enum SavedConfigContextType {
@@ -1636,6 +1652,8 @@ export const boardTable = table("boards")
     updatedBy: string().optional(),
     description: string().optional(),
     metadata: json().optional(),
+    vcsProvider: enumeration<VCSProviderType>().optional(),
+    releaseTrackingMode: enumeration<ReleaseTrackingMode>().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -1760,6 +1778,7 @@ export const conversationTable = table("conversations")
     channelId: string(),
     createdBy: string(),
     initialMessageId: string(),
+    workspaceId: string().optional(),
     parentMessageId: string().optional(),
     lastActivityAt: number(),
     replyCount: number(),
@@ -1906,6 +1925,7 @@ export const messageTable = table("messages")
     conversationId: string(),
     childConversationId: string().optional(),
     senderId: string(),
+    workspaceId: string().optional(),
     content: string(),
     msgType: enumeration<MessageType>(),
     hasAttachment: boolean(),
@@ -1989,6 +2009,7 @@ export const activityTable = table("activities")
   .columns({
     id: string(),
     userId: string(),
+    workspaceId: string().optional(),
     actorAction: string(),
     actionSource: string(),
     actionSourceId: string(),
@@ -2276,6 +2297,19 @@ export const canvasTable = table("canvases")
   })
   .primaryKey("id");
 
+export const canvasVersionTable = table("canvas_versions")
+  .columns({
+    id: string(),
+    canvasId: string(),
+    name: string(),
+    content: json(),
+    contentHash: string(),
+    createdBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const canvasParticipantTable = table("canvas_participants")
   .columns({
     id: string(),
@@ -2429,6 +2463,43 @@ export const formEntityValuesTable = table("form_entity_values")
   })
   .primaryKey("id");
 
+export const dashboardTable = table("dashboards")
+  .columns({
+    id: string(),
+    name: string(),
+    description: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const queryTable = table("queries")
+  .columns({
+    id: string(),
+    title: string(),
+    queryJson: json(),
+    entityType: enumeration<FormEntityType>().optional(),
+    targetEntity: string().optional(),
+    visualType: enumeration<QueryVisualizationType>().optional(),
+    position: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dashboardQueryMappingTable = table("dashboard_queries_mapping")
+  .columns({
+    id: string(),
+    dashboardId: string(),
+    queryId: string(),
+    sequence: number(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const merchantTable = table("merchants")
   .columns({
     id: string(),
@@ -2544,13 +2615,18 @@ export const applicationTable = table("applications")
     name: string(),
     projectId: string(),
     boardId: string(),
+    mainReleaseBoardId: string().optional(),
     channelId: string().optional(),
     regex: string(),
     repoUrl: string(),
     deployedCommit: string().optional(),
+    deployedVersion: string().optional(),
     lastDeployedAt: number().optional(),
     ownerTeam: string(),
+    envPaths: json<string[]>(),
+    migrationPaths: json<string[]>(),
     createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -2559,12 +2635,12 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     id: string(),
     applicationReleaseId: string(),
     ticketId: string(),
-    title: string(),
-    status: enumeration<ApplicationReleaseTicketStatus>(),
+    releaseId: string(),
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
     createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -2602,6 +2678,12 @@ export const releaseChangeTypeTable = table("release_change_types")
     id: string(),
     applicationId: string(),
     changeType: string(),
+    releaseId: string().optional(),
+    applicationReleaseId: string().optional(),
+    devTicketXyneId: string().optional(),
+    commitId: string().optional(),
+    filePath: string().optional(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -2779,8 +2861,10 @@ export const appCommandTable = table("app_commands")
     appId: string(),
     commandName: string(),
     description: string(),
-    isForThread: boolean(),
-    isForChat: boolean(),
+    commandType: enumeration<CommandType>(),
+    commandAccessibility: enumeration<CommandAccessibility>(),
+    isForThread: boolean().optional(),
+    isForChat: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2888,7 +2972,7 @@ export const dataSourceRelationshipTable = table("data_source_relationships")
   })
   .primaryKey("id");
 
-export const dashboardTable = table("dashboards")
+export const dynamicDashboardTable = table("dynamic_dashboards")
   .columns({
     id: string(),
     workspaceId: string(),
@@ -2925,7 +3009,7 @@ export const dashboardActivityTable = table("dashboard_activity")
   })
   .primaryKey("id");
 
-export const queryTable = table("queries")
+export const dynamicDashboardQueryTable = table("dynamic_dashboard_queries")
   .columns({
     id: string(),
     title: string().optional(),
@@ -2942,7 +3026,7 @@ export const queryTable = table("queries")
   })
   .primaryKey("id");
 
-export const dashboardQueryMappingTable = table("dashboard_queries_mapping")
+export const dynamicDashboardQueryMappingTable = table("dynamic_dashboard_queries_mapping")
   .columns({
     id: string(),
     dashboardId: string(),
@@ -3929,6 +4013,16 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     destField: ["boardId"],
     destSchema: userExpertiseMappingTable,
   }),
+  mainReleaseApplications: many({
+    sourceField: ["id"],
+    destField: ["mainReleaseBoardId"],
+    destSchema: applicationTable,
+  }),
+  ownedApplication: one({
+    sourceField: ["id"],
+    destField: ["boardId"],
+    destSchema: applicationTable,
+  }),
   incomingWebhooks: many({
     sourceField: ["id"],
     destField: ["boardId"],
@@ -4244,6 +4338,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ["canvasId"],
     destSchema: canvasUserStatusTable,
   }),
+  versions: many({
+    sourceField: ["id"],
+    destField: ["canvasId"],
+    destSchema: canvasVersionTable,
+  }),
   folder: one({
     sourceField: ["folderId"],
     destField: ["id"],
@@ -4253,6 +4352,14 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     sourceField: ["projectId"],
     destField: ["id"],
     destSchema: projectTable,
+  })
+}));
+
+export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one }) => ({
+  canvas: one({
+    sourceField: ["canvasId"],
+    destField: ["id"],
+    destSchema: canvasTable,
   })
 }));
 
@@ -4339,6 +4446,19 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ["userGroupId"],
     destField: ["id"],
     destSchema: userGroupTable,
+  })
+}));
+
+export const applicationTableRelationships = relationships(applicationTable, ({ one }) => ({
+  applicationBoard: one({
+    sourceField: ["boardId"],
+    destField: ["id"],
+    destSchema: boardTable,
+  }),
+  mainReleaseBoard: one({
+    sourceField: ["mainReleaseBoardId"],
+    destField: ["id"],
+    destSchema: boardTable,
   })
 }));
 
@@ -4502,7 +4622,7 @@ export const dataSourceRelationshipTableRelationships = relationships(dataSource
   })
 }));
 
-export const dashboardTableRelationships = relationships(dashboardTable, ({ many }) => ({
+export const dynamicDashboardTableRelationships = relationships(dynamicDashboardTable, ({ many }) => ({
   participants: many({
     sourceField: ["id"],
     destField: ["dashboardId"],
@@ -4511,7 +4631,7 @@ export const dashboardTableRelationships = relationships(dashboardTable, ({ many
   queryMappings: many({
     sourceField: ["id"],
     destField: ["dashboardId"],
-    destSchema: dashboardQueryMappingTable,
+    destSchema: dynamicDashboardQueryMappingTable,
   })
 }));
 
@@ -4519,28 +4639,28 @@ export const dashboardParticipantTableRelationships = relationships(dashboardPar
   dashboard: one({
     sourceField: ["dashboardId"],
     destField: ["id"],
-    destSchema: dashboardTable,
+    destSchema: dynamicDashboardTable,
   })
 }));
 
-export const queryTableRelationships = relationships(queryTable, ({ many }) => ({
+export const dynamicDashboardQueryTableRelationships = relationships(dynamicDashboardQueryTable, ({ many }) => ({
   dashboardMappings: many({
     sourceField: ["id"],
     destField: ["queryId"],
-    destSchema: dashboardQueryMappingTable,
+    destSchema: dynamicDashboardQueryMappingTable,
   })
 }));
 
-export const dashboardQueryMappingTableRelationships = relationships(dashboardQueryMappingTable, ({ one }) => ({
+export const dynamicDashboardQueryMappingTableRelationships = relationships(dynamicDashboardQueryMappingTable, ({ one }) => ({
   dashboard: one({
     sourceField: ["dashboardId"],
     destField: ["id"],
-    destSchema: dashboardTable,
+    destSchema: dynamicDashboardTable,
   }),
   query: one({
     sourceField: ["queryId"],
     destField: ["id"],
-    destSchema: queryTable,
+    destSchema: dynamicDashboardQueryTable,
   })
 }));
 
@@ -4681,6 +4801,7 @@ export const schema = createSchema(
       recurringCallSeriesTable,
       canvasFolderTable,
       canvasTable,
+      canvasVersionTable,
       canvasParticipantTable,
       canvasUserStatusTable,
       bookmarkTable,
@@ -4693,6 +4814,9 @@ export const schema = createSchema(
       formContextMappingTable,
       formFieldsTable,
       formEntityValuesTable,
+      dashboardTable,
+      queryTable,
+      dashboardQueryMappingTable,
       merchantTable,
       draftMessageTable,
       userActivityEventTable,
@@ -4727,11 +4851,11 @@ export const schema = createSchema(
       dataSourceTableTable,
       dataSourceColumnTable,
       dataSourceRelationshipTable,
-      dashboardTable,
+      dynamicDashboardTable,
       dashboardParticipantTable,
       dashboardActivityTable,
-      queryTable,
-      dashboardQueryMappingTable,
+      dynamicDashboardQueryTable,
+      dynamicDashboardQueryMappingTable,
       availableAppPermissionTable,
       appPermissionTable,
       installedAppPermissionTable,
@@ -4803,6 +4927,7 @@ export const schema = createSchema(
       recurringCallSeriesTableRelationships,
       canvasFolderTableRelationships,
       canvasTableRelationships,
+      canvasVersionTableRelationships,
       canvasParticipantTableRelationships,
       canvasUserStatusTableRelationships,
       formTableRelationships,
@@ -4810,6 +4935,7 @@ export const schema = createSchema(
       collectionTableRelationships,
       collectionItemTableRelationships,
       collectionPermissionTableRelationships,
+      applicationTableRelationships,
       appsTableRelationships,
       installedAppsTableRelationships,
       appIncomingWebhookTableRelationships,
@@ -4820,10 +4946,10 @@ export const schema = createSchema(
       dataSourceTableTableRelationships,
       dataSourceColumnTableRelationships,
       dataSourceRelationshipTableRelationships,
-      dashboardTableRelationships,
+      dynamicDashboardTableRelationships,
       dashboardParticipantTableRelationships,
-      queryTableRelationships,
-      dashboardQueryMappingTableRelationships,
+      dynamicDashboardQueryTableRelationships,
+      dynamicDashboardQueryMappingTableRelationships,
       availableAppPermissionTableRelationships,
       appPermissionTableRelationships,
       installedAppPermissionTableRelationships,
@@ -4926,6 +5052,7 @@ export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
 export type CanvasFolder = Row<typeof schema.tables.canvas_folders>;
 export type Canvas = Row<typeof schema.tables.canvases>;
+export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
 export type CanvasUserStatus = Row<typeof schema.tables.canvas_user_status>;
 export type Bookmark = Row<typeof schema.tables.bookmarks>;
@@ -4938,6 +5065,9 @@ export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
 export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
+export type Dashboard = Row<typeof schema.tables.dashboards>;
+export type Query = Row<typeof schema.tables.queries>;
+export type dashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
 export type Merchant = Row<typeof schema.tables.merchants>;
 export type DraftMessage = Row<typeof schema.tables.draft_messages>;
 export type UserActivityEvent = Row<typeof schema.tables.user_activity_events>;
@@ -4972,11 +5102,11 @@ export type DataSource = Row<typeof schema.tables.data_sources>;
 export type DataSourceTable = Row<typeof schema.tables.data_source_tables>;
 export type DataSourceColumn = Row<typeof schema.tables.data_source_columns>;
 export type DataSourceRelationship = Row<typeof schema.tables.data_source_relationships>;
-export type Dashboard = Row<typeof schema.tables.dashboards>;
+export type DynamicDashboard = Row<typeof schema.tables.dynamic_dashboards>;
 export type DashboardParticipant = Row<typeof schema.tables.dashboard_participants>;
 export type DashboardActivity = Row<typeof schema.tables.dashboard_activity>;
-export type Query = Row<typeof schema.tables.queries>;
-export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
+export type DynamicDashboardQuery = Row<typeof schema.tables.dynamic_dashboard_queries>;
+export type DynamicDashboardQueryMapping = Row<typeof schema.tables.dynamic_dashboard_queries_mapping>;
 export type AvailableAppPermission = Row<typeof schema.tables.available_app_permissions>;
 export type AppPermission = Row<typeof schema.tables.app_permission>;
 export type InstalledAppPermission = Row<typeof schema.tables.installed_app_permissions>;
