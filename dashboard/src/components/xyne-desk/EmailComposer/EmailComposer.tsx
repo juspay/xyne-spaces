@@ -1158,7 +1158,7 @@ export const EmailComposer = ({
       const activeSig = selectedSignatureId
         ? signatures?.find(s => s.id === selectedSignatureId)
         : null;
-      const bodyContent = hasContent ? stripCitationMarks(emailContent) : '';
+      const bodyContent = hasContent || hasInlineImages ? stripCitationMarks(emailContent) : '';
       const composedBody = activeSig
         ? `${bodyContent}${bodyContent ? '<br>' : ''}${activeSig.content}`
         : bodyContent;
@@ -1271,8 +1271,7 @@ export const EmailComposer = ({
     async (files: File[]): Promise<void> => {
       if (files.length === 0) return;
 
-      const images: File[] = [];
-      const others: File[] = [];
+      const allFiles: File[] = [];
 
       const rejectedTooLarge: string[] = [];
       for (const file of files) {
@@ -1280,8 +1279,7 @@ export const EmailComposer = ({
           rejectedTooLarge.push(file.name);
           continue;
         }
-        if (file.type.startsWith('image/')) images.push(file);
-        else others.push(file);
+        allFiles.push(file);
       }
 
       if (rejectedTooLarge.length > 0) {
@@ -1290,12 +1288,12 @@ export const EmailComposer = ({
         );
       }
 
-      if (others.length > 0) {
+      if (allFiles.length > 0) {
         let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - attachments.length;
         const acceptedFiles: File[] = [];
         let droppedForCount = 0;
 
-        for (const file of others) {
+        for (const file of allFiles) {
           if (availableSlots <= 0) {
             droppedForCount++;
             continue;
@@ -1385,13 +1383,8 @@ export const EmailComposer = ({
           );
         }
       }
-
-      if (images.length > 0) {
-        void uploadAndInsertInlineImages(images);
-      }
     },
     [
-      uploadAndInsertInlineImages,
       uploadAttachments,
       isComposeMode,
       conversationId,
