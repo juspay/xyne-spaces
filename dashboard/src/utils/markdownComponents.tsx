@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { logger, Event } from './logger';
+import { openLink } from './openLink';
 import { Check, Copy } from 'lucide-react';
 import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
@@ -159,9 +160,12 @@ export const createMarkdownComponents = (messageId: string): Components => ({
 
     if (isExternal) {
       const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
+        if (!href) return;
+        event.preventDefault();
         if (event.metaKey || event.ctrlKey) {
           logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: href });
         }
+        openLink(href, event);
       };
       return (
         <a
