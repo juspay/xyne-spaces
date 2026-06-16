@@ -65,23 +65,30 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
     };
   }, [handleResizeEvent]);
 
-  // For full-screen pages — and when rendered inside the browser-panel
-  // webview, where we skip the ChatDirectory column for the same reason the
-  // outer AppRoot chrome is skipped — render only the conversation view.
-  // Drop the rounded corners + shadow in the panel so content stretches
-  // edge-to-edge.
-  if (isFullScreenPage || isInPanelWebview) {
+  // Collapse (don't unmount) the sidebar on full-screen pages — keeps rows mounted.
+  useEffect(() => {
+    const panel = chatSidebarPanelRef.current;
+    if (!panel) return;
+    if (isFullScreenPage) {
+      if (!panel.isCollapsed()) panel.collapse();
+    } else if (panel.isCollapsed()) {
+      panel.expand();
+    }
+  }, [isFullScreenPage]);
+
+  // Browser-panel webview: skip the sidebar + chrome, render only the conversation.
+  if (isInPanelWebview) {
     return (
-      <main
-        className={cn(
-          'h-full relative overflow-hidden',
-          !isInPanelWebview && 'md:rounded-2xl shadow-md',
-        )}
-      >
+      <main className='h-full relative overflow-hidden'>
         <Outlet />
       </main>
     );
   }
+
+  // Full-screen pages render the full layout with the sidebar collapsed (see effect
+  // above) rather than unmounting it. The sidebar is persistent chrome — Slack,
+  // Discord, Linear all keep it mounted and just show/hide. Unmounting 500 rows on
+  // every dir↔dm trip was the leak; keep-alive trades a flat higher baseline for it.
 
   return (
     <TypingStateProvider>
@@ -97,7 +104,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             className='flex align-top h-full'
             autoSaveId='chat-screen-resize'
           >
-            {/* LEFT PANEL (Sidebar) - Mobile shows only on directory root, web always shows */}
+            {/* Sidebar — mobile shows only on directory root, desktop always (collapsed on full-screen) */}
             {isMobile ? (
               pathnameWithoutWorkspace === '/chat/dir' ||
               pathnameWithoutWorkspace === '/chat/dir/' ? (
@@ -111,7 +118,14 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 </Panel>
               ) : null
             ) : (
-              <Panel ref={chatSidebarPanelRef} defaultSize={20} minSize={15} maxSize={30}>
+              <Panel
+                ref={chatSidebarPanelRef}
+                defaultSize={20}
+                minSize={15}
+                maxSize={30}
+                collapsible
+                collapsedSize={0}
+              >
                 <aside className='w-full h-full'>
                   <ChatDirectory
                     channelData={channelData}
@@ -121,15 +135,19 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
               </Panel>
             )}
 
-            {/* RESIZE HANDLE */}
-            <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+            {/* RESIZE HANDLE — hidden on full-screen pages where the sidebar is collapsed */}
+            <PanelResizeHandle
+              className={cn(
+                'w-[2px] transition-colors cursor-col-resize flex items-center justify-center group',
+                isFullScreenPage && 'hidden',
+              )}
+            >
               <div
                 id='panel-resize-divider'
                 className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent'
               ></div>
             </PanelResizeHandle>
 
-            {/* MIDDLE PANEL (Conversation View) */}
             <Panel defaultSize={80} minSize={30}>
               <main
                 data-id='conversation-view'
@@ -140,9 +158,8 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             </Panel>
           </PanelGroup>
         ) : (
-          // Narrow screen: Overlay pattern
+          // Narrow screen: overlay pattern
           <>
-            {/* Mobile: Only show directory sidebar on directory root */}
             {isMobile ? (
               pathnameWithoutWorkspace === '/chat/dir' ||
               pathnameWithoutWorkspace === '/chat/dir/' ? (
@@ -161,7 +178,6 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 />
               </aside>
             )}
-            {/* Conversation overlay */}
             {pathnameWithoutWorkspace !== '/chat/dir' &&
               pathnameWithoutWorkspace !== '/chat/dir/' &&
               !pathnameWithoutWorkspace.startsWith('/chat/dir/my-tickets') && (

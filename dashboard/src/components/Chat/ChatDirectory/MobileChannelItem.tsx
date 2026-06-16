@@ -1,4 +1,4 @@
-import { ReactElement, useRef, useState, useEffect } from 'react';
+import { ReactElement } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones } from 'lucide-react';
 import { ChannelVisibility, NotificationLevel } from '@xyne/shared';
@@ -26,9 +26,6 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
   const { channelId: activeChannelId } = useParams();
   const context = useAuthContextValues();
 
-  const nameRef = useRef<HTMLSpanElement>(null);
-
-  const [isTruncated, setIsTruncated] = useState(false);
   const currentUserID = context.userID;
 
   // Get draft from state machine (reactive updates)
@@ -89,22 +86,8 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
     );
   };
 
-  useEffect(() => {
-    const el = nameRef.current;
-    if (!el) {
-      setIsTruncated(false);
-      return;
-    }
-    setIsTruncated(el.scrollWidth > el.clientWidth);
-  }, [displayName]);
-
   return (
-    <Tooltip
-      content={displayName}
-      delayDuration={1000}
-      side='top'
-      {...(!isTruncated && { open: false })}
-    >
+    <Tooltip content={displayName} delayDuration={1000} side='top'>
       <Link className='' to={`/chat/dir/${channel.id}`}>
         <div
           className={cn(
@@ -122,7 +105,6 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
             )} */}
           </div>
           <span
-            ref={nameRef}
             className={cn(
               'flex-1 truncate min-w-0 text-[16px] leading-[1.2] tracking-[-0.32px] flex items-center gap-1.5',
               shouldShowBold

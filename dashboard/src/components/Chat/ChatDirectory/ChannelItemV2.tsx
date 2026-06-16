@@ -1,4 +1,4 @@
-import { memo, ReactElement, useRef, useState, useEffect } from 'react';
+import { memo, ReactElement, useState } from 'react';
 import { withProfiler } from '../../../utils/withProfiler';
 import { Link, useNavigate } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X, MoreVertical, Check } from 'lucide-react';
@@ -61,9 +61,7 @@ const ChannelItemV2 = memo(
     const zero = useZero();
     const context = useAuthContextValues();
     const navigate = useNavigate();
-    const nameRef = useRef<HTMLSpanElement>(null);
 
-    const [isTruncated, setIsTruncated] = useState(false);
     const currentUserID = context.userID;
 
     const { isMobile } = usePlatform();
@@ -150,15 +148,6 @@ const ChannelItemV2 = memo(
       standaloneNavigate(navigate, `/chat/dir/${channel.id}`, { event: e });
     };
 
-    useEffect(() => {
-      const el = nameRef.current;
-      if (!el) {
-        setIsTruncated(false);
-        return;
-      }
-      setIsTruncated(el.scrollWidth > el.clientWidth);
-    }, [displayName]);
-
     const draftTooltipContent = (
       <div className='flex flex-col items-center'>
         {draftMessage && <span>{stripHtml(draftMessage)}</span>}
@@ -169,12 +158,7 @@ const ChannelItemV2 = memo(
     );
 
     return (
-      <Tooltip
-        content={displayName}
-        delayDuration={1000}
-        side='top'
-        {...(!isTruncated && { open: false })} // <= disable tooltip when not truncated
-      >
+      <Tooltip content={displayName} delayDuration={1000} side='top'>
         <Link
           className=''
           draggable={false}
@@ -199,10 +183,7 @@ const ChannelItemV2 = memo(
             style={shouldShowBold ? { fontWeight: '700' } : undefined}
           >
             <span className='flex items-center'>{getIcon()}</span>
-            <span
-              ref={nameRef}
-              className=' text-sm flex-1 truncate min-w-0 flex items-center gap-2'
-            >
+            <span className='text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
               <span className='visual-regression-hide'>{displayName}</span>
               {isSupportChannel && <SupportChannelBadge />}
               {is1on1DM && (
@@ -234,6 +215,7 @@ const ChannelItemV2 = memo(
               <DropdownMenu open={sectionMenuOpen} onOpenChange={setSectionMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <button
+                    type='button'
                     className={cn(
                       'flex items-center justify-center p-1 rounded-md hover:bg-sidebar-item-hover shrink-0 transition-opacity',
                       sectionMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
@@ -306,6 +288,7 @@ const ChannelItemV2 = memo(
             {shouldShowCloseButton && (
               <Tooltip content='Close conversation' side='top' sideOffset={6} delayDuration={500}>
                 <button
+                  type='button'
                   className='group-hover:block hidden p-1 rounded-md -blue'
                   onClick={handleCloseDm}
                   data-track-category='CHAT_SIDEBAR'
@@ -318,90 +301,6 @@ const ChannelItemV2 = memo(
                   <X size={14} className='shrink-0' />
                 </button>
               </Tooltip>
-            )}
-          </div>
-        </Link>
-      </Tooltip>
-    );
-
-    return (
-      <Tooltip
-        content={displayName}
-        delayDuration={1000}
-        side='top'
-        sideOffset={6}
-        {...(!isTruncated && { open: false })} // <= disable tooltip when not truncated
-      >
-        <Link
-          to={`/chat/dir/${channel.id}`}
-          className={cn(
-            'group/chitem text-base flex items-center gap-2 rounded-lg px-2 h-8 transition-colors ',
-            'hover:bg-muted hover:text-foreground',
-
-            isActive ? 'bg-muted' : 'bg-transparent',
-
-            unreadCount > 0
-              ? 'font-medium text-foreground'
-              : isActive
-                ? 'font-normal text-foreground'
-                : 'font-normal text-muted-foreground',
-          )}
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_CHANNEL'
-          data-track-metadata={JSON.stringify({
-            channelId: channel.id,
-            channelName: displayName,
-            isDM,
-          })}
-        >
-          <div
-            className={cn(
-              'flex items-center gap-2 w-full min-w-0',
-              isActive ? 'text-sidebar-text-primary' : 'text-sidebar-text-muted',
-            )}
-          >
-            <div className={`flex items-center justify-center flex-shrink-0 `}>{getIcon()}</div>
-
-            <span ref={nameRef} className={`text-sm flex-1 truncate min-w-0 `}>
-              {displayName}
-            </span>
-            {hasActiveCall && <Headphones size={14} className='text-muted-foreground shrink-0' />}
-            {draftMessage && !isActive && (
-              <Tooltip
-                content={
-                  <div className='max-w-xs text-center'>
-                    <span className='font-semibold mb-1'>Draft</span>
-                    <span className='text-xs opacity-90 line-clamp-2 mb-1'>
-                      &quot;{draftMessage}&quot;
-                    </span>
-                  </div>
-                }
-                side='top'
-                sideOffset={6}
-              >
-                <span className='ml-1' aria-label='Has draft'>
-                  <Pencil size={10} aria-hidden='true' />
-                </span>
-              </Tooltip>
-            )}
-            {unreadCount > 0 && !isActive && (
-              <Badge variant='success' className='font-mono'>
-                {unreadCount > 10 ? '10+' : unreadCount}
-              </Badge>
-            )}
-            {/* Close button for DMs - revealed on hover via CSS (no React re-render) */}
-            {isDM && (
-              <button
-                onClick={handleCloseDm}
-                className='invisible pointer-events-none group-hover/chitem:visible group-hover/chitem:pointer-events-auto p-1 rounded hover:bg-accent transition-colors shrink-0'
-                aria-label='Close conversation'
-                title='Close conversation'
-                data-track-category='CHAT_SIDEBAR'
-                data-track-name='CLOSE_DM_CHANNEL'
-                data-track-metadata={JSON.stringify({ channelId: channel.id })}
-              >
-                <X size={14} className='text-muted-foreground hover:text-foreground' />
-              </button>
             )}
           </div>
         </Link>

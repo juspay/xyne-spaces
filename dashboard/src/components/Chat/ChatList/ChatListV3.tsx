@@ -1227,11 +1227,15 @@ const ChatListV3: React.FC<ChatListProps> = ({
     };
   }, []);
 
-  // Ref callback to observe item elements
+  // Observe row; cleanup (React 19) unobserves + drops it from visibleDatesRef.
+  // Without this, recycled-while-intersecting rows leak on every switch.
   const itemRef = useCallback((el: HTMLDivElement | null) => {
-    if (el && dateObserverRef.current) {
-      dateObserverRef.current.observe(el);
-    }
+    if (!el || !dateObserverRef.current) return;
+    dateObserverRef.current.observe(el);
+    return () => {
+      dateObserverRef.current?.unobserve(el);
+      visibleDatesRef.current.delete(el);
+    };
   }, []);
 
   const scrollToBottom = useCallback(() => {

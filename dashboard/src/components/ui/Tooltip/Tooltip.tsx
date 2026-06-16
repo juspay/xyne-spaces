@@ -112,11 +112,34 @@ export interface TooltipProps extends React.ComponentProps<typeof TooltipPrimiti
  *   <button>Hover me</button>
  * </Tooltip>
  */
+/**
+ * Single shared Tooltip provider — mount ONCE at app root. Per-instance providers
+ * meant 500 channel rows = 500 providers (timers/listeners), churned on every
+ * dir↔dm mount/unmount. Tooltip.Root still takes delayDuration per-Root.
+ */
+export const TooltipProvider = ({
+  delayDuration = 0,
+  skipDelayDuration,
+  children,
+  ...rest
+}: React.ComponentProps<typeof TooltipPrimitive.Provider>): React.ReactElement => (
+  <TooltipPrimitive.Provider
+    data-slot='tooltip-provider'
+    delayDuration={delayDuration}
+    {...(skipDelayDuration !== undefined && { skipDelayDuration })}
+    {...rest}
+  >
+    {children}
+  </TooltipPrimitive.Provider>
+);
+
 export const Tooltip = ({
   children,
   content,
   delayDuration = 0,
-  skipDelayDuration,
+  // skipDelayDuration / providerProps are provider-level — now owned by the single
+  // root <TooltipProvider>. Accepted here for source-compat but intentionally unused.
+  skipDelayDuration: _skipDelayDuration,
   side,
   align = 'center',
   sideOffset = 0,
@@ -127,51 +150,44 @@ export const Tooltip = ({
   sticky = 'partial',
   hideWhenDetached,
   className,
-  providerProps,
+  providerProps: _providerProps,
   ...rootProps
 }: TooltipProps): React.ReactElement => {
   return (
-    <TooltipPrimitive.Provider
-      data-slot='tooltip-provider'
-      delayDuration={delayDuration}
-      {...(skipDelayDuration !== undefined && { skipDelayDuration })}
-      {...providerProps}
-    >
-      <TooltipPrimitive.Root data-slot='tooltip' {...rootProps}>
-        <TooltipPrimitive.Trigger asChild data-slot='tooltip-trigger'>
-          {children}
-        </TooltipPrimitive.Trigger>
-        <TooltipPrimitive.Portal>
-          <TooltipPrimitive.Content
-            data-slot='tooltip-content'
-            {...(side !== undefined && { side })}
-            align={align}
-            sideOffset={sideOffset}
-            {...(alignOffset !== undefined && { alignOffset })}
-            avoidCollisions={avoidCollisions}
-            {...(collisionBoundary !== undefined && { collisionBoundary })}
-            collisionPadding={collisionPadding}
-            sticky={sticky}
-            {...(hideWhenDetached !== undefined && { hideWhenDetached })}
-            className={cn(
-              'bg-foreground text-background',
-              'animate-in fade-in-0 zoom-in-95',
-              'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
-              'data-[side=bottom]:slide-in-from-top-2',
-              'data-[side=left]:slide-in-from-right-2',
-              'data-[side=right]:slide-in-from-left-2',
-              'data-[side=top]:slide-in-from-bottom-2',
-              'z-[60] w-fit origin-[--radix-tooltip-content-transform-origin]',
-              'rounded-md px-3 py-1.5 text-xs text-balance',
-              className,
-            )}
-          >
-            {content}
-            <TooltipPrimitive.Arrow className='bg-foreground fill-foreground z-[60] size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]' />
-          </TooltipPrimitive.Content>
-        </TooltipPrimitive.Portal>
-      </TooltipPrimitive.Root>
-    </TooltipPrimitive.Provider>
+    <TooltipPrimitive.Root data-slot='tooltip' delayDuration={delayDuration} {...rootProps}>
+      <TooltipPrimitive.Trigger asChild data-slot='tooltip-trigger'>
+        {children}
+      </TooltipPrimitive.Trigger>
+      <TooltipPrimitive.Portal>
+        <TooltipPrimitive.Content
+          data-slot='tooltip-content'
+          {...(side !== undefined && { side })}
+          align={align}
+          sideOffset={sideOffset}
+          {...(alignOffset !== undefined && { alignOffset })}
+          avoidCollisions={avoidCollisions}
+          {...(collisionBoundary !== undefined && { collisionBoundary })}
+          collisionPadding={collisionPadding}
+          sticky={sticky}
+          {...(hideWhenDetached !== undefined && { hideWhenDetached })}
+          className={cn(
+            'bg-foreground text-background',
+            'animate-in fade-in-0 zoom-in-95',
+            'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
+            'data-[side=bottom]:slide-in-from-top-2',
+            'data-[side=left]:slide-in-from-right-2',
+            'data-[side=right]:slide-in-from-left-2',
+            'data-[side=top]:slide-in-from-bottom-2',
+            'z-[60] w-fit origin-[--radix-tooltip-content-transform-origin]',
+            'rounded-md px-3 py-1.5 text-xs text-balance',
+            className,
+          )}
+        >
+          {content}
+          <TooltipPrimitive.Arrow className='bg-foreground fill-foreground z-[60] size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]' />
+        </TooltipPrimitive.Content>
+      </TooltipPrimitive.Portal>
+    </TooltipPrimitive.Root>
   );
 };
 

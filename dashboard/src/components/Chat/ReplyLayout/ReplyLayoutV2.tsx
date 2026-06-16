@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ThreadData } from '../ChatBubble/ChatBubble';
 import { PencilIcon } from 'lucide-react';
@@ -30,7 +29,6 @@ const ReplyLayoutV2: React.FC<{
   parentConversationId,
   messageId,
 }) => {
-  const [hover, setHover] = useState(false);
   const { channelId } = useParams<{ channelId: string }>();
 
   // For showInChannel messages, show "View newer replies" only if there are newer replies in the parent thread
@@ -66,12 +64,11 @@ const ReplyLayoutV2: React.FC<{
       } `}
     >
       <button
+        type='button'
         onClick={replies.onOpenThread}
-        className={`flex items-center gap-2 text-xs bg-transparent border-0 cursor-pointer transition-opacity duration-200 hover:opacity-80 flex-1 ${
+        className={`group flex items-center gap-2 text-xs bg-transparent border-0 cursor-pointer transition-opacity duration-200 hover:opacity-80 flex-1 ${
           isMe ? 'max-[500px]:justify-end' : ''
         }`}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
         data-track-category='MESSAGE'
         data-track-name='OPEN_THREAD_FROM_REPLY_LAYOUT'
         data-track-metadata={JSON.stringify({ replyCount: replies?.replyCount, messageId })}
@@ -93,17 +90,13 @@ const ReplyLayoutV2: React.FC<{
         {replies.lastActivityAt && (
           <span className='relative inline-flex items-baseline text-muted-foreground whitespace-nowrap w-[140px]'>
             <span
-              className={`absolute left-0 top-0 ${isMe ? 'max-[500px]:right-0' : ''} transition-opacity duration-150 ${
-                hover ? 'opacity-0' : 'opacity-100'
-              }`}
+              className={`absolute left-0 top-0 ${isMe ? 'max-[500px]:right-0' : ''} transition-opacity duration-150 opacity-100 group-hover:opacity-0`}
             >
               Last activity {formatRelativeTime(replies.lastActivityAt)}
             </span>
 
             <span
-              className={`absolute left-0 top-0 ${isMe ? 'max-[500px]:right-0' : ''} transition-opacity duration-150 ${
-                hover ? 'opacity-100' : 'opacity-0'
-              }`}
+              className={`absolute left-0 top-0 ${isMe ? 'max-[500px]:right-0' : ''} transition-opacity duration-150 opacity-0 group-hover:opacity-100`}
             >
               View thread
             </span>

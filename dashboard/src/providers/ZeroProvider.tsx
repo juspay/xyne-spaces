@@ -64,6 +64,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         schema,
         mutators: mutators,
         hiddenTabDisconnectDelay: 60000,
+        pingTimeoutMs: 10000,
         context: {
           userID: user.id,
           workspaceId: currentWorkspaceId,
