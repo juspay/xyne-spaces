@@ -1,3 +1,25 @@
+## [1.163.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.162.0...v1.163.0) (2026-06-16)
+
+
+### Features
+
+* Add call joining preferences feature ([be8648c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/be8648c0ee5617cad7979c7077490f2206d4f04f)), closes [#7615](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7615)
+* ask ai file scope ([8982608](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/898260867c4cc6935a817c441fdbd2fd5ded8c50)), closes [#7502](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7502)
+* fix for kanban ui not being reactive on change ([f5b42d9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f5b42d97982459ec07dc5ddc791a7f8b88a07f1e))
+* Release Manager v2 ([1be7ec7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1be7ec7fa7c58c52bfea5c4b6eb1bac3f61980b5)), closes [#6046](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/6046)
+
+
+### Bug Fixes
+
+* bot markdown links not following open-links-externally setting ([64ee2b1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/64ee2b11026807e952ac68bb0735e76c83d9474e)), closes [#7583](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7583)
+* cherry-pick PR 7541 to main ([f23caab](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f23caab651e55f3b10cff860bd063c745d8a081f)), closes [#7619](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7619)
+* fix for support notifcations ([1a622d0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1a622d022b7bedde6444f3a4a54527fe74ff754f))
+* fixes ticket creation modal title and desc field ux ([cb21feb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cb21feb662598ea7010ee8b76cda39641af43092))
+* making thread unread count and thread mark as read activities as same ([0272e56](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0272e560a1292e4244223e1942d16ccd7b1e1165)), closes [#7533](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7533)
+* Move Dynamic dashboard from zero to non zero ([ed9fb1b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ed9fb1b8d17843c6a6128e1d48fafa96fe3596db)), closes [#7491](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7491)
+* removing the useEffect refreshing modal on every users change ([a8c1a86](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a8c1a86bc29aaab3c78e37239148f8272a4235dc)), closes [#7614](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7614)
+* ticket type fix ([48fb910](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/48fb910c71a17313a23d877cb49b9fa133d7385d)), closes [#7624](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7624)
+
 ## [1.162.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.161.0...v1.162.0) (2026-06-16)
 
 
