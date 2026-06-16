@@ -250,6 +250,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // File handling state
   const [isDraggingOverModal, setIsDraggingOverModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
   const { isMobile } = usePlatform();
 
@@ -349,6 +350,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       console.error('Title generation error:', error);
     },
   });
+
+  // While the title is being AI-generated the title input is replaced by a shimmer,
+  // so the Dialog's open-autofocus can't land on it. Once generation finishes, focus
+  // the title input (desktop only) — unless the user has already moved into another field.
+  const prevIsTitleGenerating = useRef(isTitleGenerating);
+  useEffect(() => {
+    const finishedGenerating = prevIsTitleGenerating.current && !isTitleGenerating;
+    prevIsTitleGenerating.current = isTitleGenerating;
+    if (!finishedGenerating || isMobile || !isOpen) return;
+    if (document.activeElement === descriptionTextareaRef.current) return;
+    requestAnimationFrame(() => titleInputRef.current?.focus());
+  }, [isTitleGenerating, isMobile, isOpen]);
 
   // Form state
   const form = useForm({
@@ -1347,7 +1360,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       onOpenChange={handleClose}
       title='Create Ticket'
       description='Create and edit ticket details before submitting.'
-      {...(!isMobile ? { focusRef: descriptionTextareaRef } : {})}
+      {...(!isMobile ? { focusRef: titleInputRef } : {})}
       data-testid='create-ticket-modal'
       className={cn(
         'w-full max-w-screen-md max-h-1/2 rounded-xl border border-border',
@@ -1372,7 +1385,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         )}
 
         <div className='w-full px-4 pt-4 pb-3 flex items-center justify-between'>
-          <h2 className='text-sm leading-5 font-medium text-muted-foreground select-none'>
+          <h2 className='text-xs leading-5 font-medium text-foreground/80 select-none'>
             {ticketSequence
               ? `New Ticket (${ticketSequence.current}/${ticketSequence.total})`
               : 'New Ticket'}
@@ -1423,6 +1436,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   </div>
                 ) : (
                   <Input
+                    ref={titleInputRef}
                     value={field.state.value}
                     required={true}
                     onChange={e => {
@@ -1433,7 +1447,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       field.handleChange(e.target.value);
                     }}
                     aria-label='Ticket Title'
-                    placeholder='Issue'
+                    placeholder='Enter Ticket Title...'
                     data-testid='ticket-title-input'
                     data-track-category='TICKETS'
                     data-track-name='EDIT_TICKET_TITLE'
@@ -1441,7 +1455,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     className={cn(
                       '!text-xl !leading-tight truncate',
                       'px-0 border-none focus-visible:ring-0',
-                      'font-bold text-foreground placeholder:text-xl placeholder:text-muted-foreground',
+                      'font-bold text-foreground placeholder:text-xl placeholder:text-muted-foreground/50',
                       field.state.meta.errors.length > 0 && 'text-red-600',
                     )}
                   />
@@ -1472,7 +1486,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   id='ticket-description'
                   value={field.state.value || ''}
                   aria-invalid={field.state.meta.errors.length > 0}
-                  placeholder='Add description ...'
+                  placeholder='Enter Ticket Description...'
                   aria-label='Ticket Description'
                   data-testid='ticket-description-input'
                   data-track-category='TICKETS'
@@ -1490,7 +1504,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     'border-none focus-visible:ring-0 focus-visible:border-none rounded-none p-0 min-h-16',
                     'max-h-[25vh]', // can occupy max 25% of vertical height
                     'resize-none overflow-y-auto',
-                    'placeholder:text-muted-foreground/80 !text-muted-foreground leading-5 font-semibold',
+                    'placeholder:text-muted-foreground/50 text-foreground/80 leading-5 font-semibold',
                     field.state.meta.errors.length > 0 && 'text-red-600',
                   )}
                 />
