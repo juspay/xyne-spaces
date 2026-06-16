@@ -2,7 +2,7 @@
  * Tooltip Component Exports
  */
 
-export { Tooltip as default, Tooltip } from './Tooltip';
+export { Tooltip as default, Tooltip, TooltipProvider } from './Tooltip';
 
 export { cn } from '../../../utils/classNames';
 

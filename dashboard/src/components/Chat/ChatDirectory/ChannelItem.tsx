@@ -1,4 +1,4 @@
-import { ReactElement, useRef, useState, useEffect } from 'react';
+import { ReactElement } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X } from 'lucide-react';
 import { ChannelVisibility, NotificationLevel } from '@xyne/shared';
@@ -74,27 +74,8 @@ const ChannelItem = ({
     );
   };
 
-  // Truncation detection for tooltip
-  const nameRef = useRef<HTMLSpanElement>(null);
-  const [isTruncated, setIsTruncated] = useState(false);
-
-  useEffect(() => {
-    const el = nameRef.current;
-    if (!el) {
-      setIsTruncated(false);
-      return;
-    }
-    setIsTruncated(el.scrollWidth > el.clientWidth);
-  }, [displayName]);
-
   return (
-    <Tooltip
-      content={displayName}
-      delayDuration={1000}
-      side='top'
-      sideOffset={6}
-      {...(!isTruncated && { open: false })} // <= disable tooltip when not truncated
-    >
+    <Tooltip content={displayName} delayDuration={1000} side='top' sideOffset={6}>
       <Link
         to={`/chat/dir/${channel.id}`}
         className={cn(
@@ -121,9 +102,7 @@ const ChannelItem = ({
         <div className='flex items-center gap-2 w-full min-w-0'>
           <div className={`flex items-center justify-center flex-shrink-0 `}>{getIcon()}</div>
 
-          <span ref={nameRef} className='text-[13px] flex-1 truncate min-w-0'>
-            {displayName}
-          </span>
+          <span className='text-[13px] flex-1 truncate min-w-0'>{displayName}</span>
           {hasActiveCall && (
             <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
               <Headphones size={14} />
@@ -155,6 +134,7 @@ const ChannelItem = ({
           {/* Close button for DMs - revealed on hover via CSS (no React re-render) */}
           {isDM && (
             <button
+              type='button'
               onClick={handleCloseDm}
               className='invisible pointer-events-none group-hover/chitem:visible group-hover/chitem:pointer-events-auto p-1 rounded hover:bg-accent transition-colors shrink-0'
               aria-label='Close conversation'
