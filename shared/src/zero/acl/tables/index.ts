@@ -16,8 +16,6 @@ export { CanvasFoldersACL } from './canvas-folders-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';
 export { CanvasUserStatusACL } from './canvas-user-status-acl';
 export { CanvasesACL } from './canvases-acl';
-export { DashboardsACL } from './dashboards-acl';
-export { DashboardParticipantsACL } from './dashboard-participants-acl';
 export { ChannelParticipantsACL } from './channel-participants-acl';
 export { ChannelStatsACL } from './channel-stats-acl';
 export { ChannelsACL } from './channels-acl';

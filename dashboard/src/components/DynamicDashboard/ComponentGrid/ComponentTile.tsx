@@ -11,17 +11,15 @@ import {
 } from 'lucide-react';
 import { Component as ReactComponent, ReactElement, ReactNode, useCallback, useState } from 'react';
 import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
-import { useAuth } from '../../../hooks/useAuth';
 import { useComponentData } from '../../../hooks/useComponentData';
 import { useResolvedComponentData } from '../../../hooks/useResolvedComponentData';
-import { useZero } from '../../../hooks/useZero';
 import type {
   ComponentRuntimeConfig,
   DashboardRuntimeContext,
 } from '../../../services/DynamicDashboard/planResolver';
 import { formatQueryError } from '../../../utils/queryErrorFormatter';
-import { mutators } from '../../../zero/mutators';
+import { getApiErrorMessage } from '../../../utils/apiError';
+import { useComponentMutations } from '../../../hooks/useDashboards';
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import {
@@ -60,8 +58,7 @@ const ComponentTile = ({
   autoRefreshMs,
   onEdit,
 }: ComponentTileProps): ReactElement => {
-  const z = useZero();
-  const { user } = useAuth();
+  const { create, remove } = useComponentMutations(component.dashboardId ?? '');
   const visualType: QueryVisualizationType | null = isVisualType(component.visualType)
     ? component.visualType
     : null;
@@ -103,85 +100,66 @@ const ComponentTile = ({
   const isPersisted = fetchEnabled && Boolean(component.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const handleDelete = useCallback(async () => {
-    if (!z) return;
-    try {
-      const result = z.mutate(mutators.dashboardComponent.delete({ id: component.id }));
-      const res = await result.server;
-      if (res.type === 'error') {
-        toast.error('Failed to delete component', {
-          description: res.error instanceof Error ? res.error.message : 'Unknown error',
-        });
-        return;
-      }
-      toast.success('Component deleted');
-    } catch (e) {
-      toast.error('Failed to delete component', {
-        description: e instanceof Error ? e.message : 'Unknown error',
-      });
-    } finally {
-      setDeleteOpen(false);
-    }
-  }, [z, component.id]);
+  const handleDelete = useCallback(() => {
+    remove.mutate(component.id, {
+      onSuccess: () => {
+        toast.success('Component deleted');
+      },
+      onError: e => {
+        toast.error('Failed to delete component', { description: getApiErrorMessage(e) });
+      },
+      onSettled: () => {
+        setDeleteOpen(false);
+      },
+    });
+  }, [component.id, remove]);
 
-  const handleDuplicate = useCallback(async () => {
-    if (!z || !user?.id || visualType === null) return;
+  const handleDuplicate = useCallback(() => {
+    if (visualType === null) return;
     if (!component.dashboardId) {
       toast.error('Failed to duplicate component', {
         description: 'Parent dashboard id is missing from this tile',
       });
       return;
     }
-    try {
-      const newId = uuidv4();
-      const sourcePos = (() => {
-        try {
-          return JSON.parse(component.position ?? '{}') as {
-            x?: unknown;
-            y?: unknown;
-            w?: unknown;
-            h?: unknown;
-          };
-        } catch {
-          return {} as { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
-        }
-      })();
-      const pos = {
-        x: typeof sourcePos.x === 'number' ? sourcePos.x : 0,
-        y:
-          typeof sourcePos.y === 'number'
-            ? sourcePos.y + (typeof sourcePos.h === 'number' ? sourcePos.h : 2)
-            : 0,
-        w: typeof sourcePos.w === 'number' ? sourcePos.w : 6,
-        h: typeof sourcePos.h === 'number' ? sourcePos.h : 4,
-      };
-      const result = z.mutate(
-        mutators.dashboardComponent.create({
-          id: newId,
-          dashboardId: component.dashboardId,
-          visualType,
-          title: component.title ? `${component.title} (copy)` : undefined,
-          queryJson: component.storedPlan ?? {},
-          position: JSON.stringify(pos),
-          createdBy: user.id,
-          mappingId: uuidv4(),
-          timestamp: Date.now(),
-        }),
-      );
-      const res = await result.server;
-      if (res.type === 'error') {
-        toast.error('Failed to duplicate component', {
-          description: res.error instanceof Error ? res.error.message : 'Unknown error',
-        });
-        return;
+    const sourcePos = (() => {
+      try {
+        return JSON.parse(component.position ?? '{}') as {
+          x?: unknown;
+          y?: unknown;
+          w?: unknown;
+          h?: unknown;
+        };
+      } catch {
+        return {} as { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
       }
-      toast.success('Component duplicated');
-    } catch (e) {
-      toast.error('Failed to duplicate component', {
-        description: e instanceof Error ? e.message : 'Unknown error',
-      });
-    }
-  }, [z, user, component, visualType]);
+    })();
+    const pos = {
+      x: typeof sourcePos.x === 'number' ? sourcePos.x : 0,
+      y:
+        typeof sourcePos.y === 'number'
+          ? sourcePos.y + (typeof sourcePos.h === 'number' ? sourcePos.h : 2)
+          : 0,
+      w: typeof sourcePos.w === 'number' ? sourcePos.w : 6,
+      h: typeof sourcePos.h === 'number' ? sourcePos.h : 4,
+    };
+    create.mutate(
+      {
+        visualType,
+        ...(component.title ? { title: `${component.title} (copy)` } : {}),
+        queryJson: component.storedPlan ?? {},
+        position: JSON.stringify(pos),
+      },
+      {
+        onSuccess: () => {
+          toast.success('Component duplicated');
+        },
+        onError: e => {
+          toast.error('Failed to duplicate component', { description: getApiErrorMessage(e) });
+        },
+      },
+    );
+  }, [component, visualType, create]);
 
   return (
     <div className='group/tile flex flex-col h-full bg-white border border-xyne-gray-200 rounded-lg shadow-[0px_2px_1px_0px_rgba(5,5,6,0.05)] overflow-hidden'>

@@ -1,13 +1,11 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useCachedQuery } from '@xyne/shared/hooks';
 import { toast } from 'sonner';
 import { LayoutDashboard, MoreVertical, Plus, Share, Sparkles } from 'lucide-react';
 import { DashboardRole } from '@xyne/shared';
-import { queries } from '../../zero/queries';
-import { mutators } from '../../zero/mutators';
+import { getApiErrorMessage } from '../../utils/apiError';
+import { useDashboardDetail, useUpdateDashboard } from '../../hooks/useDashboards';
 import { useAuth } from '../../hooks/useAuth';
-import { useZero } from '../../hooks/useZero';
 import { Dialog } from '../ui/Dialog';
 import { DashboardShareModal } from './DashboardShareModal';
 import { ComponentGrid, type GridComponent } from './ComponentGrid';
@@ -28,15 +26,15 @@ import type {
 const DynamicDashboardScreen = (): ReactElement => {
   const { dashboardId } = useParams<{ dashboardId: string }>();
   const { user } = useAuth();
-  const z = useZero();
   const [shareOpen, setShareOpen] = useState(false);
   const [addComponentOpen, setAddComponentOpen] = useState(false);
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
 
-  const [dashboard] = useCachedQuery(queries.getDashboard({ dashboardId: dashboardId || '' }), {
-    enabled: !!dashboardId,
-  });
+  const { data } = useDashboardDetail(dashboardId || '', 'external');
+
+  const dashboard = data?.dashboard;
+  const participants = data?.participants;
 
   const dashboardConfig = useMemo<DashboardConfigShape>(() => {
     try {
@@ -73,40 +71,32 @@ const DynamicDashboardScreen = (): ReactElement => {
     };
   }, [dashboardConfig.timeRange, dashboardConfig.variables, dashboardConfig.variableValues]);
 
+  const updateConfigMutation = useUpdateDashboard(dashboard?.id || dashboardId || '');
+
   const persistConfig = useCallback(
     (partial: Partial<DashboardConfigShape>) => {
-      if (!z || !dashboard) return;
+      if (!dashboard) return;
       const next: DashboardConfigShape = { ...dashboardConfig, ...partial };
-      const result = z.mutate(
-        mutators.dashboard.update({
-          id: dashboard.id,
-          config: JSON.stringify(next),
-          timestamp: Date.now(),
-        }),
-      );
-      void result.server
-        .then(res => {
-          if (res.type === 'error') {
+      updateConfigMutation.mutate(
+        { config: JSON.stringify(next) },
+        {
+          onError: (err: unknown) => {
             toast.error('Failed to save dashboard settings', {
-              description: res.error instanceof Error ? res.error.message : undefined,
+              description: getApiErrorMessage(err),
             });
-          }
-        })
-        .catch((err: unknown) => {
-          toast.error('Failed to save dashboard settings', {
-            description: err instanceof Error ? err.message : undefined,
-          });
-        });
+          },
+        },
+      );
     },
-    [z, dashboard, dashboardConfig],
+    [dashboard, dashboardConfig, updateConfigMutation],
   );
 
   const tiles = useMemo(
     () =>
-      (dashboard?.queryMappings ?? [])
-        .map(m => m.query)
+      (data?.tiles ?? [])
+        .map(t => t.query)
         .filter((q): q is NonNullable<typeof q> => !!q && q.queryType === 'external'),
-    [dashboard?.queryMappings],
+    [data?.tiles],
   );
 
   const inferredDsId = useMemo<string | undefined>(() => {
@@ -160,10 +150,10 @@ const DynamicDashboardScreen = (): ReactElement => {
     );
   }
 
-  const participantCount = dashboard.participants?.length ?? 0;
+  const participantCount = participants?.length ?? 0;
   const componentCount = gridComponents.length;
 
-  const selfParticipant = dashboard.participants?.find(p => p.userId === user?.id);
+  const selfParticipant = participants?.find(p => p.userId === user?.id);
   const isOwner = dashboard.createdBy === user?.id || selfParticipant?.role === DashboardRole.OWNER;
   const isEditor = selfParticipant?.role === DashboardRole.EDITOR;
   const canShare = isOwner || isEditor;
@@ -315,6 +305,7 @@ const DynamicDashboardScreen = (): ReactElement => {
         <div className='flex-1 overflow-auto min-h-0'>
           <ComponentGrid
             components={gridComponents}
+            dashboardId={dashboard.id}
             runtimeContext={runtimeContext}
             autoRefreshMs={dashboardConfig.autoRefreshMs}
             canEdit={Boolean(canShare)}
@@ -356,7 +347,7 @@ const DynamicDashboardScreen = (): ReactElement => {
           }}
           isOwner={isOwner}
           isEditor={isEditor}
-          preloadedParticipants={dashboard.participants}
+          preloadedParticipants={participants}
         />
       </Dialog>
     </div>

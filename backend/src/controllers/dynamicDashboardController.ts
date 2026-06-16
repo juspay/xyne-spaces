@@ -164,15 +164,15 @@ export class DynamicDashboardController {
       return;
     }
 
-    const component = await db.query.findUnique({ where: { id: componentId } });
+    const component = await db.dynamicDashboardQuery.findUnique({ where: { id: componentId } });
     if (!component) {
       res.status(404).json({ error: 'NotFound', message: 'Component not found' });
       return;
     }
 
-    const mapping = await db.dashboardQueryMapping.findFirst({ where: { queryId: componentId } });
+    const mapping = await db.dynamicDashboardQueryMapping.findFirst({ where: { queryId: componentId } });
     const dashboard = mapping
-      ? await db.dashboard.findUnique({ where: { id: mapping.dashboardId } })
+      ? await db.dynamicDashboard.findUnique({ where: { id: mapping.dashboardId } })
       : null;
     if (!dashboard || dashboard.workspaceId !== workspaceId) {
       if (!dashboard) {

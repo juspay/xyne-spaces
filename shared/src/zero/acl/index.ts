@@ -15,8 +15,6 @@ export {
   CanvasFoldersACL,
   CanvasParticipantsACL,
   CanvasesACL,
-  DashboardsACL,
-  DashboardParticipantsACL,
   ChannelDailyRecapsACL,
   ChannelRecapsACL,
   ChannelParticipantsACL,

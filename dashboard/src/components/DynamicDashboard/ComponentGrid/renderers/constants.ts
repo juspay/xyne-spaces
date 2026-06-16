@@ -29,6 +29,9 @@ export const CHART_GRID_DASH = '3 3';
 export const CHART_YAXIS_WIDTH = 40;
 export const CHART_XAXIS_MIN_TICK_GAP = 24;
 
+export const CHART_MAX_BAR_SIZE_PX = 96;
+export const CHART_MIN_BAR_SLOT_PX = 48;
+
 export const CHART_STROKE_WIDTH = 2;
 export const CHART_AREA_FILL_OPACITY = 0.18;
 

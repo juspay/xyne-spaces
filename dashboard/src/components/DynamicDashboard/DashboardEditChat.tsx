@@ -1,16 +1,21 @@
 import { ReactElement, useCallback, useMemo, type ReactNode } from 'react';
-import { v4 as uuidv4 } from 'uuid';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { LayoutDashboard } from 'lucide-react';
+import { getApiErrorMessage } from '../../utils/apiError';
 import {
   QueryVisualizationType,
   type DashboardPlan,
   type DashboardToolCall,
   type DraftComponent,
 } from '@xyne/shared';
-import { useAuth } from '../../hooks/useAuth';
-import { useZero } from '../../hooks/useZero';
-import { mutators } from '../../zero/mutators';
+import {
+  createComponent,
+  deleteComponent,
+  updateComponent,
+  updateDashboard,
+} from '../../services/DynamicDashboard/dashboardCrudService';
+import { dashboardKeys } from '../../hooks/useDashboards';
 import { DashboardAiChat } from './ai/DashboardAiChat';
 import type { ToolCallResult } from './ai/chatTypes';
 import { defaultSizeFor, nextOpenPosition } from './componentEditor/queryPlanUtils';
@@ -58,8 +63,7 @@ export const DashboardEditChat = ({
   canRenameOrChangeVisibility,
   onClose,
 }: DashboardEditChatProps): ReactElement => {
-  const z = useZero();
-  const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   const currentPlan = useMemo<DashboardPlan>(() => {
     const planComponents: DraftComponent[] = [];
@@ -96,47 +100,26 @@ export const DashboardEditChat = ({
   }, [components]);
 
   const trackMutate = useCallback(
-    async (
-      result: {
-        server: Promise<
-          { type: 'success' } | { type: 'error'; error: { message?: string } | string | Error }
-        >;
-      },
-      label: string,
-    ): Promise<ToolCallResult> => {
-      const extractMessage = (e: unknown): string => {
-        if (typeof e === 'string') return e;
-        if (e && typeof e === 'object' && 'message' in e) {
-          const m = (e as { message?: unknown }).message;
-          if (typeof m === 'string' && m.length > 0) return m;
-        }
-        return 'Unknown error';
-      };
+    async (op: () => Promise<unknown>, label: string): Promise<ToolCallResult> => {
       try {
-        const res = await result.server;
-        if (res.type === 'error') {
-          const message = extractMessage(res.error);
-          toast.error(`Edit failed (${label})`, { description: message });
-          return { status: 'error', message };
-        }
+        await op();
+        await queryClient.invalidateQueries({ queryKey: dashboardKeys.dashboard(dashboardId) });
         return { status: 'completed' };
       } catch (err) {
-        const message = extractMessage(err);
+        const message = getApiErrorMessage(err);
         toast.error(`Edit failed (${label})`, { description: message });
         return { status: 'error', message };
       }
     },
-    [],
+    [queryClient, dashboardId],
   );
 
   const applyToolCall = useCallback(
     async (call: DashboardToolCall): Promise<ToolCallResult> => {
-      if (!z) return { status: 'error', message: 'Sync client unavailable' };
       const fail = (message: string): ToolCallResult => {
         toast.error('Edit failed', { description: message });
         return { status: 'error', message };
       };
-      const now = Date.now();
       try {
         switch (call.tool) {
           case 'set_dashboard_meta': {
@@ -147,27 +130,20 @@ export const DashboardEditChat = ({
                 "You don't have permission to rename this dashboard. Only owners can change the name.",
               );
             }
-            const args: Parameters<typeof mutators.dashboard.update>[0] = {
-              id: dashboardId,
-              timestamp: now,
-            };
-            if (description !== undefined) args.description = description;
-            if (wantsRename) args.name = title;
-            if (args.description === undefined && args.name === undefined) {
+            const patch: { name?: string; description?: string } = {};
+            if (description !== undefined) patch.description = description;
+            if (wantsRename) patch.name = title;
+            if (patch.description === undefined && patch.name === undefined) {
               return fail('No changes to apply.');
             }
-            return await trackMutate(z.mutate(mutators.dashboard.update(args)), 'rename');
+            return await trackMutate(() => updateDashboard(dashboardId, patch), 'rename');
           }
           case 'add_component': {
-            if (!user?.id) return fail('Not signed in.');
-            const id = uuidv4();
             const position =
               call.args.position ?? defaultPositionFor(call.args.visualType, components);
             return await trackMutate(
-              z.mutate(
-                mutators.dashboardComponent.create({
-                  id,
-                  dashboardId,
+              () =>
+                createComponent(dashboardId, {
                   visualType: call.args.visualType,
                   title: call.args.title,
                   queryJson: call.args.queryPlan,
@@ -175,39 +151,35 @@ export const DashboardEditChat = ({
                   ...(call.args.componentConfig
                     ? { config: JSON.stringify(call.args.componentConfig) }
                     : {}),
-                  createdBy: user.id,
-                  mappingId: uuidv4(),
-                  timestamp: now,
                 }),
-              ),
               `add "${call.args.title}"`,
             );
           }
           case 'update_component': {
-            const args: Parameters<typeof mutators.dashboardComponent.update>[0] = {
-              id: call.args.componentId,
-              timestamp: now,
-            };
+            const patch: {
+              visualType?: QueryVisualizationType;
+              title?: string;
+              queryJson?: unknown;
+              position?: string;
+              config?: string;
+            } = {};
             if (call.args.visualType !== undefined) {
-              args.visualType = call.args.visualType;
+              patch.visualType = call.args.visualType;
             }
-            if (call.args.title !== undefined) args.title = call.args.title;
+            if (call.args.title !== undefined) patch.title = call.args.title;
             if (call.args.queryPlan !== undefined) {
-              args.queryJson = call.args.queryPlan;
+              patch.queryJson = call.args.queryPlan;
             }
             if (call.args.position !== undefined) {
-              args.position = JSON.stringify(call.args.position);
+              patch.position = JSON.stringify(call.args.position);
             }
             if (call.args.componentConfig !== undefined) {
-              args.config = JSON.stringify(call.args.componentConfig);
+              patch.config = JSON.stringify(call.args.componentConfig);
             }
-            return await trackMutate(z.mutate(mutators.dashboardComponent.update(args)), 'update');
+            return await trackMutate(() => updateComponent(call.args.componentId, patch), 'update');
           }
           case 'remove_component': {
-            return await trackMutate(
-              z.mutate(mutators.dashboardComponent.delete({ id: call.args.componentId })),
-              'remove',
-            );
+            return await trackMutate(() => deleteComponent(call.args.componentId), 'remove');
           }
         }
         return fail('Unknown tool call.');
@@ -215,7 +187,7 @@ export const DashboardEditChat = ({
         return fail(err instanceof Error ? err.message : 'Unknown error');
       }
     },
-    [z, dashboardId, components, canRenameOrChangeVisibility, user, trackMutate],
+    [dashboardId, components, canRenameOrChangeVisibility, trackMutate],
   );
 
   const handleToolCall = useCallback(

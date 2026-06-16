@@ -1,14 +1,11 @@
 import { ReactElement, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import { Loader2, Plus } from 'lucide-react';
 import { DashboardVisibility } from '@xyne/shared';
-import { useCachedQuery } from '@xyne/shared/hooks';
-import { useZero } from '../../hooks/useZero';
 import { useAuth } from '../../hooks/useAuth';
-import { mutators } from '../../zero/mutators';
-import { queries } from '../../zero/queries';
+import { useDashboardList, useDashboardMutations } from '../../hooks/useDashboards';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { Button } from '../ui/Button';
 import Input from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
@@ -21,21 +18,21 @@ interface CreateDashboardModalProps {
 
 export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): ReactElement => {
   const { user } = useAuth();
-  const z = useZero();
   const navigate = useNavigate();
+  const { create } = useDashboardMutations();
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState<DashboardVisibility>(DashboardVisibility.PRIVATE);
   const [isCreating, setIsCreating] = useState(false);
 
-  const [existingDashboards] = useCachedQuery(
-    queries.allDashboards({ limit: DASHBOARD_NAME_LOOKUP_LIMIT }),
-  );
+  const { data: lookupData } = useDashboardList('all', DASHBOARD_NAME_LOOKUP_LIMIT);
+  const existingDashboards = lookupData?.dashboards;
 
   const handleCreate = useCallback(async () => {
     const trimmed = name.trim();
     if (!trimmed || !user?.id || !user?.workspaceId) return;
+    // Best-effort client-side pre-check; the server enforces uniqueness (409).
     const nameClash = (existingDashboards ?? []).some(
       d => d.name.trim().toLowerCase() === trimmed.toLowerCase(),
     );
@@ -44,37 +41,21 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
       return;
     }
     setIsCreating(true);
-    const newId = uuidv4();
     try {
-      const result = z.mutate(
-        mutators.dashboard.create({
-          id: newId,
-          workspaceId: user.workspaceId,
-          name: trimmed,
-          description: description.trim() || undefined,
-          visibility,
-          timestamp: Date.now(),
-          participantId: uuidv4(),
-        }),
-      );
-      const res = await result.server;
-      if (res.type === 'error') {
-        toast.error('Failed to create dashboard', {
-          description: res.error instanceof Error ? res.error.message : 'Unknown error',
-        });
-        return;
-      }
+      const dashboard = await create.mutateAsync({
+        name: trimmed,
+        description: description.trim() || undefined,
+        visibility,
+      });
       toast.success('Dashboard created');
-      void navigate(`/${user.workspaceId}/dashboards/${newId}`);
+      void navigate(`/${user.workspaceId}/dashboards/${dashboard.id}`);
       onClose();
     } catch (err) {
-      toast.error('Failed to create dashboard', {
-        description: err instanceof Error ? err.message : 'Unknown error',
-      });
+      toast.error('Failed to create dashboard', { description: getApiErrorMessage(err) });
     } finally {
       setIsCreating(false);
     }
-  }, [z, user, name, description, visibility, existingDashboards, navigate, onClose]);
+  }, [user, name, description, visibility, existingDashboards, navigate, onClose, create]);
 
   const handleNameChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value),

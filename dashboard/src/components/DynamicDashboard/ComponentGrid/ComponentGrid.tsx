@@ -4,6 +4,19 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '../../../utils/apiError';
+import { useComponentMutations } from '../../../hooks/useDashboards';
+import ComponentTile, { type ComponentTileData } from './ComponentTile';
+import type { DashboardRuntimeContext } from '../../../services/DynamicDashboard/planResolver';
+import {
+  DEFAULT_TILE_H,
+  DEFAULT_TILE_W,
+  GRID_COLS,
+  MIN_TILE_H,
+  MIN_TILE_W,
+  ROW_HEIGHT_PX,
+  TILE_MARGIN_PX,
+} from './constants';
 
 function ResizeCornerHandle(_axis: ResizeHandleAxis, ref: React.Ref<HTMLElement>): ReactElement {
   return (
@@ -27,19 +40,6 @@ function ResizeCornerHandle(_axis: ResizeHandleAxis, ref: React.Ref<HTMLElement>
     </div>
   );
 }
-import { useZero } from '../../../hooks/useZero';
-import { mutators } from '../../../zero/mutators';
-import ComponentTile, { type ComponentTileData } from './ComponentTile';
-import type { DashboardRuntimeContext } from '../../../services/DynamicDashboard/planResolver';
-import {
-  DEFAULT_TILE_H,
-  DEFAULT_TILE_W,
-  GRID_COLS,
-  MIN_TILE_H,
-  MIN_TILE_W,
-  ROW_HEIGHT_PX,
-  TILE_MARGIN_PX,
-} from './constants';
 
 export interface ComponentPosition {
   x: number;
@@ -54,6 +54,7 @@ export interface GridComponent extends ComponentTileData {
 
 interface ComponentGridProps {
   components: ReadonlyArray<GridComponent>;
+  dashboardId: string;
   canEdit?: boolean;
   runtimeContext?: DashboardRuntimeContext | null;
   autoRefreshMs?: number | null;
@@ -63,13 +64,14 @@ interface ComponentGridProps {
 
 const ComponentGrid = ({
   components,
+  dashboardId,
   canEdit = true,
   runtimeContext,
   autoRefreshMs,
   onEditComponent,
   onAddComponent,
 }: ComponentGridProps): ReactElement => {
-  const z = useZero();
+  const { updatePositions } = useComponentMutations(dashboardId);
 
   const layout: Layout = useMemo(
     () =>
@@ -93,7 +95,7 @@ const ComponentGrid = ({
 
   const persistLayout = useCallback(
     (next: Layout) => {
-      if (!canEdit || !z) return;
+      if (!canEdit) return;
       const updates: Array<{ id: string; position: string }> = [];
       for (const item of next) {
         const serialized = JSON.stringify({
@@ -110,27 +112,13 @@ const ComponentGrid = ({
         updates.push({ id: item.i, position: serialized });
       }
       if (updates.length === 0) return;
-      const result = z.mutate(
-        mutators.dashboardComponent.updatePositions({
-          updates,
-          timestamp: Date.now(),
-        }),
-      );
-      void result.server
-        .then(r => {
-          if (r.type === 'error') {
-            toast.error('Failed to save tile positions', {
-              description: r.error instanceof Error ? r.error.message : 'Unknown error',
-            });
-          }
-        })
-        .catch((e: unknown) => {
-          toast.error('Failed to save tile positions', {
-            description: e instanceof Error ? e.message : 'Unknown error',
-          });
-        });
+      updatePositions.mutate(updates, {
+        onError: (e: unknown) => {
+          toast.error('Failed to save tile positions', { description: getApiErrorMessage(e) });
+        },
+      });
     },
-    [canEdit, components, z],
+    [canEdit, components, updatePositions],
   );
 
   useEffect(() => {

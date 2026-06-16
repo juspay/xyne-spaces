@@ -1,16 +1,19 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QueryVisualizationType, type DashboardToolCall } from '@xyne/shared';
 import { AlertTriangle, Database, Loader2 } from 'lucide-react';
 import { ReactElement, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
-import { useAuth } from '../../hooks/useAuth';
-import { useZero } from '../../hooks/useZero';
 import { ComponentDataError } from '../../services/DynamicDashboard/componentDataService';
 import { fetchDataSourceSchema } from '../../services/DynamicDashboard/dataSourceSchemaService';
 import { listDataSources } from '../../services/DynamicDashboard/dataSourcesService';
 import { previewQueryPlan } from '../../services/DynamicDashboard/previewService';
-import { mutators } from '../../zero/mutators';
+import { getApiErrorMessage } from '../../utils/apiError';
+import {
+  createComponent,
+  updateComponent,
+} from '../../services/DynamicDashboard/dashboardCrudService';
+import { dashboardKeys } from '../../hooks/useDashboards';
 import { ComponentTile, type ComponentTileData, getRendererForType } from './ComponentGrid';
 import {
   ALL_TYPES,
@@ -69,8 +72,7 @@ export const ComponentEditorModal = ({
   onClose,
   onSaved,
 }: ComponentEditorModalProps): ReactElement => {
-  const z = useZero();
-  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const previewSeqRef = useRef(0);
   const isEditing = !!editingComponent;
 
@@ -620,10 +622,6 @@ export const ComponentEditorModal = ({
   }, [builtPlan, planIsValid, handlePreview]);
 
   const handleSave = useCallback(() => {
-    if (!z) {
-      toast.error('Zero client unavailable');
-      return;
-    }
     if (!planIsValid) {
       toast.error(invalidPlanMessage);
       return;
@@ -635,72 +633,56 @@ export const ComponentEditorModal = ({
         ...(detail ? { description: detail } : {}),
       });
     };
-    const onSuccess = (savedId: string, message: string): void => {
-      toast.success(message);
-      onSaved?.(savedId);
-      onClose();
-    };
     const handleResult = (
-      result: ReturnType<typeof z.mutate>,
-      savedId: string,
+      op: () => Promise<{ id?: string }>,
       successMessage: string,
+      fallbackId: string,
     ): void => {
-      result.server
-        .then(r => {
-          if (r.type === 'error') {
-            onFailure(r.error instanceof Error ? r.error.message : undefined);
-            return;
-          }
-          onSuccess(savedId, successMessage);
+      op()
+        .then(result => {
+          const savedId =
+            result && typeof result === 'object' && 'id' in result
+              ? String((result as { id: unknown }).id)
+              : fallbackId;
+          void queryClient.invalidateQueries({ queryKey: dashboardKeys.dashboard(dashboardId) });
+          toast.success(successMessage);
+          onSaved?.(savedId);
+          onClose();
         })
-        .catch((e: unknown) => onFailure(e instanceof Error ? e.message : undefined))
+        .catch((e: unknown) => onFailure(getApiErrorMessage(e)))
         .finally(() => previewDispatch({ type: 'saveDone' }));
     };
 
     try {
       const componentConfig = timeColumn ? { timeColumn } : {};
+      const trimmedTitle = title.trim();
       if (isEditing && editingComponent) {
         handleResult(
-          z.mutate(
-            mutators.dashboardComponent.update({
-              id: editingComponent.id,
+          () =>
+            updateComponent(editingComponent.id, {
               visualType,
-              title: title.trim() || undefined,
+              ...(trimmedTitle ? { title: trimmedTitle } : {}),
               queryJson: builtPlan,
               config: JSON.stringify(componentConfig),
-              timestamp: Date.now(),
             }),
-          ),
-          editingComponent.id,
           'Component updated',
+          editingComponent.id,
         );
       } else {
-        if (!user?.id) {
-          toast.error('Not signed in');
-          previewDispatch({ type: 'saveDone' });
-          return;
-        }
-        const id = uuidv4();
         const position = JSON.stringify(
           nextOpenPosition(existingPositions, defaultSizeFor(visualType)),
         );
         handleResult(
-          z.mutate(
-            mutators.dashboardComponent.create({
-              id,
-              dashboardId,
+          () =>
+            createComponent(dashboardId, {
               visualType,
-              title: title.trim() || undefined,
+              ...(trimmedTitle ? { title: trimmedTitle } : {}),
               queryJson: builtPlan,
               position,
               config: JSON.stringify(componentConfig),
-              createdBy: user.id,
-              mappingId: uuidv4(),
-              timestamp: Date.now(),
-            }),
-          ),
-          id,
+            }).then(tile => tile.query),
           'Component saved',
+          '',
         );
       }
     } catch (e) {
@@ -708,8 +690,7 @@ export const ComponentEditorModal = ({
       previewDispatch({ type: 'saveDone' });
     }
   }, [
-    z,
-    user,
+    queryClient,
     planIsValid,
     isEditing,
     editingComponent,
