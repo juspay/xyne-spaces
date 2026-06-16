@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { CommitAnalysisService, CommitAnalysisResult } from '@/services/commitAnalysisService';
+import { CommitAnalysisService, CommitAnalysisResult, AnalyzeCommitsRequest } from '@/services/commitAnalysisService';
 import { BitbucketService } from '@/services/bitbucketService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
@@ -12,6 +12,8 @@ import { BitbucketConfig } from '@/types/bitbucket';
 import { AffectedApplicationInfo, ReleaseService } from '@/services/release/core/';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { createCommitAnalysisCanvas } from '@/utils/commitAnalysisCanvas';
+import { parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
+import { ReleaseTrackingMode, VCSProviderType } from '@xyne/shared';
 
 async function postLoadingMessage(conversationId: string, userId: string): Promise<string> {
   const message = await conversationService.addMessageToConversation({
@@ -30,8 +32,6 @@ async function postLoadingMessage(conversationId: string, userId: string): Promi
 
 
 export interface CommitAnalysisParams {
-  workspace: string;
-  repoSlug: string;
   conversationId: string;
   userId: string;
   channelId?: string;
@@ -39,6 +39,9 @@ export interface CommitAnalysisParams {
   deployedCommitId: string;
   branch: string;
   parentTicketId?: string;
+  // The release ticket whose creation triggered this analysis. Caller passes
+  // it directly — avoids the fragile getTicketIdByConversationId lookup.
+  currentTicketId: string;
   userName?: string;
   isHotFix?: boolean;
   workspaceId: string;
@@ -90,11 +93,23 @@ export class CommitAnalysisController {
       Boolean(bitbucketConfig.apiUsername) && Boolean(bitbucketConfig.password);
 
     if (!hasToken && !hasBasicAuth) {
-      logger.info("Bitbucket integration not configured. Please provide either username/password or token.")
+      const missing: string[] = [];
+      if (!bitbucketConfig.baseUrl) missing.push('BITBUCKET_BASE_URL');
+      if (!bitbucketConfig.apiToken) missing.push('BITBUCKET_API_TOKEN');
+      if (!bitbucketConfig.apiUsername) missing.push('BITBUCKET_USERNAME');
+      if (!bitbucketConfig.password) missing.push('BITBUCKET_PASSWORD');
+      logger.warn(
+        `Bitbucket integration not configured — set BITBUCKET_API_TOKEN, or BITBUCKET_USERNAME + BITBUCKET_PASSWORD. ` +
+        `Currently missing: ${missing.join(', ') || '(none — values look set, check env loader)'}`,
+      );
     }
 
     const configObj: BitbucketConfig = {
-      baseUrl: bitbucketConfig.baseUrl ? `${bitbucketConfig.baseUrl}/rest/api/latest` : 'https://bitbucket.example.com/rest/api/latest',
+      baseUrl: bitbucketConfig.baseUrl
+        ? (bitbucketConfig.baseUrl.endsWith('/rest/api/latest')
+          ? bitbucketConfig.baseUrl
+          : `${bitbucketConfig.baseUrl}/rest/api/latest`)
+        : 'https://bitbucket.example.com/rest/api/latest',
       username: bitbucketConfig.apiUsername || '',
       password: bitbucketConfig.password || '',
       token: bitbucketConfig.apiToken || '',
@@ -104,10 +119,83 @@ export class CommitAnalysisController {
     this.releaseService = new ReleaseService(this.commitAnalysisService);
   }
 
+  private async deriveReleaseContext(
+    releaseTicketId: string,
+  ): Promise<{
+    projectId: string;
+    mainReleaseBoardId: string;
+    projectKey: string;
+    repoSlug: string;
+    code: string | null;
+  } | null> {
+    const ticket = await db.ticket.findUnique({
+      where: { id: releaseTicketId },
+      select: {
+        projectId: true,
+        boardId: true,
+        project: { select: { code: true } },
+        board: {
+          select: {
+            boardType: true,
+            vcsProvider: true,
+            releaseTrackingMode: true,
+          },
+        },
+      },
+    });
+
+    if (!ticket?.boardId || !ticket.board) {
+      return null;
+    }
+
+    if (ticket.board.releaseTrackingMode !== ReleaseTrackingMode.COMMIT_RANGE) {
+      logger.warn(
+        `[ReleaseTrigger] skipped: board ${ticket.boardId} releaseTrackingMode=${ticket.board.releaseTrackingMode ?? 'null'}`,
+      );
+      return null;
+    }
+
+    if (ticket.board.vcsProvider !== VCSProviderType.BITBUCKET_SERVER) {
+      logger.warn(
+        `[ReleaseTrigger] skipped: board ${ticket.boardId} vcsProvider=${ticket.board.vcsProvider ?? 'null'} — only BITBUCKET_SERVER supported in v1`,
+      );
+      return null;
+    }
+
+    const apps =
+      await this.applicationRepository!.findByMainReleaseBoardId(ticket.boardId);
+    if (apps.length === 0) {
+      logger.warn(`[ReleaseTrigger] skipped: main release board ${ticket.boardId} has zero applications`);
+      return null;
+    }
+
+    const repoUrls = [
+      ...new Set(apps.map(app => app.repoUrl.trim().replace(/\/+$/, ''))),
+    ];
+    if (repoUrls.length !== 1 || !repoUrls[0]) {
+      logger.error(
+        `[ReleaseTrigger] skipped: main release board ${ticket.boardId} has invalid repository URLs (${repoUrls.join(', ')})`,
+      );
+      return null;
+    }
+
+    const parsed = parseBitbucketRepoUrl(repoUrls[0]);
+    if (!parsed) {
+      logger.warn(`[ReleaseTrigger] skipped: cannot parse Bitbucket repoUrl ${repoUrls[0]}`);
+      return null;
+    }
+
+    return {
+      projectId: ticket.projectId,
+      mainReleaseBoardId: ticket.boardId,
+      projectKey: parsed.projectKey,
+      repoSlug: parsed.repoSlug,
+      code: ticket.project.code,
+    };
+  }
+
   async analyzeCommits(params: CommitAnalysisParams): Promise<CommitAnalysisResponse> {
     const {
-      workspace,
-      repoSlug,
       conversationId,
       userId,
       channelId,
@@ -115,38 +203,50 @@ export class CommitAnalysisController {
       deployedCommitId,
       branch,
       parentTicketId,
+      currentTicketId,
       userName,
-      isHotFix
+      isHotFix,
     } = params;
 
     let loadingMessageId: string | null = null;
 
     try {
-      // Resolve project from channel
-      const projectId = channelId
-        ? await this.resolveProjectId(channelId)
-        : null;
+      const derived = await this.deriveReleaseContext(currentTicketId);
+
+      if (!derived) {
+        logger.warn('[ReleaseTrigger] skipped: no workspace/repoSlug available');
+        return { success: false, error: 'Release board is not configured for commit analysis' };
+      }
+
+      const {
+        projectId,
+        mainReleaseBoardId,
+        projectKey: derivedProjectKey,
+        repoSlug: derivedRepoSlug,
+        code: projectCode,
+      } = derived;
 
       logger.info(
-        `Commit analysis request: ${workspace}/${repoSlug} by user ${userId}`
+        `Commit analysis request: ${derivedProjectKey}/${derivedRepoSlug} by user ${userId} (derived from Application.repoUrl)`,
       );
 
       // Post loading indicator
       loadingMessageId = await postLoadingMessage(conversationId, userId);
 
-      const analysisRequest = {
+      const analysisRequest: AnalyzeCommitsRequest = {
         deployedCommitId,
         newCommitId,
         branch,
-        projectKey: workspace,
-        repositorySlug: repoSlug,
+        projectKey: derivedProjectKey,
+        repositorySlug: derivedRepoSlug,
         workspaceId: params.workspaceId,
+        // Project's local code drives the dev-ticket-id regex (e.g. 'TSP').
+        // Falls through to 'XYNE' in the service if absent.
+        ...(projectCode && { ticketPrefix: projectCode }),
       };
 
       const results = await this.commitAnalysisService!.analyzeCommits(analysisRequest);
 
-      // If we have a ticket and applications, run the release orchestration
-      const currentTicketId = await this.conversationRepository!.getTicketIdByConversationId(conversationId);
       let affectedApplications: AffectedApplicationInfo[] = [];
       let migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
       let envChanges: Array<{ fileName: string; filePath: string; newValue: string }> = [];
@@ -155,9 +255,10 @@ export class CommitAnalysisController {
         const releaseResult = await this.releaseService!.release(
           analysisRequest,
           {
-            workspace,
-            repoSlug,
+            workspace: derivedProjectKey,
+            repoSlug: derivedRepoSlug,
             projectId,
+            mainReleaseBoardId,
             channelId: channelId || '',
             conversationId,
             userId,
@@ -182,8 +283,8 @@ export class CommitAnalysisController {
           await this.postToParentTicket(
             parentTicketId,
             results,
-            workspace,
-            repoSlug,
+            derivedProjectKey,
+            derivedRepoSlug,
             conversationId,
             channelId,
             affectedApplications,
@@ -211,8 +312,8 @@ export class CommitAnalysisController {
             projectId,
             conversationId,
             channelId,
-            workspace,
-            repoSlug,
+            workspace: derivedProjectKey,
+            repoSlug: derivedRepoSlug,
             deployedCommitId,
             newCommitId,
             affectedApplicationCount: affectedApplications.length,
@@ -233,7 +334,7 @@ export class CommitAnalysisController {
       const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
 
       let summaryContent = `<p><strong>📦 Release Analysis Complete</strong></p>`;
-      summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${workspace}/${repoSlug}</em></p>`;
+      summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${derivedProjectKey}/${derivedRepoSlug}</em></p>`;
       summaryContent += `<p class="m-0 leading-6"><em class="text-gray-600">${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets</em></p>`;
 
       if (affectedApplications.length > 0) {
@@ -280,17 +381,6 @@ export class CommitAnalysisController {
     }
   }
 
-
-  /**
-   * Resolves project ID from channel
-   */
-  private async resolveProjectId(channelId: string): Promise<string | null> {
-    const channel = await db.channel.findUnique({
-      where: { id: channelId },
-      select: { projectId: true },
-    });
-    return channel?.projectId || null;
-  }
 
   /**
    * Posts analysis results to parent ticket conversation
@@ -426,11 +516,20 @@ export class CommitAnalysisController {
   }
 
   /**
-   * Get the latest deployed commit ID across all applications
+   * Get the latest deployed commit ID for one main release board.
    */
-  getLatestDeployedCommitId = async (_req: Request, res: Response): Promise<void> => {
+  getLatestDeployedCommitId = async (req: Request, res: Response): Promise<void> => {
     try {
-      const latestCommitId = await this.applicationRepository!.getLatestDeployedCommitId();
+      const mainReleaseBoardId =
+        typeof req.query.mainReleaseBoardId === 'string'
+          ? req.query.mainReleaseBoardId
+          : null;
+      if (!mainReleaseBoardId) {
+        res.status(400).json({ error: 'mainReleaseBoardId is required' });
+        return;
+      }
+      const latestCommitId =
+        await this.applicationRepository!.getLatestDeployedCommitId(mainReleaseBoardId);
 
       res.status(200).json({ latestCommitId });
     } catch (error) {

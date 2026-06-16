@@ -1,6 +1,7 @@
 import { createBuilder, defineQueries } from '@rocicorp/zero';
 import {
   BaseTicketType,
+  BoardType,
   CallType,
   defineQuery,
   DocType,
@@ -2199,11 +2200,17 @@ export const queries = defineQueries({
       .related('formContextMappings')
   ),
 
-  stagesByBoards: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) =>
-    zql.stages
-      .whereExists('board', (b) => b.where('projectId', projectId))
-      .orderBy('boardId', 'asc')
-      .orderBy('sequenceNumber', 'asc')
+  stagesByBoards: defineQuery(
+    z.object({ projectId: z.string(), boardType: z.nativeEnum(BoardType).optional() }),
+    ({ args: { projectId, boardType } }) => {
+      return zql.stages
+        .whereExists('board', (b) => {
+          const scoped = b.where('projectId', projectId);
+          return boardType ? scoped.where('boardType', boardType) : scoped;
+        })
+        .orderBy('boardId', 'asc')
+        .orderBy('sequenceNumber', 'asc');
+    },
   ),
 
   channelCanvasFolders: defineQuery(
@@ -3281,12 +3288,117 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // ART rows scoped to a release ticket — joined through the per-app SubTicket mapping.
+  applicationReleaseTicketsByReleaseId: defineQuery(
+    z.object({
+      releaseId: z.string().min(1),
+      // Cursor pagination is optional: the Testing tab passes limit+start to page
+      // through rows, while the CSV export (and any full-set caller) omits both to
+      // materialize every ART row in one view. orderBy adds `id` as a tiebreaker so
+      // the (createdAt, id) cursor is stable.
+      limit: z.number().optional(),
+      start: z.object({ createdAt: z.number(), id: z.string() }).nullable().optional(),
+    }),
+    ({ args: { releaseId, limit, start } }) => {
+      let query = zql.application_release_tickets
+        .where('releaseId', releaseId)
+        .related('devTicket', q =>
+          q.one().related('pullRequests', pullRequests =>
+            pullRequests.orderBy('date', 'desc')
+          )
+        )
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
+      }
+
+      return limit !== undefined ? query.limit(limit) : query;
+    },
+  ),
+
+  // Per-instance release change anchors (env + migration) scoped to a release ticket.
+  releaseChangesByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1) }),
+    ({ args: { releaseId } }) => {
+      return zql.release_change_types
+        .where('releaseId', releaseId)
+        .related('application')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
+  // Form values for env + migration change instances under a release ticket.
+  releaseChangeFormValuesByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1) }),
+    ({ args: { releaseId } }) => {
+      // Excludes changeLog rows: those carry multi-KB diff bodies and are
+      // synced separately (releaseChangeLogValuesByReleaseId) only when the
+      // Migrations tab actually needs them.
+      return zql.form_entity_values
+        .where('contextId', releaseId)
+        .where(({ or, cmp }) =>
+          or(
+            cmp('entityType', 'RELEASE_ENV_FORM'),
+            cmp('entityType', 'RELEASE_MIGRATION_FORM'),
+          ),
+        )
+        .whereExists('formField', q => q.where('fieldName', '!=', 'changeLog'))
+        .related('formField');
+    },
+  ),
+
+  releaseChangeLogValuesByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1) }),
+    ({ args: { releaseId } }) => {
+      // The heavy half of releaseChangeFormValuesByReleaseId: changeLog rows
+      // carrying full migration diff bodies.
+      return zql.form_entity_values
+        .where('contextId', releaseId)
+        .where(({ or, cmp }) =>
+          or(
+            cmp('entityType', 'RELEASE_ENV_FORM'),
+            cmp('entityType', 'RELEASE_MIGRATION_FORM'),
+          ),
+        )
+        .whereExists('formField', q => q.where('fieldName', 'changeLog'))
+        .related('formField');
+    },
+  ),
+
   releaseTickets: defineQuery(() => {
     return zql.tickets
       .where('ticketType', BaseTicketType.Release)
       .where('isArchived', false)
       .orderBy('createdAt', 'desc');
   }),
+
+  // Release tickets scoped to a project — drives the per-project release list.
+  releaseTicketsByProjectId: defineQuery(
+    z.object({ projectId: z.string() }),
+    ({ args: { projectId } }) => {
+      return zql.tickets
+        .where('ticketType', BaseTicketType.Release)
+        .where('projectId', projectId)
+        .where('isArchived', false)
+        .orderBy('createdAt', 'desc')
+        // Release history grows forever; the Releases tab only shows recent
+        // releases, so cap the per-client materialized view.
+        .limit(100);
+    },
+  ),
+
+  // Stable single-arg query: keying on the project avoids both the
+  // boards->applications request waterfall and re-registering a new IN-list
+  // view on zero-cache every time the board set changes.
+  applicationsByProjectId: defineQuery(
+    z.object({ projectId: z.string() }),
+    ({ args: { projectId } }) => {
+      return zql.applications.where('projectId', projectId);
+    },
+  ),
+
   releaseTicketsSearch: defineQuery(
     z.object({
       search: z.string().optional(),

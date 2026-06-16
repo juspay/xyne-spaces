@@ -7,12 +7,16 @@ import { uploadMultiple } from '../middleware/upload';
 import { validate } from '../middleware/validation';
 import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
 import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator';
+import { ReleaseReportController } from '@/controllers/releaseReportController';
+import { authorize } from '@/middleware/authorize';
+import { AccessType } from '@prisma/client';
 
 const router = Router();
 const ticketController = new TicketController();
 const releaseNotesController = new ReleaseNotesController();
 const analyticsController = new AnalyticsController();
 const kanbanTicketController = new KanbanTicketController();
+const releaseReportController = new ReleaseReportController();
 
 // Note: Authentication and ACL middleware are applied at the app level
 
@@ -35,6 +39,11 @@ router.get('/:ticketId/pending-human-intervention', ticketController.getPendingH
 router.post('/:ticketId/attachments/from-conversation', ticketController.addAttachmentsFromConversation);
 
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
+router.post(
+  '/:ticketId/release-report/publish',
+  authorize('TICKETS', AccessType.WRITE),
+  releaseReportController.publish,
+);
 
 router.post('/:ticketId/merge', ticketController.mergeTicket);
 router.post('/:ticketId/unmerge', ticketController.unmergeTicket);

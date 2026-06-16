@@ -58,6 +58,8 @@ import {
   Schema,
   CollectionRole,
 
+  VCSProviderType,
+  ReleaseTrackingMode,
 } from './schema.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 import { getNudgeActionBehavior } from '../nudges.js';
@@ -2841,7 +2843,7 @@ export const mutators = defineMutators({
           }
         }
 
-      
+
         for (const [index, attachment] of attachments.entries()) {
           const { attachmentId, originalFilename, mimetype, size, width, height, duration } =
             attachment;
@@ -3806,6 +3808,47 @@ export const mutators = defineMutators({
         });
       },
     ),
+    // Client-side context validation only. The caller supplies stable IDs so it
+    // can continue directly into board editing after the server save succeeds.
+    saveReleaseBoardConfig: defineMutator(
+      z.object({
+        projectId: z.string(),
+        mainBoardId: z.string(),
+        mainBoardName: z.string(),
+        vcsProvider: z.nativeEnum(VCSProviderType),
+        releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
+        channelId: z.string(),
+        applications: z.array(
+          z.object({
+            id: z.string(),
+            boardId: z.string(),
+            boardName: z.string(),
+            name: z.string(),
+            regex: z.string(),
+            repoUrl: z.string(),
+            ownerTeam: z.string(),
+            envPaths: z.array(z.string()),
+            migrationPaths: z.array(z.string()),
+          }),
+        ),
+      }),
+      async ({ tx, args: { projectId } }) => {
+        // Validate only against tables that are guaranteed-synced into the
+        // client's Zero replica. `projects` is; `channels` is NOT — the
+        // dashboard loads channels through a managed/fallback-hydrated query
+        // (queries.userAllChannels via InitialStateLoader) into app state for
+        // performance, so they are not reliably present in the replica that
+        // this optimistic mutator reads. A `zql.channels` lookup here would
+        // return undefined for a perfectly valid channel and make the
+        // optimistic mutator throw "Channel not found", blocking the save
+        // before the server ever runs. Channel existence and project ownership
+        // are validated authoritatively in the backend mutator instead.
+        const project = await tx.run(zql.projects.where('id', projectId).one());
+        if (!project) {
+          throw new Error('Project not found');
+        }
+      },
+    ),
   },
   userGroup: {
     update: defineMutator(
@@ -4041,6 +4084,15 @@ export const mutators = defineMutators({
           throw new Error('Board not found');
         }
 
+        if (board.boardType === BoardType.RELEASE) {
+          if (projectId !== undefined && projectId !== board.projectId) {
+            throw new Error('Release boards cannot be moved to another project');
+          }
+          if (boardType !== undefined && boardType !== BoardType.RELEASE) {
+            throw new Error('Release boards cannot be converted to a normal board');
+          }
+        }
+
         // Validate project exists if projectId is being changed
         if (projectId && projectId !== board.projectId) {
           const project = await tx.run(zql.projects.where('id', projectId).one());
@@ -4249,6 +4301,16 @@ export const mutators = defineMutators({
       const board = await tx.run(zql.boards.where('id', boardId).one());
       if (!board) {
         throw new Error('Board not found');
+      }
+
+      const [ownedApplication, applicationBoardOwner] = await Promise.all([
+        tx.run(zql.applications.where('mainReleaseBoardId', boardId).one()),
+        tx.run(zql.applications.where('boardId', boardId).one()),
+      ]);
+      if (ownedApplication || applicationBoardOwner) {
+        throw new Error(
+          'Cannot delete a release board while application ownership references it',
+        );
       }
 
       // Check if board has tickets with terminal statuses (CANCELLED, COMPLETED)
@@ -4468,13 +4530,13 @@ export const mutators = defineMutators({
           updatedAt,
           ...(existingApproval
             ? {
-                submittedBy: existingApproval.submittedBy,
-                createdAt: existingApproval.createdAt,
-              }
+              submittedBy: existingApproval.submittedBy,
+              createdAt: existingApproval.createdAt,
+            }
             : {
-                submittedBy: updatedBy,
-                createdAt: updatedAt,
-              }),
+              submittedBy: updatedBy,
+              createdAt: updatedAt,
+            }),
           ...(reviewedBy !== undefined && { reviewedBy }),
         };
 
@@ -4806,14 +4868,14 @@ export const mutators = defineMutators({
         const currentChannelId = canvas.channelId ?? currentFolder?.channelId ?? null;
         const isChannelAdmin = currentChannelId
           ? Boolean(
-              await tx.run(
-                zql.channel_participants
-                  .where('channelId', currentChannelId)
-                  .where('userId', ctx.userID)
-                  .where('role', ChannelRole.ADMIN)
-                  .one(),
-              ),
-            )
+            await tx.run(
+              zql.channel_participants
+                .where('channelId', currentChannelId)
+                .where('userId', ctx.userID)
+                .where('role', ChannelRole.ADMIN)
+                .one(),
+            ),
+          )
           : false;
         const canEdit =
           canvas.createdBy === ctx.userID ||
@@ -5501,10 +5563,10 @@ export const mutators = defineMutators({
                 : projectId
                   ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
                   : and(
-                      cmp('projectId', 'IS', null),
-                      cmp('channelId', 'IS', null),
-                      cmp('createdBy', '=', ctx.userID),
-                    ),
+                    cmp('projectId', 'IS', null),
+                    cmp('channelId', 'IS', null),
+                    cmp('createdBy', '=', ctx.userID),
+                  ),
             )
             .one(),
         );
@@ -5547,14 +5609,14 @@ export const mutators = defineMutators({
 
         const isChannelAdmin = folder.channelId
           ? Boolean(
-              await tx.run(
-                zql.channel_participants
-                  .where('channelId', folder.channelId)
-                  .where('userId', ctx.userID)
-                  .where('role', ChannelRole.ADMIN)
-                  .one(),
-              ),
-            )
+            await tx.run(
+              zql.channel_participants
+                .where('channelId', folder.channelId)
+                .where('userId', ctx.userID)
+                .where('role', ChannelRole.ADMIN)
+                .one(),
+            ),
+          )
           : false;
 
         if (folder.createdBy !== ctx.userID && !isChannelAdmin) {
@@ -5582,16 +5644,16 @@ export const mutators = defineMutators({
               .where(({ and, cmp }) =>
                 folder.channelId
                   ? and(
-                      cmp('projectId', '=', folder.projectId as string),
-                      cmp('channelId', '=', folder.channelId),
-                    )
+                    cmp('projectId', '=', folder.projectId as string),
+                    cmp('channelId', '=', folder.channelId),
+                  )
                   : folder.projectId
                     ? and(cmp('projectId', '=', folder.projectId), cmp('channelId', 'IS', null))
                     : and(
-                        cmp('projectId', 'IS', null),
-                        cmp('channelId', 'IS', null),
-                        cmp('createdBy', '=', folder.createdBy),
-                      ),
+                      cmp('projectId', 'IS', null),
+                      cmp('channelId', 'IS', null),
+                      cmp('createdBy', '=', folder.createdBy),
+                    ),
               )
               .one(),
           );
@@ -5626,14 +5688,14 @@ export const mutators = defineMutators({
 
       const isChannelAdmin = folder.channelId
         ? Boolean(
-            await tx.run(
-              zql.channel_participants
-                .where('channelId', folder.channelId)
-                .where('userId', ctx.userID)
-                .where('role', ChannelRole.ADMIN)
-                .one(),
-            ),
-          )
+          await tx.run(
+            zql.channel_participants
+              .where('channelId', folder.channelId)
+              .where('userId', ctx.userID)
+              .where('role', ChannelRole.ADMIN)
+              .one(),
+          ),
+        )
         : false;
 
       if (folder.createdBy !== ctx.userID && !isChannelAdmin) {
@@ -6099,21 +6161,21 @@ export const mutators = defineMutators({
           await tx.mutate.surface_nudges.update(
             shouldPersistActionResult && actionResult
               ? {
-                  id: nudgeId,
-                  state: nextState,
-                  updatedAt: timestamp,
-                  surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
-                  actions: {
-                    ...existingActions,
-                    actionResult: actionResult as ReadonlyJSONValue,
-                  },
-                }
-              : {
-                  id: nudgeId,
-                  state: nextState,
-                  updatedAt: timestamp,
-                  surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
+                id: nudgeId,
+                state: nextState,
+                updatedAt: timestamp,
+                surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
+                actions: {
+                  ...existingActions,
+                  actionResult: actionResult as ReadonlyJSONValue,
                 },
+              }
+              : {
+                id: nudgeId,
+                state: nextState,
+                updatedAt: timestamp,
+                surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
+              },
           );
         }
         if (nudge.state === NudgeState.ACTIVE && shouldHideNudge) {
@@ -8721,6 +8783,86 @@ export const mutators = defineMutators({
       await tx.mutate.release_attributions.delete({ id });
     }),
   },
+  applicationReleaseTicket: {
+    // Per-ticket ART testing update (Testing tab on the release detail page).
+    // A dev ticket's test/stage state is single-sourced on the ticket
+    // (statusV2 / stageName) — ART no longer stores a status column. testedAt
+    // toggles on terminal stages (COMPLETED / CANCELLED) for every ART row
+    // associated with the dev ticket. Also mirrors the stage change onto the
+    // live dev ticket, resolving it via ART.ticketId.
+    updateStatus: defineMutator(
+      z.object({
+        id: z.string(),
+        stageName: z.string().optional(),
+        defaultTicketStatusV2: z.nativeEnum(TicketStatusV2).optional(),
+        failureReason: z.string().optional().nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, stageName, defaultTicketStatusV2, failureReason, timestamp } }) => {
+        const row = await tx.run(zql.application_release_tickets.where('id', id).one());
+        if (!row) {
+          throw new Error('ART row not found');
+        }
+
+        // testedAt is set once the ticket reaches a terminal stage.
+        const isTested =
+          defaultTicketStatusV2 === TicketStatusV2.COMPLETED ||
+          defaultTicketStatusV2 === TicketStatusV2.CANCELLED;
+
+        const relatedRows = await tx.run(
+          zql.application_release_tickets.where('ticketId', row.ticketId),
+        );
+        for (const relatedRow of relatedRows) {
+          await tx.mutate.application_release_tickets.update({
+            id: relatedRow.id,
+            ...(isTested ? { testedAt: timestamp } : { testedAt: null }),
+            ...(failureReason !== undefined && { failureReason }),
+            updatedAt: timestamp,
+          });
+        }
+
+        const devTicket = await tx.run(zql.tickets.where('id', row.ticketId).one());
+        if (devTicket) {
+          // Only update the dev ticket client-side if the caller is a participant
+          // in its channel. If not (e.g. release manager updating a stub from the
+          // release screen), skip the optimistic update — the server-side side
+          // effect will handle it without ACL restrictions.
+          const isParticipant = devTicket.channelId
+            ? Boolean(
+              await tx.run(
+                zql.channel_participants
+                  .where('channelId', devTicket.channelId)
+                  .where('userId', ctx.userID)
+                  .one(),
+              ),
+            )
+            : false;
+          if (isParticipant) {
+            await tx.mutate.tickets.update({
+              id: devTicket.id,
+              ...(defaultTicketStatusV2 !== undefined && { statusV2: defaultTicketStatusV2 }),
+              ...(stageName !== undefined && { stageName }),
+              updatedAt: timestamp,
+            });
+          }
+        }
+      },
+    ),
+    // QA assignment for the row. Optimistic stub — backend validates the ART exists.
+    setTestedBy: defineMutator(
+      z.object({
+        id: z.string(),
+        userId: z.string().nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { id, userId } }) => {
+        await tx.mutate.application_release_tickets.update({
+          id,
+          testedBy: userId,
+        });
+      },
+    ),
+  },
   impact: {
     create: defineMutator(
       z.object({
@@ -9409,10 +9551,10 @@ export const mutators = defineMutators({
 
         const scheduledAttachments = existingDraft
           ? await tx.run(
-              zql.message_attachments
-                .where("entityId", existingDraft.id)
-                .where("entityType", AttachmentEntityType.DRAFT),
-            )
+            zql.message_attachments
+              .where("entityId", existingDraft.id)
+              .where("entityType", AttachmentEntityType.DRAFT),
+          )
           : [];
 
         if (content.trim() === '' && scheduledAttachments.length === 0) {

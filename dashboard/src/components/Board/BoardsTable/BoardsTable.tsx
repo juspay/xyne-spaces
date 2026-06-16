@@ -4,14 +4,20 @@ import { EmptyState } from '../EmptyState';
 import { Button } from '../../ui/Button';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
+import { getBoardEditLabel } from '../BoardCard';
 import type { BoardWithStages } from '../BoardCard';
 
 interface BoardsTableProps {
   boards: readonly BoardWithStages[] | undefined;
   onEdit: (board: BoardWithStages) => void;
+  applicationBoardIds?: Set<string>;
 }
 
-export const BoardsTable = ({ boards, onEdit }: BoardsTableProps): ReactElement => {
+export const BoardsTable = ({
+  boards,
+  onEdit,
+  applicationBoardIds,
+}: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
 
   const handleCopyId = (e: React.MouseEvent, boardId: string): void => {
@@ -111,7 +117,7 @@ export const BoardsTable = ({ boards, onEdit }: BoardsTableProps): ReactElement 
                       })}
                     >
                       <Edit2 size={14} />
-                      Edit
+                      {getBoardEditLabel(board, applicationBoardIds)}
                     </Button>
                   </div>
                 </td>

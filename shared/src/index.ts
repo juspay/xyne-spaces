@@ -23,6 +23,8 @@ export * from './utils/linkPreviewParser';
 export * from './utils/ticketMetadata';
 export * from './utils/fileTypes';
 export * from './utils/channel';
+export * from './utils/csv';
+export * from './release/releaseReport';
 export {
   parseTicketMd,
   serializeTicketMd,

@@ -1,1 +1,1 @@
-export { BoardCard, type BoardWithStages } from './BoardCard';
+export { getBoardEditLabel, type BoardWithStages } from './BoardCard';

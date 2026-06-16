@@ -1,9 +1,10 @@
 import { BitbucketService } from './bitbucketService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
+import { DatabaseClient } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { logger } from '@/utils/logger';
 import { PullRequestInfo, DiffstatSummary, ChangeEntry } from '@/types/bitbucket';
-import { FormContextType, FormEntityType, } from '@xyne/shared';
+import { FormContextType, FormEntityType, BaseTicketType } from '@xyne/shared';
 import { Application, } from '@prisma/client';
 import { XyneRelease } from './release/xyne/xyneRelease';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
@@ -12,9 +13,8 @@ import {
   ChangeDetector,
   FileChangeType,
   mapBitbucketChangeType,
-  XyneChangeDetector,
   DiffParser,
-  ReleaseService
+  ReleaseEventContext,
 } from './release/core';
 export type AnalyzeCommitsRequest =
   | {
@@ -22,6 +22,10 @@ export type AnalyzeCommitsRequest =
     projectKey: string;
     repositorySlug: string;
     workspaceId: string;
+    // Local Project.code used to build the ticket-id regex (e.g. 'TSP'). When
+    // omitted, falls back to 'XYNE' for legacy callers that haven't been
+    // updated yet.
+    ticketPrefix?: string;
     branch?: string;
   }
   | {
@@ -30,6 +34,7 @@ export type AnalyzeCommitsRequest =
     projectKey: string;
     repositorySlug: string;
     workspaceId: string;
+    ticketPrefix?: string;
     branch?: string;
   };
 
@@ -53,7 +58,20 @@ export interface TicketInfo {
   status: string;
   priority: string;
   assignedTo: string | null;
+  ticketType: string | null;
 }
+
+export interface PullRequestDiffFile {
+  oldPath?: string | null;
+  newPath?: string | null;
+  path?: string | null;
+  filename?: string | null;
+  type?: string | null;
+  hunks?: Array<{ content?: string | null }>;
+}
+
+/** PR author shape (from BitbucketService) used to back local autostub users. */
+type StubAuthor = { id?: string | number; displayName?: string; emailAddress?: string };
 
 
 export class CommitAnalysisService {
@@ -62,11 +80,8 @@ export class CommitAnalysisService {
   private applicationRepository: ApplicationRepository | null = null;
   private xyneRelease: XyneRelease | null = null;
   private releaseRepository: ReleaseRepository | null = null;
-  private changeDetector: ChangeDetector;
-  private releaseService: ReleaseService | null = null;
 
-  constructor(bitbucketService: BitbucketService, changeDetector?: ChangeDetector,) {
-    this.changeDetector = changeDetector ?? XyneChangeDetector;
+  constructor(bitbucketService: BitbucketService) {
     this.bitbucketService = bitbucketService;
     this.initialize();
   }
@@ -80,8 +95,7 @@ export class CommitAnalysisService {
         this.ticketRepository &&
         this.applicationRepository &&
         this.xyneRelease &&
-        this.releaseRepository &&
-        this.releaseService
+        this.releaseRepository
       ) {
         return;
       }
@@ -91,7 +105,6 @@ export class CommitAnalysisService {
       this.xyneRelease = new XyneRelease();
       this.releaseRepository = new ReleaseRepository();
       this.ticketRepository = new TicketRepository();
-      this.releaseService = new ReleaseService(this)
       logger.info('[CommitAnalysisService] Successfully initialized all repositories');
     } catch (error) {
       logger.error('[CommitAnalysisService] Failed to initialize repositories:', error);
@@ -101,14 +114,22 @@ export class CommitAnalysisService {
 
 
 
-  private extractTicketId(prTitle: string): string | null {
-    const match = prTitle.match(/^(XYNE-\d+)/);
+  private extractTicketId(prTitle: string, prefix: string): string | null {
+    // Build the regex dynamically from the project's code (e.g. TSP, XYNE).
+    // Escape any regex metachars defensively even though codes are usually
+    // uppercase alphanumerics.
+    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const start = new RegExp(`^(${escaped}-\\d+)`);
+    // \b prevents matching the code inside a larger token (e.g. prefix "EX"
+    // must not match "EX-12" embedded in "FLEX-12").
+    const anywhere = new RegExp(`\\b${escaped}-\\d+`);
 
+    const match = prTitle.match(start);
     if (match) {
       return match[1];
     }
 
-    const anywhereMatch = prTitle.match(/XYNE-\d+/);
+    const anywhereMatch = prTitle.match(anywhere);
     if (anywhereMatch) {
       logger.debug(
         `Ticket ID found in PR title but not at start: "${prTitle}". Using: ${anywhereMatch[0]}`
@@ -119,27 +140,225 @@ export class CommitAnalysisService {
     return null;
   }
 
-  private async fetchTicketByXyneId(xyneId: string, workspaceId: string): Promise<TicketInfo | null> {
+  private async fetchTicketByXyneId(
+    xyneId: string,
+    workspaceId: string,
+    ticketPrefix: string,
+    prTitle?: string,
+    prAuthor?: StubAuthor,
+  ): Promise<TicketInfo | null> {
     try {
       const ticket = await this.ticketRepository!.getTicketByXyneId(xyneId, workspaceId);
 
-      if (!ticket) {
-        logger.debug(`Ticket ${xyneId} not found in database`);
-        return null;
+      if (ticket) {
+        return {
+          id: ticket.id,
+          xyneId: ticket.xyneId,
+          title: ticket.title,
+          status: ticket.statusV2,
+          priority: ticket.priority,
+          assignedTo: ticket.assignedTo,
+          ticketType: ticket.ticketType ?? null,
+        };
       }
 
-      return {
-        id: ticket.id,
-        xyneId: ticket.xyneId,
-        title: ticket.title,
-        status: ticket.statusV2,
-        priority: ticket.priority,
-        assignedTo: ticket.assignedTo,
-      };
+      // Dev-only convenience: prod dev-tickets aren't in a local DB, so PR
+      // titles reference XYNE-NNNN ids that don't exist locally → ART stays
+      // empty. When RELEASE_AUTOSTUB_MISSING_TICKETS=1 (and not in production),
+      // synthesize a minimal stub so the release flow can finish populating
+      // ART rows. Guarded twice so an accidental env var in prod still no-ops.
+      // TODO: remove this branch (or harden into an admin tool) before this
+      // ships — local dev convenience only.
+      if (
+        process.env.NODE_ENV !== 'production' &&
+        process.env.RELEASE_AUTOSTUB_MISSING_TICKETS === '1'
+      ) {
+        const stub = await this.autoStubMissingTicket(xyneId, ticketPrefix, workspaceId, prTitle, prAuthor);
+        if (stub) {
+          logger.info(`[AutoStub] Created stub ticket for ${xyneId} (dev only)`);
+          return stub;
+        }
+      }
+
+      logger.debug(`Ticket ${xyneId} not found in database`);
+      return null;
     } catch (error) {
       logger.error(`Error fetching ticket ${xyneId} from database:`, error);
       return null;
     }
+  }
+
+  /**
+   * Dev-only stub creator. Looks up the project by `code = ticketPrefix`,
+   * picks any non-RELEASE board on it as the home for the stub, and inserts
+   * a minimal Ticket row so downstream ART writes can resolve. Returns null
+   * if the project / board / a workspace user can't be resolved (gives up
+   * silently — local convenience, not a hard guarantee).
+   */
+  private async autoStubMissingTicket(
+    xyneId: string,
+    ticketPrefix: string,
+    workspaceId: string,
+    prTitle?: string,
+    author?: StubAuthor,
+  ): Promise<TicketInfo | null> {
+    try {
+      const db = DatabaseClient.getInstance();
+      const project = await db.project.findFirst({
+        where: { code: ticketPrefix, workspaceId },
+        select: { id: true, workspaceId: true },
+      });
+      if (!project) {
+        logger.warn(`[AutoStub] No project found with code=${ticketPrefix} in workspace=${workspaceId}`);
+        return null;
+      }
+      const board = await db.board.findFirst({
+        where: { projectId: project.id, boardType: { not: 'RELEASE' } },
+        select: { id: true },
+      });
+      if (!board) {
+        logger.warn(`[AutoStub] No non-RELEASE board on project ${project.id}`);
+        return null;
+      }
+      // Use all workspace users so any logged-in user can own/edit the stub.
+      // Also grab orgMemberId so we can mint a dummy author user (User.orgMemberId
+      // is a required FK — dummy users borrow an existing member's id locally).
+      const allUsers = await db.user.findMany({
+        where: { workspaceId },
+        select: { id: true, orgMemberId: true },
+      });
+      if (allUsers.length === 0) {
+        logger.warn(`[AutoStub] No users in workspace ${workspaceId}`);
+        return null;
+      }
+      const user = allUsers[0];
+
+      // Mint (or reuse) a dummy user representing the PR author and assign the
+      // stub to them, so the Dev Owner column shows the real author and the
+      // ticket → user FK gets exercised end-to-end. Falls back to `user` if the
+      // PR carried no usable author identity.
+      const assigneeId =
+        (await this.findOrCreateAuthorUser(author, workspaceId, user.orgMemberId)) ?? user.id;
+
+      // Tickets ACL filters by channel/project participation. The channel
+      // must belong to the stub's project so the ACL's
+      // `channel → project → channels (PUBLIC, participant)` traversal resolves.
+      // Prefer a PUBLIC channel on the project; fall back to any project channel.
+      const channel =
+        (await db.channel.findFirst({
+          where: { projectId: project.id, visibility: 'PUBLIC' },
+          select: { id: true },
+        })) ??
+        (await db.channel.findFirst({
+          where: { projectId: project.id },
+          select: { id: true },
+        }));
+      if (!channel) {
+        logger.warn(`[AutoStub] No channel found on project ${project.id}`);
+        return null;
+      }
+
+      // Find an existing Conversation in the project channel so the stub's
+      // conversationId points to a real row — the TicketActivitiesACL
+      // traverses ticket → conversation → channel → project to verify access.
+      const conversation = await db.conversation.findFirst({
+        where: { channelId: channel.id },
+        select: { conversationId: true },
+      });
+
+      const stub = await db.ticket.create({
+        data: {
+          xyneId,
+          title: prTitle?.slice(0, 200) ?? `[stub] ${xyneId}`,
+          description: '[Auto-stub created by release-manager dev mode]',
+          createdBy: user.id,
+          updatedBy: user.id,
+          assignedTo: assigneeId,
+          projectId: project.id,
+          workspaceId,
+          boardId: board.id,
+          channelId: channel.id,
+          // conversationId must point to a real Conversation row (not a channel id)
+          // so the TicketActivitiesACL's ticket→conversation→channel traversal resolves.
+          // Re-use an existing conversation in the project channel if available.
+          conversationId: conversation?.conversationId ?? channel.id,
+          statusV2: 'TODO',
+          priority: 'LOW',
+          stageName: 'BACKLOG',
+          ticketType: BaseTicketType.Fix,
+          lastEmailAt: new Date(),
+        },
+        select: { id: true, xyneId: true, title: true, statusV2: true, priority: true, assignedTo: true, ticketType: true },
+      });
+
+      // Add ALL workspace users as channel participants so any logged-in user
+      // passes the Zero ACL's `canUpdate` / `canInsert` checks (both require
+      // the caller to be a participant in a project channel).
+      await Promise.all(
+        allUsers.map(u =>
+          db.channelParticipant.upsert({
+            where: { channelId_userId: { channelId: channel.id, userId: u.id } },
+            create: { channelId: channel.id, userId: u.id },
+            update: {},
+          }),
+        ),
+      );
+
+      return {
+        id: stub.id,
+        xyneId: stub.xyneId,
+        title: stub.title,
+        status: stub.statusV2,
+        priority: stub.priority,
+        assignedTo: stub.assignedTo,
+        ticketType: stub.ticketType ?? null,
+      };
+    } catch (error) {
+      logger.error(`[AutoStub] Failed to create stub for ${xyneId}:`, error as Error);
+      return null;
+    }
+  }
+
+  /**
+   * Dev-only: find or create a local user mirroring a PR author so stub dev
+   * tickets get a realistic Dev Owner and the ticket → user FK is exercised.
+   * Keyed by (email, workspaceId). `orgMemberId` is a required FK on User, so
+   * dummy users borrow an existing workspace member's id (fine locally).
+   * Returns the user id, or null if the author has no usable identity.
+   */
+  private async findOrCreateAuthorUser(
+    author: StubAuthor | undefined,
+    workspaceId: string,
+    fallbackOrgMemberId: string,
+  ): Promise<string | null> {
+    if (!author) return null;
+    const db = DatabaseClient.getInstance();
+
+    const email =
+      author.emailAddress?.trim() ||
+      (author.id != null ? `autostub+${author.id}@local.dev` : null);
+    if (!email) return null;
+
+    const existing = await db.user.findFirst({
+      where: { email, workspaceId },
+      select: { id: true },
+    });
+    if (existing) return existing.id;
+
+    const name = author.displayName?.trim() || email;
+    const created = await db.user.create({
+      data: {
+        name,
+        email,
+        displayName: author.displayName?.trim() ?? null,
+        providerUserId: `autostub:${author.id ?? email}`,
+        workspaceId,
+        orgMemberId: fallbackOrgMemberId,
+      },
+      select: { id: true },
+    });
+    logger.info(`[AutoStub] Created dummy author user ${created.id} (${email})`);
+    return created.id;
   }
 
   private extractFolders(filePaths: string[]): string[] {
@@ -174,7 +393,8 @@ export class CommitAnalysisService {
     projectKey: string,
     repositorySlug: string,
     workspaceId: string,
-    branch?: string,
+    ticketPrefix: string,
+    branch?: string
   ): Promise<CommitAnalysisResult> {
     const result: CommitAnalysisResult = {
       commitId,
@@ -207,7 +427,7 @@ export class CommitAnalysisService {
       result.pullRequest = pullRequest;
       logger.debug(`Commit ${commitId}: Found PR #${pullRequest.id} - "${pullRequest.title}"`);
 
-      const ticketId = this.extractTicketId(pullRequest.title);
+      const ticketId = this.extractTicketId(pullRequest.title, ticketPrefix);
 
       if (!ticketId) {
         result.error = 'No ticket ID found in PR title';
@@ -215,7 +435,7 @@ export class CommitAnalysisService {
       } else {
         logger.debug(`Commit ${commitId}: Extracted ticket ID ${ticketId}`);
 
-        const ticket = await this.fetchTicketByXyneId(ticketId, workspaceId);
+        const ticket = await this.fetchTicketByXyneId(ticketId, workspaceId, ticketPrefix, pullRequest.title, pullRequest.author);
 
         if (!ticket) {
           logger.info(`Commit ${commitId}: Ticket ${ticketId} not found in database`);
@@ -265,10 +485,15 @@ export class CommitAnalysisService {
     const projectKey = request.projectKey;
     const repositorySlug = request.repositorySlug;
     const workspaceId = request.workspaceId;
-
+    // Fail fast: an empty workspaceId silently makes every ticket lookup
+    // (getTicketByXyneId / autoStub project+user queries) match nothing or the
+    // wrong workspace, producing zero ticket linkage instead of a clear error.
     if (!workspaceId) {
       throw new Error('workspaceId is required for commit analysis');
     }
+    // Default to 'XYNE' to preserve the legacy hardcoded behavior for any
+    // caller that hasn't been updated to pass `ticketPrefix`.
+    const ticketPrefix = request.ticketPrefix ?? 'XYNE';
 
     let commitIds: string[];
 
@@ -325,7 +550,7 @@ export class CommitAnalysisService {
     try {
       results = await Promise.all(
         commitIds.map((commitId) =>
-          this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, request.branch)
+          this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, ticketPrefix, request.branch)
         )
       );
     } catch (error) {
@@ -345,19 +570,20 @@ export class CommitAnalysisService {
   }
 
   async detectAffectedApplications(
-    projectId: string,
+    mainReleaseBoardId: string,
     filePaths: string[]
   ): Promise<
     (Application & { matchedFiles: string[] })[]
   > {
-    logger.info(`Detecting affected applications for project ${projectId}`, {
+    logger.info(`Detecting affected applications for main release board ${mainReleaseBoardId}`, {
       fileCount: filePaths.length,
     });
 
-    const applications = await this.applicationRepository!.findByProjectId(projectId);
+    const applications =
+      await this.applicationRepository!.findByMainReleaseBoardId(mainReleaseBoardId);
 
     if (applications.length === 0) {
-      logger.info(`No applications found for project ${projectId}`);
+      logger.info(`No applications found for main release board ${mainReleaseBoardId}`);
       return [];
     }
 
@@ -405,13 +631,8 @@ export class CommitAnalysisService {
     filePaths: string[],
     fileChanges: Array<{ path: string; changeType: FileChangeType }>,
     applicationId: string,
-    releaseContext: {
-      releaseId: string;
-      userId: string;
-      userName: string;
-      channelId: string;
-      conversationId: string;
-    }
+    releaseContext: ReleaseEventContext,
+    devTicketXyneId?: string | null,
   ): Promise<{
     envChangeCount: number;
     migrationChangeCount: number;
@@ -419,7 +640,15 @@ export class CommitAnalysisService {
     envChanges: Array<{ fileName: string; filePath: string; newValue: string }>
   }> {
 
-    const categorized = this.changeDetector.categorize(fileChanges);
+    // Pull this app's env/migration path globs from the DB (configured via
+    // the release wizard → Application.envPaths / migrationPaths). The
+    // hardcoded XyneChangeDetector singleton is gone; each app's patterns
+    // drive its own ChangeDetector.
+    const app = await this.applicationRepository!.findById(applicationId);
+    const envPatterns = app?.envPaths ?? [];
+    const migrationPatterns = app?.migrationPaths ?? [];
+    const detector = new ChangeDetector({ envPatterns, migrationPatterns });
+    const categorized = detector.categorize(fileChanges);
     logger.info(`[ReleaseChanges] Checking ${filePaths.length} files for env/migration patterns:`);
 
     const envFiles = categorized.envChanges.map((c) => c.path);
@@ -428,13 +657,13 @@ export class CommitAnalysisService {
     if (envFiles.length > 0) {
       logger.info(`[ReleaseChanges] MATCHED ${envFiles.length} env files: ${envFiles.join(', ')}`);
     } else {
-      logger.info(`[ReleaseChanges] No env file matches (patterns: env.ts, .env, .env.local, .env.example)`);
+      logger.info(`[ReleaseChanges] No env file matches (configured patterns: ${envPatterns.join(', ') || '(none — set via release wizard)'})`);
     }
 
     if (migrationFiles.length > 0) {
       logger.info(`[ReleaseChanges] MATCHED ${migrationFiles.length} migration files: ${migrationFiles.join(', ')}`);
     } else {
-      logger.info(`[ReleaseChanges] No migration file matches (patterns: backend/prisma/migrations/, backend/prisma/schema.prisma)`);
+      logger.info(`[ReleaseChanges] No migration file matches (configured patterns: ${migrationPatterns.join(', ') || '(none — set via release wizard)'})`);
     }
 
     let envChangeCount = 0;
@@ -442,9 +671,24 @@ export class CommitAnalysisService {
     const migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
     const envChanges: Array<{ fileName: string; filePath: string; newValue: string }> = [];
 
-    const releaseEnvChange = await this.releaseRepository!.findReleaseChangeType(XyneChangeType.ENV, applicationId);
+    // v2: every (app × file × kind × commit) becomes its own ReleaseChangeType
+    // row so the Changes tab can list each change individually. The legacy
+    // per-(app, kind) lookup is no longer used here.
     for (const filePath of envFiles) {
       try {
+        // Re-running analysis for the same release must not insert duplicate
+        // change instances (same guard as the PR-diff path).
+        const alreadySaved = await this.releaseChangeInstanceExists({
+          applicationId,
+          changeType: XyneChangeType.ENV,
+          releaseId: releaseContext.releaseId,
+          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
+          devTicketXyneId: devTicketXyneId ?? null,
+          commitId,
+          filePath,
+        });
+        if (alreadySaved) continue;
+
         const fileChange = fileChanges.find(c => c.path === filePath);
         const changeType = fileChange?.changeType ?? FileChangeType.MODIFIED;
 
@@ -458,31 +702,40 @@ export class CommitAnalysisService {
         // Extract env key from file path (e.g., "env.ts" -> "ENV_CONFIG")
         const fileName = filePath.split('/').pop() || filePath;
         const envDiffResult = DiffParser.parseEnvDiff(diff, fileName);
-        if (releaseEnvChange) {
-          // TODO: we should have a factory/service to generate these change requests based on project release type
-          const { formValues, payload, message } = this.xyneRelease!.getChange({
-            type: XyneChangeType.ENV,
-            data: {
-              fileName,
-              filePath,
-              envKey: fileName.toUpperCase().replace(/[.\-]/g, '_'),
-              changeType: changeType,
-              oldValue: envDiffResult.oldValue,
-              newValue: envDiffResult.newValue,
-              description: envDiffResult.changeSummary,
-            }
-          })
 
-          await this.releaseService!.saveReleaseFormValues(
-            releaseEnvChange.id,
-            payload,
-            message,
-            formValues,
-            FormContextType.RELEASE_CHANGE,
-            FormEntityType.RELEASE_ENV_FORM,
-            { ...releaseContext, applicationId }
-          );
-        }
+        const changeInstance = await this.releaseRepository!.createReleaseChangeInstance({
+          applicationId,
+          changeType: XyneChangeType.ENV,
+          releaseId: releaseContext.releaseId,
+          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
+          devTicketXyneId: devTicketXyneId ?? null,
+          commitId,
+          filePath,
+        });
+
+        // TODO: we should have a factory/service to generate these change requests based on project release type
+        const { formValues, payload, message } = this.xyneRelease!.getChange({
+          type: XyneChangeType.ENV,
+          data: {
+            fileName,
+            filePath,
+            fileSlug: fileName.toUpperCase().replace(/[.\-]/g, '_'),
+            changeType: changeType,
+            oldValue: envDiffResult.oldValue,
+            newValue: envDiffResult.newValue,
+            description: envDiffResult.changeSummary,
+          }
+        });
+
+        await this.releaseRepository!.saveReleaseFormValues(
+          changeInstance.id,
+          payload,
+          message,
+          formValues,
+          FormContextType.RELEASE_CHANGE,
+          FormEntityType.RELEASE_ENV_FORM,
+          releaseContext
+        );
         envChangeCount++;
         envChanges.push({ fileName, filePath, newValue: diff });
       } catch (error) {
@@ -491,9 +744,21 @@ export class CommitAnalysisService {
     }
 
     // Fetch and save migration file diffs
-    const releaseMigChange = await this.releaseRepository!.findReleaseChangeType(XyneChangeType.MIGRATION, applicationId);
     for (const filePath of migrationFiles) {
       try {
+        // Re-running analysis for the same release must not insert duplicate
+        // change instances (same guard as the PR-diff path).
+        const alreadySaved = await this.releaseChangeInstanceExists({
+          applicationId,
+          changeType: XyneChangeType.MIGRATION,
+          releaseId: releaseContext.releaseId,
+          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
+          devTicketXyneId: devTicketXyneId ?? null,
+          commitId,
+          filePath,
+        });
+        if (alreadySaved) continue;
+
         const diff = await this.bitbucketService.getFileDiff(
           projectKey,
           repositorySlug,
@@ -505,26 +770,35 @@ export class CommitAnalysisService {
         const fileName = filePath.split('/').pop() || filePath;
 
         const migDiffResult = DiffParser.parseMigrationDiff(diff, fileName);
-        if (releaseMigChange) {
-          const { formValues, payload, message } = this.xyneRelease!.getChange({
-            type: XyneChangeType.MIGRATION,
-            data: {
-              filePath,
-              changeLog: migDiffResult.changeLog,
-              description: `Database migration file ${fileName} changed.`,
-              query: migDiffResult.query,
-            }
-          })
-          await this.releaseService!.saveReleaseFormValues(
-            releaseMigChange.id,
-            payload,
-            message,
-            formValues,
-            FormContextType.RELEASE_CHANGE,
-            FormEntityType.RELEASE_MIGRATION_FORM,
-            { ...releaseContext, applicationId }
-          );
-        }
+
+        const changeInstance = await this.releaseRepository!.createReleaseChangeInstance({
+          applicationId,
+          changeType: XyneChangeType.MIGRATION,
+          releaseId: releaseContext.releaseId,
+          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
+          devTicketXyneId: devTicketXyneId ?? null,
+          commitId,
+          filePath,
+        });
+
+        const { formValues, payload, message } = this.xyneRelease!.getChange({
+          type: XyneChangeType.MIGRATION,
+          data: {
+            filePath,
+            changeLog: migDiffResult.changeLog,
+            description: `Database migration file ${fileName} changed.`,
+            query: migDiffResult.query,
+          }
+        });
+        await this.releaseRepository!.saveReleaseFormValues(
+          changeInstance.id,
+          payload,
+          message,
+          formValues,
+          FormContextType.RELEASE_CHANGE,
+          FormEntityType.RELEASE_MIGRATION_FORM,
+          releaseContext
+        );
 
         migrationChangeCount++;
         // Construct Bitbucket diff link using projectKey and repositorySlug
@@ -542,18 +816,179 @@ export class CommitAnalysisService {
     return { envChangeCount, migrationChangeCount, migrationLinks, envChanges };
   }
 
+  async saveReleaseChangesFromPullRequestDiffs(
+    projectKey: string,
+    repositorySlug: string,
+    diffFiles: PullRequestDiffFile[],
+    applicationId: string,
+    releaseContext: ReleaseEventContext,
+    devTicketXyneId?: string | null,
+    prUrl?: string | null,
+  ): Promise<{
+    envChangeCount: number;
+    migrationChangeCount: number;
+    migrationLinks: Array<{ filePath: string; diffUrl: string }>;
+    envChanges: Array<{ fileName: string; filePath: string; newValue: string }>
+  }> {
+    const app = await this.applicationRepository!.findById(applicationId);
+    const envPatterns = app?.envPaths ?? [];
+    const migrationPatterns = app?.migrationPaths ?? [];
+    const detector = new ChangeDetector({ envPatterns, migrationPatterns });
+
+    const diffByPath = new Map<string, PullRequestDiffFile>();
+    const fileChanges: Array<{ path: string; changeType: FileChangeType }> = [];
+    for (const file of diffFiles) {
+      const path = this.getPullRequestDiffFilePath(file);
+      if (!path) continue;
+
+      diffByPath.set(path, file);
+      fileChanges.push({
+        path,
+        changeType: this.mapPullRequestDiffTypeToFileChangeType(file.type),
+      });
+    }
+
+    const categorized = detector.categorize(fileChanges);
+    const envFiles = categorized.envChanges.map((change) => change.path);
+    const migrationFiles = categorized.migrationChanges.map((change) => change.path);
+
+    logger.info(
+      `[ReleaseChanges] Checking ${fileChanges.length} PR diff files for ${projectKey}/${repositorySlug}: ` +
+      `${envFiles.length} env, ${migrationFiles.length} migration matched`,
+    );
+
+    let envChangeCount = 0;
+    let migrationChangeCount = 0;
+    const migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
+    const envChanges: Array<{ fileName: string; filePath: string; newValue: string }> = [];
+
+    for (const filePath of envFiles) {
+      try {
+        const diffFile = diffByPath.get(filePath);
+        if (!diffFile) continue;
+
+        const alreadySaved = await this.releaseChangeInstanceExists({
+          applicationId,
+          changeType: XyneChangeType.ENV,
+          releaseId: releaseContext.releaseId,
+          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
+          devTicketXyneId: devTicketXyneId ?? null,
+          commitId: null,
+          filePath,
+        });
+        if (alreadySaved) continue;
+
+        const diff = this.buildRawDiffFromPullRequestFile(diffFile);
+        const fileName = filePath.split('/').pop() || filePath;
+        const fileChange = fileChanges.find((change) => change.path === filePath);
+        const envDiffResult = DiffParser.parseEnvDiff(diff, fileName);
+
+        const changeInstance = await this.releaseRepository!.createReleaseChangeInstance({
+          applicationId,
+          changeType: XyneChangeType.ENV,
+          releaseId: releaseContext.releaseId,
+          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
+          devTicketXyneId: devTicketXyneId ?? null,
+          commitId: null,
+          filePath,
+        });
+
+        const { formValues, payload, message } = this.xyneRelease!.getChange({
+          type: XyneChangeType.ENV,
+          data: {
+            fileName,
+            filePath,
+            fileSlug: fileName.toUpperCase().replace(/[.\-]/g, '_'),
+            changeType: fileChange?.changeType ?? FileChangeType.MODIFIED,
+            oldValue: envDiffResult.oldValue,
+            newValue: envDiffResult.newValue,
+            description: envDiffResult.changeSummary,
+          },
+        });
+
+        await this.releaseRepository!.saveReleaseFormValues(
+          changeInstance.id,
+          payload,
+          message,
+          formValues,
+          FormContextType.RELEASE_CHANGE,
+          FormEntityType.RELEASE_ENV_FORM,
+          releaseContext,
+        );
+
+        envChangeCount++;
+        envChanges.push({ fileName, filePath, newValue: diff });
+      } catch (error) {
+        logger.warn(`Failed to save PR env release change for ${filePath}:`, error);
+      }
+    }
+
+    for (const filePath of migrationFiles) {
+      try {
+        const diffFile = diffByPath.get(filePath);
+        if (!diffFile) continue;
+
+        const alreadySaved = await this.releaseChangeInstanceExists({
+          applicationId,
+          changeType: XyneChangeType.MIGRATION,
+          releaseId: releaseContext.releaseId,
+          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
+          devTicketXyneId: devTicketXyneId ?? null,
+          commitId: null,
+          filePath,
+        });
+        if (alreadySaved) continue;
+
+        const diff = this.buildRawDiffFromPullRequestFile(diffFile);
+        const fileName = filePath.split('/').pop() || filePath;
+        const migDiffResult = DiffParser.parseMigrationDiff(diff, fileName);
+
+        const changeInstance = await this.releaseRepository!.createReleaseChangeInstance({
+          applicationId,
+          changeType: XyneChangeType.MIGRATION,
+          releaseId: releaseContext.releaseId,
+          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
+          devTicketXyneId: devTicketXyneId ?? null,
+          commitId: null,
+          filePath,
+        });
+
+        const { formValues, payload, message } = this.xyneRelease!.getChange({
+          type: XyneChangeType.MIGRATION,
+          data: {
+            filePath,
+            changeLog: migDiffResult.changeLog,
+            description: `Database migration file ${fileName} changed.`,
+            query: migDiffResult.query,
+          },
+        });
+
+        await this.releaseRepository!.saveReleaseFormValues(
+          changeInstance.id,
+          payload,
+          message,
+          formValues,
+          FormContextType.RELEASE_CHANGE,
+          FormEntityType.RELEASE_MIGRATION_FORM,
+          releaseContext,
+        );
+
+        migrationChangeCount++;
+        migrationLinks.push({ filePath, diffUrl: prUrl ?? '' });
+      } catch (error) {
+        logger.warn(`Failed to save PR migration release change for ${filePath}:`, error);
+      }
+    }
+
+    return { envChangeCount, migrationChangeCount, migrationLinks, envChanges };
+  }
+
   async saveReleaseChangesFromAnalysis(
     projectKey: string,
     repositorySlug: string,
     results: CommitAnalysisResult[],
     applicationId: string,
-    releaseContext: {
-      releaseId: string;
-      userId: string;
-      userName: string;
-      channelId: string;
-      conversationId: string;
-    }
+    releaseContext: ReleaseEventContext
   ): Promise<{
     envChangeCount: number;
     migrationChangeCount: number;
@@ -576,7 +1011,8 @@ export class CommitAnalysisService {
           result.filePaths,
           result.fileChanges,
           applicationId,
-          releaseContext
+          releaseContext,
+          result.ticket?.xyneId ?? null,
         );
 
         totalEnvChanges += envChangeCount;
@@ -608,6 +1044,53 @@ export class CommitAnalysisService {
       return entry.srcPath.toString;
     }
     return entry.path.toString || entry.path.components.join('/');
+  }
+
+  private getPullRequestDiffFilePath(file: PullRequestDiffFile): string | null {
+    return file.newPath ?? file.oldPath ?? file.path ?? file.filename ?? null;
+  }
+
+  private mapPullRequestDiffTypeToFileChangeType(type: string | null | undefined): FileChangeType {
+    switch (type) {
+      case 'add':
+        return FileChangeType.ADDED;
+      case 'delete':
+        return FileChangeType.REMOVED;
+      default:
+        return FileChangeType.MODIFIED;
+    }
+  }
+
+  private buildRawDiffFromPullRequestFile(file: PullRequestDiffFile): string {
+    return (file.hunks ?? [])
+      .map((hunk) => hunk.content ?? '')
+      .filter((content) => content.length > 0)
+      .join('\n');
+  }
+
+  private async releaseChangeInstanceExists(input: {
+    applicationId: string;
+    changeType: string;
+    releaseId: string;
+    applicationReleaseId: string | null;
+    devTicketXyneId: string | null;
+    commitId: string | null;
+    filePath: string;
+  }): Promise<boolean> {
+    const db = DatabaseClient.getInstance();
+    const existing = await db.releaseChangeType.findFirst({
+      where: {
+        applicationId: input.applicationId,
+        changeType: input.changeType,
+        releaseId: input.releaseId,
+        applicationReleaseId: input.applicationReleaseId,
+        devTicketXyneId: input.devTicketXyneId,
+        commitId: input.commitId,
+        filePath: input.filePath,
+      },
+      select: { id: true },
+    });
+    return Boolean(existing);
   }
 
 }

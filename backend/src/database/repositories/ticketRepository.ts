@@ -5,12 +5,13 @@ import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapsh
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
-import { BaseTicketType, PRActivityValue } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, PRActivityValue } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateKeyBetween } from 'fractional-indexing';
 import { eventRouter } from '@/automations/engine/event-router';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
 import { emitTicketUpdated, type TicketChanges } from '@/automations/triggers/ticket-updated.trigger';
+import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { dualWriteTicketTag, dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
@@ -471,6 +472,26 @@ export class TicketRepository {
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
+    if (
+      newStatusV2 === TicketStatusV2.COMPLETED
+      && oldStatusV2 !== TicketStatusV2.COMPLETED
+      && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
+    ) {
+      // The ticket update above is already committed; deployed-version
+      // bookkeeping must not fail the request or suppress the emits below.
+      try {
+        await versionReleaseMappingService.updateDeployedVersionOnCompletion(
+          ticketId,
+          updatedTicket.updatedAt,
+        );
+      } catch (error) {
+        logger.error(
+          `[VersionReleaseMapping] failed to update deployedVersion for ticket ${ticketId}:`,
+          error,
+        );
+      }
+    }
+
     if (stageChanged || statusChanged) {
       const changes: TicketChanges = {};
       if (stageChanged) {
@@ -906,6 +927,26 @@ export class TicketRepository {
 
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+
+    if (
+      fields.statusV2 === TicketStatusV2.COMPLETED
+      && previousStatus !== TicketStatusV2.COMPLETED
+      && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
+    ) {
+      // The ticket update above is already committed; deployed-version
+      // bookkeeping must not fail the request or suppress the emits below.
+      try {
+        await versionReleaseMappingService.updateDeployedVersionOnCompletion(
+          ticketId,
+          updatedTicket.updatedAt,
+        );
+      } catch (error) {
+        logger.error(
+          `[VersionReleaseMapping] failed to update deployedVersion for ticket ${ticketId}:`,
+          error,
+        );
+      }
+    }
 
     // Consolidate all field changes into a single TICKET_UPDATED emit.
     if (prevSnapshot) {

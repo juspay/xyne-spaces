@@ -35,11 +35,13 @@ export class FormService {
       entityId: string;
       entityType: string;
       fieldId: string;
+      contextId?: string | null;
       fieldValue?: string;
       actualFieldValue: Prisma.InputJsonValue;
-    }>
+    }>,
+    tx?: Prisma.TransactionClient
   ) {
-    return await this.formsRepository.createManyFormEntityValues(data);
+    return await this.formsRepository.createManyFormEntityValues(data, tx);
   }
 
   async findFormByContextAndEntity(context: FormContextType, entity: FormEntityType) {

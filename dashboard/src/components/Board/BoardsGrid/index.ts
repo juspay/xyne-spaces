@@ -1,1 +1,0 @@
-export { BoardsGrid } from './BoardsGrid';

@@ -1,3 +1,4 @@
+
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -354,6 +355,20 @@ enum ConversationParticipation {
 enum ProjectType {
   DEFAULT
   DM
+  @@schema("public")
+}
+
+enum VCSProviderType {
+  GITHUB
+  BITBUCKET_CLOUD
+  BITBUCKET_SERVER
+  @@schema("public")
+}
+
+enum ReleaseTrackingMode {
+  COMMIT_RANGE
+  VERSION
+
   @@schema("public")
 }
 
@@ -1839,17 +1854,17 @@ model Invitation {
 
 // Project Models
 model Project {
-  id              String    @id @default(cuid())
-  name            String
-  code            String    // Project shortcode for ticket IDs (e.g., EUL, INF)
-  ticketSequence  Int       @default(0)  // Atomic counter for project-scoped ticket numbering
-  description     String?
-  workspaceId     String    // Workspace this project belongs to
-  type            ProjectType  @default(DEFAULT)
-  createdBy       String    // User ID (no FK constraint)
-  updatedBy       String?   // User ID (no FK constraint)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime? @updatedAt
+  id             String           @id @default(cuid())
+  name           String
+  code           String // Project shortcode for ticket IDs (e.g., EUL, INF)
+  ticketSequence Int              @default(0) // Atomic counter for project-scoped ticket numbering
+  description    String?
+  workspaceId    String // Workspace this project belongs to
+  type           ProjectType      @default(DEFAULT)
+  createdBy      String // User ID (no FK constraint)
+  updatedBy      String? // User ID (no FK constraint)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime?        @updatedAt
 
   // Relations
   workspace Workspace @relation(fields: [workspaceId], references: [id])
@@ -1869,17 +1884,19 @@ model Project {
 
 // Board Models
 model Board {
-  id          String    @id @default(cuid())
-  name        String
-  boardType   BoardType @default(DEFAULT)
-  projectId   String    // Project ID (no FK constraint)
-  workspaceId String    // Workspace for ACL optimization (denormalized from project)
-  createdBy   String    // User ID (no FK constraint)
-  updatedBy   String?   // User ID (no FK constraint)
-  description String?   // Board description
-  metadata    Json?     // Board configuration including ticketFormConfig
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime? @updatedAt
+  id                  String               @id @default(cuid())
+  name                String
+  boardType           BoardType            @default(DEFAULT)
+  projectId           String               // Project ID (no FK constraint)
+  workspaceId         String               // Workspace for ACL optimization (denormalized from project)
+  createdBy           String               // User ID (no FK constraint)
+  updatedBy           String?              // User ID (no FK constraint)
+  description         String?              // Board description
+  metadata            Json?                // Board configuration including ticketFormConfig
+  vcsProvider         VCSProviderType?      // Main release board VCS provider
+  releaseTrackingMode ReleaseTrackingMode? // Main release board tracking mode
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime?            @updatedAt
 
   // Relations
   project               Project                @relation(fields: [projectId], references: [id])
@@ -1888,6 +1905,8 @@ model Board {
   boardComplexityScores BoardComplexityScore[]
   workloadMappings      UserWorkloadMapping[]
   expertiseMappings     UserExpertiseMapping[]
+  mainReleaseApplications Application[] @relation("MainReleaseBoardApplications")
+  ownedApplication        Application?  @relation("ApplicationBoard")
   incomingWebhooks      AppIncomingWebhook[]
 
   @@unique([name, projectId])
@@ -3369,6 +3388,7 @@ model FormEntityValues {
 
   @@index([entityId, entityType])
   @@index([fieldId])
+  @@index([contextId]) // releaseChangeFormValuesByReleaseId filters on contextId (= releaseId)
   @@unique([entityId, entityType, fieldId, contextId]) // One value per field per entity per context
   @@map("form_entity_values")
   @@schema("public")
@@ -3577,15 +3597,6 @@ model StageApprovers {
 
 // Release Management Enums
 
-enum ApplicationReleaseTicketStatus {
-  NOT_TESTED
-  TESTING
-  PASSED
-  FAILED
-  EXCLUDED
-  @@schema("public")
-}
-
 enum ReleaseEventType {
   RELEASE
   TICKET
@@ -3606,41 +3617,53 @@ enum RCAStatus {
 
 // Services that can be released
 model Application {
-  id              String    @id @default(cuid())
-  name            String
-  projectId       String    // Project ID (no FK constraint)
-  boardId         String    // Board ID (no FK constraint)
-  channelId       String?   // Channel ID (no FK constraint)
-  regex           String    // Used to identify service 
-  repoUrl         String
-  deployedCommit  String?   // Used to identify the commit that is currently deployed
-  lastDeployedAt  DateTime?
-  ownerTeam       String
-  createdAt       DateTime  @default(now())
+  id                 String    @id @default(cuid())
+  name               String
+  projectId          String    // Project ID (no FK constraint)
+  boardId            String    @unique // Application release board ID
+  mainReleaseBoardId String?   // Owning main release board ID
+  channelId          String?   // Channel ID (no FK constraint)
+  regex              String    // Used to identify service
+  repoUrl            String
+  deployedCommit     String?   // Commit-range deployment state
+  deployedVersion    String?   // Version-mode deployment state
+  lastDeployedAt     DateTime?
+  ownerTeam          String
+  envPaths           String[]  @default([]) // Environment file paths matched against PR diffs
+  migrationPaths     String[]  @default([]) // Migration file paths matched against PR diffs
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime @default("1970-01-01T00:00:00.000Z") @updatedAt
+  applicationBoard Board @relation("ApplicationBoard", fields: [boardId], references: [id], onDelete: Restrict)
+  mainReleaseBoard Board? @relation("MainReleaseBoardApplications", fields: [mainReleaseBoardId], references: [id], onDelete: Restrict)
 
+  @@unique([mainReleaseBoardId, name])
   @@index([projectId])
   @@index([channelId])
   @@index([boardId])
+  @@index([mainReleaseBoardId])
   @@map("applications")
   @@schema("public")
 }
 
-// Individual application releases under a parent release ticket
-// Mapping between application release and actual dev tickets
+// Per (per-app SubTicket × dev-ticket) testing cell.
+// Ticket details (type, assignee, title) are fetched via the Zero `devTicket`
+// relation (ticketId → ticket.id) — no snapshots needed.
 model ApplicationReleaseTicket {
   id                    String                          @id @default(cuid())
   applicationReleaseId  String                          // SubTicket ID from ApplicationRelease
-  ticketId              String                          // Ticket ID in the actual dev board
-  title                 String
-  status                ApplicationReleaseTicketStatus  @default(NOT_TESTED)
+  ticketId              String                          // Dev ticket UUID (FK to tickets.id via Zero relation)
+  releaseId             String                          // Release ticket ID
   testedBy              String?                         // User ID (no FK constraint)
   testedAt              DateTime?
   failureReason         String?
   createdAt             DateTime                        @default(now())
+  // No @default(now()): see Application.updatedAt — every write sets it explicitly.
+  updatedAt             DateTime                        @default("1970-01-01T00:00:00.000Z") @updatedAt
 
+  @@unique([applicationReleaseId, ticketId])
   @@index([applicationReleaseId])
   @@index([ticketId])
-  @@index([status])
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "application_release_tickets_releaseId_createdAt_id_idx")
   @@map("application_release_tickets")
   @@schema("public")
 }
@@ -3686,14 +3709,33 @@ model ReleaseChange {
   @@schema("public")
 }
 
+/// Per-instance anchor for a single env/migration change emitted during
+/// release commit analysis. Each row pairs with a `form_entity_values`
+/// bag (entityId = this row's id) that holds the variable kind-specific
+/// fields (envKey/oldValue/newValue, changeLog/query, etc.). Legacy
+/// pre-v2 rows existed as a per-(app, kind) lookup registry and have
+/// all linkage columns NULL — release-scoped reads filter on
+/// `releaseId IS NOT NULL` so they don't bleed into v2 surfaces.
 model ReleaseChangeType {
   id              String   @id @default(cuid())
   applicationId   String   // Application ID
   changeType      String   // e.g., "env", "migrations", "database", etc.
+  releaseId            String? // Parent release Ticket id (matches release_events.releaseId)
+  applicationReleaseId String? // Per-app SubTicket id (matches release_events.applicationReleaseId)
+  devTicketXyneId      String? // Dev ticket xyneId carried from the source commit's PR title
+  commitId             String? // Source commit hash
+  filePath             String? // File path of the change (identifies the instance + dedupes)
+  // No @default(now()): avoid a DB-level now() default on a Zero-synced table.
+  // The repository sets createdAt explicitly on every write; pre-existing rows
+  // are backfilled with a fixed literal in the migration, which drops the default.
+  createdAt            DateTime  @default("1970-01-01T00:00:00.000Z")
 
   @@index([id])
   @@index([applicationId])
   @@index([changeType])
+  @@index([releaseId])
+  @@index([applicationReleaseId])
+  @@index([devTicketXyneId])
   @@map("release_change_types")
   @@schema("public")
 }

@@ -452,7 +452,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   useEffect(() => {
     if (!isOpen || !formMapping?.formFields) return;
-    if (!isReleaseBoard(selectedBoard?.boardType)) return;
+    if (!selectedBoard || !isReleaseBoard(selectedBoard.boardType)) return;
+
+    const hasDeployedCommitField = formMapping.formFields.some(
+      field => field.fieldName === 'deployedCommitId',
+    );
+    if (!hasDeployedCommitField) return;
 
     const currentDeployedCommitId = getSingleStringValue(
       formValues?.dynamicFields?.['deployedCommitId'] || '',
@@ -464,6 +469,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       try {
         const response = await apiInstance.get<{ latestCommitId: string }>(
           '/commits/analyze/latest-deployed-commit',
+          { params: { mainReleaseBoardId: selectedBoard.id } },
         );
 
         if (response.data?.latestCommitId) {

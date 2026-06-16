@@ -129,6 +129,27 @@ class UserActivityTrackingService {
     });
   }
 
+  async trackReleaseReportPublished(
+    userId: string,
+    metadata: {
+      ticketId: string;
+      canvasId: string;
+      action: 'created' | 'updated';
+      version: number;
+      devTicketCount: number;
+      environmentVariableCount: number;
+      migrationFileCount: number;
+      partialFailure: boolean;
+    },
+  ): Promise<void> {
+    await this.track({
+      userId,
+      eventName: 'RELEASE_REPORT_PUBLISHED',
+      eventCategory: 'RELEASE',
+      metadata,
+    });
+  }
+
   // ==================== Specific Channel Operations ====================
 
   async trackChannelCreated(userId: string, metadata?: { channelId?: string; name?: string; scopeType?: string; projectId?: string }): Promise<void> {

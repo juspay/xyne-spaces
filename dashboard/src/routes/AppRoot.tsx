@@ -21,6 +21,8 @@ import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
+import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
+
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
 import MyTicketsScreen from './FilteredTicketsScreen/FilteredTicketsScreen.tsx';
 import SupportScreen from './SupportScreen/SupportScreen.tsx';
@@ -1050,6 +1052,10 @@ export const router = createBrowserRouter([
               {
                 path: 'listProjects/:projectId',
                 element: <ProjectDetailScreen />,
+              },
+              {
+                path: 'listProjects/:projectId/releases/:releaseTicketId',
+                element: <ReleaseDetailScreen />,
               },
               {
                 path: 'calls',

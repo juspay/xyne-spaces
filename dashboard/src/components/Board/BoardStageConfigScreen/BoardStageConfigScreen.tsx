@@ -63,16 +63,24 @@ const BoardStageConfigScreen = ({
   const zero = useZero();
 
   // ── Data fetching ──────────────────────────────────────────────────────────
+  // initialBoard may only replace the query when it actually carries stage
+  // data. A partial object (e.g. { id, name }) must not suppress the fetch:
+  // boards can already have stages here (release boards are created with
+  // seeded stages), and rendering the default template over them destroys the
+  // real stages on the next save.
+  const initialBoardHasStages =
+    !!initialBoard && typeof initialBoard === 'object' && 'stages' in initialBoard;
+
   // Fetch only the specific board with full details (stages, prStatusMappings, etc.)
   const [boardFromQuery] = useCachedQuery(queries.boardFullDetailById({ boardId: boardId || '' }), {
-    enabled: !!boardId && !initialBoard,
+    enabled: !!boardId && !initialBoardHasStages,
   });
 
-  // Use initialBoard if provided (for newly created boards), otherwise use query result
+  // Use initialBoard if it has full data (for newly created boards), otherwise use query result
   const board = useMemo(() => {
-    if (initialBoard) return initialBoard;
+    if (initialBoardHasStages) return initialBoard;
     return boardFromQuery;
-  }, [initialBoard, boardFromQuery]);
+  }, [initialBoardHasStages, initialBoard, boardFromQuery]);
 
   const [project] = useCachedQuery(queries.projectById({ projectId: projectId || '' }), {
     enabled: !!projectId,

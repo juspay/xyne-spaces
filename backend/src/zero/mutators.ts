@@ -42,6 +42,7 @@ import {
   AttachmentEntityType,
   AttributionConfidence,
   BaseTicketType,
+  isReleaseTicket,
   getNudgeActionBehavior,
   LinkVisibility,
   CollectionRole,
@@ -72,6 +73,8 @@ import {
   DashboardVisibility,
   DashboardRole,
   parseDashboardConfig,
+  VCSProviderType,
+  ReleaseTrackingMode,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
@@ -89,6 +92,7 @@ import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
+import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 
@@ -2442,7 +2446,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             metadata: undefined,
           });
 
-           // Copy attachments from the original message
+          // Copy attachments from the original message
           for (const attachment of attachmentsArray) {
             if (!attachment) continue;
             await tx.mutate.message_attachments.insert({
@@ -2459,18 +2463,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               storageProvider: attachment.storageProvider,
               conversationId: conversationId,
               workspaceId: authData.workspaceId,
-              metadata: attachment.metadata, 
+              metadata: attachment.metadata,
               createdAt: now,
               isDeleted: false,
             });
           }
 
           // --- Call Message Forwarding Specifics ---
-          
+
           let replyCount = 0;
           const originalMetadata = originalMessage.metadata as Record<string, unknown> | undefined;
           const isCallMessage = originalMetadata?.['isCallMessage'] === true;
-          
+
           // Define metadata for the new forwarded message
           if (isCallMessage) {
             const forwardedMessageMetadata = { ...(originalMessage.metadata as Record<string, unknown> || {}) };
@@ -2478,7 +2482,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             if (originalMetadata?.['callId']) {
               forwardedMessageMetadata['callId'] = originalMetadata['callId'];
             }
-            
+
             // Re-update the inserted message metadata with call indicators
             await tx.mutate.messages.update({
               messageId,
@@ -2504,7 +2508,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               for (let i = 0; i < systemMessages.length; i++) {
                 const sysMsg = systemMessages[i]!;
                 const clonedMessageId = uuidv4(); // Generate a new UUID for the duplicated message
-                
+
                 await tx.mutate.messages.insert({
                   messageId: clonedMessageId,
                   conversationId,
@@ -2525,33 +2529,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
                 // If the system message had attachments, we need to clone the attachment references
                 if (sysMsg.hasAttachment) {
-                   const originalAtts = await tx.run(
-                     zql.message_attachments
+                  const originalAtts = await tx.run(
+                    zql.message_attachments
                       .where('entityId', sysMsg.messageId)
                       .where('entityType', AttachmentEntityType.CHAT)
-                   );
+                  );
 
-                    for (let j = 0; j < originalAtts.length; j++) {
-                      const attInfo = originalAtts[j]!;
-                      await tx.mutate.message_attachments.insert({
-                         id: uuidv4(),
-                         entityId: clonedMessageId,
-                         entityType: AttachmentEntityType.CHAT,
-                         originalFilename: attInfo.originalFilename,
-                         size: attInfo.size,
-                         mimetype: attInfo.mimetype,
-                         url: (attInfo as any).url || (attInfo as any).fileUrl || '',
-                         thumbnailUrl: attInfo.thumbnailUrl,
-                         uploadedByUserId: authData.sub,
-                         createdBy: authData.sub,
-                         storageProvider: (attInfo as any).storageProvider || config.fileStorage.provider,
-                         conversationId: conversationId,
-                         workspaceId: authData.workspaceId,
-                         metadata: attInfo.metadata as any,
-                         createdAt: now,
-                        isDeleted: false,
-                      });
-                    }
+                  for (let j = 0; j < originalAtts.length; j++) {
+                    const attInfo = originalAtts[j]!;
+                    await tx.mutate.message_attachments.insert({
+                      id: uuidv4(),
+                      entityId: clonedMessageId,
+                      entityType: AttachmentEntityType.CHAT,
+                      originalFilename: attInfo.originalFilename,
+                      size: attInfo.size,
+                      mimetype: attInfo.mimetype,
+                      url: (attInfo as any).url || (attInfo as any).fileUrl || '',
+                      thumbnailUrl: attInfo.thumbnailUrl,
+                      uploadedByUserId: authData.sub,
+                      createdBy: authData.sub,
+                      storageProvider: (attInfo as any).storageProvider || config.fileStorage.provider,
+                      conversationId: conversationId,
+                      workspaceId: authData.workspaceId,
+                      metadata: attInfo.metadata as any,
+                      createdAt: now,
+                      isDeleted: false,
+                    });
+                  }
                 }
               }
             }
@@ -2560,8 +2564,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Update reply count if bots were added
           if (replyCount > 0) {
             await tx.mutate.conversations.update({
-               conversationId,
-               replyCount
+              conversationId,
+              replyCount
             });
           }
 
@@ -2617,7 +2621,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const conversation = await tx.run(
             zql.conversations.where('conversationId', conversationId).one()
           );
-          
+
           if (!conversation) {
             throw new Error('Conversation not found');
           }
@@ -3893,13 +3897,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           for (const attachmentId of attachmentIds) {
             const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
             if (!attachment) continue;
-  
+
             await tx.mutate.message_attachments.delete({ id: attachment.id });
-  
+
             const remainingAttachments = await tx.run(
               zql.message_attachments.where('entityId', attachment.entityId),
             );
-  
+
             if (remainingAttachments.length === 0) {
               if (attachment.entityType !== AttachmentEntityType.DRAFT) {
                 await tx.mutate.messages.update({
@@ -4575,8 +4579,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
-                  // Update ConversationParticipant.lastReadAt to track when user last read this thread
-          const participant = await tx.run(
+          // Update ConversationParticipant.lastReadAt to track when user last read this thread
+          let participant = await tx.run(
             zql.conversation_participants
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
@@ -4961,7 +4965,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (params.eta !== undefined && params.eta !== null && params.eta < now) {
             throw new Error("ETA cannot be set to a past date");
           }
-          
+
           if (params.isArchived === true && !ticket.isArchived) {
             if (ticket.statusV2 !== TicketStatusV2.COMPLETED && ticket.statusV2 !== TicketStatusV2.CANCELLED) {
               throw new Error('Ticket must be in Completed or Cancelled status to be archived');
@@ -4975,7 +4979,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
           const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
 
-          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging|| isBoardChanging) && ticket.userGroupId) {
+          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
             // Get board to check if transfer is restricted
             const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
 
@@ -5011,7 +5015,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const oldAssignedTo = ticket.assignedTo;
           const oldBoardId = ticket.boardId;
 
-          
+
           // Handle board transfer
           if (params.boardId !== undefined && params.boardId !== oldBoardId) {
             const now = Date.now();
@@ -5031,8 +5035,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
             // 2. Calculate total ETA from new board's stages (same logic as ticket creation)
             const totalEtaHours = newBoardStages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
-            const newTicketEta = totalEtaHours > 0 
-              ? calculateETADeadline(new Date(now), totalEtaHours).getTime() 
+            const newTicketEta = totalEtaHours > 0
+              ? calculateETADeadline(new Date(now), totalEtaHours).getTime()
               : null;
 
             // 3. Update ticket with first stage and new ETA
@@ -5076,7 +5080,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             if (firstStage.eta !== null && firstStage.eta > 0) {
               const stageEtaDeadline = calculateETADeadline(new Date(now), firstStage.eta).getTime();
               const newEntryId = uuidv4();
-              
+
               await tx.mutate.ticket_stage_eta.insert({
                 id: newEntryId,
                 ticketId: params.id,
@@ -5088,7 +5092,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 updatedBy: authData.sub
               });
             }
-            if(ticket.userGroupId){
+            if (ticket.userGroupId) {
               // Fire and forget - retrigger autoassignment for the new board
               asyncTasks.push(async () => {
                 try {
@@ -5115,7 +5119,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId);
                     if (assignmentResult.assignedUserId) {
                       logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
-                      
+
                       // Update the ticket with the auto-assigned user using tx.mutate
                       await tx.mutate.tickets.update({
                         id: params.id,
@@ -5287,19 +5291,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     });
                   } else {
                     // First time entering this stage - create new entry only if stage has ETA
-                      const newEntryId = uuidv4();
-                      const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
-                      await tx.mutate.ticket_stage_eta.insert({
-                        id: newEntryId,
-                        ticketId: params.id,
-                        stageId: newStage.id,
-                        stageEnteredAt: now,
-                        stageLeftAt: null,
-                        stageEta: stageEtaDeadline,
-                        createdAt: now,
-                        updatedBy: authData.sub
-                      });
-                    }
+                    const newEntryId = uuidv4();
+                    const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
+                    await tx.mutate.ticket_stage_eta.insert({
+                      id: newEntryId,
+                      ticketId: params.id,
+                      stageId: newStage.id,
+                      stageEnteredAt: now,
+                      stageLeftAt: null,
+                      stageEta: stageEtaDeadline,
+                      createdAt: now,
+                      updatedBy: authData.sub
+                    });
+                  }
                 }
               } else {
                 // BACKWARD MOVEMENT: Delete all forward stage entries, reactivate target
@@ -5365,6 +5369,27 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
+
+          if (
+            params.statusV2 === TicketStatusV2.COMPLETED
+            && ticket.statusV2 !== TicketStatusV2.COMPLETED
+            && isReleaseTicket(ticket.ticketType as BaseTicketType | null)
+          ) {
+            const completionTimestamp = new Date(params.updatedAt);
+            asyncTasks.push(async () => {
+              try {
+                await versionReleaseMappingService.updateDeployedVersionOnCompletion(
+                  params.id,
+                  completionTimestamp,
+                );
+              } catch (error) {
+                logger.error(
+                  `[VersionReleaseMapping] failed to update deployedVersion for ticket ${params.id}:`,
+                  error,
+                );
+              }
+            });
+          }
 
           // Sync workload for assignedTo changes (async, non-blocking)
           if (params.assignedTo !== undefined && params.assignedTo !== oldAssignedTo && ticket.userGroupId && ticket.boardId) {
@@ -5441,23 +5466,23 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   ticket.projectId
                 );
 
-                if (assignmentResult.assignedUserId) {
-                  await tx.mutate.tickets.update({
-                    id: params.id,
-                    assignedTo: assignmentResult.assignedUserId,
-                    updatedBy: authData.sub,
-                    updatedAt: timestamp,
-                  });
+                  if (assignmentResult.assignedUserId) {
+                    await tx.mutate.tickets.update({
+                      id: params.id,
+                      assignedTo: assignmentResult.assignedUserId,
+                      updatedBy: authData.sub,
+                      updatedAt: timestamp,
+                    });
 
-                  // Add to activities for tracking
-                  await tx.mutate.ticket_activities.insert({
-                    id: activityId,
-                    ticketId: params.id,
-                    updatedBy: authData.sub,
-                    timestamp: timestamp,
-                    activityType: ActivityType.ASSIGNED_TO,
-                    value: { oldValue: ticket.assignedTo, newValue: assignmentResult.assignedUserId },
-                  });
+                    // Add to activities for tracking
+                    await tx.mutate.ticket_activities.insert({
+                      id: activityId,
+                      ticketId: params.id,
+                      updatedBy: authData.sub,
+                      timestamp: timestamp,
+                      activityType: ActivityType.ASSIGNED_TO,
+                      value: { oldValue: ticket.assignedTo, newValue: assignmentResult.assignedUserId },
+                    });
 
                   // Create system message if conversation exists
                   if (ticket.conversationId) {
@@ -5487,9 +5512,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     logger.info(`siraj101 syncUserWorkload  5${assignmentResult.assignedUserId}`)
                     await syncUserWorkload(assignmentResult.assignedUserId, params.userGroupId!, targetBoardId, authData.sub);
 
-                  logger.info(`[AUTO-ASSIGN] Ticket ${params.id} assigned to ${assignmentResult.assignedUserId} (group change)`);
-                } else {
-                  logger.info(`[AUTO-ASSIGN] No user assigned for ticket ${params.id}. Reason: ${assignmentResult.reason}`);
+                    logger.info(`[AUTO-ASSIGN] Ticket ${params.id} assigned to ${assignmentResult.assignedUserId} (group change)`);
+                  } else {
+                    logger.info(`[AUTO-ASSIGN] No user assigned for ticket ${params.id}. Reason: ${assignmentResult.reason}`);
                   }
                 }
               } catch (error) {
@@ -5961,6 +5986,389 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
+      // Creates or updates one main release board and only the applications
+      // explicitly owned by that board through Application.mainReleaseBoardId.
+      saveReleaseBoardConfig: defineMutator(
+        z.object({
+          projectId: z.string(),
+          mainBoardId: z.string(),
+          mainBoardName: z.string(),
+          vcsProvider: z.nativeEnum(VCSProviderType),
+          releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
+          channelId: z.string(),
+          applications: z.array(
+            z.object({
+              id: z.string(),
+              boardId: z.string(),
+              boardName: z.string(),
+              name: z.string(),
+              regex: z.string(),
+              repoUrl: z.string(),
+              ownerTeam: z.string(),
+              envPaths: z.array(z.string()),
+              migrationPaths: z.array(z.string()),
+            }),
+          ),
+        }),
+        async ({
+          tx,
+          args: {
+            projectId,
+            mainBoardId,
+            mainBoardName,
+            vcsProvider,
+            releaseTrackingMode,
+            channelId,
+            applications,
+          },
+        }) => {
+          // Validate project exists
+          const project = await tx.run(zql.projects.where('id', projectId).one());
+          if (!project) {
+            throw new Error('Project not found');
+          }
+
+          // Validate channel exists and belongs to this project
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error('Channel not found');
+          }
+          if (channel.projectId !== projectId) {
+            throw new Error('Channel does not belong to this project');
+          }
+
+          if (applications.length === 0) {
+            throw new Error('At least one application is required');
+          }
+
+          const normalizedApplicationNames = applications.map(app => app.name.trim());
+          if (normalizedApplicationNames.some(name => !name)) {
+            throw new Error('Application name is required');
+          }
+          if (new Set(normalizedApplicationNames).size !== normalizedApplicationNames.length) {
+            throw new Error('Application names must be unique within a release group');
+          }
+
+          // One main release board represents one repository. A project can use
+          // multiple repositories by creating multiple main release boards.
+          const normalizedRepoUrls = new Set(
+            applications.map(app => app.repoUrl.trim().replace(/\/+$/, '')),
+          );
+          if (normalizedRepoUrls.has('') || normalizedRepoUrls.size !== 1) {
+            throw new Error('All applications in a release group must use the same repository URL');
+          }
+
+          if (!mainBoardName.trim()) {
+            throw new Error('Main release board name is required');
+          }
+          for (const app of applications) {
+            if (!app.boardName.trim()) {
+              throw new Error('Application board name is required');
+            }
+            if (app.boardId === mainBoardId) {
+              throw new Error('An application board cannot be the main release board');
+            }
+          }
+
+          const appIds = applications.map(app => app.id);
+          const appBoardIds = applications.map(app => app.boardId);
+          const requestedBoardNames = [
+            mainBoardName.trim(),
+            ...applications.map(app => app.boardName.trim()),
+          ];
+          if (new Set(appIds).size !== appIds.length) {
+            throw new Error('Application IDs must be unique');
+          }
+          if (new Set(appBoardIds).size !== appBoardIds.length) {
+            throw new Error('Application board IDs must be unique');
+          }
+          if (new Set(requestedBoardNames).size !== requestedBoardNames.length) {
+            throw new Error('Release board names must be unique within the project');
+          }
+
+          // Seed the GENERIC default stages on each new release board. This is
+          // the workspace-agnostic prod default — deliberately minimal. A
+          // workspace can customize stages afterward; e.g. the Xyne-Spaces local
+          // lifecycle lives in backend/scripts/release-manager/seed-release-stages.ts and is
+          // intentionally NOT shared with this default (workspace-specific seed
+          // data stays scoped to that script).
+          const seedReleaseStages = async (newBoardId: string, ts: number): Promise<void> => {
+            const stages = [
+              { name: 'BACKLOG', sequenceNumber: 1, defaultTicketStatusV2: TicketStatusV2.TODO },
+              { name: 'IN PROGRESS', sequenceNumber: 2, defaultTicketStatusV2: TicketStatusV2.STARTED },
+              { name: 'COMPLETED', sequenceNumber: 3, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
+              { name: 'NOT REQUIRED', sequenceNumber: 4, defaultTicketStatusV2: TicketStatusV2.CANCELLED },
+            ];
+            for (const s of stages) {
+              await tx.mutate.stages.insert({
+                id: uuidv4(),
+                name: s.name,
+                sequenceNumber: s.sequenceNumber,
+                defaultTicketStatusV2: s.defaultTicketStatusV2,
+                boardId: newBoardId,
+                createdBy: authData.sub,
+                updatedBy: authData.sub,
+                createdAt: ts,
+                updatedAt: ts,
+              });
+            }
+          };
+
+          // Bind this release board group to the form selected by its main board's mode.
+          // The Create Ticket modal reads one BOARD/TICKET mapping per board, so
+          // switching modes updates the existing mapping instead of adding a second
+          // form. The forms themselves are seed data (scripts/seed-release.ts).
+          const releaseCommitFormName = 'xyne_release_specs_form';
+          const releaseVersionFormName = 'xyne_release_version_specs_form';
+          const targetReleaseFormName =
+            releaseTrackingMode === ReleaseTrackingMode.VERSION
+              ? releaseVersionFormName
+              : releaseCommitFormName;
+          let targetReleaseFormId: string | null = null;
+          let releaseFormLookedUp = false;
+          const ensureBoardFormMapping = async (boardId: string): Promise<void> => {
+            if (!releaseFormLookedUp) {
+              releaseFormLookedUp = true;
+              const forms = await tx.run(
+                zql.forms
+                  .where('formName', targetReleaseFormName)
+                  .where('contextType', FormContextType.BOARD)
+                  .where('entityType', FormEntityType.TICKET)
+                  .where('workspaceId', project.workspaceId),
+              );
+              targetReleaseFormId = forms[0]?.id ?? null;
+            }
+            if (!targetReleaseFormId) {
+              throw new Error(
+                `Release form "${targetReleaseFormName}" is not configured for this workspace. `
+                + 'Run scripts/release-manager/seed-release.ts before creating release boards.',
+              );
+            }
+
+            const existingMapping = await tx.run(
+              zql.forms_context_mapping
+                .where('contextId', boardId)
+                .where('contextType', FormContextType.BOARD)
+                .where('entityType', FormEntityType.TICKET)
+                .one(),
+            );
+
+            if (existingMapping) {
+              // Skip the no-op write: an unchanged mapping would still be
+              // replicated to every client subscribed to forms_context_mapping.
+              if (existingMapping.formId !== targetReleaseFormId) {
+                await tx.mutate.forms_context_mapping.update({
+                  id: existingMapping.id,
+                  formId: targetReleaseFormId,
+                });
+              }
+              return;
+            }
+
+            await tx.mutate.forms_context_mapping.insert({
+              id: uuidv4(),
+              formId: targetReleaseFormId,
+              contextId: boardId,
+              contextType: FormContextType.BOARD,
+              entityType: FormEntityType.TICKET,
+            });
+          };
+
+          const deleteApplicationBoard = async (
+            application: { id: string; boardId: string },
+          ): Promise<void> => {
+            const stages = await tx.run(zql.stages.where('boardId', application.boardId));
+            for (const stage of stages) {
+              const approvers = await tx.run(
+                zql.stage_approvers.where('stageId', stage.id),
+              );
+              for (const approver of approvers) {
+                await tx.mutate.stage_approvers.delete({ id: approver.id });
+              }
+
+              const prStatusMappings = await tx.run(
+                zql.stage_pr_status_mappings.where('stageId', stage.id),
+              );
+              for (const mapping of prStatusMappings) {
+                await tx.mutate.stage_pr_status_mappings.delete({ id: mapping.id });
+              }
+
+              const stageFormMappings = await tx.run(
+                zql.forms_context_mapping
+                  .where('contextId', stage.id)
+                  .where('contextType', FormContextType.STAGE),
+              );
+              for (const mapping of stageFormMappings) {
+                await tx.mutate.forms_context_mapping.delete({ id: mapping.id });
+              }
+
+              await tx.mutate.stages.delete({ id: stage.id });
+            }
+
+            const boardFormMappings = await tx.run(
+              zql.forms_context_mapping
+                .where('contextId', application.boardId)
+                .where('contextType', FormContextType.BOARD),
+            );
+            for (const mapping of boardFormMappings) {
+              await tx.mutate.forms_context_mapping.delete({ id: mapping.id });
+            }
+
+            await tx.mutate.applications.delete({ id: application.id });
+            await tx.mutate.boards.delete({ id: application.boardId });
+          };
+
+          const existingMainBoard = await tx.run(zql.boards.where('id', mainBoardId).one());
+
+          if (existingMainBoard) {
+            if (
+              existingMainBoard.projectId !== projectId
+              || existingMainBoard.boardType !== BoardType.RELEASE
+            ) {
+              throw new Error('Main release board does not belong to this project');
+            }
+            if (!existingMainBoard.vcsProvider || !existingMainBoard.releaseTrackingMode) {
+              throw new Error('The selected board is not a main release board');
+            }
+
+            await tx.mutate.boards.update({
+              id: existingMainBoard.id,
+              name: mainBoardName.trim(),
+              vcsProvider,
+              releaseTrackingMode,
+              updatedBy: authData.sub,
+              updatedAt: Date.now(),
+            });
+            await ensureBoardFormMapping(existingMainBoard.id);
+          } else {
+            const projectBoardTs = Date.now();
+            await tx.mutate.boards.insert({
+              id: mainBoardId,
+              name: mainBoardName.trim(),
+              projectId,
+              workspaceId: project.workspaceId,
+              createdBy: authData.sub,
+              boardType: BoardType.RELEASE,
+              vcsProvider,
+              releaseTrackingMode,
+              createdAt: projectBoardTs,
+            });
+            await seedReleaseStages(mainBoardId, projectBoardTs);
+            await ensureBoardFormMapping(mainBoardId);
+          }
+
+          // Group-scoped edits only load applications owned by this main board.
+          const existingApps = await tx.run(
+            zql.applications.where('mainReleaseBoardId', mainBoardId),
+          );
+          const existingById = new Map(existingApps.map(app => [app.id, app]));
+          const payloadApplicationIds = new Set(applications.map(app => app.id));
+
+          for (const existing of existingApps) {
+            if (!payloadApplicationIds.has(existing.id)) {
+              // Existence probe only — materializing the board's whole ticket
+              // set inside the push transaction just to throw is wasted work.
+              const boardTicket = await tx.run(
+                zql.tickets.where('boardId', existing.boardId).one(),
+              );
+              if (boardTicket) {
+                throw new Error(
+                  `Cannot remove application "${existing.name}" because its board has tickets`,
+                );
+              }
+              await deleteApplicationBoard(existing);
+            }
+          }
+
+          // One batched lookup instead of a per-application round-trip: the
+          // update branch needs the board row, the insert branch needs an
+          // id-collision check — both answered by the same IN query.
+          const payloadBoardIds = applications.map(app => app.boardId);
+          const payloadBoards = payloadBoardIds.length > 0
+            ? await tx.run(zql.boards.where('id', 'IN', payloadBoardIds))
+            : [];
+          const payloadBoardById = new Map(payloadBoards.map(board => [board.id, board]));
+
+          for (const appConfig of applications) {
+            const existing = existingById.get(appConfig.id);
+
+            if (existing) {
+              if (existing.boardId !== appConfig.boardId) {
+                throw new Error('An existing application cannot be moved to another board');
+              }
+
+              const applicationBoard = payloadBoardById.get(existing.boardId);
+              if (
+                !applicationBoard
+                || applicationBoard.projectId !== projectId
+                || applicationBoard.boardType !== BoardType.RELEASE
+              ) {
+                throw new Error(`Application board for "${appConfig.name}" is invalid`);
+              }
+              await tx.mutate.boards.update({
+                id: applicationBoard.id,
+                name: appConfig.boardName.trim(),
+                updatedBy: authData.sub,
+                updatedAt: Date.now(),
+              });
+              // No form mapping for application boards: release tickets are
+              // only ever created on the main release board.
+
+              await tx.mutate.applications.update({
+                id: existing.id,
+                name: appConfig.name.trim(),
+                mainReleaseBoardId: mainBoardId,
+                channelId,
+                regex: appConfig.regex,
+                repoUrl: appConfig.repoUrl.trim().replace(/\/+$/, ''),
+                ownerTeam: appConfig.ownerTeam,
+                envPaths: appConfig.envPaths,
+                migrationPaths: appConfig.migrationPaths,
+                updatedAt: Date.now(),
+              });
+              continue;
+            }
+
+            const boardName = appConfig.boardName.trim();
+            const boardId = appConfig.boardId;
+            const applicationId = appConfig.id;
+
+            if (payloadBoardById.has(boardId)) {
+              throw new Error(`Application board ID "${boardId}" already exists`);
+            }
+
+            const now = Date.now();
+            await tx.mutate.boards.insert({
+              id: boardId,
+              name: boardName,
+              projectId,
+              workspaceId: project.workspaceId,
+              createdBy: authData.sub,
+              boardType: BoardType.RELEASE,
+              createdAt: now,
+            });
+            await seedReleaseStages(boardId, now);
+            // No form mapping for application boards: release tickets are
+            // only ever created on the main release board.
+
+            await tx.mutate.applications.insert({
+              id: applicationId,
+              name: appConfig.name.trim(),
+              projectId,
+              boardId,
+              mainReleaseBoardId: mainBoardId,
+              channelId,
+              regex: appConfig.regex,
+              repoUrl: appConfig.repoUrl.trim().replace(/\/+$/, ''),
+              ownerTeam: appConfig.ownerTeam,
+              envPaths: appConfig.envPaths,
+              migrationPaths: appConfig.migrationPaths,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+          }
+        },
+      ),
     },
 
     userGroup: {
@@ -6020,9 +6428,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
                 // Handle resource_access for USER-GROUPS based on role changes
                 const wasManagerOrLead = oldResponsibility === UserResponsibility.MANAGER ||
-                                         oldResponsibility === UserResponsibility.TEAM_LEAD;
+                  oldResponsibility === UserResponsibility.TEAM_LEAD;
                 const isManagerOrLead = responsibility === UserResponsibility.MANAGER ||
-                                        responsibility === UserResponsibility.TEAM_LEAD;
+                  responsibility === UserResponsibility.TEAM_LEAD;
 
                 if (!wasManagerOrLead && isManagerOrLead) {
                   // Upgraded to MANAGER/TEAM_LEAD → grant WRITE access
@@ -6279,6 +6687,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
+          }
+
+          if (board.boardType === BoardType.RELEASE) {
+            if (projectId !== undefined && projectId !== board.projectId) {
+              throw new Error('Release boards cannot be moved to another project');
+            }
+            if (boardType !== undefined && boardType !== BoardType.RELEASE) {
+              throw new Error('Release boards cannot be converted to a normal board');
+            }
           }
 
           // Validate project exists if projectId is being changed
@@ -6539,6 +6956,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
+          }
+
+          const [ownedApplication, applicationBoardOwner] = await Promise.all([
+            tx.run(zql.applications.where('mainReleaseBoardId', boardId).one()),
+            tx.run(zql.applications.where('boardId', boardId).one()),
+          ]);
+          if (ownedApplication || applicationBoardOwner) {
+            throw new Error(
+              'Cannot delete a release board while application ownership references it',
+            );
           }
 
           // Check if board has tickets with terminal statuses (CANCELLED, COMPLETED)
@@ -7585,14 +8012,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const currentChannelId = canvas.channelId ?? currentFolder?.channelId ?? null;
             const isChannelAdmin = currentChannelId
               ? Boolean(
-                  await tx.run(
-                    zql.channel_participants
-                      .where('channelId', currentChannelId)
-                      .where('userId', authData.sub)
-                      .where('role', ChannelRole.ADMIN)
-                      .one(),
-                  ),
-                )
+                await tx.run(
+                  zql.channel_participants
+                    .where('channelId', currentChannelId)
+                    .where('userId', authData.sub)
+                    .where('role', ChannelRole.ADMIN)
+                    .one(),
+                ),
+              )
               : false;
 
             const canEdit =
@@ -7919,20 +8346,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const duplicateNameMessage = getCanvasFolderNameConflictMessage(channelId, projectId);
           const existingFolder = await tx.run(
             zql.canvas_folders
-            .where('name', cleanName)
-            .where(({ and, cmp }) =>
-              channelId
-                ? and(cmp('projectId', '=', projectId as string), cmp('channelId', '=', channelId))
-                : projectId
-                  ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
-                  : and(
+              .where('name', cleanName)
+              .where(({ and, cmp }) =>
+                channelId
+                  ? and(cmp('projectId', '=', projectId as string), cmp('channelId', '=', channelId))
+                  : projectId
+                    ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
+                    : and(
                       cmp('projectId', 'IS', null),
                       cmp('channelId', 'IS', null),
                       cmp('createdBy', '=', authData.sub),
                     ),
-            )
-            .one(),
-        );
+              )
+              .one(),
+          );
           if (existingFolder) {
             throw new Error(duplicateNameMessage);
           }
@@ -7972,14 +8399,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const isChannelAdmin = folder.channelId
             ? Boolean(
-                await tx.run(
-                  zql.channel_participants
-                    .where('channelId', folder.channelId)
-                    .where('userId', authData.sub)
-                    .where('role', ChannelRole.ADMIN)
-                    .one(),
-                ),
-              )
+              await tx.run(
+                zql.channel_participants
+                  .where('channelId', folder.channelId)
+                  .where('userId', authData.sub)
+                  .where('role', ChannelRole.ADMIN)
+                  .one(),
+              ),
+            )
             : false;
 
           if (folder.createdBy !== authData.sub && !isChannelAdmin) {
@@ -8007,19 +8434,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .where(({ and, cmp }) =>
                   folder.channelId
                     ? and(
-                        cmp('projectId', '=', folder.projectId as string),
-                        cmp('channelId', '=', folder.channelId),
-                      )
+                      cmp('projectId', '=', folder.projectId as string),
+                      cmp('channelId', '=', folder.channelId),
+                    )
                     : folder.projectId
                       ? and(
-                          cmp('projectId', '=', folder.projectId),
-                          cmp('channelId', 'IS', null),
-                        )
+                        cmp('projectId', '=', folder.projectId),
+                        cmp('channelId', 'IS', null),
+                      )
                       : and(
-                          cmp('projectId', 'IS', null),
-                          cmp('channelId', 'IS', null),
-                          cmp('createdBy', '=', folder.createdBy),
-                        ),
+                        cmp('projectId', 'IS', null),
+                        cmp('channelId', 'IS', null),
+                        cmp('createdBy', '=', folder.createdBy),
+                      ),
                 )
                 .one(),
             );
@@ -8056,14 +8483,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const isChannelAdmin = folder.channelId
             ? Boolean(
-                await tx.run(
-                  zql.channel_participants
-                    .where('channelId', folder.channelId)
-                    .where('userId', authData.sub)
-                    .where('role', ChannelRole.ADMIN)
-                    .one(),
-                ),
-              )
+              await tx.run(
+                zql.channel_participants
+                  .where('channelId', folder.channelId)
+                  .where('userId', authData.sub)
+                  .where('role', ChannelRole.ADMIN)
+                  .one(),
+              ),
+            )
             : false;
 
           if (folder.createdBy !== authData.sub && !isChannelAdmin) {
@@ -8286,21 +8713,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.surface_nudges.update(
               shouldPersistActionResult && actionResult
                 ? {
-                    id: nudgeId,
-                    state: nextState,
-                    updatedAt: timestamp,
-                    surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
-                    actions: {
-                      ...existingActions,
-                      actionResult: actionResult as ReadonlyJSONValue,
-                    },
-                  }
-                : {
-                    id: nudgeId,
-                    state: nextState,
-                    updatedAt: timestamp,
-                    surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
+                  id: nudgeId,
+                  state: nextState,
+                  updatedAt: timestamp,
+                  surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
+                  actions: {
+                    ...existingActions,
+                    actionResult: actionResult as ReadonlyJSONValue,
                   },
+                }
+                : {
+                  id: nudgeId,
+                  state: nextState,
+                  updatedAt: timestamp,
+                  surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
+                },
             );
           }
 
@@ -9054,6 +9481,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdAt: timestamp,
             updatedAt: timestamp,
           });
+
+          if (entityType === FormEntityType.TICKET && formField.fieldName === 'releaseVersion') {
+            asyncTasks.push(async () => {
+              await versionReleaseMappingService.syncTicketById(entityId);
+            });
+          }
         },
       ),
       update: defineMutator(
@@ -9088,6 +9521,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             actualFieldValue: valueToStore,
             updatedAt,
           });
+
+          if (
+            formEntityValue.entityType === FormEntityType.TICKET &&
+            formEntityValue.formField?.fieldName === 'releaseVersion'
+          ) {
+            asyncTasks.push(async () => {
+              await versionReleaseMappingService.syncTicketById(formEntityValue.entityId);
+            });
+          }
         },
       ),
     },
@@ -9725,22 +10167,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       ),
     },
     emailDraft: {
-    upsert: defineMutator(
-      z.object({
-        id: z.string(),
-        conversationId: z.string(),
-        channelId: z.string(),
+      upsert: defineMutator(
+        z.object({
+          id: z.string(),
+          conversationId: z.string(),
+          channelId: z.string(),
           draftContent: z.string(),
           attachmentIds: z.array(z.string()).optional(),
-        updatedAt: z.number(),
-      }),
-      async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, attachmentIds, updatedAt } }) => {
-        const existing = await tx.run(
-          zql.email_drafts
-            .where('conversationId', conversationId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
+          updatedAt: z.number(),
+        }),
+        async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, attachmentIds, updatedAt } }) => {
+          const existing = await tx.run(
+            zql.email_drafts
+              .where('conversationId', conversationId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
           if (existing) {
             await tx.mutate.email_drafts.update({
               id: existing.id,
@@ -9762,17 +10204,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         },
       ),
-    delete: defineMutator(
-      z.object({
-        conversationId: z.string(),
-      }),
-      async ({ tx, ctx, args: { conversationId } }) => {
-        const existing = await tx.run(
-          zql.email_drafts
-            .where('conversationId', conversationId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
+      delete: defineMutator(
+        z.object({
+          conversationId: z.string(),
+        }),
+        async ({ tx, ctx, args: { conversationId } }) => {
+          const existing = await tx.run(
+            zql.email_drafts
+              .where('conversationId', conversationId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
           if (existing) {
             await tx.mutate.email_drafts.delete({ id: existing.id });
           }
@@ -9963,7 +10405,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-  
+
           for (const [index, attachment] of attachments.entries()) {
             const { attachmentId, mimetype, size, width, height } = attachment;
             const rawName = attachment.originalFilename || 'unnamed_file';
@@ -10522,13 +10964,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             rootCause,
             severity,
             bugTypeId,
-          categoryTypeId,
-          issueCategoryId,
-          issueStartAt,
-          status,
-          timestamp,
-        },
-      }) => {
+            categoryTypeId,
+            issueCategoryId,
+            issueStartAt,
+            status,
+            timestamp,
+          },
+        }) => {
           // Validate ticket exists
           const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
           if (!ticket) {
@@ -10587,12 +11029,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             rootCause,
             severity,
             bugTypeId,
-          categoryTypeId,
-          issueCategoryId,
-          issueStartAt,
-          status,
-          timestamp,
-        },
+            categoryTypeId,
+            issueCategoryId,
+            issueStartAt,
+            status,
+            timestamp,
+          },
         }) => {
           const rca = await tx.run(zql.rcas.where('id', id).one());
           if (!rca) {
@@ -10610,9 +11052,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             ...(ticketId !== undefined && { ticketId }),
             ...(title !== undefined && { title }),
             ...(summary !== undefined && { summary }),
-          ...(rootCause !== undefined && { rootCause }),
-          ...(severity !== undefined && { severity }),
-          ...(bugTypeId !== undefined && { bugTypeId }),
+            ...(rootCause !== undefined && { rootCause }),
+            ...(severity !== undefined && { severity }),
+            ...(bugTypeId !== undefined && { bugTypeId }),
             ...(categoryTypeId !== undefined && { categoryTypeId }),
             ...(issueCategoryId !== undefined && { issueCategoryId }),
             ...(issueStartAt !== undefined && { issueStartAt }),
@@ -10661,7 +11103,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (releaseApplicationId) {
             const subTicket = await tx.run(zql.sub_tickets.where('id', releaseApplicationId).one());
             if (!subTicket) {
-              throw new Error('Application release not found');
+              throw new Error('Application release sub-ticket not found');
             }
 
             const mapping = await tx.run(
@@ -10671,7 +11113,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .one(),
             );
             if (!mapping) {
-              throw new Error('Application release is not linked to this release ticket');
+              throw new Error('Application release sub-ticket is not linked to this release ticket');
             }
           }
 
@@ -10726,7 +11168,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (releaseApplicationId) {
             const subTicket = await tx.run(zql.sub_tickets.where('id', releaseApplicationId).one());
             if (!subTicket) {
-              throw new Error('Application release not found');
+              throw new Error('Application release sub-ticket not found');
             }
 
             const mapping = await tx.run(
@@ -10736,7 +11178,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .one(),
             );
             if (!mapping) {
-              throw new Error('Application release is not linked to this release ticket');
+              throw new Error('Application release sub-ticket is not linked to this release ticket');
             }
           }
 
@@ -10766,6 +11208,88 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Release attribution not found');
           }
           await tx.mutate.release_attributions.delete({ id });
+        },
+      ),
+    },
+    applicationReleaseTicket: {
+      // Per-ticket ART testing update. A dev ticket's test/stage state is
+      // single-sourced on the ticket (statusV2 / stageName) — ART no longer
+      // stores a status column. testedAt toggles on terminal stages
+      // (COMPLETED / CANCELLED) for every ART row associated with the dev
+      // ticket; testedBy is NOT touched here (it's driven separately by
+      // setTestedBy — the QA-assignment picker on the Testing tab). The live
+      // dev ticket is resolved via ART.ticketId and updated in the same
+      // mutation so the stage change reflects on the actual ticket.
+      updateStatus: defineMutator(
+        z.object({
+          id: z.string(),
+          stageName: z.string().optional(),
+          defaultTicketStatusV2: z.nativeEnum(TicketStatusV2).optional(),
+          failureReason: z.string().optional().nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, stageName, defaultTicketStatusV2, failureReason, timestamp } }) => {
+          const row = await tx.run(zql.application_release_tickets.where('id', id).one());
+          if (!row) {
+            throw new Error('ART row not found');
+          }
+
+          // testedAt is set once the ticket reaches a terminal stage.
+          const isTested =
+            defaultTicketStatusV2 === TicketStatusV2.COMPLETED ||
+            defaultTicketStatusV2 === TicketStatusV2.CANCELLED;
+
+          const relatedRows = await tx.run(
+            zql.application_release_tickets.where('ticketId', row.ticketId),
+          );
+          for (const relatedRow of relatedRows) {
+            await tx.mutate.application_release_tickets.update({
+              id: relatedRow.id,
+              ...(isTested ? { testedAt: timestamp } : { testedAt: null }),
+              ...(failureReason !== undefined && { failureReason }),
+              updatedAt: timestamp,
+            });
+          }
+
+          // Only drive the dev ticket's status when a stage status was actually
+          // supplied; otherwise leave statusV2 untouched (don't silently reset to TODO).
+          const devTicket = await tx.run(zql.tickets.where('id', row.ticketId).one());
+          if (devTicket) {
+            await tx.mutate.tickets.update({
+              id: devTicket.id,
+              ...(defaultTicketStatusV2 !== undefined && { statusV2: defaultTicketStatusV2 }),
+              ...(stageName !== undefined && { stageName }),
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      // Set the QA assigned to test this ART row. Independent of status; users
+      // can assign before testing starts. Pass userId=null to unassign.
+      setTestedBy: defineMutator(
+        z.object({
+          id: z.string(),
+          userId: z.string().nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, userId, timestamp } }) => {
+          const row = await tx.run(zql.application_release_tickets.where('id', id).one());
+          if (!row) {
+            throw new Error('ART row not found');
+          }
+          // Reject dangling user references: only persist testedBy for a real
+          // user (null clears the assignment).
+          if (userId !== null) {
+            const user = await tx.run(zql.users.where('id', userId).one());
+            if (!user) {
+              throw new Error('User not found');
+            }
+          }
+          await tx.mutate.application_release_tickets.update({
+            id,
+            testedBy: userId,
+            updatedAt: timestamp,
+          });
         },
       ),
     },
@@ -10976,7 +11500,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Update each channel user status with recap subscription state
           for (const status of userChannelStatuses) {
             const shouldSubscribe = newChannelIds.has(status.channelId);
-            
+
             // Only update if the subscription state is changing
             if (status.isRecapSubscribed !== shouldSubscribe) {
               await tx.mutate.channel_user_status.update({
@@ -12078,23 +12602,23 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               subCategoryField: subCategoryField ?? null,
             });
           } else {
-          await tx.mutate.email_channel_preferences.insert({
-            channelId,
-            ownerUserId: ctx.userID,
-            assigneeUserGroupId: null,
-            boardId: null,
-            sendAsEmail: null,
-            classificationEnabled,
-            classificationPrompt,
-            categoryField,
-            subCategoryField: subCategoryField ?? null,
-            defaultCc: null,
-            autoDraftMode: AutoDraftMode.OFF,
-            priorityClassificationEnabled: false,
-            priorityClassificationPrompt: null,
-            priorityClassificationThreshold: 0.5,
-          });
-        }
+            await tx.mutate.email_channel_preferences.insert({
+              channelId,
+              ownerUserId: ctx.userID,
+              assigneeUserGroupId: null,
+              boardId: null,
+              sendAsEmail: null,
+              classificationEnabled,
+              classificationPrompt,
+              categoryField,
+              subCategoryField: subCategoryField ?? null,
+              defaultCc: null,
+              autoDraftMode: AutoDraftMode.OFF,
+              priorityClassificationEnabled: false,
+              priorityClassificationPrompt: null,
+              priorityClassificationThreshold: 0.5,
+            });
+          }
         },
       ),
       upsertPriorityClassificationConfig: defineMutator(
@@ -12117,21 +12641,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
             });
           } else {
-          await tx.mutate.email_channel_preferences.insert({
-            channelId,
-            ownerUserId: ctx.userID,
-            assigneeUserGroupId: null,
-            boardId: null,
-            sendAsEmail: null,
-            classificationEnabled: false,
-            classificationPrompt: null,
-            categoryField: null,
-            subCategoryField: null,
-            defaultCc: null,
-            autoDraftMode: AutoDraftMode.OFF,
-            priorityClassificationEnabled,
-            priorityClassificationPrompt: priorityClassificationPrompt ?? null,
-            priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
+            await tx.mutate.email_channel_preferences.insert({
+              channelId,
+              ownerUserId: ctx.userID,
+              assigneeUserGroupId: null,
+              boardId: null,
+              sendAsEmail: null,
+              classificationEnabled: false,
+              classificationPrompt: null,
+              categoryField: null,
+              subCategoryField: null,
+              defaultCc: null,
+              autoDraftMode: AutoDraftMode.OFF,
+              priorityClassificationEnabled,
+              priorityClassificationPrompt: priorityClassificationPrompt ?? null,
+              priorityClassificationThreshold: priorityClassificationThreshold ?? 0.5,
             });
           }
         },
@@ -12763,10 +13287,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const scheduledAttachments = existingDraft
             ? await tx.run(
-                zql.message_attachments
-                  .where("entityId", existingDraft.id)
-                  .where("entityType", AttachmentEntityType.DRAFT),
-              )
+              zql.message_attachments
+                .where("entityId", existingDraft.id)
+                .where("entityType", AttachmentEntityType.DRAFT),
+            )
             : [];
 
           if (content.trim() === '' && scheduledAttachments.length === 0) {
