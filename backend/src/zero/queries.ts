@@ -3490,6 +3490,15 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // Stage transitions (with approvers) for a board — used by NON_LINEAR board config and the
+  // drag/drop form gate. Mirrors shared queries.
+  getStageTransitionsByBoardId: defineQuery(
+    z.object({ boardId: z.string() }),
+    ({ args: { boardId } }) => {
+      return zql.stage_transitions.where('boardId', boardId).related('transitionApprovers');
+    },
+  ),
+
   collectionSubfolders: defineQuery(
     z.object({ rootCollectionId: z.string() }),
     ({ args: { rootCollectionId } }) => {

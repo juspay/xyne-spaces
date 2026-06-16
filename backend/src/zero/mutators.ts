@@ -1,4 +1,4 @@
-import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators } from '@rocicorp/zero';
+import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
 import {
   ChannelRole,
@@ -35,6 +35,9 @@ import {
   UserResponsibility,
   AccessType,
   BoardType,
+  ReenterMode,
+  VisitSlaMode,
+  ApproverType,
   TicketStageRequestStatus,
   COEStatus,
   RCAStatus,
@@ -138,6 +141,89 @@ export type AuthData = {
 };
 
 export type ParticipantOperationType = 'participants_added' | 'participants_removed' | 'participants_joined';
+
+// Shared helpers for NON_LINEAR stage transitions (version tracking + ETA deadline).
+function computeStageVisitVersion(
+  targetETAs: ReadonlyArray<{ id: string; version: number | null; stageEnteredAt: number }>,
+  reenterMode: ReenterMode,
+): { newVersion: number; existingEtaId: string | null } {
+  const maxVersion = targetETAs.length > 0 ? Math.max(...targetETAs.map(e => e.version ?? 1)) : 0;
+  if (maxVersion === 0) {
+    return { newVersion: 1, existingEtaId: null };
+  }
+  if (reenterMode === ReenterMode.CONTINUE) {
+    const mostRecent = targetETAs
+      .filter(e => e.version === maxVersion)
+      .sort((a, b) => b.stageEnteredAt - a.stageEnteredAt)[0];
+    return { newVersion: maxVersion, existingEtaId: mostRecent?.id ?? null };
+  }
+  return { newVersion: maxVersion + 1, existingEtaId: null };
+}
+
+function computeStageEtaDeadline(
+  now: number,
+  slaMode: VisitSlaMode,
+  fixedEtaHours: number | null | undefined,
+  stageDefaultEta: number | null | undefined,
+): number {
+  if (slaMode === VisitSlaMode.NONE) {
+    return now;
+  }
+  if (slaMode === VisitSlaMode.FIXED_HOURS && fixedEtaHours && fixedEtaHours > 0) {
+    return calculateETADeadline(new Date(now), fixedEtaHours).getTime();
+  }
+  return stageDefaultEta && stageDefaultEta > 0
+    ? calculateETADeadline(new Date(now), stageDefaultEta).getTime()
+    : now;
+}
+
+// Authorize a stage-request review (APPROVE/REJECT): only listed approvers may act, which also
+// prevents self-approval. NON_LINEAR boards keep approvers on the transition edge; other boards
+// keep them on the target stage. USER approvers only. Throws if the user is not an approver.
+async function assertCanReviewStageRequest(
+  tx: Transaction<Schema>,
+  ticket: { boardId: string; stageName: string | null },
+  stageId: string,
+  userId: string,
+): Promise<void> {
+  const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
+  let approverIds: string[] = [];
+
+  if (board?.boardType === BoardType.NON_LINEAR) {
+    const currentStage = ticket.stageName
+      ? await tx.run(
+          zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
+        )
+      : null;
+    const transition = currentStage
+      ? ((await tx.run(
+          zql.stage_transitions
+            .where('boardId', ticket.boardId)
+            .where('fromStageId', currentStage.id)
+            .where('toStageId', stageId)
+            .one(),
+        )) ?? null)
+      : null;
+    if (transition) {
+      const transitionApprovers = await tx.run(
+        zql.stage_approvers.where('transitionId', transition.id),
+      );
+      approverIds = transitionApprovers
+        .filter(a => a.approverType === ApproverType.USER)
+        .map(a => a.userId)
+        .filter((id): id is string => id !== null);
+    }
+  } else {
+    const stageApprovers = await tx.run(zql.stage_approvers.where('stageId', stageId));
+    approverIds = stageApprovers
+      .map(a => a.userId)
+      .filter((id): id is string => id !== null);
+  }
+
+  if (!approverIds.includes(userId)) {
+    throw new Error('You are not authorized to approve or reject this stage request');
+  }
+}
 
 async function getConversationSeenCutoffAt(
   tx: Transaction<Schema>,
@@ -5085,6 +5171,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 id: newEntryId,
                 ticketId: params.id,
                 stageId: firstStage.id,
+                version: 1,
                 stageEnteredAt: now,
                 stageLeftAt: null,
                 stageEta: stageEtaDeadline,
@@ -5230,6 +5317,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // STAGE HISTORY TRACKING: Track stage transitions in ticket_stage_eta table
           if (params.stageName !== undefined && params.stageName !== ticket.stageName) {
+            // Guard: direct stageName changes on NON_LINEAR boards must use the nonLinear.transition mutator
+            const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
+            if (board?.boardType === BoardType.NON_LINEAR) {
+              throw new Error('Direct stage changes are not allowed on non-linear boards. Use the nonLinear.transition mutator.');
+            }
 
             // Fetch current and target stages to determine movement direction
             const oldStage = await tx.run(zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one());
@@ -5297,6 +5389,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       id: newEntryId,
                       ticketId: params.id,
                       stageId: newStage.id,
+                      version: 1,
                       stageEnteredAt: now,
                       stageLeftAt: null,
                       stageEta: stageEtaDeadline,
@@ -5356,6 +5449,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       id: newEntryId,
                       ticketId: params.id,
                       stageId: newStage.id,
+                      version: 1,
                       stageEnteredAt: now,
                       stageLeftAt: null,
                       stageEta: stageEtaDeadline,
@@ -5706,6 +5800,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id,
             ticketId: oldTicketStageEtaEntry?.ticketId ?? ticketId!,
             stageId: oldTicketStageEtaEntry?.stageId ?? stageId!,
+            version: 1,
             stageEnteredAt: oldTicketStageEtaEntry?.stageEnteredAt ?? now,
             stageLeftAt: null,
             stageEta,
@@ -6844,7 +6939,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   for (const prStatus of stage.prStatuses) {
                     await tx.mutate.stage_pr_status_mappings.insert({
                       id: uuidv4(),
-                      stageId: stage.id || uuidv4(),
+                      stageId: newStageId,
                       prStatus: prStatus,
                       createdAt: now,
                     });
@@ -6940,6 +7035,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   await tx.mutate.stage_approvers.insert({
                     id: `${stageId}-${approverId}`,
                     userId: approverId,
+                    approverType: ApproverType.USER,
                     stageId: stageId,
                     createdAt: now,
                   });
@@ -9453,8 +9549,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           newValue: z.array(z.string()),
           timestamp: z.number(),
           contextId: z.string().optional(),
+          version: z.number().optional(),
         }),
-        async ({ tx, args: { id, entityId, entityType, fieldId, newValue, timestamp, contextId } }) => {
+        async ({ tx, args: { id, entityId, entityType, fieldId, newValue, timestamp, contextId, version } }) => {
           // Fetch the form field to determine field type
           const formField = await tx.run(zql.form_fields.where('id', fieldId).one());
 
@@ -9476,6 +9573,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             entityType,
             fieldId,
             ...(contextId && { contextId }),
+            version: version ?? 1,
             fieldValue: '',
             actualFieldValue,
             createdAt: timestamp,
@@ -10715,7 +10813,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             rejectedActivityId,
           },
         }) => {
-          const existingApproval = await tx.run(zql.ticket_stage_requests.where('id', id).one());
+          let existingApproval = await tx.run(zql.ticket_stage_requests.where('id', id).one());
+
+          // Revisit: fall back to existing (ticketId, stageId) record if client sent a new UUID.
+          let effectiveId = id;
+          if (!existingApproval) {
+            const existingForTicketStage = await tx.run(
+              zql.ticket_stage_requests
+                .where('ticketId', ticketId)
+                .where('stageId', stageId)
+                .one(),
+            );
+            if (existingForTicketStage) {
+              existingApproval = existingForTicketStage;
+              effectiveId = existingForTicketStage.id;
+            }
+          }
 
           const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
           const stage = await tx.run(zql.stages.where('id', stageId).one());
@@ -10727,12 +10840,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Stage not found');
           }
 
+          // Authorize review: only listed approvers may APPROVE/REJECT (blocks self-approval).
+          if (
+            status === TicketStageRequestStatus.APPROVED ||
+            status === TicketStageRequestStatus.REJECTED
+          ) {
+            await assertCanReviewStageRequest(tx, ticket, stageId, authData.sub);
+          }
+
           // Get actor name for activity messages
           const actor = await tx.run(zql.users.where('id', updatedBy).one());
 
           // Prepare payload - preserve immutable fields from existing record
           const payload = {
-            id,
+            id: effectiveId,
             ticketId,
             stageId,
             ...(formId && { formId }),
@@ -10755,8 +10876,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.ticket_stage_requests.upsert(payload);
 
           // Handle activities based on whether this is create or update
-          if (!existingApproval && requestActivityId) {
-            // Create message for approval request
+          const isNewRequest = !existingApproval; // true only when no prior record existed (checked after fallback lookup)
+          if (isNewRequest && requestActivityId) {
+            // Create message for a fresh approval request
             const actorName = actor?.name || 'Someone';
             const hasForm = !!formId;
             const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
@@ -10780,6 +10902,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 fromStage: ticket.stageName,
                 toStage: stage.name,
                 hasForm,
+              },
+            });
+          } else if (
+            status === TicketStageRequestStatus.SUBMITTED &&
+            existingApproval?.status === TicketStageRequestStatus.APPROVED &&
+            requestActivityId
+          ) {
+            // Revisit: transitioning from APPROVED → SUBMITTED (new visit to an already-visited stage)
+            const actorName = actor?.name || 'Someone';
+            const hasForm = !!formId;
+            const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
+
+            await tx.mutate.messages.insert({
+              messageId: requestActivityId,
+              conversationId: ticket.conversationId,
+              senderId: updatedBy,
+              content: `${actorName} ${actionText} ${stage.name}`,
+              msgType: MessageType.SYSTEM,
+              hasAttachment: false,
+              edited: false,
+              isDeleted: false,
+              isSent: false,
+              showInChannel: false,
+              createdAt: updatedAt,
+              metadata: {
+                activityType: ActivityType.STAGE_CHANGE_REQUEST,
+                isTicketActivity: true,
               },
             });
           } else if (
@@ -10819,13 +10968,158 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             existingApproval?.status !== TicketStageRequestStatus.APPROVED &&
             approvedActivityId
           ) {
-            // If status changed to approved, move ticket to the stage
-            await tx.mutate.tickets.update({
-              id: ticket.id,
-              stageName: stage.name,
-              ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
-              updatedAt,
-            });
+            // Move the ticket to the approved stage.
+            // For NON_LINEAR boards also manage visit ETAs; for DEFAULT/RELEASE boards a simple update suffices.
+            const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
+            if (board?.boardType === BoardType.NON_LINEAR) {
+              const now = updatedAt;
+              const currentStageObj = await tx.run(
+                zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
+              );
+              const transition = currentStageObj
+                ? ((await tx.run(
+                    zql.stage_transitions
+                      .where('boardId', ticket.boardId)
+                      .where('fromStageId', currentStageObj.id)
+                      .where('toStageId', stage.id)
+                      .one(),
+                  )) ?? null)
+                : null;
+
+              if (currentStageObj) {
+                const currentETAs = await tx.run(
+                  zql.ticket_stage_eta
+                    .where('ticketId', ticket.id)
+                    .where('stageId', currentStageObj.id),
+                );
+                const activeETA = currentETAs.find(e => e.stageLeftAt === null);
+                if (activeETA) {
+                  await tx.mutate.ticket_stage_eta.update({
+                    id: activeETA.id,
+                    stageLeftAt: now,
+                    updatedAt: now,
+                    updatedBy: authData.sub,
+                  });
+                }
+              } else {
+                // ticket.stageName is a required field, so an unresolvable current stage means it
+                // references a stage that no longer exists on the board — corrupt state. Fail fast
+                // rather than guessing which ETAs to close.
+                throw new Error(
+                  `Cannot approve stage change: ticket ${ticket.id} has an unresolvable current stage "${ticket.stageName}"`,
+                );
+              }
+
+              const targetETAs = await tx.run(
+                zql.ticket_stage_eta
+                  .where('ticketId', ticket.id)
+                  .where('stageId', stage.id),
+              );
+              const reenterMode = (transition?.onReenter as ReenterMode | undefined) ?? ReenterMode.RESET;
+              const maxVisitIndex =
+                targetETAs.length > 0 ? Math.max(...targetETAs.map(e => e.version ?? 1)) : 0;
+              const { newVersion: newVisitIndex, existingEtaId } = computeStageVisitVersion(
+                targetETAs,
+                reenterMode,
+              );
+
+              const stageEtaDeadline = computeStageEtaDeadline(
+                now,
+                (transition?.visitSlaMode as VisitSlaMode | undefined) ?? VisitSlaMode.STAGE_DEFAULT,
+                transition?.fixedEtaHours,
+                stage.eta,
+              );
+
+              if (existingEtaId) {
+                await tx.mutate.ticket_stage_eta.update({
+                  id: existingEtaId,
+                  stageEnteredAt: now,
+                  stageLeftAt: null,
+                  stageEta: stageEtaDeadline,
+                  updatedAt: now,
+                  updatedBy: authData.sub,
+                });
+              } else {
+                await tx.mutate.ticket_stage_eta.insert({
+                  id: uuidv4(),
+                  ticketId: ticket.id,
+                  stageId: stage.id,
+                  version: newVisitIndex,
+                  stageEnteredAt: now,
+                  stageLeftAt: null,
+                  stageEta: stageEtaDeadline,
+                  createdAt: now,
+                  updatedBy: authData.sub,
+                });
+              }
+
+              // Normalize this submission's form-value versions to the authoritative
+              // newVisitIndex. The frontend creates values at a guessed version
+              // (maxStageVersion+1) before the ETA exists, so they must be re-stamped here.
+              //
+              // Runs for BOTH RESET and CONTINUE (the old `newVisitIndex > 1` guard left
+              // CONTINUE re-entries orphaned, since CONTINUE keeps newVisitIndex == maxVisitIndex).
+              // When a record already exists at newVisitIndex for the same field (the CONTINUE
+              // case — we're continuing the same logical visit), merge into it and delete the
+              // duplicate to respect the UNIQUE(entityId,entityType,fieldId,contextId,version)
+              // constraint. Otherwise (RESET — a brand-new version) simply re-stamp the version.
+              const normalizeFormValueVersions = async () => {
+                const prevETA = targetETAs
+                  .filter(e => e.version === maxVisitIndex)
+                  .sort((a, b) => b.stageEnteredAt - a.stageEnteredAt)[0];
+                const prevLeftAt = prevETA?.stageLeftAt ?? 0;
+                const allFormValues = await tx.run(
+                  zql.form_entity_values
+                    .where('entityId', ticket.id)
+                    .where('contextId', stage.id),
+                );
+                // Values submitted for THIS visit: a different version than newVisitIndex and
+                // updated after the previous visit was left.
+                const staleValues = allFormValues.filter(
+                  fv =>
+                    fv.version !== newVisitIndex &&
+                    (fv.updatedAt ?? fv.createdAt ?? 0) > prevLeftAt,
+                );
+                for (const fv of staleValues) {
+                  const existingAtTarget = allFormValues.find(
+                    other =>
+                      other.id !== fv.id &&
+                      other.fieldId === fv.fieldId &&
+                      other.version === newVisitIndex,
+                  );
+                  if (existingAtTarget) {
+                    // CONTINUE: a record already occupies newVisitIndex → merge value, drop dup.
+                    await tx.mutate.form_entity_values.update({
+                      id: existingAtTarget.id,
+                      actualFieldValue: fv.actualFieldValue as any,
+                      updatedAt: now,
+                    });
+                    await tx.mutate.form_entity_values.delete({ id: fv.id });
+                  } else {
+                    await tx.mutate.form_entity_values.update({
+                      id: fv.id,
+                      version: newVisitIndex,
+                      updatedAt: now,
+                    });
+                  }
+                }
+              };
+              await normalizeFormValueVersions();
+
+              await tx.mutate.tickets.update({
+                id: ticket.id,
+                stageName: stage.name,
+                ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                updatedAt,
+              });
+            } else {
+              await tx.mutate.tickets.update({
+                id: ticket.id,
+                stageName: stage.name,
+                ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                updatedAt,
+              });
+            }
 
             // Create message for approval
             const actorName = actor?.name || 'Someone';
@@ -13917,6 +14211,344 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt: timestamp,
           });
           logger.info(`[Mutator] automations.archive OPTIMISTIC id=${id} status=ARCHIVED`);
+        },
+      ),
+    },
+    nonLinear: {
+      syncTransitions: defineMutator(
+        z.object({
+          boardId: z.string(),
+          transitions: z.array(
+            z.object({
+              id: z.string(),
+              fromStageId: z.string().nullable().optional(),
+              toStageId: z.string(),
+              formId: z.string().nullable().optional(),
+              requiresApproval: z.boolean().optional(),
+              bypassApprovalForAutomation: z.boolean().optional(),
+              visitSlaMode: z.string().optional(),
+              fixedEtaHours: z.number().nullable().optional(),
+              onReenter: z.string().optional(),
+              approvers: z
+                .array(
+                  z.object({
+                    id: z.string(),
+                    approverId: z.string(),
+                    approverType: z.string(),
+                  }),
+                )
+                .optional(),
+            }),
+          ),
+          // Caller-supplied timestamp — keeps client/server runs aligned (see nonLinear.transition).
+          now: z.number(),
+        }),
+        async ({ tx, args: { boardId, transitions, now } }) => {
+          const board = await tx.run(zql.boards.where('id', boardId).one());
+          if (!board) throw new Error('Board not found');
+          if (board.workspaceId !== authData.workspaceId) throw new Error('Board not found');
+
+          // Validate the incoming edges before persisting. These guards prevent configs that
+          // the runtime can't satisfy (and that the UI may not block on non-UI paths):
+          //  - self-loops (fromStageId === toStageId) make no sense as a directed transition
+          //  - requiresApproval with no approvers strands the ticket (no one can ever approve)
+          //  - a formId must reference an existing form, else the form gate throws with a
+          //    dangling id that resolves to no fields
+          const formIdsToCheck = Array.from(
+            new Set(transitions.map(t => t.formId).filter((f): f is string => f != null)),
+          );
+          const existingForms =
+            formIdsToCheck.length > 0
+              ? await tx.run(zql.forms.where('id', 'IN', formIdsToCheck))
+              : [];
+          const existingFormIds = new Set(existingForms.map(f => f.id));
+          for (const t of transitions) {
+            if (t.fromStageId != null && t.fromStageId === t.toStageId) {
+              throw new Error('A stage transition cannot start and end at the same stage');
+            }
+            if (t.requiresApproval && (t.approvers?.length ?? 0) === 0) {
+              throw new Error(
+                'A transition that requires approval must have at least one approver',
+              );
+            }
+            if (t.formId != null && !existingFormIds.has(t.formId)) {
+              throw new Error(`Form "${t.formId}" referenced by a transition does not exist`);
+            }
+          }
+
+          const existing = await tx.run(zql.stage_transitions.where('boardId', boardId));
+          for (const t of existing) {
+            const approvers = await tx.run(
+              zql.stage_approvers.where('transitionId', t.id),
+            );
+            for (const a of approvers) {
+              await tx.mutate.stage_approvers.delete({ id: a.id });
+            }
+            await tx.mutate.stage_transitions.delete({ id: t.id });
+          }
+
+          for (const t of transitions) {
+            await tx.mutate.stage_transitions.insert({
+              id: t.id,
+              boardId,
+              ...(t.fromStageId != null && { fromStageId: t.fromStageId }),
+              toStageId: t.toStageId,
+              ...(t.formId != null && { formId: t.formId }),
+              requiresApproval: t.requiresApproval ?? false,
+              bypassApprovalForAutomation: t.bypassApprovalForAutomation ?? false,
+              visitSlaMode: (t.visitSlaMode as VisitSlaMode) ?? VisitSlaMode.STAGE_DEFAULT,
+              ...(t.fixedEtaHours != null && { fixedEtaHours: t.fixedEtaHours }),
+              onReenter: (t.onReenter as ReenterMode) ?? ReenterMode.RESET,
+              createdAt: now,
+              updatedAt: now,
+            });
+            for (const a of t.approvers ?? []) {
+              const approverType = (a.approverType as ApproverType) ?? ApproverType.USER;
+              await tx.mutate.stage_approvers.insert({
+                id: a.id,
+                transitionId: t.id,
+                // roleId holds the identifier for ROLE approvers, userId for USER approvers
+                ...(approverType === ApproverType.ROLE
+                  ? { roleId: a.approverId }
+                  : { userId: a.approverId }),
+                approverType,
+                createdAt: now,
+              });
+            }
+          }
+        },
+      ),
+
+      /**
+       * Execute a stage transition on a NON_LINEAR board via Zero.
+       * Handles: form gate, visitIndex computation (CONTINUE/RESET), ETA management, form value persistence.
+       * The frontend is responsible for showing the form modal before calling this mutator.
+       * formValues being present signals the form was acknowledged (even if empty); undefined triggers the form gate.
+       */
+      transition: defineMutator(
+        z.object({
+          ticketId: z.string(),
+          toStageName: z.string(),
+          // Caller-supplied timestamp. Passed from the client so the optimistic and
+          // authoritative (server) runs of this mutator persist identical timestamps.
+          now: z.number(),
+          // JSON-encoded Record<string, unknown> — encoding avoids ReadonlyJSONValue incompatibility
+          formValuesJson: z.string().optional(),
+        }),
+        async ({ tx, args: { ticketId, toStageName, now, formValuesJson } }) => {
+          const formValues: Record<string, unknown> | undefined = formValuesJson
+            ? (JSON.parse(formValuesJson) as Record<string, unknown>)
+            : undefined;
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          if (!ticket) throw new Error('Ticket not found');
+          if (ticket.stageName === toStageName) return;
+
+          // This mutator implements NON_LINEAR transition semantics only (form gate, approvals,
+          // visit versioning). DEFAULT/RELEASE boards must use the standard stage-update path.
+          const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
+          if (board?.boardType !== BoardType.NON_LINEAR) {
+            throw new Error('nonLinear.transition is only valid for NON_LINEAR boards');
+          }
+
+          const targetStage = await tx.run(
+            zql.stages.where('boardId', ticket.boardId).where('name', toStageName).one(),
+          );
+          if (!targetStage) throw new Error(`Stage "${toStageName}" not found`);
+
+          const currentStage = await tx.run(
+            zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
+          );
+
+          // Only the current stage's outgoing edges matter: a stage is "restricted" when it
+          // has at least one outgoing transition, in which case a move must match one of them.
+          const outgoingTransitions = currentStage
+            ? await tx.run(
+                zql.stage_transitions
+                  .where('boardId', ticket.boardId)
+                  .where('fromStageId', currentStage.id),
+              )
+            : [];
+          const transition = outgoingTransitions.find(t => t.toStageId === targetStage.id) ?? null;
+
+          // If the current stage has outgoing edges, block moves that match none of them.
+          // Mirrors frontend isCurrentStageRestricted.
+          if (currentStage && outgoingTransitions.length > 0 && !transition) {
+            throw new Error('This stage transition is not allowed');
+          }
+
+          // Approval gate: if this transition requires approval, only listed approvers may
+          // execute it directly (self-approval path). Non-approvers must go through the
+          // ticketStageRequest SUBMITTED → APPROVED flow handled by the upsert mutator.
+          if (transition?.requiresApproval) {
+            const approvers = await tx.run(
+              zql.stage_approvers.where('transitionId', transition.id),
+            );
+            const isApprover = approvers.some(
+              a => a.userId === authData.sub && a.approverType === 'USER',
+            );
+            if (!isApprover) {
+              throw new Error('This transition requires approval');
+            }
+          }
+
+          // Compute visitIndex before the form gate so the gate can scope to this specific visit.
+          const targetETAs = await tx.run(
+            zql.ticket_stage_eta
+              .where('ticketId', ticketId)
+              .where('stageId', targetStage.id),
+          );
+          const { newVersion: newVisitIndex, existingEtaId } = computeStageVisitVersion(
+            targetETAs,
+            (transition?.onReenter as ReenterMode | undefined) ?? ReenterMode.RESET,
+          );
+
+          // Form gate: the form is configured on the EDGE, so every traversal of an edge
+          // that has a formId must prompt the form — regardless of reenter mode or whether
+          // values already exist for this visitIndex.
+          //
+          // formValues === undefined  → form not yet filled this call → gate (throw) so the
+          //   client opens the modal. The client then re-fires this mutator WITH formValuesJson.
+          // formValues provided        → form was acknowledged this call → gate passes.
+          //
+          // This mutator is only called WITHOUT formValues for the no-approver direct-move case
+          // (the approval flow moves the ticket via ticketStageRequest.upsert, not here), so
+          // there is no legitimate "values already exist → skip the form" case. A CONTINUE-reenter
+          // edge keeps newVisitIndex stable, so the old hasFormValuesForVisit check matched the
+          // prior visit's values and wrongly skipped the form on re-traversal — removed.
+          //
+          // effectiveFormId: use the matched transition's formId only. The form gate is
+          // edge-specific — only the configured edge's formId should gate the transition.
+          // When transition === null (unrestricted source, no matched edge), there is no
+          // specific edge to enforce a form on, so effectiveFormId = null.
+          // NOTE: null ?? X = X in JS, so we must NOT use ?. shorthand here — use explicit
+          // transition === null check to avoid treating "transition found, formId=null" the
+          // same as "no transition found".
+          const effectiveFormId: string | null =
+            transition === null ? null : (transition?.formId ?? null);
+
+          if (effectiveFormId && formValues === undefined) {
+            throw new ApplicationError('This transition requires a form to be submitted', {
+              details: { formId: effectiveFormId },
+            });
+          }
+
+          // `now` is supplied by the caller (see args schema) so client + server runs agree.
+
+          // Close current stage ETA
+          if (currentStage) {
+            const currentETAs = await tx.run(
+              zql.ticket_stage_eta
+                .where('ticketId', ticketId)
+                .where('stageId', currentStage.id),
+            );
+            const activeETA = currentETAs.find(e => e.stageLeftAt === null);
+            if (activeETA) {
+              await tx.mutate.ticket_stage_eta.update({
+                id: activeETA.id,
+                stageLeftAt: now,
+                updatedAt: now,
+                updatedBy: authData.sub,
+              });
+            }
+          } else {
+            // currentStage couldn't be resolved (e.g. ticket.stageName is null or points to a
+            // renamed/deleted stage). Close any dangling open ETAs (except the target's, which
+            // we may reopen below) so the ticket doesn't end up with two open visits.
+            const allOpenETAs = await tx.run(
+              zql.ticket_stage_eta.where('ticketId', ticketId),
+            );
+            for (const e of allOpenETAs) {
+              if (e.stageLeftAt === null && e.stageId !== targetStage.id) {
+                await tx.mutate.ticket_stage_eta.update({
+                  id: e.id,
+                  stageLeftAt: now,
+                  updatedAt: now,
+                  updatedBy: authData.sub,
+                });
+              }
+            }
+          }
+
+          const stageEtaDeadline = computeStageEtaDeadline(
+            now,
+            (transition?.visitSlaMode as VisitSlaMode | undefined) ?? VisitSlaMode.STAGE_DEFAULT,
+            transition?.fixedEtaHours,
+            targetStage.eta,
+          );
+
+          if (existingEtaId) {
+            await tx.mutate.ticket_stage_eta.update({
+              id: existingEtaId,
+              stageEnteredAt: now,
+              stageLeftAt: null,
+              stageEta: stageEtaDeadline,
+              updatedAt: now,
+              updatedBy: authData.sub,
+            });
+          } else {
+            await tx.mutate.ticket_stage_eta.insert({
+              id: uuidv4(),
+              ticketId,
+              stageId: targetStage.id,
+              version: newVisitIndex,
+              stageEnteredAt: now,
+              stageLeftAt: null,
+              stageEta: stageEtaDeadline,
+              createdAt: now,
+              updatedBy: authData.sub,
+            });
+          }
+
+          await tx.mutate.tickets.update({
+            id: ticketId,
+            stageName: toStageName,
+            ...(targetStage.defaultTicketStatusV2 && {
+              statusV2: targetStage.defaultTicketStatusV2,
+            }),
+            updatedAt: now,
+          });
+
+          // Persist form values with the correct version (visitIndex).
+          // Use effectiveFormId — covers both matched-transition formId and the fallback
+          // formId from any transition to the target stage (unrestricted source path).
+          if (formValues && effectiveFormId) {
+            const formFields = await tx.run(
+              zql.form_fields.where('formId', effectiveFormId),
+            );
+            for (const [fieldName, value] of Object.entries(formValues)) {
+              const field = formFields.find(f => f.fieldName === fieldName);
+              if (!field) continue;
+
+              const existing = await tx.run(
+                zql.form_entity_values
+                  .where('entityId', ticketId)
+                  .where('fieldId', field.id)
+                  .where('contextId', targetStage.id),
+              );
+              const existingEntry = existing.find(e => e.version === newVisitIndex);
+              if (existingEntry) {
+                await tx.mutate.form_entity_values.update({
+                  id: existingEntry.id,
+                  actualFieldValue: value as any,
+                  updatedAt: now,
+                });
+              } else {
+                await tx.mutate.form_entity_values.insert({
+                  id: uuidv4(),
+                  formId: effectiveFormId,
+                  entityId: ticketId,
+                  entityType: FormEntityType.TICKET,
+                  fieldId: field.id,
+                  contextId: targetStage.id,
+                  version: newVisitIndex,
+                  fieldValue: '',
+                  actualFieldValue: value as any,
+                  createdAt: now,
+                  updatedAt: now,
+                });
+              }
+            }
+          }
         },
       ),
     },

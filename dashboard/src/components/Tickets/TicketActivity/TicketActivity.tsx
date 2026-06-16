@@ -8,6 +8,8 @@ import {
   Tag,
   Archive,
   GitMerge,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import {
   ActivityType,
@@ -27,11 +29,28 @@ import { TicketStatusIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
 import { formatPRActivityParts } from '../../../utils/activityFormatter';
 
+type FormValueEntry = {
+  id: string;
+  fieldId: string;
+  fieldValue?: unknown;
+  actualFieldValue?: unknown;
+  formField?: { fieldName: string } | null;
+};
+
+type StageVisitFormValues = {
+  stageName: string;
+  stageId: string;
+  version: number;
+  enteredAt: number;
+  formValues: FormValueEntry[];
+};
+
 interface TicketActivityProps {
   activities: TicketActivityType[] | undefined;
   users: User[] | undefined;
   boards?: { id: string; name: string }[];
   userGroups: UserGroup[] | undefined;
+  stageVisitFormValues?: StageVisitFormValues[];
 }
 
 /**
@@ -484,6 +503,7 @@ export const TicketActivity = ({
   users,
   userGroups,
   boards,
+  stageVisitFormValues = [],
 }: TicketActivityProps): ReactElement => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
 
@@ -532,6 +552,7 @@ export const TicketActivity = ({
               userGroups={userGroups}
               {...(boards !== undefined ? { boards } : {})}
               activities={sortedActivities}
+              stageVisitFormValues={stageVisitFormValues}
             />
           ))}
         </div>
@@ -545,6 +566,13 @@ export const TicketActivity = ({
   );
 };
 
+const renderFormFieldValue = (fv: FormValueEntry): string => {
+  const raw = fv.actualFieldValue ?? fv.fieldValue;
+  if (raw === null || raw === undefined) return '—';
+  if (typeof raw === 'object') return JSON.stringify(raw);
+  return String(raw as string | number | boolean);
+};
+
 export const ActivityComponent = ({
   activity,
   index,
@@ -552,6 +580,7 @@ export const ActivityComponent = ({
   boards,
   userGroups,
   activities,
+  stageVisitFormValues = [],
 }: {
   activity: TicketActivityType;
   index: number;
@@ -559,7 +588,9 @@ export const ActivityComponent = ({
   boards?: { id: string; name: string }[];
   userGroups: UserGroup[] | undefined;
   activities: TicketActivityType[];
+  stageVisitFormValues?: StageVisitFormValues[];
 }) => {
+  const [formExpanded, setFormExpanded] = useState(true);
   const activityUser = users?.find(u => u.id === activity.updatedBy);
   const { description, details, hideActorName } = getActivityDescription(
     activity,
@@ -568,6 +599,20 @@ export const ActivityComponent = ({
     userGroups,
   );
   const isLast = index === activities.length - 1;
+
+  // Match stage move activity to form submission by stage name + timestamp (60s tolerance).
+  const activityValue = activity.value as { field?: string; newValue?: string } | null;
+  const isStageMove =
+    (activity.activityType === ActivityType.STAGE_NAME ||
+      activity.activityType === ActivityType.STATUS) &&
+    activityValue?.field === 'stageName';
+
+  const matchedFormVisit = isStageMove
+    ? stageVisitFormValues
+        .filter(sv => sv.stageName === activityValue?.newValue)
+        .filter(sv => sv.enteredAt <= new Date(activity.timestamp).getTime() + 60_000)
+        .sort((a, b) => b.enteredAt - a.enteredAt)[0]
+    : undefined;
 
   return (
     <div
@@ -595,6 +640,43 @@ export const ActivityComponent = ({
             {formatTimestamp(activity.timestamp)}
           </span>
         </div>
+
+        {/* Inline form submission viewer */}
+        {matchedFormVisit && matchedFormVisit.formValues.length > 0 && (
+          <div className='mt-2'>
+            <button
+              type='button'
+              onClick={() => setFormExpanded(prev => !prev)}
+              data-track-category='ticket_activity'
+              data-track-name='toggle_form_submission'
+              className='inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors'
+            >
+              {formExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              <FileText size={11} />
+              <span>
+                Form submission
+                {matchedFormVisit.version > 1 && ` (visit #${matchedFormVisit.version})`}
+                {' · '}
+                {matchedFormVisit.formValues.length} field
+                {matchedFormVisit.formValues.length !== 1 ? 's' : ''}
+              </span>
+            </button>
+            {formExpanded && (
+              <div className='mt-1.5 rounded-md border border-border bg-muted/30 divide-y divide-border overflow-hidden'>
+                {matchedFormVisit.formValues.map(fv => (
+                  <div key={fv.id} className='px-3 py-2 flex items-start justify-between gap-4'>
+                    <span className='text-[11px] text-muted-foreground shrink-0'>
+                      {fv.formField?.fieldName ?? fv.fieldId}
+                    </span>
+                    <span className='text-[11px] text-foreground text-right break-words min-w-0'>
+                      {renderFormFieldValue(fv)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

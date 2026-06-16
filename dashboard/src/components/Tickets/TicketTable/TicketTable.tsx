@@ -12,7 +12,10 @@ import {
   GridReadyEvent,
 } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
+import { BoardType } from '@xyne/shared';
+import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
+import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
 import { Calendar, Check, User } from 'lucide-react';
@@ -154,6 +157,45 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
+
+  // NON_LINEAR boards reject direct ticket.update — use the transition mutator instead.
+  const routeStageChange = useCallback(
+    async (
+      ticketId: string,
+      boardId: string | null | undefined,
+      toStageName: string,
+    ): Promise<void> => {
+      if (boardId) {
+        // No try/catch: Zero queries resolve through the cache and don't throw here.
+        const board = (await zero.run(queries.boardDetailById({ boardId }), {
+          type: 'complete',
+        })) as { boardType?: string } | null;
+        if (board?.boardType === BoardType.NON_LINEAR) {
+          const result = zero.mutate(
+            mutators.nonLinear.transition({ ticketId, toStageName, now: Date.now() }),
+          );
+          void (
+            result as {
+              server: Promise<{ type: string; error?: { message?: string } } | undefined>;
+            }
+          ).server.then(serverResult => {
+            if (serverResult?.type === 'error') {
+              toast.error(
+                serverResult.error?.message === 'This transition requires a form to be submitted'
+                  ? 'Open this ticket on its board to fill the required form for this stage'
+                  : (serverResult.error?.message ?? 'Unable to change stage'),
+              );
+            }
+          });
+          return;
+        }
+      }
+      zero.mutate(
+        mutators.ticket.update({ id: ticketId, stageName: toStageName, updatedAt: Date.now() }),
+      );
+    },
+    [zero],
+  );
 
   const [gridApi, setGridApi] = useState<GridApi | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
@@ -444,13 +486,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         cellEditor: StageCellEditor,
         onCellValueChanged: params => {
           if (params.newValue !== params.oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                stageName: String(params.newValue),
-                updatedAt: Date.now(),
-              }),
-            );
+            void routeStageChange(params.data.id, params.data.boardId, String(params.newValue));
           }
         },
         cellRenderer: (params: ICellRendererParams<Ticket>) => (
@@ -550,15 +586,26 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           if (row && typeof row === 'object' && 'id' in row) {
             const ticket = row as Ticket;
             // Convert null eta to undefined for mutator
-            const { eta, ...otherUpdates } = updates as { eta?: number | null };
-            zero.mutate(
-              mutators.ticket.update({
-                id: ticket.id,
-                ...otherUpdates,
-                ...(eta !== undefined && { eta: eta ?? undefined }),
-                updatedAt: Date.now(),
-              }),
-            );
+            const { eta, stageName, ...otherUpdates } = updates as {
+              eta?: number | null;
+              stageName?: string;
+            };
+            if (stageName !== undefined) {
+              void routeStageChange(ticket.id, ticket.boardId, stageName);
+            }
+            const remaining = {
+              ...otherUpdates,
+              ...(eta !== undefined && { eta: eta ?? undefined }),
+            };
+            if (Object.keys(remaining).length > 0) {
+              zero.mutate(
+                mutators.ticket.update({
+                  id: ticket.id,
+                  ...remaining,
+                  updatedAt: Date.now(),
+                }),
+              );
+            }
           }
         });
       }

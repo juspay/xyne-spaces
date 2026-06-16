@@ -37,6 +37,7 @@ import {
   ReactionCountsACL,
   ReactionsACL,
   StagesACL,
+  StageTransitionsACL,
   StagePRStatusMappingsACL,
   SubTicketsACL,
   TicketActivitiesACL,
@@ -60,6 +61,7 @@ import {
   SavedUserConfigurationsACL,
   TicketAssignmentsACL,
   TicketStageEtaACL,
+  TicketStageRequestsACL,
   UserProfilesACL,
   UserPreferencesACL,
   FormsACL,
@@ -144,6 +146,8 @@ export class QueryACLFactory {
         return new ReactionsACL(ctx) as BaseQueryACL<TTable>;
       case 'stages':
         return new StagesACL(ctx) as BaseQueryACL<TTable>;
+      case 'stage_transitions':
+        return new StageTransitionsACL(ctx) as BaseQueryACL<TTable>;
       case 'stage_pr_status_mappings':
         return new StagePRStatusMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'sub_tickets':
@@ -184,6 +188,8 @@ export class QueryACLFactory {
         return new TicketAssignmentsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_eta':
         return new TicketStageEtaACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_stage_requests':
+        return new TicketStageRequestsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_workload_mappings':
         return new UserWorkloadMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'users':

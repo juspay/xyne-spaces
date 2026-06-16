@@ -119,6 +119,7 @@ export const TicketFiltersDropdown = ({
   selectedBoardName,
   onBoardDropdownOpenChange,
   isTicketsSyncing = false,
+  isNonLinearBoard = false,
   channelId,
   groupBy,
   hasActiveView,
@@ -714,6 +715,11 @@ export const TicketFiltersDropdown = ({
               <span className='font-semibold text-base'>
                 {isTicketsSyncing ? 'Loading tickets' : boardLabel}
               </span>
+              {isNonLinearBoard && (
+                <span className='bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-medium ml-1.5'>
+                  Non-Linear
+                </span>
+              )}
               {isTicketsSyncing && <Loader2 className='w-4 h-4 animate-spin' />}
               <ChevronDown
                 className={cn(

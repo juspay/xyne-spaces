@@ -5,7 +5,7 @@ import { ActivitySource } from '@/types/ticket';
 import { DatabaseClient } from '@/database/client';
 import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
-import { PRStatusEvent } from '@prisma/client';
+import { PRStatusEvent, BoardType } from '@prisma/client';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
@@ -13,6 +13,7 @@ import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapsh
 import { websocketService } from '@/services/websocketService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType, isReleaseTicket } from '@xyne/shared';
+import { ticketStageTransitionService } from './stageTransition/ticketStageTransitionService';
 
 
 const prisma = DatabaseClient.getInstance();
@@ -71,6 +72,19 @@ export class TicketService {
       }
 
       const { boardId } = ticket;
+
+      // NON_LINEAR boards require the dedicated transition service (handles forms, approvals, SLA).
+      if (ticket.board?.boardType === BoardType.NON_LINEAR) {
+        const result = await ticketStageTransitionService.transitionTicket(ticketId, userId, stage, {
+          isAutomation: true,
+        });
+        if (!result.success) {
+          logger.warn(
+            `[TicketService] NON_LINEAR stage transition failed for ticket ${ticketId} → "${stage}": ${result.message}`,
+          );
+        }
+        return;
+      }
 
       // Query the board to find the AI_PICKED_UP stage
       const targetStage = await prisma.stage.findFirst({
@@ -169,7 +183,9 @@ export class TicketService {
     const data: Record<string, unknown> = { updatedBy: userId, updatedAt: new Date() };
 
     if (params.assigneeId) { data['assignedTo'] = params.assigneeId; updates.push('assignee'); }
-    if (params.stage) { data['stageName'] = params.stage; updates.push('stage'); }
+    if (params.stage) {
+      data['stageName'] = params.stage; updates.push('stage');
+    }
     if (params.groupId) { data['userGroupId'] = params.groupId; updates.push('group'); }
     if (params.title) { data['title'] = params.title; updates.push('title'); }
     if (params.description) { data['description'] = params.description; updates.push('description'); }

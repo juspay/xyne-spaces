@@ -42,6 +42,8 @@ import {
   BaseTicketType,
   RCAStatus,
   LookupType,
+  BoardType,
+  ApproverType,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -61,6 +63,11 @@ import { Selector } from './Selector';
 import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
+import {
+  getReachableStageIds,
+  findMatchingTransition,
+  isCurrentStageRestricted,
+} from '../../../utils/stageTransitionUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
@@ -80,6 +87,7 @@ import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
+import { FormViewerDialog } from './FormViewerDialog';
 import Tooltip from '../../ui/Tooltip';
 import WorkflowTriggerModal from '../../Workflow/WorkflowTriggerModal';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -106,7 +114,11 @@ interface StageInfo {
   name: string;
   sequenceNumber: number;
   defaultTicketStatusV2?: TicketStatusV2;
-  approvers?: readonly { userId: string; stageId: string }[];
+  approvers?: readonly {
+    userId: string | null;
+    roleId: string | null | undefined;
+    stageId: string | null;
+  }[];
   formId?: string | null;
   eta: number | null;
 }
@@ -213,6 +225,96 @@ interface FormEntityValueWithField extends FormEntityValues {
     };
   };
 }
+
+// ── Stage Form Submissions Component ──────────────────────────────────────────
+interface StageFormSubmissionsProps {
+  stageVisitFormValues: Array<{
+    stageName: string;
+    stageId: string;
+    version: number;
+    enteredAt: number;
+    formValues: FormEntityValueWithField[];
+  }>;
+}
+
+const StageFormSubmissions: React.FC<StageFormSubmissionsProps> = ({ stageVisitFormValues }) => {
+  const [viewingForm, setViewingForm] = useState<{
+    stageName: string;
+    version: number;
+    formValues: FormEntityValueWithField[];
+  } | null>(null);
+
+  return (
+    <div className='mt-8'>
+      <h3 className='text-base font-semibold text-foreground mb-4 flex items-center gap-2'>
+        Stage Form Submissions
+        <span className='text-xs font-normal bg-muted text-muted-foreground px-1.5 py-0.5 rounded'>
+          {stageVisitFormValues.length}
+        </span>
+      </h3>
+      {stageVisitFormValues.length === 0 && (
+        <p className='text-sm text-muted-foreground'>
+          No form submissions yet. Form data will appear here when a ticket is moved through a stage
+          with a required form.
+        </p>
+      )}
+      <div className='flex flex-col gap-2'>
+        {stageVisitFormValues.map(sv => {
+          const key = `${sv.stageId}:${sv.version}`;
+          const date = new Date(sv.enteredAt).toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          return (
+            <div key={key} className='rounded-lg border border-border overflow-hidden'>
+              <button
+                type='button'
+                onClick={() =>
+                  setViewingForm({
+                    stageName: sv.stageName,
+                    version: sv.version,
+                    formValues: sv.formValues,
+                  })
+                }
+                data-track-category='ticket_details'
+                data-track-name='view_form_submission'
+                className='w-full flex items-center justify-between px-3 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors text-left'
+              >
+                <div className='flex items-center gap-2'>
+                  <div className='w-2 h-2 rounded-full bg-[#6276be] shrink-0' />
+                  <span className='text-sm font-medium text-foreground'>{sv.stageName}</span>
+                  {sv.version > 1 && (
+                    <span className='text-[10px] bg-amber-50 border border-amber-200 text-amber-700 px-1.5 py-0.5 rounded-full'>
+                      Visit #{sv.version}
+                    </span>
+                  )}
+                  <span className='text-xs text-muted-foreground'>{date}</span>
+                </div>
+                <span className='text-xs text-primary/80 shrink-0'>
+                  View {sv.formValues.length} field{sv.formValues.length !== 1 ? 's' : ''}
+                </span>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {viewingForm && (
+        <FormViewerDialog
+          isOpen
+          onClose={() => setViewingForm(null)}
+          stageName={viewingForm.stageName}
+          visitIndex={viewingForm.version}
+          formValues={
+            viewingForm.formValues as Parameters<typeof FormViewerDialog>[0]['formValues']
+          }
+        />
+      )}
+    </div>
+  );
+};
 
 interface TicketDetailsProps {
   ticketId: string;
@@ -451,7 +553,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   useEffect(() => {
     if (!descriptionRef.current || showFullDescription) return;
 
-    const checkTruncation = () => {
+    const checkTruncation = (): void => {
       const element = descriptionRef.current;
       if (element) {
         const isTruncated = element.scrollHeight > element.clientHeight;
@@ -466,7 +568,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       checkTruncation(); // Initial check
     }
 
-    return () => {
+    return (): void => {
       resizeObserver.disconnect();
     };
   }, [ticket?.description, showFullDescription]);
@@ -483,7 +585,37 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     enabled: !!ticket?.boardId,
   });
 
-  // Create a map of stageId -> formId for quick lookup (from stages.formContextMappings)
+  // Query board details to detect non-linear boards
+  const [boardData] = useCachedQuery(queries.boardDetailById({ boardId: ticket?.boardId ?? '' }), {
+    enabled: !!ticket?.boardId,
+  });
+
+  const isNonLinearBoard = boardData?.boardType === BoardType.NON_LINEAR;
+
+  // Transitions (with approvers) are fetched via the dedicated query, not embedded in boardDetailById.
+  const [boardStageTransitions] = useCachedQuery(
+    queries.getStageTransitionsByBoardId({ boardId: ticket?.boardId ?? '' }),
+    {
+      enabled: !!ticket?.boardId && isNonLinearBoard,
+    },
+  );
+
+  // Only NON_LINEAR boards use transition-based gating; linear boards keep the legacy path.
+  const stageTransitions = useMemo(() => {
+    if (!isNonLinearBoard || !boardStageTransitions) return [];
+    return boardStageTransitions;
+  }, [isNonLinearBoard, boardStageTransitions]);
+
+  // Always-current refs so the async .server.then() handler can look up the latest
+  // transition/form data even when the render-time closure is stale.
+  const stageTransitionsRef = useRef(stageTransitions);
+  stageTransitionsRef.current = stageTransitions;
+  const stagesRef = useRef(stages);
+  stagesRef.current = stages;
+
+  // Create a map of stageId -> formId for quick lookup.
+  // Includes both stage-level forms (formContextMappings) and transition-level forms
+  // (from stageTransitions.formId) so NON_LINEAR boards with per-transition forms are covered.
   const stageFormMap = useMemo(() => {
     const map = new Map<string, string>();
     if (stages) {
@@ -497,8 +629,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }
       });
     }
+    stageTransitions.forEach(t => {
+      if (t.formId) {
+        map.set(t.toStageId, t.formId);
+      }
+    });
     return map;
-  }, [stages]);
+  }, [stages, stageTransitions]);
 
   // Create stages array with formId and approvers included
   const stagesWithFormInfo = useMemo(() => {
@@ -508,6 +645,26 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       formId: stageFormMap.get(stage.id) ?? null,
     }));
   }, [stages, stageFormMap]);
+
+  // Compute the set of stage names reachable from the current stage.
+  // Used to grey out unreachable options in the stage selector.
+  // Returns null (no restriction) for linear boards or NON_LINEAR with 0 transitions configured.
+  const reachableStageNamesForSelector = useMemo<Set<string> | null>(() => {
+    if (!stages || !ticket?.stageName) return null;
+
+    // Linear boards don't restrict navigation
+    if (!isNonLinearBoard) return null;
+
+    if (stageTransitions.length === 0) return null;
+
+    const currentStageObj = stages.find(s => s.name === ticket.stageName);
+    if (!currentStageObj) return null;
+
+    const reachableIds = getReachableStageIds(stageTransitions, currentStageObj.id);
+    if (!reachableIds) return null;
+
+    return new Set(stages.filter(s => reachableIds.has(s.id)).map(s => s.name));
+  }, [isNonLinearBoard, stageTransitions, stages, ticket?.stageName]);
 
   // Check if board has stages with approval (for sequential movement enforcement)
   const boardHasStagesWithApproval = useMemo(() => {
@@ -523,6 +680,34 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const shouldEnforceSequentialMovement = useMemo(() => {
     return boardHasStagesWithApproval || boardHasStagesWithForms;
   }, [boardHasStagesWithApproval, boardHasStagesWithForms]);
+
+  // A stage the ticket cannot transition to from its current stage.
+  const isStageUnreachable = useCallback(
+    (item: { name: string; sequenceNumber?: number }): boolean => {
+      // NON_LINEAR (or any board with transitions): only configured edges are reachable.
+      if (reachableStageNamesForSelector !== null) {
+        return !reachableStageNamesForSelector.has(item.name);
+      }
+      // Linear boards with forms/approval: only the immediate next stage is reachable forward;
+      // moving backward to any earlier stage stays allowed.
+      if (!shouldEnforceSequentialMovement) return false;
+      const currentStageSeq = stages?.find(s => s.name === ticket?.stageName)?.sequenceNumber;
+      if (currentStageSeq === undefined || item.sequenceNumber === undefined) return false;
+      if (item.sequenceNumber > currentStageSeq) {
+        return item.sequenceNumber !== currentStageSeq + 1;
+      }
+      return false;
+    },
+    [reachableStageNamesForSelector, shouldEnforceSequentialMovement, stages, ticket?.stageName],
+  );
+
+  // Stage list for the status selector: list ONLY the stages the ticket can move to, plus the
+  // current stage (so the selected value still renders). Unreachable stages are removed entirely
+  // rather than shown greyed/disabled.
+  const selectorStages = useMemo(
+    () => (stages ?? []).filter(s => s.name === ticket?.stageName || !isStageUnreachable(s)),
+    [stages, ticket?.stageName, isStageUnreachable],
+  );
 
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
@@ -797,12 +982,43 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         contextId: ticket?.boardId || '',
         fieldValue: '',
         actualFieldValue: null,
+        version: 1,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         formField,
       };
     });
   }, [formMapping, formEntityValues, ticketId, ticket?.boardId]);
+
+  // Group form values by stage+version — no ETA join needed
+  const stageVisitFormValues = useMemo(() => {
+    const rawFormValues = (formEntityValues as FormEntityValueWithField[] | undefined) ?? [];
+    const withStage = rawFormValues.filter(fv => fv.contextId);
+
+    const groups = new Map<string, FormEntityValueWithField[]>();
+    for (const fv of withStage) {
+      const key = `${fv.contextId}:${fv.version ?? 1}`;
+      const bucket = groups.get(key) ?? [];
+      bucket.push(fv);
+      groups.set(key, bucket);
+    }
+
+    return Array.from(groups.entries())
+      .map(([key, fvs]) => {
+        const stageId = key.split(':')[0] ?? '';
+        const version = fvs[0]?.version ?? 1;
+        const stage = stagesWithFormInfo?.find(s => s.id === stageId);
+        const enteredAt = Math.min(...fvs.map(fv => new Date(fv.createdAt).getTime()));
+        return {
+          stageName: stage?.name ?? stageId,
+          stageId,
+          version,
+          enteredAt,
+          formValues: fvs,
+        };
+      })
+      .sort((a, b) => a.enteredAt - b.enteredAt);
+  }, [formEntityValues, stagesWithFormInfo]);
 
   type FormsToShowItem = {
     type: 'request' | 'form';
@@ -830,7 +1046,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (ticket?.ticketStageRequests) {
       ticket.ticketStageRequests.forEach(req => {
         const stage = stagesWithFormInfo?.find(s => s.id === req.stageId);
-        const hasApprovers = stage?.approvers && stage.approvers.length > 0;
+        // For NON_LINEAR boards approvers live on the transition, not the stage.
+        const hasApprovers = isNonLinearBoard
+          ? stageTransitions.some(
+              t => t.toStageId === req.stageId && (t.transitionApprovers?.length ?? 0) > 0,
+            )
+          : stage?.approvers && stage.approvers.length > 0;
 
         if (hasApprovers) {
           const form = (req as TicketStageRequest & { form?: { formName: string } }).form;
@@ -868,8 +1089,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         // Find which stage this contextId belongs to
         const stage = stagesWithFormInfo.find(s => s.id === contextId);
         if (stage && stage.formId) {
-          // Only show forms for stages up to current ticket stage (filter stale data)
-          if (stage.sequenceNumber !== undefined && stage.sequenceNumber > currentStageSeq) {
+          // On linear boards, hide form data from "future" stages (stale data from backward moves).
+          // On non-linear boards stage order has no meaning, so always show all form data.
+          if (
+            !isNonLinearBoard &&
+            stage.sequenceNumber !== undefined &&
+            stage.sequenceNumber > currentStageSeq
+          ) {
             return;
           }
 
@@ -894,7 +1120,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
 
     return result;
-  }, [ticket?.ticketStageRequests, formEntityValues, stagesWithFormInfo, ticket?.stageName]);
+  }, [
+    ticket?.ticketStageRequests,
+    formEntityValues,
+    stagesWithFormInfo,
+    ticket?.stageName,
+    isNonLinearBoard,
+    stageTransitions,
+  ]);
 
   const tags = ticket?.tagMappings;
   // Available tags from project_tags
@@ -1261,6 +1494,236 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const handleStageChange = (stageName: string): void => {
     if (!ticket) return;
+
+    const hasTransitionsDefined = stageTransitions.length > 0;
+
+    // Shared helper: open the stage form modal given a target stage + formId.
+    const openStageForm = (
+      targetStageObj: StageInfo,
+      formId: string,
+      hasApprovers: boolean,
+    ): void => {
+      // Only pass an active (SUBMITTED/DRAFT) request — an APPROVED/REJECTED request from
+      // a prior visit would lock the form fields and show "Form approved", blocking revisits.
+      const existingRequest = ticket.ticketStageRequests?.find(
+        r =>
+          r.stageId === targetStageObj.id &&
+          (r.status === TicketStageRequestStatus.SUBMITTED ||
+            r.status === TicketStageRequestStatus.DRAFT),
+      );
+      setStageFormModal({
+        ticket,
+        targetStage: { ...targetStageObj, formId },
+        sourceStageName: ticket.stageName || '',
+        formId,
+        isReviewer: false,
+        hasApprovers,
+        existingRequest: existingRequest || null,
+      });
+    };
+
+    // Shared helper: apply form gate → approval gate → nonLinear.transition for a found transition.
+    const execTransition = (
+      mt: {
+        formId?: string | null;
+        requiresApproval?: boolean;
+        transitionApprovers?: ReadonlyArray<{
+          userId: string | null;
+          roleId: string | null;
+          approverType: ApproverType;
+        }>;
+      },
+      _currentStageObj: { id: string; name: string },
+      targetStageObj: StageInfo,
+    ): void => {
+      // Forms on NON_LINEAR boards are EDGE-specific: only the matched transition's formId may
+      // gate this move. Do NOT fall back to stageFormMap — it aggregates formIds by target stage
+      // (from stage-level mappings AND every transition into that stage), so it would open the
+      // form on EVERY move into the stage (e.g. COMPLETED→IN PROGRESS firing the form configured
+      // on BACKLOG→IN PROGRESS). If the edge's formId lags in the Zero cache, the server form-gate
+      // + recovery path opens the modal. Other board types keep the stageFormMap fallback.
+      const resolvedFormId: string | null = isNonLinearBoard
+        ? (mt.formId ?? null)
+        : (mt.formId ?? stageFormMap.get(targetStageObj.id) ?? null);
+
+      if (resolvedFormId) {
+        const hasApproversForTarget = isNonLinearBoard
+          ? (mt.transitionApprovers?.length ?? 0) > 0
+          : (mt.transitionApprovers?.length ?? 0) > 0 ||
+            stageTransitions.some(
+              t => t.toStageId === targetStageObj.id && (t.transitionApprovers?.length ?? 0) > 0,
+            );
+        openStageForm(targetStageObj, resolvedFormId, hasApproversForTarget);
+        return;
+      }
+      if (mt.requiresApproval) {
+        const isApprover =
+          mt.transitionApprovers?.some(
+            a => a.approverType === ApproverType.USER && a.userId === currentUser?.id,
+          ) ?? false;
+        if (!isApprover) {
+          // Reuse the existing record's ID for revisits (unique constraint on ticketId+stageId)
+          const existingForStage = ticket.ticketStageRequests?.find(
+            r => r.stageId === targetStageObj.id,
+          );
+          void zero.mutate(
+            mutators.ticketStageRequest.upsert({
+              id: existingForStage?.id ?? uuidv4(),
+              ticketId: ticket.id,
+              stageId: targetStageObj.id,
+              status: TicketStageRequestStatus.SUBMITTED,
+              updatedBy: currentUser?.id || '',
+              updatedAt: Date.now(),
+              requestActivityId: uuidv4(),
+            }),
+          );
+          toast.success('Stage change request submitted for approval');
+          return;
+        }
+      }
+      // Fire optimistic mutation. If Zero cache lagged and the server finds a form gate,
+      // it returns the formId in error.details — open the form from there.
+      const capturedTargetStage = targetStageObj;
+      const capturedBoardId = ticket.boardId;
+      const capturedCurrentStageName = ticket.stageName;
+      const transitionResult = zero.mutate(
+        mutators.nonLinear.transition({
+          ticketId: ticket.id,
+          toStageName: stageName,
+          now: Date.now(),
+        }),
+      );
+      void (
+        transitionResult as {
+          server: Promise<
+            | {
+                type: string;
+                error?: { type: string; message: string; details?: { formId?: string } };
+              }
+            | undefined
+          >;
+        }
+      ).server.then(async serverResult => {
+        if (
+          serverResult?.type === 'error' &&
+          serverResult.error?.message === 'This transition requires a form to be submitted'
+        ) {
+          // 2. Try latest transitions from ref (Zero may have synced by now).
+          const latestTransitions = stageTransitionsRef.current;
+          const currentStageObj = stagesRef.current?.find(s => s.name === capturedCurrentStageName);
+          const latestMt =
+            latestTransitions.length > 0 && currentStageObj
+              ? latestTransitions.find(
+                  t =>
+                    t.fromStageId === currentStageObj.id && t.toStageId === capturedTargetStage.id,
+                )
+              : undefined;
+
+          // 1. Try server error details (fastest path).
+          const directFormId = serverResult.error.details?.formId;
+          if (directFormId) {
+            const hasApproversT1 = (latestMt?.transitionApprovers?.length ?? 0) > 0;
+            openStageForm(capturedTargetStage, directFormId, hasApproversT1);
+            return;
+          }
+
+          // Use formId from the matched transition only — stageFormMap is ambiguous when
+          // multiple transitions go to the same stage with different formIds.
+          const refFormId = latestMt?.formId ?? null;
+          if (refFormId) {
+            openStageForm(
+              capturedTargetStage,
+              refFormId,
+              (latestMt?.transitionApprovers?.length ?? 0) > 0,
+            );
+            return;
+          }
+
+          // 3. Force-fetch from Zero server as final fallback.
+          // No try/catch: Zero queries resolve through the cache and don't throw here.
+          if (capturedBoardId) {
+            const freshTransitions = await zero.run(
+              queries.getStageTransitionsByBoardId({ boardId: capturedBoardId }),
+              { type: 'complete' },
+            );
+            if (freshTransitions) {
+              const freshMt = freshTransitions.find(
+                t =>
+                  t.fromStageId === currentStageObj?.id && t.toStageId === capturedTargetStage.id,
+              );
+              const freshFormId = freshMt?.formId ?? null;
+              if (freshFormId) {
+                openStageForm(
+                  capturedTargetStage,
+                  freshFormId,
+                  (freshMt?.transitionApprovers?.length ?? 0) > 0,
+                );
+              }
+            }
+          }
+        }
+      });
+    };
+
+    if (isNonLinearBoard) {
+      // ticket.stageName===null means initial stage placement — skip transition restrictions.
+      if (hasTransitionsDefined && ticket.stageName !== null) {
+        const currentStageObj = stages?.find(s => s.name === ticket.stageName);
+        const targetStageObj = stages?.find(s => s.name === stageName);
+        // If stages haven't finished loading, fall through to the direct nonLinear.transition call.
+        if (currentStageObj && targetStageObj) {
+          const restricted = isCurrentStageRestricted(stageTransitions, currentStageObj.id);
+          if (restricted) {
+            const matchingTransition = findMatchingTransition(
+              stageTransitions,
+              currentStageObj.id,
+              targetStageObj.id,
+            );
+            if (!matchingTransition) {
+              toast.error('This stage transition is not allowed');
+              return;
+            }
+            execTransition(matchingTransition, currentStageObj, targetStageObj);
+            return;
+          }
+        }
+      }
+      // No matching transition edge — no form gate, perform the move directly.
+      const currentStageObj = stages?.find(s => s.name === ticket.stageName);
+      const targetStageObj = stages?.find(s => s.name === stageName);
+      if (currentStageObj && targetStageObj) {
+        execTransition({}, currentStageObj, targetStageObj);
+      } else {
+        void zero.mutate(
+          mutators.nonLinear.transition({
+            ticketId: ticket.id,
+            toStageName: stageName,
+            now: Date.now(),
+          }),
+        );
+      }
+      return;
+    }
+
+    // Transition-based gate: linear boards with explicit transitions defined
+    if (hasTransitionsDefined) {
+      const currentStageObj = stages?.find(s => s.name === ticket.stageName);
+      const targetStageObj = stages?.find(s => s.name === stageName);
+      if (!currentStageObj || !targetStageObj) {
+        toast.error('Stage not found');
+        return;
+      }
+      const matchingTransition = findMatchingTransition(
+        stageTransitions,
+        currentStageObj.id,
+        targetStageObj.id,
+      );
+      if (matchingTransition) {
+        execTransition(matchingTransition, currentStageObj, targetStageObj);
+        return;
+      }
+      // No matching transition — fall through to legacy gate
+    }
 
     // Find the stage's default ticket status
     const boardStages = stages; // Use the current board's stages, not related tickets
@@ -2361,29 +2824,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   })}
                 >
                   <Selector
-                    items={stages}
+                    items={selectorStages}
                     selectedValue={ticket.stageName}
                     onValueChange={handleStageChange}
                     placeholder='Set Status'
                     icon={<TicketStatusIcon size={14} />}
                     noBorder={true}
-                    isItemDisabled={item => {
-                      if (!shouldEnforceSequentialMovement) return false;
-                      const currentStageSeq = stages?.find(
-                        s => s.name === ticket.stageName,
-                      )?.sequenceNumber;
-                      if (currentStageSeq === undefined || item.sequenceNumber === undefined)
-                        return false;
-
-                      if (item.sequenceNumber > currentStageSeq) {
-                        return item.sequenceNumber !== currentStageSeq + 1;
-                      }
-                      // Moving backward: allow to any previous stage
-                      return false;
-                    }}
+                    isItemDisabled={item => item.name === ticket.stageName}
                   />
                   {/* Show alert icon if there's a pending request for the next stage */}
-                  {(() => {
+                  {((): React.ReactElement | null => {
                     if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
                     const currentStage = stagesWithFormInfo.find(s => s.name === ticket.stageName);
                     if (!currentStage) return null;
@@ -2647,7 +3097,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 ticketKey='projected deadline'
                 value={
                   ticket.statusUpdatedAt ? (
-                    (() => {
+                    ((): React.ReactElement => {
                       const pausedDurationMs = calculateWorkingDurationMs(
                         new Date(ticket.statusUpdatedAt),
                         new Date(Date.now()),
@@ -2748,9 +3198,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   const isRejected = item.status === TicketStageRequestStatus.REJECTED;
                   const isApproved = item.status === TicketStageRequestStatus.APPROVED;
                   const isDraft = item.status === TicketStageRequestStatus.DRAFT;
-                  const isApprover =
-                    stage?.approvers?.some(a => a.userId === currentUser?.id) ?? false;
-                  const hasApprovers = stage?.approvers && stage.approvers.length > 0;
+                  // For NON_LINEAR boards approvers live on the transition, not the stage.
+                  const isApprover = isNonLinearBoard
+                    ? stageTransitions.some(
+                        t =>
+                          t.toStageId === item.stageId &&
+                          t.transitionApprovers?.some(
+                            a =>
+                              a.userId === currentUser?.id && a.approverType === ApproverType.USER,
+                          ),
+                      )
+                    : (stage?.approvers?.some(a => a.userId === currentUser?.id) ?? false);
+                  const hasApprovers = isNonLinearBoard
+                    ? stageTransitions.some(
+                        t =>
+                          t.toStageId === item.stageId && (t.transitionApprovers?.length ?? 0) > 0,
+                      )
+                    : stage?.approvers && stage.approvers.length > 0;
 
                   // Find previous stage
                   const currentStageSeq = stage?.sequenceNumber ?? 0;
@@ -2777,7 +3241,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           {/* Status Badge - only show for stages with approvers */}
                           {hasApprovers &&
                             item.status &&
-                            (() => {
+                            ((): React.ReactElement | null => {
                               const config = getStatusBadgeConfig(item.status);
                               return config ? (
                                 <span className={config.className.replace('text-xs', 'text-sm')}>
@@ -2803,6 +3267,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                         name: 'Unknown Stage',
                                         sequenceNumber: 0,
                                         boardId: ticket.boardId || '',
+                                        eta: null,
                                       },
                                       sourceStageName: previousStage?.name || 'Unknown Stage',
                                       formId: item.formId,
@@ -2858,6 +3323,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                             name: 'Unknown Stage',
                                             sequenceNumber: 0,
                                             boardId: ticket.boardId || '',
+                                            eta: null,
                                           },
                                           sourceStageName: previousStage?.name || 'Unknown Stage',
                                           formId: item.formId,
@@ -2887,6 +3353,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                             name: 'Unknown Stage',
                                             sequenceNumber: 0,
                                             boardId: ticket.boardId || '',
+                                            eta: null,
                                           },
                                           sourceStageName: previousStage?.name || 'Unknown Stage',
                                           formId: item.formId,
@@ -2918,6 +3385,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                         name: 'Unknown Stage',
                                         sequenceNumber: 0,
                                         boardId: ticket.boardId || '',
+                                        eta: null,
                                       },
                                       sourceStageName: previousStage?.name || 'Unknown Stage',
                                       formId: item.formId,
@@ -2994,6 +3462,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                         name: 'Unknown Stage',
                                         sequenceNumber: 0,
                                         boardId: ticket.boardId || '',
+                                        eta: null,
                                       },
                                       sourceStageName: previousStage?.name || 'Unknown Stage',
                                       formId: item.formId,
@@ -3355,7 +3824,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       formatIncomingReferenceLabel(reference.relationType),
                       false,
                       reference.relationType === TicketReferenceRelation.MERGED_INTO
-                        ? () => {
+                        ? (): void => {
                             void handleUnmerge(reference.sourceTicket?.id || '');
                           }
                         : undefined,
@@ -3396,11 +3865,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           </div>
         </div>
+        {/* Stage Form Submissions — per-stage-visit forms are a NON_LINEAR concept.
+            On linear boards the single board-level form lives in the form panel above,
+            so hide this panel entirely rather than rendering an empty state. */}
+        {isNonLinearBoard && <StageFormSubmissions stageVisitFormValues={stageVisitFormValues} />}
         <TicketActivity
           activities={activities}
           users={users}
           userGroups={userGroups}
           boards={boards}
+          stageVisitFormValues={isNonLinearBoard ? stageVisitFormValues : []}
         />
       </div>
       {/* SubTicket Modal */}
@@ -3473,6 +3947,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           isReviewer={stageFormModal.isReviewer ?? false}
           hasApprovers={stageFormModal.hasApprovers ?? false}
           existingRequest={stageFormModal.existingRequest ?? null}
+          isNonLinearBoard={isNonLinearBoard}
           onSuccess={() => setStageFormModal(null)}
         />
       )}

@@ -1,4 +1,9 @@
 import { ReactElement, useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { ReactFlowProvider } from 'reactflow';
+import {
+  NonLinearTransitionEditor,
+  type TransitionMeta,
+} from '../NonLinearTransitionEditor/NonLinearTransitionEditor';
 import {
   Plus,
   X,
@@ -28,6 +33,7 @@ import {
   PRStatusEvent,
   FormContextType,
   FormFieldType,
+  BoardType,
 } from '@xyne/shared';
 import { toast } from 'sonner';
 import { useUsers } from '../../../hooks/useUsers';
@@ -136,6 +142,17 @@ const BoardStageConfigScreen = ({
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
   const [pendingFormCondition, setPendingFormCondition] = useState<StageCondition | null>(null);
 
+  // ── Edge Condition State (NON_LINEAR boards only) ────────────────────────────
+  const [isEdgeConditionModalOpen, setIsEdgeConditionModalOpen] = useState(false);
+  const [selectedEdgeForCondition, setSelectedEdgeForCondition] = useState<{
+    fromTempId: number;
+    toTempId: number;
+  } | null>(null);
+  const [isEdgeCreateFormOpen, setIsEdgeCreateFormOpen] = useState(false);
+  const [_pendingEdgeFormCondition, setPendingEdgeFormCondition] = useState<StageCondition | null>(
+    null,
+  );
+
   // ── Direct Transition Form State (per-stage, no ConditionBuilder needed) ────
   const [isDirectFormOpen, setIsDirectFormOpen] = useState(false);
   const [selectedStageForDirectForm, setSelectedStageForDirectForm] = useState<number | null>(null);
@@ -167,6 +184,42 @@ const BoardStageConfigScreen = ({
   // 'priority': SLA deadlines derive from board_sla_policies (per-priority config).
   // Typed as the non-nullable union so comparisons against 'priority' are unambiguous.
   const [slaPolicyType, setSlaPolicyType] = useState<'stages' | 'priority'>('stages');
+
+  // ── Board Type Toggle ────────────────────────────────────────────────────────
+  const [boardType, setBoardType] = useState<BoardType>(BoardType.DEFAULT);
+
+  // ── Edge form state (non-linear boards) ─────────────────────────────────────
+  // Which edge has a form being created/edited
+  const [edgeFormTarget, setEdgeFormTarget] = useState<{
+    fromTempId: number;
+    toTempId: number;
+  } | null>(null);
+  const [isEdgeFormOpen, setIsEdgeFormOpen] = useState(false);
+  const [edgeEditFormId, setEdgeEditFormId] = useState<string | null>(null);
+  const [edgeEditFormData, setEdgeEditFormData] = useState<{
+    formName: string;
+    formDescription: string;
+    fields: Array<{
+      id: string;
+      persistedFieldId?: string;
+      fieldName: string;
+      fieldType: FormFieldType;
+      isOptional: boolean;
+      fieldEnum?: string[];
+    }>;
+  } | null>(null);
+
+  // ── Stage Transitions (non-linear boards) ────────────────────────────────────
+  // Map from source stage tempId → Set of target stage tempIds
+  const [transitionsByTempId, setTransitionsByTempId] = useState<Map<number, Set<number>>>(
+    new Map(),
+  );
+  const [isTransitionsLoading, setIsTransitionsLoading] = useState(false);
+  const hasLoadedTransitions = useRef(false);
+
+  // ── Transition Metadata (non-linear boards) ─────────────────────────────────
+  // Per-edge metadata keyed by "fromTempId->toTempId"
+  const [transitionsMeta, setTransitionsMeta] = useState<Map<string, TransitionMeta>>(new Map());
 
   // ── Local state ─────────────────────────────────────────────────────────────
   // Default stages for new boards (when no stages exist)
@@ -250,8 +303,66 @@ const BoardStageConfigScreen = ({
       } else {
         setSlaPolicyType('stages');
       }
+      if (board && typeof board === 'object' && 'boardType' in board) {
+        const boardObj = board as { boardType?: BoardType };
+        setBoardType(boardObj.boardType ?? BoardType.DEFAULT);
+      }
     }
   }, [board]);
+
+  // ── Load stage transitions for all board types ─────────────────────────────
+  useEffect(() => {
+    if (!isOpen) {
+      hasLoadedTransitions.current = false;
+      return;
+    }
+    if (hasLoadedTransitions.current) return;
+    if (!boardId) return;
+    // Need real stage IDs to map transitions
+    const hasRealStageIds = stages.some(s => s.id);
+    if (!hasRealStageIds) return;
+
+    hasLoadedTransitions.current = true;
+    setIsTransitionsLoading(true);
+
+    zero
+      .run(queries.getStageTransitionsByBoardId({ boardId }), { type: 'complete' })
+      .then(transitions => {
+        const map = new Map<number, Set<number>>();
+        const metaMap = new Map<string, TransitionMeta>();
+        for (const t of transitions) {
+          const fromStage = stages.find(s => s.id === t.fromStageId);
+          const toStage = stages.find(s => s.id === t.toStageId);
+          if (fromStage && toStage) {
+            if (!map.has(fromStage.tempId)) {
+              map.set(fromStage.tempId, new Set());
+            }
+            map.get(fromStage.tempId)!.add(toStage.tempId);
+
+            metaMap.set(`${fromStage.tempId}->${toStage.tempId}`, {
+              id: t.id,
+              formId: t.formId,
+              requiresApproval: t.requiresApproval,
+              approverUserIds: (t.transitionApprovers ?? [])
+                .filter((a: { approverType: string }) => a.approverType === 'USER')
+                .map((a: { userId: string | null }) => a.userId)
+                .filter((id: string | null): id is string => id !== null),
+              visitSlaMode: t.visitSlaMode,
+              fixedEtaHours: t.fixedEtaHours,
+              onReenter: t.onReenter,
+            });
+          }
+        }
+        setTransitionsByTempId(map);
+        setTransitionsMeta(metaMap);
+      })
+      .catch(err => {
+        console.error('Failed to load stage transitions:', err);
+      })
+      .finally(() => setIsTransitionsLoading(false));
+    // formMap/userMap are read inside to resolve form/user display names; the
+    // hasLoadedTransitions ref guard prevents this effect from re-running.
+  }, [isOpen, boardId, boardType, stages, formMap, userMap]);
 
   // ── Load stages from board (same approach as BoardForm) ─────────────────────
   useEffect(() => {
@@ -404,6 +515,55 @@ const BoardStageConfigScreen = ({
   const handleUpdateStage = useCallback((tempId: number, updates: Partial<Stage>) => {
     setStages(prev => prev.map(s => (s.tempId === tempId ? { ...s, ...updates } : s)));
   }, []);
+
+  // ── Transition Helpers (non-linear boards) ───────────────────────────────────
+  const toggleTransition = useCallback((fromTempId: number, toTempId: number, enabled: boolean) => {
+    setTransitionsByTempId(prev => {
+      const newMap = new Map(prev);
+      const targets = new Set(newMap.get(fromTempId) || []);
+      if (enabled) {
+        targets.add(toTempId);
+      } else {
+        targets.delete(toTempId);
+      }
+      if (targets.size === 0) {
+        newMap.delete(fromTempId);
+      } else {
+        newMap.set(fromTempId, targets);
+      }
+      return newMap;
+    });
+
+    // When removing an edge, also remove its metadata
+    if (!enabled) {
+      setTransitionsMeta(prev => {
+        const next = new Map(prev);
+        next.delete(`${fromTempId}->${toTempId}`);
+        return next;
+      });
+    }
+  }, []);
+
+  const updateTransitionMeta = useCallback(
+    (fromTempId: number, toTempId: number, meta: Partial<TransitionMeta>) => {
+      setTransitionsMeta(prev => {
+        const key = `${fromTempId}->${toTempId}`;
+        const existing = prev.get(key);
+        const newMeta: TransitionMeta = {
+          requiresApproval: false,
+          approverUserIds: [],
+          visitSlaMode: 'STAGE_DEFAULT',
+          onReenter: 'RESET',
+          ...existing,
+          ...meta,
+        };
+        const next = new Map(prev);
+        next.set(key, newMeta);
+        return next;
+      });
+    },
+    [],
+  );
 
   const handleStartEditEta = useCallback((stage: Stage) => {
     setEditingEtaId(stage.tempId);
@@ -728,6 +888,89 @@ const BoardStageConfigScreen = ({
     setSelectedStageForDirectForm(null);
   }, []);
 
+  // ── Edge Condition Handlers (NON_LINEAR boards) ─────────────────────────────
+
+  const handleAddConditionForEdge = useCallback((from: number, to: number) => {
+    setSelectedEdgeForCondition({ fromTempId: from, toTempId: to });
+    setIsEdgeConditionModalOpen(true);
+  }, []);
+
+  const handleCloseEdgeConditionModal = useCallback(() => {
+    setIsEdgeConditionModalOpen(false);
+    setSelectedEdgeForCondition(null);
+  }, []);
+
+  const handleSaveEdgeCondition = useCallback(
+    (condition: StageCondition) => {
+      if (!selectedEdgeForCondition) return;
+      const { fromTempId, toTempId } = selectedEdgeForCondition;
+      if (condition.thenField === 'form') {
+        updateTransitionMeta(fromTempId, toTempId, {
+          formId: condition.thenValue,
+        });
+      } else if (condition.thenField === 'approver' && condition.approverIds) {
+        updateTransitionMeta(fromTempId, toTempId, {
+          requiresApproval: true,
+          approverUserIds: condition.approverIds,
+        });
+      }
+      handleCloseEdgeConditionModal();
+    },
+    [selectedEdgeForCondition, updateTransitionMeta, handleCloseEdgeConditionModal],
+  );
+
+  const handleOpenEdgeCreateForm = useCallback((condition?: StageCondition) => {
+    setIsEdgeConditionModalOpen(false);
+    setIsEdgeCreateFormOpen(true);
+    setPendingEdgeFormCondition(condition || null);
+  }, []);
+
+  const handleCloseEdgeCreateForm = useCallback(() => {
+    setIsEdgeCreateFormOpen(false);
+    setPendingEdgeFormCondition(null);
+  }, []);
+
+  const handleEdgeCreateFormSave = useCallback(
+    async (formData: {
+      formName: string;
+      formDescription: string;
+      fields: Array<{
+        id: string;
+        fieldName: string;
+        fieldType: string;
+        isOptional: boolean;
+        fieldEnum?: string[];
+      }>;
+    }) => {
+      if (!projectId || !selectedEdgeForCondition) return;
+      try {
+        const createdForm = await formService.createForm({
+          formName: formData.formName,
+          formDescription: formData.formDescription,
+          contextType: FormContextType.STAGE,
+          entityType: FormEntityType.TICKET,
+          fields: formData.fields.map(f => ({
+            fieldName: f.fieldName,
+            fieldType: f.fieldType as FormFieldType,
+            ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
+            isOptional: f.isOptional,
+          })),
+        });
+        toast.success(`Form "${formData.formName}" created successfully`);
+        setIsEdgeCreateFormOpen(false);
+        setPendingEdgeFormCondition(null);
+        const { fromTempId, toTempId } = selectedEdgeForCondition;
+        updateTransitionMeta(fromTempId, toTempId, { formId: createdForm.id });
+        handleCloseEdgeConditionModal();
+      } catch (error) {
+        toast.error('Failed to create form', {
+          description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        });
+      }
+    },
+    [projectId, selectedEdgeForCondition, updateTransitionMeta, handleCloseEdgeConditionModal],
+  );
+
   // ── Edit Form Handlers ───────────────────────────────────────────────────────
 
   /**
@@ -899,6 +1142,108 @@ const BoardStageConfigScreen = ({
     });
   }, []);
 
+  // ── Edge Form Handlers (NON_LINEAR per-edge forms) ───────────────────────────
+  const handleOpenEdgeForm = useCallback(
+    (fromTempId: number, toTempId: number, existingFormId?: string | null) => {
+      setEdgeFormTarget({ fromTempId, toTempId });
+      if (existingFormId) {
+        void formService
+          .getFormById(existingFormId)
+          .then(formDetails => {
+            setEdgeEditFormId(existingFormId);
+            setEdgeEditFormData({
+              formName: formDetails.formName,
+              formDescription: formDetails.formDescription || '',
+              fields: formDetails.fields.map(f => ({
+                id: f.id,
+                persistedFieldId: f.id,
+                fieldName: f.fieldName,
+                fieldType: f.fieldType,
+                isOptional: f.isOptional,
+                ...(f.fieldEnum ? { fieldEnum: f.fieldEnum } : {}),
+              })),
+            });
+            setIsEdgeFormOpen(true);
+          })
+          .catch(() => toast.error('Failed to load form details'));
+      } else {
+        setEdgeEditFormId(null);
+        setEdgeEditFormData(null);
+        setIsEdgeFormOpen(true);
+      }
+    },
+    [],
+  );
+
+  const handleCloseEdgeForm = useCallback(() => {
+    setIsEdgeFormOpen(false);
+    setEdgeFormTarget(null);
+    setEdgeEditFormId(null);
+    setEdgeEditFormData(null);
+  }, []);
+
+  const handleEdgeFormSave = useCallback(
+    async (formData: {
+      formName: string;
+      formDescription: string;
+      fields: Array<{
+        id: string;
+        fieldName: string;
+        fieldType: string;
+        isOptional: boolean;
+        fieldEnum?: string[];
+      }>;
+    }) => {
+      if (!projectId || !edgeFormTarget) return;
+      try {
+        const { fromTempId, toTempId } = edgeFormTarget;
+        let formId: string;
+        if (edgeEditFormId) {
+          await formService.updateForm({
+            formId: edgeEditFormId,
+            formName: formData.formName,
+            formDescription: formData.formDescription,
+            contextType: FormContextType.STAGE,
+            entityType: FormEntityType.TICKET,
+            fields: formData.fields.map(f => ({
+              fieldName: f.fieldName,
+              fieldType: f.fieldType as FormFieldType,
+              ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
+              isOptional: f.isOptional,
+            })),
+          });
+          formId = edgeEditFormId;
+          toast.success(`Form "${formData.formName}" updated`);
+        } else {
+          const created = await formService.createForm({
+            formName: formData.formName,
+            formDescription: formData.formDescription,
+            contextType: FormContextType.STAGE,
+            entityType: FormEntityType.TICKET,
+            fields: formData.fields.map(f => ({
+              fieldName: f.fieldName,
+              fieldType: f.fieldType as FormFieldType,
+              ...(f.fieldEnum && { fieldEnum: f.fieldEnum }),
+              isOptional: f.isOptional,
+            })),
+          });
+          formId = created.id;
+          toast.success(`Form "${formData.formName}" added`);
+        }
+        updateTransitionMeta(fromTempId, toTempId, { formId });
+        setIsEdgeFormOpen(false);
+        setEdgeFormTarget(null);
+        setEdgeEditFormId(null);
+        setEdgeEditFormData(null);
+      } catch (error) {
+        toast.error('Failed to save form', {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      }
+    },
+    [projectId, edgeFormTarget, edgeEditFormId, updateTransitionMeta],
+  );
+
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     if (!boardId) return;
@@ -971,6 +1316,7 @@ const BoardStageConfigScreen = ({
           fullRoleAssignment,
           slaPolicyType,
         },
+        boardType,
         timestamp: Date.now(),
         stageIds,
         stages: stagesData,
@@ -988,6 +1334,100 @@ const BoardStageConfigScreen = ({
           duration: 5000,
         });
       } else {
+        // Sync stage transitions for all board types
+        try {
+          const desiredTransitions: Array<{
+            fromStageId: string | null;
+            toStageId: string;
+            formId?: string | null;
+            requiresApproval?: boolean;
+            approverUserIds?: string[];
+            visitSlaMode?: string;
+            fixedEtaHours?: number | null;
+            onReenter?: string;
+          }> = [];
+
+          // Forms, approvers and SLA on NON_LINEAR boards are EDGE-specific: every gate lives on
+          // a concrete fromStage→toStage transition, so a form/approval only fires for that
+          // specific edge rather than when entering a stage from any source.
+          for (const [fromTempId, targetTempIds] of transitionsByTempId.entries()) {
+            const fromStage = stages.find(s => s.tempId === fromTempId);
+            const fromStageId = fromStage?.id || stageIds[String(fromStage?.sequenceNumber)];
+            if (!fromStageId) continue;
+
+            for (const toTempId of targetTempIds) {
+              const toStage = stages.find(s => s.tempId === toTempId);
+              const toStageId = toStage?.id || stageIds[String(toStage?.sequenceNumber)];
+              if (!toStageId || toStageId === fromStageId) continue;
+
+              const meta = transitionsMeta.get(`${fromTempId}->${toTempId}`);
+              desiredTransitions.push({
+                fromStageId,
+                toStageId,
+                ...(meta?.formId !== undefined && { formId: meta.formId }),
+                ...(meta?.requiresApproval !== undefined && {
+                  requiresApproval: meta.requiresApproval,
+                }),
+                ...(meta?.approverUserIds !== undefined && {
+                  approverUserIds: meta.approverUserIds,
+                }),
+                ...(meta?.visitSlaMode !== undefined && { visitSlaMode: meta.visitSlaMode }),
+                ...(meta?.fixedEtaHours !== undefined && { fixedEtaHours: meta.fixedEtaHours }),
+                ...(meta?.onReenter !== undefined && { onReenter: meta.onReenter }),
+              });
+            }
+          }
+
+          const invalidApprovalTransitions = desiredTransitions.filter(
+            t => t.requiresApproval && !t.approverUserIds?.length,
+          );
+          if (invalidApprovalTransitions.length > 0) {
+            toast.error('Some transitions require approval but have no approvers assigned.', {
+              description:
+                'Please add at least one approver to each approval-required transition before saving.',
+            });
+            return;
+          }
+
+          const transitionsWithIds = desiredTransitions.map(t => ({
+            id: uuidv4(),
+            fromStageId: t.fromStageId ?? null,
+            toStageId: t.toStageId,
+            ...(t.formId !== undefined && { formId: t.formId }),
+            requiresApproval: t.requiresApproval ?? false,
+            ...(t.visitSlaMode !== undefined && { visitSlaMode: t.visitSlaMode }),
+            ...(t.fixedEtaHours !== undefined && { fixedEtaHours: t.fixedEtaHours }),
+            ...(t.onReenter !== undefined && { onReenter: t.onReenter }),
+            approvers: (t.approverUserIds ?? []).map(approverId => ({
+              id: uuidv4(),
+              approverId,
+              approverType: 'USER' as const,
+            })),
+          }));
+          const syncResult = zero.mutate(
+            mutators.nonLinear.syncTransitions({
+              boardId,
+              transitions: transitionsWithIds,
+              now: Date.now(),
+            }),
+          );
+          const syncRes = await (
+            syncResult as {
+              server: Promise<{ type: string; error?: { message: string } } | undefined>;
+            }
+          ).server;
+          if (syncRes?.type === 'error') {
+            throw new Error(syncRes.error?.message ?? 'Failed to sync stage transitions');
+          }
+        } catch (transitionErr) {
+          console.error('Stage transition sync failed:', transitionErr);
+          const errMsg =
+            transitionErr instanceof Error ? transitionErr.message : String(transitionErr);
+          toast.warning('Board saved, but stage transitions could not be synced', {
+            description: `${errMsg}. Please reopen board settings and save transitions again.`,
+            duration: 8000,
+          });
+        }
         toast.success('Board stages updated successfully');
         onSave?.();
         onClose();
@@ -1008,6 +1448,9 @@ const BoardStageConfigScreen = ({
     isAllowedToTransfer,
     fullRoleAssignment,
     slaPolicyType,
+    boardType,
+    transitionsByTempId,
+    transitionsMeta,
   ]);
 
   if (!isOpen) return null;
@@ -1215,373 +1658,504 @@ const BoardStageConfigScreen = ({
             )}
           </div>
 
-          {/* ── Stages Area — always visible for transition form configuration ── */}
-          <div className='px-6 pt-3 pb-6'>
-            {/* Rounded container with columns background */}
-            <div className='h-[500px] min-h-[500px] w-full rounded-[16px] bg-muted/50 overflow-x-auto overflow-y-hidden'>
-              {/* Stage Cards Row - centered when few, scrollable when many */}
-              <div className='h-full flex items-stretch justify-center min-w-max relative'>
-                {/* Dotted grid pattern background - at top level */}
-                <div
-                  className='absolute inset-0 pointer-events-none z-[20]'
-                  style={{
-                    backgroundImage:
-                      'radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)',
-                    backgroundSize: '24px 24px',
-                  }}
+          {/* ── Board Type Toggle ── */}
+          <div className='px-6 py-3 border-t border-border'>
+            <div className='flex items-center justify-between gap-4'>
+              <div className='flex items-center gap-2 min-w-0'>
+                <GitBranch size={14} className='text-muted-foreground flex-shrink-0' />
+                <span className='text-[13px] font-medium text-foreground whitespace-nowrap'>
+                  Non-Linear Board
+                </span>
+                <span className='text-[12px] text-muted-foreground truncate hidden sm:block'>
+                  When enabled, ticket stage movements are controlled by explicit transitions
+                </span>
+              </div>
+              <button
+                type='button'
+                role='switch'
+                aria-checked={boardType === BoardType.NON_LINEAR}
+                onClick={() =>
+                  setBoardType(
+                    boardType === BoardType.NON_LINEAR ? BoardType.DEFAULT : BoardType.NON_LINEAR,
+                  )
+                }
+                data-track-category='board_config'
+                data-track-name='toggle_non_linear_board'
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                  boardType === BoardType.NON_LINEAR ? 'bg-[#6276be]' : 'bg-muted'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform duration-200 ${
+                    boardType === BoardType.NON_LINEAR ? 'translate-x-4' : 'translate-x-0'
+                  }`}
                 />
-                {stages.map((stage, index) => {
-                  const statusOption = getStatusOption(stage.defaultTicketStatusV2);
-                  const isLast = index === stages.length - 1;
+              </button>
+            </div>
+          </div>
 
-                  // Calculate active stages for progress indicator (exclude TODO and CANCELLED from position calc)
-                  const activeStages = stages.filter(
-                    s =>
-                      s.defaultTicketStatusV2 !== TicketStatusV2.TODO &&
-                      s.defaultTicketStatusV2 !== TicketStatusV2.CANCELLED,
-                  );
-                  const totalActiveStages = activeStages.length;
-                  const stageIndexInActive = activeStages.findIndex(s => s.tempId === stage.tempId);
+          {/* ── Stages Area ── */}
+          <div className='px-6 pt-3 pb-6'>
+            {/* Transition Editor header */}
+            <div className='flex items-center gap-2 mb-2'>
+              <span className='text-xs text-muted-foreground font-medium'>
+                {boardType === BoardType.NON_LINEAR ? 'Transition Graph' : 'Stage Pipeline'}
+              </span>
+              {boardType !== BoardType.NON_LINEAR && (
+                <span className='text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded border border-border'>
+                  Optional — add form requirements to stages
+                </span>
+              )}
+            </div>
+            {/* NON_LINEAR: ReactFlow graph editor */}
+            {boardType === BoardType.NON_LINEAR && (
+              <div className='h-[520px] w-full rounded-[16px] border border-border overflow-hidden'>
+                <ReactFlowProvider>
+                  <NonLinearTransitionEditor
+                    stages={stages}
+                    transitionsByTempId={transitionsByTempId}
+                    transitionsMeta={transitionsMeta}
+                    toggleTransition={toggleTransition}
+                    updateTransitionMeta={updateTransitionMeta}
+                    onUpdateStage={handleUpdateStage}
+                    onDeleteStage={handleDeleteStage}
+                    onAddStage={() => handleAddStageAt(stages.length)}
+                    formMap={formMap}
+                    allUsers={allUsers}
+                    userMap={userMap}
+                    onOpenEdgeForm={handleOpenEdgeForm}
+                    onAddConditionForEdge={handleAddConditionForEdge}
+                    isTransitionsLoading={isTransitionsLoading}
+                    editingEtaId={editingEtaId}
+                    etaValue={etaValue}
+                    etaInputRef={etaInputRef}
+                    onStartEditEta={handleStartEditEta}
+                    onSaveEta={handleSaveEta}
+                    onCancelEta={() => setEditingEtaId(null)}
+                    setEtaValue={setEtaValue}
+                  />
+                </ReactFlowProvider>
+              </div>
+            )}
+            {/* NON_LINEAR: Edge Condition Builder */}
+            {boardType === BoardType.NON_LINEAR && isEdgeConditionModalOpen && (
+              <div className='absolute left-1/4 top-1/4 -translate-y-[250px] ml-[16px] z-50'>
+                <ConditionBuilder
+                  isOpen={true}
+                  onClose={handleCloseEdgeConditionModal}
+                  onSave={handleSaveEdgeCondition}
+                  onOpenCreateForm={handleOpenEdgeCreateForm}
+                  nextStageName={
+                    selectedEdgeForCondition
+                      ? (stages.find(s => s.tempId === selectedEdgeForCondition.toTempId)?.name ??
+                        undefined)
+                      : undefined
+                  }
+                  allStages={stages.map(s => ({
+                    name: s.name,
+                    sequenceNumber: s.sequenceNumber,
+                    ...(s.formId && { formId: s.formId }),
+                  }))}
+                />
+              </div>
+            )}
+            {/* NON_LINEAR: Create Form Slide Out (from edge condition) */}
+            {boardType === BoardType.NON_LINEAR && isEdgeCreateFormOpen && (
+              <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                <CreateFormSlideOut
+                  isOpen={true}
+                  onClose={handleCloseEdgeCreateForm}
+                  onSave={formData => void handleEdgeCreateFormSave(formData)}
+                />
+              </div>
+            )}
+            {/* LINEAR: existing pipeline view */}
+            {boardType !== BoardType.NON_LINEAR && (
+              <div className='h-[500px] min-h-[500px] w-full rounded-[16px] bg-muted/50 overflow-x-auto overflow-y-auto'>
+                {/* Stage Cards Row - centered when few, scrollable when many */}
+                <div className='h-full flex items-stretch justify-center min-w-max relative'>
+                  {/* Dotted grid pattern background - at top level */}
+                  <div
+                    className='absolute inset-0 pointer-events-none z-[20]'
+                    style={{
+                      backgroundImage:
+                        'radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)',
+                      backgroundSize: '24px 24px',
+                    }}
+                  />
+                  {stages.map((stage, index) => {
+                    const statusOption = getStatusOption(stage.defaultTicketStatusV2);
+                    const isLast = index === stages.length - 1;
 
-                  // Get background color based on status - uses semantic theme-aware colors
-                  const getStatusBgColor = (status: TicketStatusV2): string => {
-                    switch (status) {
-                      case TicketStatusV2.TODO:
-                        return 'bg-stage-todo';
-                      case TicketStatusV2.STARTED:
-                        return 'bg-muted/30';
-                      case TicketStatusV2.PAUSED:
-                        return 'bg-muted/50';
-                      case TicketStatusV2.COMPLETED:
-                        return 'bg-stage-completed';
-                      case TicketStatusV2.CANCELLED:
-                        return 'bg-stage-cancelled';
-                      default:
-                        return 'bg-muted/30';
-                    }
-                  };
+                    // Calculate active stages for progress indicator (exclude TODO and CANCELLED from position calc)
+                    const activeStages = stages.filter(
+                      s =>
+                        s.defaultTicketStatusV2 !== TicketStatusV2.TODO &&
+                        s.defaultTicketStatusV2 !== TicketStatusV2.CANCELLED,
+                    );
+                    const totalActiveStages = activeStages.length;
+                    const stageIndexInActive = activeStages.findIndex(
+                      s => s.tempId === stage.tempId,
+                    );
 
-                  return (
-                    <div key={stage.tempId} className='flex items-stretch h-full relative'>
-                      {/* Colored Background Column - full width touching adjacent boxes */}
-                      <div
-                        className={`${getStatusBgColor(stage.defaultTicketStatusV2)} self-stretch flex items-start justify-center px-10 pt-20 relative`}
-                      >
-                        {/* Stage Card - narrower than colored background */}
-                        <div className='w-[260px] bg-background rounded-[10px] border border-border shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] overflow-hidden pb-[10px] shrink-0 z-40'>
-                          {/* Card Header */}
-                          <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
-                            {/* Status Dropdown */}
-                            <DropdownMenu>
-                              <DropdownMenuTrigger
-                                className='flex items-center gap-[6px] outline-none'
-                                data-track-category='board_config'
-                                data-track-name='change_stage_status'
-                              >
-                                <span className='text-[13px] font-medium text-muted-foreground'>
-                                  {statusOption.label}
-                                </span>
-                                <ChevronDown size={14} className='text-muted-foreground' />
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align='start'>
-                                {STATUS_OPTIONS.map(opt => (
-                                  <DropdownMenuItem
-                                    key={opt.status}
-                                    onSelect={() =>
-                                      handleUpdateStage(stage.tempId, {
-                                        defaultTicketStatusV2: opt.status,
-                                      })
-                                    }
-                                    className='flex items-center gap-2'
-                                  >
-                                    {opt.icon}
-                                    <span>{opt.label}</span>
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                    // Get background color based on status - uses semantic theme-aware colors
+                    const getStatusBgColor = (status: TicketStatusV2): string => {
+                      switch (status) {
+                        case TicketStatusV2.TODO:
+                          return 'bg-stage-todo';
+                        case TicketStatusV2.STARTED:
+                          return 'bg-muted/30';
+                        case TicketStatusV2.PAUSED:
+                          return 'bg-muted/50';
+                        case TicketStatusV2.COMPLETED:
+                          return 'bg-stage-completed';
+                        case TicketStatusV2.CANCELLED:
+                          return 'bg-stage-cancelled';
+                        default:
+                          return 'bg-muted/30';
+                      }
+                    };
 
-                            {/* ETA & Close */}
-                            <div className='flex items-center gap-2 relative'>
-                              {/* Set ETA button - always visible here (outer block already guards slaPolicyType !== 'priority') */}
-                              <Button
-                                onClick={() => handleStartEditEta(stage)}
-                                variant='ghost'
-                                size='sm'
-                                className='flex items-center gap-[4px] text-[12px] text-foreground hover:text-foreground/80 p-[4px] rounded-[6px] h-auto'
-                                data-track-category='board_config'
-                                data-track-name='start_edit_eta'
-                              >
-                                <Timer size={12} />
-                                <span className='font-[450]'>
-                                  {stage.eta > 0 ? `${stage.eta}h` : 'Set ETA'}
-                                </span>
-                              </Button>
-
-                              {/* ETA Input dropdown - appears below when editing */}
-                              {editingEtaId === stage.tempId && (
-                                <div className='absolute top-full right-0 mt-2 z-50 bg-background border border-border rounded-[6px] shadow-[0px_2px_6px_0px_rgba(5,5,6,0.07)] pl-[10px] pr-[6px] py-[8px] flex items-center gap-2 min-w-[80px]'>
-                                  <input
-                                    ref={etaInputRef}
-                                    type='text'
-                                    inputMode='numeric'
-                                    pattern='[0-9]*'
-                                    value={etaValue}
-                                    onChange={e => setEtaValue(e.target.value)}
-                                    onBlur={() => handleSaveEta(stage.tempId)}
-                                    onKeyDown={e => {
-                                      if (e.key === 'Enter') handleSaveEta(stage.tempId);
-                                      if (e.key === 'Escape') setEditingEtaId(null);
-                                    }}
-                                    data-track-category='board_config'
-                                    data-track-name='edit_eta_input'
-                                    placeholder='ETA'
-                                    className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
-                                  />
-                                  <span className='text-[14px] font-[450] text-foreground'>
-                                    hrs
+                    return (
+                      <div key={stage.tempId} className='flex items-stretch h-full relative'>
+                        {/* Colored Background Column - full width touching adjacent boxes */}
+                        <div
+                          className={`${getStatusBgColor(stage.defaultTicketStatusV2)} self-stretch flex items-start justify-center px-10 pt-20 relative`}
+                        >
+                          {/* Stage Card - narrower than colored background */}
+                          <div className='w-[260px] bg-background rounded-[10px] border border-border shadow-[0px_2px_8px_0px_rgba(5,5,6,0.07)] pb-[10px] shrink-0 z-40'>
+                            {/* Card Header */}
+                            <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
+                              {/* Status Dropdown */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger
+                                  className='flex items-center gap-[6px] outline-none'
+                                  data-track-category='board_config'
+                                  data-track-name='change_stage_status'
+                                >
+                                  <span className='text-[13px] font-medium text-muted-foreground'>
+                                    {statusOption.label}
                                   </span>
-                                </div>
-                              )}
-                              <Button
-                                onClick={() => handleDeleteStage(stage.tempId)}
-                                variant='ghost'
-                                size='iconSm'
-                                className='text-muted-foreground hover:text-muted-foreground/80 shrink-0'
-                                data-track-category='board_config'
-                                data-track-name='delete_stage'
-                              >
-                                <X size={14} />
-                              </Button>
-                            </div>
-                          </div>
+                                  <ChevronDown size={14} className='text-muted-foreground' />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align='start'>
+                                  {STATUS_OPTIONS.map(opt => (
+                                    <DropdownMenuItem
+                                      key={opt.status}
+                                      onSelect={() =>
+                                        handleUpdateStage(stage.tempId, {
+                                          defaultTicketStatusV2: opt.status,
+                                        })
+                                      }
+                                      className='flex items-center gap-2'
+                                    >
+                                      {opt.icon}
+                                      <span>{opt.label}</span>
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
 
-                          {/* Card Body */}
-                          <div className='px-3 py-3'>
-                            {/* Status Icon + Stage Name */}
-                            <div className='flex items-center gap-[4px] mb-3'>
-                              <div className='bg-background h-[26px] flex items-center justify-center px-[6px] py-[4px] rounded-[6px]'>
-                                <StatusIndicator
-                                  status={stage.defaultTicketStatusV2}
-                                  size={16}
-                                  stageIndex={
-                                    stageIndexInActive >= 0 ? stageIndexInActive : undefined
+                              {/* ETA & Close */}
+                              <div className='flex items-center gap-2 relative'>
+                                {/* Set ETA button - always visible here (outer block already guards slaPolicyType !== 'priority') */}
+                                <Button
+                                  onClick={() => handleStartEditEta(stage)}
+                                  variant='ghost'
+                                  size='sm'
+                                  className='flex items-center gap-[4px] text-[12px] text-foreground hover:text-foreground/80 p-[4px] rounded-[6px] h-auto'
+                                  data-track-category='board_config'
+                                  data-track-name='start_edit_eta'
+                                >
+                                  <Timer size={12} />
+                                  <span className='font-[450]'>
+                                    {stage.eta > 0 ? `${stage.eta}h` : 'Set ETA'}
+                                  </span>
+                                </Button>
+
+                                {/* ETA Input dropdown - appears below when editing */}
+                                {editingEtaId === stage.tempId && (
+                                  <div className='absolute top-full right-0 mt-2 z-50 bg-background border border-border rounded-[6px] shadow-[0px_2px_6px_0px_rgba(5,5,6,0.07)] pl-[10px] pr-[6px] py-[8px] flex items-center gap-2 min-w-[80px]'>
+                                    <input
+                                      ref={etaInputRef}
+                                      type='text'
+                                      inputMode='numeric'
+                                      pattern='[0-9]*'
+                                      value={etaValue}
+                                      onChange={e => setEtaValue(e.target.value)}
+                                      onBlur={() => handleSaveEta(stage.tempId)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') handleSaveEta(stage.tempId);
+                                        if (e.key === 'Escape') setEditingEtaId(null);
+                                      }}
+                                      data-track-category='board_config'
+                                      data-track-name='edit_eta_input'
+                                      placeholder='ETA'
+                                      className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
+                                    />
+                                    <span className='text-[14px] font-[450] text-foreground'>
+                                      hrs
+                                    </span>
+                                  </div>
+                                )}
+                                <Button
+                                  onClick={() => handleDeleteStage(stage.tempId)}
+                                  variant='ghost'
+                                  size='iconSm'
+                                  className='text-muted-foreground hover:text-muted-foreground/80 shrink-0'
+                                  data-track-category='board_config'
+                                  data-track-name='delete_stage'
+                                >
+                                  <X size={14} />
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Card Body */}
+                            <div className='px-3 py-3'>
+                              {/* Status Icon + Stage Name */}
+                              <div className='flex items-center gap-[4px] mb-3'>
+                                <div className='bg-background h-[26px] flex items-center justify-center px-[6px] py-[4px] rounded-[6px]'>
+                                  <StatusIndicator
+                                    status={stage.defaultTicketStatusV2}
+                                    size={16}
+                                    stageIndex={
+                                      stageIndexInActive >= 0 ? stageIndexInActive : undefined
+                                    }
+                                    totalNonCancelledStages={
+                                      totalActiveStages > 0 ? totalActiveStages : undefined
+                                    }
+                                  />
+                                </div>
+                                <input
+                                  type='text'
+                                  value={stage.name}
+                                  onChange={e =>
+                                    handleUpdateStage(stage.tempId, { name: e.target.value })
                                   }
-                                  totalNonCancelledStages={
-                                    totalActiveStages > 0 ? totalActiveStages : undefined
-                                  }
+                                  data-track-category='board_config'
+                                  data-track-name='edit_stage_name'
+                                  placeholder='Stage name...'
+                                  className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
                                 />
                               </div>
-                              <input
-                                type='text'
-                                value={stage.name}
-                                onChange={e =>
-                                  handleUpdateStage(stage.tempId, { name: e.target.value })
-                                }
-                                data-track-category='board_config'
-                                data-track-name='edit_stage_name'
-                                placeholder='Stage name...'
-                                className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
-                              />
-                            </div>
 
-                            {/* Condition Boxes */}
-                            {stage.conditions && stage.conditions.length > 0 && (
-                              <div className='flex flex-col gap-2 mb-3'>
-                                {stage.conditions.map((condition, condIdx) => (
-                                  <Button
-                                    key={condition.id}
-                                    onClick={() =>
-                                      handleOpenConditionModal(stage.tempId, condition)
-                                    }
-                                    variant='ghost'
-                                    className='w-full bg-background border border-border rounded-[12px] h-auto min-h-[40px] px-2 py-2 flex items-center gap-[6px] hover:bg-muted transition-colors justify-start'
-                                    data-track-category='board_config'
-                                    data-track-name='edit_condition'
-                                  >
-                                    <GitBranch
-                                      size={14}
-                                      className='text-muted-foreground flex-shrink-0'
-                                    />
-                                    <span className='text-[14px] font-medium text-foreground break-words whitespace-normal text-left leading-[18px]'>
-                                      {condition.name || `Condition ${condIdx + 1}`}
-                                    </span>
-                                  </Button>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Add Condition Link */}
-                            <Button
-                              onClick={() => handleOpenConditionModal(stage.tempId)}
-                              variant='ghost'
-                              size='sm'
-                              className='flex items-center gap-[6px] text-[14px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] h-auto'
-                              data-track-category='board_config'
-                              data-track-name='add_condition'
-                            >
-                              <GitBranch size={14} className='text-[#6276be]' />
-                              <span>Add Condition</span>
-                            </Button>
-
-                            {/* ── Transition Form Section ── */}
-                            {/* Hide for the first stage since there's no previous stage to transition from */}
-                            {index > 0 && (
-                              <div className='mt-2 pt-2 border-t border-border'>
-                                <p className='text-[10px] font-medium text-muted-foreground uppercase tracking-[0.5px] mb-1.5'>
-                                  Transition Form
-                                </p>
-                                {stage.formId ? (
-                                  <div className='flex items-center justify-between bg-muted/60 rounded-[8px] px-2 py-1.5'>
-                                    <span
-                                      className='text-[12px] text-foreground truncate max-w-[140px]'
-                                      title={formMap.get(stage.formId) || 'Form'}
+                              {/* Condition Boxes */}
+                              {stage.conditions && stage.conditions.length > 0 && (
+                                <div className='flex flex-col gap-2 mb-3'>
+                                  {stage.conditions.map((condition, condIdx) => (
+                                    <Button
+                                      key={condition.id}
+                                      onClick={() =>
+                                        handleOpenConditionModal(stage.tempId, condition)
+                                      }
+                                      variant='ghost'
+                                      className='w-full bg-background border border-border rounded-[12px] h-auto min-h-[40px] px-2 py-2 flex items-center gap-[6px] hover:bg-muted transition-colors justify-start'
+                                      data-track-category='board_config'
+                                      data-track-name='edit_condition'
                                     >
-                                      {formMap.get(stage.formId) || 'Transition Form'}
-                                    </span>
-                                    <div className='flex items-center gap-0.5'>
-                                      <Button
-                                        onClick={() =>
-                                          void handleOpenEditForm(stage.tempId, stage.formId!)
-                                        }
-                                        variant='ghost'
-                                        size='iconSm'
-                                        className='text-muted-foreground hover:text-foreground flex-shrink-0 h-5 w-5 p-0.5'
-                                        data-track-category='board_config'
-                                        data-track-name='edit_stage_form'
+                                      <GitBranch
+                                        size={14}
+                                        className='text-muted-foreground flex-shrink-0'
+                                      />
+                                      <span className='text-[14px] font-medium text-foreground break-words whitespace-normal text-left leading-[18px]'>
+                                        {condition.name || `Condition ${condIdx + 1}`}
+                                      </span>
+                                    </Button>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Add Condition Link */}
+                              <Button
+                                onClick={() => handleOpenConditionModal(stage.tempId)}
+                                variant='ghost'
+                                size='sm'
+                                className='flex items-center gap-[6px] text-[14px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] h-auto'
+                                data-track-category='board_config'
+                                data-track-name='add_condition'
+                              >
+                                <GitBranch size={14} className='text-[#6276be]' />
+                                <span>Add Condition</span>
+                              </Button>
+
+                              {/* ── Transition Form Section (linear boards only; NON_LINEAR uses per-edge forms) ── */}
+                              {index > 0 && (
+                                <div className='mt-2 pt-2 border-t border-border'>
+                                  <p className='text-[10px] font-medium text-muted-foreground uppercase tracking-[0.5px] mb-1.5'>
+                                    Transition Form
+                                  </p>
+                                  {stage.formId ? (
+                                    <div className='flex items-center justify-between bg-muted/60 rounded-[8px] px-2 py-1.5'>
+                                      <span
+                                        className='text-[12px] text-foreground truncate max-w-[140px]'
+                                        title={formMap.get(stage.formId) || 'Form'}
                                       >
-                                        <Pencil size={10} />
-                                      </Button>
-                                      <Button
-                                        onClick={() => handleRemoveStageForm(stage.tempId)}
-                                        variant='ghost'
-                                        size='iconSm'
-                                        className='text-muted-foreground hover:text-red-500 flex-shrink-0'
-                                        data-track-category='board_config'
-                                        data-track-name='remove_stage_form'
-                                      >
-                                        <X size={12} />
-                                      </Button>
+                                        {formMap.get(stage.formId) || 'Transition Form'}
+                                      </span>
+                                      <div className='flex items-center gap-0.5'>
+                                        <Button
+                                          onClick={() =>
+                                            void handleOpenEditForm(stage.tempId, stage.formId!)
+                                          }
+                                          variant='ghost'
+                                          size='iconSm'
+                                          className='text-muted-foreground hover:text-foreground flex-shrink-0 h-5 w-5 p-0.5'
+                                          data-track-category='board_config'
+                                          data-track-name='edit_stage_form'
+                                        >
+                                          <Pencil size={10} />
+                                        </Button>
+                                        <Button
+                                          onClick={() => handleRemoveStageForm(stage.tempId)}
+                                          variant='ghost'
+                                          size='iconSm'
+                                          className='text-muted-foreground hover:text-red-500 flex-shrink-0'
+                                          data-track-category='board_config'
+                                          data-track-name='remove_stage_form'
+                                        >
+                                          <X size={12} />
+                                        </Button>
+                                      </div>
                                     </div>
-                                  </div>
-                                ) : (
-                                  <Button
-                                    onClick={() => handleOpenDirectForm(stage.tempId)}
-                                    variant='ghost'
-                                    size='sm'
-                                    className='flex items-center gap-[6px] text-[13px] font-medium text-muted-foreground hover:text-foreground p-[4px] rounded-[6px] h-auto'
-                                    data-track-category='board_config'
-                                    data-track-name='configure_transition_form'
-                                  >
-                                    <Plus size={13} />
-                                    <span>Configure Transition Form</span>
-                                  </Button>
-                                )}
-                              </div>
-                            )}
+                                  ) : (
+                                    <Button
+                                      onClick={() => handleOpenDirectForm(stage.tempId)}
+                                      variant='ghost'
+                                      size='sm'
+                                      className='flex items-center gap-[6px] text-[13px] font-medium text-muted-foreground hover:text-foreground p-[4px] rounded-[6px] h-auto'
+                                      data-track-category='board_config'
+                                      data-track-name='configure_transition_form'
+                                    >
+                                      <Plus size={13} />
+                                      <span>Configure Transition Form</span>
+                                    </Button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* Condition Builder - positioned absolutely to the right */}
-                      {isConditionModalOpen && selectedStageForCondition === stage.tempId && (
-                        <div className='absolute left-1/4 top-1/4 -translate-y-[250px] ml-[16px] z-50'>
-                          <ConditionBuilder
-                            isOpen={true}
-                            onClose={handleCloseConditionModal}
-                            onSave={handleSaveCondition}
-                            onDelete={editingCondition ? handleDeleteCondition : undefined}
-                            condition={editingCondition}
-                            onOpenCreateForm={handleOpenCreateForm}
-                            nextStageName={stages[index + 1]?.name}
-                            allStages={stages.map(s => ({
-                              name: s.name,
-                              sequenceNumber: s.sequenceNumber,
-                              ...(s.formId && { formId: s.formId }),
-                            }))}
-                          />
-                        </div>
-                      )}
-
-                      {/* Create Form Slide Out - fixed panel matching grey background height */}
-                      {isCreateFormOpen && selectedStageForCondition === stage.tempId && (
-                        <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
-                          <CreateFormSlideOut
-                            isOpen={true}
-                            onClose={handleCloseCreateForm}
-                            onSave={formData => void handleCreateFormSave(formData)}
-                          />
-                        </div>
-                      )}
-
-                      {/* Direct Transition Form Slide Out - opened from "Configure Transition Form" button */}
-                      {isDirectFormOpen && selectedStageForDirectForm === stage.tempId && (
-                        <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
-                          <CreateFormSlideOut
-                            isOpen={true}
-                            onClose={handleCloseDirectForm}
-                            onSave={formData => void handleDirectFormSave(formData)}
-                            title='Configure Transition Form'
-                          />
-                        </div>
-                      )}
-
-                      {/* Edit Form Slide Out - opened from pencil/edit icon */}
-                      {isEditFormOpen &&
-                        selectedStageForEditForm === stage.tempId &&
-                        editingFormData && (
-                          <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
-                            <CreateFormSlideOut
+                        {/* Condition Builder - positioned absolutely to the right */}
+                        {isConditionModalOpen && selectedStageForCondition === stage.tempId && (
+                          <div className='absolute left-1/4 top-1/4 -translate-y-[250px] ml-[16px] z-50'>
+                            <ConditionBuilder
                               isOpen={true}
-                              onClose={handleCloseEditForm}
-                              onSave={() => {}}
-                              onUpdate={formData => void handleEditFormSave(formData)}
-                              {...(editingFormId ? { formId: editingFormId } : {})}
-                              initialData={editingFormData}
-                              title='Edit Transition Form'
+                              onClose={handleCloseConditionModal}
+                              onSave={handleSaveCondition}
+                              onDelete={editingCondition ? handleDeleteCondition : undefined}
+                              condition={editingCondition}
+                              onOpenCreateForm={handleOpenCreateForm}
+                              nextStageName={stages[index + 1]?.name}
+                              allStages={stages.map(s => ({
+                                name: s.name,
+                                sequenceNumber: s.sequenceNumber,
+                                ...(s.formId && { formId: s.formId }),
+                              }))}
                             />
                           </div>
                         )}
 
-                      {/* Black line on top of where colored backgrounds meet */}
-                      {!isLast && (
-                        <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-10 w-[80px] h-[2px] bg-muted-foreground' />
-                      )}
+                        {/* Create Form Slide Out - fixed panel matching grey background height */}
+                        {isCreateFormOpen && selectedStageForCondition === stage.tempId && (
+                          <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                            <CreateFormSlideOut
+                              isOpen={true}
+                              onClose={handleCloseCreateForm}
+                              onSave={formData => void handleCreateFormSave(formData)}
+                            />
+                          </div>
+                        )}
 
-                      {/* Plus button on top of the line - matches Figma design */}
-                      {!isLast && (
-                        <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-20'>
-                          <Button
-                            onClick={() => handleAddStageAt(index + 1)}
-                            data-track-category='board_config'
-                            data-track-name='add_stage_between'
-                            variant='ghost'
-                            size='iconSm'
-                            className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
-                          >
-                            <Plus size={12} className='text-foreground' />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        {/* Direct Transition Form Slide Out - opened from "Configure Transition Form" button */}
+                        {isDirectFormOpen && selectedStageForDirectForm === stage.tempId && (
+                          <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                            <CreateFormSlideOut
+                              isOpen={true}
+                              onClose={handleCloseDirectForm}
+                              onSave={formData => void handleDirectFormSave(formData)}
+                              title='Configure Transition Form'
+                            />
+                          </div>
+                        )}
 
-                {/* Final Add Stage Card (when no stages or as last option) */}
-                {stages.length === 0 && (
-                  <Button
-                    onClick={() => handleAddStageAt(0)}
-                    data-track-category='board_config'
-                    data-track-name='add_first_stage'
-                    variant='ghost'
-                    className='w-[280px] h-[120px] rounded-lg border-2 border-dashed border-muted-foreground flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-muted-foreground/80 hover:border-muted-foreground/60 hover:bg-background/50 transition-colors'
-                  >
-                    <Plus size={20} />
-                    <span className='text-sm font-medium'>Add Stage</span>
-                  </Button>
-                )}
+                        {/* Edit Form Slide Out - opened from pencil/edit icon */}
+                        {isEditFormOpen &&
+                          selectedStageForEditForm === stage.tempId &&
+                          editingFormData && (
+                            <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                              <CreateFormSlideOut
+                                isOpen={true}
+                                onClose={handleCloseEditForm}
+                                onSave={() => {}}
+                                onUpdate={formData => void handleEditFormSave(formData)}
+                                {...(editingFormId ? { formId: editingFormId } : {})}
+                                initialData={editingFormData}
+                                title='Edit Transition Form'
+                              />
+                            </div>
+                          )}
+
+                        {/* Black line on top of where colored backgrounds meet */}
+                        {!isLast && (
+                          <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-10 w-[80px] h-[2px] bg-muted-foreground' />
+                        )}
+
+                        {/* Plus button on top of the line - matches Figma design */}
+                        {!isLast && (
+                          <div className='absolute right-0 top-[150px] -translate-y-1/2 translate-x-1/2 z-20'>
+                            <Button
+                              onClick={() => handleAddStageAt(index + 1)}
+                              data-track-category='board_config'
+                              data-track-name='add_stage_between'
+                              variant='ghost'
+                              size='iconSm'
+                              className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
+                            >
+                              <Plus size={12} className='text-foreground' />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Final Add Stage Card (when no stages or as last option) */}
+                  {stages.length === 0 && (
+                    <Button
+                      onClick={() => handleAddStageAt(0)}
+                      data-track-category='board_config'
+                      data-track-name='add_first_stage'
+                      variant='ghost'
+                      className='w-[280px] h-[120px] rounded-lg border-2 border-dashed border-muted-foreground flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-muted-foreground/80 hover:border-muted-foreground/60 hover:bg-background/50 transition-colors'
+                    >
+                      <Plus size={20} />
+                      <span className='text-sm font-medium'>Add Stage</span>
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}{' '}
+            {/* end boardType !== 'NON_LINEAR' */}
+            {/* Edge form slide-out for NON_LINEAR per-edge forms */}
+            {isEdgeFormOpen && edgeFormTarget && (
+              <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                <CreateFormSlideOut
+                  isOpen={true}
+                  onClose={handleCloseEdgeForm}
+                  onSave={formData => void handleEdgeFormSave(formData)}
+                  {...(edgeEditFormId ? { formId: edgeEditFormId } : {})}
+                  {...(edgeEditFormData
+                    ? {
+                        onUpdate: formData => void handleEdgeFormSave(formData),
+                        initialData: edgeEditFormData,
+                      }
+                    : {})}
+                  title={edgeEditFormId ? 'Edit Transition Form' : 'Configure Transition Form'}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
