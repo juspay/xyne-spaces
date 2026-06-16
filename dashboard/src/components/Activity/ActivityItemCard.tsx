@@ -24,7 +24,7 @@ import { UserHoverWrapper } from '../ui/UserMentionPopover/UserMentionPopover';
 import { cn } from '../../utils/classNames';
 import { Button } from '../ui/Button';
 import { GenericMentionHoverPopover } from '../ui/GenericMentionPopover/GenericMentionPopover';
-import { CheckCircle, CircleDot } from 'lucide-react';
+import { SquareCheck, SquareDot } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 
 interface ActivityItemCardProps {
@@ -318,43 +318,19 @@ export const ActivityItemCard = ({
               ))}
           </div>
 
-          <div className='flex items-center gap-1 flex-shrink-0 ml-auto sm:ml-2'>
+          <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
             {!isMobile &&
-              !activity.isRead &&
               !['reacted', 'removed'].includes(activity.actorAction) &&
               !isDeskChannelType(channel?.type) &&
-              channel?.type !== ChannelType.SUPPORT && (
-                <Tooltip content='Mark as read' delayDuration={0} side='top'>
-                  <div
-                    role='button'
-                    tabIndex={0}
-                    onClick={handleMarkAsRead}
-                    onKeyDown={handleMarkAsReadKeyDown}
-                    className='opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-accent/50 cursor-pointer'
-                    aria-label='Mark as read'
-                    data-track-category='ACTIVITY'
-                    data-track-name='MARK_AS_READ'
-                    data-track-metadata={JSON.stringify({
-                      activityId: activity.id,
-                      actorAction: activity.actorAction,
-                    })}
-                  >
-                    <CheckCircle className='w-3.5 h-3.5 text-muted-foreground hover:text-foreground' />
-                  </div>
-                </Tooltip>
-              )}
-            {!isMobile &&
-              activity.isRead &&
-              !['reacted', 'removed'].includes(activity.actorAction) &&
-              !isDeskChannelType(channel?.type) &&
-              channel?.type !== ChannelType.SUPPORT && (
+              channel?.type !== ChannelType.SUPPORT &&
+              (activity.isRead ? (
                 <Tooltip content='Mark as unread' delayDuration={0} side='top'>
                   <div
                     role='button'
                     tabIndex={0}
                     onClick={handleMarkAsUnread}
                     onKeyDown={handleMarkAsUnreadKeyDown}
-                    className='opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-accent/50 cursor-pointer'
+                    className='opacity-0 group-hover:opacity-100 transition-opacity rounded hover:bg-accent/50 cursor-pointer'
                     aria-label='Mark as unread'
                     data-track-category='ACTIVITY'
                     data-track-name='MARK_AS_UNREAD'
@@ -363,12 +339,29 @@ export const ActivityItemCard = ({
                       actorAction: activity.actorAction,
                     })}
                   >
-                    <CircleDot className='w-3.5 h-3.5 text-muted-foreground hover:text-foreground' />
+                    <SquareDot className='w-3.5 h-3.5 text-muted-foreground hover:text-foreground' />
                   </div>
                 </Tooltip>
-              )}
-          </div>
-          <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
+              ) : (
+                <Tooltip content='Mark as read' delayDuration={0} side='top'>
+                  <div
+                    role='button'
+                    tabIndex={0}
+                    onClick={handleMarkAsRead}
+                    onKeyDown={handleMarkAsReadKeyDown}
+                    className='opacity-0 group-hover:opacity-100 transition-opacity rounded hover:bg-accent/50 cursor-pointer'
+                    aria-label='Mark as read'
+                    data-track-category='ACTIVITY'
+                    data-track-name='MARK_AS_READ'
+                    data-track-metadata={JSON.stringify({
+                      activityId: activity.id,
+                      actorAction: activity.actorAction,
+                    })}
+                  >
+                    <SquareCheck className='w-3.5 h-3.5 text-muted-foreground hover:text-foreground' />
+                  </div>
+                </Tooltip>
+              ))}
             {showUnreadDot && !activity.isRead && (
               <span className='h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0' />
             )}
