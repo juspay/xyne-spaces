@@ -39,6 +39,7 @@ import {
   isNativeCallSupported,
 } from '../utils/reactNativeBridge';
 import { logger, Event } from '../utils/logger';
+import { getCallJoinSettings } from '../hooks/useCallJoinSettings';
 
 // Set LiveKit log level
 setLogLevel('warn');
@@ -1070,13 +1071,20 @@ export const roomMachine = setup({
       if (context.room) {
         const enableTracksAndSelectDevices = async (): Promise<void> => {
           try {
+            const { joinMuted, joinWithoutVideo } = getCallJoinSettings();
+
             const alreadyJoinedCount = context.room!.remoteParticipants.size;
             const shouldMuteByDefault = alreadyJoinedCount > DEFAULT_MUTE_THRESHOLD;
 
-            if (!shouldMuteByDefault) {
-              // Fewer than or equal to threshold members — enable mic as normal
-              await context.room!.localParticipant.setMicrophoneEnabled(true);
-            }
+            // Respect user preference: if joinMuted is true, always mute
+            // If joinMuted is false, use the existing threshold logic
+            const enableMic = !joinMuted && !shouldMuteByDefault;
+            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+
+            // For video: respect user preference
+            const enableCamera = !joinWithoutVideo;
+
+            await context.room!.localParticipant.setCameraEnabled(enableCamera);
 
             // Always select default audio devices regardless of mute state
             await context.room!.switchActiveDevice('audioinput', 'default');
@@ -1326,7 +1334,6 @@ export const roomMachine = setup({
               externalId: ({ event }) => event.output.externalId,
               token: ({ event }) => event.output.token,
               serverUrl: ({ event }) => event.output.livekitUrl,
-              callType: () => CallType.AUDIO,
               callId: ({ event }) => event.output.callId,
               roomLink: ({ event }) => event.output.roomLink,
               channelId: ({ event }) => event.output.channelId || null,
