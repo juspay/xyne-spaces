@@ -21,6 +21,8 @@ export interface SortOption {
 
 export interface CollectionTreeNode {
   id: string;
+  /** Stable file UUID (CollectionItem.fileId) — equals the Vespa docId. Only set for FILE nodes. */
+  fileId?: string;
   name: string;
   type: NodeType;
   parentId: string | null;

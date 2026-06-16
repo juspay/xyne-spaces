@@ -551,6 +551,11 @@ export function createSearchFilesTool(): Tool<
       if (context.collectionIds && context.collectionIds.length > 0) {
         fileFilters.subApp = ['collections'];
         fileFilters.collectionId = context.collectionIds;
+        // When a single file is in focus (Ask AI opened from a file viewer),
+        // narrow the search to just that document's chunks.
+        if (context.fileIds && context.fileIds.length > 0) {
+          fileFilters.fileId = context.fileIds;
+        }
       } else if (file_type) {
         // SubApp filter (file_type → subApp) — only when no KB context
         const upper = file_type.toUpperCase();

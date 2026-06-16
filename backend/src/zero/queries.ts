@@ -3524,14 +3524,16 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // Root collections, optionally filtered by scope. Pass { scopeType, scopeId } to
+  // scope to a channel; pass {} for ALL collections the user can access (Ask AI
+  // picker from any chat). Access is enforced by the collections ACL either way.
   scopedCollections: defineQuery(
-    z.object({ scopeType: z.string(), scopeId: z.string() }),
+    z.object({ scopeType: z.string().optional(), scopeId: z.string().optional() }),
     ({ ctx, args: { scopeType, scopeId } }) => {
-      return zql.collections
-        .where('scopeType', scopeType)
-        .where('scopeId', scopeId)
-        .where('parentId', 'IS', null)
-        .where('deletedAt', 'IS', null)
+      const base = zql.collections.where('parentId', 'IS', null).where('deletedAt', 'IS', null);
+      const scoped =
+        scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
+      return scoped
         .related('permissions', p => p.where('userId', ctx.userID))
         .orderBy('createdAt', 'asc');
     },

@@ -25,6 +25,9 @@ import {
   Microscope,
   Hash,
   BookOpen,
+  ChevronRight,
+  ArrowLeft,
+  Folder,
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { Mark } from '@tiptap/core';
@@ -59,6 +62,8 @@ import type { MentionResult } from '../../../ui/Selectors/Selectors.types';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { useResearchOptions, type ResearchContext } from '../../../../hooks/useResearchAgent';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+import { queries } from '../../../../zero/queries';
 import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
@@ -158,6 +163,11 @@ export interface XyneAIInputBoxProps {
   onSelectAgent?: (slug: string | null) => void;
   kbCollectionId?: string | undefined;
   collectionsList?: CollectionSummary[];
+  /** When Ask AI is opened from a file viewer, scopes retrieval to this single file. */
+  fileScope?: { id: string; name: string } | null;
+  onRemoveFileScope?: () => void;
+  /** Select a file from the picker as scope (id = the file's Vespa docId / fileId UUID). */
+  onSelectFileScope?: (file: { id: string; name: string }) => void;
   compactToolbar?: boolean;
   tightToolbar?: boolean;
 }
@@ -229,6 +239,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       createCanvasEnabled = false,
       onCreateCanvasToggle,
       kbCollectionId = '',
+      fileScope = null,
+      onRemoveFileScope,
+      onSelectFileScope,
       onUserTagsChange,
       isOnboarding = false,
       selectedAgentSlug = null,
@@ -331,6 +344,97 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           col.name.toLowerCase().includes(query) || col.description?.toLowerCase().includes(query),
       );
     }, [collectionsList, collectionSearchQuery]);
+
+    // Hierarchical file-browser for the KB picker. navStack = path of opened
+    // nodes: [] = collections list; [0] = the collection (root); deeper = subfolders.
+    // Double-click a collection/folder to open it; single-click a collection to
+    // (de)select it; click a file to scope Ask AI to it.
+    const [navStack, setNavStack] = useState<Array<{ id: string; name: string }>>([]);
+    const inFolderView = navStack.length > 0;
+    const rootCollectionId = navStack[0]?.id ?? '';
+    const currentFolderId = navStack[navStack.length - 1]?.id ?? '';
+
+    const [allSubfolders] = useCachedQuery(
+      queries.collectionSubfolders({ rootCollectionId }),
+      inFolderView && !!rootCollectionId,
+    );
+    const [currentFolderItems] = useCachedQuery(
+      queries.collectionItems({ collectionId: currentFolderId }),
+      inFolderView && !!currentFolderId,
+    );
+
+    const fileQuery = collectionSearchQuery.trim().toLowerCase();
+    const currentSubfolders = useMemo(
+      () =>
+        (allSubfolders ?? [])
+          .filter(f => (f as { parentId?: string | null }).parentId === currentFolderId)
+          .filter(f => !fileQuery || (f as { name: string }).name.toLowerCase().includes(fileQuery))
+          .map(f => ({ id: (f as { id: string }).id, name: (f as { name: string }).name })),
+      [allSubfolders, currentFolderId, fileQuery],
+    );
+    const currentFiles = useMemo(
+      () =>
+        (currentFolderItems ?? [])
+          .map(it => ({
+            fileId: (it as { fileId?: string }).fileId ?? '',
+            name: (it as { name: string }).name,
+          }))
+          .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery))),
+      [currentFolderItems, fileQuery],
+    );
+
+    // Reset navigation whenever the picker closes.
+    useEffect(() => {
+      if (!showCollectionDropdown) {
+        setNavStack([]);
+        setCollectionSearchQuery('');
+      }
+    }, [showCollectionDropdown]);
+
+    // Disambiguate single-click (select collection) from double-click (open it).
+    const collectionClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const openNode = useCallback((node: { id: string; name: string }) => {
+      if (collectionClickTimer.current) {
+        clearTimeout(collectionClickTimer.current);
+        collectionClickTimer.current = null;
+      }
+      setCollectionSearchQuery('');
+      setNavStack(prev => [...prev, node]);
+    }, []);
+
+    const handleCollectionSingleClick = useCallback(
+      (collection: { id: string; name: string }) => {
+        if (collectionClickTimer.current) return; // a double-click is in progress
+        collectionClickTimer.current = setTimeout(() => {
+          collectionClickTimer.current = null;
+          // Single-select: at most ONE collection. Clicking the selected one clears it.
+          setSelectedCollections(prev => {
+            const isCurrent = prev.length === 1 && prev[0]?.id === collection.id;
+            const updated = isCurrent ? [] : [{ id: collection.id, name: collection.name }];
+            onSelectedCollectionsChange?.(updated.map(c => c.id));
+            return updated;
+          });
+          // Choosing a collection = collection-level scope → drop any single-file scope.
+          onRemoveFileScope?.();
+        }, 220);
+      },
+      [onSelectedCollectionsChange, onRemoveFileScope],
+    );
+
+    // Pick a file: scope Ask AI to just that file, and ensure its (root) collection is
+    // selected so the KB tool stays enabled + the collection filter applies.
+    const handleSelectFile = useCallback(
+      (file: { fileId: string; name: string }) => {
+        onSelectFileScope?.({ id: file.fileId, name: file.name });
+        // Single-select: the file's (root) collection becomes the ONLY selected collection.
+        const col = navStack[0];
+        const updated = col ? [col] : [];
+        setSelectedCollections(updated);
+        onSelectedCollectionsChange?.(updated.map(c => c.id));
+        setShowCollectionDropdown(false);
+      },
+      [onSelectFileScope, navStack, onSelectedCollectionsChange],
+    );
 
     // Thread info state - track if user has removed it
     const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
@@ -1513,6 +1617,33 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   </div>
                 ))}
 
+                {/* File Scope Pill — narrows Ask AI to a single file (opened from file viewer) */}
+                {fileScope && (
+                  <div
+                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+                  >
+                    <div className='flex items-center gap-1'>
+                      <div className='flex-shrink-0'>
+                        <FileText className='w-3.5 h-3.5 text-[#7C3AED]' />
+                      </div>
+                      <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[160px] truncate">
+                        {fileScope.name}
+                      </span>
+                    </div>
+                    {onRemoveFileScope && (
+                      <button
+                        onClick={onRemoveFileScope}
+                        className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                        aria-label={`Remove file scope ${fileScope.name}`}
+                        data-track-category='XyneAI'
+                        data-track-name='REMOVE_FILE_SCOPE'
+                      >
+                        <X className='w-3 h-3' />
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {/* Collection Pills */}
                 {selectedCollections.map(collection => (
                   <div
@@ -1951,55 +2082,116 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             className='absolute bottom-full left-4 right-4 mb-2 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden'
           >
             <div className='p-2 border-b border-border bg-muted'>
+              {inFolderView && (
+                <div className='mb-2 flex items-center gap-1 text-xs text-muted-foreground'>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setCollectionSearchQuery('');
+                      setNavStack(prev => prev.slice(0, -1));
+                    }}
+                    className='flex items-center hover:text-foreground'
+                    aria-label='Back'
+                    data-track-category='XyneAI'
+                    data-track-name='KB_FOLDER_BACK'
+                  >
+                    <ArrowLeft className='w-3.5 h-3.5' />
+                  </button>
+                  <span className='truncate'>{navStack.map(n => n.name).join(' / ')}</span>
+                </div>
+              )}
               <input
                 type='text'
-                placeholder='Search collections...'
+                placeholder={inFolderView ? 'Search this folder…' : 'Search collections…'}
                 value={collectionSearchQuery}
                 onChange={e => setCollectionSearchQuery(e.target.value)}
                 className='w-full px-3 py-2 bg-popover text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary'
                 data-track-category='XyneAI'
-                data-track-name='COLLECTION_SEARCH_INPUT'
+                data-track-name={
+                  inFolderView ? 'KB_FOLDER_SEARCH_INPUT' : 'COLLECTION_SEARCH_INPUT'
+                }
               />
             </div>
-            <div className='max-h-60 overflow-y-auto'>
-              {filteredCollections.length === 0 ? (
+            <div className='max-h-72 overflow-y-auto'>
+              {inFolderView ? (
+                /* ── Folder view: double-click a folder to open, click a file to scope ── */
+                currentSubfolders.length === 0 && currentFiles.length === 0 ? (
+                  <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
+                    {collectionSearchQuery.trim() ? 'No matches' : 'This folder is empty'}
+                  </div>
+                ) : (
+                  <div className='py-1'>
+                    {currentSubfolders.map(folder => (
+                      <button
+                        key={folder.id}
+                        type='button'
+                        onDoubleClick={() => openNode(folder)}
+                        className='w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent'
+                        title='Double-click to open'
+                        data-track-category='XyneAI'
+                        data-track-name='OPEN_KB_FOLDER'
+                      >
+                        <Folder className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                        <span className='flex-1 truncate'>{folder.name}</span>
+                        <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
+                      </button>
+                    ))}
+                    {currentFiles.map(file => {
+                      const isSelected = fileScope?.id === file.fileId;
+                      return (
+                        <button
+                          key={file.fileId}
+                          type='button'
+                          onClick={() => handleSelectFile(file)}
+                          className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent ${
+                            isSelected ? 'bg-accent' : ''
+                          }`}
+                          data-track-category='XyneAI'
+                          data-track-name='SELECT_FILE_SCOPE'
+                          data-track-metadata={JSON.stringify({ fileId: file.fileId })}
+                        >
+                          <FileText className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                          <span className='flex-1 truncate'>{file.name}</span>
+                          {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )
+              ) : filteredCollections.length === 0 ? (
                 <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
                   {collectionSearchQuery.length === 0
                     ? 'Type to search collections'
                     : 'No collections found'}
                 </div>
               ) : (
+                /* ── Collection view: click to select · double-click to open ── */
                 <div className='py-1'>
+                  <div className='px-3 pb-1 text-[11px] text-muted-foreground'>
+                    Click to select · double-click to open
+                  </div>
                   {filteredCollections.map(collection => {
                     const isSelected = selectedCollections.some(c => c.id === collection.id);
                     return (
                       <button
                         key={collection.id}
                         type='button'
-                        onClick={() => {
-                          if (isSelected) {
-                            const updated = selectedCollections.filter(c => c.id !== collection.id);
-                            setSelectedCollections(updated);
-                            onSelectedCollectionsChange?.(updated.map(c => c.id));
-                          } else {
-                            const updated = [
-                              ...selectedCollections,
-                              { id: collection.id, name: collection.name },
-                            ];
-                            setSelectedCollections(updated);
-                            onSelectedCollectionsChange?.(updated.map(c => c.id));
-                          }
-                        }}
+                        onClick={() =>
+                          handleCollectionSingleClick({ id: collection.id, name: collection.name })
+                        }
+                        onDoubleClick={() => openNode({ id: collection.id, name: collection.name })}
                         className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent ${
                           isSelected ? 'bg-accent' : ''
                         }`}
+                        title='Click to select · double-click to open'
                         data-track-category='XyneAI'
                         data-track-name='SELECT_COLLECTION'
                         data-track-metadata={JSON.stringify({ collectionId: collection.id })}
                       >
-                        <BookOpen className='w-4 h-4 text-[#7C3AED]' />
+                        <BookOpen className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
                         <span className='flex-1 truncate'>{collection.name}</span>
                         {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                        <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
                       </button>
                     );
                   })}

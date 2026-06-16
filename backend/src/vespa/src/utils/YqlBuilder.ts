@@ -66,6 +66,7 @@ export interface FileFilters {
   channelId?: string[];
   ownerId?: string[];
   collectionId?: string[];
+  fileId?: string[]; // Scope to specific file document(s) by docId
   projectId?: string[];
 }
 
@@ -486,6 +487,12 @@ export class YqlBuilder {
       const orCondition = filters.collectionId
         .map((id) => `clId contains "${this.escapeYqlValue(id)}"`)
         .join(' or ');
+      conditions.push(`(${orCondition})`);
+    }
+
+    // File ID filter (scope to a specific file/document by its Vespa docId)
+    if (filters.fileId && filters.fileId.length > 0) {
+      const orCondition = filters.fileId.map(id => `docId contains "${this.escapeYqlValue(id)}"`).join(' or ');
       conditions.push(`(${orCondition})`);
     }
 

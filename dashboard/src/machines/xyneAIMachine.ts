@@ -57,6 +57,9 @@ export interface XyneAIContext {
   // Knowledge Base context
   kbCollectionId: string | null;
   kbChannelId: string | null;
+  // Single-file scope when Ask AI is opened from a file viewer
+  kbDocId: string | null;
+  kbDocName: string | null;
 }
 
 // Event types for XyneAI machine
@@ -75,6 +78,8 @@ export type XyneAIEvent =
       focusSessionId?: string | null;
       kbCollectionId?: string | null;
       kbChannelId?: string | null;
+      kbDocId?: string | null;
+      kbDocName?: string | null;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
@@ -402,6 +407,8 @@ export const xyneAIMachine = setup({
               : null,
           kbCollectionId: event.kbCollectionId ?? null,
           kbChannelId: event.kbChannelId ?? null,
+          kbDocId: event.kbDocId ?? null,
+          kbDocName: event.kbDocName ?? null,
         };
 
         // Persist to IndexedDB
@@ -462,6 +469,8 @@ export const xyneAIMachine = setup({
           kbCollectionId:
             event.kbCollectionId !== undefined ? event.kbCollectionId : context.kbCollectionId,
           kbChannelId: event.kbChannelId !== undefined ? event.kbChannelId : context.kbChannelId,
+          kbDocId: event.kbDocId !== undefined ? event.kbDocId : context.kbDocId,
+          kbDocName: event.kbDocName !== undefined ? event.kbDocName : context.kbDocName,
         };
 
         // Persist to IndexedDB
@@ -472,7 +481,12 @@ export const xyneAIMachine = setup({
       return {};
     }),
     clearKbContext: assign(() => {
-      const newContext = { kbCollectionId: null, kbChannelId: null };
+      const newContext = {
+        kbCollectionId: null,
+        kbChannelId: null,
+        kbDocId: null,
+        kbDocName: null,
+      };
       void saveContextToIndexedDB(newContext);
       return newContext;
     }),
@@ -500,6 +514,8 @@ export const xyneAIMachine = setup({
         focusSessionId: null,
         kbCollectionId: null,
         kbChannelId: null,
+        kbDocId: null,
+        kbDocName: null,
       };
 
       // Clear from IndexedDB when closing
@@ -640,6 +656,8 @@ export const xyneAIMachine = setup({
     focusSessionId: null,
     kbCollectionId: null,
     kbChannelId: null,
+    kbDocId: null,
+    kbDocName: null,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',

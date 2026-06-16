@@ -27,6 +27,7 @@ interface UseXyneAIStreamParams {
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
   collectionIds?: string[];
+  fileIds?: string[];
   createCanvasEnabled?: boolean;
   isV2?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
@@ -87,6 +88,7 @@ export const useXyneAIStream = ({
   deepResearchEnabled = false,
   researchContext,
   collectionIds,
+  fileIds,
   createCanvasEnabled = false,
   isV2 = false,
   channelId,
@@ -304,6 +306,7 @@ export const useXyneAIStream = ({
           displayQuery: displayContent ?? query,
           channelIds,
           collectionIds: collectionIds ?? [],
+          fileIds: fileIds ?? [],
           conversationId,
           threadConversationId,
           attachmentIds,
@@ -335,6 +338,7 @@ export const useXyneAIStream = ({
       threadConversationId,
       attachmentIds,
       canvasViewAccessId,
+      fileIds,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,

@@ -139,6 +139,40 @@ async function buildAgentPrompt(
   return prompt;
 }
 
+/**
+ * When Ask AI is opened from a single file (fileIds in scope), the file search is
+ * already filtered to that document. But the agent doesn't otherwise know a document
+ * is in focus, so on referential queries ("tell me about this doc") it asks the user
+ * for a link instead of searching. This instruction primes it to treat the scoped
+ * file as the implicit subject and use search_files proactively.
+ */
+async function buildFocusedFileInstruction(fileIds: string[]): Promise<string> {
+  let names: string[] = [];
+  try {
+    const items = await db.collectionItem.findMany({
+      where: { fileId: { in: fileIds }, isLatest: true },
+      select: { name: true },
+    });
+    names = items.map(i => i.name).filter(Boolean);
+  } catch (error) {
+    logger.warn('[XyneAI] Failed to resolve focused file name(s):', error);
+  }
+
+  const subject =
+    names.length === 1
+      ? `the file "${names[0]}"`
+      : names.length > 1
+        ? `these files: ${names.map(n => `"${n}"`).join(', ')}`
+        : 'the document the user is currently viewing';
+
+  return [
+    '## Focused document',
+    `The user is currently viewing ${subject}, and your file search (search_files) is ALREADY scoped to it.`,
+    'When the user says "this doc", "this file", "this PDF", or refers to "it" without naming a source, they mean this document — do NOT ask them for a link or which document they mean.',
+    'Always call search_files (it is auto-scoped to this document) with a query derived from their question, then answer from the returned chunks. For a broad request like "tell me about this doc", search with general terms (e.g. the title or "overview summary main points") to pull its main content.',
+  ].join('\n');
+}
+
 // ============================================================================
 // Agent Registry
 // ============================================================================
@@ -256,7 +290,7 @@ export async function createAgentRunner(
 
   // If a systemPromptOverride is provided (e.g. draft mode), use it directly
   // and skip the standard prompt-builder logic.
-  const systemPrompt = context.systemPromptOverride
+  let systemPrompt = context.systemPromptOverride
     ? context.systemPromptOverride
     : await buildAgentPrompt(
         source,
@@ -275,7 +309,17 @@ export async function createAgentRunner(
     hasChannels,
     knowledgeBaseEnabled
       );
-  
+
+  // When opened from a single file, tell the agent which document is in focus so it
+  // searches the (already file-scoped) content instead of asking the user for a link.
+  if (!context.systemPromptOverride && context.fileIds && context.fileIds.length > 0) {
+    const focusedFileInstruction = await buildFocusedFileInstruction(context.fileIds);
+    systemPrompt = `${systemPrompt}\n\n${focusedFileInstruction}`;
+    logger.info(
+      `[AskAI:trace] [${context.sessionId}] STEP 2 → focused-document instruction injected for fileIds=${JSON.stringify(context.fileIds)}; agent told to call search_files (auto-scoped) instead of asking for a link`,
+    );
+  }
+
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, context.deepResearchEnabled, hasThreadContext, context.memoryEnabled, context.disableTools);
   const agentRegistry = createAgentRegistry(agent);
   const runConfig = createRunConfig(agentRegistry, modelName, apiKey, onEvent);

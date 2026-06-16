@@ -115,6 +115,8 @@ interface XyneAISidebarProps {
   onConversationChange?: (conversationId: string) => void;
   kbCollectionId?: string;
   kbChannelId?: string;
+  kbDocId?: string;
+  kbDocName?: string;
 }
 
 const XyneAISidebar = ({
@@ -128,7 +130,8 @@ const XyneAISidebar = ({
   initialConversationId,
   onConversationChange,
   kbCollectionId: kbCollectionIdProp,
-  kbChannelId,
+  kbDocId: kbDocIdProp,
+  kbDocName: kbDocNameProp,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -161,6 +164,13 @@ const XyneAISidebar = ({
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
   const [showContextModal, setShowContextModal] = useState(false);
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
+  // Single-file scope when Ask AI is opened from a file viewer. Removable to widen back to the collection.
+  const [fileScope, setFileScope] = useState<{ id: string; name: string } | null>(
+    kbDocIdProp ? { id: kbDocIdProp, name: kbDocNameProp || 'this file' } : null,
+  );
+  useEffect(() => {
+    setFileScope(kbDocIdProp ? { id: kbDocIdProp, name: kbDocNameProp || 'this file' } : null);
+  }, [kbDocIdProp, kbDocNameProp]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -372,10 +382,10 @@ const XyneAISidebar = ({
   );
 
   const currentUser = useSelf();
-  const [zeroCollections] = useZeroQuery(
-    queries.scopedCollections({ scopeType: 'CHANNEL', scopeId: kbChannelId ?? '' }),
-    !!currentUser?.id && !!kbChannelId,
-  );
+  // Load ALL collections the user can access (no scope), so the Ask AI picker works
+  // from anywhere in the chat — not only from /knowledge-base. (scopedCollections
+  // with {} = global; with { scopeType, scopeId } it scopes to a channel.)
+  const [zeroCollections] = useZeroQuery(queries.scopedCollections({}), !!currentUser?.id);
   const collectionsList: CollectionSummary[] = useMemo(() => {
     if (!zeroCollections || !currentUser?.id) return [];
     return zeroCollections.map(col => {
@@ -469,6 +479,7 @@ const XyneAISidebar = ({
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
     collectionIds: selectedCollectionIds ?? [],
+    fileIds: fileScope ? [fileScope.id] : [],
     conversationId,
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
@@ -1610,6 +1621,9 @@ const XyneAISidebar = ({
     onAddChannel: handleAddChannel,
     nonDMChannels,
     collectionsList,
+    fileScope,
+    onRemoveFileScope: () => setFileScope(null),
+    onSelectFileScope: (file: { id: string; name: string }) => setFileScope(file),
     onOpenContextModal: handleOpenContextModal,
     selectedTickets,
     onRemoveTicket: handleRemoveTicket,
