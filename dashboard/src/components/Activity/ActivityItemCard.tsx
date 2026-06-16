@@ -14,6 +14,7 @@ export const NofocusRefProvider = NofocusRefContext.Provider;
 import { useChannel } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../hooks/useAuth';
+import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import UserAvatar from '../UserAvatar/UserAvatar';
 import { AvatarSize } from '../UserAvatar/UserAvatar';
@@ -67,6 +68,7 @@ export const ActivityItemCard = ({
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
+  const { baseRoute } = useRouteContext();
   const zero = useZero();
   const { isMobile } = usePlatform();
   const nofocusRef = useContext(NofocusRefContext);
@@ -106,8 +108,16 @@ export const ActivityItemCard = ({
     }
 
     const isDeskChannel = isDeskChannelType(channel?.type);
+    // In the Activity panel, open desk/Support tickets inside the panel's own
+    // outlet (so the activity list stays mounted) instead of redirecting to the
+    // full /support inbox. The embedded ticket route only exists under
+    // /chat/activity, so only rewrite there; everywhere else keep /support.
+    const embeddedTicketPath =
+      baseRoute === '/chat/activity' && supportTargetPath
+        ? supportTargetPath.replace(/^\/support\//, `${baseRoute}/ticket/`)
+        : undefined;
     const path = isDeskChannel
-      ? (supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
+      ? (embeddedTicketPath ?? supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
       : targetPath;
 
     if (path) {
