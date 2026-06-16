@@ -127,6 +127,8 @@ import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
+import { tagRoutes } from '@/tags';
+import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -572,6 +574,9 @@ export class App {
     // Scheduled messages routes (auth required)
     this.app.use('/api/scheduled-messages', authMiddleware.authenticate, scheduledMessageRoutes);
 
+    // Generic tag routes (auth applied per-route within tagRoutes)
+    this.app.use('/api/tags', tagRoutes);
+
     // Automations routes (auth required, no ACL — matches /api/calls)
     this.app.use('/api/automations', authMiddleware.authenticate, automationRoutes);
 
@@ -881,6 +886,11 @@ export class App {
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
     await delayedMessageQueue.initialize();
 
+    if (config.enableTagGenerationPipeline) {
+      logger.info('Initializing tag generation pipeline queue (producer)...');
+      await tagGenerationPipeline.connectQueue();
+    }
+
     // Nightly automated Slack migration cron (runs only on migration pod)
     if (config.autoSyncSlackChannel.enabled) {
       logger.info('[APP] Starting Slack migration nightly worker...');
@@ -931,6 +941,9 @@ export class App {
 
       // Close email classification queue
       await emailClassificationQueue.close();
+
+      // Close tag generation pipeline queue
+      await tagGenerationPipeline.close();
 
       // Shutdown notification service
       await notificationService.shutdown();
