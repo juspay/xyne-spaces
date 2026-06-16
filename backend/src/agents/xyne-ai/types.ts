@@ -34,6 +34,7 @@ export interface XyneAIRequest {
   sessionId?: string;
   channelIds: string[];
   collectionIds?: string[];
+  fileIds?: string[];  // Scope KB file search to specific file document(s) by docId
   conversationId?: string;
   canvasViewAccessId?: string;  // Canvas context when Ask AI is triggered from canvas
   selectionContexts?: SelectionContext[];  // Selected text contexts from canvases

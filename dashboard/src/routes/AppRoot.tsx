@@ -329,6 +329,8 @@ const AppRoot = (): ReactElement => {
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
   const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
+  const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
+  const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
 
@@ -549,6 +551,8 @@ const AppRoot = (): ReactElement => {
                             canvasInfo={xyneAICanvasInfo}
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
+                            kbDocId={xyneAIKbDocId ?? ''}
+                            kbDocName={xyneAIKbDocName ?? ''}
                             onDebuggerOpenChange={setIsXyneDebuggerOpen}
                           />
                         </XyneAISidebarZIndexShell>
@@ -687,6 +691,8 @@ const AppRoot = (): ReactElement => {
                       canvasInfo={xyneAICanvasInfo}
                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                       kbChannelId={xyneAIKbChannelId ?? ''}
+                      kbDocId={xyneAIKbDocId ?? ''}
+                      kbDocName={xyneAIKbDocName ?? ''}
                       onDebuggerOpenChange={setIsXyneDebuggerOpen}
                     />
                   </Drawer>

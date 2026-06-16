@@ -50,6 +50,7 @@ export interface ResearchContext {
 export interface XyneAIAgentContext {
   channelIds: string[];
   collectionIds?: string[];  // Selected collections for KB search
+  fileIds?: string[];  // Scope KB file search to specific file document(s) by docId
   conversationId?: string;
   userId: string;
   sessionId: string;

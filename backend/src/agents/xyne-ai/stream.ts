@@ -339,7 +339,7 @@ const {
   query,
   sessionId,
   channelIds,
-  collectionIds, conversationId,
+  collectionIds, fileIds, conversationId,
   canvasViewAccessId,
   selectionContexts,
   createCanvasEnabled,
@@ -379,6 +379,13 @@ const {
   }
 
   logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}, attachments: ${attachments?.length || 0}, messageAttachmentIds: ${messageAttachmentIds?.length || 0}, ephemeral: ${isEphemeralSession}`);
+
+  logger.info(
+    `[AskAI:trace] [${session.sessionId}] STEP 1 → query received: "${query}" | ` +
+    `collectionIds=${collectionIds?.length ? JSON.stringify(collectionIds) : 'NONE'} | ` +
+    `fileIds=${fileIds?.length ? JSON.stringify(fileIds) : 'NONE'}` +
+    `${fileIds?.length ? ' (file-scoped — search_files will filter to this docId)' : ''}`,
+  );
 
   yield { type: 'start', sessionId: session.sessionId, isNewSession };
 
@@ -721,6 +728,7 @@ const {
   const agentContext = {
     channelIds,
     collectionIds,
+    fileIds,
     conversationId,
     canvasViewAccessId,
     selectionContexts,

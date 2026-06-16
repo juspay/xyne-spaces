@@ -19,7 +19,7 @@ export const FileViewerLayout: React.FC = () => {
   const resolvedFolderId = folderId === '_' ? null : (folderId ?? null);
 
   // Open XyneAI with Knowledge Base context
-  const handleOpenChat = (docId: string, _docName: string): void => {
+  const handleOpenChat = (docId: string, docName: string): void => {
     // Store KB context in sessionStorage for the XyneAI session
     const kbContext = {
       projectId: projectId || 'default',
@@ -34,6 +34,9 @@ export const FileViewerLayout: React.FC = () => {
       startFreshChat: true,
       kbCollectionId: collectionId ?? null,
       kbChannelId: channelId ?? null,
+      // Scope the chat to this single file (docId === Vespa file docId)
+      kbDocId: docId,
+      kbDocName: docName,
     });
   };
 

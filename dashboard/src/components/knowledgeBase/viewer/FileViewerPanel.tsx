@@ -78,6 +78,8 @@ export const FileViewerPanel: React.FC<{
 
     return {
       id: fileId,
+      // Stable file UUID = Vespa docId. Falls back to route id if missing.
+      fileId: node.fileId ?? fileId,
       name,
       type: fileType,
       size: node.size || 0,
@@ -287,7 +289,7 @@ export const FileViewerPanel: React.FC<{
           onDownload={() => {
             void handleDownload();
           }}
-          onOpenChat={onOpenChat ? () => onOpenChat(file.id, file.name) : undefined}
+          onOpenChat={onOpenChat ? () => onOpenChat(file.fileId, file.name) : undefined}
         />
         {renderContent()}
       </div>

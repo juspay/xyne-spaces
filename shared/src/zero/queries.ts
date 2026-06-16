@@ -3355,14 +3355,17 @@ export const queries = defineQueries({
   // Collections filtered by generic scope (scopeType + scopeId).
   // For channel-scoped collections pass { scopeType: 'CHANNEL', scopeId: channelId }.
   // Future scopes (THREAD, TICKET, …) just use a different scopeType — no schema change needed.
+  // Root collections, optionally filtered by scope. Pass { scopeType, scopeId }
+  // (e.g. { scopeType: 'CHANNEL', scopeId: channelId }) to scope to a channel; pass
+  // {} to get ALL collections the user can access (used by the Ask AI picker from
+  // any chat). Access is enforced by the collections ACL either way.
   scopedCollections: defineQuery(
-    z.object({ scopeType: z.string(), scopeId: z.string() }),
+    z.object({ scopeType: z.string().optional(), scopeId: z.string().optional() }),
     ({ ctx, args: { scopeType, scopeId } }) => {
-      return zql.collections
-        .where('scopeType', scopeType)
-        .where('scopeId', scopeId)
-        .where('parentId', 'IS', null)
-        .where('deletedAt', 'IS', null)
+      const base = zql.collections.where('parentId', 'IS', null).where('deletedAt', 'IS', null);
+      const scoped =
+        scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
+      return scoped
         .related('permissions', p => p.where('userId', ctx.userID))
         .orderBy('createdAt', 'asc');
     },

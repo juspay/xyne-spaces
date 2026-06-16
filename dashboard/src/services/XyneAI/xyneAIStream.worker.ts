@@ -14,6 +14,7 @@ export interface WorkerStartStreamMessage {
       displayQuery?: string;
       channelIds: string[];
       collectionIds?: string[];
+      fileIds?: string[];
       canvasIds?: string[];
       ticketIds?: string[];
       callIds?: string[];
@@ -121,6 +122,8 @@ async function executeStream(
         channel_ids: requestBody.channelIds,
         ...(requestBody.collectionIds &&
           requestBody.collectionIds.length > 0 && { collection_ids: requestBody.collectionIds }),
+        ...(requestBody.fileIds &&
+          requestBody.fileIds.length > 0 && { file_ids: requestBody.fileIds }),
         ...(requestBody.canvasIds &&
           requestBody.canvasIds.length > 0 && { canvas_ids: requestBody.canvasIds }),
         ...(requestBody.ticketIds &&

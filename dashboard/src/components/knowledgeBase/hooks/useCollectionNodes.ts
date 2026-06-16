@@ -62,6 +62,7 @@ export function useCollectionNodes({
       const attachment = item.attachment;
       result[item.id] = {
         id: item.id,
+        fileId: item.fileId,
         name: item.name,
         type: 'FILE' as NodeType,
         parentId: item.collectionId === collectionId ? null : item.collectionId,
