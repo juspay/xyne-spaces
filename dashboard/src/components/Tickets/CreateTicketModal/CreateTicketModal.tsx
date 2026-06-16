@@ -548,10 +548,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const userGroupOptions = useUserGroups();
 
-  const [ticketTypeQueried, setTicketTypeQueried] = useState(false);
   const [ticketTypeOptions] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
-    { enabled: ticketTypeQueried },
   );
   const users = useActiveUserSearch(assigneeSearchValue, 15);
 
@@ -2349,9 +2347,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     onSelect={(value: string | null) =>
                       field.handleChange(value as CreateTicketFormData['ticketType'])
                     }
-                    onOpenChange={open => {
-                      if (open) setTicketTypeQueried(true);
-                    }}
                     searchPlaceholder='ticket type'
                     placeholder='ticket type'
                     inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
