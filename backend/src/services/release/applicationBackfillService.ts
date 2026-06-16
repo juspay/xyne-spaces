@@ -64,7 +64,7 @@ export class ApplicationBackfillService {
 
     if (!migrationChangeType) {
       migrationChangeType = await db.releaseChangeType.create({
-        data: { changeType: XyneChangeType.MIGRATION, applicationId },
+        data: { changeType: XyneChangeType.MIGRATION, applicationId, createdAt: new Date() },
       });
       logger.info(`Created ReleaseChangeType: MIGRATION (${migrationChangeType.id})`);
     }
@@ -75,7 +75,7 @@ export class ApplicationBackfillService {
 
     if (!envChangeType) {
       envChangeType = await db.releaseChangeType.create({
-        data: { changeType: XyneChangeType.ENV, applicationId },
+        data: { changeType: XyneChangeType.ENV, applicationId, createdAt: new Date() },
       });
       logger.info(`Created ReleaseChangeType: ENV (${envChangeType.id})`);
     }
@@ -218,6 +218,7 @@ export class ApplicationBackfillService {
   async backfillApplications(
     applications: ApplicationData[],
     channelId: string,
+    mainReleaseBoardId: string,
     createdBy: string
   ) {
     logger.info('Starting application backfill...');
@@ -237,6 +238,17 @@ export class ApplicationBackfillService {
       // Setup ReleaseChangeType, forms, and lookup values first
       await this.backFillReleaseForms(createdBy, validChannel.workspaceId);
       await this.backFillTicketTypeLookups();
+
+      const mainReleaseBoard = await db.board.findFirst({
+        where: {
+          id: mainReleaseBoardId,
+          projectId: validChannel.projectId,
+          boardType: BoardType.RELEASE,
+        },
+      });
+      if (!mainReleaseBoard) {
+        throw new Error('mainReleaseBoardId must reference a RELEASE board in the channel project');
+      }
 
       logger.info('Creating applications...');
 
@@ -303,6 +315,7 @@ export class ApplicationBackfillService {
             name: app.name,
             projectId: validChannel.projectId,
             boardId: board.id,
+            mainReleaseBoardId,
             channelId: validChannel.id,
             regex: app.regex,
             repoUrl: app.repoUrl,

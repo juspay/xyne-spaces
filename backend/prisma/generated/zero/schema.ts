@@ -726,19 +726,6 @@ export enum SessionRecordingProcessStatus {
   FAILED = "FAILED",
 }
 
-export enum CommandType {
-  COMMAND = "COMMAND",
-  SHORTCUT = "SHORTCUT",
-}
-
-export enum CommandAccessibility {
-  CHAT = "CHAT",
-  THREAD = "THREAD",
-  BOTH = "BOTH",
-  MESSAGE = "MESSAGE",
-  GLOBAL = "GLOBAL",
-}
-
 export enum SavedConfigContextType {
   BOARD = "BOARD",
 }
@@ -1767,7 +1754,6 @@ export const conversationTable = table("conversations")
     channelId: string(),
     createdBy: string(),
     initialMessageId: string(),
-    workspaceId: string().optional(),
     parentMessageId: string().optional(),
     lastActivityAt: number(),
     replyCount: number(),
@@ -1914,7 +1900,6 @@ export const messageTable = table("messages")
     conversationId: string(),
     childConversationId: string().optional(),
     senderId: string(),
-    workspaceId: string().optional(),
     content: string(),
     msgType: enumeration<MessageType>(),
     hasAttachment: boolean(),
@@ -1998,7 +1983,6 @@ export const activityTable = table("activities")
   .columns({
     id: string(),
     userId: string(),
-    workspaceId: string().optional(),
     actorAction: string(),
     actionSource: string(),
     actionSourceId: string(),
@@ -2789,10 +2773,8 @@ export const appCommandTable = table("app_commands")
     appId: string(),
     commandName: string(),
     description: string(),
-    commandType: enumeration<CommandType>(),
-    commandAccessibility: enumeration<CommandAccessibility>(),
-    isForThread: boolean().optional(),
-    isForChat: boolean().optional(),
+    isForThread: boolean(),
+    isForChat: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })

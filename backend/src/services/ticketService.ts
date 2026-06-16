@@ -11,6 +11,8 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { websocketService } from '@/services/websocketService';
+import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
+import { BaseTicketType, isReleaseTicket } from '@xyne/shared';
 
 
 const prisma = DatabaseClient.getInstance();
@@ -175,6 +177,13 @@ export class TicketService {
     if (params.status) { data['statusV2'] = params.status; updates.push('status'); }
     if (params.eta) { data['eta'] = new Date(params.eta); updates.push('eta'); }
 
+    const previousTicket = params.status === 'COMPLETED'
+      ? await prisma.ticket.findUnique({
+          where: { id: ticketId },
+          select: { statusV2: true },
+        })
+      : null;
+
     const previousCountsSnapshot = await buildKanbanCountsSnapshot(ticketId);
     const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
@@ -182,6 +191,27 @@ export class TicketService {
     });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+
+    if (
+      params.status === 'COMPLETED'
+      && previousTicket
+      && previousTicket.statusV2 !== 'COMPLETED'
+      && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
+    ) {
+      // The ticket update above is already committed; deployed-version
+      // bookkeeping must not fail the request.
+      try {
+        await versionReleaseMappingService.updateDeployedVersionOnCompletion(
+          ticketId,
+          updatedTicket.updatedAt,
+        );
+      } catch (error) {
+        logger.error(
+          `[VersionReleaseMapping] failed to update deployedVersion for ticket ${ticketId}:`,
+          error,
+        );
+      }
+    }
     await vespaQueue.addJob({
       schema: ticketSchema,
       jobType: 'feed',

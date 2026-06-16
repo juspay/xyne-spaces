@@ -35,12 +35,24 @@ export class DiffParser {
         const removedLines: string[] = [];
         const addedLines: string[] = [];
 
+        // Only collect +/- lines inside a hunk. Gating on `@@` distinguishes the
+        // `---`/`+++` file-header markers (which precede the first hunk) from real
+        // content lines that happen to start with `--`/`++` (e.g. a removed SQL
+        // comment `-- drop col` arrives as `--- drop col`).
+        let inHunk = false;
         for (const line of lines) {
-            if (line.startsWith('-') && !line.startsWith('---')) {
-                // Removed line (but not the file marker)
+            if (line.startsWith('diff --git ')) {
+                inHunk = false;
+                continue;
+            }
+            if (line.startsWith('@@')) {
+                inHunk = true;
+                continue;
+            }
+            if (!inHunk) continue;
+            if (line.startsWith('-')) {
                 removedLines.push(line.slice(1));
-            } else if (line.startsWith('+') && !line.startsWith('+++')) {
-                // Added line (but not the file marker)
+            } else if (line.startsWith('+')) {
                 addedLines.push(line.slice(1));
             }
         }
@@ -84,6 +96,25 @@ export class DiffParser {
     }
 
     /**
+     * Strip git-diff metadata lines and per-line +/- markers so the
+     * stored `changeLog` is copy-paste-ready content (no `diff --git`,
+     * `index …`, `+++`/`---`, `@@ … @@`, no leading `+`/`-`/space).
+     *
+     * Mirrors the dashboard's render-time `cleanDiff` in
+     * `dashboard/src/components/Release/ChangeCards.tsx` — moving the
+     * cleanup to write-time means new rows are already clean. The
+     * dashboard helper stays for backward compat with legacy rows.
+     */
+    private static cleanChangeLog(rawDiff: string): string {
+        const drop = /^(diff --git |index |new file mode |deleted file mode |old mode |new mode |--- |\+\+\+ |@@ )/;
+        return rawDiff
+            .split('\n')
+            .filter(line => !drop.test(line))
+            .map(line => line.replace(/^[+\- ]/, ''))
+            .join('\n');
+    }
+
+    /**
      * Parse diff for migration/SQL files to extract the query
      */
     static parseMigrationDiff(diff: string, fileName: string): MigrationDiffResult {
@@ -105,7 +136,7 @@ export class DiffParser {
 
         return {
             query: query.trim() || '-- No query extracted',
-            changeLog: parsed.rawDiff,
+            changeLog: this.cleanChangeLog(parsed.rawDiff),
         };
     }
 

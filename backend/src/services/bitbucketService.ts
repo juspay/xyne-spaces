@@ -97,8 +97,18 @@ export class BitbucketService {
           continue; // Retry
         }
 
-        // For other errors, throw immediately
-        throw new Error(`Bitbucket API error: ${response.status} ${response.statusText}`);
+        // For other errors, throw immediately with the URL so callers know
+        // exactly which endpoint failed (404 in particular is opaque without it).
+        let bodyText = '';
+        try {
+          bodyText = await response.text();
+        } catch {
+          // ignore body-read failure
+        }
+        throw new Error(
+          `Bitbucket API error: ${response.status} ${response.statusText} for ${url}` +
+          (bodyText ? ` — body: ${bodyText.slice(0, 200)}` : ''),
+        );
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
@@ -461,9 +471,11 @@ export class BitbucketService {
 
       return [...commitIds, sinceCommitId];
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       logger.error(
-        `Failed to fetch commits between ${sinceCommitId} and ${untilCommitId}:`,
-        error as Error
+        `Failed to fetch commits between ${sinceCommitId} and ${untilCommitId} in ${projectKey}/${repositorySlug}` +
+        (branch ? ` (branch=${branch})` : '') +
+        `: ${msg}`,
       );
       throw error;
     }

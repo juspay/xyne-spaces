@@ -2,6 +2,7 @@
 // Basic Types
 
 import { apiInstance } from '../../../services/clients/apiClient';
+import { escapeCsvCell } from '@xyne/shared';
 import type {
   WorkflowStep,
   StepDetailsResponse,
@@ -57,27 +58,12 @@ interface StepDetail {
 // CSV UTILITIES
 // ---------------------------------------------------------------------------
 
-// Escape CSV values consistently
 const escapeCsv = (value: unknown): string => {
-  if (value === null || value === undefined) return '';
-
-  let s: string;
-  if (typeof value === 'object' && value !== null) {
-    s = JSON.stringify(value);
-  } else if (typeof value === 'string') {
-    s = value;
-  } else if (typeof value === 'number' || typeof value === 'boolean') {
-    s = String(value);
-  } else {
-    s = JSON.stringify(value);
+  if (value === null || value === undefined) return escapeCsvCell('');
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return escapeCsvCell(value);
   }
-
-  // Prevent CSV injection - prepend tab to values that start with formula characters
-  if (/^[=@+-]/.test(s)) {
-    s = `\t${s}`;
-  }
-
-  return /[,"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  return escapeCsvCell(JSON.stringify(value) ?? '');
 };
 
 // Trigger CSV download

@@ -1,6 +1,5 @@
-import { ReactElement } from 'react';
-import { Button, ButtonType } from '@juspay/blend-design-system';
-import type { Stage, StageApprovers, BoardType } from '@xyne/shared';
+import { BoardType } from '@xyne/shared';
+import type { Stage, StageApprovers, Application } from '@xyne/shared';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 
 export interface StageWithApprovers extends Stage {
@@ -20,65 +19,22 @@ export interface BoardWithStages {
   readonly updatedAt: number | null;
   readonly metadata?: ReadonlyJSONValue;
   readonly stages?: readonly StageWithApprovers[] | Error;
+  readonly applications?: readonly Application[] | Error;
 }
 
-interface BoardCardProps {
-  board: BoardWithStages;
-  onEdit: (board: BoardWithStages) => void;
+export function getBoardEditLabel(
+  board: BoardWithStages,
+  applicationBoardIds?: Set<string>,
+): string {
+  if (board.boardType !== BoardType.RELEASE) {
+    return 'Edit';
+  }
+  if (applicationBoardIds) {
+    return applicationBoardIds.has(board.id) ? 'Edit Application Config' : 'Edit Release Board';
+  }
+  const apps = board.applications;
+  if (apps === undefined || apps instanceof Error || !Array.isArray(apps) || apps.length === 0) {
+    return 'Edit Main Board';
+  }
+  return 'Edit Release Config';
 }
-
-export const BoardCard = ({ board, onEdit }: BoardCardProps): ReactElement => {
-  const stages = (
-    board.stages && Array.isArray(board.stages) ? board.stages : []
-  ) as readonly Stage[];
-  const hasStages = stages.length > 0;
-
-  return (
-    <div className='bg-background rounded-lg shadow-sm border border-border p-6 hover:shadow-md transition-shadow'>
-      <div className='mb-4'>
-        <h3 className='text-lg font-semibold text-foreground mb-2'>{board.name}</h3>
-        <p className='text-sm text-muted-foreground'>Project ID: {board.projectId}</p>
-        {board.description && (
-          <p className='text-sm text-muted-foreground mt-2 line-clamp-2'>{board.description}</p>
-        )}
-      </div>
-
-      {hasStages && (
-        <div className='border-t border-border pt-4 mt-4'>
-          <p className='text-xs font-semibold text-foreground mb-2'>Stages ({stages.length})</p>
-          <div className='space-y-1'>
-            {[...stages]
-              .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
-              .map(stage => (
-                <div key={stage.id} className='text-xs text-muted-foreground flex justify-between'>
-                  <span>
-                    {stage.sequenceNumber}. {stage.name}
-                  </span>
-                  <span className='text-muted-foreground'>
-                    {stage.eta !== null ? `${stage.eta}h` : '-'}
-                  </span>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
-
-      <div className='border-t border-border pt-4 mt-4'>
-        <div className='text-xs text-muted-foreground mb-3'>
-          <p>Created: {new Date(board.createdAt).toLocaleDateString()}</p>
-        </div>
-
-        <div className='flex gap-2'>
-          <Button
-            buttonType={ButtonType.SECONDARY}
-            text='Edit'
-            onClick={() => onEdit(board)}
-            data-track-category='Board'
-            data-track-name='Edit_Board'
-            data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
-          />
-        </div>
-      </div>
-    </div>
-  );
-};

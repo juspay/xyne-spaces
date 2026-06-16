@@ -39,7 +39,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
-import { BaseTicketType, FormContextType, FormEntityType, serializeTicketMd } from '@xyne/shared';
+import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
+import { BaseTicketType, FormContextType, FormEntityType, ReleaseTrackingMode, serializeTicketMd } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
@@ -1045,6 +1046,11 @@ export class TicketController {
                 data: formEntityValuesData,
               });
               logger.info(`[Ticket Creation] Created ${formEntityValuesData.length} form entity values for ticket ${ticket.id}`);
+              if (Object.prototype.hasOwnProperty.call(dynamicFields, 'releaseVersion')) {
+                versionReleaseMappingService.syncTicketById(ticket.id).catch(error => {
+                  logger.error(`[Ticket Creation] Version release mapping failed for ticket ${ticket.xyneId}:`, error);
+                });
+              }
             }
           }
         } catch (error) {
@@ -1215,39 +1221,68 @@ export class TicketController {
         })
       }
 
-      // Trigger commit analysis 
-      const deployedCommitId = dynamicFields?.['deployedCommitId'] as string;
-      const newCommitId = dynamicFields?.['newCommitId'] as string;
-      const branch = dynamicFields?.['branch'] as string;
+      // Trigger commit analysis for commit-range release tickets only.
+      const releaseTicket = isReleaseTicket(ticket.ticketType as BaseTicketType);
+      const releaseBoardConfig = releaseTicket
+        ? await prisma.board.findUnique({
+          where: { id: boardId },
+          select: { releaseTrackingMode: true },
+        })
+        : null;
+      const releaseTrackingMode =
+        releaseBoardConfig?.releaseTrackingMode ?? ReleaseTrackingMode.COMMIT_RANGE;
 
-      if (this.commitAnalysisController && isReleaseTicket(ticket.ticketType as BaseTicketType) && deployedCommitId && newCommitId && branch) {
-        // TODO: Replace hardcoded values with actual configuration from project/board settings
-        const workspace = 'XYNE';
-        const repoSlug = 'xyne-spaces';
-        const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot', ticket.workspaceId);
+      if (releaseTicket && releaseTrackingMode === ReleaseTrackingMode.VERSION) {
+        logger.info(`[ReleaseTrigger] skipped for ticket ${ticket.xyneId}: releaseTrackingMode=VERSION`);
+      } else {
+        const deployedCommitId = dynamicFields?.['deployedCommitId'] as string;
+        const newCommitId = dynamicFields?.['newCommitId'] as string;
+        const branch = dynamicFields?.['branch'] as string;
 
-        this.commitAnalysisController.analyzeCommits({
-          workspace,
-          repoSlug,
-          conversationId: ticket.conversationId,
-          userId: xyneReleaseBot?.id || userId,
-          channelId: ticket.channelId || undefined,
-          newCommitId,
-          deployedCommitId,
-          branch,
-          parentTicketId,
-          userName: req.user?.name,
-          isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
-          workspaceId: xyneReleaseBot?.workspaceId || req.user?.workspaceId!,
-        }).then((result) => {
-          if (result.success) {
-            logger.info(`[Ticket Creation] Commit analysis completed for ticket ${ticket.xyneId}`);
-          } else {
-            logger.error(`[Ticket Creation] Commit analysis failed for ticket ${ticket.xyneId}:`, result.error);
-          }
-        }).catch((error) => {
-          logger.error(`[Ticket Creation] Commit analysis error for ticket ${ticket.xyneId}:`, error);
-        });
+        // Make silent-skip visible — log which condition(s) failed so this can be
+        // debugged without staring at code. WARN level so it shows up by default.
+        if (!this.commitAnalysisController || !releaseTicket || !deployedCommitId || !newCommitId || !branch) {
+          const missing: string[] = [];
+          if (!this.commitAnalysisController) missing.push('commitAnalysisController(not initialized — check Bitbucket env vars)');
+          if (!releaseTicket) missing.push(`ticketType(=${ticket.ticketType}, want Release/Hotfix)`);
+          if (!deployedCommitId) missing.push('dynamicFields.deployedCommitId');
+          if (!newCommitId) missing.push('dynamicFields.newCommitId');
+          if (!branch) missing.push('dynamicFields.branch');
+          logger.warn(`[ReleaseTrigger] skipped for ticket ${ticket.xyneId}: missing=${missing.join(', ')}`);
+        }
+
+        if (this.commitAnalysisController && releaseTicket && deployedCommitId && newCommitId && branch) {
+          // workspace + repoSlug are now derived inside commitAnalysisController
+          // from Application.repoUrl on the resolved project. We pass empty
+          // placeholders to satisfy the existing param shape; the controller
+          // ignores them when DB-derived values are available.
+          const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot', ticket.workspaceId);
+
+          this.commitAnalysisController.analyzeCommits({
+            conversationId: ticket.conversationId,
+            userId: xyneReleaseBot?.id || userId,
+            channelId: ticket.channelId || undefined,
+            newCommitId,
+            deployedCommitId,
+            branch,
+            parentTicketId,
+            currentTicketId: ticket.id,
+            userName: req.user?.name,
+            isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
+            workspaceId: xyneReleaseBot?.workspaceId || req.user?.workspaceId!,
+          }).then((result) => {
+            if (result.success) {
+              logger.info(`[Ticket Creation] Commit analysis completed for ticket ${ticket.xyneId}`);
+            } else {
+              // Interpolate the error into the message — Winston treats the 2nd
+              // positional arg as metadata and won't print plain strings/objects there.
+              logger.error(`[Ticket Creation] Commit analysis failed for ticket ${ticket.xyneId}: ${result.error ?? '(no error message)'}`);
+            }
+          }).catch((error) => {
+            const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
+            logger.error(`[Ticket Creation] Commit analysis error for ticket ${ticket.xyneId}: ${msg}`);
+          });
+        }
       }
 
     } catch (error) {

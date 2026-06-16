@@ -675,6 +675,34 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
       },
     });
   }
+
+  async findExistingReleaseReportMessage(
+    conversationId: string,
+    releaseTicketId: string,
+  ): Promise<Message | null> {
+    return await this.db.message.findFirst({
+      where: {
+        conversationId,
+        isDeleted: false,
+        AND: [
+          {
+            metadata: {
+              path: ['messageSubtype'],
+              equals: 'release_report',
+            },
+          },
+          {
+            metadata: {
+              path: ['releaseTicketId'],
+              equals: releaseTicketId,
+            },
+          },
+        ],
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async findLastMessage(filters: MessageFilters): Promise<Message | null> {
   return await this.db.message.findFirst({
     where: {

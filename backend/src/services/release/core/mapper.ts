@@ -1,5 +1,4 @@
 import { CommitAnalysisResult } from '@/services/commitAnalysisService';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 export interface ApplicationMappingInput {
@@ -13,9 +12,20 @@ export interface ApplicationWithSubTicket extends ApplicationMappingInput {
 
 export interface ApplicationReleaseTicketMapping {
 	applicationReleaseId: string;
-	ticketId: string;
-	title: string;
-	ticketUrl: string;
+	releaseId: string;
+	devTicketId: string;
+}
+
+// True if the PR touched any file owned by this application.
+function affectsApp(filePaths: string[], matchedFiles: ReadonlySet<string>): boolean {
+	for (const fp of filePaths) {
+		if (matchedFiles.has(fp)) return true;
+	}
+	return false;
+}
+
+function buildMatchedFileSets<T extends ApplicationMappingInput>(apps: T[]): Map<string, ReadonlySet<string>> {
+	return new Map(apps.map(app => [app.id, new Set(app.matchedFiles)]));
 }
 
 /**
@@ -25,23 +35,22 @@ export function buildPRLinksByApplication(
 	results: CommitAnalysisResult[],
 	affectedApplications: ApplicationMappingInput[]
 ): Map<string, string[]> {
+	const matchedFileSets = buildMatchedFileSets(affectedApplications);
 	const prLinksByApplication = new Map<string, string[]>();
 
 	for (const result of results) {
-		if (result.pullRequest && result.filePaths) {
-			for (const app of affectedApplications) {
-				// Check if any file in this PR affects this application
-				const affectsApp = result.filePaths.some(filePath =>
-					app.matchedFiles.includes(filePath)
-				);
+		if (!result.pullRequest || !result.filePaths) continue;
 
-				if (affectsApp) {
-					if (!prLinksByApplication.has(app.id)) {
-						prLinksByApplication.set(app.id, []);
-					}
-					prLinksByApplication.get(app.id)!.push(result.pullRequest.url);
-				}
+		for (const app of affectedApplications) {
+			const appFiles = matchedFileSets.get(app.id)!;
+			if (!affectsApp(result.filePaths, appFiles)) continue;
+
+			let links = prLinksByApplication.get(app.id);
+			if (!links) {
+				links = [];
+				prLinksByApplication.set(app.id, links);
 			}
+			links.push(result.pullRequest.url);
 		}
 	}
 
@@ -49,34 +58,37 @@ export function buildPRLinksByApplication(
 }
 
 /**
- * Builds application release ticket mappings
+ * Builds ART (application_release_tickets) row data — one row per
+ * (per-app SubTicket × dev-ticket) where the PR for that dev ticket
+ * actually touched files belonging to the application.
+ *
+ * Phase 0b: file-intersection check ensures we don't create rows for
+ * (app × dev-ticket) pairs the PR didn't actually touch.
  */
 export function buildApplicationReleaseTicketMappings(
 	results: CommitAnalysisResult[],
-	affectedApplicationsWithSubTickets: ApplicationWithSubTicket[],
-	affectedApplications: Array<{ id: string }>,
-	channelId: string,
-	conversationId: string
+	affectedApplications: ApplicationWithSubTicket[],
+	releaseId: string,
 ): ApplicationReleaseTicketMapping[] {
+	const matchedFileSets = buildMatchedFileSets(affectedApplications);
 	const recordsToCreate: ApplicationReleaseTicketMapping[] = [];
 
 	for (const result of results) {
-		if (result.ticket && result.filePaths) {
-			for (const app of affectedApplicationsWithSubTickets) {
-				const affectedApp = affectedApplications.find((a) => a.id === app.id);
-				if (affectedApp) {
-					const ticketUrl = `${config.slackFrontendUrl}/chat/${channelId}?tab=tickets&ticketId=${result.ticket.id}&conversationId=${conversationId}`;
-					recordsToCreate.push({
-						applicationReleaseId: app.subTicketId!,
-						ticketId: result.ticket.id,
-						title: result.ticket.title,
-						ticketUrl,
-					});
-					logger.info(
-						`Prepared ApplicationReleaseTicket mapping: ${app.subTicketId} -> ${result.ticket.xyneId}`
-					);
-				}
-			}
+		if (!result.ticket || !result.filePaths) continue;
+
+		for (const app of affectedApplications) {
+			if (!app.subTicketId) continue;
+			const appFiles = matchedFileSets.get(app.id)!;
+			if (!affectsApp(result.filePaths, appFiles)) continue;
+
+			recordsToCreate.push({
+				applicationReleaseId: app.subTicketId,
+				releaseId,
+				devTicketId: result.ticket.id,
+			});
+			logger.info(
+				`Prepared ART row: applicationRelease=${app.subTicketId} → devTicket=${result.ticket.xyneId}`
+			);
 		}
 	}
 
@@ -90,15 +102,12 @@ export function filterResultsByApplication(
 	results: CommitAnalysisResult[],
 	matchedFiles: string[]
 ): CommitAnalysisResult[] {
+	const matchedSet = new Set(matchedFiles);
 	return results
 		.map(result => ({
 			...result,
-			filePaths: result.filePaths.filter(fp =>
-				matchedFiles.includes(fp)
-			),
-			fileChanges: result.fileChanges.filter(fc =>
-				matchedFiles.includes(fc.path)
-			)
+			filePaths: result.filePaths.filter(fp => matchedSet.has(fp)),
+			fileChanges: result.fileChanges.filter(fc => matchedSet.has(fc.path)),
 		}))
 		.filter(r => r.filePaths.length > 0);
 }

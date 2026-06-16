@@ -413,6 +413,10 @@ async function main() {
       // Don't throw - this is not critical
     }
 
+    // Release-management system data (TICKET_TYPE lookups, xyne_release_specs_form,
+    // per-board form mappings) now lives in `scripts/release-manager/seed-release.ts` — run that
+    // separately after this ACL seed.
+
     // Step 6: Verify setup
     console.log('\n🔍 Verifying ACL setup...');
     

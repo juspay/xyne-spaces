@@ -9,5 +9,4 @@ router.post('/', projectController.createProject);
 
 // Get project-level daily recaps for the current user
 router.get('/recap', projectController.getProjectRecap);
-
 export default router;

@@ -10,7 +10,8 @@ export class ApplicationBackfillController {
    * 
    * Body:
    * {
-   *   "channelId": "ch_123abc", 
+   *   "channelId": "ch_123abc",
+   *   "mainReleaseBoardId": "board_parent_123",
    *   "applications": [
    *     {
    *       "name": "backend",
@@ -24,7 +25,7 @@ export class ApplicationBackfillController {
    */
   async backfillApplications(req: Request, res: Response): Promise<void> {
     try {
-      const { channelId, applications } = req.body;
+      const { channelId, mainReleaseBoardId, applications } = req.body;
 
       if (!channelId) {
         res.status(400).json({
@@ -41,6 +42,16 @@ export class ApplicationBackfillController {
           success: false,
           error: 'Validation error',
           message: 'applications array is required and must not be empty',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (!mainReleaseBoardId) {
+        res.status(400).json({
+          success: false,
+          error: 'Validation error',
+          message: 'mainReleaseBoardId is required',
           timestamp: new Date().toISOString(),
         });
         return;
@@ -68,6 +79,7 @@ export class ApplicationBackfillController {
       const result = await applicationBackfillService.backfillApplications(
         applications,
         channelId,
+        mainReleaseBoardId,
         req.user!.id
       );
 

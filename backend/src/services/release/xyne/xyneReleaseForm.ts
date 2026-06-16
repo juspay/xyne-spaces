@@ -1,9 +1,15 @@
 import { FormFieldType } from "@xyne/shared";
-import { FormSchema, FormSchemaProvider, StrictFormValues } from "../core";
+// Import from the specific file rather than the `../core` barrel — the barrel
+// re-exports releaseService which transitively pulls in the repository
+// container, and that container's circular self-import crashes at module-init
+// time when this file is loaded by `tsx` scripts (vs. server boot, where Node's
+// import order tolerates it). Direct file import keeps scripts working.
+import { FormSchema, FormSchemaProvider, StrictFormValues } from "../core/releaseForm";
 export enum XyneChangeType {
     MIGRATION = "MIGRATION",
     ENV = "ENV",
     DEPLOYEDMENT_SPECS = "DEPLOYMENT_SPECS",
+    VERSION_SPECS = "VERSION_SPECS",
 }
 
 export class XyneFormSchemaProvider extends FormSchemaProvider<XyneChangeType> {
@@ -54,11 +60,14 @@ export class XyneFormSchemaProvider extends FormSchemaProvider<XyneChangeType> {
             description: "Optional: specific path if different from default",
         },
         {
-            name: "envKey",
-            label: "Environment Key",
+            name: "fileSlug",
+            label: "File Slug",
             type: FormFieldType.STRING,
             required: true,
-            description: "The environment variable key",
+            // File-derived slug (e.g. `ENV_TS` from env.ts), NOT an env var name.
+            // Actual changed var names are derived from oldValue/newValue at read
+            // time (see dashboard envVars.ts). Renamed from the misleading "envKey".
+            description: "File-derived slug (e.g. ENV_TS); not an env variable name",
         },
         {
             name: "changeType",
@@ -118,6 +127,16 @@ export class XyneFormSchemaProvider extends FormSchemaProvider<XyneChangeType> {
         },
     ] as const;
 
+    static readonly VERSION_SPECS_FIELDS = [
+        {
+            name: "releaseVersion",
+            label: "Release version",
+            type: FormFieldType.STRING,
+            required: true,
+            description: "Version identifier for this release",
+        },
+    ] as const;
+
     private static readonly SCHEMAS: Record<XyneChangeType, FormSchema> = {
         [XyneChangeType.MIGRATION]: {
             changeType: XyneChangeType.MIGRATION,
@@ -130,6 +149,10 @@ export class XyneFormSchemaProvider extends FormSchemaProvider<XyneChangeType> {
         [XyneChangeType.DEPLOYEDMENT_SPECS]: {
             changeType: XyneChangeType.DEPLOYEDMENT_SPECS,
             fields: XyneFormSchemaProvider.DEPLOYMENT_SPECS_FIELDS,
+        },
+        [XyneChangeType.VERSION_SPECS]: {
+            changeType: XyneChangeType.VERSION_SPECS,
+            fields: XyneFormSchemaProvider.VERSION_SPECS_FIELDS,
         },
     };
 

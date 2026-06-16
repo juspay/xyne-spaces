@@ -87,14 +87,6 @@ export class ChangeDetector {
 }
 
 /**
- * ChangeDetector for Xyne releases
- */
-export const XyneChangeDetector = new ChangeDetector({
-	envPatterns: ["env.ts", ".env", ".env.local", ".env.example"],
-	migrationPatterns: ["backend/prisma/migrations/", "backend/prisma/schema.prisma"],
-});
-
-/**
  * Maps Bitbucket change entry types to our FileChangeType
  */
 export function mapBitbucketChangeType(type?: string): FileChangeType {

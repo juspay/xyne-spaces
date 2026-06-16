@@ -14,14 +14,19 @@ import { db } from '@/database/client';
 const prisma = DatabaseClient.getInstance();
 
 
+// Single source of truth for parsing env-var names + add/remove status from a
+// raw diff's `newValue` (leading +/- markers still present). Mirrors the
+// dashboard's render-time parser in dashboard/src/components/Release/envVars.ts
+// (which reads cleaned values without +/- prefixes) — both allow lower/upper
+// case keys so canvas counts and dashboard badges agree.
 function parseEnvChanges(
-  envChanges: Array<{ filePath: string; fileName: string; newValue: string }> | undefined
+  envChanges: Array<{ newValue: string }> | undefined
 ): Array<{ name: string; status: string }> {
   if (!envChanges || envChanges.length === 0) {
     return [];
   }
 
-  const envVarRegex = /^([+-])\s*([A-Z][A-Z0-9_]*)(?:\s*=|\s*:)/gm;
+  const envVarRegex = /^([+-])\s*([A-Za-z][A-Za-z0-9_]*)(?:\s*=|\s*:)/gm;
   const envVarStatusMap = new Map<string, { added: boolean; removed: boolean }>();
 
   for (const change of envChanges) {
@@ -502,35 +507,10 @@ async function formatCommitAnalysisToBlockNote(
         content: [{ type: 'text', text: 'Environment Changes:', styles: { bold: true } }],
       });
 
-      const envVarStatusMap = new Map<string, { added: boolean; removed: boolean }>();
-      const envVarRegex = /^([+-])\s*([A-Z][A-Z0-9_]*)(?:\s*=|\s*:)/gm;
-
-      prEnvChanges.forEach((filePath) => {
-        const change = envChangesByPath.get(filePath);
-        if (change?.newValue) {
-          let match;
-          envVarRegex.lastIndex = 0;
-          while ((match = envVarRegex.exec(change.newValue)) !== null) {
-            const sign = match[1];
-            const varName = match[2];
-            if (!envVarStatusMap.has(varName)) {
-              envVarStatusMap.set(varName, { added: false, removed: false });
-            }
-            const status = envVarStatusMap.get(varName)!;
-            if (sign === '+') status.added = true;
-            if (sign === '-') status.removed = true;
-          }
-        }
-      });
-
-      const envVarList = Array.from(envVarStatusMap.entries())
-        .map(([name, flags]) => {
-          let status = 'MODIFIED';
-          if (flags.added && !flags.removed) status = 'ADDED';
-          else if (!flags.added && flags.removed) status = 'DELETED';
-          return { name, status };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
+      const prEnvChangeList = prEnvChanges
+        .map((filePath) => envChangesByPath.get(filePath))
+        .filter((c): c is { fileName: string; newValue: string } => !!c);
+      const envVarList = parseEnvChanges(prEnvChangeList);
 
       for (const item of envVarList) {
         blocks.push({

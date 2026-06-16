@@ -648,14 +648,7 @@ export enum LookupType {
 
 // Release Management Enums
 
-// @ts-ignore TS1294
-export enum ApplicationReleaseTicketStatus {
-  NOT_TESTED = 'NOT_TESTED',
-  TESTING = 'TESTING',
-  PASSED = 'PASSED',
-  FAILED = 'FAILED',
-  EXCLUDED = 'EXCLUDED',
-}
+
 
 // @ts-ignore TS1294
 export enum EnvChangeType {
@@ -740,6 +733,19 @@ export enum AttributionConfidence {
   LOW = 'LOW',
   MEDIUM = 'MEDIUM',
   HIGH = 'HIGH',
+}
+
+// @ts-ignore TS1294
+export enum VCSProviderType {
+  GITHUB = 'GITHUB',
+  BITBUCKET_CLOUD = 'BITBUCKET_CLOUD',
+  BITBUCKET_SERVER = 'BITBUCKET_SERVER',
+}
+
+// @ts-ignore TS1294
+export enum ReleaseTrackingMode {
+  COMMIT_RANGE = 'COMMIT_RANGE',
+  VERSION = 'VERSION',
 }
 
 export enum ProjectType {
@@ -1033,6 +1039,8 @@ export const boardTable = table('boards')
     createdBy: string(),
     updatedBy: string().optional(),
     metadata: json().optional(),
+    vcsProvider: enumeration<VCSProviderType>().optional(),
+    releaseTrackingMode: enumeration<ReleaseTrackingMode>().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -1308,6 +1316,7 @@ export const pullRequestsTable = table('pull_requests')
   .columns({
     id: string(),
     prId: number(),
+    ticketId: string().optional(),
     workflowExecutionId: string().optional(),
     repoName: string(),
     sourceBranchName: string(),
@@ -2164,13 +2173,18 @@ export const applicationTable = table('applications')
     name: string(),
     projectId: string(),
     boardId: string(),
+    mainReleaseBoardId: string().optional(),
     channelId: string().optional(),
     regex: string(),
     repoUrl: string(),
     deployedCommit: string().optional(),
+    deployedVersion: string().optional(),
     lastDeployedAt: number().optional(),
     ownerTeam: string(),
+    envPaths: json<string[]>(),
+    migrationPaths: json<string[]>(),
     createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -2178,13 +2192,13 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
   .columns({
     id: string(),
     applicationReleaseId: string(),
-    ticketId: string(),
-    title: string(),
-    status: enumeration<ApplicationReleaseTicketStatus>(),
+    releaseId: string(),
+    ticketId: string(),                    // dev ticket UUID — use devTicket relation for full ticket details
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
     createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -2224,6 +2238,12 @@ export const releaseChangeTypeTable = table('release_change_types')
     id: string(),
     applicationId: string(),
     changeType: string(),
+    releaseId: string().optional(),
+    applicationReleaseId: string().optional(),
+    devTicketXyneId: string().optional(),
+    commitId: string().optional(),
+    filePath: string().optional(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -2327,7 +2347,7 @@ export const channelRecapTable = table('channel_recaps')
     recapDate: number(),
     summary: string(),
     userId: string().optional(),// null for base recap, actual userId for custom recap
-      })
+  })
   .primaryKey('id');
 
 export const recapsTable = table('recaps')
@@ -2646,6 +2666,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: ticketAssignmentTable,
   }),
+  pullRequests: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: pullRequestsTable,
+  }),
   rcas: many({
     sourceField: ['id'],
     destField: ['ticketId'],
@@ -2893,6 +2918,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
   applications: many({
     sourceField: ['id'],
     destField: ['boardId'],
+    destSchema: applicationTable,
+  }),
+  mainReleaseApplications: many({
+    sourceField: ['id'],
+    destField: ['mainReleaseBoardId'],
     destSchema: applicationTable,
   }),
   slaPolicies: many({
@@ -3573,16 +3603,16 @@ export const activityTableRelationships = relationships(activityTable, ({ one })
     destField: ['id'],
     destSchema: channelTable,
   }),
-    message: one({
-      sourceField: ['messageId'],
-      destField: ['messageId'],
-      destSchema: messageTable,
-    }),
-    conversation: one({
-      sourceField: ['conversationId'],
-      destField: ['conversationId'],
-      destSchema: conversationTable,
-    }),
+  message: one({
+    sourceField: ['messageId'],
+    destField: ['messageId'],
+    destSchema: messageTable,
+  }),
+  conversation: one({
+    sourceField: ['conversationId'],
+    destField: ['conversationId'],
+    destSchema: conversationTable,
+  }),
   reaction: one({
     sourceField: ['reactionId'],
     destField: ['reactionId'],
@@ -3861,6 +3891,11 @@ export const pullRequestsTableRelationships = relationships(pullRequestsTable, (
     sourceField: ['workflowExecutionId'],
     destField: ['id'],
     destSchema: workflowExecutionTable,
+  }),
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
   }),
 }));
 
@@ -4236,6 +4271,11 @@ export const applicationTableRelationships = relationships(applicationTable, ({ 
     destField: ['id'],
     destSchema: boardTable,
   }),
+  mainReleaseBoard: one({
+    sourceField: ['mainReleaseBoardId'],
+    destField: ['id'],
+    destSchema: boardTable,
+  }),
 }));
 
 export const applicationReleaseTicketTableRelationships = relationships(applicationReleaseTicketTable, ({ one }) => ({
@@ -4243,6 +4283,11 @@ export const applicationReleaseTicketTableRelationships = relationships(applicat
     sourceField: ['applicationReleaseId'],
     destField: ['id'],
     destSchema: subTicketTable,
+  }),
+  devTicket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
   }),
 }));
 
@@ -4257,6 +4302,14 @@ export const releaseEventTableRelationships = relationships(releaseEventTable, (
     sourceField: ['applicationReleaseId'],
     destField: ['id'],
     destSchema: subTicketTable,
+  }),
+}));
+
+export const releaseChangeTypeTableRelationships = relationships(releaseChangeTypeTable, ({ one }) => ({
+  application: one({
+    sourceField: ['applicationId'],
+    destField: ['id'],
+    destSchema: applicationTable,
   }),
 }));
 
@@ -4590,6 +4643,7 @@ export const schema = createSchema({
     applicationTableRelationships,
     applicationReleaseTicketTableRelationships,
     releaseEventTableRelationships,
+    releaseChangeTypeTableRelationships,
     rcaTableRelationships,
     impactTableRelationships,
     coeTableRelationships,

@@ -299,16 +299,24 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       entityId: string;
       entityType: string;
       fieldId: string;
+      contextId?: string | null;
       fieldValue?: string;
       actualFieldValue: Prisma.InputJsonValue;
-    }>
+    }>,
+    tx?: Prisma.TransactionClient
   ): Promise<{ count: number }> {
-    return await this.db.formEntityValues.createMany({
+    const client = tx || this.db;
+    return await client.formEntityValues.createMany({
       data: data.map(item => ({
         formId: item.formId,
         entityId: item.entityId,
         entityType: item.entityType,
         fieldId: item.fieldId,
+        // Release-scoped writes (entityType=RELEASE_ENV_FORM/RELEASE_MIGRATION_FORM)
+        // pass contextId=releaseTicketId so the same change-type row can hold
+        // values across multiple releases without colliding on the
+        // (entityId, entityType, fieldId, contextId) unique key.
+        ...(item.contextId !== undefined && { contextId: item.contextId }),
         fieldValue: item.fieldValue || '',
         actualFieldValue: item.actualFieldValue as Prisma.InputJsonValue,
       })),

@@ -4,17 +4,14 @@ import { TicketIdService } from '@/services/ticketIdService';
 
 const prisma = DatabaseClient.getInstance();
 import { Application } from '@prisma/client';
-import { ActivityType, TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { ActivityType, TicketPriority } from '@xyne/shared';
 import { dualWriteTicketTag } from '@/services/ticketTagDualWriteService';
 
 export class ApplicationRepository {
 
-  /**
-   * Find applications by project ID
-   */
-  async findByProjectId(projectId: string): Promise<Application[]> {
+  async findByMainReleaseBoardId(mainReleaseBoardId: string): Promise<Application[]> {
     return await prisma.application.findMany({
-      where: { projectId },
+      where: { mainReleaseBoardId },
     });
   }
 
@@ -44,75 +41,122 @@ export class ApplicationRepository {
   }
 
   /**
-   * Create application release ticket mappings
+   * Create ART rows — one per (app SubTicket × dev ticket). `ticketId` stores
+   * the dev ticket UUID; the Testing tab joins tickets via the `devTicket` Zero
+   * relation (ticketId → tickets.id) for label/type/assignee, so we don't
+   * snapshot those here. Dedup is handled by the @@unique([applicationReleaseId,
+   * ticketId]) constraint via skipDuplicates.
    */
   async createApplicationReleaseTicketMappings(records: Array<{
     applicationReleaseId: string;
-    ticketId: string;
-    title: string;
-    ticketUrl: string;
+    releaseId: string;
+    devTicketId: string;
   }>): Promise<{ count: number }> {
+    if (records.length === 0) return { count: 0 };
+
+    const data = records.map(r => ({
+      applicationReleaseId: r.applicationReleaseId,
+      releaseId: r.releaseId,
+      ticketId: r.devTicketId,
+    }));
+
     const result = await prisma.applicationReleaseTicket.createMany({
-      data: records,
+      data,
       skipDuplicates: true,
     });
+    logger.info(
+      `Inserted ${result.count}/${data.length} ART row(s) for releaseId=${data[0]?.releaseId ?? 'unknown'}`,
+    );
     return result;
   }
 
 
-  async getLatestDeployedCommitId(): Promise<string | null> {
+  /** Latest deployed commit within one main release board group. */
+  async getLatestDeployedCommitId(mainReleaseBoardId: string): Promise<string | null> {
     const application = await prisma.application.findFirst({
       where: {
+        mainReleaseBoardId,
         deployedCommit: { not: null },
         lastDeployedAt: { not: null },
       },
-      select: {
-        deployedCommit: true,
-      },
-      orderBy: {
-        lastDeployedAt: 'desc',
-      },
+      select: { deployedCommit: true },
+      orderBy: { lastDeployedAt: 'desc' },
     });
 
     return application?.deployedCommit ?? null;
   }
 
-  async createApplicationSubTickets(
-    parentTicketId: string,
-    parentXyneId: string,
-    projectId: string,
-    channelId: string,
-    conversationId: string,
-    createdBy: string,
-    affectedApplications: (Application & { matchedFiles: string[] })[],
-    prLinksByApplication: Map<string, string[]>,
-    isHotFix?: boolean
-  ): Promise<{ subTicketId: string, mappedTicketId: string, xyneId: string }[]> {
+  /**
+   * Create per-app SubTickets + Tickets + TicketSubTicketMappings for a release.
+   *
+   * Returns a Map keyed by applicationId so callers don't have to maintain index alignment
+   * with the input list (apps may be skipped if they have no boardId or transaction fails).
+   *
+   * On retry, this is called again with the same parentTicketId; new SubTickets/Tickets
+   * are created for the retry's deploy event. Old ones remain as deploy-event history.
+   * ART rows for the new deploy event will be written under the new SubTicket id.
+   */
+  async createApplicationSubTickets(opts: {
+    parentTicketId: string;
+    parentTitle: string;
+    projectId: string;
+    channelId: string;
+    conversationId: string;
+    createdBy: string;
+    affectedApplications: (Application & { matchedFiles: string[] })[];
+    prLinksByApplication: Map<string, string[]>;
+    isHotFix?: boolean;
+  }): Promise<Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>> {
+    const {
+      parentTicketId,
+      parentTitle,
+      projectId,
+      channelId,
+      conversationId,
+      createdBy,
+      affectedApplications,
+      prLinksByApplication,
+      isHotFix,
+    } = opts;
     logger.info(`Creating sub-tickets for ${affectedApplications.length} affected applications`);
 
-    const subTicketIds: { subTicketId: string, mappedTicketId: string, xyneId: string }[] = [];
+    // Project workspace doesn't change per-app; resolve once outside the loop.
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { workspaceId: true },
+    });
+    const ticketWorkspaceId = project?.workspaceId ?? '';
+
+    const result = new Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>();
 
     for (const application of affectedApplications) {
-      try {
-        if (!application.boardId) {
-          logger.warn(`Application ${application.name} has no boardId, skipping ticket creation`);
-          continue;
-        }
+      if (!application.boardId) {
+        logger.warn(`Application ${application.name} has no boardId, skipping ticket creation`);
+        continue;
+      }
 
-        const result = await prisma.$transaction(async (tx) => {
+      try {
+        const txResult = await prisma.$transaction(async (tx) => {
           const xyneId = await TicketIdService.generateTicketId(tx, projectId);
-          const project = await tx.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
-          const ticketWorkspaceId = project?.workspaceId ?? '';
 
           const prLinks = prLinksByApplication.get(application.id) || [];
           const prLinksSection = prLinks.length > 0
             ? `\n\nPull Requests:\n${prLinks.map(link => `- ${link}`).join('\n')}`
             : '';
 
-          // Create ticket in the application's board
+          // Pick the application's release board's first stage (lowest
+          // sequenceNumber) so the per-app ticket lands on the board's
+          // configured first column instead of a hardcoded 'Release' label
+          // that may not exist on the board.
+          const firstStage = await tx.stage.findFirst({
+            where: { boardId: application.boardId! },
+            orderBy: { sequenceNumber: 'asc' },
+            select: { name: true, defaultTicketStatusV2: true },
+          });
+
           const ticket = await tx.ticket.create({
             data: {
-              title: `${parentXyneId}: ${application.name}`,
+              title: `${parentTitle} - ${application.name}`,
               description: `Release ticket for ${application.name} application.${prLinksSection}`,
               createdBy,
               updatedBy: createdBy,
@@ -122,9 +166,9 @@ export class ApplicationRepository {
               projectId,
               workspaceId: ticketWorkspaceId,
               boardId: application.boardId,
-              statusV2: TicketStatusV2.TODO,
+              statusV2: firstStage?.defaultTicketStatusV2 ?? 'TODO',
               priority: TicketPriority.LOW,
-              stageName: 'Release',
+              stageName: firstStage?.name ?? 'Backlog',
               lastEmailAt: new Date(),
             },
           });
@@ -139,10 +183,9 @@ export class ApplicationRepository {
             await dualWriteTicketTag(ticket.id, 'HotFix', tx);
           }
 
-          // Create sub-ticket with mappedTicketId
           const subTicket = await tx.subTicket.create({
             data: {
-              title: `${parentXyneId}: ${application.name}`,
+              title: `${parentTitle} - ${application.name}`,
               description: `Release sub-ticket for ${application.name} application.${prLinksSection}`,
               createdBy,
               updatedBy: createdBy,
@@ -154,10 +197,7 @@ export class ApplicationRepository {
           });
 
           await tx.ticketSubTicketMapping.create({
-            data: {
-              ticketId: parentTicketId,
-              subTicketId: subTicket.id,
-            },
+            data: { ticketId: parentTicketId, subTicketId: subTicket.id },
           });
 
           await tx.ticketActivity.create({
@@ -179,14 +219,13 @@ export class ApplicationRepository {
           return { subTicketId: subTicket.id, mappedTicketId: ticket.id, xyneId };
         });
 
-        subTicketIds.push({ subTicketId: result.subTicketId, mappedTicketId: result.mappedTicketId, xyneId: result.xyneId });
-
-        logger.info(`Created sub-ticket ${result.subTicketId} and ticket ${result.xyneId} (${result.mappedTicketId}) for application ${application.name}`);
+        result.set(application.id, txResult);
+        logger.info(`Created sub-ticket ${txResult.subTicketId}, ticket ${txResult.xyneId} (${txResult.mappedTicketId}) for application ${application.name}`);
       } catch (error) {
-        logger.error(`Failed to create sub-ticket for application ${application.name}:`, error as Error);
+        logger.error(`Failed to create sub-ticket / application release for application ${application.name}:`, error as Error);
       }
     }
 
-    return subTicketIds;
+    return result;
   }
 }
