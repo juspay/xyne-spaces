@@ -4,6 +4,8 @@ import type {
   TicketEntityMapping,
   TicketTag,
   FormEntityValues,
+  TicketAssignment,
+  TicketTagMapping,
 } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 import type { Stage } from './KanbanBoardScreen.types';
@@ -214,6 +216,52 @@ export const sortByKanbanPosition = <T extends Ticket>(tickets: T[]): T[] => {
     // Both null or same position — createdAt DESC (newest first)
     return b.createdAt - a.createdAt;
   });
+};
+
+type KanbanSnapshotTicket = Ticket & {
+  tagMappings?: TicketTagMapping[];
+  assignments?: TicketAssignment[];
+};
+
+export const ticketBoardSnapshotSignature = (ticket: KanbanSnapshotTicket): string => {
+  const tagMappingsSignature = (ticket.tagMappings ?? [])
+    .map((tag: TicketTagMapping) => `${tag.tagId}:${tag.tagName}`)
+    .join('|');
+  const assignmentsSignature = (ticket.assignments ?? [])
+    .map((assignment: TicketAssignment) => `${assignment.userId}:${assignment.userResponsibility}`)
+    .join('|');
+
+  return [
+    ticket.id,
+    ticket.updatedAt ?? 0,
+    ticket.title ?? '',
+    ticket.stageName ?? '',
+    ticket.statusV2 ?? '',
+    ticket.priority ?? '',
+    ticket.assignedTo ?? '',
+    ticket.userGroupId ?? '',
+    ticket.eta ?? 0,
+    ticket.kanbanPosition ?? '',
+    tagMappingsSignature,
+    assignmentsSignature,
+  ].join('::');
+};
+
+export const ticketsHaveSameBoardSnapshot = (left: Ticket[], right: Ticket[]): boolean => {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftTicket = left[index];
+    const rightTicket = right[index];
+    if (!leftTicket || !rightTicket) return false;
+    if (leftTicket.id !== rightTicket.id) return false;
+    if (ticketBoardSnapshotSignature(leftTicket) !== ticketBoardSnapshotSignature(rightTicket)) {
+      return false;
+    }
+  }
+
+  return true;
 };
 
 export const groupTicketsByStage = (

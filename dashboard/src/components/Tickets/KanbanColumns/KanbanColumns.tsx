@@ -14,6 +14,7 @@ import type {
   Stage,
 } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import type { BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
+import { ticketBoardSnapshotSignature } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import {
   type KanbanTicketsPageBaseArgs,
   useKanbanTicketsPage,
@@ -102,19 +103,19 @@ const VirtualizedStageList: React.FC<{
   slaPolicies,
 }) => {
   const scrollRef = React.useRef<HTMLDivElement>(null);
-  const lastReportedTicketIdsRef = React.useRef<string>('');
+  const lastReportedTicketSnapshotRef = React.useRef<string>('');
   const scrollKey = `kanban-scroll-${stageId}`;
-  const ticketIdsSignature = React.useMemo(
-    () => stageTickets.map(ticket => ticket.id).join(','),
+  const ticketSnapshotSignature = React.useMemo(
+    () => stageTickets.map(ticket => ticketBoardSnapshotSignature(ticket)).join(','),
     [stageTickets],
   );
 
   React.useEffect(() => {
     if (!onTicketsChange) return;
-    if (lastReportedTicketIdsRef.current === ticketIdsSignature) return;
-    lastReportedTicketIdsRef.current = ticketIdsSignature;
+    if (lastReportedTicketSnapshotRef.current === ticketSnapshotSignature) return;
+    lastReportedTicketSnapshotRef.current = ticketSnapshotSignature;
     onTicketsChange(columnKey, stageTickets);
-  }, [columnKey, onTicketsChange, stageTickets, ticketIdsSignature]);
+  }, [columnKey, onTicketsChange, stageTickets, ticketSnapshotSignature]);
 
   React.useEffect(() => {
     const el = scrollRef.current;
@@ -240,18 +241,18 @@ const PaginatedStageList: React.FC<{
     return [...renderedTicketsById.values()];
   }, [allKnownTickets, columnStatus, columnType, columnValue, tickets]);
 
-  const fetchedTicketIdsSignature = React.useMemo(
-    () => tickets.map(ticket => ticket.id).join(','),
+  const fetchedTicketSnapshotSignature = React.useMemo(
+    () => tickets.map(ticket => ticketBoardSnapshotSignature(ticket)).join(','),
     [tickets],
   );
-  const lastReportedFetchedTicketIdsRef = React.useRef<string>('');
+  const lastReportedFetchedTicketSnapshotRef = React.useRef<string>('');
 
   React.useEffect(() => {
     if (!onTicketsChange) return;
-    if (lastReportedFetchedTicketIdsRef.current === fetchedTicketIdsSignature) return;
-    lastReportedFetchedTicketIdsRef.current = fetchedTicketIdsSignature;
+    if (lastReportedFetchedTicketSnapshotRef.current === fetchedTicketSnapshotSignature) return;
+    lastReportedFetchedTicketSnapshotRef.current = fetchedTicketSnapshotSignature;
     onTicketsChange(columnKey, tickets);
-  }, [columnKey, fetchedTicketIdsSignature, onTicketsChange, tickets]);
+  }, [columnKey, fetchedTicketSnapshotSignature, onTicketsChange, tickets]);
 
   return (
     <SortableContext

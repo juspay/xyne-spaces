@@ -74,6 +74,7 @@ import {
   groupTicketsByFormField,
   extractBoardFormFields,
   extractGroupableFormFields,
+  ticketsHaveSameBoardSnapshot,
 } from './KanbanBoardScreen.utils';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -170,15 +171,6 @@ function valuesToFilters(
   }
   return result;
 }
-
-const ticketsHaveSameIds = (left: Ticket[], right: Ticket[]): boolean => {
-  if (left === right) return true;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index]?.id !== right[index]?.id) return false;
-  }
-  return true;
-};
 
 interface BoardKanbanScreenProps {
   viewMode?: 'my-tickets' | `user-tickets` | 'group-tickets';
@@ -320,7 +312,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         return next;
       }
 
-      if (ticketsHaveSameIds(prev[columnKey] ?? [], tickets)) {
+      if (ticketsHaveSameBoardSnapshot(prev[columnKey] ?? [], tickets)) {
         return prev;
       }
       return {
@@ -1397,7 +1389,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         return;
       }
 
-      if (localTickets !== null && ticketsHaveSameIds(localTickets, uniqueTickets)) {
+      if (localTickets !== null && ticketsHaveSameBoardSnapshot(localTickets, uniqueTickets)) {
         return;
       }
 
@@ -1406,7 +1398,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
 
     if (!isDraggingRef.current && filteredTickets) {
-      if (localTickets !== null && ticketsHaveSameIds(localTickets, filteredTickets)) {
+      if (localTickets !== null && ticketsHaveSameBoardSnapshot(localTickets, filteredTickets)) {
         return;
       }
       setLocalTickets(filteredTickets); // 🔄 SYNC!
