@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo, useEffect } from 'react';
+import { ReactElement, useState, useMemo, useEffect, createContext, useContext } from 'react';
 import {
   Globe,
   Pencil,
@@ -69,10 +69,15 @@ import { Link } from 'react-router-dom';
 
 /**
  * v3-style inline citation chip for `[clf-<toolCallId>#<chunkIndex>]` tokens.
- * Resolves to the structured ClawCitation on the parent message's toolInvocations
- * and renders as a small clickable pill linking into Spaces. Falls back to a
- * non-clickable badge when no URL can be built (e.g. older agent output that
- * doesn't carry per-chunk citations).
+ * Resolves to the structured ClawCitation on a ToolInvocation and renders as
+ * a small clickable pill linking into Spaces. Falls back to a non-clickable
+ * badge when no URL can be built (e.g. older agent output that doesn't carry
+ * per-chunk citations).
+ *
+ * Lookup precedence: ConversationToolInvocationsContext (aggregate across
+ * every turn in the conversation, so a tool invoked in turn 1 can still
+ * resolve a chip rendered in turn 5) → falls back to the per-message
+ * `toolInvocations` prop for safety.
  *
  * Display format `{toolNumber}.{chunkIndex}` matches v3's CitationChip so
  * users see consistent citation references across both surfaces.
@@ -83,6 +88,17 @@ interface ClawCitationChipProps {
   toolNumber: number;
   toolInvocations: ToolInvocationType[] | undefined;
 }
+
+/**
+ * Conversation-wide ToolInvocation pool. Populated by XyneAISidebar with the
+ * flat union of `message.toolInvocations` across every visible message in the
+ * current branch. ClawCitationChip prefers this over its per-message prop so
+ * cross-turn citations (e.g. the bot in turn 5 referencing tool output from
+ * turn 1) resolve correctly.
+ */
+export const ConversationToolInvocationsContext = createContext<ToolInvocationType[] | undefined>(
+  undefined,
+);
 
 const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
   if (!citation) return 'Citation';
@@ -109,7 +125,12 @@ const ClawCitationChip = ({
   toolNumber,
   toolInvocations,
 }: ClawCitationChipProps): ReactElement => {
-  const citation = findCitationForChunk(toolInvocations, toolCallId, chunkIndex);
+  // Prefer the conversation-wide pool (cross-turn lookup); fall back to the
+  // per-message prop so the chip still resolves if the provider is absent.
+  const conversationTools = useContext(ConversationToolInvocationsContext);
+  const lookupTools =
+    conversationTools && conversationTools.length > 0 ? conversationTools : toolInvocations;
+  const citation = findCitationForChunk(lookupTools, toolCallId, chunkIndex);
   const url = citation ? buildClawCitationUrl(citation) : null;
   const label = `${toolNumber}.${chunkIndex}`;
   const tooltip = buildClawCitationTooltip(citation);
@@ -1273,6 +1294,15 @@ export const MessageItem = React.memo(
                 </div>
               )}
 
+              {/* Subtle "Stopped" indicator for cancelled mid-stream responses */}
+              {message.type === 'bot' && !message.isStreaming && message.isAborted && (
+                <div className='mt-2'>
+                  <span className="text-xs text-muted-foreground font-['Inter'] italic">
+                    Stopped
+                  </span>
+                </div>
+              )}
+
               {message.type === 'bot' && onDebug && (
                 <button
                   type='button'
@@ -1286,7 +1316,9 @@ export const MessageItem = React.memo(
                 </button>
               )}
 
-              {/* Branch navigator + Copy/Regenerate/Like/Dislike Buttons */}
+              {/* Branch navigator + Copy/Regenerate/Like/Dislike Buttons.
+                  Aborted messages still get actions when they carry partial
+                  content — user can copy the snippet or regenerate to retry. */}
               {message.type === 'bot' && !message.isStreaming && !message.isAborted && (
                 <div className='flex items-center justify-between mt-4'>
                   {branchInfo && onBranchNavigate ? (
@@ -1372,7 +1404,10 @@ const MessageContent = ({
 
       {/* v2: Tool Invocations */}
       {message.toolInvocations && message.toolInvocations.length > 0 && (
-        <ToolInvocationList invocations={message.toolInvocations} />
+        <ToolInvocationList
+          invocations={message.toolInvocations}
+          messageAborted={!!message.isAborted}
+        />
       )}
 
       {/* v2: Pending Actions (Human-in-the-loop) */}

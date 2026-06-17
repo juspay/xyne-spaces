@@ -388,11 +388,18 @@ function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
 
 /**
  * Stream a claw agent run to the provided Express Response (SSE).
+ *
+ * An optional AbortSignal lets the caller tear down the upstream fetch when
+ * the dashboard's SSE connection drops (or it explicitly cancels mid-run).
+ * Without it, claw-auth would keep its own connection to claw open while
+ * we hold the SSE socket on res — wasting work and leaving partial state
+ * un-persisted because the `done` callback never reaches us.
  */
 export async function runClawAgentStream(
   req: { headers?: { cookie?: string } },
   res: Response,
-  request: ClawRunRequest
+  request: ClawRunRequest,
+  opts: { signal?: AbortSignal } = {}
 ): Promise<ClawRunStreamResult> {
   const clawAuthUrl = `${getClawBaseUrl()}/claw/api/v1/run/stream`;
   const clawConversationId = request.sessionId || `chat-${randomUUID()}`;
@@ -453,6 +460,7 @@ export async function runClawAgentStream(
       ...cookieHeader,
     },
     body: JSON.stringify(payload),
+    ...(opts.signal ? { signal: opts.signal } : {}),
   });
 
   if (!response.ok) {
@@ -473,6 +481,7 @@ export async function runClawAgentStream(
 
   try {
     while (true) {
+      if (opts.signal?.aborted) break;
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -587,12 +596,61 @@ export async function runClawAgentStream(
         }
       }
     }
+  } catch (err) {
+    if (opts.signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+      logger.info(`[ClawAgentService] Stream aborted by caller (events=${eventCount})`);
+      return { success: false, sessionId: clawConversationId, error: 'aborted' };
+    }
+    throw err;
   } finally {
-    reader.releaseLock();
+    try { reader.releaseLock(); } catch { /* already released */ }
   }
 
   logger.info(`[ClawAgentService] Stream complete, events=${eventCount}`);
   return { success: true, sessionId: clawConversationId };
+}
+
+/**
+ * Cancel an in-flight claw agent run by sessionId.
+ *
+ * Forwards to claw-auth's `/run/stream/cancel`, which validates ownership and
+ * calls claw's `/run/:sessionId/cancel`. Claw aborts the run's AbortController,
+ * the agent loop throws RunCancelledError, and the resulting `done` frame with
+ * status="cancelled" carries the partial assistant text + tool invocations so
+ * the message store gets the in-flight state instead of nothing.
+ */
+export async function cancelClawAgentRun(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  sessionId: string
+): Promise<{ success: boolean; status: string; error?: string }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/run/stream/cancel`;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...extractUserIdHeader(userId),
+        ...extractCookieHeader(req),
+      },
+      body: JSON.stringify({ sessionId }),
+    });
+    const json = (await response.json().catch(() => ({}))) as {
+      success?: boolean;
+      data?: { status?: string };
+      error?: string;
+    };
+    if (!response.ok || !json.success) {
+      const error = json.error ?? `Cancel failed: HTTP ${response.status}`;
+      logger.warn(`[ClawAgentService] cancelClawAgentRun ${sessionId}: ${error}`);
+      return { success: false, status: 'unknown', error };
+    }
+    return { success: true, status: json.data?.status ?? 'cancelled' };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`[ClawAgentService] cancelClawAgentRun ${sessionId} failed: ${msg}`);
+    return { success: false, status: 'unknown', error: msg };
+  }
 }
 
 // ============================================================================

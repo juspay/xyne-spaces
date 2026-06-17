@@ -12,6 +12,7 @@ import {
 } from '@/services/otel';
 import {
   runClawAgentStream,
+  cancelClawAgentRun,
   listClawConversations,
   getClawConversationMessages,
   getClawDebugArtifacts,
@@ -294,8 +295,21 @@ export class XyneAIControllerV2 {
           }
         }, 20_000);
 
+        // Tear down the upstream claw-auth fetch the moment the dashboard's
+        // SSE connection drops (e.g. tab closed). Without this, claw-auth →
+        // claw keep running, the `done` callback can race past us, and partial
+        // state never reaches the message store. The explicit /cancel endpoint
+        // is the well-behaved path; this is the safety net for raw disconnects.
+        const upstreamAbort = new AbortController();
+        const onClientClose = () => {
+          if (!upstreamAbort.signal.aborted) upstreamAbort.abort();
+        };
+        res.on('close', onClientClose);
+
         try {
-          const result = await runClawAgentStream(req, res, runReq);
+          const result = await runClawAgentStream(req, res, runReq, {
+            signal: upstreamAbort.signal,
+          });
           if (result.error) {
             status = 'error';
             res.write(
@@ -317,6 +331,7 @@ export class XyneAIControllerV2 {
             streamError instanceof Error ? streamError.message : String(streamError);
           res.write(`data: ${JSON.stringify({ type: 'error', error: errorMessage })}\n\n`);
         } finally {
+          res.off('close', onClientClose);
           clearInterval(pingInterval);
         }
 
@@ -354,6 +369,38 @@ export class XyneAIControllerV2 {
       }
     } catch (error) {
       this.handleError(res, error, 'xyne-ai v2 query');
+    }
+  };
+
+  /**
+   * POST /api/xyne-ai/v2/cancel/:sessionId
+   *
+   * Stop an in-flight Ask AI v2 run. Forwards through claw-auth to claw, which
+   * aborts the run's AbortController. Claw then emits a done frame with
+   * status="cancelled" carrying partial assistant text + tool invocations, and
+   * claw-auth's existing callback persists that partial state — so the
+   * conversation reload still shows whatever was generated before the stop.
+   */
+  cancelRun = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = (req as any).user?.id as string | undefined;
+      if (!userId) {
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
+      const sessionId = req.params['sessionId'];
+      if (!sessionId) {
+        res.status(400).json({ error: 'sessionId is required' });
+        return;
+      }
+      const result = await cancelClawAgentRun(req, userId, sessionId);
+      if (!result.success) {
+        res.status(502).json({ success: false, error: result.error ?? 'Cancel failed' });
+        return;
+      }
+      res.json({ success: true, sessionId, status: result.status });
+    } catch (error) {
+      this.handleError(res, error, 'xyne-ai v2 cancel');
     }
   };
 

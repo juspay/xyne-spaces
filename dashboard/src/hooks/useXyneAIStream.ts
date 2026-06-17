@@ -125,7 +125,22 @@ export const useXyneAIStream = ({
       const matchesSlot = state.streamSlotKey === slotRef;
       const matchesTrackedStream =
         currentStreamIdRef.current !== null && state.streamId === currentStreamIdRef.current;
-      if (!matchesSlot && !matchesTrackedStream) return;
+      // Also match by sessionId: a stream created with a draft slot key gets
+      // its server sessionId mid-flight (see meta-event handler in the
+      // manager). If the user switched conversations before the slot key
+      // promotion landed everywhere, we can still recognise "this stream
+      // belongs to the conversation this hook represents" by sessionId.
+      const matchesBySessionId =
+        !!state.sessionId &&
+        !!conversationIdRef.current &&
+        state.sessionId === conversationIdRef.current;
+      if (!matchesSlot && !matchesTrackedStream && !matchesBySessionId) return;
+
+      // Once we've matched by anything, lock onto the streamId so future
+      // notifications stay routed even if slot key / sessionId change again.
+      if (currentStreamIdRef.current !== state.streamId) {
+        currentStreamIdRef.current = state.streamId;
+      }
 
       setMessages(state.messages);
 
@@ -143,8 +158,17 @@ export const useXyneAIStream = ({
     const builtThreadId = threadId;
     let activeStream = xyneAIStreamManager.getActiveStream(builtThreadId);
     if (!activeStream) {
+      // Search every active stream — match by slot key, by stream's own
+      // sessionId, or by the conversationId this hook is bound to. Don't
+      // restrict to status==='streaming' — a stream that completed while we
+      // were on another conversation still lives in the manager (the
+      // activeStreams TTL is 5min) and we want to adopt its messages.
+      const sessionToMatch = conversationIdRef.current;
       for (const s of xyneAIStreamManager.getAllActiveStreams().values()) {
-        if (s.streamSlotKey === streamSessionKey && s.status === 'streaming') {
+        if (
+          s.streamSlotKey === streamSessionKey ||
+          (sessionToMatch && s.sessionId === sessionToMatch)
+        ) {
           activeStream = s;
           break;
         }
@@ -234,6 +258,8 @@ export const useXyneAIStream = ({
       // Get current messages synchronously
       // Strip any still-streaming messages — they may not have been cleared yet if abortCurrentRequest
       // was called just before submitQuery (React batches the state update, so prev still shows them).
+      // Preserve whatever content was streamed; only fall back to a placeholder
+      // when there's nothing at all (i.e. abort before the first delta).
       const rawMessages = await syncMessagesRef();
       const currentMessages = rawMessages.map(msg =>
         msg.isStreaming
@@ -241,7 +267,7 @@ export const useXyneAIStream = ({
               ...msg,
               isStreaming: false,
               isAborted: true,
-              content: msg.content || 'Query aborted by user.',
+              content: msg.content || msg.streamingContent || '',
             }
           : msg,
       );

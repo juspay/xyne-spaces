@@ -238,6 +238,16 @@ export class XyneAIControllerFactory {
   listAccessibleAgents = async (req: Request, res: Response): Promise<void> => {
     return xyneAIControllerV2.listAccessibleAgents(req, res);
   };
+
+  /**
+   * POST /api/xyne-ai/v2/cancel/:sessionId
+   * Cancel an in-flight v2 (claw) run; partial state is persisted via the
+   * cancelled `done` frame on the upstream stream. Sessions are always claw
+   * sessions (v1 ask-ai has no sessionId to cancel), so this just delegates.
+   */
+  cancelRun = async (req: Request, res: Response): Promise<void> => {
+    return xyneAIControllerV2.cancelRun(req, res);
+  };
 }
 
 export const xyneAIControllerFactory = new XyneAIControllerFactory();

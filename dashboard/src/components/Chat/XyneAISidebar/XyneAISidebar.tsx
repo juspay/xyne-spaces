@@ -60,7 +60,7 @@ import {
   type ContextSelections,
   toAttachedContext,
 } from './components/ContextPickerPanel';
-import { MessageItem } from './components/MessageItem';
+import { MessageItem, ConversationToolInvocationsContext } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
 import { XyneAIOnboardingHeader } from './components/XyneAIOnboardingHeader';
@@ -212,12 +212,63 @@ const XyneAISidebar = ({
     () => messages.some((m: Message) => m.isStreaming),
     [messages],
   );
+
+  // Per-render render-precompute hoisted out of the inline IIFE in JSX.
+  // Two O(n) passes over `messages` and `displayMessages` that the JSX used to
+  // do on every render — every streaming delta was triggering them, blowing
+  // out the main thread on long conversations. They only depend on the two
+  // message lists, so memoize and let React skip the work when nothing
+  // actually changed since the last frame.
+  const { lastBotIndex, lastUserIndex, siblingIndexById, siblingCountById } = useMemo(() => {
+    let botIdx = -1;
+    let userIdx = -1;
+    for (let i = displayMessages.length - 1; i >= 0; i--) {
+      if (botIdx === -1 && displayMessages[i]?.type === 'bot') botIdx = i;
+      if (userIdx === -1 && displayMessages[i]?.type === 'user') userIdx = i;
+      if (botIdx !== -1 && userIdx !== -1) break;
+    }
+    const indexById = new Map<string, number>();
+    const countById = new Map<string, number>();
+    const groups = new Map<string, string[]>();
+    for (const m of messages) {
+      const key = m.parentId ?? BRANCH_ROOT_KEY;
+      const group = groups.get(key);
+      if (group) group.push(m.id);
+      else groups.set(key, [m.id]);
+    }
+    for (const [, group] of groups) {
+      group.forEach((id, i) => {
+        indexById.set(id, i);
+        countById.set(id, group.length);
+      });
+    }
+    return {
+      lastBotIndex: botIdx,
+      lastUserIndex: userIdx,
+      siblingIndexById: indexById,
+      siblingCountById: countById,
+    };
+  }, [messages, displayMessages]);
   const streamingBotTurnIndex = useMemo(() => {
     const index = displayMessages.findIndex(
       message => message.type === 'bot' && message.isStreaming,
     );
     if (index < 0) return -1;
     return displayMessages.slice(0, index + 1).filter(message => message.type === 'bot').length - 1;
+  }, [displayMessages]);
+
+  // Flat union of every visible message's toolInvocations. Powers
+  // ConversationToolInvocationsContext so an inline citation chip rendered in
+  // turn N can resolve a `toolCallId` that was emitted back in turn 1.
+  // Keyed on the toolCallId set so a streaming delta that only mutates a
+  // tool's payload doesn't churn this list's identity unless a tool was
+  // added/removed.
+  const conversationToolInvocations = useMemo(() => {
+    const out: NonNullable<Message['toolInvocations']> = [];
+    for (const m of displayMessages) {
+      if (m.toolInvocations?.length) out.push(...m.toolInvocations);
+    }
+    return out;
   }, [displayMessages]);
 
   // Legacy conversation: no message has parentId — branching features disabled
@@ -892,8 +943,21 @@ const XyneAISidebar = ({
         xyneAIStreamManager.getActiveStream(streamTid) ??
         xyneAIStreamManager.findActiveStreamBySessionId(conversation.sessionId);
 
-      if (live && live.status === 'streaming') {
-        setMessages(live.messages);
+      // Adopt the live manager state for BOTH 'streaming' and 'completed' — as
+      // long as the entry hasn't been swept (5 minute window after the
+      // completeStream change). For completed streams this means we render the
+      // just-finished reply instantly on switch-back with no /messages roundtrip
+      // and no chance of the server missing the final bot message because the
+      // assistant-message INSERT hasn't replicated yet. The streaming case also
+      // keeps the live subscription wired so deltas continue to flow.
+      if (live && (live.status === 'streaming' || live.status === 'completed')) {
+        // Defense in depth: even after completeStream's per-message
+        // isStreaming normalization, ensure no stray flag survives — older
+        // streams that completed before the fix can still sit in IndexedDB.
+        const normalized = live.messages.map(m =>
+          live.status === 'completed' && m.isStreaming ? { ...m, isStreaming: false } : m,
+        );
+        setMessages(normalized);
         setDebugEvents(live.debugEvents);
         setDebugArtifactsReadyVersion(live.debugArtifactsReadyVersion);
         if (live.sessionId) {
@@ -917,7 +981,24 @@ const XyneAISidebar = ({
           conversation.sessionId,
           selectedAgentSlug,
         );
-        const messagesWithoutStreaming: Message[] = clawMessages.map(msg => ({
+        // Overlay any local-only messages from the manager. If the user sent a
+        // message in this conversation, switched away, came back AFTER the
+        // 5-minute manager TTL but BEFORE the server-side message INSERT
+        // committed, the /messages fetch will be missing it. The manager's
+        // IndexedDB-backed messages cover that window.
+        const liveForOverlay =
+          xyneAIStreamManager.getActiveStream(streamTid) ??
+          xyneAIStreamManager.findActiveStreamBySessionId(conversation.sessionId);
+        const serverIds = new Set(clawMessages.map(m => m.id));
+        const overlayed: Message[] = [...clawMessages];
+        if (liveForOverlay) {
+          for (const localMsg of liveForOverlay.messages) {
+            if (!serverIds.has(localMsg.id)) {
+              overlayed.push(localMsg);
+            }
+          }
+        }
+        const messagesWithoutStreaming: Message[] = overlayed.map(msg => ({
           ...msg,
           isStreaming: false,
         }));
@@ -1884,96 +1965,76 @@ const XyneAISidebar = ({
                             </p>
                           </div>
                         )}
-                        {(() => {
-                          let lastBotIndex = -1;
-                          let lastUserIndex = -1;
-                          for (let i = displayMessages.length - 1; i >= 0; i--) {
-                            if (lastBotIndex === -1 && displayMessages[i]?.type === 'bot') {
-                              lastBotIndex = i;
-                            }
-                            if (lastUserIndex === -1 && displayMessages[i]?.type === 'user') {
-                              lastUserIndex = i;
-                            }
-                            if (lastBotIndex !== -1 && lastUserIndex !== -1) break;
-                          }
-                          const siblingIndexById = new Map<string, number>();
-                          const parentGroups = new Map<string, string[]>();
-                          for (const m of messages) {
-                            const key = m.parentId ?? BRANCH_ROOT_KEY;
-                            const group = parentGroups.get(key);
-                            if (group) {
-                              group.push(m.id);
-                            } else {
-                              parentGroups.set(key, [m.id]);
-                            }
-                          }
-                          for (const [, group] of parentGroups) {
-                            group.forEach((id, i) => siblingIndexById.set(id, i));
-                          }
-                          return displayMessages.map((message: Message, index: number) => {
-                            const isLatestBotMessage =
-                              message.type === 'bot' && index === lastBotIndex;
-                            const isLatestUserMessage =
-                              message.type === 'user' && index === lastUserIndex;
-                            const parentKey = message.parentId ?? BRANCH_ROOT_KEY;
-                            const groupIds = parentGroups.get(parentKey) ?? [];
-                            const siblingCount = groupIds.length;
-                            const siblingIndex = siblingIndexById.get(message.id) ?? 0;
-                            const hasBranches = siblingCount > 1;
-                            const botTurnIndex =
-                              message.type === 'bot'
-                                ? displayMessages
-                                    .slice(0, index + 1)
-                                    .filter(item => item.type === 'bot').length - 1
-                                : -1;
-                            return (
-                              <MessageItem
-                                key={message.id}
-                                message={message}
-                                onFeedback={(id, type) => void handleFeedback(id, type)}
-                                onCitationClick={handleCitationClick}
-                                onSummarizerCitationClick={handleSummarizerCitationClick}
-                                feedbackValue={feedbackMap[message.id] || null}
-                                onRegenerate={
-                                  !isLegacyConversation && isLatestBotMessage
-                                    ? () => void handleRegenerate()
-                                    : undefined
-                                }
-                                onEditSubmit={
-                                  !isLegacyConversation && isLatestUserMessage
-                                    ? (newContent: string) =>
-                                        void handleEditMessage(message.id, newContent)
-                                    : undefined
-                                }
-                                onEditMobile={
-                                  !isLegacyConversation && isLatestUserMessage && isMobile
-                                    ? () => handleEditMobile(message.id)
-                                    : undefined
-                                }
-                                isLatestBotMessage={isLatestBotMessage}
-                                branchInfo={
-                                  !isLegacyConversation && hasBranches
-                                    ? { index: siblingIndex, total: siblingCount }
-                                    : undefined
-                                }
-                                onBranchNavigate={
-                                  !isLegacyConversation && hasBranches
-                                    ? (dir: 'prev' | 'next') =>
-                                        handleBranchNavigate(message.id, dir)
-                                    : undefined
-                                }
-                                onDebug={
-                                  isV2 && message.type === 'bot'
-                                    ? () => {
-                                        setDebugTurnIndex(botTurnIndex);
-                                        setShowDebugger(true);
-                                      }
-                                    : undefined
-                                }
-                              />
-                            );
-                          });
-                        })()}
+                        <ConversationToolInvocationsContext.Provider
+                          value={conversationToolInvocations}
+                        >
+                          {(() => {
+                            // lastBotIndex / lastUserIndex / siblingIndexById are
+                            // computed in the memo above; just consume here so this
+                            // IIFE doesn't re-walk both lists on every render.
+                            return displayMessages.map((message: Message, index: number) => {
+                              const isLatestBotMessage =
+                                message.type === 'bot' && index === lastBotIndex;
+                              const isLatestUserMessage =
+                                message.type === 'user' && index === lastUserIndex;
+                              const siblingCount = siblingCountById.get(message.id) ?? 0;
+                              const siblingIndex = siblingIndexById.get(message.id) ?? 0;
+                              const hasBranches = siblingCount > 1;
+                              const botTurnIndex =
+                                message.type === 'bot'
+                                  ? displayMessages
+                                      .slice(0, index + 1)
+                                      .filter(item => item.type === 'bot').length - 1
+                                  : -1;
+                              return (
+                                <MessageItem
+                                  key={message.id}
+                                  message={message}
+                                  onFeedback={(id, type) => void handleFeedback(id, type)}
+                                  onCitationClick={handleCitationClick}
+                                  onSummarizerCitationClick={handleSummarizerCitationClick}
+                                  feedbackValue={feedbackMap[message.id] || null}
+                                  onRegenerate={
+                                    !isLegacyConversation && isLatestBotMessage
+                                      ? () => void handleRegenerate()
+                                      : undefined
+                                  }
+                                  onEditSubmit={
+                                    !isLegacyConversation && isLatestUserMessage
+                                      ? (newContent: string) =>
+                                          void handleEditMessage(message.id, newContent)
+                                      : undefined
+                                  }
+                                  onEditMobile={
+                                    !isLegacyConversation && isLatestUserMessage && isMobile
+                                      ? () => handleEditMobile(message.id)
+                                      : undefined
+                                  }
+                                  isLatestBotMessage={isLatestBotMessage}
+                                  branchInfo={
+                                    !isLegacyConversation && hasBranches
+                                      ? { index: siblingIndex, total: siblingCount }
+                                      : undefined
+                                  }
+                                  onBranchNavigate={
+                                    !isLegacyConversation && hasBranches
+                                      ? (dir: 'prev' | 'next') =>
+                                          handleBranchNavigate(message.id, dir)
+                                      : undefined
+                                  }
+                                  onDebug={
+                                    isV2 && message.type === 'bot'
+                                      ? () => {
+                                          setDebugTurnIndex(botTurnIndex);
+                                          setShowDebugger(true);
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              );
+                            });
+                          })()}
+                        </ConversationToolInvocationsContext.Provider>
                         {aiOnboarding.isActive && visibleSuggestions.length > 0 && (
                           <div className='mt-4 flex flex-wrap gap-2'>
                             {visibleSuggestions.map(suggestion => (

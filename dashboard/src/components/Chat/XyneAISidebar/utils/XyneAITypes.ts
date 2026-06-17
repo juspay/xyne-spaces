@@ -135,7 +135,7 @@ export interface ToolInvocation {
   toolCallId?: string;
   args: Record<string, unknown>;
   result?: string;
-  status: 'running' | 'completed' | 'error';
+  status: 'running' | 'completed' | 'error' | 'cancelled';
   durationMs: number;
   isError?: boolean;
   subagentName?: string;

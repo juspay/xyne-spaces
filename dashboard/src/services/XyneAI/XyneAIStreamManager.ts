@@ -4,7 +4,7 @@
  * Allows streams to persist across sidebar open/close cycles
  * Uses Web Worker for streaming to run on a separate thread
  */
-import { BASE_URL } from '../clients/apiClient';
+import { apiInstance, BASE_URL } from '../clients/apiClient';
 import { trackCitationsGenerated } from '../otel/xyneAIMetrics';
 import { parsePartialSummarizerJSON } from '../../utils/partialJsonParser';
 import {
@@ -698,13 +698,21 @@ class XyneAIStreamManager {
    */
   public findActiveStreamBySessionId(sessionId: string): StreamState | null {
     if (!sessionId) return null;
+    // Match by sessionId or slot key, regardless of status. The TTL on
+    // activeStreams (set in completeStream) is now 5 minutes, so completed
+    // streams within that window are intentionally retained for switch-back.
+    // Restricting to status==='streaming' here was hiding those completed
+    // streams from handleLoadConversation's live-state adoption path, forcing
+    // a stale server fetch instead of using the in-memory rendered messages.
+    // Prefer a streaming match if both a streaming and a completed match
+    // exist (rare; happens during regenerate-and-switch races).
+    let completed: StreamState | null = null;
     for (const state of this.activeStreams.values()) {
-      if (state.status !== 'streaming') continue;
-      if (state.sessionId === sessionId || state.streamSlotKey === sessionId) {
-        return state;
-      }
+      if (state.sessionId !== sessionId && state.streamSlotKey !== sessionId) continue;
+      if (state.status === 'streaming') return state;
+      if (!completed) completed = state;
     }
-    return null;
+    return completed;
   }
 
   /**
@@ -930,13 +938,35 @@ class XyneAIStreamManager {
     switch (data['type']) {
       case 'start':
         if (data['sessionId'] && typeof data['sessionId'] === 'string') {
-          result.sessionId = data['sessionId'];
-          currentState.sessionId = data['sessionId'];
+          const newSessionId = data['sessionId'];
+          result.sessionId = newSessionId;
+          currentState.sessionId = newSessionId;
+          // CRITICAL: also promote the streamSlotKey to the server-issued
+          // sessionId if we're currently still on a draft key. Without this,
+          // every notification the manager sends carries
+          // `streamSlotKey = "draft-..."` while the conversation it now
+          // belongs to is listening for the real sessionId — so switching
+          // away mid-stream and switching back drops every subsequent chunk
+          // at the subscriber filter (useXyneAIStream.ts). The sidebar's
+          // migrate-effect only runs after streaming finishes, which is too
+          // late to recover the in-flight events.
+          //
+          // Only promote when the current slot key looks like a draft (so we
+          // don't clobber a real key that's already correct). Draft keys are
+          // produced by newStreamSlotKey() / `draft-...` prefix; anything
+          // matching the new sessionId is already aligned.
+          const looksLikeDraft =
+            !currentState.streamSlotKey ||
+            currentState.streamSlotKey.startsWith('draft-') ||
+            currentState.streamSlotKey !== newSessionId;
+          if (looksLikeDraft && currentState.streamSlotKey !== newSessionId) {
+            currentState.streamSlotKey = newSessionId;
+          }
           // Store sessionId on the bot message for later use (e.g., action approval)
           updateMessages(prev =>
             prev.map(msg =>
               msg.id === botMessageId && msg.type === 'bot'
-                ? { ...msg, sessionId: data['sessionId'] as string }
+                ? { ...msg, sessionId: newSessionId }
                 : msg,
             ),
           );
@@ -1475,10 +1505,31 @@ class XyneAIStreamManager {
     }
 
     currentState.status = 'completed';
+    // Clear isStreaming on the bot message itself. The per-chunk handler also
+    // does this but ONLY runs while a subscriber is alive; if the user
+    // switched conversations mid-stream, that subscriber unhooked and the bot
+    // message in currentState.messages still has isStreaming=true. When the
+    // user switches back, handleLoadConversation reads currentState and
+    // renders a permanently-spinning bot. Fix it at the source: the stream is
+    // done, mark every still-streaming message done. Use streamingContent as
+    // the final content when content is empty (matches the chunk handler).
+    currentState.messages = currentState.messages.map(m => {
+      if (!m.isStreaming) return m;
+      const finalContent =
+        m.content && m.content.length > 0
+          ? m.content
+          : typeof m.streamingContent === 'string' && m.streamingContent.length > 0
+            ? m.streamingContent
+            : m.content;
+      return { ...m, isStreaming: false, content: finalContent };
+    });
     this.notifySubscribers({ ...currentState });
 
     // Persist completion
     void xyneAIStreamStorage.completeStream(streamId, finalResponse);
+    // Also persist the cleaned messages so a page refresh / IndexedDB rehydrate
+    // doesn't bring back the streaming flag.
+    void xyneAIStreamStorage.updateMessages(streamId, currentState.messages);
 
     // Re-fetch messages from backend to get authoritative final state
     // This fixes rendering misalignment issues caused by partial/broken markdown
@@ -1498,15 +1549,26 @@ class XyneAIStreamManager {
       this.showCompletionToast(notifyKey, finalResponse, currentState.sessionId || null);
     }
 
-    // Cleanup after a delay — only if this stream is still the active one for this thread
-    // (a new stream may have replaced it under the same threadId key)
-    setTimeout(() => {
-      const current = this.activeStreams.get(threadId);
-      if (current && current.streamId === streamId) {
-        this.activeStreams.delete(threadId);
-      }
-      this.abortControllers.delete(streamId);
-    }, 5000);
+    // Cleanup after a delay — only if this stream is still the active one for
+    // this thread (a new stream may have replaced it under the same threadId
+    // key). The window matters: while the entry is in `activeStreams`,
+    // handleLoadConversation + the useXyneAIStream hook can re-bind to it on
+    // switch-back and the user sees the completed reply immediately. After it
+    // disappears the loader falls through to the backend /messages fetch,
+    // which is slower and (in the current pipeline) sometimes missing the
+    // last bot reply. 5s was too aggressive — a user who switches to another
+    // conv to peek at it and comes back loses the reply. Keep it for 5 minutes;
+    // a completed stream's memory footprint is tiny.
+    setTimeout(
+      () => {
+        const current = this.activeStreams.get(threadId);
+        if (current && current.streamId === streamId) {
+          this.activeStreams.delete(threadId);
+        }
+        this.abortControllers.delete(streamId);
+      },
+      5 * 60 * 1000,
+    );
   }
 
   /**
@@ -1684,9 +1746,37 @@ class XyneAIStreamManager {
   }
 
   /**
-   * Abort a stream
+   * Abort a stream.
+   *
+   * Send the upstream cancel (so the agent stops and the cancelled `done`
+   * frame persists partial state to chat_messages), then abort the local
+   * fetch / worker. We deliberately use `state.traceId` — not
+   * `state.sessionId` — because the backend looks up agent_runs by claw's
+   * run UUID, which lives on traceId; sessionId here is the conversation id.
    */
   public abortStream(streamId: string): void {
+    // Snapshot the cancel key before we mutate state below. The state lookup
+    // below may not happen if the stream is no longer in activeStreams (e.g.
+    // late retry), but we still want to fire the backend cancel.
+    let cancelRunId: string | null = null;
+    for (const state of this.activeStreams.values()) {
+      if (state.streamId === streamId) {
+        cancelRunId = state.traceId?.trim() || null;
+        break;
+      }
+    }
+    if (cancelRunId) {
+      // Fire-and-forget; never block the UI on this. If traceId is empty
+      // (very early abort before the upstream `run` event arrived), skip —
+      // there's no claw sessionId for the backend to cancel yet. The
+      // backend's res.on('close') safety net still tears down upstream when
+      // we abort the fetch below.
+      void apiInstance.post(`/xyne-ai/v2/cancel/${encodeURIComponent(cancelRunId)}`).catch(() => {
+        // Best-effort. The local abort still happens; the backend's
+        // res.on('close') safety net will tear down upstream too.
+      });
+    }
+
     const abortController = this.abortControllers.get(streamId);
     if (abortController) {
       abortController.abort();
@@ -1705,12 +1795,16 @@ class XyneAIStreamManager {
       if (state.streamId === streamId) {
         state.status = 'aborted';
 
-        // Update messages to show aborted state
+        // Preserve whatever was streamed so far — tool rows + partial assistant
+        // text. The backend persists the same content to chat_messages with
+        // status="cancelled", so reload-from-server matches.
         state.messages = state.messages.map(msg =>
           msg.isStreaming
             ? {
                 ...msg,
-                content: 'Query aborted by user.',
+                // Keep streamed content; fall back to streamingContent if
+                // content hasn't been finalized yet.
+                content: msg.content || msg.streamingContent || '',
                 isStreaming: false,
                 isAborted: true,
                 streamingContent: '',
@@ -1720,7 +1814,7 @@ class XyneAIStreamManager {
 
         this.notifySubscribers({ ...state });
 
-        // Persist abort
+        // Persist abort (with whatever partial content lives in messages now)
         void xyneAIStreamStorage.abortStream(streamId);
 
         // Cleanup

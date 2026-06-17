@@ -1,12 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Loader2, ChevronRight, Check, AlertCircle, Link2 } from 'lucide-react';
+import { Loader2, ChevronRight, Check, AlertCircle, Link2, CircleSlash } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ToolInvocation, ClawCitation } from '../utils/XyneAITypes';
 import { buildClawCitationUrl, getClawCitationLabel } from '../utils/clawCitationUrl';
 
 interface ToolInvocationListProps {
   invocations: ToolInvocation[];
+  /** When the parent message was cancelled mid-stream, any invocation still in
+   *  status='running' should render as cancelled (not as a perpetual spinner).
+   *  Backend marks the message status='cancelled', but in-flight tool rows it
+   *  emitted via pushInvocation never got their tool_execution_end frame —
+   *  they stay 'running' in the array. Normalize at the render boundary. */
+  messageAborted?: boolean;
 }
 
 /**
@@ -26,11 +32,24 @@ function humanizeToolName(raw: string): string {
     .join(' ');
 }
 
-export function ToolInvocationList({ invocations }: ToolInvocationListProps): ReactElement {
+export function ToolInvocationList({
+  invocations,
+  messageAborted = false,
+}: ToolInvocationListProps): ReactElement {
+  // Normalize once per render — child invocations inside subagents inherit the
+  // cancelled state from their parent message via this single sweep, so the
+  // tree walker below doesn't need a second pass.
+  const normalized = useMemo<ToolInvocation[]>(() => {
+    if (!messageAborted) return invocations;
+    return invocations.map(inv =>
+      inv.status === 'running' ? { ...inv, status: 'cancelled' as const } : inv,
+    );
+  }, [invocations, messageAborted]);
+
   const roots: ToolInvocation[] = [];
   const childrenByParent = new Map<string, ToolInvocation[]>();
 
-  for (const inv of invocations) {
+  for (const inv of normalized) {
     if (inv.parentToolCallId) {
       const list = childrenByParent.get(inv.parentToolCallId) ?? [];
       list.push(inv);
@@ -120,6 +139,7 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
 
   const isSubagent = children && children.length > 0;
   const isRunning = invocation.status === 'running';
+  const isCancelled = invocation.status === 'cancelled';
   const runningChildren = children?.filter(c => c.status === 'running').length ?? 0;
   const completedChildren = (children?.length ?? 0) - runningChildren;
 
@@ -152,6 +172,11 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
           {/* Status indicator */}
           {isRunning ? (
             <Loader2 size={12} className='animate-spin shrink-0 text-blue-500' />
+          ) : isCancelled ? (
+            // Subtle Stopped marker — same visual weight as the success Check
+            // but always visible, so a user scanning a cancelled message sees
+            // which tools were mid-flight when they hit Stop.
+            <CircleSlash size={12} className='shrink-0 text-muted-foreground' />
           ) : invocation.isError ? (
             <AlertCircle size={12} className='shrink-0 text-destructive' />
           ) : (
@@ -181,7 +206,7 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
 
           {/* Duration */}
           <span className='ml-auto shrink-0 text-[10px] text-muted-foreground/60 tabular-nums'>
-            {isRunning ? '…' : `${invocation.durationMs}ms`}
+            {isRunning ? '…' : isCancelled ? 'stopped' : `${invocation.durationMs}ms`}
           </span>
         </div>
       </button>
@@ -201,8 +226,9 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
             </div>
           )}
 
-          {/* Result */}
-          {!isRunning && (
+          {/* Result. Cancelled rows have no result body — show a one-line
+              "Stopped before completion" instead of an empty pre block. */}
+          {!isRunning && !isCancelled && (
             <div>
               <div className='text-muted-foreground/70 mb-0.5 text-[10px] uppercase tracking-wide'>
                 Result
@@ -216,6 +242,11 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
               >
                 {invocation.result || '(no result)'}
               </pre>
+            </div>
+          )}
+          {isCancelled && (
+            <div className='text-[10px] italic text-muted-foreground/70'>
+              Stopped before completion
             </div>
           )}
 
