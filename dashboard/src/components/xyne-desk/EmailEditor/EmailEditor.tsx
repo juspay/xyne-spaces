@@ -90,6 +90,7 @@ interface EmailEditorProps {
   uploadAndInsertInlineImages?: (images: File[]) => void | Promise<void>;
   onSendShortcut?: () => void;
   onBlur?: () => void;
+  onFocus?: () => void;
   onEditorReady?: (editor: Editor) => void;
   placeholder?: string;
   disabled?: boolean;
@@ -114,6 +115,7 @@ export const EmailEditor = ({
   uploadAndInsertInlineImages,
   onSendShortcut,
   onBlur,
+  onFocus,
   onEditorReady,
   placeholder = 'Compose email...',
   disabled = false,
@@ -134,6 +136,7 @@ export const EmailEditor = ({
     uploadAndInsertInlineImages,
     onSendShortcut,
     onBlur,
+    onFocus,
     onEditorReady,
     onCitationClick,
     onSelectionRefine,
@@ -144,6 +147,7 @@ export const EmailEditor = ({
     uploadAndInsertInlineImages,
     onSendShortcut,
     onBlur,
+    onFocus,
     onEditorReady,
     onCitationClick,
     onSelectionRefine,
@@ -296,6 +300,7 @@ export const EmailEditor = ({
       cb.current.onChange(html);
     },
     onBlur: () => cb.current.onBlur?.(),
+    onFocus: () => cb.current.onFocus?.(),
     editorProps: {
       scrollThreshold: 0,
       scrollMargin: 16,
@@ -383,7 +388,7 @@ export const EmailEditor = ({
   }, [editor, disabled, readOnly]);
 
   return (
-    <div ref={containerRef} className={`relative flex flex-col min-h-0 ${className}`}>
+    <div ref={containerRef} className={`relative flex flex-col ${className}`}>
       {/* Selection refine popover */}
       {!bubbleToolbar && selectionPopover && showSelectionRefine && !disabled && !readOnly && (
         <div
