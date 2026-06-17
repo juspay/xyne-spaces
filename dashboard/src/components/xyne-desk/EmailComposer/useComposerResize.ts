@@ -9,6 +9,11 @@ interface UseComposerResizeOptions {
    * unusable size.
    */
   useTallMinHeight: boolean;
+  /**
+   * When any recipient field is expanded, treat min-height the same as
+   * tallMinHeight so the editor stays usable.
+   */
+  recipientExpanded?: boolean;
   initialHeight?: number;
   defaultMinHeight?: number;
   tallMinHeight?: number;
@@ -21,6 +26,8 @@ interface UseComposerResizeReturn {
   isResizing: boolean;
   handlePointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   resizeTargetRef: React.RefObject<HTMLDivElement | null>;
+  /** Computed minimum height based on current conditions */
+  minHeight: number;
 }
 
 /**
@@ -28,9 +35,12 @@ interface UseComposerResizeReturn {
  * starting positions, and a pointer-captured drag lifecycle so quick drags
  * can't outrun listener setup or get lost over the thread's iframes.
  */
+export const COMPOSER_MAX_HEIGHT_PX = 760;
+
 export const useComposerResize = ({
   enabled,
   useTallMinHeight,
+  recipientExpanded = false,
   initialHeight = 320,
   defaultMinHeight = 260,
   tallMinHeight = 440,
@@ -38,6 +48,7 @@ export const useComposerResize = ({
 }: UseComposerResizeOptions): UseComposerResizeReturn => {
   const [composerHeight, setComposerHeightState] = useState<number>(initialHeight);
   const [isResizing, setIsResizing] = useState<boolean>(false);
+  const minHeight = useTallMinHeight || recipientExpanded ? tallMinHeight : defaultMinHeight;
   const startYRef = useRef<number>(0);
   const startHeightRef = useRef<number>(initialHeight);
   const pendingHeightRef = useRef<number>(initialHeight);
@@ -69,7 +80,6 @@ export const useComposerResize = ({
     startHeightRef.current = pendingHeightRef.current;
     setIsResizing(true);
 
-    const minHeight = useTallMinHeight ? tallMinHeight : defaultMinHeight;
     const handle = event.currentTarget;
     const pointerId = event.pointerId;
     const target = resizeTargetRef.current;
@@ -159,5 +169,6 @@ export const useComposerResize = ({
     isResizing,
     handlePointerDown,
     resizeTargetRef,
+    minHeight,
   };
 };

@@ -80,7 +80,7 @@ export const RecipientSuggestionsDropdown = ({
         width: pos.width,
         maxHeight: DROPDOWN_MAX_HEIGHT,
       }}
-      className='z-50 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md'
+      className='z-50 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md recipient-suggestions-dropdown'
     >
       {suggestions.map((s, idx) => {
         const isHighlighted = idx === highlightedIndex;

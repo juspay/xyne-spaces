@@ -64,8 +64,6 @@ import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
 
 import { DraftCard } from '../DraftCard/DraftCard';
 import { EmailEditor } from '../EmailEditor/EmailEditor';
-import { EmailTagWithAvatar } from '../EmailTagWithAvatar/EmailTagWithAvatar';
-import { RecipientSuggestionsDropdown } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
 import { AIComposerPanel, AIRefineDropdown } from '../AIComposerPanel/AIComposerPanel';
 import {
   appendCitationBlock,
@@ -75,6 +73,7 @@ import {
 import { RecipientPillExtension } from '../../ui/TipTapExtensions';
 import { Popover } from '../../ui/Popover/Popover';
 import { RecipientMentionSelector } from './RecipientMentionSelector';
+import { RecipientField as RecipientFieldRow } from './RecipientField';
 
 import {
   buildContactPool,
@@ -84,7 +83,7 @@ import {
   type RecipientField,
   type ComposerEmail,
 } from './recipients';
-import { useComposerResize } from './useComposerResize';
+import { useComposerResize, COMPOSER_MAX_HEIGHT_PX } from './useComposerResize';
 import { useComposerDragDrop } from './useComposerDragDrop';
 import {
   MAX_EMAIL_ATTACHMENT_FILES,
@@ -92,6 +91,8 @@ import {
   parseFromField,
   stripHtml,
 } from './helpers';
+
+export const COMPOSER_RESIZE_STEP_PX = 20;
 
 /**
  * Per-feature toggles. Reply and compose enable different subsets — keep this
@@ -443,6 +444,33 @@ export const EmailComposer = ({
   const [bccEmails, setBccEmails] = useState<string[]>([]);
   const [showCc, setShowCc] = useState<boolean>(true);
   const [showBcc, setShowBcc] = useState<boolean>(false);
+  const [isToExpanded, setIsToExpanded] = useState(false);
+  const [isCcExpanded, setIsCcExpanded] = useState(false);
+  const [isBccExpanded, setIsBccExpanded] = useState(false);
+
+  const anyFieldExpanded = isToExpanded || isCcExpanded || isBccExpanded;
+
+  // Auto-collapse expanded recipient fields when clicking outside them or focusing the editor.
+  useEffect(() => {
+    if (!anyFieldExpanded) return undefined;
+    const handleDocumentClick = (e: MouseEvent): void => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      // Don't collapse if the click is inside any recipient field row, chip container,
+      // or the floating suggestion dropdown (rendered via React portal).
+      const insideTo = toRowRef.current?.contains(target);
+      const insideCc = ccRowRef.current?.contains(target);
+      const insideBcc = bccRowRef.current?.contains(target);
+      const insideDropdown =
+        target instanceof Element && target.closest('.recipient-suggestions-dropdown');
+      if (insideTo || insideCc || insideBcc || insideDropdown) return;
+      setIsToExpanded(false);
+      setIsCcExpanded(false);
+      setIsBccExpanded(false);
+    };
+    document.addEventListener('mousedown', handleDocumentClick);
+    return () => document.removeEventListener('mousedown', handleDocumentClick);
+  }, [anyFieldExpanded]);
 
   const clearRecipientsForDraft = useCallback(
     (storageKeys: Array<string | null | undefined>): void => {
@@ -595,9 +623,11 @@ export const EmailComposer = ({
     setComposerHeight,
     handlePointerDown: handleComposerResizePointerDown,
     resizeTargetRef,
+    minHeight,
   } = useComposerResize({
     enabled: isExpanded && !isSending,
     useTallMinHeight: aiDraft.isDraftActive || isInlineAIPanelOpen,
+    recipientExpanded: anyFieldExpanded,
     initialHeight: 480,
     defaultMinHeight: 360,
   });
@@ -655,6 +685,9 @@ export const EmailComposer = ({
         e.dataTransfer.setData('text/plain', email);
         setShowCc(true);
         setShowBcc(true);
+        if (field === 'to') setIsToExpanded(true);
+        if (field === 'cc') setIsCcExpanded(true);
+        if (field === 'bcc') setIsBccExpanded(true);
       },
     [],
   );
@@ -888,11 +921,16 @@ export const EmailComposer = ({
             bcc?: string[];
           };
           if (parsed && Array.isArray(parsed.to)) {
-            setToEmails(parsed.to);
-            setCcEmails(parsed.cc ?? []);
-            setBccEmails(parsed.bcc ?? []);
-            setShowCc(true);
-            setShowBcc((parsed.bcc ?? []).length > 0);
+            // Validate: only keep strings that look like email addresses.
+            // Stale/corrupted localStorage can contain non-email strings
+            // (e.g. labels, names) that blow up the recipient fields.
+            const isEmailLike = (s: unknown): s is string =>
+              typeof s === 'string' && s.includes('@');
+            setToEmails(parsed.to.filter(isEmailLike));
+            setCcEmails((parsed.cc ?? []).filter(isEmailLike));
+            setBccEmails((parsed.bcc ?? []).filter(isEmailLike));
+            setShowCc((parsed.cc ?? []).filter(isEmailLike).length > 0);
+            setShowBcc((parsed.bcc ?? []).filter(isEmailLike).length > 0);
             return;
           }
         }
@@ -1555,6 +1593,15 @@ export const EmailComposer = ({
       const target = e.target as Node | null;
       if (!target || !composerRef.current?.contains(target)) return;
 
+      if (anyFieldExpanded) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsToExpanded(false);
+        setIsCcExpanded(false);
+        setIsBccExpanded(false);
+        return;
+      }
+
       if (isInlineAIPanelOpen) {
         e.preventDefault();
         e.stopPropagation();
@@ -1577,6 +1624,7 @@ export const EmailComposer = ({
     setIsInlineAIPanelOpen,
     hasEmailBody,
     isDirty,
+    anyFieldExpanded,
   ]);
 
   const { isDraggingFiles, dragHandlers } = useComposerDragDrop(addFilesToAttachments);
@@ -1655,7 +1703,7 @@ export const EmailComposer = ({
       <div
         ref={resizeTargetRef}
         className={cn(
-          'relative flex flex-col overflow-hidden bg-background',
+          'relative flex flex-col overflow-y-auto overscroll-contain bg-background',
           features.showCardWrap ? 'rounded-2xl border border-border shadow-lg' : 'flex-1 min-h-0',
           isSending && 'pointer-events-none',
         )}
@@ -1673,10 +1721,27 @@ export const EmailComposer = ({
           <div
             className='h-4 flex-shrink-0 flex items-center justify-center cursor-row-resize touch-none'
             onPointerDown={handleComposerResizePointerDown}
-            onKeyDown={() => {}}
+            onKeyDown={e => {
+              if (!isExpanded || isSending) return;
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setComposerHeight(h =>
+                  Math.min(h + COMPOSER_RESIZE_STEP_PX, COMPOSER_MAX_HEIGHT_PX),
+                );
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setComposerHeight(h => Math.max(h - COMPOSER_RESIZE_STEP_PX, minHeight));
+              } else if (e.key === 'Home') {
+                e.preventDefault();
+                setComposerHeight(minHeight);
+              } else if (e.key === 'End') {
+                e.preventDefault();
+                setComposerHeight(COMPOSER_MAX_HEIGHT_PX);
+              }
+            }}
             role='button'
             tabIndex={0}
-            aria-label='Resize composer'
+            aria-label='Resize composer. Arrow Up to grow, Arrow Down to shrink, Home for minimum, End for maximum.'
           >
             <div className='h-1 w-14 rounded-full bg-muted-foreground/30' />
           </div>
@@ -1807,360 +1872,257 @@ export const EmailComposer = ({
                     <ReplyAll size={16} className='text-muted-foreground' />
                   </button>
                 )}
-                <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>To</span>
-
-                <div
-                  ref={toRowRef}
-                  className={`relative flex-1 flex flex-wrap items-center gap-1.5 cursor-text min-h-[28px] rounded-md transition-colors ${dragOverField === 'to' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
-                  onClick={() => toInputRef.current?.focus()}
-                  onKeyDown={e => {
-                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-                      e.preventDefault();
-                      toInputRef.current?.focus();
-                    }
-                  }}
-                  onDragOver={handleFieldDragOver('to')}
-                  onDragLeave={handleFieldDragLeave('to')}
-                  onDrop={handleFieldDrop('to')}
-                  role='button'
-                  tabIndex={0}
-                  data-track-category='SUPPORT'
-                  data-track-name='FocusToField'
-                  data-track-metadata={JSON.stringify({
-                    toEmails: toEmails,
-                    ccEmails: ccEmails,
-                    bccEmails: bccEmails,
+                <RecipientFieldRow
+                  className='flex-1 min-w-0'
+                  field='to'
+                  label='To'
+                  emails={toEmails}
+                  inputRef={toInputRef}
+                  rowRef={toRowRef}
+                  inputValue={toInputValue}
+                  expanded={isToExpanded}
+                  onExpandedChange={setIsToExpanded}
+                  onEmailsChangeUpdater={setToEmails}
+                  onInputValueChange={setToInputValue}
+                  suggestions={toSuggestions}
+                  activeSuggestField={activeSuggestField}
+                  highlightedIndex={suggestionIndex}
+                  onSuggestionSelect={handleSuggestionSelect}
+                  onHighlight={setSuggestionIndex}
+                  disabled={isSending}
+                  users={users}
+                  dragOverField={dragOverField}
+                  handleChipDragStart={handleChipDragStart}
+                  handleChipDragEnd={handleChipDragEnd}
+                  handleFieldDragOver={handleFieldDragOver}
+                  handleFieldDragLeave={handleFieldDragLeave}
+                  handleFieldDrop={handleFieldDrop}
+                  handleKeyDown={handleToKeyDown}
+                  handleBlur={handleToBlur}
+                  focusSuggest={focusSuggest}
+                  trackName='FocusToField'
+                  trackMetadata={{
+                    toEmails,
+                    ccEmails,
+                    bccEmails,
                     conversationId,
                     draftEmailId: draftId,
-                  })}
-                >
-                  {toEmails.map(email => (
-                    <EmailTagWithAvatar
-                      key={email}
-                      email={email}
-                      onRemove={() => setToEmails(toEmails.filter(e => e !== email))}
-                      disabled={isSending}
-                      users={users}
-                      draggable
-                      onDragStart={handleChipDragStart('to', email)}
-                      onDragEnd={handleChipDragEnd}
-                    />
-                  ))}
-                  <input
-                    ref={toInputRef}
-                    type='text'
-                    value={toInputValue}
-                    onChange={e => {
-                      setToInputValue(e.target.value);
-                      setSuggestionIndex(0);
-                    }}
-                    onKeyDown={handleToKeyDown}
-                    onFocus={() => focusSuggest('to')}
-                    onBlur={handleToBlur}
-                    placeholder={toEmails.length === 0 ? 'Add recipients...' : ''}
-                    className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
-                    disabled={isSending}
-                    data-track-category='SUPPORT'
-                    data-track-name='EditToField'
-                    data-track-metadata={JSON.stringify({
-                      toEmails: toEmails,
-                      ccEmails: ccEmails,
-                      bccEmails: bccEmails,
-                      conversationId,
-                      draftEmailId: draftId,
-                    })}
-                  />
-                  <RecipientSuggestionsDropdown
-                    visible={activeSuggestField === 'to'}
-                    suggestions={toSuggestions}
-                    highlightedIndex={suggestionIndex}
-                    onSelect={email => handleSuggestionSelect('to', email)}
-                    onHighlight={setSuggestionIndex}
-                    anchorRef={toRowRef}
-                  />
-                </div>
-
-                {/* Cc/Bcc toggles plus the panel-level Close button at
-                    the right of the recipient row. Close lives here —
-                    away from the bottom Discard/Trash — so users don't
-                    confuse "close & save draft" with "throw it away". */}
-                <div className='flex items-center gap-1 flex-shrink-0 mt-0.5'>
-                  {!showCc && (
-                    <button
-                      onClick={() => setShowCc(true)}
-                      className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                      data-track-category='SUPPORT'
-                      data-track-name='ShowCcField'
-                      data-track-metadata={JSON.stringify({
-                        ccMails: ccEmails,
-                        bccCount: bccEmails.length,
-                        conversationId,
-                        draftEmailId: draftId,
-                      })}
-                    >
-                      Cc
-                    </button>
-                  )}
-                  {!showBcc && (
-                    <button
-                      onClick={() => setShowBcc(true)}
-                      className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                      data-track-category='SUPPORT'
-                      data-track-name='ShowBccField'
-                      data-track-metadata={JSON.stringify({
-                        ccCount: ccEmails.length,
-                        bccEmails: bccEmails,
-                        conversationId,
-                        draftEmailId: draftId,
-                      })}
-                    >
-                      Bcc
-                    </button>
-                  )}
-                  {onClose && features.showDiscardButton && (
-                    <button
-                      type='button'
-                      onMouseDown={() => {
-                        if (!isComposeMode) suppressNextReplyAutosaveRef.current = true;
-                      }}
-                      onClick={() => {
-                        if (!isComposeMode && draftId) {
-                          deleteDraft();
-                          clearRecipientsForDraft([
-                            conversationId ? `xyne:emailDraft:recipients:${conversationId}` : null,
-                            `xyne:emailDraft:recipients:${draftId}`,
-                          ]);
-                          clearAttachmentsForDraft([
-                            conversationId ? `xyne:emailDraft:attachments:${conversationId}` : null,
-                            `xyne:emailDraft:attachments:${draftId}`,
-                          ]);
-                        }
-                        if (!isComposeMode && !draftId) {
-                          clearRecipientsForDraft([
-                            conversationId ? `xyne:emailDraft:recipients:${conversationId}` : null,
-                          ]);
-                          clearAttachmentsForDraft([
-                            conversationId ? `xyne:emailDraft:attachments:${conversationId}` : null,
-                          ]);
-                          setEmailContent('');
-                          setAttachments([]);
-                          setToEmails([]);
-                          setCcEmails([]);
-                          setBccEmails([]);
-                          onClose();
-                          return;
-                        }
-                        if (isComposeMode) {
-                          deleteDraft();
-                        }
-                        if (composeDraftKey) {
-                          try {
-                            localStorage.removeItem(composeDraftKey);
-                          } catch {
-                            /* ignore quota/access errors */
-                          }
-                        }
-                        setEmailContent('');
-                        setAttachments([]);
-                        setToEmails([]);
-                        setCcEmails([]);
-                        setBccEmails([]);
-                        if (isComposeMode) {
-                          onDiscard?.();
-                        } else {
-                          onClose?.();
-                        }
-                      }}
-                      disabled={isSending}
-                      className='size-6 ml-0.5 flex items-center justify-center rounded-md text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 transition-colors disabled:opacity-50'
-                      aria-label='Discard draft'
-                      title='Discard draft'
-                      data-track-category='Support'
-                      data-track-name='DiscardComposerDraft'
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                  {onClose && features.showMinimizeButton && (
-                    <button
-                      type='button'
-                      onClick={() => {
-                        if (hasEmailBody && isDirty) saveDraft(emailContent);
-                        onClose();
-                      }}
-                      disabled={isSending}
-                      className='size-6 ml-0.5 flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50'
-                      aria-label='Minimize reply'
-                      title='Minimize (keeps draft)'
-                      data-track-category='Support'
-                      data-track-name='MinimizeReplyComposer'
-                    >
-                      <Minimize2 size={14} />
-                    </button>
-                  )}
-                </div>
+                  }}
+                  actions={
+                    <>
+                      {!showCc && (
+                        <button
+                          onClick={() => setShowCc(true)}
+                          className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
+                          data-track-category='SUPPORT'
+                          data-track-name='ShowCcField'
+                          data-track-metadata={JSON.stringify({
+                            ccMails: ccEmails,
+                            bccCount: bccEmails.length,
+                            conversationId,
+                            draftEmailId: draftId,
+                          })}
+                        >
+                          Cc
+                        </button>
+                      )}
+                      {!showBcc && (
+                        <button
+                          onClick={() => setShowBcc(true)}
+                          className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
+                          data-track-category='SUPPORT'
+                          data-track-name='ShowBccField'
+                          data-track-metadata={JSON.stringify({
+                            ccCount: ccEmails.length,
+                            bccEmails: bccEmails,
+                            conversationId,
+                            draftEmailId: draftId,
+                          })}
+                        >
+                          Bcc
+                        </button>
+                      )}
+                      {onClose && features.showDiscardButton && (
+                        <button
+                          type='button'
+                          onMouseDown={() => {
+                            if (!isComposeMode) suppressNextReplyAutosaveRef.current = true;
+                          }}
+                          onClick={() => {
+                            if (!isComposeMode && draftId) {
+                              deleteDraft();
+                              clearRecipientsForDraft([
+                                conversationId
+                                  ? `xyne:emailDraft:recipients:${conversationId}`
+                                  : null,
+                                `xyne:emailDraft:recipients:${draftId}`,
+                              ]);
+                              clearAttachmentsForDraft([
+                                conversationId
+                                  ? `xyne:emailDraft:attachments:${conversationId}`
+                                  : null,
+                                `xyne:emailDraft:attachments:${draftId}`,
+                              ]);
+                            }
+                            if (!isComposeMode && !draftId) {
+                              clearRecipientsForDraft([
+                                conversationId
+                                  ? `xyne:emailDraft:recipients:${conversationId}`
+                                  : null,
+                              ]);
+                              clearAttachmentsForDraft([
+                                conversationId
+                                  ? `xyne:emailDraft:attachments:${conversationId}`
+                                  : null,
+                              ]);
+                              setEmailContent('');
+                              setAttachments([]);
+                              setToEmails([]);
+                              setCcEmails([]);
+                              setBccEmails([]);
+                              onClose();
+                              return;
+                            }
+                            if (isComposeMode) {
+                              deleteDraft();
+                            }
+                            if (composeDraftKey) {
+                              try {
+                                localStorage.removeItem(composeDraftKey);
+                              } catch {
+                                /* ignore quota/access errors */
+                              }
+                            }
+                            setEmailContent('');
+                            setAttachments([]);
+                            setToEmails([]);
+                            setCcEmails([]);
+                            setBccEmails([]);
+                            if (isComposeMode) {
+                              onDiscard?.();
+                            } else {
+                              onClose?.();
+                            }
+                          }}
+                          disabled={isSending}
+                          className='size-6 ml-0.5 flex items-center justify-center rounded-md text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 transition-colors disabled:opacity-50'
+                          aria-label='Discard draft'
+                          title='Discard draft'
+                          data-track-category='Support'
+                          data-track-name='DiscardComposerDraft'
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                      {onClose && features.showMinimizeButton && (
+                        <button
+                          type='button'
+                          onClick={() => {
+                            if (hasEmailBody && isDirty) saveDraft(emailContent);
+                            onClose();
+                          }}
+                          disabled={isSending}
+                          className='size-6 ml-0.5 flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50'
+                          aria-label='Minimize reply'
+                          title='Minimize (keeps draft)'
+                          data-track-category='Support'
+                          data-track-name='MinimizeReplyComposer'
+                        >
+                          <Minimize2 size={14} />
+                        </button>
+                      )}
+                    </>
+                  }
+                />
               </div>
 
               {showCc && (
-                <div className='flex items-start gap-2 mt-0.5'>
-                  <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>Cc</span>
-                  <div
-                    ref={ccRowRef}
-                    className={`relative flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'cc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
-                    onClick={() => ccInputRef.current?.focus()}
-                    onKeyDown={e => {
-                      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-                        e.preventDefault();
-                        ccInputRef.current?.focus();
-                      }
-                    }}
-                    onDragOver={handleFieldDragOver('cc')}
-                    onDragLeave={handleFieldDragLeave('cc')}
-                    onDrop={handleFieldDrop('cc')}
-                    role='button'
-                    tabIndex={0}
-                    data-track-category='SUPPORT'
-                    data-track-name='FocusCcField'
-                    data-track-metadata={JSON.stringify({
-                      ccCount: ccEmails.length,
-                      bccCount: bccEmails.length,
-                      conversationId,
-                      draftEmailId: draftId,
-                    })}
-                  >
-                    {ccEmails.map(email => (
-                      <EmailTagWithAvatar
-                        key={email}
-                        email={email}
-                        onRemove={() => setCcEmails(ccEmails.filter(e => e !== email))}
-                        disabled={isSending}
-                        users={users}
-                        draggable
-                        onDragStart={handleChipDragStart('cc', email)}
-                        onDragEnd={handleChipDragEnd}
-                      />
-                    ))}
-                    <input
-                      ref={ccInputRef}
-                      type='text'
-                      value={ccInputValue}
-                      onChange={e => {
-                        setCcInputValue(e.target.value);
-                        setSuggestionIndex(0);
-                      }}
-                      onKeyDown={handleCcKeyDown}
-                      onFocus={() => focusSuggest('cc')}
-                      onBlur={() => {
-                        const newEmails = splitAndValidateEmails(ccInputValue, ccEmails);
-                        if (newEmails.length > 0) {
-                          setCcEmails([...ccEmails, ...newEmails]);
-                          setCcInputValue('');
-                        }
-                        blurSuggest('cc');
-                      }}
-                      placeholder={ccEmails.length === 0 ? 'Add recipients...' : ''}
-                      className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
-                      disabled={isSending}
-                      data-track-category='SUPPORT'
-                      data-track-name='EditCcField'
-                      data-track-metadata={JSON.stringify({
-                        ccEmails: ccEmails,
-                        bccCount: bccEmails.length,
-                        conversationId,
-                        draftEmailId: draftId,
-                      })}
-                    />
-                    <RecipientSuggestionsDropdown
-                      visible={activeSuggestField === 'cc'}
-                      suggestions={ccSuggestions}
-                      highlightedIndex={suggestionIndex}
-                      onSelect={email => handleSuggestionSelect('cc', email)}
-                      onHighlight={setSuggestionIndex}
-                      anchorRef={ccRowRef}
-                    />
-                  </div>
-                </div>
+                <RecipientFieldRow
+                  field='cc'
+                  label='Cc'
+                  emails={ccEmails}
+                  inputRef={ccInputRef}
+                  rowRef={ccRowRef}
+                  inputValue={ccInputValue}
+                  expanded={isCcExpanded}
+                  onExpandedChange={setIsCcExpanded}
+                  onEmailsChangeUpdater={setCcEmails}
+                  onInputValueChange={setCcInputValue}
+                  suggestions={ccSuggestions}
+                  activeSuggestField={activeSuggestField}
+                  highlightedIndex={suggestionIndex}
+                  onSuggestionSelect={handleSuggestionSelect}
+                  onHighlight={setSuggestionIndex}
+                  disabled={isSending}
+                  users={users}
+                  dragOverField={dragOverField}
+                  handleChipDragStart={handleChipDragStart}
+                  handleChipDragEnd={handleChipDragEnd}
+                  handleFieldDragOver={handleFieldDragOver}
+                  handleFieldDragLeave={handleFieldDragLeave}
+                  handleFieldDrop={handleFieldDrop}
+                  handleKeyDown={handleCcKeyDown}
+                  handleBlur={() => {
+                    const newEmails = splitAndValidateEmails(ccInputValue, ccEmails);
+                    if (newEmails.length > 0) {
+                      setCcEmails([...ccEmails, ...newEmails]);
+                      setCcInputValue('');
+                    }
+                    blurSuggest('cc');
+                  }}
+                  focusSuggest={focusSuggest}
+                  trackName='FocusCcField'
+                  trackMetadata={{
+                    ccCount: ccEmails.length,
+                    bccCount: bccEmails.length,
+                    conversationId,
+                    draftEmailId: draftId,
+                  }}
+                />
               )}
 
               {showBcc && (
-                <div className='flex items-start gap-2 mt-0.5'>
-                  <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>
-                    Bcc
-                  </span>
-                  <div
-                    ref={bccRowRef}
-                    className={`relative flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'bcc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
-                    onClick={() => bccInputRef.current?.focus()}
-                    onKeyDown={e => {
-                      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-                        e.preventDefault();
-                        bccInputRef.current?.focus();
-                      }
-                    }}
-                    onDragOver={handleFieldDragOver('bcc')}
-                    onDragLeave={handleFieldDragLeave('bcc')}
-                    onDrop={handleFieldDrop('bcc')}
-                    role='button'
-                    tabIndex={0}
-                    data-track-category='SUPPORT'
-                    data-track-name='FocusBccField'
-                    data-track-metadata={JSON.stringify({
-                      bccCount: bccEmails,
-                      conversationId,
-                      draftEmailId: draftId,
-                    })}
-                  >
-                    {bccEmails.map(email => (
-                      <EmailTagWithAvatar
-                        key={email}
-                        email={email}
-                        onRemove={() => setBccEmails(bccEmails.filter(e => e !== email))}
-                        disabled={isSending}
-                        users={users}
-                        draggable
-                        onDragStart={handleChipDragStart('bcc', email)}
-                        onDragEnd={handleChipDragEnd}
-                      />
-                    ))}
-                    <input
-                      ref={bccInputRef}
-                      type='text'
-                      value={bccInputValue}
-                      onChange={e => {
-                        setBccInputValue(e.target.value);
-                        setSuggestionIndex(0);
-                      }}
-                      onKeyDown={handleBccKeyDown}
-                      onFocus={() => focusSuggest('bcc')}
-                      onBlur={() => {
-                        const newEmails = splitAndValidateEmails(bccInputValue, bccEmails);
-                        if (newEmails.length > 0) {
-                          setBccEmails([...bccEmails, ...newEmails]);
-                          setBccInputValue('');
-                        }
-                        blurSuggest('bcc');
-                      }}
-                      placeholder={bccEmails.length === 0 ? 'Add recipients...' : ''}
-                      data-track-category='SUPPORT'
-                      data-track-name='EditBccField'
-                      data-track-metadata={JSON.stringify({
-                        bccEmails: bccEmails,
-                        conversationId,
-                        draftEmailId: draftId,
-                      })}
-                      className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
-                      disabled={isSending}
-                    />
-                    <RecipientSuggestionsDropdown
-                      visible={activeSuggestField === 'bcc'}
-                      suggestions={bccSuggestions}
-                      highlightedIndex={suggestionIndex}
-                      onSelect={email => handleSuggestionSelect('bcc', email)}
-                      onHighlight={setSuggestionIndex}
-                      anchorRef={bccRowRef}
-                    />
-                  </div>
-                </div>
+                <RecipientFieldRow
+                  field='bcc'
+                  label='Bcc'
+                  emails={bccEmails}
+                  inputRef={bccInputRef}
+                  rowRef={bccRowRef}
+                  inputValue={bccInputValue}
+                  expanded={isBccExpanded}
+                  onExpandedChange={setIsBccExpanded}
+                  onEmailsChangeUpdater={setBccEmails}
+                  onInputValueChange={setBccInputValue}
+                  suggestions={bccSuggestions}
+                  activeSuggestField={activeSuggestField}
+                  highlightedIndex={suggestionIndex}
+                  onSuggestionSelect={handleSuggestionSelect}
+                  onHighlight={setSuggestionIndex}
+                  disabled={isSending}
+                  users={users}
+                  dragOverField={dragOverField}
+                  handleChipDragStart={handleChipDragStart}
+                  handleChipDragEnd={handleChipDragEnd}
+                  handleFieldDragOver={handleFieldDragOver}
+                  handleFieldDragLeave={handleFieldDragLeave}
+                  handleFieldDrop={handleFieldDrop}
+                  handleKeyDown={handleBccKeyDown}
+                  handleBlur={() => {
+                    const newEmails = splitAndValidateEmails(bccInputValue, bccEmails);
+                    if (newEmails.length > 0) {
+                      setBccEmails([...bccEmails, ...newEmails]);
+                      setBccInputValue('');
+                    }
+                    blurSuggest('bcc');
+                  }}
+                  focusSuggest={focusSuggest}
+                  trackName='FocusBccField'
+                  trackMetadata={{
+                    bccCount: bccEmails,
+                    conversationId,
+                    draftEmailId: draftId,
+                  }}
+                />
               )}
             </>
           )}
@@ -2215,7 +2177,7 @@ export const EmailComposer = ({
           </div>
         )}
 
-        <div className='flex-1 min-h-0 flex flex-col'>
+        <div className='flex-1 flex flex-col' style={{ minHeight: '180px' }}>
           {((): ReactElement => {
             const draftActive = aiDraft.isDraftActive;
             const toolbarRightSlot = isAutoDraftGenerating ? (
@@ -2343,6 +2305,11 @@ export const EmailComposer = ({
                   }}
                   onBlur={() => {
                     if (!isComposeMode && hasEmailBody && isDirty) saveDraft(emailContent);
+                  }}
+                  onFocus={() => {
+                    setIsToExpanded(false);
+                    setIsCcExpanded(false);
+                    setIsBccExpanded(false);
                   }}
                   onCitationClick={effectiveCitationClick}
                   {...(onCitationOrderChange && { onCitationOrderChange })}
