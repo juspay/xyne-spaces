@@ -373,23 +373,24 @@ class TeamIntelligenceTeamRepository {
     const rangeEnd = new Date(to);
     rangeEnd.setUTCHours(23, 59, 59, 999);
 
-    const grouped = await db.channelRecap.groupBy({
-      by: ['channelId'],
+    const grouped = await db.recap.groupBy({
+      by: ['entityId'],
       where: {
+        entityType: 'CHANNEL',
         recapDate: {
           gte: rangeStart,
           lte: rangeEnd,
         },
       },
       _count: {
-        channelId: true,
+        entityId: true,
       },
       _max: {
         recapDate: true,
       },
       orderBy: {
         _count: {
-          channelId: 'desc',
+          entityId: 'desc',
         },
       },
     });
@@ -398,7 +399,7 @@ class TeamIntelligenceTeamRepository {
       return [];
     }
 
-    const channelIds = grouped.map((item) => item.channelId);
+    const channelIds = grouped.map((item) => item.entityId);
     const channels = await db.channel.findMany({
       where: {
         id: {
@@ -414,9 +415,9 @@ class TeamIntelligenceTeamRepository {
     const channelNameById = new Map(channels.map((channel) => [channel.id, channel.name]));
 
     return grouped.map((item) => ({
-      channelId: item.channelId,
-      channelName: channelNameById.get(item.channelId) ?? item.channelId,
-      recapCount: item._count.channelId,
+      channelId: item.entityId,
+      channelName: channelNameById.get(item.entityId) ?? item.entityId,
+      recapCount: item._count.entityId,
       lastRecapDate: item._max.recapDate ? item._max.recapDate.toISOString().slice(0, 10) : null,
     }));
   }
@@ -465,9 +466,10 @@ class TeamIntelligenceTeamRepository {
     const now = new Date();
 
     const [total, recaps, channels, ticketRecords, overdueTicketRecords] = await Promise.all([
-      db.channelRecap.count({
+      db.recap.count({
         where: {
-          channelId: {
+          entityType: 'CHANNEL',
+          entityId: {
             in: channelIds,
           },
           recapDate: {
@@ -476,9 +478,10 @@ class TeamIntelligenceTeamRepository {
           },
         },
       }),
-      db.channelRecap.findMany({
+      db.recap.findMany({
         where: {
-          channelId: {
+          entityType: 'CHANNEL',
+          entityId: {
             in: channelIds,
           },
           recapDate: {
@@ -491,7 +494,7 @@ class TeamIntelligenceTeamRepository {
         take: limit,
         select: {
           id: true,
-          channelId: true,
+          entityId: true,
           recapDate: true,
           summary: true,
           userId: true,
@@ -561,9 +564,12 @@ class TeamIntelligenceTeamRepository {
       total,
       totalPages,
       recaps: recaps.map((recap) => ({
-        ...recap,
+        id: recap.id,
+        channelId: recap.entityId,
         recapDate: recap.recapDate.toISOString().slice(0, 10),
-        channelName: channelNameById.get(recap.channelId) ?? recap.channelId,
+        summary: recap.summary,
+        userId: recap.userId,
+        channelName: channelNameById.get(recap.entityId) ?? recap.entityId,
       })),
       ticketMetrics,
       overdueTickets: overdueTicketRecords.map((ticket) => ({
