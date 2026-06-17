@@ -11,7 +11,7 @@ export type PreferenceSection =
   | 'search'
   | 'toolbar'
   | 'calendar'
-  | 'security'
+  | 'password'
   | 'developer';
 
 export interface PreferencesProps {

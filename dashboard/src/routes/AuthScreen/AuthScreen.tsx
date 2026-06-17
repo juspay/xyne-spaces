@@ -1,7 +1,6 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
 import { Navigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
-import axios from 'axios';
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import { useOAuthProviders } from '../../hooks/useOAuthProviders';
@@ -180,12 +179,8 @@ const AuthScreen = (): ReactElement => {
       setFpMessage('Code sent! Check your email.');
       setFpStep('code');
     } catch (err) {
-      if (axios.isAxiosError<{ error?: string; message?: string }>(err)) {
-        setFpError(
-          err.response?.data?.message ??
-            err.response?.data?.error ??
-            'Failed to send code. Please try again.',
-        );
+      if (err instanceof Error && err.message) {
+        setFpError(err.message);
       } else {
         setFpError('Failed to send code. Please try again.');
       }
@@ -228,8 +223,8 @@ const AuthScreen = (): ReactElement => {
       });
       setFpStep('success');
     } catch (err: unknown) {
-      if (axios.isAxiosError<{ error?: string }>(err) && err.response?.data?.error) {
-        setFpError(err.response.data.error);
+      if (err instanceof Error && err.message) {
+        setFpError(err.message);
       } else {
         setFpError('Failed to reset password. Please try again.');
       }
@@ -280,14 +275,14 @@ const AuthScreen = (): ReactElement => {
 
   return (
     <ThemeProvider>
-      <div className='min-h-screen w-full overflow-x-hidden overflow-y-auto relative bg-background'>
-        <div className='min-h-screen w-full flex flex-col items-stretch'>
-          <div
-            className='w-full flex flex-col items-center justify-center p-4 sm:p-6 md:p-8 lg:p-12 min-h-screen py-8 sm:py-10 md:py-12 relative z-10'
-            role='main'
-            aria-label='Login form'
-          >
-            <div className='w-full max-w-xl flex flex-col justify-center gap-8 backdrop-blur-xl'>
+      <div className='h-[100dvh] w-full overflow-y-auto bg-background'>
+        <div
+          className='min-h-full w-full grid grid-rows-[1fr_auto]'
+          role='main'
+          aria-label='Login form'
+        >
+          <div className='flex flex-col items-center justify-center p-4 sm:p-6 md:p-8 lg:p-12 py-8 sm:py-10 md:py-12'>
+            <div className='w-full max-w-xl flex flex-col gap-8 backdrop-blur-xl'>
               {/* Welcome Header */}
               {isEnrollmentFlow ? (
                 <div className='w-full'>
@@ -778,13 +773,13 @@ const AuthScreen = (): ReactElement => {
                   )}
             </div>
           </div>
-        </div>
 
-        {/* Copyright */}
-        <div className='text-center pt-2 absolute bottom-16 w-full'>
-          <p className='text-xs sm:text-sm text-muted-foreground'>
-            &copy; {new Date().getFullYear()} Xyne Spaces. All rights reserved.
-          </p>
+          {/* Copyright */}
+          <div className='py-4 text-center'>
+            <p className='text-xs sm:text-sm text-muted-foreground'>
+              &copy; {new Date().getFullYear()} Xyne Spaces. All rights reserved.
+            </p>
+          </div>
         </div>
       </div>
     </ThemeProvider>
