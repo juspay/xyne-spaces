@@ -133,7 +133,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
           <input
             ref={inputRef}
             className='flex-1 min-w-[60px] bg-transparent border-none text-sm p-1 outline-none'
-            placeholder={selectedTags.length === 0 ? 'Add tags...' : ''}
+            placeholder={selectedTags.length === 0 ? 'Add labels...' : ''}
             value={search}
             onChange={e => setSearch(e.target.value)}
             onKeyDown={handleKey}
@@ -182,9 +182,13 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                 );
               })
             ) : search.trim() ? (
-              <div className='p-3 text-center text-sm text-muted-foreground'>No matching tags</div>
+              <div className='p-3 text-center text-sm text-muted-foreground'>
+                No matching labels
+              </div>
             ) : (
-              <div className='p-3 text-center text-sm text-muted-foreground'>No tags available</div>
+              <div className='p-3 text-center text-sm text-muted-foreground'>
+                No labels available
+              </div>
             )}
 
             {canCreate && (

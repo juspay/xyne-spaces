@@ -2648,7 +2648,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
             {/* Add Tag Button */}
             <TicketKeyValuePair
-              ticketKey='Tags'
+              ticketKey='Labels'
               value={
                 <div className='relative flex items-center' ref={tagDropdownRef}>
                   {/* Tags */}
@@ -2708,7 +2708,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                               <button
                                 onClick={() => void handleRemoveTag(tag.id)}
                                 className={`ml-1 p-0.5 rounded transition-colors`}
-                                aria-label='Remove tag'
+                                aria-label='Remove label'
                                 data-track-category='Tickets'
                                 data-track-name='RemoveTag'
                                 data-track-metadata={JSON.stringify({
@@ -2725,7 +2725,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     <button
                       onClick={() => setShowTagDropdown(!showTagDropdown)}
                       className='inline-flex items-center justify-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors'
-                      aria-label='Add tag'
+                      aria-label='Add label'
                       data-track-category='Tickets'
                       data-track-name='ToggleTagDropdown'
                       data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -2745,7 +2745,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           value={tagSearchQuery}
                           onChange={e => setTagSearchQuery(e.target.value)}
                           onKeyDown={handleTagKeyDown}
-                          placeholder='Search or create tag...'
+                          placeholder='Search or create label...'
                           className='w-full px-2.5 py-1.5 text-sm border text-foreground bg-background border-input rounded outline-none focus:border-border'
                           data-track-category='Tickets'
                           data-track-name='SearchTags'

@@ -186,10 +186,10 @@ export const BoardTicketFormConfig = ({
           <div className='flex items-center justify-between mb-2'>
             <div className='flex-1'>
               <label htmlFor='labels' className='text-sm font-medium text-foreground'>
-                Labels/Tags Field
+                Labels Field
               </label>
               <p className='text-xs text-muted-foreground mt-0.5'>
-                Show/hide labels/tags field in ticket form
+                Show/hide labels field in ticket form
               </p>
             </div>
             <Switch

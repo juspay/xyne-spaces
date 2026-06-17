@@ -107,7 +107,7 @@ const TicketPreviewContent = ({
           {/* Tags Field */}
           <div className='flex gap-[66px] items-center pr-[40px] py-[8px] max-w-prose border-b border-border'>
             <div className='min-w-[140px] max-w-[140px]'>
-              <p className='text-[14px] font-medium text-muted-foreground leading-[20px]'>Tags</p>
+              <p className='text-[14px] font-medium text-muted-foreground leading-[20px]'>Labels</p>
             </div>
             <div className='flex items-center gap-[6px]'>
               <div className='flex items-center gap-2 flex-wrap'>
@@ -132,7 +132,7 @@ const TicketPreviewContent = ({
                         variant='ghost'
                         size='iconSm'
                         className='ml-1 p-0.5 h-5 w-5'
-                        aria-label='Remove tag'
+                        aria-label='Remove label'
                       >
                         <X size={12} />
                       </Button>
