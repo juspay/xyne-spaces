@@ -118,6 +118,8 @@ import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBod
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { useEmailDraft } from '../../hooks/useEmailDraft';
+import { DeskDraftSubtree } from '../../components/xyne-desk/DeskFolders/DeskDraftSubtree';
+import { UserDraftsView } from '../../components/xyne-desk/DeskFolders/UserDraftsView';
 import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
 import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
@@ -534,6 +536,8 @@ const SupportScreen = (): ReactElement => {
     return saved ? saved === 'true' : true;
   });
   const [filters, setFilters] = useState<TicketFilters>({});
+  const [expandedDeskIds, setExpandedDeskIds] = useState<Set<string>>(new Set());
+  const [deskView, setDeskView] = useState<'tickets' | 'userDrafts'>('tickets');
   // Build the filter args once — reused by both the kanban query and the list view.
   // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
   const ticketFilter = useMemo(
@@ -1241,58 +1245,6 @@ const SupportScreen = (): ReactElement => {
     [navigate, isMobile, supportBase],
   );
 
-  const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
-    const isActive = selectedChannelId === c.id;
-    const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
-    const status = statusByChannelId.get(c.id);
-    const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
-    const shouldShowBold =
-      !isActive &&
-      !isMuted &&
-      !!status?.lastViewedAt &&
-      !!c.channelStats?.lastActivityAt &&
-      c.channelStats.lastActivityAt > status.lastViewedAt;
-    return (
-      <div
-        key={c.id}
-        role='button'
-        tabIndex={0}
-        className={cn(
-          'flex items-center gap-1.5 h-8 rounded-md px-1.5 cursor-pointer transition-colors',
-          isActive
-            ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
-            : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
-        )}
-        onClick={() => setSelectedChannelId(c.id)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setSelectedChannelId(c.id);
-          }
-        }}
-        data-track-category='Support'
-        data-track-name='SelectEmailChannel'
-      >
-        <span className='flex items-center flex-shrink-0'>
-          {isPrivate ? (
-            <Lock size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
-          ) : (
-            <Hash size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
-          )}
-        </span>
-        <span
-          className={cn(
-            'text-sm flex-1 truncate min-w-0',
-            shouldShowBold && '!font-semibold text-sidebar-unread-foreground',
-          )}
-          style={shouldShowBold ? { fontWeight: 700 } : undefined}
-        >
-          {c.name?.trim() || 'Unnamed Channel'}
-        </span>
-      </div>
-    );
-  };
-
   // Derive saved drafts: persisted instances for the current channel that were
   // explicitly closed (X) and still have content — shown in the Drafts banner.
   const savedDrafts = useMemo(() => {
@@ -1306,6 +1258,142 @@ const SupportScreen = (): ReactElement => {
         instanceHasDraft(userID, p.id),
     );
   }, [selectedChannelId, userID, composeInstances]);
+
+  const toggleDeskExpanded = useCallback((id: string): void => {
+    setExpandedDeskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Plain desk selection: return to the normal ticket list for the channel.
+  const selectDesk = useCallback(
+    (id: string): void => {
+      setSelectedChannelId(id);
+      setDeskView('tickets');
+    },
+    [setSelectedChannelId],
+  );
+
+  const openUserDrafts = useCallback(
+    (id: string): void => {
+      setSelectedChannelId(id);
+      setDeskView('userDrafts');
+    },
+    [setSelectedChannelId],
+  );
+
+  const openDeskTicket = useCallback(
+    (item: {
+      channelId: string;
+      ticketXyneId: string;
+      ticketId: string;
+      conversationId: string;
+    }): void => {
+      void navigate(`${supportBase}/${item.channelId}/${item.ticketXyneId}`, {
+        state: { conversationId: item.conversationId, ticketId: item.ticketId },
+      });
+    },
+    [navigate, supportBase],
+  );
+
+  const composeDraftRefs = useMemo(() => {
+    if (!userID) return [];
+    return savedDrafts
+      .slice()
+      .sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))
+      .map(draft => {
+        const preview = readDraftPreview(userID, draft.id);
+        const label =
+          preview.subject ||
+          (preview.to.length > 0 ? `To: ${preview.to[0]}` : '') ||
+          preview.bodySnippet ||
+          'No subject';
+        return { id: draft.id, label };
+      });
+  }, [savedDrafts, userID]);
+
+  const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
+    const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
+    const isJoined = joinedChannelIds.has(c.id);
+    const isExpanded = isJoined && expandedDeskIds.has(c.id);
+    const isActive = selectedChannelId === c.id && deskView === 'tickets';
+    const status = statusByChannelId.get(c.id);
+    const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
+    const shouldShowBold =
+      !isActive &&
+      !isMuted &&
+      !!status?.lastViewedAt &&
+      !!c.channelStats?.lastActivityAt &&
+      c.channelStats.lastActivityAt > status.lastViewedAt;
+    return (
+      <div key={c.id}>
+        <div
+          role='button'
+          tabIndex={0}
+          className={cn(
+            'flex items-center gap-1 h-8 rounded-md px-1.5 cursor-pointer transition-colors',
+            isActive
+              ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
+              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
+          )}
+          onClick={() => selectDesk(c.id)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              selectDesk(c.id);
+            }
+          }}
+          data-track-category='Support'
+          data-track-name='SelectEmailChannel'
+        >
+          {isJoined ? (
+            <button
+              type='button'
+              onClick={e => {
+                e.stopPropagation();
+                toggleDeskExpanded(c.id);
+              }}
+              className='flex items-center justify-center w-4 h-4 flex-shrink-0 rounded text-muted-foreground hover:text-foreground'
+              aria-label={isExpanded ? 'Collapse desk' : 'Expand desk'}
+              data-track-category='Support'
+              data-track-name='ToggleDeskExpand'
+            >
+              {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </button>
+          ) : (
+            <span className='w-4 flex-shrink-0' />
+          )}
+          <span className='flex items-center flex-shrink-0'>
+            {isPrivate ? (
+              <Lock size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
+            ) : (
+              <Hash size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
+            )}
+          </span>
+          <span
+            className={cn(
+              'text-sm flex-1 truncate min-w-0',
+              shouldShowBold && '!font-semibold text-sidebar-unread-foreground',
+            )}
+            style={shouldShowBold ? { fontWeight: 700 } : undefined}
+          >
+            {c.name?.trim() || 'Unnamed Channel'}
+          </span>
+        </div>
+        {isExpanded && (
+          <DeskDraftSubtree
+            activeFolder={
+              selectedChannelId === c.id && deskView === 'userDrafts' ? 'userDrafts' : null
+            }
+            onOpenUserDrafts={() => openUserDrafts(c.id)}
+          />
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -1401,7 +1489,21 @@ const SupportScreen = (): ReactElement => {
         )}
         {!ticketId && (
           <Panel defaultSize={84} minSize={75} order={2}>
-            <div className='h-full flex flex-col'>
+            <div className='h-full flex flex-col relative'>
+              {deskView !== 'tickets' && selectedChannelId && (
+                <div className='absolute inset-0 z-30 bg-background'>
+                  {deskView === 'userDrafts' ? (
+                    <UserDraftsView
+                      channelId={selectedChannelId}
+                      composeDrafts={composeDraftRefs}
+                      onReopenCompose={reopenDraft}
+                      onDiscardCompose={discardDraft}
+                      onOpenTicket={openDeskTicket}
+                      onClose={() => setDeskView('tickets')}
+                    />
+                  ) : null}
+                </div>
+              )}
               <div className='flex-shrink-0 relative border-b border-border'>
                 <div
                   className={cn(

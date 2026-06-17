@@ -4154,6 +4154,11 @@ export const emailDraftTableRelationships = relationships(emailDraftTable, ({ on
     destField: ['conversationId'],
     destSchema: conversationTable,
   }),
+  ticket: one({
+    sourceField: ['conversationId'],
+    destField: ['conversationId'],
+    destSchema: ticketTable,
+  }),
   channel: one({
     sourceField: ['channelId'],
     destField: ['id'],
