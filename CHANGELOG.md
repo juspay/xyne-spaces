@@ -1,3 +1,11 @@
+## [1.163.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.163.0...v1.163.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* Fix white text visibility on call screen bottom left ([d4ae36e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d4ae36ed868c008a22df7557fd800297657c43cc))
+* rename 'Tags' to 'Labels' in ticket UI strings and Task type to Type ([414e6d7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/414e6d76a60c1877e549366906f7cda459cdc8c6)), closes [#7215](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7215)
+
 ## [1.163.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.162.0...v1.163.0) (2026-06-16)
 
 
