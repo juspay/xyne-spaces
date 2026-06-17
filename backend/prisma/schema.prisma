@@ -2157,7 +2157,7 @@ model Conversation {
   ticket_md         String?
   initial_message_md String?
   parent_message_md  String?
-  doNotPostToChannel Boolean? @default(false)
+  doNotPostToChannel Boolean?
   createdAt         DateTime @default(now())
 
   // Relations
