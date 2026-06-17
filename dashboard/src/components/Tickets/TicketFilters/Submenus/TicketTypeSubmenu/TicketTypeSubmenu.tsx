@@ -71,16 +71,14 @@ export const TicketTypeSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search task types...'
+            placeholder='Search types...'
             className='pl-9 h-9'
           />
         </div>
       </div>
       <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
         {!availableTypes || availableTypes.length === 0 ? (
-          <div className='p-8 text-center text-sm text-muted-foreground'>
-            No task types available
-          </div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No types available</div>
         ) : finalResults.length > 0 ? (
           <div className='space-y-0.5'>
             {finalResults.map(type => {
@@ -108,7 +106,7 @@ export const TicketTypeSubmenu = ({
             })}
           </div>
         ) : (
-          <div className='p-8 text-center text-sm text-muted-foreground'>No task types found</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No types found</div>
         )}
       </div>
       {selectedTypes.length > 0 && (

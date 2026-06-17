@@ -498,7 +498,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
       {
         key: 'tags',
-        headerName: 'Tags',
+        headerName: 'Labels',
         editable: true,
         cellEditor: TagsCellEditor,
         cellEditorParams: {

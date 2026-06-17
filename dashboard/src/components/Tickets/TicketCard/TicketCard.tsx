@@ -772,7 +772,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         data-track-name='EditTagsInline'
                         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                       >
-                        <Tooltip content='Add tags'>
+                        <Tooltip content='Add labels'>
                           <div className='flex items-center gap-1.5 px-1.5 py-1 rounded-md border border-border bg-muted hover:border-input transition-colors'>
                             <Tag className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2} />
                           </div>

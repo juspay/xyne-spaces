@@ -151,7 +151,7 @@ export const getDefaultCreateFields = (): CreateField[] => [
   {
     id: '6',
     name: 'tags',
-    label: 'Tags',
+    label: 'Labels',
     type: 'tags',
     required: false,
     order: 6,

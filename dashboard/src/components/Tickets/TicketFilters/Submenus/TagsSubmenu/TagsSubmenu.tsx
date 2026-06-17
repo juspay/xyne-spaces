@@ -69,14 +69,14 @@ export const TagsSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search tags...'
+            placeholder='Search labels...'
             className='pl-9 h-9'
           />
         </div>
       </div>
       <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
         {!availableTags || availableTags.length === 0 ? (
-          <div className='p-8 text-center text-sm text-muted-foreground'>No tags available</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No labels available</div>
         ) : finalResults.length > 0 ? (
           <div className='space-y-0.5'>
             {finalResults.map(tag => {
@@ -107,13 +107,13 @@ export const TagsSubmenu = ({
             })}
           </div>
         ) : (
-          <div className='p-8 text-center text-sm text-muted-foreground'>No tags found</div>
+          <div className='p-8 text-center text-sm text-muted-foreground'>No labels found</div>
         )}
       </div>
       {selectedTags.length > 0 && (
         <div className='p-3 border-t bg-muted'>
           <div className='text-xs text-muted-foreground'>
-            {selectedTags.length} tag{selectedTags.length !== 1 ? 's' : ''} selected
+            {selectedTags.length} label{selectedTags.length !== 1 ? 's' : ''} selected
           </div>
         </div>
       )}

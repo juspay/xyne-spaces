@@ -199,7 +199,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               data-track-name='ToggleTagsMenu'
             >
               <Tag className='size-4 text-foreground flex-shrink-0' />
-              <span className='text-xs sm:text-sm font-semibold text-foreground'>Tags</span>
+              <span className='text-xs sm:text-sm font-semibold text-foreground'>Labels</span>
             </button>
 
             {activeMenu === 'tags' && (

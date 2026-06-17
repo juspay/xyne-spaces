@@ -94,9 +94,9 @@ const FILTER_MENU_ITEMS: FilterMenuItem[] = [
   { id: 'qaAssigned', label: 'QA', icon: User, filterKey: 'qaAssigned' },
   { id: 'dueDate', label: 'Due Date', icon: Calendar, filterKey: 'dueDate' },
   { id: 'createdAt', label: 'Created At', icon: Calendar, filterKey: 'createdAt' },
-  { id: 'tags', label: 'Tags', icon: Tag, filterKey: 'tags' },
+  { id: 'tags', label: 'Labels', icon: Tag, filterKey: 'tags' },
   { id: 'stages', label: 'Stages', icon: Circle, filterKey: 'stages' },
-  { id: 'ticketTypes', label: 'Task Type', icon: Layers, filterKey: 'ticketTypes' },
+  { id: 'ticketTypes', label: 'Type', icon: Layers, filterKey: 'ticketTypes' },
 ];
 
 export const TicketFiltersDropdown = ({
