@@ -2793,14 +2793,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
-          const channel = await tx.run(zql.channels.where('id', conversation.channelId).related('project').one());
+          const [channel, participant, channelDrafts] = await Promise.all([
+            tx.run(zql.channels.where('id', conversation.channelId).related('project').one()),
+            tx.run(zql.channel_participants
+              .where('userId', authData.sub)
+              .where('channelId', conversation.channelId)
+              .one()),
+            tx.run(zql.draft_messages
+              .where('channelId', conversation.channelId)
+              .where('userId', authData.sub)),
+          ]);
           if (!channel) {
             throw new Error("Channel doesn't exists");
           }
-          const participant = await tx.run(zql.channel_participants
-            .where('userId', authData.sub)
-            .where('channelId', conversation.channelId)
-            .one());
 
           if (participant === undefined && channel.visibility == ChannelVisibility.PRIVATE) {
             throw new Error('You need to be a participant for adding a conversations');
@@ -2824,11 +2829,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             isDeleted: false,
             isSent: true
           };
-
-          // Check for existing draft and transfer attachments
-          const channelDrafts = await tx.run(zql.draft_messages
-            .where('channelId', conversation.channelId)
-            .where('userId', authData.sub));
 
           const draft = channelDrafts.find(d => d.conversationId === conversationId);
 
@@ -2874,7 +2874,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           logger.info(`💬 [MUTATOR-CREATE-REPLY] Reply message ${message.messageId} created in conversation ${conversationId}, type: ${type}`);
 
           if (type === MessageType.USER) {
-            const userProfile = await tx.run(zql.user_profiles.where('userId', authData.sub).one());
             logger.info(`📊 [MUTATOR-CREATE-REPLY] Scheduling message count increment for USER reply message ${message.messageId}`);
             asyncTasks.push(async () => {
               try {
@@ -2895,6 +2894,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
             asyncTasks.push(async () => {
               try {
+                const userProfile = await db.userProfile.findFirst({
+                  where: { userId: authData.sub },
+                  select: { team: true },
+                });
                 logger.info('analytics_event', {
                   event: 'message_sent',
                   timestamp: new Date(timestamp).toISOString(),
@@ -2919,16 +2922,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             lastActivityAt: timestamp,
           });
 
-          // Update lastReplyAt on all participants for this conversation
-          // (denormalized for userConversationsPaginatedV2 query)
-          const allParticipants = await tx.run(zql.conversation_participants
-            .where('conversationId', conversationId));
-          for (const p of allParticipants) {
-            await tx.mutate.conversation_participants.update({
-              id: p.id,
-              lastReplyAt: timestamp,
-            });
-          }
 
           if (showInChannel) {
             if (!childConversationId) {
