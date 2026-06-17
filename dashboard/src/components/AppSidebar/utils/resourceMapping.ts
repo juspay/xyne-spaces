@@ -12,6 +12,7 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/resource-access': 'USERS',
   '/jira-migration': 'TICKET-MIGRATION',
   '/migration/confluence': 'CONFLUENCE-MIGRATION',
+  '/migration/whatsapp': 'TICKET-MIGRATION',
   '/forms': 'FORMS',
   '/product-insights': 'PRODUCT-INSIGHTS',
   '/projects': 'PROJECTS',

@@ -26,6 +26,7 @@ import {
   Building2,
   Zap,
   Atom,
+  MessageSquareText,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -71,6 +72,12 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/listProjects', label: 'List Projects', icon: Folder },
   { path: '/jira-migration', label: 'Jira Migration', icon: ArrowRightLeft, iconSize: 18 },
   { path: '/migration/confluence', label: 'Confluence Migration', icon: BookOpen, iconSize: 18 },
+  {
+    path: '/migration/whatsapp',
+    label: 'WhatsApp Migration',
+    icon: MessageSquareText,
+    iconSize: 18,
+  },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom },
 ];
 
