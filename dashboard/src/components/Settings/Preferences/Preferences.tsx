@@ -22,7 +22,6 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { NotificationLevel } from '@xyne/shared';
-import axios from 'axios';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { format } from 'date-fns';
 
@@ -74,7 +73,7 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'calendar', label: 'Calendar', icon: <Calendar className='size-4' /> },
-  { id: 'security', label: 'Security', icon: <Shield className='size-4' /> },
+  { id: 'password', label: 'Password', icon: <Shield className='size-4' /> },
   { id: 'developer', label: 'Developer', icon: <Code2 className='size-4' /> },
 ];
 
@@ -478,8 +477,8 @@ const CalendarSection: FC<{ state: PreferencesState }> = ({ state }) => (
   </div>
 );
 
-// ─── Security ───────────────────────────────────────────────────────────────
-const SecuritySection: FC = () => {
+// ─── Password ───────────────────────────────────────────────────────────────
+const PasswordSection: FC = () => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -511,8 +510,8 @@ const SecuritySection: FC = () => {
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {
-      if (axios.isAxiosError<{ error?: string }>(err) && err.response?.data?.error) {
-        setError(err.response.data.error);
+      if (err instanceof Error && err.message) {
+        setError(err.message);
       } else {
         setError('Failed to update password');
       }
@@ -523,7 +522,7 @@ const SecuritySection: FC = () => {
 
   return (
     <div className='space-y-4'>
-      <SectionHeader title='Security' subtitle='Manage your account security' />
+      <SectionHeader title='Password' subtitle='Manage your account password' />
 
       <div className='space-y-4'>
         <div className='space-y-3'>
@@ -772,7 +771,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   search: SearchSection,
   toolbar: ToolbarSection,
   calendar: CalendarSection,
-  security: SecuritySection as FC<{ state: PreferencesState }>,
+  password: PasswordSection as FC<{ state: PreferencesState }>,
   developer: DeveloperSection,
 };
 
