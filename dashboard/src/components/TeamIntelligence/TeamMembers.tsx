@@ -43,16 +43,24 @@ const TeamMembers = (): ReactElement => {
       </div>
 
       {isLoading ? (
-        <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-center gap-2'>
+        <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-start gap-2'>
           <Loader2 size={16} className='animate-spin text-muted-foreground' />
           <p className='text-sm text-muted-foreground'>Loading team members...</p>
         </div>
       ) : (
         <div className='grid gap-4 md:grid-cols-2'>
           {members.length === 0 ? (
-            <p className='col-span-2 py-6 text-center text-sm text-muted-foreground'>
-              No members match &ldquo;{query}&rdquo;.
-            </p>
+            teamMembers?.employee_list?.length === 0 ? (
+              <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-start gap-2 col-span-2'>
+                <p className='text-sm text-muted-foreground'>No team members.</p>
+              </div>
+            ) : (
+              <div className='w-full rounded-xl border border-border/50 bg-card p-5 flex items-center justify-start gap-2 col-span-2'>
+                <p className='text-sm text-muted-foreground'>
+                  No members match &ldquo;{query}&rdquo;.
+                </p>
+              </div>
+            )
           ) : (
             members.map(member => {
               return <TeamMember key={member.email} member={member} />;
