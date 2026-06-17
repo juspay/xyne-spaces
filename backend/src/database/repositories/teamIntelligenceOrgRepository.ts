@@ -434,13 +434,15 @@ class TeamIntelligenceOrgRepository {
     const now = new Date();
 
     const [total, recaps, channels, ticketRecords] = await Promise.all([
-      db.channelRecap.count({
+      db.recap.count({
         where: {
+          entityType: 'CHANNEL',
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
       }),
-      db.channelRecap.findMany({
+      db.recap.findMany({
         where: {
+          entityType: 'CHANNEL',
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
         orderBy: [{ recapDate: 'desc' }, { id: 'desc' }],
@@ -448,7 +450,7 @@ class TeamIntelligenceOrgRepository {
         take: limit,
         select: {
           id: true,
-          channelId: true,
+          entityId: true,
           recapDate: true,
           summary: true,
           userId: true,
@@ -492,9 +494,12 @@ class TeamIntelligenceOrgRepository {
       total,
       totalPages,
       recaps: recaps.map((recap) => ({
-        ...recap,
+        id: recap.id,
+        channelId: recap.entityId,
         recapDate: recap.recapDate.toISOString().slice(0, 10),
-        channelName: channelNameById.get(recap.channelId) ?? recap.channelId,
+        summary: recap.summary,
+        userId: recap.userId,
+        channelName: channelNameById.get(recap.entityId) ?? recap.entityId,
       })),
       ticketMetrics,
     };

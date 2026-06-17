@@ -494,8 +494,9 @@ class TeamIntelligenceUserRepository {
     }
 
     // Get total count for pagination
-    const total = await db.channelRecap.count({
+    const total = await db.recap.count({
       where: {
+        entityType: 'CHANNEL',
         userId: user.id,
         recapDate: {
           gte: from,
@@ -508,8 +509,9 @@ class TeamIntelligenceUserRepository {
     const totalPages = Math.ceil(total / limit);
 
     // Get paginated recaps
-    const recaps = await db.channelRecap.findMany({
+    const recaps = await db.recap.findMany({
       where: {
+        entityType: 'CHANNEL',
         userId: user.id,
         recapDate: {
           gte: from,
@@ -523,7 +525,7 @@ class TeamIntelligenceUserRepository {
       take: limit,
       select: {
         id: true,
-        channelId: true,
+        entityId: true,
         recapDate: true,
         summary: true,
         userId: true,
@@ -538,7 +540,13 @@ class TeamIntelligenceUserRepository {
       limit,
       total,
       totalPages,
-      recaps,
+      recaps: recaps.map((recap) => ({
+        id: recap.id,
+        channelId: recap.entityId,
+        recapDate: recap.recapDate,
+        summary: recap.summary,
+        userId: recap.userId,
+      })),
     };
   }
 }
