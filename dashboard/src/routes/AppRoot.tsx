@@ -163,6 +163,7 @@ import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
+import WhatsAppMigrationScreen from './WhatsAppMigrationScreen/WhatsAppMigrationScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { getTicketsPath } from '../components/ErrorReportModal/ErrorReportModal.utils';
 import { useCacConfig } from '../hooks/useCacConfig';
@@ -1250,6 +1251,14 @@ export const router = createBrowserRouter([
                 element: (
                   <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
                     <ConfluenceMigrationScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'migration/whatsapp',
+                element: (
+                  <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                    <WhatsAppMigrationScreen />
                   </ResourceProtectedRoute>
                 ),
               },

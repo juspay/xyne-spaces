@@ -7,6 +7,7 @@ import express, { Router, Request, Response } from 'express';
 import slackRoutes from './slack';
 import jiraRoutes from './jira';
 import confluenceRoutes from './confluence';
+import whatsappRoutes from './whatsapp';
 import adminRoutes from './admin';
 import cleanupRoutes from './cleanUp';
 import userActivationRoutes from '@/routes/userActivation';
@@ -30,6 +31,9 @@ router.use('/slack', slackRoutes);
 
 // Route to Jira migration
 router.use('/jira', jiraRoutes);
+
+// Route to WhatsApp migration
+router.use('/whatsapp', whatsappRoutes);
 
 // Route to Confluence migration
 router.use('/confluence', confluenceRoutes);

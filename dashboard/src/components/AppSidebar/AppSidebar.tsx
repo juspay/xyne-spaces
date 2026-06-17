@@ -167,6 +167,7 @@ const AppSidebar = (): ReactElement => {
     if (pathname.startsWith('/chat/sent')) return '/chat/sent';
     if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
     if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
+    if (pathname.startsWith('/migration/whatsapp')) return '/migration/whatsapp';
     return '/' + (pathname.split('/')[1] || '');
   };
 
