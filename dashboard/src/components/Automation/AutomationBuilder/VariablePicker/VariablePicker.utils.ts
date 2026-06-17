@@ -14,6 +14,26 @@ export function pickerEntrySortKey(path: string): [number, string] {
   return [path ? path.split('.').length : 0, path];
 }
 
+function isStringLeafType(leafType: string): boolean {
+  return leafType.includes('string');
+}
+
+export function acceptsVariable(
+  entry: VariableEntry,
+  targetEntityKind?: string | null,
+  targetLeafType?: string | null,
+): boolean {
+  if (targetEntityKind) {
+    if (entry.entityKind === targetEntityKind) return true;
+    if (isStringLeafType(entry.leafType)) return true;
+    return false;
+  }
+  if (targetLeafType) {
+    return entry.leafType === targetLeafType || entry.leafType.includes(targetLeafType);
+  }
+  return true;
+}
+
 const PREFERRED_PATHS_BY_KIND: Record<string, string[]> = {
   conversation: ['ticket.conversationId', 'email.conversationId'],
 };
@@ -23,18 +43,10 @@ export function findSoleMatchingVariable(
   targetEntityKind: string | null | undefined,
   targetLeafType?: string | null,
 ): VariableEntry | null {
-  const accept = (entry: VariableEntry): boolean => {
-    if (targetEntityKind) return entry.entityKind === targetEntityKind;
-    if (targetLeafType) {
-      return entry.leafType === targetLeafType || entry.leafType.includes(targetLeafType);
-    }
-    return true;
-  };
-
   const matches: VariableEntry[] = [];
   for (const source of sources) {
     for (const entry of flattenSource(source)) {
-      if (accept(entry)) matches.push(entry);
+      if (acceptsVariable(entry, targetEntityKind, targetLeafType)) matches.push(entry);
     }
   }
 

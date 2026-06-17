@@ -6,7 +6,7 @@ import type {
   VariableEntry,
   VariablePickerSource,
 } from './VariablePicker.types';
-import { flattenSource } from './VariablePicker.utils';
+import { acceptsVariable, flattenSource } from './VariablePicker.utils';
 
 interface PickerGroup {
   groupKey: string;
@@ -32,13 +32,8 @@ export function VariablePicker({
 
   const groups = useMemo<PickerGroup[]>(() => {
     if (!targetEntityKind && !targetLeafType) return allGroups;
-    const accept = (entry: VariableEntry): boolean => {
-      if (targetEntityKind) return entry.entityKind === targetEntityKind;
-      if (targetLeafType) {
-        return entry.leafType === targetLeafType || entry.leafType.includes(targetLeafType);
-      }
-      return true;
-    };
+    const accept = (entry: VariableEntry): boolean =>
+      acceptsVariable(entry, targetEntityKind, targetLeafType);
     const matching = allGroups
       .map(group => ({
         ...group,
