@@ -339,5 +339,3 @@ export const CustomField = ({ mode, field, onSave, onCancel }: CustomFieldProps)
     </div>
   );
 };
-
-export default CustomField;

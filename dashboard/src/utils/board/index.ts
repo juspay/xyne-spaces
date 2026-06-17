@@ -16,9 +16,6 @@ export {
   THEN_CONDITION_OPTIONS,
   PR_STATUS_OPTIONS,
   FIELD_TYPE_OPTIONS,
-  getFilteredThenOptions,
-  getFilteredThenConditionOptions,
-  getOptionLabel,
 } from './stageConfigUtils';
 
 export {

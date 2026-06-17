@@ -93,8 +93,6 @@ export interface Stage {
 }
 
 // Preview mode type
-export type PreviewMode = 'create' | 'details';
-
 // Default ticket fields configuration
 export const DEFAULT_TICKET_FIELDS: TicketField[] = [
   {
@@ -154,16 +152,3 @@ export const DEFAULT_TICKET_FIELDS: TicketField[] = [
 ];
 
 // Constants
-export const PRIORITY_OPTIONS: SelectOption[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-];
-
-export const STATUS_OPTIONS: SelectOption[] = [
-  { value: TicketStatusV2.TODO, label: 'To Do' },
-  { value: TicketStatusV2.STARTED, label: 'Started' },
-  { value: TicketStatusV2.PAUSED, label: 'Paused' },
-  { value: TicketStatusV2.COMPLETED, label: 'Completed' },
-  { value: TicketStatusV2.CANCELLED, label: 'Cancelled' },
-];

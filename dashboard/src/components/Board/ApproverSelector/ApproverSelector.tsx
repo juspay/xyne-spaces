@@ -125,5 +125,3 @@ export const ApproverSelector = ({
     </div>
   );
 };
-
-export default ApproverSelector;

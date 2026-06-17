@@ -6,23 +6,7 @@ export type ProjectWithBoards = Project & {
 };
 
 // Extended type: Board with its stages included
-export type BoardWithStages = Board & {
-  stages?: Array<{
-    id: string;
-    name: string;
-    eta: number;
-    sequenceNumber: number;
-  }>;
-};
-
 // Favorite item - can be a ticket view or a board
-export type FavoriteItem = {
-  id: string;
-  type: 'ticket-view' | 'board';
-  name: string;
-  icon?: string;
-};
-
 // User group for filtering
 export type UserGroup = {
   id: string;
