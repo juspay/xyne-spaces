@@ -1,3 +1,23 @@
+## [1.164.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.163.1...v1.164.0) (2026-06-17)
+
+
+### Features
+
+* channel recap table changes fix for team intelligence ([b037def](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b037def47c697cf47232d315e5f819edeab3297b))
+* claw stream and cancel ([81258ce](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/81258ce182e2990d2c5f00fde36823cd19906480)), closes [#7651](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7651)
+* first prototype ([8603171](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/860317193fdb63d464b641a612ab9747b511f51e)), closes [#7573](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7573)
+* whatsapp migration ([dc500a8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dc500a8dd6db8922ae074e6d65a125cb94316709)), closes [#7641](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7641)
+
+
+### Bug Fixes
+
+* default Cmd+K and full-page search to "Only my channels" ([2e79319](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2e793193a4e4bb640cb33aeab545a1c38b3e90fe)), closes [#7634](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7634)
+* drop DB default on conversations.doNotPostToChannel ([95c7d3e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/95c7d3efd61ef99266a676b404597d716e72359c)), closes [#7665](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7665)
+* Error propagation fix and scroll fix ([60d6768](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/60d676841481037a54afd60ca9851db83c4435d5))
+* Fixing the cc issue for desk emails ([d24577d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d24577d1b74f6de32508e0a7e66d8045d2c96bc0))
+* generic variable ([a5563e2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a5563e23598e550a0f43d1f395b6c59b7d0c2b27)), closes [#7592](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7592)
+* parallalize ops in message send mutation ([6dfa8f6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6dfa8f6780bba3618189e8056bfe78427442218b)), closes [#7653](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7653)
+
 ## [1.163.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.163.0...v1.163.1) (2026-06-17)
 
 
