@@ -176,6 +176,20 @@ router.delete('/sessions/:sessionId', xyneAIControllerFactory.deleteSessionEndpo
  */
 router.post('/v2/action', authMiddleware.authenticate, xyneAIControllerFactory.handleActionApproval);
 
+/**
+ * POST /api/xyne-ai/v2/cancel/:sessionId
+ *
+ * Cancel an in-flight Ask AI v2 run. Propagates through claw-auth to claw,
+ * which aborts the agent loop. Claw then emits a final `done` frame with
+ * status="cancelled" carrying partial assistant text + tool invocations, so
+ * the partial result is persisted to chat_messages and visible on reload.
+ */
+router.post(
+  '/v2/cancel/:sessionId',
+  authMiddleware.authenticate,
+  xyneAIControllerFactory.cancelRun,
+);
+
 // GET /api/xyne-ai/v2/conversations - List user's AI conversations from claw
 router.get('/v2/conversations', authMiddleware.authenticate, xyneAIControllerFactory.listConversations);
 

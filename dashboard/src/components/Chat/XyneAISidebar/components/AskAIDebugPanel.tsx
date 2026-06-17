@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CirclePlay,
+  CircleSlash,
   Copy,
   FileText,
   ListTree,
@@ -532,6 +533,7 @@ function eventTitle(kind: string, data: Record<string, unknown>): string {
   if (kind === 'assistant_turn_end') return 'Assistant response';
   if (kind === 'session_start') return 'Session started';
   if (kind === 'session_end') return 'Session completed';
+  if (kind === 'session_cancelled') return 'Session cancelled';
   if (kind === 'session_error') return 'Error';
   if (kind === 'auto_retry_start') return 'Retry attempt';
   if (kind === 'compaction_start') return 'Context compaction started';
@@ -550,6 +552,7 @@ function eventIcon(kind: string): { Icon: typeof Bug; color: string } {
     return { Icon: CirclePlay, color: 'text-sky-500 dark:text-sky-400' };
   if (kind === 'session_end')
     return { Icon: CheckCircle2, color: 'text-cyan-500 dark:text-cyan-400' };
+  if (kind === 'session_cancelled') return { Icon: CircleSlash, color: 'text-muted-foreground' };
   if (kind === 'session_error')
     return { Icon: AlertCircle, color: 'text-red-500 dark:text-red-400' };
   if (kind === 'auto_retry_start')
@@ -582,6 +585,16 @@ function eventSummary(kind: string, data: Record<string, unknown>): string {
       return 'Retrying after a transient error';
     case 'session_error':
       return getString(data, 'error');
+    case 'session_cancelled': {
+      const reason = getString(data, 'reason');
+      const len = getNumber(data, 'partialTextLength') ?? 0;
+      const tools = getNumber(data, 'toolCount') ?? 0;
+      const parts: string[] = [];
+      if (reason) parts.push(reason);
+      if (len) parts.push(`${len} char${len === 1 ? '' : 's'} streamed`);
+      if (tools) parts.push(`${tools} tool${tools === 1 ? '' : 's'}`);
+      return parts.join(' · ');
+    }
     case 'session_end':
       return '';
     default:
@@ -1076,6 +1089,7 @@ function DebugEventItem({
           'assistant_turn_end',
           'session_error',
           'session_end',
+          'session_cancelled',
         ].includes(kind) && (
           <details className='rounded-md bg-xyne-surface'>
             <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
