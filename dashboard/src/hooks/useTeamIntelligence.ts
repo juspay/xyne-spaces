@@ -22,14 +22,13 @@ import {
   TeamTicketRecapsResponse,
   UserProductivity,
 } from '@/services/TeamIntelligence/teamIntelligenceService';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
 
 const TEAM_INTELLIGENCE_STALE_TIME_MS = 5 * 60 * 1000;
 
 const teamIntelligenceQueryOptions = {
   staleTime: TEAM_INTELLIGENCE_STALE_TIME_MS,
-  placeholderData: keepPreviousData,
 } as const;
 
 export function useOrgSummary({
