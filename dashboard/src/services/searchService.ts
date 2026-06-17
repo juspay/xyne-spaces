@@ -463,6 +463,10 @@ export class SearchService {
       params['includeBotMessages'] = filters.includeBotMessages.toString();
     }
 
+    if (filters.onlyMyChannels !== undefined) {
+      params['onlyMyChannels'] = filters.onlyMyChannels.toString();
+    }
+
     if (filters.groupBy !== undefined) {
       params['groupBy'] = filters.groupBy;
     }

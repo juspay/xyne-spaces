@@ -16,6 +16,6 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   assigneeIds: [],
   sortBy: 'relevance',
   includeBotMessages: false,
-  onlyMyChannels: false,
+  onlyMyChannels: true,
   rankProfile: '',
 };

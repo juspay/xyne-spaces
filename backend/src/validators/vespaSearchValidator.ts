@@ -203,6 +203,11 @@ export const vespaSearchQuerySchema = Joi.object({
     'any.only': 'includeBotMessages must be "true" or "false"'
   }),
 
+  // Cmd-K "Include my channels" toggle. When true, scope chat results to channels the user is a member of.
+  onlyMyChannels: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'onlyMyChannels must be "true" or "false"'
+  }),
+
   // Debug flag
   includeDebugInfo: Joi.boolean().optional().messages({
     'boolean.base': 'Include debug info must be a boolean'

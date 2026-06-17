@@ -151,6 +151,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       callType,   // Call type filter (e.g. HEADLESS for recordings)
       presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
       includeBotMessages,  // 'true'|'false' string from cmd-K toggle; default behavior excludes BOT messages
+      onlyMyChannels,      // 'true'|'false' string from cmd-K toggle; default behavior includes public channels
       includeDebugInfo,    // 'true' => attach matchfeatures/rankfeatures debug info to each result
       groupBy,    // Override Vespa grouping. Empty string => flat ranked list (no grouping).
       // Note: subApp was moved up to be with other frontend filters
@@ -376,6 +377,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     if (includeBotMessages !== 'true') {
       options.slack.excludeBotMessages = true;
     }
+
+    // My-channels toggle: when true, scope chat results to channels the user is a
+    // member of (drop the public-non-member access branch in YqlBuilder).
+    options.slack.onlyMyChannels = onlyMyChannels === 'true';
 
     // Call vespa search
     const results = await vespaService.searchService.searchVespa(

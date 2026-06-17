@@ -179,6 +179,9 @@ export interface VespaSearchFilters {
   // Cmd-K "Include bot messages" toggle. Default off → backend excludes BOT messages.
   includeBotMessages?: boolean;
 
+  // Cmd-K "Include my channels" toggle. Default on → backend scopes to member channels.
+  onlyMyChannels?: boolean;
+
   // Override Vespa grouping. Empty string => flat ranked list (no grouping).
   groupBy?: string;
 }
