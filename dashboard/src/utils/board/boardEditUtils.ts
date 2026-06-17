@@ -1,21 +1,5 @@
 import type { BoardMetadata, TicketFormConfig } from '@xyne/shared';
-import type {
-  TicketField,
-  SelectOption,
-} from '../../components/Board/BoardEditScreen/BoardEditScreen.types';
-
-/**
- * Field type options for custom fields dropdown
- */
-export const FIELD_TYPE_OPTIONS: SelectOption[] = [
-  { value: 'text', label: 'String' },
-  { value: 'select', label: 'Single Select' },
-  { value: 'multiselect', label: 'Multi Select' },
-  { value: 'boolean', label: 'Boolean' },
-  { value: 'date', label: 'Date' },
-  { value: 'user', label: 'User' },
-];
-
+import type { TicketField } from '../../components/Board/BoardEditScreen/BoardEditScreen.types';
 /**
  * Extract ticket form config from board metadata
  */

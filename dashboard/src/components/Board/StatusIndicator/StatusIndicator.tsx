@@ -97,5 +97,3 @@ export const StatusIndicator = ({
     </svg>
   );
 };
-
-export default StatusIndicator;

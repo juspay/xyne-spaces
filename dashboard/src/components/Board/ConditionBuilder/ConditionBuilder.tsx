@@ -609,5 +609,3 @@ export const ConditionBuilder = ({
     </div>
   );
 };
-
-export default ConditionBuilder;

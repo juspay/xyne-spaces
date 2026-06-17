@@ -1,7 +1,5 @@
 import { PRStatusEvent, FormFieldType } from '@xyne/shared';
 import type {
-  WhenFieldType,
-  ThenFieldType,
   WhenFieldOption,
   ThenFieldOption,
   ConditionOption,
@@ -59,35 +57,3 @@ export const FIELD_TYPE_OPTIONS: FieldTypeOption[] = [
 ];
 
 // ─── Helper Functions ───────────────────────────────────────────────────────
-
-/**
- * Filter options based on when field selection
- */
-export const getFilteredThenOptions = (
-  whenField: WhenFieldType | '',
-  options: ThenFieldOption[],
-): ThenFieldOption[] => {
-  return options.filter(opt => !whenField || opt.whenField === whenField);
-};
-
-/**
- * Filter options based on then field selection
- */
-export const getFilteredThenConditionOptions = (
-  thenField: ThenFieldType | '',
-  options: ThenConditionOption[],
-): ThenConditionOption[] => {
-  return options.filter(opt => !thenField || opt.thenField === thenField);
-};
-
-/**
- * Get display label for a value from options array
- */
-export const getOptionLabel = (
-  value: string,
-  options: SelectOption[],
-  defaultLabel: string = 'Choose',
-): string => {
-  const option = options.find(opt => opt.value === value);
-  return option?.label || defaultLabel;
-};

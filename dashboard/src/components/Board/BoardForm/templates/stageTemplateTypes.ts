@@ -19,8 +19,3 @@ export interface StageTemplateMetadata {
   isManaged: boolean; // Whether stages from this template are read-only (all stages in template share this)
   getStageMetadata: (stageName: string) => StageMetadata; // Function to get per-stage metadata (badge, etc.)
 }
-
-export interface StageTemplate {
-  definitions: StageDefinition[];
-  metadata: StageTemplateMetadata;
-}

@@ -1,0 +1,205 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "ignoreExportsUsedInFile": true,
+  "workspaces": {
+    "dashboard": {
+      "entry": [
+        "src/main.tsx",
+        "index.html",
+        "src/services/XyneAI/xyneAIStream.worker.ts",
+        "src/utils/logger.worker.ts",
+        "src/components/FileViewer/excelParser.worker.ts",
+        "src/routes/**/*.tsx",
+        "src/routes/**/*.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignore": [
+        "**/*.test.{ts,tsx}",
+        "**/*.spec.{ts,tsx}",
+        "public/sw.js",
+        "dist/**",
+        "coverage/**"
+      ]
+    },
+    "framework": {
+      "entry": [
+        "src/index.ts",
+        "dist/src/application/index.js"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "dist/**",
+        "node_modules/**"
+      ]
+    },
+    "backend": {
+      "entry": [
+        "src/index.ts",
+        "src/worker.ts"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "dist/**",
+        "node_modules/**",
+        "backend/**"
+      ]
+    },
+    "shared": {
+      "entry": [
+        "src/index.ts",
+        "src/zero/index.ts",
+        "src/hooks/index.ts",
+        "src/machines/index.ts",
+        "src/platform/index.ts",
+        "src/providers/index.ts",
+        "src/logger/index.ts",
+        "src/utils/index.ts",
+        "src/automations/variable-ref.ts"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "dist/**",
+        "node_modules/**"
+      ]
+    },
+    "apps/xyne-spaces": {
+      "entry": [
+        "index.js",
+        "App.tsx"
+      ],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignore": [
+        "**/*.test.{ts,tsx}",
+        "**/*.spec.{ts,tsx}",
+        "node_modules/**"
+      ]
+    },
+    "lotus": {
+      "entry": [
+        "app/_layout.tsx"
+      ],
+      "project": ["app/**/*.{ts,tsx}"],
+      "ignore": [
+        "**/*.test.{ts,tsx}",
+        "**/*.spec.{ts,tsx}",
+        "node_modules/**"
+      ]
+    },
+    "xyne-claw": {
+      "entry": [
+        "src/main.ts"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "node_modules/**"
+      ]
+    },
+    "xyne-claw-shared": {
+      "entry": [
+        "src/index.ts",
+        "src/tools/index.ts",
+        "src/tools/pgm/index.ts",
+        "src/tools/google/index.ts"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "node_modules/**"
+      ]
+    },
+    "xyne-claw-auth/frontend": {
+      "entry": [
+        "src/main.tsx",
+        "index.html"
+      ],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignore": [
+        "**/*.test.{ts,tsx}",
+        "**/*.spec.{ts,tsx}",
+        "node_modules/**"
+      ]
+    },
+    "xyne-claw-auth/backend": {
+      "entry": [
+        "src/main.ts",
+        "src/queue/scheduled-jobs-worker.ts",
+        "src/queue/run-recovery-worker.ts",
+        "src/queue/digital-twin-backfill-worker.ts",
+        "prisma/seed.ts"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "node_modules/**"
+      ]
+    },
+    "dashboard-external": {
+      "vite": false,
+      "entry": [
+        "src/main.tsx",
+        "index.html"
+      ],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignore": [
+        "**/*.test.{ts,tsx}",
+        "**/*.spec.{ts,tsx}",
+        "node_modules/**"
+      ]
+    },
+    "site": {
+      "entry": [
+        "app/layout.tsx",
+        "app/page.tsx",
+        "app/**/*.tsx"
+      ],
+      "project": ["app/**/*.{ts,tsx}"],
+      "ignore": [
+        "**/*.test.{ts,tsx}",
+        "**/*.spec.{ts,tsx}",
+        "node_modules/**",
+        ".next/**"
+      ]
+    },
+    "electron": {
+      "entry": [
+        "src/app/main.ts",
+        "src/preload.ts"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "dist/**",
+        "node_modules/**"
+      ]
+    },
+    "packages/kata-sdk": {
+      "entry": [
+        "src/index.ts"
+      ],
+      "project": ["src/**/*.ts"],
+      "ignore": [
+        "dist/**",
+        "node_modules/**"
+      ]
+    }
+  },
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/*.config.*",
+    "**/Dockerfile*",
+    "**/*.lock",
+    "**/*.md",
+    "**/index.ts",
+    "**/index.tsx"
+  ]
+}

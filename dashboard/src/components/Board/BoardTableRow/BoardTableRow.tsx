@@ -78,5 +78,3 @@ export const BoardTableRow = ({
     </div>
   );
 };
-
-export default BoardTableRow;

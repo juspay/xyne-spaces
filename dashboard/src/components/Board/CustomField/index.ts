@@ -1,2 +1,2 @@
-export { CustomField, default } from './CustomField';
+export { CustomField } from './CustomField';
 export type { FieldType, CustomFieldProps } from './CustomField.types';

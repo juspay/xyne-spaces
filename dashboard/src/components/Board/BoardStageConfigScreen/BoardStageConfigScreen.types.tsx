@@ -33,36 +33,10 @@ export interface StageNode {
   position: { x: number; y: number };
 }
 
-export interface NodeConnection {
-  from: number; // tempId
-  to: number; // tempId
-}
-
-export interface StageForm {
-  id: string;
-  name: string;
-}
-
 // Re-export from shared for convenience
 export type { User };
 
 // Constants
-export const PR_STATUS_OPTIONS = [
-  { value: 'PR_MERGED', label: 'PR Merged' },
-  { value: 'PR_APPROVED', label: 'PR Approved' },
-  { value: 'PR_CHANGES_REQUESTED', label: 'PR Changes Requested' },
-  { value: 'PR_OPENED', label: 'PR Opened' },
-  { value: 'PR_CLOSED', label: 'PR Closed' },
-];
-
-export const TICKET_STATUS_OPTIONS = [
-  { value: TicketStatusV2.TODO, label: 'To Do' },
-  { value: TicketStatusV2.STARTED, label: 'Started' },
-  { value: TicketStatusV2.PAUSED, label: 'Paused' },
-  { value: TicketStatusV2.COMPLETED, label: 'Completed' },
-  { value: TicketStatusV2.CANCELLED, label: 'Cancelled' },
-];
-
 // Status options for the status indicator (used in stage config)
 export const STATUS_OPTIONS = [
   {

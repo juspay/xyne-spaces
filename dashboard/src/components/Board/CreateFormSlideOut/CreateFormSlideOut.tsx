@@ -521,5 +521,3 @@ export const CreateFormSlideOut = ({
     </div>
   );
 };
-
-export default CreateFormSlideOut;

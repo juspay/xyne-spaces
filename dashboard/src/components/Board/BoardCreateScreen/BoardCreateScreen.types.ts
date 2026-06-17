@@ -1,14 +1,5 @@
 import type { FormContextType } from '@xyne/shared';
 
-export interface TemplateCard {
-  id: string;
-  name: string;
-  description: string;
-  bgColor: string;
-  borderColor: string;
-  icon?: string;
-}
-
 export interface BoardRow {
   id: string;
   title: string;
@@ -19,20 +10,6 @@ export interface BoardRow {
   projectId: string;
   stages?: number;
   customFieldNames?: string[];
-}
-
-export interface CreateBoardData {
-  name: string;
-  projectId: string;
-  boardType: string;
-  stages: Array<{
-    name: string;
-    sequenceNumber: number;
-    defaultTicketStatusV2: string;
-    eta?: number;
-    prStatuses?: string[];
-    approverIds?: string[];
-  }>;
 }
 
 export const CreationMode = {
@@ -66,12 +43,4 @@ export interface FormMapping {
   id: string;
   formContextMappings?: readonly FormContextMapping[];
   formFields?: readonly FormField[];
-}
-
-export interface BoardFromQuery {
-  id: string;
-  name: string;
-  createdBy: string;
-  projectId: string;
-  stages?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
 }
