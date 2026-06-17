@@ -41,6 +41,9 @@ interface UseSearchMetricsOptions {
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
   onSearchComplete?: (results: DisplaySearchResult[], query: string) => void;
   mentionSearchType?: MentionType | null;
+  // Initial value for the "Include my channels" toggle. Defaults to false so the
+  // full-page search is unaffected; the Cmd-K modal opts in with `true`.
+  defaultOnlyMyChannels?: boolean;
 }
 
 const BACKEND_RESULTS_LIMIT = 25;
@@ -178,6 +181,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const [useVespaSearch, setUseVespaSearch] = useState(true);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
   const [includeBotMessages, setIncludeBotMessages] = useState(false);
+  // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
+  // other consumers (full-page search) default OFF so their behavior is unchanged.
+  const [onlyMyChannels, setOnlyMyChannels] = useState(options.defaultOnlyMyChannels ?? false);
   // Vespa rank profile, passed through to the search payload. '' => backend default.
   const [rankProfile, setRankProfile] = useState('');
   // Compare mode: request per-result matchfeatures/rankfeatures for ranking debug.
@@ -845,6 +851,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               limit: limit,
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
+              onlyMyChannels,
               ...(rankProfile && { rankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
               ...(priorityFilter && { priority: priorityFilter }),
@@ -960,6 +967,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
             if (channelMentions.length > 0) {
               searchFilters.in = channelMentions.map(m => m.id).join(',');
+              // Explicit in: channels win — don't also constrain to "only my channels"
+              // (else searching a channel you're not a member of returns nothing).
+              searchFilters.onlyMyChannels = false;
             }
 
             let mergedResults: DisplaySearchResult[] = [];
@@ -1126,6 +1136,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       markSearchStart,
       resetSearchState,
       includeBotMessages,
+      onlyMyChannels,
       rankProfile,
       includeDebugInfo,
     ],
@@ -1137,6 +1148,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     activeTab: TabType;
     mentionsKey: string;
     includeBotMessages: boolean;
+    onlyMyChannels: boolean;
     rankProfile: string;
     includeDebugInfo: boolean;
   }>({
@@ -1144,6 +1156,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     activeTab: TabType.ALL,
     mentionsKey: '',
     includeBotMessages: false,
+    onlyMyChannels: options.defaultOnlyMyChannels ?? false,
     rankProfile: '',
     includeDebugInfo: false,
   });
@@ -1170,6 +1183,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       normalizedText === lastSearchedParamsRef.current.text &&
       activeTab === lastSearchedParamsRef.current.activeTab &&
       includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
+      onlyMyChannels === lastSearchedParamsRef.current.onlyMyChannels &&
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
@@ -1183,6 +1197,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         text: normalizedText,
         activeTab,
         includeBotMessages,
+        onlyMyChannels,
         rankProfile,
         includeDebugInfo,
         mentionsKey: currentMentionsKey,
@@ -1210,6 +1225,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     options.mentionSearchType,
     performSearch,
     includeBotMessages,
+    onlyMyChannels,
     rankProfile,
     includeDebugInfo,
   ]);
@@ -1271,6 +1287,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           limit: currentOffset + pageSize,
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
+          onlyMyChannels,
           ...(rankProfile && { rankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),
           ...(priorityFilter && { priority: priorityFilter }),
@@ -1342,6 +1359,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
         if (channelMentions.length > 0) {
           searchFilters.in = channelMentions.map(m => m.id).join(',');
+          // Explicit in: channels win over "only my channels" (keep parity with the initial search).
+          searchFilters.onlyMyChannels = false;
         }
 
         const currentSessionId = searchSessionId || '';
@@ -1434,6 +1453,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     useVespaSearch,
     includeBotMessages,
+    onlyMyChannels,
     rankProfile,
     includeDebugInfo,
   ]);
@@ -1525,6 +1545,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setUseVespaSearch,
     includeBotMessages,
     setIncludeBotMessages,
+    onlyMyChannels,
+    setOnlyMyChannels,
     rankProfile,
     setRankProfile,
     includeDebugInfo,

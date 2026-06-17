@@ -32,6 +32,9 @@ export interface SlackFilters {
   // When true, exclude messages with messageType="BOT" from chat results.
   // Default behavior (when undefined/false) is to INCLUDE bot messages.
   excludeBotMessages?: boolean;
+  // When true, scope chat results to channels the user is a member of (drop the
+  // public-non-member access branch). Default (undefined/false) includes public channels.
+  onlyMyChannels?: boolean;
 }
 
 export interface TicketFilters {
@@ -638,7 +641,7 @@ export class YqlBuilder {
     // isPrivate exists only on chat_message/chat_container — omit it when the query is
     // pruned to chat_attachment only (else Vespa rejects the field reference).
     const accessClauses: string[] = [`permissions contains "${userId}"`];
-    if (this.schemasHaveField(selectedSchemas, (f) => f.isPrivate)) {
+    if (!filters.onlyMyChannels && this.schemasHaveField(selectedSchemas, (f) => f.isPrivate)) {
       accessClauses.push(`isPrivate contains "false"`);
     }
     conditions.push(`(${accessClauses.join(' or ')})`);

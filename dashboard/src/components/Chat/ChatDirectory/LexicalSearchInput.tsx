@@ -241,37 +241,34 @@ function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: n
 
       // Use requestAnimationFrame to ensure DOM has been updated after Lexical's render
       requestAnimationFrame(() => {
-        const selection = window.getSelection();
-        if (!selection || selection.rangeCount === 0) return;
-
-        const range = selection.getRangeAt(0).cloneRange();
-        range.collapse(false);
-
-        const cursorRect = range.getBoundingClientRect();
-
-        // If cursorRect has zero width/height, the range might be collapsed at a node boundary.
-        // Use a temporary zero-width space to measure position accurately.
-        if (cursorRect.left === 0 && cursorRect.right === 0) {
-          const span = document.createElement('span');
-          span.textContent = '\u200b';
-          range.insertNode(span);
-          const spanRect = span.getBoundingClientRect();
-          const containerRect = editorEl
-            .closest('[data-lexical-search-input]')
-            ?.getBoundingClientRect();
-          if (containerRect) {
-            onPositionChange(spanRect.left - containerRect.left);
-          }
-          span.remove();
-          return;
-        }
-
         const containerRect = editorEl
           .closest('[data-lexical-search-input]')
           ?.getBoundingClientRect();
-        if (containerRect) {
-          onPositionChange(cursorRect.left - containerRect.left);
+        if (!containerRect) return;
+
+        // Anchor the suffix to the RIGHT EDGE of the typed text, not the caret \u2014 keying off
+        // the caret made the suffix collapse onto the text when the caret moved off the end.
+        // Measure the last rendered text node (collapsing a range over the block element
+        // lands on a line boundary, not the inline text end).
+        const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT);
+        let lastTextNode: Node | null = null;
+        while (walker.nextNode()) lastTextNode = walker.currentNode;
+
+        if (lastTextNode && (lastTextNode.textContent ?? '').length > 0) {
+          const range = document.createRange();
+          range.selectNodeContents(lastTextNode);
+          const rect = range.getBoundingClientRect();
+          onPositionChange(rect.right - containerRect.left);
+          return;
         }
+
+        // No text yet (e.g. only mention chips) \u2014 fall back to the caret position.
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+        const caret = selection.getRangeAt(0).cloneRange();
+        caret.collapse(false);
+        const caretRect = caret.getBoundingClientRect();
+        onPositionChange(caretRect.left - containerRect.left);
       });
     });
   }, [editor, onPositionChange]);

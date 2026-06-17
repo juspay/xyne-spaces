@@ -60,16 +60,6 @@ type ResultsMention = {
   prefix: 'from:' | 'in:' | 'assignee:' | 'priority:';
 };
 
-// `in:` channels: explicit selection wins, else all visible channels when "only my
-// channels" is on, else none.
-function resolveChannelIds(
-  inChannelIds: string[],
-  onlyMyChannels: boolean,
-  allChannels: { id: string }[],
-): string[] {
-  return inChannelIds.length > 0 ? inChannelIds : onlyMyChannels ? allChannels.map(c => c.id) : [];
-}
-
 // Build the hook's selectedMentions from resolved filter ids. Priority is appended from
 // the URL — it has no results-screen UI, so it's pinned rather than read from `filters`.
 function buildSelectedMentions(
@@ -156,11 +146,16 @@ const SearchResults = (): ReactElement => {
     setActiveTab,
     setSelectedMentions,
     setIncludeBotMessages,
+    setOnlyMyChannels,
     setRankProfile,
     setIncludeDebugInfo,
     loadMoreRef,
     paginationState,
-  } = useSearchMetrics({ allChannels: [], mentionSearchType: null });
+  } = useSearchMetrics({
+    allChannels: [],
+    mentionSearchType: null,
+    defaultOnlyMyChannels: filters.onlyMyChannels,
+  });
 
   // Sync hook text whenever the URL query param changes; also close sidebar on new search
   useEffect(() => {
@@ -204,6 +199,12 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.includeBotMessages]);
 
+  // Sync "only my channels" filter → hook (applied server-side via the onlyMyChannels flag)
+  useEffect(() => {
+    setOnlyMyChannels(filters.onlyMyChannels);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.onlyMyChannels]);
+
   // Sync rankProfile filter → hook; clear selection so the matrix never mixes
   // ranking data captured under different profiles
   useEffect(() => {
@@ -229,11 +230,9 @@ const SearchResults = (): ReactElement => {
   const allChannels = useAllVisibleChannels();
   const allChannelsForNav = useAllChannels();
 
-  // Channels to pass as in: mentions — explicit selection takes precedence over "only my channels"
-  const channelIdsForSearch = useMemo(
-    () => resolveChannelIds(filters.inChannelIds, filters.onlyMyChannels, allChannels),
-    [filters.inChannelIds, filters.onlyMyChannels, allChannels],
-  );
+  // Only explicit in: chips are passed as channel mentions; "only my channels" is
+  // applied server-side via the onlyMyChannels flag synced above.
+  const channelIdsForSearch = filters.inChannelIds;
 
   // Sync from/in/assignee/priority filters → hook selected mentions
   useEffect(() => {
@@ -251,22 +250,23 @@ const SearchResults = (): ReactElement => {
   const handleFiltersChange = useCallback(
     (newFilters: SearchResultsFilters) => {
       setFilters(newFilters);
-      // Immediately sync tab and mentions to hook
+      // Immediately sync tab, member-scope flag, and mentions to hook
       if (newFilters.docType !== 'channels') {
         setActiveTab(docTypeToTabType(newFilters.docType));
       }
+      setOnlyMyChannels(newFilters.onlyMyChannels);
       // priorityFilter re-pinned from the URL (not in newFilters) so toggling another
       // filter keeps it.
       setSelectedMentions(
         buildSelectedMentions(
           newFilters.fromUserIds,
-          resolveChannelIds(newFilters.inChannelIds, newFilters.onlyMyChannels, allChannels),
+          newFilters.inChannelIds,
           newFilters.assigneeIds,
           priorityFilter,
         ),
       );
     },
-    [setActiveTab, setSelectedMentions, allChannels, priorityFilter],
+    [setActiveTab, setOnlyMyChannels, setSelectedMentions, priorityFilter],
   );
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
     if (!isChannelsMode && filters.docType !== 'all') return [];

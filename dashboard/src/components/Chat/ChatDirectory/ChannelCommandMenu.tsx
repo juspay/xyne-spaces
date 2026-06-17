@@ -22,12 +22,12 @@ import {
   Mail,
   ArrowRight,
   ListFilter,
+  SlidersHorizontal,
   User,
   SignalHigh,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Popover from '@radix-ui/react-popover';
-import * as Switch from '@radix-ui/react-switch';
 import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
 import { PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
@@ -346,6 +346,8 @@ const ChannelCommandMenu = ({
     // setUseVespaSearch,
     includeBotMessages,
     setIncludeBotMessages,
+    onlyMyChannels,
+    setOnlyMyChannels,
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
@@ -357,6 +359,9 @@ const ChannelCommandMenu = ({
   } = useSearchMetrics({
     allChannels,
     mentionSearchType,
+    // Default to "my channels" only in the standard Cmd-K modal (where the toggle
+    // lives). Inline / screen-popup reuses of this component keep the old behavior.
+    defaultOnlyMyChannels: !inline && !hideTabs,
   });
 
   // Aliases to match old usage if needed or just use new names
@@ -431,6 +436,7 @@ const ChannelCommandMenu = ({
 
   const insertTextRef = useRef<((text: string) => void) | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [searchFiltersOpen, setSearchFiltersOpen] = useState(false);
 
   // Type autocomplete - derived from searchText
   const typeAutocomplete = useMemo(() => {
@@ -2367,6 +2373,85 @@ const ChannelCommandMenu = ({
               </div>
             </Popover.Root>
           )}
+          {!inline && !hideTabs && (
+            <Popover.Root open={searchFiltersOpen} onOpenChange={setSearchFiltersOpen}>
+              <div className='relative group/filtertip'>
+                <Popover.Trigger asChild>
+                  <button
+                    type='button'
+                    className={cn(
+                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors',
+                      searchFiltersOpen
+                        ? 'bg-primary/10 border-primary/40 text-primary'
+                        : 'border-border text-foreground hover:bg-accent hover:text-accent-foreground',
+                    )}
+                    aria-label='Search filters'
+                  >
+                    <SlidersHorizontal size={13} />
+                  </button>
+                </Popover.Trigger>
+                <div className='pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/filtertip:opacity-100 transition-opacity z-[10001]'>
+                  Search filters
+                </div>
+                <Popover.Portal>
+                  <Popover.Content
+                    side='bottom'
+                    align='end'
+                    sideOffset={6}
+                    className='z-[10000] bg-popover border border-border rounded-lg shadow-md min-w-[180px] p-1 text-popover-foreground'
+                    onOpenAutoFocus={e => e.preventDefault()}
+                  >
+                    <button
+                      type='button'
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => setOnlyMyChannels(v => !v)}
+                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left'
+                      data-track-category='SEARCH'
+                      data-track-name='TOGGLE_ONLY_MY_CHANNELS'
+                    >
+                      <span>Only my channels</span>
+                      <span
+                        className={cn(
+                          'w-8 h-4 rounded-full transition-colors flex-shrink-0',
+                          onlyMyChannels ? 'bg-primary' : 'bg-muted-foreground/30',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'block w-3 h-3 rounded-full bg-white mt-0.5 transition-transform',
+                            onlyMyChannels ? 'translate-x-4' : 'translate-x-0.5',
+                          )}
+                        />
+                      </span>
+                    </button>
+                    <button
+                      type='button'
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => setIncludeBotMessages(v => !v)}
+                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left'
+                      data-track-category='SEARCH'
+                      data-track-name='TOGGLE_BOT_MESSAGES'
+                    >
+                      <span>Include bot messages</span>
+                      <span
+                        className={cn(
+                          'w-8 h-4 rounded-full transition-colors flex-shrink-0',
+                          includeBotMessages ? 'bg-primary' : 'bg-muted-foreground/30',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'block w-3 h-3 rounded-full bg-white mt-0.5 transition-transform',
+                            includeBotMessages ? 'translate-x-4' : 'translate-x-0.5',
+                          )}
+                        />
+                      </span>
+                    </button>
+                  </Popover.Content>
+                </Popover.Portal>
+              </div>
+            </Popover.Root>
+          )}
           <kbd className='px-1.5 py-0.5 text-xs font-semibold text-muted-foreground border border-border rounded flex-shrink-0 hidden sm:block'>
             Esc
           </kbd>
@@ -3152,7 +3237,7 @@ const ChannelCommandMenu = ({
 
       {/* Footer - outside body flex so TicketPreviewPanel only spans results area */}
       {!inline && !isMobile && (
-        <div className='px-4 py-2 border-t border-border/40 text-sm text-muted-foreground flex items-center justify-between shrink-0 bg-muted/30 rounded-b-2xl'>
+        <div className='px-4 py-2 border-t border-border/40 text-sm text-muted-foreground flex items-center justify-end shrink-0 bg-muted/30 rounded-b-2xl'>
           {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
@@ -3168,28 +3253,6 @@ const ChannelCommandMenu = ({
             </Switch.Root>
           </div>
           */}
-          <div className='flex items-center gap-2'>
-            <label
-              htmlFor='include-bot-messages-toggle'
-              className='text-xs text-muted-foreground cursor-pointer'
-              title={
-                includeBotMessages
-                  ? 'Bot messages are included in search results'
-                  : 'Bot messages are hidden from search results'
-              }
-            >
-              Include bot messages
-            </label>
-            <Switch.Root
-              id='include-bot-messages-toggle'
-              checked={includeBotMessages}
-              onCheckedChange={setIncludeBotMessages}
-              aria-label='Toggle bot messages in search results'
-              className='w-9 h-5 bg-muted-foreground/40 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
-            >
-              <Switch.Thumb className='block w-4 h-4 bg-background rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-5' />
-            </Switch.Root>
-          </div>
           <div className='flex items-center gap-6'>
             <span className='flex gap-2.5 items-center'>
               <span>Open</span>
