@@ -1371,6 +1371,27 @@ export const queries = defineQueries({
         .orderBy('updatedAt', 'desc');
     }
   ),
+  userEmailDrafts: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { channelId, limit, start } }) => {
+      let query = zql.email_drafts
+        .where('channelId', channelId)
+        .where('userId', '=', ctx.userID)
+        .orderBy('updatedAt', 'desc');
+
+      if (start) {
+        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
+      }
+
+      return query
+        .limit(limit)
+        .related('ticket');
+    }
+  ),
   // @deprecated
   ticketById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
