@@ -26,6 +26,7 @@ import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover
 import { useChannel } from '../../../hooks/useChannels';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { ALLOWED_TAGS, isValidURL, sanitizeDomTree } from '../../../utils/sanitizer';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
@@ -500,6 +501,66 @@ function CollapsibleConversationHistory({
       >
         {children}
       </div>
+    </div>
+  );
+}
+
+function CopyableCodeBlock({
+  children,
+  codeText,
+}: {
+  children: React.ReactNode;
+  codeText: string;
+}): JSX.Element {
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = React.useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== undefined) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = (): void => {
+    void copyTextToClipboard(codeText)
+      .then(() => {
+        setCopied(true);
+        resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to copy code snippet to clipboard', error);
+      });
+  };
+
+  return (
+    <div className='group/code-block relative'>
+      <button
+        type='button'
+        onClick={handleCopy}
+        className='absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md border border-muted-foreground/30 bg-background/90 px-2 text-xs font-medium text-muted-foreground opacity-100 shadow-sm transition-opacity hover:bg-muted hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
+        aria-label='Copy code snippet'
+        title='Copy code snippet'
+        data-track-category='MESSAGE'
+        data-track-name='COPY_CODE_SNIPPET'
+      >
+        {copied ? (
+          <>
+            <Check className='h-3 w-3 text-green-600' />
+            <span>Copied</span>
+          </>
+        ) : (
+          <>
+            <Copy className='h-3 w-3' />
+            <span>Copy</span>
+          </>
+        )}
+      </button>
+      <span aria-live='polite' className='sr-only'>
+        {copied ? 'Code snippet copied to clipboard' : ''}
+      </span>
+      {children}
     </div>
   );
 }
@@ -1242,6 +1303,13 @@ const parseNode = (
   if (tag === 'pre') {
     const codeText = el.textContent ?? '';
     const lineCount = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
+    const preElement = React.createElement(tag, props, ...children);
+    const copyablePre = (
+      <CopyableCodeBlock key={`${keyPrefix}-copyable-pre-${idx}`} codeText={codeText}>
+        {preElement}
+      </CopyableCodeBlock>
+    );
+
     if (lineCount > CODE_BLOCK_COLLAPSE_THRESHOLD) {
       return (
         <CollapsibleCodeBlock
@@ -1249,10 +1317,12 @@ const parseNode = (
           keyPrefix={`${keyPrefix}-${idx}`}
           lineCount={lineCount}
         >
-          {React.createElement(tag, props, ...children)}
+          {copyablePre}
         </CollapsibleCodeBlock>
       );
     }
+
+    return copyablePre;
   }
 
   return React.createElement(tag, props, ...children);
