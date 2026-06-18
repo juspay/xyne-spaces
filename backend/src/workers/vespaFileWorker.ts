@@ -8,6 +8,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { superpositionClient } from '@/services/superpositionClient';
+import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
 import { config } from '@/config/env';
 import { IngestionStatus } from '@prisma/client';
 import { SubApp } from '@/vespa/src/types';
@@ -197,6 +198,25 @@ export class VespaFileWorker {
 		);
 
 		try {
+			// Route PDFs (collections + chat/ticket attachments) into the async OCR
+			// scheduler (if enabled). When routed, the scheduler owns processing —
+			// skip synchronous parsing.
+			if (
+				jobType === 'feed' &&
+				schema === fileSchema &&
+				(app === SubApp.COLLECTIONS ||
+					app === SubApp.CHAT_ATTACHMENT ||
+					app === SubApp.TICKET_ATTACHMENT)
+			) {
+				const routed = await routePdfToScheduler(docId, app);
+				if (routed) {
+					logger.info(
+						`[VESPA_FILE_WORKER] Routed ${docId} (${app}) to async OCR scheduler; skipping sync processing`,
+					);
+					return;
+				}
+			}
+
 			// Check if file indexing is enabled
 			if (jobType === 'feed' && schema === fileSchema) {
 				const isFileIndexingEnabled = await superpositionClient.getBooleanValue(

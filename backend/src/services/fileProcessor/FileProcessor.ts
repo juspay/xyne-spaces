@@ -6,6 +6,7 @@ import { BaseStrategy } from "./strategies/BaseStrategy"
 import { TextStrategy } from "./strategies/TextStrategy"
 import { PdfJsStrategy } from "./strategies/PdfJsStrategy"
 import { DocxStrategy } from "./strategies/DocxStrategy"
+import { PdfFallbackProcessor } from "./PdfFallbackProcessor"
 import { DoclingService } from "./DoclingService"
 
 /**
@@ -138,7 +139,18 @@ export class FileProcessor {
         mimeType: string,
         config?: StrategyConfig
     ): Promise<ProcessingResult> {
-        // Try Docling first if enabled
+        // PDFs go through the multi-engine fallback ladder
+        // (LightOnOCR/Docling → PdfJs). It owns its own OCR/Docling attempt,
+        // so we don't double-run tryDocling here.
+        if (mimeType === "application/pdf") {
+            return PdfFallbackProcessor.processWithFallback(
+                buffer,
+                filename,
+                vespaDocId,
+            )
+        }
+
+        // Non-PDF: try Docling first if enabled, then the matching local strategy.
         const doclingResult = await FileProcessor.tryDocling(buffer, filename, vespaDocId)
         if (doclingResult) {
             return doclingResult

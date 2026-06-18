@@ -1,5 +1,7 @@
 import { config } from 'dotenv'
 import { config as appConfig } from '@/config/env'
+import { startDoclingSchedulerRole } from '@/services/ingestion/docling/workers/scheduler'
+import { startRuntimeConfigPolling } from '@/services/ingestion/docling/runtime/config'
 import { DatabaseClient } from '@/database/client'
 import { logger } from '@/utils/logger'
 import { pollingService } from './workflows/services/polling-service'
@@ -104,6 +106,15 @@ class WorkerService {
 
       if (vespaFileWorkerEnabled) {
         await vespaFileWorker.start()
+      }
+
+      // Async OCR (Docling/LightOn) scheduler roles — fire-and-forget loops.
+      if (appConfig.doclingScheduler.enabled && appConfig.doclingScheduler.role) {
+        logger.info(
+          `Starting Docling async OCR scheduler role: ${appConfig.doclingScheduler.role}`,
+        )
+        startRuntimeConfigPolling()
+        void startDoclingSchedulerRole(appConfig.doclingScheduler.role)
       }
 
       if(workflowType){
