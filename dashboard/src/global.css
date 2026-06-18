@@ -3036,6 +3036,34 @@ img.inline-emoji,
   color: #60a5fa !important;
 }
 
+/* Blend SingleSelect / Select dropdown menu dark mode.
+ * The blend SelectMenu surface (data-dropdown="dropdown", also role="menu" /
+ * data-radix-menu-content) is a nested styled-component, so the
+ * `[class*="sc-"] [class*="sc-"] { background-color: transparent }` rule above
+ * (specificity 0,3,0) strips its background and leaves it see-through in dark mode.
+ * These selectors are pinned to the element's stable data/role attributes so they
+ * outrank that blanket rule (0,4,0 vs 0,3,0). */
+[data-theme="midnight"] [data-dropdown="dropdown"][data-radix-menu-content][role="menu"] {
+  background-color: #1a1a1a !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="midnight"] [data-dropdown="dropdown"] [data-dropdown-value],
+[data-theme="midnight"] [data-dropdown="dropdown"] [data-dropdown-value] * {
+  color: #d1d5db !important;
+}
+
+[data-theme="midnight"] [data-dropdown="dropdown"] [data-dropdown-value]:hover {
+  background-color: #2a2d30 !important;
+}
+
+[data-theme="midnight"]
+  [data-dropdown="dropdown"]
+  [data-dropdown-value][data-dropdown-value-selected="True"] {
+  background-color: rgba(37, 99, 235, 0.2) !important;
+  color: #60a5fa !important;
+}
+
 /* Blend Design System - styled-components specific overrides */
 /* The Blend components use sc-* class patterns from styled-components */
 [data-theme="midnight"] [class^="sc-"] {
