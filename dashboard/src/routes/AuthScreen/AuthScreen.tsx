@@ -13,6 +13,7 @@ import { ShineBorder } from '../../components/ui/shine-border';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
+import { dropAllDatabases } from '@rocicorp/zero';
 
 /**
  * AuthScreen - Mobile-Responsive Login Page with Modern Design
@@ -91,6 +92,7 @@ const AuthScreen = (): ReactElement => {
       localStorage.removeItem('enrollment_completed');
     } else {
       void indexedDBService.dropAllUserDatabases();
+      void dropAllDatabases();
     }
   }, [isAuthenticated]);
 
