@@ -93,12 +93,54 @@ export interface MailFilters {
   createdRange?: string;
 }
 
+/**
+ * Collects filter values for Vespa parameter substitution (the prepared-statement pattern):
+ * `bind()` returns an `@placeholder` and the value rides as a separate request property, so it
+ * is matched as data, never parsed as YQL. Repeated (field, value) pairs reuse one placeholder.
+ */
+class VespaQueryParams {
+  private readonly placeholdersByField = new Map<string, Map<string, string>>();
+
+  /**
+   * Bind a value and return its `@placeholder`. Identical (field, value) pairs reuse one
+   * placeholder; distinct values of a field get distinct ones.
+   */
+  bind(fieldName: string, value: string): string {
+    let placeholderByValue = this.placeholdersByField.get(fieldName);
+    if (!placeholderByValue) {
+      placeholderByValue = new Map<string, string>();
+      this.placeholdersByField.set(fieldName, placeholderByValue);
+    }
+    const existing = placeholderByValue.get(value);
+    if (existing) {
+      return `@${existing}`;
+    }
+
+    // The `_` separates name from index so distinct fields never share a placeholder:
+    // "channelId" idx 10 -> "channelId_10" can't collide with "channelId1" idx 0 -> "channelId1_0".
+    const placeholder = `${fieldName}_${placeholderByValue.size}`;
+    placeholderByValue.set(value, placeholder);
+    return `@${placeholder}`;
+  }
+
+  /** Placeholder -> value map to merge into the Vespa search request payload. */
+  toRequestProperties(): Record<string, string> {
+    const properties: Record<string, string> = {};
+    for (const placeholderByValue of this.placeholdersByField.values()) {
+      for (const [value, placeholder] of placeholderByValue) {
+        // Values go out raw, never escaped: bound params are matched verbatim by Vespa.
+        properties[placeholder] = value;
+      }
+    }
+    return properties;
+  }
+}
+
 export class YqlBuilder {
   constructor() {}
 
-  private escapeYqlValue(value: string): string {
-    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  }
+  // No escapeYqlValue here anymore: every user/dynamic value is bound via VespaQueryParams.bind()
+  // as an `@placeholder` parameter, so it never enters the YQL string and needs no escaping.
 
   buildYql(
     query: string,
@@ -115,9 +157,14 @@ export class YqlBuilder {
     useFuzzy: boolean = false,
     useSemanticAnyway: boolean = true,
     workspaceId?: string
-  ): string {
+  ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
+    // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
+    // a real number so a non-numeric caller can't inject YQL. Default matches index.ts/the Joi schema.
+    const safeLimit = Number.isFinite(limit) ? limit : 20;
     const whereConditions: string[] = [];
+    // Collects `@placeholder` parameter bindings for user filter values (see VespaQueryParams).
+    const params = new VespaQueryParams();
 
     //Build search condition
     const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
@@ -158,8 +205,8 @@ export class YqlBuilder {
       or ({defaultIndex: "status"} userInput(@query))
       or ({defaultIndex: "subject_fuzzy"} userInput(@query))
       or ({defaultIndex: "chunks_fuzzy"} userInput(@query))
-      or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
-      or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
+      or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
+      or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
     )`);
         } else {
           // Lexical only: short query, skip semantic
@@ -197,19 +244,19 @@ export class YqlBuilder {
         // sam_transcript schema uses its own embedding fields; text_embeddings/chunk_embeddings don't exist on it
         whereConditions.push(`(
         (userInput(@query))
-      or ({targetHits:${limit}} nearestNeighbor(meetingSummary_embeddings, e))
-      or ({targetHits:${limit}} nearestNeighbor(chapters_embeddings, e))
-      or ({targetHits:${limit}} nearestNeighbor(actionItems_embeddings, e))
-      or ({targetHits:${limit}} nearestNeighbor(others_embeddings, e))
-      or ({targetHits:${limit}} nearestNeighbor(qna_embeddings, e))
+      or ({targetHits:${safeLimit}} nearestNeighbor(meetingSummary_embeddings, e))
+      or ({targetHits:${safeLimit}} nearestNeighbor(chapters_embeddings, e))
+      or ({targetHits:${safeLimit}} nearestNeighbor(actionItems_embeddings, e))
+      or ({targetHits:${safeLimit}} nearestNeighbor(others_embeddings, e))
+      or ({targetHits:${safeLimit}} nearestNeighbor(qna_embeddings, e))
     )`);
       } else {
         // Lexical only: short query
         if (useSemantic) {
           whereConditions.push(`(
           (userInput(@query))
-        or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
-        or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
+        or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
+        or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
         )`);
         } else {
           whereConditions.push(`(userInput(@query))`);
@@ -238,28 +285,28 @@ export class YqlBuilder {
     if (apps.some((a) => a.toLowerCase() === 'chat')) {
       const chatSchemas = selectedFor([messageSchema, channelSchema, attachmentSchema]);
       guardedParts.push(
-        `(${this.buildChatConditions(slackFilters, userId, chatSchemas)}) and ${this.buildPermGuard(chatSchemas, userId, workspaceId)}`
+        `(${this.buildChatConditions(slackFilters, userId, chatSchemas, params)}) and ${this.buildPermGuard(chatSchemas, userId, params, workspaceId)}`
       );
     }
 
     if (apps.some((a) => a.toLowerCase() === 'ticket')) {
       const ticketSchemas = selectedFor([ticketSchema]);
       guardedParts.push(
-        `(${this.buildTicketConditions(ticketFilters, userId)}) and ${this.buildPermGuard(ticketSchemas, userId, workspaceId)}`
+        `(${this.buildTicketConditions(ticketFilters, userId, params)}) and ${this.buildPermGuard(ticketSchemas, userId, params, workspaceId)}`
       );
     }
 
     if (apps.some((a) => a.toLowerCase() === 'file')) {
       const fileSchemas = selectedFor([fileSchema]);
       guardedParts.push(
-        `(${this.buildFileConditions(fileFilters, userId)}) and ${this.buildPermGuard(fileSchemas, userId, workspaceId)}`
+        `(${this.buildFileConditions(fileFilters, userId, params)}) and ${this.buildPermGuard(fileSchemas, userId, params, workspaceId)}`
       );
     }
 
     if (apps.some((a) => a.toLowerCase() === 'mail')) {
       const mailSchemas = selectedFor([mailSchema]);
       guardedParts.push(
-        `(${this.buildMailConditions(mailFilters, userId)}) and ${this.buildPermGuard(mailSchemas, userId, workspaceId)}`
+        `(${this.buildMailConditions(mailFilters, userId, params)}) and ${this.buildPermGuard(mailSchemas, userId, params, workspaceId)}`
       );
     }
 
@@ -268,7 +315,7 @@ export class YqlBuilder {
     }
 
     if (apps.some((a) => a.toLowerCase() === 'transcript')) {
-      openConditions.push(this.buildMeetingConditions(meetingFilters));
+      openConditions.push(this.buildMeetingConditions(meetingFilters, params));
     }
 
     // Combine per-app guarded groups with open conditions.
@@ -287,7 +334,7 @@ export class YqlBuilder {
 
     // Workspace isolation: also apply at top level to cover open conditions (user, transcript)
     if (workspaceId) {
-      whereConditions.push(`workspaceId contains "${this.escapeYqlValue(workspaceId)}"`);
+      whereConditions.push(`workspaceId contains ${params.bind('workspaceId', workspaceId)}`);
     }
 
     let yql = `select * from sources ${schemaNames} where ${whereConditions.join(' and ')}`;
@@ -297,15 +344,15 @@ export class YqlBuilder {
     if (isMailOnly) {
       // Deduplicate mail results by conversation: one result per threadId,
       // keeping the highest-relevance hit within each thread.
-      yql += ` | all(group(threadId) max(${limit}) order(-max(relevance())) each(max(1) each(output(summary(default)))))`;
+      yql += ` | all(group(threadId) max(${safeLimit}) order(-max(relevance())) each(max(1) each(output(summary(default)))))`;
     } else if (groupBy && apps.length != 1) {
-      const groupClause = this.buildGroupingClause(groupBy, limit);
+      const groupClause = this.buildGroupingClause(groupBy, safeLimit);
       if (groupClause) {
         yql += `| ${groupClause}`;
       }
     }
 
-    return yql;
+    return { yql, params: params.toRequestProperties() };
   }
   /**
    * Build YQL condition for user search
@@ -394,20 +441,24 @@ export class YqlBuilder {
   private buildPermGuard(
     selectedSchemas: VespaSchema[],
     userId: string,
+    params: VespaQueryParams,
     workspaceId?: string
   ): string {
-    const accessConditions: string[] = [`permissions contains "${userId}"`];
+    // The same user id is checked against permissions/ownerId/channelPermissions, so bind
+    // it once and reuse the placeholder across all three clauses.
+    const accessUser = params.bind('permissions', userId);
+    const accessConditions: string[] = [`permissions contains ${accessUser}`];
     if (this.schemasHaveField(selectedSchemas, (f) => f.ownerId)) {
-      accessConditions.push(`ownerId contains "${userId}"`);
+      accessConditions.push(`ownerId contains ${accessUser}`);
     }
     if (this.schemasHaveField(selectedSchemas, (f) => f.channelPermissions)) {
-      accessConditions.push(`channelPermissions contains "${userId}"`);
+      accessConditions.push(`channelPermissions contains ${accessUser}`);
     }
     if (this.schemasHaveField(selectedSchemas, (f) => f.isPrivate)) {
       accessConditions.push(`isPrivate contains "false"`);
     }
     const workspaceClause = workspaceId
-      ? ` and workspaceId contains "${this.escapeYqlValue(workspaceId)}"`
+      ? ` and workspaceId contains ${params.bind('workspaceId', workspaceId)}`
       : '';
     return `((${accessConditions.join(' or ')})${workspaceClause})`;
   }
@@ -416,8 +467,11 @@ export class YqlBuilder {
    * Build YQL condition for file search
    * Applies to file schemas
    */
-  private buildFileConditions(filters: FileFilters, userId: string): string {
+  private buildFileConditions(filters: FileFilters, userId: string, params: VespaQueryParams): string {
     const conditions: string[] = [];
+    // The current user's id is checked against ownerId/permissions in the subApp access
+    // groups below; bind it once and reuse the placeholder.
+    const accessUser = params.bind('permissions', userId);
 
     // DocType filter
     conditions.push(`docType contains "file"`);
@@ -433,7 +487,7 @@ export class YqlBuilder {
 
     if (filters.channelId && filters.channelId.length > 0) {
       const channelIds = filters.channelId
-        .map((c) => `channelId contains "${this.escapeYqlValue(c.trim())}"`)
+        .map((channelId) => `channelId contains ${params.bind('channelId', channelId.trim())}`)
         .join(' or ');
       conditions.push(`(${channelIds})`);
     }
@@ -441,7 +495,7 @@ export class YqlBuilder {
     // Owner filter (created_by)
     if (filters.ownerId && filters.ownerId.length > 0) {
       const ownerIds = filters.ownerId
-        .map((id) => `ownerId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((ownerId) => `ownerId contains ${params.bind('ownerId', ownerId.trim())}`)
         .join(' or ');
       conditions.push(`(${ownerIds})`);
     }
@@ -449,7 +503,7 @@ export class YqlBuilder {
     // Canvas: require owner/permissions/isPrivate check
     if (subApps.some((s) => s === 'CANVAS')) {
       subAppConditions.push(
-        `((subApp contains "CANVAS") and (ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false"))`
+        `((subApp contains "CANVAS") and (ownerId contains ${accessUser} or permissions contains ${accessUser} or isPrivate contains "false"))`
       );
     }
 
@@ -460,7 +514,7 @@ export class YqlBuilder {
       )
     ) {
       subAppConditions.push(
-        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains "${userId}" or channelPermissions contains "${userId}" or isPrivate contains "false"))`
+        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
       );
     }
 
@@ -471,10 +525,10 @@ export class YqlBuilder {
 
     // Collections: require owner/permissions/isPrivate check + project scoping
     if (subApps.some((s) => s === 'collections')) {
-      let collectionCondition = `(subApp contains "collections") and (ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false")`;
+      let collectionCondition = `(subApp contains "collections") and (ownerId contains ${accessUser} or permissions contains ${accessUser} or isPrivate contains "false")`;
       if (filters.projectId && filters.projectId.length > 0) {
         const projectCondition = filters.projectId
-          .map((id) => `projectId contains "${this.escapeYqlValue(id)}"`)
+          .map((projectId) => `projectId contains ${params.bind('projectId', projectId)}`)
           .join(' or ');
         collectionCondition += ` and (${projectCondition})`;
       }
@@ -488,21 +542,21 @@ export class YqlBuilder {
     // Collection ID filter (scope to specific collections)
     if (filters.collectionId && filters.collectionId.length > 0) {
       const orCondition = filters.collectionId
-        .map((id) => `clId contains "${this.escapeYqlValue(id)}"`)
+        .map((collectionId) => `clId contains ${params.bind('clId', collectionId)}`)
         .join(' or ');
       conditions.push(`(${orCondition})`);
     }
 
     // File ID filter (scope to a specific file/document by its Vespa docId)
     if (filters.fileId && filters.fileId.length > 0) {
-      const orCondition = filters.fileId.map(id => `docId contains "${this.escapeYqlValue(id)}"`).join(' or ');
+      const orCondition = filters.fileId.map(id => `docId contains ${params.bind('docId', id)}`).join(' or ');
       conditions.push(`(${orCondition})`);
     }
 
     // callType filter (e.g. HEADLESS for recordings)
     if (filters.callType && filters.callType.length > 0) {
       const types = filters.callType
-        .map((t) => `callType contains "${this.escapeYqlValue(t.trim())}"`)
+        .map((callType) => `callType contains ${params.bind('callType', callType.trim())}`)
         .join(' or ');
       conditions.push(`(${types})`);
     }
@@ -510,7 +564,7 @@ export class YqlBuilder {
     // createdBy filter (for from: functionality - files uploaded by specific user)
     if (filters.createdBy && filters.createdBy.length > 0) {
       const creators = filters.createdBy
-        .map((id) => `createdBy contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((createdBy) => `createdBy contains ${params.bind('createdBy', createdBy.trim())}`)
         .join(' or ');
       conditions.push(`(${creators})`);
     }
@@ -553,13 +607,14 @@ export class YqlBuilder {
   private buildChatConditions(
     filters: SlackFilters,
     userId: string,
-    selectedSchemas: VespaSchema[]
+    selectedSchemas: VespaSchema[],
+    params: VespaQueryParams
   ): string {
     const conditions: string[] = [];
     // DocType filter
     if (filters.docType && filters.docType.length > 0) {
       const docTypes = filters.docType
-        .map((t) => `docType contains "${this.escapeYqlValue(t.trim())}"`)
+        .map((docType) => `docType contains ${params.bind('docType', docType.trim())}`)
         .join(' or ');
       conditions.push(`(${docTypes})`);
     } else {
@@ -571,7 +626,7 @@ export class YqlBuilder {
     // Project filter
     if (filters.projectId && filters.projectId.length > 0) {
       const projects = filters.projectId
-        .map((id) => `projectId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((projectId) => `projectId contains ${params.bind('projectId', projectId.trim())}`)
         .join(' or ');
       conditions.push(`(${projects})`);
     }
@@ -579,7 +634,7 @@ export class YqlBuilder {
     // Channel filter
     if (filters.channelId && filters.channelId.length > 0) {
       const channels = filters.channelId
-        .map((id) => `channelId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((channelId) => `channelId contains ${params.bind('channelId', channelId.trim())}`)
         .join(' or ');
       conditions.push(`(${channels})`);
     }
@@ -587,7 +642,7 @@ export class YqlBuilder {
     // Sender filter
     if (filters.senderId && filters.senderId.length > 0) {
       const senders = filters.senderId
-        .map((id) => `userId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((senderId) => `userId contains ${params.bind('senderId', senderId.trim())}`)
         .join(' or ');
       conditions.push(`(${senders})`);
     }
@@ -596,12 +651,12 @@ export class YqlBuilder {
     // Matches userId for direct messages, and threadMentions/threadSenders for thread participation
     if (filters.participants && filters.participants.length > 0) {
       const participantConditions = filters.participants
-        .map((id) => {
-          const trimmedId = this.escapeYqlValue(id.trim());
+        .map((participantId) => {
+          const participant = params.bind('participant', participantId.trim());
           return `(
-          userId contains "${trimmedId}" OR
-          threadMentions contains "${trimmedId}" OR
-          threadSenders contains "${trimmedId}"
+          userId contains ${participant} OR
+          threadMentions contains ${participant} OR
+          threadSenders contains ${participant}
         )`;
         })
         .join(' or ');
@@ -640,7 +695,7 @@ export class YqlBuilder {
     // Permissions check: user must have explicit permissions OR channel is public.
     // isPrivate exists only on chat_message/chat_container — omit it when the query is
     // pruned to chat_attachment only (else Vespa rejects the field reference).
-    const accessClauses: string[] = [`permissions contains "${userId}"`];
+    const accessClauses: string[] = [`permissions contains ${params.bind('permissions', userId)}`];
     if (!filters.onlyMyChannels && this.schemasHaveField(selectedSchemas, (f) => f.isPrivate)) {
       accessClauses.push(`isPrivate contains "false"`);
     }
@@ -664,7 +719,7 @@ export class YqlBuilder {
    * Build YQL condition for Ticket app
    * Applies to ticket schema only
    */
-  private buildTicketConditions(filters: TicketFilters, userId: string): string {
+  private buildTicketConditions(filters: TicketFilters, userId: string, params: VespaQueryParams): string {
     const conditions: string[] = [];
 
     // DocType filter (always ticket)
@@ -673,17 +728,17 @@ export class YqlBuilder {
     // Project filter
     if (filters.projectId && filters.projectId.length > 0) {
       const projects = filters.projectId
-        .map((id) => `projectId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((projectId) => `projectId contains ${params.bind('projectId', projectId.trim())}`)
         .join(' or ');
       conditions.push(`(${projects})`);
     } else {
-      conditions.push(`permissions contains "${userId}"`);
+      conditions.push(`permissions contains ${params.bind('permissions', userId)}`);
     }
 
     // Channel filter
     if (filters.channelId && filters.channelId.length > 0) {
       const channels = filters.channelId
-        .map((id) => `channelId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((channelId) => `channelId contains ${params.bind('channelId', channelId.trim())}`)
         .join(' or ');
       conditions.push(`(${channels})`);
     }
@@ -691,7 +746,7 @@ export class YqlBuilder {
     // Status filter
     if (filters.status && filters.status.length > 0) {
       const statuses = filters.status
-        .map((s) => `status contains "${this.escapeYqlValue(s.trim().toUpperCase())}"`)
+        .map((status) => `status contains ${params.bind('status', status.trim().toUpperCase())}`)
         .join(' or ');
       conditions.push(`(${statuses})`);
     }
@@ -699,14 +754,14 @@ export class YqlBuilder {
     // Ticket ID filter
     if (filters.ticketId && filters.ticketId.length > 0) {
       const tickets = filters.ticketId
-        .map((id) => `docId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((ticketId) => `docId contains ${params.bind('docId', ticketId.trim())}`)
         .join(' or ');
       conditions.push(`(${tickets})`);
     }
 
     if (filters.priority && filters.priority.length > 0) {
       const priorities = filters.priority
-        .map((p) => `priority contains "${this.escapeYqlValue(p.trim().toUpperCase())}"`)
+        .map((priority) => `priority contains ${params.bind('priority', priority.trim().toUpperCase())}`)
         .join(' or ');
       conditions.push(`(${priorities})`);
     }
@@ -714,7 +769,7 @@ export class YqlBuilder {
     // CreatedBy filter (for from: functionality)
     if (filters.createdBy && filters.createdBy.length > 0) {
       const creators = filters.createdBy
-        .map((id) => `createdBy contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((createdBy) => `createdBy contains ${params.bind('createdBy', createdBy.trim())}`)
         .join(' or ');
       conditions.push(`(${creators})`);
     }
@@ -722,7 +777,7 @@ export class YqlBuilder {
     // Board filter (array - comma-separated)
     if (filters.boardId && filters.boardId.length > 0) {
       const boards = filters.boardId
-        .map((id) => `boardId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((boardId) => `boardId contains ${params.bind('boardId', boardId.trim())}`)
         .join(' or ');
       conditions.push(`(${boards})`);
     }
@@ -730,7 +785,7 @@ export class YqlBuilder {
     // Tags filter (array)
     if (filters.tags && filters.tags.length > 0) {
       const tagConditions = filters.tags
-        .map((tag) => `tags contains "${this.escapeYqlValue(tag.trim())}"`)
+        .map((tag) => `tags contains ${params.bind('tags', tag.trim())}`)
         .join(' or ');
       conditions.push(`(${tagConditions})`);
     }
@@ -761,16 +816,16 @@ export class YqlBuilder {
 
           if (concreteValues.length > 0) {
             const valueClause = concreteValues
-              .map((fieldValue) => `fieldValue contains "${this.escapeYqlValue(fieldValue)}"`)
+              .map((fieldValue) => `fieldValue contains ${params.bind('fieldValue', fieldValue)}`)
               .join(' or ');
             valueConditions.push(
-              `formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}" and (${valueClause}))`
+              `formFields contains sameElement(fieldId contains ${params.bind('fieldId', fieldId)} and (${valueClause}))`
             );
           }
 
           if (missingRequested) {
             valueConditions.push(
-              `!(formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}"))`
+              `!(formFields contains sameElement(fieldId contains ${params.bind('fieldId', fieldId)}))`
             );
           }
 
@@ -787,13 +842,18 @@ export class YqlBuilder {
     if (filters.dynamicFieldDateRanges) {
       const dateConditions = Object.entries(filters.dynamicFieldDateRanges)
         .map(([fieldId, range]) => {
-          const effectiveStart =
-            range.start ?? (range.end !== undefined ? range.end - (10 * DAY_IN_MS) : undefined);
-          const effectiveEnd =
-            range.end ?? (range.start !== undefined ? range.start + (10 * DAY_IN_MS) : undefined);
+          // start/end are interpolated raw below (not bound @params) but arrive from JSON.parse with
+          // no numeric validation, so coerce to finite numbers — a non-numeric value would inject YQL.
+          const start = Number(range.start);
+          const end = Number(range.end);
+          const hasStart = Number.isFinite(start);
+          const hasEnd = Number.isFinite(end);
+
+          const effectiveStart = hasStart ? start : hasEnd ? end - 10 * DAY_IN_MS : undefined;
+          const effectiveEnd = hasEnd ? end : hasStart ? start + 10 * DAY_IN_MS : undefined;
 
           if (effectiveStart !== undefined && effectiveEnd !== undefined) {
-            return `formFields contains sameElement(fieldId contains "${this.escapeYqlValue(fieldId)}" and fieldValueLong >= ${effectiveStart} and fieldValueLong <= ${effectiveEnd})`;
+            return `formFields contains sameElement(fieldId contains ${params.bind('fieldId', fieldId)} and fieldValueLong >= ${effectiveStart} and fieldValueLong <= ${effectiveEnd})`;
           }
           return '';
         })
@@ -808,7 +868,7 @@ export class YqlBuilder {
     // Stage filter
     if (filters.stage && filters.stage.length > 0) {
       const stages = filters.stage
-        .map((s) => `stage contains "${this.escapeYqlValue(s.trim().toUpperCase())}"`)
+        .map((stage) => `stage contains ${params.bind('stage', stage.trim().toUpperCase())}`)
         .join(' or ');
       conditions.push(`(${stages})`);
     }
@@ -816,7 +876,7 @@ export class YqlBuilder {
     // AssignedTo filter (search by ID)
     if (filters.assignedTo && filters.assignedTo.length > 0) {
       const assignees = filters.assignedTo
-        .map((id) => `assignedTo contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((assignedTo) => `assignedTo contains ${params.bind('assignedTo', assignedTo.trim())}`)
         .join(' or ');
       conditions.push(`(${assignees})`);
     }
@@ -862,7 +922,7 @@ export class YqlBuilder {
    * Build YQL condition for SAM Transcript search
    * Applies to sam_transcript schema only
    */
-  private buildMeetingConditions(filters: MeetingFilters): string {
+  private buildMeetingConditions(filters: MeetingFilters, params: VespaQueryParams): string {
     const conditions: string[] = [];
 
     // DocType filter (always sam_transcript)
@@ -871,7 +931,7 @@ export class YqlBuilder {
     // Platform filter
     if (filters.platform && filters.platform.length > 0) {
       const platforms = filters.platform
-        .map((p) => `platform contains "${this.escapeYqlValue(p.trim())}"`)
+        .map((platform) => `platform contains ${params.bind('platform', platform.trim())}`)
         .join(' or ');
       conditions.push(`(${platforms})`);
     }
@@ -879,7 +939,7 @@ export class YqlBuilder {
     // Merchants filter
     if (filters.merchants && filters.merchants.length > 0) {
       const merchantConditions = filters.merchants
-        .map((m) => `merchants contains "${this.escapeYqlValue(m.trim())}"`)
+        .map((merchant) => `merchants contains ${params.bind('merchants', merchant.trim())}`)
         .join(' or ');
       conditions.push(`(${merchantConditions})`);
     }
@@ -887,7 +947,7 @@ export class YqlBuilder {
     // Type filter
     if (filters.type && filters.type.length > 0) {
       const types = filters.type
-        .map((t) => `type contains "${this.escapeYqlValue(t.trim())}"`)
+        .map((type) => `type contains ${params.bind('type', type.trim())}`)
         .join(' or ');
       conditions.push(`(${types})`);
     }
@@ -895,7 +955,7 @@ export class YqlBuilder {
     // Participants filter
     if (filters.participants && filters.participants.length > 0) {
       const participantConditions = filters.participants
-        .map((p) => `participants contains "${this.escapeYqlValue(p.trim())}"`)
+        .map((participant) => `participants contains ${params.bind('participant', participant.trim())}`)
         .join(' or ');
       conditions.push(`(${participantConditions})`);
     }
@@ -963,14 +1023,14 @@ export class YqlBuilder {
    * entity = "support_desk" identifies Desk emails (future: "personal" for Gmail).
    * permissions stores channel-participant user IDs — filtered by current user ID.
    */
-  private buildMailConditions(filters: MailFilters, userId: string): string {
+  private buildMailConditions(filters: MailFilters, userId: string, params: VespaQueryParams): string {
     const conditions: string[] = [`entity contains "support_desk"`];
 
-    conditions.push(`permissions contains "${userId}"`);
+    conditions.push(`permissions contains ${params.bind('permissions', userId)}`);
 
     if (filters.channelId && filters.channelId.length > 0) {
       const channels = filters.channelId
-        .map((id) => `channelId contains "${this.escapeYqlValue(id.trim())}"`)
+        .map((channelId) => `channelId contains ${params.bind('channelId', channelId.trim())}`)
         .join(' or ');
       conditions.push(`(${channels})`);
     }
