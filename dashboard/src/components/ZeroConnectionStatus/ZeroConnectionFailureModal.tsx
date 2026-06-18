@@ -2,6 +2,7 @@ import { ReactElement } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import { isElectronApp } from '../../utils/electronApp';
 import { logger, Event as LoggerEvent } from '../../utils/logger';
+import { useAuth } from '@/hooks/useAuth';
 
 interface ZeroConnectionFailureModalProps {
   onClose?: () => void;
@@ -11,19 +12,14 @@ export const ZeroConnectionFailureModal = ({
   onClose,
 }: ZeroConnectionFailureModalProps = {}): ReactElement => {
   const isElectron = isElectronApp();
+  const { logout } = useAuth();
 
   const handleRefresh = (): void => {
     logger.info(LoggerEvent.APP_REFRESH, {
       trigger: 'USER_CLICK_CONNECTION_FAILURE_MODAL',
     });
 
-    if (isElectron) {
-      // Electron: use IPC to trigger a proper hard reload in the main process
-      // This clears the session cache and calls reloadIgnoringCache()
-      window.electronAPI?.applyAppUpdate?.();
-    } else {
-      window.location.reload();
-    }
+    logout();
   };
 
   return (
