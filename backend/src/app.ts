@@ -105,6 +105,7 @@ import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
 import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
 import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
+import workspaceIdBackfillRoutes from '@/routes/workspaceIdBackfill';
 import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
@@ -384,6 +385,7 @@ export class App {
     this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
     this.app.use('/migrate/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
     this.app.use('/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
+    this.app.use('/migrate/api/admin/workspace-id-backfill', workspaceIdBackfillRoutes);
     this.app.use('/migrate/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
     this.app.use('/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
 
