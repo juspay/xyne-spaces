@@ -3,7 +3,7 @@ import { useChannel, useAllVisibleChannels } from './useChannels';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuthContextValues, useAuth } from './useAuth';
 import type { MentionResult } from '../components/ui/Selectors';
-import { useSelf, useUsers, useUserSearch } from './useUsers';
+import { useSelf, useUsers, useActiveUsers, useActiveUserSearch } from './useUsers';
 import type { User } from '../machines/stateMachine';
 import { useUserGroupSearch } from './useUserGroupSearch';
 import { getUserDisplayName } from '../utils/userDisplayName';
@@ -39,13 +39,15 @@ export const useMentionSearch = (
   const [error, setError] = useState<string | null>(null);
   const [isMentionRequested, setIsMentionRequested] = useState<boolean>(false);
   const shouldSearch = searchQuery.trim().length > 0;
-  const usersData = useUserSearch(searchQuery, 10);
+  // Deactivated users must not appear in the @mention picker
+  const usersData = useActiveUserSearch(searchQuery, 10);
   const userGroupsData = useUserGroupSearch(searchQuery, 10);
 
   const currentUser = useSelf();
 
-  // All users in the workspace – used for sorting and mention resolution
-  const allWorkspaceUsers = useUsers();
+  // Active users in the workspace – drives the empty-state picker (recent DM
+  // partners / channel members). Deactivated users are excluded here too.
+  const allWorkspaceUsers = useActiveUsers();
 
   const usersById = useMemo(() => {
     const map = new Map<string, User>();

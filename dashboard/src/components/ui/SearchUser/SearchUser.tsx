@@ -8,7 +8,7 @@ import { Badge } from '../Badge';
 import { cn } from '../../../utils/classNames';
 import { Search, X } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
-import { useUserSearch, useSelf } from '../../../hooks/useUsers';
+import { useActiveUserSearch, useSelf } from '../../../hooks/useUsers';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { isStatusExpired } from '../../../utils/statusUtils';
@@ -50,8 +50,8 @@ export const SearchUser: React.FC<SearchUserProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  // Get users matching search query from Zero
-  const searchResults = useUserSearch(searchValue, 10);
+  // Get active users matching search query from Zero (deactivated users are excluded)
+  const searchResults = useActiveUserSearch(searchValue, 10);
   const selfUser = useSelf();
 
   // Get channel participants if channelId is provided
