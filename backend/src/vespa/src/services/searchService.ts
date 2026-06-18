@@ -216,7 +216,7 @@ export class SearchService {
       const buildPayload = (useFuzzy: boolean, useSemanticAnyway: boolean, wsId: string | undefined) => {
         const escapedQuery = escapeQueryForUserInput(searchQuery);
         const effectiveQuery = escapedQuery || '*';
-        const yql = this.yqlBuilder.buildYql(
+        const { yql, params: boundParams } = this.yqlBuilder.buildYql(
           effectiveQuery,
           allSchemas,
           limit,
@@ -240,6 +240,9 @@ export class SearchService {
         return {
           yql,
           query: effectiveQuery,
+          // Spread before the reserved keys below so those always win on collision; yql/query above
+          // are safe since bind() names placeholders `<field>_<index>`, never a reserved key.
+          ...boundParams,
           hits: limit,
           offset,
           ...(useFuzzy ? { "ranking.profile": RankProfile.fuzzyRank } : { "ranking.profile": rankProfile }),
