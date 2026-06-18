@@ -10,7 +10,7 @@ import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
 import { useChannelSubscription } from '../../../hooks/useChannelSubscription';
 import { useScope, useShortcutById } from '../../../shortcuts';
-import { ChannelVisibility } from '@xyne/shared';
+import { ChannelVisibility, ChannelScopeType } from '@xyne/shared';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { ConversationTabContext } from '../ConversationTabContext';
 import ConversationHeader from '../ConversationHeader/ConversationHeader';
@@ -29,6 +29,11 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
 import ChatListV3 from '../ChatList/ChatListV3';
 import LinksTab from '../LinksTab/LinksTab';
+import { Archive } from 'lucide-react';
+import { useUser } from '../../../hooks/useUsers';
+import { useAuthContextValues } from '../../../hooks/useAuth';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
+import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 
 // Stable empty array — an inline `[]` here would be a new reference on every
 // render, causing useChannelSubscription's effect to unsubscribe/resubscribe
@@ -60,6 +65,17 @@ const ExpandedTicketView = ({
         />
       </Panel>
     </PanelGroup>
+  );
+};
+
+const DeactivatedDmArchiveBanner = (): ReactElement => {
+  return (
+    <div className='px-4 pt-4 pb-4 bg-background'>
+      <div className='flex items-center justify-center gap-2 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground'>
+        <Archive className='size-4 shrink-0' />
+        <span>You are viewing the archives of a deactivated account</span>
+      </div>
+    </div>
   );
 };
 
@@ -170,6 +186,13 @@ const ConversationPanelV2 = ({
   const shouldShowJoinChannel =
     channel?.visibility === ChannelVisibility.PUBLIC && !isUserMember && !channel?.isArchived;
 
+  const { userID: currentUserId } = useAuthContextValues();
+  const dmPartnerId =
+    channel?.scopeType === ChannelScopeType.DM
+      ? parseDMParticipantIds(channel).find(id => id !== currentUserId)
+      : undefined;
+  const isDeactivatedDmArchive = isUserDeactivated(useUser(dmPartnerId ?? ''));
+
   // Safe tab setter with validation. Memoized because it feeds the context
   // value below — an unstable reference re-rendered every visible ChatBubble
   // (context consumers) on each panel render.
@@ -229,6 +252,8 @@ const ConversationPanelV2 = ({
               )}
               {shouldShowJoinChannel ? (
                 <JoinChannel channelId={channelId} channelTitle={channel?.name} />
+              ) : isDeactivatedDmArchive ? (
+                <DeactivatedDmArchiveBanner />
               ) : (
                 <div className='px-4 pt-4 pb-4 bg-background'>
                   <ChatInput

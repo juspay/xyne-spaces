@@ -11,7 +11,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useUserSearch, useUsers, useUser } from '../../../hooks/useUsers';
+import { useActiveUserSearch, useActiveUsers, useUser } from '../../../hooks/useUsers';
 import {
   EVENT_PROPERTIES,
   EVENTS,
@@ -170,11 +170,11 @@ export const ComposeDmPanel: React.FC = () => {
     { enabled: !!existingDmChannel },
   );
 
-  // Get users matching search query
-  const searchResults = useUserSearch(searchValue, 10);
+  // Get active users matching search query
+  const searchResults = useActiveUserSearch(searchValue, 10);
 
-  // All workspace users and visible channels – used for conversation-history ordering
-  const allWorkspaceUsers = useUsers();
+  // All active workspace users and visible channels – used for conversation-history ordering
+  const allWorkspaceUsers = useActiveUsers();
   const visibleChannels = useAllVisibleChannels();
 
   // Build an ordered list of user IDs based on most-recently-active DM channels

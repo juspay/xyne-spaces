@@ -4,7 +4,7 @@ import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Badge } from '../../ui/Badge';
 import { X, Hash, Lock, Users } from 'lucide-react';
-import { useUserSearch, useUser, useUsers } from '../../../hooks/useUsers';
+import { useActiveUserSearch, useUser, useUsers } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   useChannelSearch,
@@ -416,7 +416,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   const [inputValue, setInputValue] = useState<string>('');
   const trimmedInputValue = inputValue.trim();
-  const usersSuggestions = useUserSearch(trimmedInputValue, 20);
+  const usersSuggestions = useActiveUserSearch(trimmedInputValue, 20);
   const channelsSuggestions = useChannelSearch(trimmedInputValue, 5);
   const dropdownListItems = useMemo(() => {
     // Show default suggestions on initial modal open with empty input
