@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, X, Check } from 'lucide-react';
+import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
 import type { EmailSignature } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -50,13 +50,13 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     canManage,
     isEmail,
     isSlack,
-    canViewSendAs,
     ownerId,
+    setOwner,
     sendAsAlias,
     setSendAsAlias,
+    sendAsAliasError,
     ccEmails,
     setCcEmails,
-    handleOwnerChange,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
@@ -99,8 +99,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               : 'This user will be used to create tickets in this channel'}
           </div>
         </div>
-        <Select value={ownerId} onValueChange={handleOwnerChange}>
-          <SelectTrigger className='w-full max-w-[300px] p-[8px] h-[36px] bg-background rounded-[10px] font-medium shadow-sm'>
+        <Select value={ownerId} onValueChange={setOwner} disabled={!canManage}>
+          <SelectTrigger className='w-full max-w-[300px] p-[8px] h-[36px] bg-background rounded-[10px] font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50'>
             <SelectValue placeholder='Select owner' />
           </SelectTrigger>
           <SelectContent className='rounded-[10px]'>
@@ -121,7 +121,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
         </Select>
       </div>
 
-      {isEmail && canViewSendAs && (
+      {isEmail && (
         <div className='flex flex-col gap-[16px]'>
           <div className='flex flex-col gap-[4px]'>
             <div className='text-desk-label'>Send-as alias</div>
@@ -133,8 +133,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                 </>
               ) : (
                 <>
-                  Outbound replies on this desk are sent from this address. Only the desk owner or
-                  creator can change it.
+                  Outbound replies on this desk are sent from this address. Only the desk owner or a
+                  channel admin can change it.
                 </>
               )}
             </div>
@@ -146,10 +146,18 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             placeholder='support@yourcompany.com'
             readOnly={!canManage}
             disabled={!canManage}
-            className='h-[36px] w-full max-w-[300px] rounded-[10px] border border-border bg-background px-[14px] py-[10px] text-sm text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
+            aria-invalid={!!sendAsAliasError}
+            className={`h-[36px] w-full max-w-[300px] rounded-[10px] border bg-background px-[14px] py-[10px] text-sm text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-1 disabled:cursor-not-allowed disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0 ${
+              sendAsAliasError
+                ? 'border-red-500 focus:ring-red-500'
+                : 'border-border focus:ring-desk-accent'
+            }`}
             data-track-category='DeskSettings'
             data-track-name='SendAsAliasInput'
           />
+          {sendAsAliasError && (
+            <p className='text-[12px] leading-[120%] text-red-500'>{sendAsAliasError}</p>
+          )}
         </div>
       )}
 
@@ -162,7 +170,11 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             </div>
           </div>
           <div className='relative'>
-            <div className='flex w-full items-center gap-1.5 overflow-x-auto rounded-[10px] border border-border bg-background p-[6px] text-sm shadow-sm scrollbar-none focus-within:ring-1 focus-within:ring-desk-accent'>
+            <div
+              className={`flex w-full items-center gap-1.5 overflow-x-auto rounded-[10px] border border-border bg-background p-[6px] text-sm shadow-sm scrollbar-none focus-within:ring-1 focus-within:ring-desk-accent ${
+                !canManage ? 'cursor-not-allowed bg-muted/40 opacity-60' : ''
+              }`}
+            >
               {ccEmails.map((email, idx) => (
                 <div
                   key={`${email}-${idx}`}
@@ -174,7 +186,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                   <button
                     type='button'
                     onClick={() => setCcEmails(prev => prev.filter((_, i) => i !== idx))}
-                    className='text-desk-accent-foreground hover:text-foreground'
+                    disabled={!canManage}
+                    className='text-desk-accent-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
                     data-track-category='DeskSettings'
                     data-track-name='RemoveCcEmail'
                     aria-label={`Remove ${email}`}
@@ -220,7 +233,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                   }
                 }}
                 placeholder={ccEmails.length === 0 ? 'Add email recipients' : ''}
-                className='min-w-[80px] flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-desk-helper'
+                readOnly={!canManage}
+                disabled={!canManage}
+                className='min-w-[80px] flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-desk-helper disabled:cursor-not-allowed'
               />
             </div>
 
@@ -420,20 +435,24 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                           setEditingSignature(sig);
                           setSignatureModalOpen(true);
                         }}
-                        className='text-desk-label'
+                        className='text-desk-muted transition-colors hover:text-foreground'
+                        title='Edit signature'
+                        aria-label='Edit signature'
                         data-track-category='DeskSettings'
                         data-track-name='EditSignature'
                       >
-                        Edit
+                        <Pencil size={16} />
                       </button>
                       <button
                         type='button'
                         onClick={() => zero.mutate(mutators.emailSignature.delete({ id: sig.id }))}
-                        className='text-desk-label text-red-500 hover:text-red-600'
+                        className='text-desk-muted transition-colors hover:text-red-500'
+                        title='Delete signature'
+                        aria-label='Delete signature'
                         data-track-category='DeskSettings'
                         data-track-name='DeleteSignature'
                       >
-                        Delete
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </div>

@@ -7,48 +7,46 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../ui/Select/Select';
-import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { TestClassificationForm } from './TestClassificationForm';
 import type {
   ClassificationMapping,
-  SaveConfigPayload,
   SaveMappingPayload,
   ClassificationPreviewResult,
 } from '../../../types/classification';
-
-const CLASSIFICATION_AUTOSAVE_DEBOUNCE_MS = 500;
-
-interface ClassificationConfigShape {
-  enabled: boolean;
-  classificationPrompt: string;
-  categoryField: string;
-  subCategoryField: string | null;
-}
 
 export interface AIClassificationConfigProps {
   canManage: boolean;
   onBack: () => void;
   userGroups: { id: string; name: string }[];
-  config: ClassificationConfigShape | null;
+  classificationPrompt: string;
+  setClassificationPrompt: (value: string) => void;
+  categoryField: string;
+  setCategoryField: (value: string) => void;
+  subCategoryField: string;
+  setSubCategoryField: (value: string) => void;
   mappings: ClassificationMapping[];
-  saveConfig: (payload: SaveConfigPayload) => Promise<void>;
-  saveMapping: (payload: SaveMappingPayload) => Promise<void>;
-  updateMapping: (mappingId: string, payload: Partial<SaveMappingPayload>) => Promise<void>;
-  deleteMapping: (mappingId: string) => Promise<void>;
+  saveMapping: (payload: SaveMappingPayload) => void;
+  updateMapping: (mappingId: string, payload: Partial<SaveMappingPayload>) => void;
+  deleteMapping: (mappingId: string) => void;
   previewResult: ClassificationPreviewResult | null;
   isPreviewing: boolean;
-  isSaving?: boolean;
   runPreview: (emailSubject: string, emailBody: string) => Promise<void>;
   error: string | null;
+  /** Save-blocking validation message (e.g. enabled but missing category/prompt). */
+  validationError?: string | null;
 }
 
 export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
   canManage,
   onBack,
   userGroups,
-  config,
+  classificationPrompt,
+  setClassificationPrompt,
+  categoryField,
+  setCategoryField,
+  subCategoryField,
+  setSubCategoryField,
   mappings,
-  saveConfig,
   saveMapping,
   updateMapping,
   deleteMapping,
@@ -56,29 +54,8 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
   isPreviewing,
   runPreview,
   error,
+  validationError,
 }) => {
-  const [categoryFieldName, setCategoryFieldName] = useState(config?.categoryField ?? '');
-  const [categoryFieldOptional, setCategoryFieldOptional] = useState(
-    config?.subCategoryField ?? '',
-  );
-  const [classificationPrompt, setClassificationPrompt] = useState(
-    config?.classificationPrompt ?? '',
-  );
-
-  const debouncedCategory = useDebouncedValue(
-    categoryFieldName,
-    CLASSIFICATION_AUTOSAVE_DEBOUNCE_MS,
-  );
-  const debouncedSubCategory = useDebouncedValue(
-    categoryFieldOptional,
-    CLASSIFICATION_AUTOSAVE_DEBOUNCE_MS,
-  );
-  const debouncedPrompt = useDebouncedValue(
-    classificationPrompt,
-    CLASSIFICATION_AUTOSAVE_DEBOUNCE_MS,
-  );
-  const isSyncingFromServer = useRef(true);
-
   const [showNewRuleForm, setShowNewRuleForm] = useState(false);
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
   const [editCategory, setEditCategory] = useState('');
@@ -91,57 +68,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
   const [testEmailSubject, setTestEmailSubject] = useState('');
   const [testEmailBody, setTestEmailBody] = useState('');
   const newRuleFormRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    isSyncingFromServer.current = true;
-    if (config) {
-      setCategoryFieldName(config.categoryField);
-      setCategoryFieldOptional(config.subCategoryField ?? '');
-      setClassificationPrompt(config.classificationPrompt);
-    }
-    const t = window.setTimeout(() => {
-      isSyncingFromServer.current = false;
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [config]);
-
-  useEffect(() => {
-    if (isSyncingFromServer.current || !config || !canManage) return;
-    const serverCategory = config.categoryField ?? '';
-    const serverSub = config.subCategoryField ?? '';
-    const serverPrompt = config.classificationPrompt ?? '';
-
-    if (
-      debouncedCategory === serverCategory &&
-      debouncedSubCategory === serverSub &&
-      debouncedPrompt === serverPrompt
-    ) {
-      return;
-    }
-
-    const hasRequiredFields =
-      debouncedCategory.trim().length > 0 && debouncedPrompt.trim().length > 0;
-
-    // Do not allow an enabled config with an empty prompt/category to silently persist.
-    if (!hasRequiredFields) {
-      if (config.enabled) {
-        void saveConfig({
-          classificationPrompt: debouncedPrompt,
-          enabled: false,
-          categoryField: debouncedCategory,
-          subCategoryField: debouncedSubCategory || null,
-        });
-      }
-      return;
-    }
-
-    void saveConfig({
-      classificationPrompt: debouncedPrompt,
-      enabled: config.enabled,
-      categoryField: debouncedCategory,
-      subCategoryField: debouncedSubCategory || null,
-    });
-  }, [debouncedCategory, debouncedSubCategory, debouncedPrompt, config, saveConfig, canManage]);
 
   useEffect(() => {
     if (showNewRuleForm) {
@@ -206,7 +132,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
   };
 
   const fieldDisabled = !canManage;
-  const rulesReady = Boolean(config && debouncedPrompt.trim());
+  const rulesReady = Boolean(classificationPrompt.trim());
 
   return (
     <div className='flex flex-col gap-[16px]'>
@@ -220,6 +146,12 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
         <ArrowLeft size={16} />
         Configure Auto-classification
       </button>
+
+      {validationError && (
+        <div className='rounded-[10px] bg-destructive/10 px-3 py-2 text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-destructive'>
+          {validationError}
+        </div>
+      )}
 
       <div className='flex flex-col gap-[2px]'>
         <div className='text-desk-label'>Field Mapping</div>
@@ -235,8 +167,8 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
         <input
           id='classification-category-field'
           type='text'
-          value={categoryFieldName}
-          onChange={e => setCategoryFieldName(e.target.value)}
+          value={categoryField}
+          onChange={e => setCategoryField(e.target.value)}
           placeholder='eg. Query Type'
           readOnly={fieldDisabled}
           disabled={fieldDisabled}
@@ -253,8 +185,8 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
         <input
           id='classification-subcategory-field'
           type='text'
-          value={categoryFieldOptional}
-          onChange={e => setCategoryFieldOptional(e.target.value)}
+          value={subCategoryField}
+          onChange={e => setSubCategoryField(e.target.value)}
           placeholder='eg. Feature Request Type'
           readOnly={fieldDisabled}
           disabled={fieldDisabled}

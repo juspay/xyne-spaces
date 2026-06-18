@@ -1943,12 +1943,14 @@ const SupportScreen = (): ReactElement => {
                   </div>
                 </div>
               </div>
-              <DeskSettings
-                open={isSettingsOpen}
-                onClose={() => void navigate(-1)}
-                channelId={selectedChannelId}
-                userID={userID}
-              />
+              {isSettingsOpen && (
+                <DeskSettings
+                  open
+                  onClose={() => void navigate(-1)}
+                  channelId={selectedChannelId}
+                  userID={userID}
+                />
+              )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                 {!selectedChannelId ? (
                   <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>

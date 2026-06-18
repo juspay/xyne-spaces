@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
-import { ChannelType, Schema } from '@xyne/shared';
+import { ChannelType, ChannelRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -22,8 +22,12 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
 
     await this.verifyChannelParticipant(args.channelId, tx, 'insert');
 
-    if (args.sendAsEmail != null) {
-      this.assertSendAsEmailGate(channel.createdBy, args.ownerUserId ?? null, 'insert');
+    const isAdmin = await this.isChannelAdmin(args.channelId, tx);
+    if (!isAdmin) {
+      throw new MutationACLError(
+        'Email channel preference insert failed: only a channel admin can create the desk preference',
+        'email_channel_preferences',
+      );
     }
   }
 
@@ -48,23 +52,29 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
 
     await this.verifyChannelParticipant(preference.channelId, tx, 'update');
 
-    if (args.sendAsEmail !== undefined) {
-      this.assertSendAsEmailGate(channel.createdBy, preference.ownerUserId ?? null, 'update');
+    const hasChanges = Object.keys(args).some(key => key !== 'channelId');
+    if (!hasChanges) return;
+
+    const ownerUserId = preference.ownerUserId ?? null;
+    const isDeskOwner = ownerUserId !== null && ownerUserId === this.ctx.userID;
+    const canManage = isDeskOwner || (await this.isChannelAdmin(preference.channelId, tx));
+
+    if (!canManage) {
+      throw new MutationACLError(
+        'Email channel preference update failed: only the desk owner or a channel admin can change this desk',
+        'email_channel_preferences',
+      );
     }
   }
 
-  private assertSendAsEmailGate(
-    channelCreatedBy: string,
-    preferenceOwnerUserId: string | null,
-    operation: 'insert' | 'update',
-  ): void {
-    const userId = this.ctx.userID;
-    if (userId === channelCreatedBy) return;
-    if (preferenceOwnerUserId && preferenceOwnerUserId === userId) return;
-    throw new MutationACLError(
-      `Email channel preference ${operation} failed: only the desk owner or creator can change the send-as alias`,
-      'email_channel_preferences',
+  private async isChannelAdmin(channelId: string, tx: Transaction<Schema>): Promise<boolean> {
+    const participant = await tx.run(
+      zql.channel_participants
+        .where('channelId', channelId)
+        .where('userId', this.ctx.userID)
+        .one(),
     );
+    return participant?.role === ChannelRole.ADMIN;
   }
 
   async canDelete(_args: DeleteID<TableSchema<'email_channel_preferences'>>, _tx: Transaction<Schema>): Promise<void> {

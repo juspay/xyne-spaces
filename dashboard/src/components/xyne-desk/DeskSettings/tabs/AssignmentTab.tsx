@@ -17,7 +17,7 @@ interface AssignmentTabProps {
 
 export const AssignmentTab: React.FC<AssignmentTabProps> = ({ form }) => {
   const allUserGroups = useUserGroups();
-  const { defaultAssigneeGroupId, handleAssigneeChange } = form;
+  const { defaultAssigneeGroupId, setAssigneeGroup, canManage } = form;
 
   return (
     <div className='flex flex-col gap-[8px]'>
@@ -27,8 +27,12 @@ export const AssignmentTab: React.FC<AssignmentTabProps> = ({ form }) => {
           Tickets created from emails in this channel will be assigned to this user group
         </div>
       </div>
-      <Select value={defaultAssigneeGroupId || 'none'} onValueChange={handleAssigneeChange}>
-        <SelectTrigger className='w-full max-w-[300px] h-[38px] px-[14px] py-[10px] bg-background rounded-[10px] font-medium shadow-sm'>
+      <Select
+        value={defaultAssigneeGroupId || 'none'}
+        onValueChange={setAssigneeGroup}
+        disabled={!canManage}
+      >
+        <SelectTrigger className='w-full max-w-[300px] h-[38px] px-[14px] py-[10px] bg-background rounded-[10px] font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50'>
           <SelectValue
             placeholder={
               (allUserGroups ?? []).length > 0 ? 'Select user group' : 'No user groups available'

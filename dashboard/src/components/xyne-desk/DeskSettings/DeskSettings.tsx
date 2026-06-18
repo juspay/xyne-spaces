@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -48,7 +48,18 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
 
   const form = useDeskSettingsForm(channelId, userID, open);
-  const { isEmail } = form;
+  const { isEmail, isDirty, saving, save, cancel, sendAsAliasError, classificationConfigError } =
+    form;
+  const saveBlockedReason = sendAsAliasError ?? classificationConfigError;
+
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+  const requestClose = useCallback(() => {
+    if (isDirty) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    onClose();
+  }, [isDirty, onClose]);
 
   const availableTabs = useMemo(
     () =>
@@ -64,7 +75,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
-      onClose();
+      requestClose();
     }
   };
 
@@ -79,7 +90,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
         <div className='relative'>
           <button
             type='button'
-            onClick={onClose}
+            onClick={requestClose}
             className='absolute left-[96%] z-10 mt-[8px] ml-2 top-0 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-desk-border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
             data-track-category='DeskSettings'
             data-track-name='CloseButton'
@@ -88,7 +99,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
           </button>
           <div className='isolate flex h-[82vh] max-h-[800px] flex-col overflow-hidden rounded-[12px] border border-desk-border bg-popover shadow-lg dark:border-border'>
             <div className='flex flex-1 min-h-0'>
-              <div className='w-[240px] shrink-0 flex flex-col px-[8px]'>
+              <div className='w-[240px] shrink-0 flex flex-col px-[8px] border-r border-desk-border dark:border-border'>
                 <div className='text-lg font-semibold text-foreground shrink-0 pt-[24px] px-[8px] pb-[16px]'>
                   Desk Settings
                 </div>
@@ -129,9 +140,76 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                 </div>
               </div>
             </div>
+            {isDirty && (
+              <div className='shrink-0 border-t border-desk-border px-6 md:px-12 lg:px-[86px] py-[12px] dark:border-border'>
+                <div className='flex items-center justify-end gap-[8px]'>
+                  <button
+                    type='button'
+                    onClick={cancel}
+                    disabled={saving}
+                    className='rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+                    data-track-category='DeskSettings'
+                    data-track-name='CancelAll'
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => void save()}
+                    disabled={saving || !!saveBlockedReason}
+                    title={saveBlockedReason ?? undefined}
+                    className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+                    data-track-category='DeskSettings'
+                    data-track-name='SaveAll'
+                  >
+                    {saving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      <Dialog
+        open={confirmDiscardOpen}
+        onOpenChange={next => {
+          if (!next) setConfirmDiscardOpen(false);
+        }}
+        title='Discard unsaved changes?'
+        description='You have unsaved changes that will be lost.'
+        className='max-w-sm p-5'
+      >
+        <div className='flex flex-col gap-[8px]'>
+          <div className='text-base font-semibold text-foreground'>Discard unsaved changes?</div>
+          <div className='text-sm text-muted-foreground'>
+            You have unsaved changes on this desk. If you leave now, they’ll be lost.
+          </div>
+          <div className='mt-[12px] flex items-center justify-end gap-[8px]'>
+            <button
+              type='button'
+              onClick={() => setConfirmDiscardOpen(false)}
+              className='rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent'
+              data-track-category='DeskSettings'
+              data-track-name='KeepEditing'
+            >
+              Keep editing
+            </button>
+            <button
+              type='button'
+              onClick={() => {
+                setConfirmDiscardOpen(false);
+                onClose();
+              }}
+              className='rounded-[10px] border border-red-500 bg-red-500 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-red-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-500'
+              data-track-category='DeskSettings'
+              data-track-name='DiscardChanges'
+            >
+              Discard changes
+            </button>
+          </div>
+        </div>
+      </Dialog>
     </Dialog>
   );
 };

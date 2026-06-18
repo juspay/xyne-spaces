@@ -65,16 +65,16 @@ export const useEmailClassification = (channelId: string, mappingsEnabled = fals
   );
 
   const createMapping = useCallback(
-    (payload: SaveMappingPayload): Promise<void> => {
+    (payload: SaveMappingPayload & { id?: string; createdAt?: number }): Promise<void> => {
       setError(null);
       void zero.mutate(
         mutators.classificationMapping.create({
-          id: crypto.randomUUID(),
+          id: payload.id ?? crypto.randomUUID(),
           channelId,
           category: payload.category,
           subCategory: payload.subCategory ?? null,
           userGroupId: payload.userGroupId,
-          createdAt: Date.now(),
+          createdAt: payload.createdAt ?? Date.now(),
         }),
       );
       return Promise.resolve();
