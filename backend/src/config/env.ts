@@ -295,6 +295,75 @@ const envSchema = Joi.object({
   DOCLING_TIMEOUT_MS: Joi.number().default(240000),
   DOCLING_HEALTH_CACHE_TTL_MS: Joi.number().default(30000),
   DOCLING_DO_OCR: Joi.boolean().default(true),
+  // ── Async OCR (Docling/LightOn) scheduler ──────────────────────────────────
+  DOCLING_ASYNC_SCHEDULER_ENABLED: Joi.boolean().default(false),
+  // When true, the file worker routes COLLECTION PDFs into the async OCR
+  // scheduler instead of synchronous FileProcessor parsing.
+  DOCLING_ROUTE_PDFS_TO_SCHEDULER: Joi.boolean().default(false),
+  // Role for this process: splitter | submitter | result | writer | reaper | all | ''
+  DOCLING_SCHEDULER_ROLE: Joi.string()
+    .valid('', 'splitter', 'submitter', 'result', 'writer', 'reaper', 'all')
+    .default(''),
+  DOCLING_SCHEDULER_POLL_MS: Joi.number().default(1000),
+  DOCLING_SCHEDULER_LEASE_MS: Joi.number().default(600000),
+  DOCLING_SCHEDULER_SPLIT_CONCURRENCY: Joi.number().default(1),
+  DOCLING_SCHEDULER_MAX_SPLIT_ATTEMPTS: Joi.number().default(3),
+  DOCLING_SCHEDULER_ACTIVE_OCR_FILES: Joi.number().default(4),
+  DOCLING_SCHEDULER_ADMITTED_PAGE_BUDGET: Joi.number().default(200),
+  DOCLING_SCHEDULER_PER_FILE_INFLIGHT_PARTS: Joi.number().default(2),
+  DOCLING_SCHEDULER_PER_FILE_INFLIGHT_PAGES: Joi.number().default(50),
+  DOCLING_SCHEDULER_MAX_PART_ATTEMPTS: Joi.number().default(3),
+  DOCLING_SCHEDULER_MAX_WRITE_ATTEMPTS: Joi.number().default(5),
+  DOCLING_SCHEDULER_SUBMIT_CONCURRENCY: Joi.number().default(4),
+  DOCLING_SCHEDULER_SUBMIT_CLAIM_BATCH_SIZE: Joi.number().default(4),
+  DOCLING_SCHEDULER_SUBMIT_PREFETCH_MULTIPLIER: Joi.number().default(2),
+  DOCLING_SCHEDULER_MAX_CONCURRENT_CLAIMERS: Joi.number().default(1),
+  DOCLING_SCHEDULER_SUBMITTER_SHUTDOWN_DRAIN_MS: Joi.number().default(30000),
+  DOCLING_SCHEDULER_ADMISSION_POLL_MS: Joi.number().default(2000),
+  DOCLING_SCHEDULER_PERMIT_RECONCILE_BATCH: Joi.number().default(200),
+  DOCLING_SCHEDULER_RETRY_BASE_MS: Joi.number().default(30000),
+  DOCLING_SCHEDULER_RETRY_MAX_MS: Joi.number().default(600000),
+  DOCLING_SCHEDULER_VESPA_WRITE_PERMITS: Joi.number().default(1),
+  DOCLING_SCHEDULER_VESPA_WRITE_PERMIT_TTL_MS: Joi.number().default(1800000),
+  DOCLING_SCHEDULER_VESPA_WRITE_TIMEOUT_MS: Joi.number().default(300000),
+  DOCLING_SCHEDULER_MAX_VESPA_PAYLOAD_BYTES: Joi.number().default(9437184),
+  DOCLING_PAGE_CHUNK_SIZE: Joi.number().default(25),
+  // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
+  DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default(''),
+  DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
+  // Submit (OCR wrapper) concurrency permits + leases
+  DOCLING_ASYNC_SUBMIT_PERMITS: Joi.number().default(16),
+  DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS: Joi.number().default(21600000),
+  // Redis results stream + consumer group (wrapper publishes to docling:results)
+  DOCLING_RESULTS_STREAM: Joi.string().default(''),
+  DOCLING_RESULT_KEY_PREFIX: Joi.string().default(''),
+  DOCLING_SCHEDULER_RESULT_GROUP: Joi.string().default(''),
+  DOCLING_RESULT_READ_COUNT: Joi.number().default(2),
+  DOCLING_RESULT_BLOCK_MS: Joi.number().default(5000),
+  DOCLING_RESULT_MIN_IDLE_MS: Joi.number().default(600000),
+  // Dynamic runtime-config hash (permits/concurrency tuning without redeploy)
+  DOCLING_RUNTIME_CONFIG_KEY: Joi.string().default(''),
+  DOCLING_RUNTIME_CONFIG_POLL_MS: Joi.number().default(300000),
+  // OCR wrapper service (submitter POSTs parts to /process_async here)
+  DOCLING_SERVICE_URL: Joi.string().uri().default(''),
+  DOCLING_ASYNC_SUBMIT_RETRIES: Joi.number().default(5),
+  DOCLING_ASYNC_SUBMIT_RETRY_DELAY_MS: Joi.number().default(1000),
+  DOCLING_ASYNC_SUBMIT_TIMEOUT_MS: Joi.number().default(120000),
+  // ── Multi-engine PDF fallback ladder (sync processWithFallback) ────────────
+  // Env names kept identical to xyne-search to avoid cross-repo confusion.
+  // Hard reject PDFs over this page count before any engine runs.
+  MAX_PDF_PAGE_COUNT: Joi.number().integer().positive().default(1000),
+  // When true, the fallback ladder fails on the first engine's error (no degrade).
+  PDF_PROCESSING_DISABLE_FALLBACKS: Joi.boolean().default(false),
+  // LightOnOCR synchronous fallback engine (the Mode B OCR step) — calls the
+  // wrapper's /process endpoint. Enabled when a URL is set. LightOnOCR is the
+  // single OCR engine (no Paddle): the fallback retries the same model
+  // synchronously before degrading to PdfJs.
+  PDF_LIGHTONOCR_SYNC_URL: Joi.string().allow('').default(''),
+  PDF_LIGHTONOCR_SYNC_TIMEOUT_MS: Joi.number().default(600000),
+  // xyne-spaces-only: when the async OCR scheduler exhausts a file, degrade to
+  // the sync ladder instead of dropping it. (No xyne-search equivalent.)
+  PDF_ASYNC_SYNC_FALLBACK_ENABLED: Joi.boolean().default(true),
   REDIS_HOST: Joi.string().default(''),
   REDIS_PORT: Joi.number().integer().min(1).max(65535).default(6379),
   REDIS_PASSWORD: Joi.string().allow('').default(''),
@@ -656,6 +725,63 @@ export const config = {
     timeoutMs: envVars.DOCLING_TIMEOUT_MS as number,
     healthCacheTtlMs: envVars.DOCLING_HEALTH_CACHE_TTL_MS as number,
     doOcr: envVars.DOCLING_DO_OCR as boolean,
+  },
+  doclingScheduler: {
+    enabled: envVars.DOCLING_ASYNC_SCHEDULER_ENABLED as boolean,
+    routePdfs: envVars.DOCLING_ROUTE_PDFS_TO_SCHEDULER as boolean,
+    role: envVars.DOCLING_SCHEDULER_ROLE as string,
+    pollMs: envVars.DOCLING_SCHEDULER_POLL_MS as number,
+    leaseMs: envVars.DOCLING_SCHEDULER_LEASE_MS as number,
+    splitConcurrency: envVars.DOCLING_SCHEDULER_SPLIT_CONCURRENCY as number,
+    maxSplitAttempts: envVars.DOCLING_SCHEDULER_MAX_SPLIT_ATTEMPTS as number,
+    activeOcrFiles: envVars.DOCLING_SCHEDULER_ACTIVE_OCR_FILES as number,
+    admittedPageBudget: envVars.DOCLING_SCHEDULER_ADMITTED_PAGE_BUDGET as number,
+    perFileInflightParts: envVars.DOCLING_SCHEDULER_PER_FILE_INFLIGHT_PARTS as number,
+    perFileInflightPages: envVars.DOCLING_SCHEDULER_PER_FILE_INFLIGHT_PAGES as number,
+    maxPartAttempts: envVars.DOCLING_SCHEDULER_MAX_PART_ATTEMPTS as number,
+    maxWriteAttempts: envVars.DOCLING_SCHEDULER_MAX_WRITE_ATTEMPTS as number,
+    submitConcurrency: envVars.DOCLING_SCHEDULER_SUBMIT_CONCURRENCY as number,
+    submitClaimBatchSize: envVars.DOCLING_SCHEDULER_SUBMIT_CLAIM_BATCH_SIZE as number,
+    submitPrefetchMultiplier: envVars.DOCLING_SCHEDULER_SUBMIT_PREFETCH_MULTIPLIER as number,
+    maxConcurrentClaimers: envVars.DOCLING_SCHEDULER_MAX_CONCURRENT_CLAIMERS as number,
+    submitterShutdownDrainMs: envVars.DOCLING_SCHEDULER_SUBMITTER_SHUTDOWN_DRAIN_MS as number,
+    admissionPollMs: envVars.DOCLING_SCHEDULER_ADMISSION_POLL_MS as number,
+    permitReconcileBatch: envVars.DOCLING_SCHEDULER_PERMIT_RECONCILE_BATCH as number,
+    retryBaseMs: envVars.DOCLING_SCHEDULER_RETRY_BASE_MS as number,
+    retryMaxMs: envVars.DOCLING_SCHEDULER_RETRY_MAX_MS as number,
+    vespaWritePermits: envVars.DOCLING_SCHEDULER_VESPA_WRITE_PERMITS as number,
+    vespaWritePermitTtlMs: envVars.DOCLING_SCHEDULER_VESPA_WRITE_PERMIT_TTL_MS as number,
+    vespaWriteTimeoutMs: envVars.DOCLING_SCHEDULER_VESPA_WRITE_TIMEOUT_MS as number,
+    maxVespaPayloadBytes: envVars.DOCLING_SCHEDULER_MAX_VESPA_PAYLOAD_BYTES as number,
+    pageChunkSize: envVars.DOCLING_PAGE_CHUNK_SIZE as number,
+    storageRoot: envVars.DOCLING_ASYNC_STORAGE_ROOT as string,
+    keepTempResults: envVars.DOCLING_KEEP_TEMP_RESULTS as boolean,
+    submitPermits: envVars.DOCLING_ASYNC_SUBMIT_PERMITS as number,
+    submitPermitLeaseTtlMs: envVars.DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS as number,
+    resultsStream: envVars.DOCLING_RESULTS_STREAM as string,
+    resultKeyPrefix: envVars.DOCLING_RESULT_KEY_PREFIX as string,
+    resultGroup: envVars.DOCLING_SCHEDULER_RESULT_GROUP as string,
+    resultReadCount: envVars.DOCLING_RESULT_READ_COUNT as number,
+    resultBlockMs: envVars.DOCLING_RESULT_BLOCK_MS as number,
+    resultMinIdleMs: envVars.DOCLING_RESULT_MIN_IDLE_MS as number,
+    runtimeConfigKey: envVars.DOCLING_RUNTIME_CONFIG_KEY as string,
+    runtimeConfigPollMs: envVars.DOCLING_RUNTIME_CONFIG_POLL_MS as number,
+    serviceUrl: envVars.DOCLING_SERVICE_URL as string,
+    submitRetries: envVars.DOCLING_ASYNC_SUBMIT_RETRIES as number,
+    submitRetryDelayMs: envVars.DOCLING_ASYNC_SUBMIT_RETRY_DELAY_MS as number,
+    submitTimeoutMs: envVars.DOCLING_ASYNC_SUBMIT_TIMEOUT_MS as number,
+  },
+  pdf: {
+    maxPdfPageCount: envVars.MAX_PDF_PAGE_COUNT as number,
+    disableFallbacks: envVars.PDF_PROCESSING_DISABLE_FALLBACKS as boolean,
+    asyncSyncFallbackEnabled: envVars.PDF_ASYNC_SYNC_FALLBACK_ENABLED as boolean,
+    // LightOnOCR synchronous fallback engine. Active only when a URL is set
+    // (points at the wrapper's /process). The Mode B OCR step.
+    lightOnOcr: {
+      url: envVars.PDF_LIGHTONOCR_SYNC_URL as string,
+      timeoutMs: envVars.PDF_LIGHTONOCR_SYNC_TIMEOUT_MS as number,
+      enabled: Boolean(envVars.PDF_LIGHTONOCR_SYNC_URL),
+    },
   },
   redis: {
     host: envVars.REDIS_HOST as string,

@@ -4562,3 +4562,137 @@ model InstalledAppPermission {
   @@map("installed_app_permissions")
   @@schema("public")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Async OCR (Docling/LightOn) scheduler state machine
+// Ported from xyne-search. Two tables drive the splitter→submitter→result→
+// writer→reaper pipeline. Coordination is pure Postgres: workers claim rows
+// with FOR UPDATE SKIP LOCKED + leases (see the raw-SQL store layer).
+// IDs are String (cuid/uuid text) to match xyne-spaces' domain — `fileId` is
+// the stable file UUID (CollectionItem.fileId), not CollectionItem.id. No FK to
+// CollectionItem on purpose; status is plain text to mirror the source queries.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DoclingAsyncFile {
+  fileId           String    @id @map("file_id")
+  collectionId     String    @map("collection_id")
+  sourcePath       String    @map("source_path")
+  sourceStorageKey String?   @map("source_storage_key")
+  stageDir         String?   @map("stage_dir")
+  resultsDir       String?   @map("results_dir")
+  basePriority     Int       @default(0) @map("base_priority")
+  priorityOverride Int?      @map("priority_override")
+  status           String    @default("pending_split")
+  totalPages       Int       @default(0) @map("total_pages")
+  totalParts       Int       @default(0) @map("total_parts")
+  pageChunkSize    Int       @default(0) @map("page_chunk_size")
+  readyPartsCount  Int       @default(0) @map("ready_parts_count")
+  writeAttemptCount Int      @default(0) @map("write_attempt_count")
+  splitAttemptCount Int      @default(0) @map("split_attempt_count")
+  availableAt      DateTime  @default(now()) @map("available_at")
+  leaseOwner       String?   @map("lease_owner")
+  leaseToken       String?   @map("lease_token")
+  leaseUntil       DateTime? @map("lease_until")
+  ocrActivatedAt   DateTime? @map("ocr_activated_at")
+  completedAt      DateTime? @map("completed_at")
+  errorMessage     String?   @map("error_message")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  parts DoclingAsyncPart[]
+
+  @@index([status, availableAt, basePriority, createdAt], map: "docling_async_files_status_priority_idx")
+  @@index([status, leaseUntil], map: "docling_async_files_active_status_idx")
+  @@index([collectionId], map: "docling_async_files_collection_idx")
+  @@map("docling_async_files")
+  @@schema("non_zero")
+}
+
+model DoclingAsyncPart {
+  fileId         String    @map("file_id")
+  partIndex      Int       @map("part_index")
+  docId          String    @map("doc_id")
+  currentJobId   String?   @map("current_job_id")
+  partPath       String    @map("part_path")
+  resultPath     String?   @map("result_path")
+  startPage      Int       @map("start_page")
+  endPage        Int       @map("end_page")
+  partSizeBytes  Int       @default(0) @map("part_size_bytes")
+  pageCount      Int       @default(0) @map("page_count")
+  status         String    @default("queued")
+  attemptCount   Int       @default(0) @map("attempt_count")
+  availableAt    DateTime  @default(now()) @map("available_at")
+  submittedAt    DateTime? @map("submitted_at")
+  readyAt        DateTime? @map("ready_at")
+  writtenAt      DateTime? @map("written_at")
+  leaseOwner     String?   @map("lease_owner")
+  leaseUntil     DateTime? @map("lease_until")
+  submitPermitId String?   @map("submit_permit_id")
+  errorMessage   String?   @map("error_message")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  file DoclingAsyncFile @relation(fields: [fileId], references: [fileId], onDelete: Cascade)
+
+  @@id([fileId, partIndex], map: "docling_async_parts_pk")
+  @@unique([currentJobId], map: "docling_async_parts_current_job_id_uidx")
+  @@index([status, availableAt, createdAt], map: "docling_async_parts_status_available_idx")
+  @@index([fileId, status], map: "docling_async_parts_file_status_idx")
+  @@index([submitPermitId], map: "docling_async_parts_submit_permit_idx")
+  @@index([fileId, status, partIndex], map: "docling_async_parts_file_status_part_idx")
+  @@index([status, fileId], map: "docling_async_parts_status_file_idx")
+  @@map("docling_async_parts")
+  @@schema("non_zero")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Generic Tag Framework (V1)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum TagMethod {
+  MANUAL
+  LLM
+  AUTOMATED
+
+  @@schema("public")
+}
+
+model Tag {
+  id          String    @id @default(cuid())
+  sourceId    String
+  sourceType  String
+  workspaceId String
+  tagCategory String
+  tag         String
+  method      TagMethod
+  reason      String?
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  isDeleted   Boolean   @default(false)
+
+  @@index([sourceId, sourceType, tagCategory])    // active-tag lookup & versioning replacement
+  @@index([sourceType, tagCategory, tag])         // analytics aggregation
+  @@index([workspaceId, sourceType, tagCategory]) // per-workspace ACL/analytics queries
+  @@map("tags")
+  @@schema("public")
+}
+
+model TagsConfig {
+  id          String   @id @default(cuid())
+  configKey   String
+  sourceType  String
+  workspaceId String
+  config      Json
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  isDeleted   Boolean  @default(false)
+
+  @@index([configKey, isDeleted])
+  @@index([sourceType, workspaceId, isDeleted])   // list active configs for a sourceType+workspace
+  @@map("tags_config")
+  @@schema("public")
+}

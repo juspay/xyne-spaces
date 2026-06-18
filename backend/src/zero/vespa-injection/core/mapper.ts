@@ -672,6 +672,18 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
 
 export const mapCollection = async (
   args: CollectionItem,
+  // When provided (e.g. from the async OCR scheduler's writer), skip the
+  // synchronous FileProcessor parse and use these pre-computed chunks instead.
+  // All permission/owner/scope resolution below is reused unchanged.
+  override?: {
+    chunks: string[];
+    chunks_pos: string[];
+    chunks_map?: any[];
+    image_chunks: string[];
+    image_chunks_pos: string[];
+    image_chunks_map?: any[];
+    documentOutline?: string;
+  },
 ): Promise<VespaFileDocument> => {
   const collectionItem = await db.collectionItem.findUnique({
     where: { id: args.id },
@@ -711,13 +723,27 @@ export const mapCollection = async (
   let chunks_map: any[] | undefined;
   let documentOutline: string | undefined;
 
-  if (attachment?.url) {
+  if (override) {
+    // Async OCR scheduler path — chunks already produced by the OCR fleet.
+    chunks = override.chunks;
+    chunks_pos = override.chunks_pos;
+    chunks_map = override.chunks_map;
+    image_chunks = override.image_chunks;
+    image_chunks_pos = override.image_chunks_pos;
+    documentOutline = override.documentOutline;
+  } else if (attachment?.url) {
     try {
       const storageService = getStorageService();
       const buffer = await storageService.getFileBuffer(attachment!.url);
 
-      const processor = FileProcessor.fromMimeType(attachment?.mimetype || '');
-      const result = await processor.processBuffer(buffer, collectionItem.id);
+      // Multi-engine fallback ladder (PDFs: Docling/Paddle → Gemini → PdfJs;
+      // other types: Docling → local strategy).
+      const result = await FileProcessor.processBufferWithFallback(
+        buffer,
+        collectionItem.id,
+        attachment?.originalFilename || 'file',
+        attachment?.mimetype || '',
+      );
 
       chunks = result.chunks || [];
       chunks_pos = result.chunks_pos
@@ -764,6 +790,7 @@ export const mapCollection = async (
     chunks_map,
     image_chunks,
     image_chunks_pos,
+    // NOTE: the Vespa `file` schema has no `image_chunks_map` field — do not send it.
     documentOutline,
     metadata: '{}',
     createdBy: collectionItem.uploadedById || collectionItem.ownerId,
@@ -1030,7 +1057,21 @@ export const mapRCA = async (args: RCAWithRelations, workspaceId?: string, orgId
  * 3. Resolves the channel from the conversation
  * 4. Builds a complete VespaFileDocument for indexing
  */
-export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
+export const mapFile = async (
+  args: InsertValue<MessageAttachmentsSchema>,
+  workspaceId?: string,
+  orgId?: string,
+  // When provided (async OCR scheduler's writer), skip FileProcessor and use
+  // these pre-computed chunks. Permission/channel resolution below is reused.
+  override?: {
+    chunks: string[];
+    chunks_pos: string[];
+    chunks_map?: any[];
+    image_chunks: string[];
+    image_chunks_pos: string[];
+    documentOutline?: string;
+  },
+): Promise<VespaFileDocument> => {
   // Resolve channel from conversation
   let channelRef: string | undefined;
   let channelId: string | undefined;
@@ -1080,6 +1121,17 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>, works
   let chunks: string[] = [];
   let fileSize = args.size || 0;
   let processingResult: any;
+  if (override) {
+    // Async OCR scheduler path — chunks already produced by the OCR fleet.
+    chunks = override.chunks;
+    processingResult = {
+      chunks_pos: override.chunks_pos,
+      chunks_map: override.chunks_map,
+      documentOutline: override.documentOutline,
+      image_chunks: override.image_chunks,
+      image_chunks_pos: override.image_chunks_pos,
+    };
+  } else
   try {
     if (args.url) {
       // Extract GCS path from URL
@@ -1130,8 +1182,8 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>, works
       ? processingResult.chunks_pos.map(String)
       : chunks.map((_, index) => String(index)),
     chunks_map: processingResult?.chunks_map,
-    image_chunks: [],
-    image_chunks_pos: [],
+    image_chunks: processingResult?.image_chunks ?? [],
+    image_chunks_pos: (processingResult?.image_chunks_pos ?? []).map(String),
     documentOutline: processingResult?.documentOutline,
     metadata: JSON.stringify({
       entityType: args.entityType,

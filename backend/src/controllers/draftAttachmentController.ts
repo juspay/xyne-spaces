@@ -195,37 +195,53 @@ export class DraftAttachmentController {
           const finalWidth = metadata.width ?? uploadedFile.width ?? parsedLegacyWidth;
           const finalHeight = metadata.height ?? uploadedFile.height ?? parsedLegacyHeight;
 
-          await this.db.messageAttachment.upsert({
-            where: { id: attachmentId },
-            update: {
-              url: fileUrl,
-              size: file.size,
-              originalFilename: uploadedFile.originalName,
-              width: finalWidth,
-              height: finalHeight,
-              thumbnailUrl,
-              storageProvider: config.fileStorage.provider,
-              metadata: completeMetadata,
-            },
-            create: {
-              id: attachmentId,
-              entityId: finalDraftMessageId,
-              entityType: AttachmentEntityType.DRAFT,
-              url: fileUrl,
-              size: file.size,
-              originalFilename: uploadedFile.originalName,
-              mimetype: file.mimetype,
-              uploadedByUserId: userId,
-              createdBy: userId,
-              storageProvider: config.fileStorage.provider,
-              conversationId: conversationId || null,
-              workspaceId: draftWorkspaceId,
-              width: finalWidth,
-              height: finalHeight,
-              thumbnailUrl,
-              metadata: completeMetadata,
-            },
-          });
+          // Fields that must always reflect the just-uploaded file (esp. `url`).
+          const attachmentData = {
+            url: fileUrl,
+            size: file.size,
+            originalFilename: uploadedFile.originalName,
+            width: finalWidth,
+            height: finalHeight,
+            thumbnailUrl,
+            storageProvider: config.fileStorage.provider,
+            metadata: completeMetadata,
+          };
+
+          try {
+            await this.db.messageAttachment.upsert({
+              where: { id: attachmentId },
+              update: attachmentData,
+              create: {
+                id: attachmentId,
+                entityId: finalDraftMessageId,
+                entityType: AttachmentEntityType.DRAFT,
+                mimetype: file.mimetype,
+                uploadedByUserId: userId,
+                createdBy: userId,
+                conversationId: conversationId || null,
+                workspaceId: draftWorkspaceId,
+                ...attachmentData,
+              },
+            });
+          } catch (upsertError) {
+            // With relationMode="prisma", upsert is a non-atomic SELECT-then-write.
+            // Zero's optimistic insert of the same attachment id can land between
+            // the SELECT and the INSERT, so the create branch fails with P2002.
+            // The row already exists — fall back to an update so the uploaded url
+            // is never lost (otherwise the attachment stays url-less and silently
+            // never ingests). More likely on larger/slower uploads.
+            if (
+              upsertError instanceof Prisma.PrismaClientKnownRequestError &&
+              upsertError.code === 'P2002'
+            ) {
+              await this.db.messageAttachment.update({
+                where: { id: attachmentId },
+                data: attachmentData,
+              });
+            } else {
+              throw upsertError;
+            }
+          }
 
           logger.info(`Successfully processed draft attachment ${attachmentId}: ${fileUrl}`);
 
