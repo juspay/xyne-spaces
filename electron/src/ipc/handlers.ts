@@ -9,6 +9,8 @@ import { config } from '../app/config';
 import { docsPublishService } from '../services/docs-publish';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
+import ElectronEvent from '../services/logger/electron-events';
+import { normalizeExternalUrl } from '../utils/validation';
 import {
   requestAllMediaPermissions,
 } from '../services/media-permission';
@@ -62,12 +64,18 @@ export function setupIpcHandlers(): void {
   });
 
   ipcMain.on('open-external', (_event, url: string) => {
+    if (typeof url !== 'string') return;
     let newUrl = url.startsWith("/api/auth/login") ? `${config.MTLS_BACKEND_URL}${url}` : url;
     if (newUrl.includes("/auth/login") && config.loginTempHeader) {
       const separator = newUrl.includes("?") ? "&" : "?";
       newUrl = `${newUrl}${separator}isNy=true`;
     }
-    void shell.openExternal(newUrl);
+    const safeUrl = normalizeExternalUrl(newUrl);
+    if (!safeUrl) {
+      Logger.error(ElectronEvent.OPEN_EXTERNAL_BLOCKED, { url: newUrl });
+      return;
+    }
+    void shell.openExternal(safeUrl);
   });
 
   ipcMain.on('screen-picker:set-enabled', (_event, enabled: boolean) => {

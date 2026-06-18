@@ -59,6 +59,10 @@ const ElectronEvent = {
     // Cookie events
     COOKIES_CLEARED: 'cookies_cleared',
     COOKIES_CLEAR_FAILED: 'cookies_clear_failed',
+
+    // Security guard rail events
+    OPEN_EXTERNAL_BLOCKED: 'open_external_blocked',
+    DEEP_LINK_INVITATION_REJECTED: 'deep_link_invitation_rejected',
     } as const;
 
 export type ElectronEventType = (typeof ElectronEvent)[keyof typeof ElectronEvent];

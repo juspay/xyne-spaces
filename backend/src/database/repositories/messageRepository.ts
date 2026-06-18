@@ -4,6 +4,7 @@ import { Message, MessageType } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { websocketService } from '@/services/websocketService';
 import {logger} from '@/utils/logger';
+import { sanitizeMessageContent } from '@/utils/contentUtils';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -87,8 +88,15 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     });
   }
 
+  // Markdown messages render via rehype-raw on the client (raw HTML executes),
+  private sanitizeMarkdownContent(data: { content?: string; metadata?: Record<string, any> | null }): void {
+    if (data.metadata?.contentFormat === 'markdown' && data.content) {
+      data.content = sanitizeMessageContent(data.content);
+    }
+  }
+
   async create(data: CreateMessageInput, disableMessageCountIncrement: boolean = false): Promise<Message> {
-    
+
       await this.validateString(data.conversationId, 'conversationId');
     await this.validateString(data.senderId, 'senderId');
     
@@ -106,6 +114,8 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     if (data.msgType) {
       await this.validateEnum(data.msgType, 'msgType', ['USER', 'BOT', 'SYSTEM', 'FORWARDED']);
     }
+
+    this.sanitizeMarkdownContent(data);
 
      const result = await this.db.message.create({
         data: {
@@ -248,6 +258,8 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     if (data.msgType) {
       await this.validateEnum(data.msgType, 'msgType', ['USER', 'BOT', 'SYSTEM', 'FORWARDED']);
     }
+
+    this.sanitizeMarkdownContent(data);
 
     const result = await this.db.message.update({
       where: { messageId: id },
@@ -531,6 +543,8 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     if (data.msgType) {
       await this.validateEnum(data.msgType, 'msgType', ['USER', 'BOT', 'SYSTEM', 'FORWARDED']);
     }
+
+    this.sanitizeMarkdownContent(data);
 
     const result = await this.db.message.create({
       data: {

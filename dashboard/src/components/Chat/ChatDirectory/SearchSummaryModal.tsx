@@ -4,7 +4,7 @@
  */
 import { ReactElement, useEffect, useMemo, useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import { parseStreamingContent } from '../Summary';
+import { parseStreamingContent, sanitizeBoldMarkdown } from '../Summary';
 import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 
 // ============================================================================
@@ -196,7 +196,7 @@ export const SearchSummaryModal = ({
                         <span className='text-primary mt-1 shrink-0'>•</span>
                         <span
                           dangerouslySetInnerHTML={{
-                            __html: point.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'),
+                            __html: sanitizeBoldMarkdown(point),
                           }}
                         />
                       </li>
