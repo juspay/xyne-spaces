@@ -1,13 +1,19 @@
 import { type ChangeEvent, type ReactElement, useEffect, useMemo, useState } from 'react';
-import { useChannelsByProjectId } from '../../hooks/useChannels';
-import { queries } from '../../zero/queries';
+import { useAllChannels } from '../../hooks/useChannels';
+import { useUsers } from '../../hooks/useUsers';
+import { useAuthContextValues } from '../../hooks/useAuth';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
 import Textarea from '../../components/ui/Textarea/Textarea';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
-import { Hash, Users, FileArchive, FolderKanban } from 'lucide-react';
+import { Hash, User, Users, FileArchive } from 'lucide-react';
 import { toast } from 'sonner';
+import { ChannelScopeType } from '@xyne/shared';
+import { getDMParticipantIdsToFetch } from '../../components/Chat/ChatDirectory/ChatDirectory.utils';
+import { getUserDisplayName } from '../../utils/userDisplayName';
+import { channelService } from '../../services/Chat/channelService';
 import {
   whatsAppMigrationService,
   type WhatsAppImportSourceSummary,
@@ -23,6 +29,9 @@ type MappingEntry = {
 
 type WhatsAppMigrationTab = 'import' | 'delete';
 
+const CHANNEL_TARGET_PREFIX = 'channel:';
+const USER_TARGET_PREFIX = 'user:';
+
 const parseMappings = (rawValue: string): MappingEntry[] =>
   rawValue
     .split('\n')
@@ -34,9 +43,45 @@ const parseMappings = (rawValue: string): MappingEntry[] =>
     })
     .filter(entry => Boolean(entry.whatsappName) && Boolean(entry.email));
 
+const getTargetChannelLabel = (
+  channel: {
+    id: string;
+    name: string;
+    scopeType: ChannelScopeType;
+  },
+  currentUserId: string,
+  allUsers: { id: string; name?: string | null; email?: string | null }[],
+): string => {
+  if (channel.scopeType === ChannelScopeType.DEFAULT) return channel.name;
+
+  const participantNames = getDMParticipantIdsToFetch(channel, currentUserId)
+    .map(id => allUsers.find(user => user.id === id))
+    .filter((user): user is (typeof allUsers)[number] => Boolean(user))
+    .map(user => getUserDisplayName(user))
+    .filter(Boolean);
+
+  return participantNames.length > 0 ? participantNames.join(', ') : channel.name;
+};
+
+const getTargetChannelValue = (channelId: string): string => `${CHANNEL_TARGET_PREFIX}${channelId}`;
+const getTargetUserValue = (userId: string): string => `${USER_TARGET_PREFIX}${userId}`;
+
+const parseTargetValue = (
+  value: string | null,
+): { type: 'channel' | 'user'; id: string } | null => {
+  if (!value) return null;
+  if (value.startsWith(CHANNEL_TARGET_PREFIX)) {
+    return { type: 'channel', id: value.slice(CHANNEL_TARGET_PREFIX.length) };
+  }
+  if (value.startsWith(USER_TARGET_PREFIX)) {
+    return { type: 'user', id: value.slice(USER_TARGET_PREFIX.length) };
+  }
+  return { type: 'channel', id: value };
+};
+
 const WhatsAppMigrationPanel = (): ReactElement => {
-  const [projects] = useCachedQuery(queries.getAllProjects());
-  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [workspaceUsers] = useCachedQuery(queries.getUsersV2());
+  const [selectedTargetValue, setSelectedTargetValue] = useState('');
   const [selectedChannelId, setSelectedChannelId] = useState('');
   const [mappingsInput, setMappingsInput] = useState('');
   const [mappingCsvFile, setMappingCsvFile] = useState<File | null>(null);
@@ -52,27 +97,54 @@ const WhatsAppMigrationPanel = (): ReactElement => {
   const [purgePreview, setPurgePreview] = useState<WhatsAppPurgeImportResponse | null>(null);
   const [isPurgeLoading, setIsPurgeLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<WhatsAppMigrationTab>('import');
-  const channels = useChannelsByProjectId(selectedProjectId || undefined);
+  const allChannels = useAllChannels();
+  const hydratedUsers = useUsers();
+  const allUsers = workspaceUsers.length > 0 ? workspaceUsers : hydratedUsers;
+  const { userID } = useAuthContextValues();
 
-  const projectOptions = useMemo(
-    () =>
-      projects.map(project => ({
-        value: project.id,
-        label: project.name,
-        icon: <FolderKanban className='w-4 h-4 text-muted-foreground' />,
-      })),
-    [projects],
+  const targetOptions = useMemo(
+    () => [
+      ...allChannels
+        .filter(
+          channel =>
+            !channel.isArchived &&
+            (channel.scopeType === ChannelScopeType.DEFAULT ||
+              channel.scopeType === ChannelScopeType.DM ||
+              channel.scopeType === ChannelScopeType.GROUP_DM),
+        )
+        .sort((a, b) =>
+          getTargetChannelLabel(a, userID ?? '', allUsers).localeCompare(
+            getTargetChannelLabel(b, userID ?? '', allUsers),
+          ),
+        )
+        .map(channel => ({
+          value: getTargetChannelValue(channel.id),
+          label: getTargetChannelLabel(channel, userID ?? '', allUsers),
+          icon: <Hash className='w-4 h-4 text-muted-foreground' />,
+          subtitle:
+            channel.scopeType === ChannelScopeType.DEFAULT ? 'Existing channel' : 'Existing DM',
+        })),
+      ...allUsers
+        .sort((a, b) => getUserDisplayName(a).localeCompare(getUserDisplayName(b)))
+        .map(user => ({
+          value: getTargetUserValue(user.id),
+          label:
+            user.id === userID ? `${getUserDisplayName(user)} (you)` : getUserDisplayName(user),
+          icon: <User className='w-4 h-4 text-muted-foreground' />,
+          subtitle: user.email || 'Create or reuse personal DM',
+        })),
+    ],
+    [allChannels, allUsers, userID],
   );
 
-  const channelOptions = useMemo(
-    () =>
-      channels.map(channel => ({
-        value: channel.id,
-        label: channel.name,
-        icon: <Hash className='w-4 h-4 text-muted-foreground' />,
-      })),
-    [channels],
-  );
+  const resolveTargetChannelId = async (value: string | null): Promise<string> => {
+    const parsed = parseTargetValue(value);
+    if (!parsed) return '';
+    if (parsed.type === 'channel') return parsed.id;
+
+    const result = await channelService.createDm({ participantIds: [parsed.id] });
+    return result.id;
+  };
 
   useEffect(() => {
     if (!activeJobId) return;
@@ -146,8 +218,8 @@ const WhatsAppMigrationPanel = (): ReactElement => {
       toast.error('Choose WhatsApp zip first');
       return null;
     }
-    if (!selectedProjectId || !selectedChannelId) {
-      toast.error('Select target project and channel');
+    if (!selectedChannelId) {
+      toast.error('Select target channel');
       return null;
     }
 
@@ -159,7 +231,6 @@ const WhatsAppMigrationPanel = (): ReactElement => {
 
     const payload = new FormData();
     payload.append('archive', archiveFile);
-    payload.append('targetProjectId', selectedProjectId);
     payload.append('targetChannelId', selectedChannelId);
     if (mappings.length > 0) {
       payload.append('mappingJson', JSON.stringify(mappings));
@@ -327,42 +398,42 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                   }}
                 />
                 <p className='mt-2 text-xs text-muted-foreground'>
-                  Each WhatsApp message will be imported as a separate standalone message.
+                  Each WhatsApp message will be imported as a separate standalone message into a
+                  regular channel or personal DM.
                 </p>
               </div>
 
-              <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
-                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                  <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                    Target Project
-                  </p>
-                  <EntitySelector
-                    options={projectOptions}
-                    selectedValue={selectedProjectId || null}
-                    onSelect={value => {
-                      setSelectedProjectId(value ?? '');
-                      setSelectedChannelId('');
-                      setPreview(null);
-                    }}
-                    placeholder='Select project'
-                    searchPlaceholder='Search projects...'
-                    width='100%'
-                  />
-                </div>
-
+              <div className='grid grid-cols-1 gap-4'>
                 <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
                   <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                     Target Channel
                   </p>
                   <EntitySelector
-                    options={channelOptions}
-                    selectedValue={selectedChannelId || null}
+                    options={targetOptions}
+                    selectedValue={selectedTargetValue || null}
                     onSelect={value => {
-                      setSelectedChannelId(value ?? '');
+                      setSelectedTargetValue(value ?? '');
+                      setSelectedChannelId('');
                       setPreview(null);
+
+                      if (!value) {
+                        return;
+                      }
+
+                      void resolveTargetChannelId(value)
+                        .then(channelId => {
+                          setSelectedChannelId(channelId);
+                        })
+                        .catch(error => {
+                          setSelectedTargetValue('');
+                          setSelectedChannelId('');
+                          toast.error(
+                            error instanceof Error ? error.message : 'Failed to prepare DM target',
+                          );
+                        });
                     }}
-                    placeholder='Select channel'
-                    searchPlaceholder='Search channels...'
+                    placeholder='Select channel or user'
+                    searchPlaceholder='Search channels or users...'
                     width='100%'
                   />
                 </div>
@@ -437,40 +508,38 @@ const WhatsAppMigrationPanel = (): ReactElement => {
               </p>
             </div>
             <div className='p-5 space-y-5'>
-              <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
-                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                  <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                    Target Project
-                  </p>
-                  <EntitySelector
-                    options={projectOptions}
-                    selectedValue={selectedProjectId || null}
-                    onSelect={value => {
-                      setSelectedProjectId(value ?? '');
-                      setSelectedChannelId('');
-                      setSelectedPurgeSourceId('');
-                      setPurgePreview(null);
-                    }}
-                    placeholder='Select project'
-                    searchPlaceholder='Search projects...'
-                    width='100%'
-                  />
-                </div>
-
+              <div className='grid grid-cols-1 gap-4'>
                 <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
                   <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                     Target Channel
                   </p>
                   <EntitySelector
-                    options={channelOptions}
-                    selectedValue={selectedChannelId || null}
+                    options={targetOptions}
+                    selectedValue={selectedTargetValue || null}
                     onSelect={value => {
-                      setSelectedChannelId(value ?? '');
+                      setSelectedTargetValue(value ?? '');
+                      setSelectedChannelId('');
                       setSelectedPurgeSourceId('');
                       setPurgePreview(null);
+
+                      if (!value) {
+                        return;
+                      }
+
+                      void resolveTargetChannelId(value)
+                        .then(channelId => {
+                          setSelectedChannelId(channelId);
+                        })
+                        .catch(error => {
+                          setSelectedTargetValue('');
+                          setSelectedChannelId('');
+                          toast.error(
+                            error instanceof Error ? error.message : 'Failed to prepare DM target',
+                          );
+                        });
                     }}
-                    placeholder='Select channel'
-                    searchPlaceholder='Search channels...'
+                    placeholder='Select channel or user'
+                    searchPlaceholder='Search channels or users...'
                     width='100%'
                   />
                 </div>

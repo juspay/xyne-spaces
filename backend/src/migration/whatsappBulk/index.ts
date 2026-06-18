@@ -7,27 +7,26 @@ import type { Request } from 'express';
 import { AccessType } from '@prisma/client';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
-import { WhatsAppMigrationController } from '@/controllers/whatsappMigrationController';
-import whatsappBulkRoutes from '@/migration/whatsappBulk';
+import { WhatsAppBulkMigrationController } from '@/controllers/whatsappBulkMigrationController';
 
 const router = Router();
-const controller = new WhatsAppMigrationController();
+const controller = new WhatsAppBulkMigrationController();
 const whatsappMigrationAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 
-const uploadDir = join(tmpdir(), 'xyne-whatsapp-imports');
+const uploadDir = join(tmpdir(), 'xyne-whatsapp-bulk-imports');
 mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({
   dest: uploadDir,
   fileFilter: (_req: Request, file, cb) => {
     const fileName = file.originalname.toLowerCase();
-    if (file.fieldname === 'archive') {
+    if (file.fieldname === 'archives') {
       const isZip =
         fileName.endsWith('.zip') ||
         file.mimetype === 'application/zip' ||
         file.mimetype === 'application/x-zip-compressed';
       if (!isZip) {
-        cb(new Error('archive must be a .zip file'));
+        cb(new Error('archives must be .zip files'));
         return;
       }
       cb(null, true);
@@ -53,33 +52,32 @@ const upload = multer({
   },
   limits: {
     fileSize: 1024 * 1024 * 1024,
-    files: 2,
+    files: 201,
   },
 });
+
+router.post(
+  '/stage',
+  authMiddleware.authenticate,
+  whatsappMigrationAdminAuth,
+  upload.fields([{ name: 'archives', maxCount: 200 }]),
+  controller.stage,
+);
 
 router.post(
   '/preview',
   authMiddleware.authenticate,
   whatsappMigrationAdminAuth,
-  upload.fields([
-    { name: 'archive', maxCount: 1 },
-    { name: 'mappingFile', maxCount: 1 },
-  ]),
+  upload.fields([{ name: 'mappingFile', maxCount: 1 }]),
   controller.preview,
 );
+
 router.post(
-  '/execute',
+  '/start',
   authMiddleware.authenticate,
   whatsappMigrationAdminAuth,
-  upload.fields([
-    { name: 'archive', maxCount: 1 },
-    { name: 'mappingFile', maxCount: 1 },
-  ]),
-  controller.execute,
+  upload.fields([{ name: 'mappingFile', maxCount: 1 }]),
+  controller.start,
 );
-router.get('/sources', authMiddleware.authenticate, whatsappMigrationAdminAuth, controller.listSources);
-router.get('/status/:jobId', authMiddleware.authenticate, whatsappMigrationAdminAuth, controller.status);
-router.post('/purge', authMiddleware.authenticate, whatsappMigrationAdminAuth, controller.purgeImport);
-router.use('/bulk', whatsappBulkRoutes);
 
 export default router;

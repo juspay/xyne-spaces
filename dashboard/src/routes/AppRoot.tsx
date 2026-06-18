@@ -163,7 +163,7 @@ import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
-import WhatsAppMigrationScreen from './WhatsAppMigrationScreen/WhatsAppMigrationScreen';
+import WhatsAppBulkMigrationScreen from './WhatsAppBulkMigrationScreen/WhatsAppBulkMigrationScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { getTicketsPath } from '../components/ErrorReportModal/ErrorReportModal.utils';
 import { useCacConfig } from '../hooks/useCacConfig';
@@ -1258,7 +1258,7 @@ export const router = createBrowserRouter([
                 path: 'migration/whatsapp',
                 element: (
                   <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                    <WhatsAppMigrationScreen />
+                    <WhatsAppBulkMigrationScreen />
                   </ResourceProtectedRoute>
                 ),
               },

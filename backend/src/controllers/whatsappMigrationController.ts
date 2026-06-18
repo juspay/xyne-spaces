@@ -239,29 +239,21 @@ export class WhatsAppMigrationController {
         return;
       }
 
-      const { targetProjectId, targetChannelId } = req.body as {
-        targetProjectId?: string;
-        targetChannelId?: string;
-      };
+      const { targetChannelId } = req.body as { targetChannelId?: string };
 
-      if (!targetProjectId || !targetChannelId) {
+      if (!targetChannelId) {
         await cleanupUploadedFiles([archive, mappingFile]);
-        res.status(400).json({ error: 'targetProjectId and targetChannelId are required' });
+        res.status(400).json({ error: 'targetChannelId is required' });
         return;
       }
 
       const channel = await db.channel.findUnique({
         where: { id: targetChannelId },
-        select: { id: true, projectId: true, workspaceId: true },
+        select: { id: true, projectId: true, workspaceId: true, scopeType: true },
       });
       if (!channel) {
         await cleanupUploadedFiles([archive, mappingFile]);
         res.status(404).json({ error: 'Target channel not found' });
-        return;
-      }
-      if (channel.projectId !== targetProjectId) {
-        await cleanupUploadedFiles([archive, mappingFile]);
-        res.status(400).json({ error: 'Target channel does not belong to targetProjectId' });
         return;
       }
       if (channel.workspaceId !== workspaceId) {
@@ -279,7 +271,6 @@ export class WhatsAppMigrationController {
 
       const jobId = randomUUID();
       await whatsAppMigrationProgressService.createJob(jobId, {
-        targetProjectId,
         targetChannelId,
         chatName: null,
       });
@@ -287,7 +278,6 @@ export class WhatsAppMigrationController {
       const input: WhatsAppMigrationExecuteInput = {
         archivePath: archive.path,
         archiveOriginalName: archive.originalname,
-        targetProjectId,
         targetChannelId,
         mappings,
         actorUserId,
@@ -299,7 +289,6 @@ export class WhatsAppMigrationController {
         jobId,
         actorUserId,
         workspaceId,
-        targetProjectId,
         targetChannelId,
         archiveOriginalName: archive.originalname,
         archiveSize: archive.size,
