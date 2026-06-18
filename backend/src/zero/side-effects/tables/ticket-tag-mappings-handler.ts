@@ -7,6 +7,14 @@ import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 
+/**
+ * Tag changes are dual-written to both `ticket_tags` (old) and
+ * `ticket_tag_mappings` (new, canonical) tables in the same mutation, so both
+ * side-effect handlers fire for one change. The ticket activity + SYSTEM message
+ * audit trail is emitted exclusively here, on the canonical new-model table.
+ * TicketTagsSideEffectHandler intentionally does NOT emit it, to avoid duplicate
+ * messages during the dual-write migration window.
+ */
 export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     const { args } = job;
