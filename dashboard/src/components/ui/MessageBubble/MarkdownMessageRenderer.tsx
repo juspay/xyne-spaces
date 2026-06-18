@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import {
   MentionRenderer,
   GroupMentionRenderer,
@@ -12,6 +13,28 @@ import { GenericMentionHoverPopover } from '../GenericMentionPopover/GenericMent
 import type { createMarkdownComponents } from '../../../utils/markdownComponents';
 
 type MarkdownComponents = ReturnType<typeof createMarkdownComponents>;
+
+const MENTION_DATA_ATTRS = [
+  'dataMention',
+  'dataMentionType',
+  'dataUserId',
+  'dataUsername',
+  'dataGroupId',
+  'dataGroupName',
+  'dataGroupAlias',
+  'dataChannelMention',
+  'dataChannelId',
+  'dataChannelName',
+  'dataIsPrivate',
+];
+
+const messageSanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    span: [...(defaultSchema.attributes?.['span'] ?? []), 'className', ...MENTION_DATA_ATTRS],
+  },
+};
 
 interface MarkdownMessageRendererProps {
   content: string;
@@ -123,7 +146,7 @@ export const MarkdownMessageRenderer: FC<MarkdownMessageRendererProps> = ({
     <div className={`${className} min-w-0`}>
       <Markdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, messageSanitizeSchema]]}
         components={{
           ...markdownComponents,
           span: MentionAwareSpan,

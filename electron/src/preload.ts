@@ -146,7 +146,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generateKeys: (label: string) => ipcRenderer.invoke('generate-keys', label),
   generateCSR: (label: string, subjectCN: string) => ipcRenderer.invoke('generate-csr', label, subjectCN),
   storeCertificate: (pem: string) => ipcRenderer.invoke('store-certificate', pem),
-  installRootCA: (pem: string) => ipcRenderer.invoke('install-root-ca', pem),
   deleteKeys: (commonName: string) => ipcRenderer.invoke('delete-keys', commonName),
   checkKeys: (commonName: string) => ipcRenderer.invoke('check-keys', commonName),
   getDeviceInfo: () => ipcRenderer.invoke('get-device-info'),

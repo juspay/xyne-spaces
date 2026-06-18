@@ -8,6 +8,13 @@ import { X, Users, MessageSquare, Hash, Sparkles, Check } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { useSummaryCache } from '../../hooks/useSummaryQuery';
+import { sanitizeHtmlString } from '../../utils/sanitizer';
+
+// AI keypoints are markdown; convert **bold** → <strong>, then run through the
+// shared allowlist sanitizer so any HTML smuggled into the (prompt-injection-
+// reachable) summary can't run via the dangerouslySetInnerHTML below.
+export const sanitizeBoldMarkdown = (text: string): string =>
+  sanitizeHtmlString(text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'));
 
 // ============================================================================
 // Type Definitions
@@ -795,7 +802,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
                       <span
                         className='text-foreground text-sm'
                         dangerouslySetInnerHTML={{
-                          __html: point.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'),
+                          __html: sanitizeBoldMarkdown(point),
                         }}
                       />
                     </li>
@@ -843,10 +850,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
                         messageNumber &&
                         (conversationIdMapping[String(messageNumber)] ||
                           messageIdMapping[String(messageNumber)]);
-                      const formattedPoint = point.replace(
-                        /\*\*([^*]+)\*\*/g,
-                        '<strong>$1</strong>',
-                      );
+                      const formattedPoint = sanitizeBoldMarkdown(point);
 
                       return (
                         <li key={index} className='flex items-start gap-2'>

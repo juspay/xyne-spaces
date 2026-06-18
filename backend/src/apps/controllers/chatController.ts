@@ -12,6 +12,7 @@ import { MessageType } from '@xyne/shared';
 import { validateFlowDefinition, formatValidationErrors } from '@xyne/shared';
 import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
+import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
 
 const ChatActionBodySchema = z.object({
@@ -220,7 +221,11 @@ export class ChatController {
 
       if (flow) {
         const flowId = crypto.randomUUID();
-        const appId = (req.body as Record<string, unknown>).appId as string;
+        const appId = (req.body as Record<string, unknown>).appId;
+        if (appId !== undefined && !isAlphanumericId(appId)) {
+          res.status(400).json({ error: 'Invalid appId', code: 'VALIDATION_ERROR' });
+          return;
+        }
         const flowJSON = {
           version: '2.0' as const,
           screenId: flow.screenId ?? flowId,
@@ -245,12 +250,12 @@ export class ChatController {
         }
 
         const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
-        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${appId ?? ''}" data-flow-id="${flowId}">Flow JSON</div>`;
+        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">Flow JSON</div>`;
         isMarkdown = false;
       } else if (markdownText) {
-        content = markdownText;
+        content = sanitizeMessageContent(markdownText);
       } else if (contentFormat === ContentFormat.MARKDOWN) {
-        content = text || '';
+        content = sanitizeMessageContent(text || '');
       } else {
           content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
       }
@@ -322,12 +327,16 @@ export class ChatController {
           });
           return;
         }
-        const appId = (req.body as Record<string, unknown>).appId as string | undefined;
+        const appId = (req.body as Record<string, unknown>).appId;
+        if (appId !== undefined && !isAlphanumericId(appId)) {
+          res.status(400).json({ error: 'Invalid appId', code: 'VALIDATION_ERROR' });
+          return;
+        }
         const flowId = (flowResult.data.screenId) ?? crypto.randomUUID();
         const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
-        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${appId ?? ''}" data-flow-id="${flowId}">Flow JSON</div>`;
+        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">Flow JSON</div>`;
       } else if (markdownText) {
-        content = markdownText;
+        content = sanitizeMessageContent(markdownText);
       } else {
           content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
       }

@@ -48,6 +48,53 @@ export function sanitizeEmailBodyHtml(html: string): string {
   return DOMPurify.sanitize(html);
 }
 
+// IDs like appId (Apps.id / cuid) are alphanumeric only. Reject anything else
+export function isAlphanumericId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-zA-Z0-9]+$/.test(value);
+}
+
+// HTML-encode a value before interpolating it into a double-quoted HTML attribute.
+export function encodeHtmlAttr(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Sanitizes message content for storage, preventing XSS when rendering markdown with rehype-raw on the client. Mutates data.content in place.
+export function sanitizeMessageContent(content: string): string {
+  if (!content) return content;
+
+  return DOMPurify.sanitize(content, {
+    USE_PROFILES: { html: true },
+
+    FORBID_TAGS: [
+      'script',
+      'iframe',
+      'object',
+      'embed',
+      'form',
+      'input',
+      'textarea',
+      'style',
+      'link',
+      'meta',
+      'base',
+    ],
+
+    // DOMPurify already strips ALL event-handler attributes by default; we only
+    // need to additionally block (iframe payload carrier).
+    FORBID_ATTR: ['srcdoc'],
+
+    ADD_ATTR: ['target', 'rel'],
+
+    // Allow only https/mailto schemes + relative URLs; rejects javascript:/data:/vbscript:.
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  });
+}
+
 export function cleanEmailBodyHtml(html: string): string {
   if (!html?.trim()) return html;
 

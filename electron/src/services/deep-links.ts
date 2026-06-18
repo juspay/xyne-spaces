@@ -6,6 +6,7 @@ import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import ElectronEvent from './logger/electron-events';
+import { isHexToken } from '../utils/validation';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -99,13 +100,23 @@ async function handleDeepLink(url: string): Promise<void> {
   // Ensure app is ready and services (like mTLS) are initialized
   await app.whenReady();
 
+  const INVITATION_ID_BYTE_SIZE = 16;
+
   // 1. Auth Callback Case
   if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://auth/callback`)) {
     try {
       const urlObj = new URL(url);
       const code = urlObj.searchParams.get('code');
       const state = urlObj.searchParams.get('state');
-      const invitationId = urlObj.searchParams.get('invitationId');
+      const rawInvitationId = urlObj.searchParams.get('invitationId');
+      const invitationId = isHexToken(rawInvitationId, INVITATION_ID_BYTE_SIZE)
+        ? rawInvitationId
+        : null;
+      if (rawInvitationId !== null && invitationId === null) {
+        Logger.error(ElectronEvent.DEEP_LINK_INVITATION_REJECTED, {
+          value: rawInvitationId,
+        });
+      }
 
       log.info('[DeepLinks] Auth callback received:', { code: !!code, state: !!state, invitationId });
 
@@ -203,7 +214,15 @@ async function handleDeepLink(url: string): Promise<void> {
     try {
       const urlObj = new URL(url);
       const workspaceId = urlObj.searchParams.get('workspaceId');
-      const invitationId = urlObj.searchParams.get('invitationId');
+      const rawInvitationId = urlObj.searchParams.get('invitationId');
+      const invitationId = isHexToken(rawInvitationId, INVITATION_ID_BYTE_SIZE)
+        ? rawInvitationId
+        : null;
+      if (rawInvitationId !== null && invitationId === null) {
+        Logger.error(ElectronEvent.DEEP_LINK_INVITATION_REJECTED, {
+          value: rawInvitationId,
+        });
+      }
 
       log.info('[DeepLinks] Invite deep link received:', { workspaceId, invitationId });
 
@@ -261,19 +280,20 @@ async function handleDeepLink(url: string): Promise<void> {
       window.show();
       window.focus();
       
-      // Set invitationId in localStorage BEFORE navigation
-      // This ensures it's available even if auth redirect happens
+      // Set invitationId in localStorage BEFORE navigation so it survives auth
+      // redirect. invitationId is validated as hex above, safe to interpolate.
       if (invitationId) {
-        window.webContents.executeJavaScript(`
-          localStorage.setItem('pending_invitation_id', '${invitationId}');
-        `);
+        window.webContents.executeJavaScript(
+          `localStorage.setItem('pending_invitation_id', '${invitationId}');`,
+        );
       }
-      
-      // Navigate to invite page with params
-      const pathStr = invitationId 
-        ? `/invite?workspaceId=${workspaceId}&invitationId=${invitationId}`
-        : `/invite?workspaceId=${workspaceId}`;
-      
+
+      // URLSearchParams encodes the values (no query/route injection).
+      const inviteParams = new URLSearchParams();
+      if (workspaceId) inviteParams.set('workspaceId', workspaceId);
+      if (invitationId) inviteParams.set('invitationId', invitationId);
+      const pathStr = `/invite?${inviteParams.toString()}`;
+
       log.info('[DeepLinks] Navigating to:', pathStr);
       window.webContents.send('navigate-to', pathStr);
       

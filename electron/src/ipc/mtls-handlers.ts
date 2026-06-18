@@ -64,14 +64,14 @@ async function urlLoadWithRetry(fn: () => Promise<void>, attempts = 0): Promise<
 export function setupMTLSIpcHandlers(): void {
 
     // mtls start
-    ipcMain.handle('generate-keys', async (_event, label: string) => {
+    ipcMain.handle('generate-keys', async () => {
         Logger.info(EnrollmentEvent.FIRST_TIME_SIGNUP_START);
-        return await keychain.generateKeyPair(label || 'SimulationClient');
+        return await keychain.generateKeyPair(config.MTLS_IDENTITY_NAME);
     });
 
-    ipcMain.handle('generate-csr', async (_event, label: string, subject: string) => {
+    ipcMain.handle('generate-csr', async () => {
         try {
-            const result = await keychain.generateCSR(label || 'SimulationClient', subject);
+            const result = await keychain.generateCSR(config.MTLS_IDENTITY_NAME);
             Logger.info(EnrollmentEvent.CSR_GENERATION_SUCCESS);
             return result;
         } catch (error) {
@@ -115,17 +115,12 @@ export function setupMTLSIpcHandlers(): void {
         }
     });
 
-    ipcMain.handle('install-root-ca', async (_event, pem: string) => {
-        return await keychain.installRootCA(pem);
+    ipcMain.handle('delete-keys', async () => {
+        return await keychain.deleteIdentity(config.MTLS_IDENTITY_NAME);
     });
 
-    ipcMain.handle('delete-keys', async (_event, commonName: string) => {
-        // Default to our simulation name if not provided (though we expect it to be passed)
-        return await keychain.deleteIdentity(commonName || config.MTLS_IDENTITY_NAME);
-    });
-
-    ipcMain.handle('check-keys', async (_event, commonName: string) => {
-        return await keychain.checkIdentity(commonName || config.MTLS_IDENTITY_NAME);
+    ipcMain.handle('check-keys', async () => {
+        return await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
     });
 
     ipcMain.handle('get-device-info', async () => {

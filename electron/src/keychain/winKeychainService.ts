@@ -81,9 +81,9 @@ class WinKeychainService implements IKeychain {
      * Generates a KeyPair AND a CSR in one operation using certreq.
      * Windows creates the Private Key in the 'Request' store automatically.
      */
-    async generateCSR(label: string, commonName: string): Promise<string> {
-        this.label = label;
-        Logger.info(EnrollmentEvent.CSR_GENERATION_SUCCESS, { label });
+    async generateCSR(commonName: string): Promise<string> {
+        this.label = commonName;
+        Logger.info(EnrollmentEvent.CSR_GENERATION_SUCCESS, { label: commonName });
 
         const timestamp = Date.now();
         const infPath = path.join(os.tmpdir(), `req_${timestamp}.inf`);
@@ -108,7 +108,7 @@ class WinKeychainService implements IKeychain {
             ProviderName = "Microsoft Software Key Storage Provider"
             RequestType = PKCS10
             KeyUsage = 0xA0 ; DigitalSignature, KeyEncipherment
-            FriendlyName = "${label}"
+            FriendlyName = "${commonName}"
 
             [EnhancedKeyUsageExtension]
             OID=1.3.6.1.5.5.7.3.2 ; Client Authentication
@@ -131,7 +131,7 @@ class WinKeychainService implements IKeychain {
                 .replace('BEGIN NEW CERTIFICATE REQUEST', 'BEGIN CERTIFICATE REQUEST')
                 .replace('END NEW CERTIFICATE REQUEST', 'END CERTIFICATE REQUEST');
             
-            Logger.info(EnrollmentEvent.KEY_GENERATION_SUCCESS, { label }); // Log success for both
+            Logger.info(EnrollmentEvent.KEY_GENERATION_SUCCESS, { label: commonName }); // Log success for both
             return csrContent;
 
         } catch (error: any) {

@@ -70,7 +70,6 @@ export interface ElectronAPI {
   generateKeys: (label: string) => Promise<void>;
   generateCSR: (label: string, subjectCN: string) => Promise<string>;
   storeCertificate: (pem: string) => Promise<void>;
-  installRootCA: (pem: string) => Promise<void>;
   deleteKeys: (commonName: string) => Promise<void>;
   checkKeys: (commonName: string) => Promise<boolean>;
   getDeviceInfo: () => Promise<unknown>;

@@ -98,7 +98,7 @@ class LinuxKeychainService implements IKeychain {
     /**
      * Generates a CSR (PKCS#10) using the in-memory private key.
      */
-    async generateCSR(_label: string, commonName: string): Promise<string> {
+    async generateCSR(commonName: string): Promise<string> {
         if (!this.privateKeyPem) {
             throw new Error("No keys generated. Please generate keys first.");
         }
