@@ -5,7 +5,6 @@ export type WhatsAppMigrationJobStatus = 'queued' | 'running' | 'completed' | 'f
 export interface WhatsAppMigrationJobProgress {
   jobId: string;
   status: WhatsAppMigrationJobStatus;
-  targetProjectId: string;
   targetChannelId: string;
   chatName: string | null;
   phase:
@@ -46,13 +45,12 @@ class WhatsAppMigrationProgressService {
 
   async createJob(
     jobId: string,
-    input: { targetProjectId: string; targetChannelId: string; chatName?: string | null },
+    input: { targetChannelId: string; chatName?: string | null },
   ): Promise<WhatsAppMigrationJobProgress> {
     const now = new Date().toISOString();
     const progress: WhatsAppMigrationJobProgress = {
       jobId,
       status: 'queued',
-      targetProjectId: input.targetProjectId,
       targetChannelId: input.targetChannelId,
       chatName: input.chatName ?? null,
       phase: 'queued',

@@ -178,7 +178,6 @@ export interface WhatsAppMigrationPreviewResult {
 export interface WhatsAppMigrationExecuteInput {
   archivePath: string;
   archiveOriginalName?: string;
-  targetProjectId: string;
   targetChannelId: string;
   mappings: WhatsAppNameEmailMapping[];
   actorUserId: string;
@@ -1165,7 +1164,6 @@ export class WhatsAppMigrationService {
     try {
       logger.info('[WhatsAppMigration] Execute started', {
         jobId,
-        targetProjectId: input.targetProjectId,
         targetChannelId: input.targetChannelId,
         workspaceId: input.workspaceId,
         archiveOriginalName: input.archiveOriginalName || null,
@@ -1215,13 +1213,10 @@ export class WhatsAppMigrationService {
 
       const channel = await db.channel.findUnique({
         where: { id: input.targetChannelId },
-        select: { id: true, projectId: true, workspaceId: true },
+        select: { id: true, projectId: true, workspaceId: true, scopeType: true },
       });
       if (!channel) {
         throw new Error('Target channel not found');
-      }
-      if (channel.projectId !== input.targetProjectId) {
-        throw new Error('Target channel does not belong to target project');
       }
 
       const senderNames = parsedChat.messages.filter(message => !message.isSystemMessage && message.senderName).map(message => message.senderName!);

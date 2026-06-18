@@ -210,6 +210,73 @@ export class GCSService {
   }
 
   /**
+   * Upload a readable stream directly to GCS at an exact path.
+   */
+  async uploadStreamToPath(
+    stream: NodeJS.ReadableStream,
+    options: {
+      path: string;
+      contentType: string;
+      metadata?: Record<string, string>;
+    }
+  ): Promise<GCSUploadResult> {
+    try {
+      if (!stream) {
+        throw new Error('File stream is required');
+      }
+
+      if (!options.path) {
+        throw new Error('Path is required');
+      }
+
+      if (!options.contentType) {
+        throw new Error('Content type is required');
+      }
+
+      const file = this.bucket.file(options.path);
+      let totalBytes = 0;
+
+      logger.info(`Streaming file upload to GCS at exact path: ${options.path}`, {
+        contentType: options.contentType,
+      });
+
+      stream.on('data', (chunk: Buffer | string) => {
+        totalBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      });
+
+      const writeStream = file.createWriteStream({
+        metadata: {
+          contentType: options.contentType,
+          cacheControl: 'public, max-age=31536000',
+          ...options.metadata,
+        },
+        resumable: true,
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        stream
+          .pipe(writeStream)
+          .on('finish', resolve)
+          .on('error', reject);
+      });
+
+      return {
+        filename: options.path,
+        gcsPath: options.path,
+        size: totalBytes,
+      };
+    } catch (error) {
+      logger.error('Failed to stream upload to exact GCS path:', error);
+
+      if (error instanceof Error) {
+        throw new Error(`GCS stream upload failed: ${error.message}`);
+      }
+
+      throw new Error('GCS stream upload failed: Unknown error');
+    }
+  }
+
+  /**
    * Upload file buffer to GCS at an exact path without any modifications
    * Use this when you need full control over the file path
    */

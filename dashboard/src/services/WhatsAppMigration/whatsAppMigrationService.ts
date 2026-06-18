@@ -12,6 +12,13 @@ const WHATSAPP_MIGRATION_BASE_URL = normalizedApiBaseUrl.replace(
     : '/migrate/api/migration/whatsapp',
 );
 
+const WHATSAPP_BULK_MIGRATION_BASE_URL = normalizedApiBaseUrl.replace(
+  /\/api$/,
+  isLocalhost || isTestEnv || isSandboxLocal
+    ? '/api/migration/whatsapp/bulk'
+    : '/migrate/api/migration/whatsapp/bulk',
+);
+
 export interface WhatsAppMigrationPreviewResponse {
   chatName: string | null;
   participants: string[];
@@ -27,7 +34,6 @@ export interface WhatsAppMigrationPreviewResponse {
 export interface WhatsAppMigrationJobProgress {
   jobId: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
-  targetProjectId: string;
   targetChannelId: string;
   chatName: string | null;
   phase:
@@ -90,6 +96,27 @@ export interface WhatsAppPurgeImportResponse {
   };
 }
 
+export interface WhatsAppBulkStagedFile {
+  stagedFileId: string;
+  originalName: string;
+  gcsPath: string;
+  size: number;
+}
+
+export interface WhatsAppBulkStartedJob {
+  jobId: string;
+  stagedFileId: string;
+  originalName: string;
+  targetChannelId: string;
+}
+
+export interface WhatsAppBulkValidationResult {
+  stagedFileId: string;
+  originalName: string;
+  targetChannelId: string;
+  preview: WhatsAppMigrationPreviewResponse;
+}
+
 class WhatsAppMigrationService {
   async preview(payload: FormData): Promise<WhatsAppMigrationPreviewResponse> {
     const response = await apiInstance.post<{
@@ -137,6 +164,36 @@ class WhatsAppMigrationService {
       payload,
     );
     return response.data.data;
+  }
+
+  async stageBulkArchives(payload: FormData): Promise<WhatsAppBulkStagedFile[]> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: { stagedFiles: WhatsAppBulkStagedFile[] };
+    }>(`${WHATSAPP_BULK_MIGRATION_BASE_URL}/stage`, payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data.data.stagedFiles;
+  }
+
+  async previewBulkMigration(payload: FormData): Promise<WhatsAppBulkValidationResult[]> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: { validationResults: WhatsAppBulkValidationResult[] };
+    }>(`${WHATSAPP_BULK_MIGRATION_BASE_URL}/preview`, payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data.data.validationResults;
+  }
+
+  async startBulkMigration(payload: FormData): Promise<WhatsAppBulkStartedJob[]> {
+    const response = await apiInstance.post<{
+      success: true;
+      data: { jobs: WhatsAppBulkStartedJob[] };
+    }>(`${WHATSAPP_BULK_MIGRATION_BASE_URL}/start`, payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data.data.jobs;
   }
 }
 
