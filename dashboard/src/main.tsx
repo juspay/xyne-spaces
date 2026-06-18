@@ -4,6 +4,7 @@ import './global.css';
 import { mixpanelService } from './services/Analytics/mixpanelService';
 import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReportLogCollector } from './utils/errorReportLogCollector';
+import { logger, Event } from './utils/logger';
 
 // Expose app version to window for Electron access
 window.__APP_VERSION__ = __APP_VERSION__;
@@ -24,11 +25,13 @@ const handleConsoleError = (args: unknown[]): void => {
   try {
     const errorMessage = args.map(arg => String(arg)).join(' ');
 
-    mixpanelService.track('Frontend Error', {
+    const properties = {
       type: 'console.error',
       message: errorMessage,
       ...getCommonErrorProperties(),
-    });
+    };
+    mixpanelService.track('Frontend Error', properties);
+    logger.error(Event.FRONTEND_ERROR, properties);
   } catch (trackingError) {
     originalConsoleError('Failed to track console.error to Mixpanel:', trackingError);
   }
@@ -38,7 +41,7 @@ const handleWindowError = (event: ErrorEvent): void => {
   try {
     const error = event.error as Error | undefined;
 
-    mixpanelService.track('Frontend Error', {
+    const properties = {
       type: 'uncaught_exception',
       message: event.message,
       source: event.filename,
@@ -48,7 +51,9 @@ const handleWindowError = (event: ErrorEvent): void => {
       errorName: error?.name,
       errorMessage: error?.message,
       ...getCommonErrorProperties(),
-    });
+    };
+    mixpanelService.track('Frontend Error', properties);
+    logger.error(Event.FRONTEND_ERROR, properties);
   } catch (trackingError) {
     originalConsoleError('Failed to track error to Mixpanel:', trackingError);
   }
@@ -65,14 +70,16 @@ const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
         ? reason
         : String(reason);
 
-    mixpanelService.track('Frontend Error', {
+    const properties = {
       type: 'unhandledrejection',
       message: isError ? reason.message : typeof reason === 'string' ? reason : String(reason),
       stack: isError ? reason.stack : undefined,
       errorName: isError ? reason.name : undefined,
       reason: reasonString,
       ...getCommonErrorProperties(),
-    });
+    };
+    mixpanelService.track('Frontend Error', properties);
+    logger.error(Event.FRONTEND_ERROR, properties);
   } catch (trackingError) {
     originalConsoleError('Failed to track promise rejection to Mixpanel:', trackingError);
   }

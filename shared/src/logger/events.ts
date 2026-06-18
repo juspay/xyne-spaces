@@ -73,6 +73,7 @@ export const Event = {
   AUTH_SESSION_EXPIRED: "auth_session_expired",
   API_NETWORK_ERROR: "api_network_error",
   API_OPERATIONAL_ERROR: "api_operational_error",
+  FRONTEND_ERROR: "frontend_error",
   CANVAS_PREFETCH_STARTED: "canvas_prefetch_started",
   CANVAS_PREFETCH_SUCCESS: "canvas_prefetch_success",
   CANVAS_PREFETCH_FAILED: "canvas_prefetch_failed",

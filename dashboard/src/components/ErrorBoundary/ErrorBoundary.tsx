@@ -1,5 +1,6 @@
 import { Component, ReactNode, ReactElement } from 'react';
 import { useRouteError } from 'react-router-dom';
+import { logger, Event } from '../../utils/logger';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -115,6 +116,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     // eslint-disable-next-line no-console
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     //TODO : Add to report errors to sentry
+
+    logger.error(Event.FRONTEND_ERROR, {
+      type: 'react_error_boundary',
+      message: error.message,
+      errorName: error.name,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+      timestamp: new Date().toISOString(),
+    });
 
     this.setState(prevState => ({
       ...prevState,
