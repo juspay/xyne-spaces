@@ -1,4 +1,5 @@
-import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent, PrismaClient } from '@prisma/client';
+import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent, PrismaClient, EmailType } from '@prisma/client';
+import { extractEmailAddress } from '@/utils/email';
 import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
 import { websocketService } from '@/services/websocketService';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
@@ -1024,5 +1025,74 @@ export class TicketRepository {
     });
     await dualWriteTicketTags(ticketId, toAdd, prisma);
     return { added: toAdd, alreadyPresent };
+  }
+
+  /**
+   * List desk tickets raised by an external merchant (identified by email).
+   * Matches ticket.metadata.reporterEmail and root inbound emails on the thread.
+   */
+  async findTicketsByMerchantSenderEmail(params: {
+    channelIds: string[];
+    senderEmail: string;
+    limit: number;
+    cursor?: { createdAt: Date; id: string };
+  }) {
+    const normalizedSender =
+      extractEmailAddress(params.senderEmail) ?? params.senderEmail.trim().toLowerCase();
+    const channelIds = [...new Set(params.channelIds.map(id => id.trim()).filter(Boolean))];
+
+    const matchingConversations = await prisma.email.findMany({
+      where: {
+        channelId: { in: channelIds },
+        type: EmailType.DEFAULT,
+        from: { contains: normalizedSender, mode: 'insensitive' },
+      },
+      select: { conversationId: true },
+      distinct: ['conversationId'],
+    });
+    const conversationIds = matchingConversations.map(row => row.conversationId);
+
+    const reporterFilter: Prisma.TicketWhereInput[] = [
+      { metadata: { path: ['reporterEmail'], equals: normalizedSender } },
+    ];
+    if (conversationIds.length > 0) {
+      reporterFilter.push({ conversationId: { in: conversationIds } });
+    }
+
+    const where: Prisma.TicketWhereInput = {
+      channelId: { in: channelIds },
+      isArchived: false,
+      OR: reporterFilter,
+    };
+
+    if (params.cursor) {
+      where.AND = [
+        {
+          OR: [
+            { createdAt: { lt: params.cursor.createdAt } },
+            { createdAt: params.cursor.createdAt, id: { lt: params.cursor.id } },
+          ],
+        },
+      ];
+    }
+
+    return prisma.ticket.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: params.limit + 1,
+      select: {
+        id: true,
+        xyneId: true,
+        title: true,
+        statusV2: true,
+        stageName: true,
+        priority: true,
+        createdAt: true,
+        lastEmailAt: true,
+        conversationId: true,
+        channelId: true,
+        metadata: true,
+      },
+    });
   }
 }
