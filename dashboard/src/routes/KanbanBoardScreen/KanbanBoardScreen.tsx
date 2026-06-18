@@ -1131,18 +1131,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         });
       }
     });
-    allUsers?.forEach(user => userIds.add(user.id));
     return Array.from(userIds);
-  }, [allUsers, kanbanSourceTickets]);
+  }, [kanbanSourceTickets]);
 
   const availableUserGroups = useMemo(() => {
     const groups = new Set<string>();
     (kanbanSourceTickets as KanbanLocalTicket[] | undefined)?.forEach(ticket => {
       if (ticket.userGroupId) groups.add(ticket.userGroupId);
     });
-    allUserGroups?.forEach(group => groups.add(group.id));
     return Array.from(groups);
-  }, [allUserGroups, kanbanSourceTickets]);
+  }, [kanbanSourceTickets]);
 
   // Get available board IDs based on view mode (only needed for my-tickets views)
   // Hydrate from the dedicated API call and merge in any boards from loaded tickets

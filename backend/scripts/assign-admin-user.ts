@@ -61,6 +61,22 @@ async function assignUserToGroup() {
         part.charAt(0).toUpperCase() + part.slice(1)
       ).join(' ');
 
+      // Find or create OrgMember (required for User.orgMemberId)
+      let orgMember = await prisma.orgMember.findUnique({
+        where: { email }
+      });
+
+      if (!orgMember) {
+        orgMember = await prisma.orgMember.create({
+          data: {
+            email,
+            orgId: 'xyne-default-org',
+            role: 'OWNER',
+            joinedAt: new Date(),
+          }
+        });
+      }
+
       user = await prisma.user.create({
         data: {
           email,
@@ -68,8 +84,13 @@ async function assignUserToGroup() {
           authProvider: 'GOOGLE',
           providerUserId: `admin-${email.replace(/[^a-zA-Z0-9]/g, '-')}`,
           status: 'ACTIVE',
-          workspaceId: defaultWorkspace.id,
           role: WorkspaceRole.ADMIN,
+          workspace: {
+            connect: { id: defaultWorkspace.id }
+          },
+          orgMember: {
+            connect: { memberId: orgMember.memberId }
+          },
         }
       });
       console.log(`✅ Created user ${email} in default workspace`);
@@ -98,56 +119,44 @@ async function assignUserToGroup() {
     }
 
     // Grant direct ADMIN access to ALL resources for this user (required for User Management admin checks)
-    console.log('\n🔐 Granting direct ADMIN access to all resources...');
     const allResources = await prisma.resource.findMany();
-    let grantedCount = 0;
-
-    for (const resource of allResources) {
-      // Check if direct permission already exists
-      const existingDirectPermission = await prisma.resourceAccess.findFirst({
+    const adminResources = allResources.filter(r => r.accessType === AccessType.ADMIN);
+    
+    for (const resource of adminResources) {
+      const existingAccess = await prisma.resourceAccess.findUnique({
         where: {
-          userId: user.id,
-          resourceId: resource.id,
-          accessType: AccessType.ADMIN,
-        },
+          userId_resourceId: {
+            userId: user.id,
+            resourceId: resource.id
+          }
+        }
       });
 
-      if (!existingDirectPermission) {
+      if (!existingAccess) {
         await prisma.resourceAccess.create({
           data: {
             userId: user.id,
             resourceId: resource.id,
-            accessType: AccessType.ADMIN,
-          },
+            accessType: AccessType.ADMIN
+          }
         });
-        grantedCount++;
-        console.log(`  ✅ Granted ADMIN access: ${resource.name}`);
+        console.log(`✅ Granted ADMIN access to resource: ${resource.name}`);
       }
     }
 
-    if (grantedCount === 0) {
-      console.log('  ✅ Direct ADMIN access already exists for all resources');
-    } else {
-      console.log(`  ✅ Granted direct ADMIN access to ${grantedCount} resources`);
-    }
-
-    console.log('\n📋 Admin user permissions:');
-    console.log('  - Full system access via ADMIN group');
-    console.log('  - Direct ADMIN access to all resources (for ACL checks)');
-    console.log('  - Can grant/modify/revoke resource access for other users');
+    console.log(`🎉 User ${user.email} successfully assigned to ADMIN group with full admin access!`);
+    console.log(`📋 Details:`);
+    console.log(`   • User ID: ${user.id}`);
+    console.log(`   • Workspace: ${defaultWorkspace.name} (${defaultWorkspace.id})`);
+    console.log(`   • Role: ${user.role}`);
+    console.log(`   • Group: ${adminGroup.name} (${adminGroup.id})`);
 
   } catch (error) {
     console.error('❌ Error assigning user to group:', error);
+    process.exit(1);
   } finally {
     await prisma.$disconnect();
   }
 }
 
-assignUserToGroup()
-  .then(() => {
-    process.exit(0);
-  })
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+assignUserToGroup();
