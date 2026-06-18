@@ -94,23 +94,37 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
       >
         <div
           className={cn(
-            'flex items-center gap-2 bg-green-100 rounded-lg px-2 py-1.5',
-            isUserInCall ? 'bg-green-100' : 'bg-green-700',
+            'flex items-center gap-2 rounded-lg px-2 py-1.5',
+            isUserInCall ? 'bg-green-100 dark:bg-green-900/30' : 'bg-green-700',
           )}
         >
-          <Headphones className={cn('w-5 h-5', isUserInCall ? 'text-green-700' : 'text-white')} />
+          <Headphones
+            className={cn(
+              'w-5 h-5',
+              isUserInCall ? 'text-green-700 dark:text-green-300' : 'text-white',
+            )}
+          />
         </div>
 
         <div
           className={cn(
-            'flex items-center bg-green-100 justify-between w-full px-2 py-1.5 rounded-lg',
-            isUserInCall ? 'bg-green-100' : 'bg-green-700',
+            'flex items-center justify-between w-full px-2 py-1.5 rounded-lg',
+            isUserInCall ? 'bg-green-100 dark:bg-green-900/30' : 'bg-green-700',
           )}
         >
           <div className='flex items-center gap-4'>
             <div className='flex items-center gap-2'>
               <AvatarGroup userIds={participantUserIds} size='sm' count={2} />
-              {!isMobile && <span className='text-sm font-medium '>{callStatusText}</span>}
+              {!isMobile && (
+                <span
+                  className={cn(
+                    'text-sm font-medium',
+                    isUserInCall ? 'text-green-800 dark:text-green-200' : '',
+                  )}
+                >
+                  {callStatusText}
+                </span>
+              )}
             </div>
 
             {callDuration && (
@@ -124,7 +138,10 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
                   />
                 )}
                 <span
-                  className={cn('text-sm', isUserInCall ? 'text-foreground/90' : 'text-white/90')}
+                  className={cn(
+                    'text-sm',
+                    isUserInCall ? 'text-green-800 dark:text-green-200' : 'text-white/90',
+                  )}
                 >
                   {callDuration}
                 </span>
