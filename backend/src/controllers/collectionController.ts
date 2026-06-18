@@ -10,6 +10,11 @@ import { SubApp } from '@/vespa/src/types';
 import { CollectionRole, CollectionPermission, IngestionStatus, Collection } from '@prisma/client';
 import archiver from 'archiver';
 import unzipper from 'unzipper';
+import {
+    resolveCollectionAccess,
+    listAccessibleRootCollections,
+    expandCollectionTrees,
+} from '@/services/collectionAccess';
 
 export class CollectionController {
     private collectionRepository: CollectionRepository;
@@ -174,7 +179,12 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
     };
 
     /**
-     * Check user role on a root collection (collectionId must be a root Collection.id)
+     * Check user role on a root collection (collectionId must be a root Collection.id).
+     *
+     * Delegates to services/collectionAccess.resolveCollectionAccess so that owner,
+     * direct user permission, group-membership permission, and public-fallback are
+     * all evaluated in one place. The earlier inline check honoured direct user
+     * perms only — group-granted access was silently denied.
      */
     private async getCollectionOrRole(
         collectionId: string,
@@ -183,16 +193,40 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
         const collection = await this.collectionRepository.findCollectionByIdWithPermissions(collectionId);
         if (!collection) return { role: null, collection: null };
 
-        let role: CollectionRole | null = collection.ownerId === userId ? CollectionRole.OWNER : null;
-        if (!role && collection.permissions) {
-            const permission = collection.permissions.find(p => p.userId === userId);
-            if (permission) role = permission.role;
-        }
-        if (!role && !collection.isPrivate) {
-            role = CollectionRole.EDITOR;
-        }
+        const { role } = await resolveCollectionAccess(userId, {
+            ownerId: collection.ownerId,
+            isPrivate: collection.isPrivate,
+            permissions: collection.permissions,
+        });
         return { role, collection };
     }
+
+    /**
+     * GET /api/collections/accessible
+     *
+     * List every root collection the requesting user can access (owner, direct
+     * permission, group permission, or public). When ?includeItems=1, expand
+     * each root into its full sub-folder + file tree so the claw KB picker can
+     * render a per-file selector.
+     */
+    listAccessibleCollections = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const user = req.user;
+            if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+            const includeItems = req.query.includeItems === '1' || req.query.includeItems === 'true';
+            const scopeType = typeof req.query.scopeType === 'string' ? req.query.scopeType : undefined;
+            const scopeId = typeof req.query.scopeId === 'string' ? req.query.scopeId : undefined;
+
+            const roots = await listAccessibleRootCollections(user.id, { scopeType, scopeId });
+            const collections = includeItems ? await expandCollectionTrees(roots) : roots;
+
+            res.status(200).json({ success: true, collections });
+        } catch (error) {
+            logger.error('Error listing accessible collections:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    };
 
     /**
      * Ensure all folders in a path exist under the given base folder, creating them if needed.
