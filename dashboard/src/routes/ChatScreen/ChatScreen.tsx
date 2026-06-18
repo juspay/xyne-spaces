@@ -181,7 +181,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             {pathnameWithoutWorkspace !== '/chat/dir' &&
               pathnameWithoutWorkspace !== '/chat/dir/' &&
               !pathnameWithoutWorkspace.startsWith('/chat/dir/my-tickets') && (
-                <div className='absolute inset-0 z-50 bg-background'>
+                <div className='absolute inset-0 z-40 bg-background'>
                   <main data-id='chat-screen' className='h-full overflow-hidden'>
                     <Outlet context={{ shouldStackThread }} />
                   </main>
