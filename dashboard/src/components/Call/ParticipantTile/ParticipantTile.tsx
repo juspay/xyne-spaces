@@ -151,6 +151,7 @@ export function ParticipantTile({
             'w-full h-full',
             isScreenShare ? 'object-contain bg-black' : 'object-cover',
           )}
+          style={participant.isLocal && !isScreenShare ? { transform: 'scaleX(-1)' } : undefined}
         />
       ) : (
         <div
