@@ -12,6 +12,8 @@ router.post('/updateTicket', requirePermission('tickets:write'), validateChannel
 router.post('/updateFormField', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.updateFormField);
 router.post('/disableEmailSend', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.disableEmailSend);
 router.post('/enableEmailSend', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.enableEmailSend);
+router.get('/listBySender', requirePermission('tickets:read'), ticketController.listBySender);
 router.get('/:ticketId', requirePermission('tickets:read'), validateChannelAccessForGet, ticketController.getInfo);
+
 
 export default router;

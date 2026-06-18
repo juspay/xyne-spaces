@@ -87,6 +87,64 @@ async function resolveAndValidateChannel(
 }
 
 /**
+ * Validate the app bot has access to every channel in the list (parallel lookups).
+ */
+export async function validateChannelIdsAccess(
+  channelIds: string[],
+  userId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string; message: string }> {
+  const uniqueChannelIds = [...new Set(channelIds.map(id => id.trim()).filter(Boolean))];
+  if (uniqueChannelIds.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Bad Request',
+      message: 'At least one channelId is required',
+    };
+  }
+
+  const results = await Promise.all(
+    uniqueChannelIds.map(async channelId => {
+      const channel = await repositories.channels.findById(channelId);
+      if (!channel) {
+        logger.warn(`[CHANNEL-VALIDATION] Channel ${channelId} not found`);
+        return {
+          ok: false as const,
+          status: 404,
+          error: 'Not Found',
+          message: `Channel ${channelId} not found`,
+        };
+      }
+
+      const isParticipant = await repositories.channelParticipants.isParticipant(
+        channelId,
+        userId,
+      );
+      if (!isParticipant) {
+        logger.warn(
+          `[CHANNEL-VALIDATION] User ${userId} does not have access to channel ${channelId}`,
+        );
+        return {
+          ok: false as const,
+          status: 403,
+          error: 'Forbidden',
+          message: `Bot does not have channel access to ${channelId}`,
+        };
+      }
+
+      return { ok: true as const };
+    }),
+  );
+
+  const failed = results.find(result => !result.ok);
+  if (failed && !failed.ok) {
+    return failed;
+  }
+
+  return { ok: true };
+}
+
+/**
  * Middleware to validate channel access for GET requests
  * Reads channelId and conversationId from query params, userId from body
  */

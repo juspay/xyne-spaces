@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, Prisma } from '@prisma/client';
+import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, Prisma, DeskType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -18,10 +18,15 @@ import { buildEmailTicketAcknowledgmentBody } from '../core/emailUtils';
 import { extractEmailAddress } from '@/utils/email';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 
 import { resolveChannelId } from '../utils/channelUtils';
+import { decodeCursor, paginateResults } from '../core/paginationUtils';
+import type { MerchantTicketListItem } from '../types';
+import { validateChannelIdsAccess } from '../middelware/channelValidation';
 
 const externalSourceRepo = new ExternalSourceRepository();
+const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 
 const prismaClient = DatabaseClient.getInstance();
 
@@ -92,6 +97,46 @@ const CreateEmailTicketBodySchema = z.object({
   stageName: z.string().trim().optional(),
   ticketType: z.string().trim().optional(),
 });
+
+const ListBySenderQuerySchema = z.object({
+  channelIds: z.array(z.string().min(1, 'channelId must not be empty').trim()).min(1, {
+    message: 'At least one channelId is required (channelId, repeated channelId, or channelIds)',
+  }),
+  senderEmail: z.string().email('senderEmail must be a valid email').trim(),
+  limit: z
+    .string()
+    .optional()
+    .transform(val => (val ? parseInt(val, 10) : 20)),
+  cursor: z.string().optional(),
+});
+
+function parseListBySenderChannelIds(query: Request['query']): string[] {
+  const ids = new Set<string>();
+
+  const channelIdsParam = query.channelIds;
+  if (typeof channelIdsParam === 'string' && channelIdsParam.trim()) {
+    for (const part of channelIdsParam.split(',')) {
+      const trimmed = part.trim();
+      if (trimmed) ids.add(trimmed);
+    }
+  }
+
+  const channelIdParam = query.channelId;
+  if (Array.isArray(channelIdParam)) {
+    for (const value of channelIdParam) {
+      if (typeof value === 'string' && value.trim()) ids.add(value.trim());
+    }
+  } else if (typeof channelIdParam === 'string' && channelIdParam.trim()) {
+    ids.add(channelIdParam.trim());
+  }
+
+  return [...ids];
+}
+
+interface MerchantTicketsListCursor {
+  id: string;
+  createdAt: number;
+}
 
 export class TicketController {
 
@@ -503,6 +548,94 @@ export class TicketController {
   };
 
   /**
+   * List tickets raised by an external merchant (email sender).
+   * GET /api/apps/ticket/listBySender?channelIds=id1,id2&senderEmail=...&limit=20&cursor=...
+   * Also supports repeated channelId=... or a single channelId for backward compatibility.
+   */
+  listBySender = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const channelIds = parseListBySenderChannelIds(req.query);
+      const queryResult = ListBySenderQuerySchema.safeParse({
+        ...req.query,
+        channelIds,
+      });
+      if (!queryResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: queryResult.error.errors,
+        });
+        return;
+      }
+
+      const { channelIds: validatedChannelIds, senderEmail, limit: rawLimit, cursor } =
+        queryResult.data;
+      const limit = Math.min(Math.max(rawLimit, 1), 100);
+      const decodedCursor = decodeCursor<MerchantTicketsListCursor>(cursor);
+
+      const access = await validateChannelIdsAccess(validatedChannelIds, req.body.userId);
+      if (!access.ok) {
+        res.status(access.status).json({
+          error: access.error,
+          message: access.message,
+        });
+        return;
+      }
+
+      const normalizedSender =
+        extractEmailAddress(senderEmail) ?? senderEmail.trim().toLowerCase();
+
+      const tickets = await repositories.tickets.findTicketsByMerchantSenderEmail({
+        channelIds: validatedChannelIds,
+        senderEmail: normalizedSender,
+        limit,
+        cursor: decodedCursor
+          ? { id: decodedCursor.id, createdAt: new Date(decodedCursor.createdAt) }
+          : undefined,
+      });
+
+      const items: MerchantTicketListItem[] = tickets.map(ticket => {
+        const metadata = ticket.metadata as { reporterEmail?: string } | null;
+        return {
+          ticketId: ticket.id,
+          xyneId: ticket.xyneId,
+          title: ticket.title,
+          statusV2: ticket.statusV2,
+          stageName: ticket.stageName,
+          priority: ticket.priority,
+          createdAt: ticket.createdAt,
+          lastEmailAt: ticket.lastEmailAt,
+          conversationId: ticket.conversationId,
+          channelId: ticket.channelId,
+          senderEmail: metadata?.reporterEmail ?? normalizedSender,
+        };
+      });
+
+      const pagination = paginateResults(
+        items,
+        limit,
+        (item): MerchantTicketsListCursor => ({
+          id: item.ticketId,
+          createdAt: item.createdAt.getTime(),
+        }),
+      );
+
+      res.status(200).json({
+        items: pagination.items,
+        nextCursor: pagination.nextCursor,
+        hasMore: pagination.hasMore,
+      });
+    } catch (error) {
+      logger.error('[TicketController] listBySender error:', error);
+      if (error instanceof Error && error.message === 'Invalid cursor format') {
+        res.status(400).json({ error: error.message, code: 'VALIDATION_ERROR' });
+        return;
+      }
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
    * Get ticket information by ID
    * GET /:ticketId
    */
@@ -780,7 +913,7 @@ export class TicketController {
    * Ticket appears as an email thread identical to Gmail-ingested tickets.
    * POST /api/apps/ticket/createEmailTicket
    *
-   * Body: { channelId, subject, body, senderEmail }
+   * Body: { channelId, subject, body, senderEmail, boardId? }
    */
   createEmailTicket = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -810,34 +943,59 @@ export class TicketController {
       const userId = req.user!.id;
       const workspaceId = req.user!.workspaceId;
 
-      // Fetch channel to get projectId (needed for boardId validation)
       const channel = await repositories.channels.findById(channelId);
       if (!channel) {
         res.status(404).json({ error: `Channel with ID ${channelId} not found`, code: 'CHANNEL_NOT_FOUND' });
         return;
       }
 
-      // Validate boardId if provided — must exist and belong to the same project as the channel
-      if (boardId) {
-        const board = await repositories.boards.findById(boardId);
+      const channelPref = await prismaClient.emailChannelPreference.findUnique({
+        where: { channelId },
+        select: { sendAsEmail: true, ownerUserId: true, boardId: true, deskType: true },
+      });
+
+      const boardIdToConfigure = boardId || undefined;
+
+      if (boardIdToConfigure) {
+        const board = await prismaClient.board.findUnique({
+          where: { id: boardIdToConfigure },
+          select: { id: true, projectId: true },
+        });
         if (!board) {
-          res.status(404).json({ error: `Board with ID ${boardId} not found`, code: 'BOARD_NOT_FOUND' });
+          res.status(404).json({
+            error: `Board with ID ${boardIdToConfigure} not found`,
+            code: 'BOARD_NOT_FOUND',
+          });
           return;
         }
         if (board.projectId !== channel.projectId) {
-          res.status(400).json({ error: `Board does not belong to the channel's project`, code: 'BOARD_PROJECT_MISMATCH' });
+          res.status(400).json({
+            error: 'Board does not belong to the channel project',
+            code: 'BOARD_PROJECT_MISMATCH',
+          });
           return;
         }
+        await emailChannelPreferenceRepo.upsert({
+          channelId,
+          deskType: channelPref?.deskType ?? DeskType.EMAIL,
+          boardId: boardIdToConfigure,
+        });
+      }
+
+      const effectiveBoardId = boardIdToConfigure || channelPref?.boardId;
+      if (!effectiveBoardId) {
+        res.status(503).json({
+          error:
+            'Email desk board is not configured. Set email_channel_preferences.boardId or pass boardId in the request body.',
+          code: 'MISCONFIGURED',
+        });
+        return;
       }
 
       // Resolve recipientEmail using same 3-level priority as outbound reply sender:
       //   1. EmailChannelPreference.sendAsEmail — admin-configured alias (highest priority)
       //   2. ExternalSource.displayName — connected mailbox from OAuth integration
       //   3. Desk owner's user email — last-resort fallback
-      const channelPref = await prismaClient.emailChannelPreference.findUnique({
-        where: { channelId },
-        select: { sendAsEmail: true, ownerUserId: true },
-      });
       const externalSource = await externalSourceRepo.findByChannelId(channelId);
       const ownerUser = channelPref?.ownerUserId
         ? await repositories.users.findById(channelPref.ownerUserId)
@@ -964,8 +1122,12 @@ export class TicketController {
           emailTo: [recipientEmail],
           externalThreadId,
           externalMessageId,
+          ticketMetadata: {
+            reporterEmail: extractEmailAddress(senderEmail) ?? senderEmail.trim().toLowerCase(),
+            fromEmailAddress: senderEmail,
+          },
           receivedAt: new Date(),
-          ...(boardId && { boardId }),
+          ...(effectiveBoardId && { boardId: effectiveBoardId }),
         });
       } catch (createErr) {
         if (claimedExternalMessageId) {

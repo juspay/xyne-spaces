@@ -336,6 +336,23 @@ export interface EmailRepliesRequest extends PaginationRequest {
  */
 export interface EmailRepliesResponse extends PaginatedResponse<EmailRepliesItem> {}
 
+/** Ticket row returned by list-by-merchant-sender apps API */
+export interface MerchantTicketListItem {
+  ticketId: string;
+  xyneId: string;
+  title: string;
+  statusV2: string;
+  stageName: string;
+  priority: string;
+  createdAt: Date;
+  lastEmailAt: Date;
+  conversationId: string;
+  channelId: string;
+  senderEmail: string;
+}
+
+export interface MerchantTicketsListResponse extends PaginatedResponse<MerchantTicketListItem> {}
+
 /**
  * User data response for user API endpoint
  */
