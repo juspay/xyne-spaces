@@ -103,6 +103,9 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder='Signature Name'
+            autoComplete='off'
+            data-1p-ignore
+            data-lpignore='true'
             className='w-full text-sm text-foreground placeholder:text-muted-foreground bg-transparent focus:outline-none'
             data-track-category='DeskSettings'
             data-track-name='SignatureNameInput'

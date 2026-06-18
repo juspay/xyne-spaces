@@ -1,14 +1,19 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { EmailMergeMode, AutoDraftMode, ChannelType } from '@xyne/shared';
+import { EmailMergeMode, AutoDraftMode, ChannelType, ChannelRole } from '@xyne/shared';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
-import { useDeskChannelPreferenceAutoSave } from '../../../hooks/useDeskChannelPreferenceAutoSave';
-import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import {
+  useDeskChannelPreferenceAutoSave,
+  type ChannelPreferencePatch,
+} from '../../../hooks/useDeskChannelPreferenceAutoSave';
 import { useEmailClassification } from '../../../hooks/useEmailClassification';
 import { usePriorityClassification } from '../../../hooks/usePriorityClassification';
 import { useVisibleChannel } from '../../../hooks/useChannels';
 import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
-import type { SaveConfigPayload } from '../../../types/classification';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
+import { DEFAULT_PRIORITY_PROMPT } from './constants';
+import type { SaveMappingPayload, ClassificationMapping } from '../../../types/classification';
 
 export const parseDefaultCc = (val: string | undefined | null): string[] =>
   val
@@ -17,6 +22,54 @@ export const parseDefaultCc = (val: string | undefined | null): string[] =>
         .map(s => s.trim())
         .filter(Boolean)
     : [];
+
+type DraftShape = Record<string, string | number | boolean | null>;
+
+function useDraft<T extends DraftShape>(server: T) {
+  const [draft, setDraft] = useState<T>(server);
+  const [syncedServer, setSyncedServer] = useState<T>(server);
+  const serverKey = JSON.stringify(server);
+  const syncedKey = JSON.stringify(syncedServer);
+
+  if (serverKey !== syncedKey) {
+    setDraft(current => {
+      let changed = false;
+      const next = { ...current };
+      (Object.keys(server) as (keyof T)[]).forEach(key => {
+        const userEdited = !Object.is(current[key], syncedServer[key]);
+        if (!userEdited && !Object.is(current[key], server[key])) {
+          next[key] = server[key];
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+    setSyncedServer(server);
+  }
+
+  const setField = useCallback(
+    <K extends keyof T>(key: K, value: T[K] | ((prev: T[K]) => T[K])) => {
+      setDraft(current => {
+        const nextVal =
+          typeof value === 'function' ? (value as (prev: T[K]) => T[K])(current[key]) : value;
+        return Object.is(current[key], nextVal) ? current : { ...current, [key]: nextVal };
+      });
+    },
+    [],
+  );
+
+  const reset = () => setDraft(server);
+
+  const dirty = (Object.keys(server) as (keyof T)[]).some(k => !Object.is(draft[k], server[k]));
+
+  return { draft, server, setField, reset, dirty };
+}
+
+const mappingsKey = (list: ClassificationMapping[]): string =>
+  list
+    .map(m => `${m.id} ${m.category} ${m.subCategory ?? ''} ${m.userGroupId}`)
+    .sort()
+    .join('');
 
 export function useDeskSettingsForm(
   channelId: string | null,
@@ -30,58 +83,83 @@ export function useDeskSettingsForm(
   const isEmail = channelType === ChannelType.EMAIL;
   const isSlack = channelType === ChannelType.SLACK;
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
-  const canManage =
+  const [channelParticipants] = useCachedQuery(
+    queries.channelParticipants({ channelId: channelId ?? '' }),
+    { enabled: !!channelId },
+  );
+  const isChannelAdmin =
     !!userID &&
-    !!selectedChannelForSettings &&
-    (selectedChannelForSettings.createdBy === userID || currentInboxOwnerUserId === userID);
+    (channelParticipants ?? []).some(p => p.userId === userID && p.role === ChannelRole.ADMIN);
+  const isDeskOwner = !!userID && currentInboxOwnerUserId === userID;
 
-  const savedSendAsEmail = emailChannelPreference?.sendAsEmail ?? '';
-  const canViewSendAs = canManage || savedSendAsEmail.trim().length > 0;
+  const canManage = isDeskOwner || isChannelAdmin;
 
-  const [ownerId, setOwnerId] = useState(emailChannelPreference?.ownerUserId ?? '');
-  const [sendAsAlias, setSendAsAlias] = useState(emailChannelPreference?.sendAsEmail ?? '');
-  const [ccEmails, setCcEmails] = useState<string[]>(
-    parseDefaultCc(emailChannelPreference?.defaultCc),
-  );
-  const [defaultAssigneeGroupId, setDefaultAssigneeGroupId] = useState(
-    emailChannelPreference?.assigneeUserGroupId ?? '',
-  );
-  const [autoMergeEmails, setAutoMergeEmails] = useState(
-    emailChannelPreference?.emailMergeMode === EmailMergeMode.ENABLED,
-  );
-  const [autoAIDraft, setAutoAIDraft] = useState(
-    emailChannelPreference?.autoDraftMode === AutoDraftMode.DRAFT,
-  );
-  const [autoDraftAgentSlug, setAutoDraftAgentSlug] = useState<string | null>(
-    emailChannelPreference?.autoDraftAgentSlug ?? null,
-  );
   const clawAgents = useChannelClawAgents(channelId);
-
-  const debouncedSendAs = useDebouncedValue(sendAsAlias, 500);
-  const skipSendAsSave = useRef(true);
-  const skipCcSave = useRef(true);
   const [aiFeatureConfig, setAiFeatureConfig] = useState<
     'none' | 'auto-classification' | 'priority'
   >('none');
+  const [saving, setSaving] = useState(false);
 
   const {
     config: classificationConfig,
     saveConfig: saveClassificationConfig,
-    createMapping: saveClassificationMapping,
-    updateMapping: updateClassificationMapping,
-    deleteMapping: deleteClassificationMapping,
+    createMapping: persistCreateMapping,
+    updateMapping: persistUpdateMapping,
+    deleteMapping: persistDeleteMapping,
     previewResult: classificationPreviewResult,
     isPreviewing: isClassificationPreviewing,
-    isSaving: isClassificationSaving,
     runPreview: runClassificationPreview,
     error: classificationError,
   } = useEmailClassification(channelId ?? '', !!channelId);
 
-  const classificationMappings = classificationConfig?.mappings ?? [];
+  const serverMappings: ClassificationMapping[] = classificationConfig?.mappings ?? [];
+  const serverMappingsKey = mappingsKey(serverMappings);
+  const [mappingsDraft, setMappingsDraft] = useState<ClassificationMapping[]>(serverMappings);
+  const [syncedMappingsKey, setSyncedMappingsKey] = useState(serverMappingsKey);
+  if (serverMappingsKey !== syncedMappingsKey) {
+    if (mappingsKey(mappingsDraft) === syncedMappingsKey) setMappingsDraft(serverMappings);
+    setSyncedMappingsKey(serverMappingsKey);
+  }
+  const mappingsDirty = mappingsKey(mappingsDraft) !== serverMappingsKey;
+
+  const addMapping = (payload: SaveMappingPayload) => {
+    if (!canManage) return;
+    setMappingsDraft(prev => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        channelId: channelId ?? '',
+        category: payload.category,
+        subCategory: payload.subCategory ?? null,
+        userGroupId: payload.userGroupId,
+        createdAt: Date.now(),
+      },
+    ]);
+  };
+  const updateMappingDraft = (id: string, payload: Partial<SaveMappingPayload>) => {
+    if (!canManage) return;
+    setMappingsDraft(prev =>
+      prev.map(m =>
+        m.id === id
+          ? {
+              ...m,
+              ...(payload.category !== undefined ? { category: payload.category } : {}),
+              ...(payload.subCategory !== undefined
+                ? { subCategory: payload.subCategory ?? null }
+                : {}),
+              ...(payload.userGroupId !== undefined ? { userGroupId: payload.userGroupId } : {}),
+            }
+          : m,
+      ),
+    );
+  };
+  const deleteMappingDraft = (id: string) => {
+    if (!canManage) return;
+    setMappingsDraft(prev => prev.filter(m => m.id !== id));
+  };
 
   const {
     config: priorityConfig,
-    isSaving: isPrioritySaving,
     saveConfig: savePriorityConfig,
     previewResult: priorityPreviewResult,
     isPreviewing: isPriorityPreviewing,
@@ -89,247 +167,250 @@ export function useDeskSettingsForm(
     error: priorityError,
   } = usePriorityClassification(channelId ?? '');
 
-  const classificationEnabled = classificationConfig?.enabled ?? false;
+  const pref = useDraft({
+    ownerUserId: emailChannelPreference?.ownerUserId ?? '',
+    sendAsEmail: emailChannelPreference?.sendAsEmail ?? '',
+    defaultCc: parseDefaultCc(emailChannelPreference?.defaultCc).join(','),
+    assigneeUserGroupId: emailChannelPreference?.assigneeUserGroupId ?? '',
+    autoMergeEmails: emailChannelPreference?.emailMergeMode === EmailMergeMode.ENABLED,
+    autoAIDraft: emailChannelPreference?.autoDraftMode === AutoDraftMode.DRAFT,
+    autoDraftAgentSlug: emailChannelPreference?.autoDraftAgentSlug ?? null,
+  });
+  const cls = useDraft({
+    enabled: classificationConfig?.enabled ?? false,
+    classificationPrompt: classificationConfig?.classificationPrompt ?? '',
+    categoryField: classificationConfig?.categoryField ?? '',
+    subCategoryField: classificationConfig?.subCategoryField ?? '',
+  });
+  const pri = useDraft({
+    enabled: priorityConfig?.enabled ?? false,
+    prompt: priorityConfig?.priorityClassificationPrompt ?? DEFAULT_PRIORITY_PROMPT,
+    threshold: priorityConfig?.priorityClassificationThreshold ?? 0.5,
+  });
 
   useEffect(() => {
-    if (!emailChannelPreference) return;
-    skipSendAsSave.current = true;
-    skipCcSave.current = true;
-    setOwnerId(emailChannelPreference.ownerUserId ?? '');
-    setSendAsAlias(emailChannelPreference.sendAsEmail ?? '');
-    setCcEmails(parseDefaultCc(emailChannelPreference.defaultCc));
-    setDefaultAssigneeGroupId(emailChannelPreference.assigneeUserGroupId ?? '');
-    setAutoMergeEmails(emailChannelPreference.emailMergeMode === EmailMergeMode.ENABLED);
-    setAutoAIDraft(emailChannelPreference.autoDraftMode === AutoDraftMode.DRAFT);
-    setAutoDraftAgentSlug(emailChannelPreference.autoDraftAgentSlug ?? null);
-    const t = window.setTimeout(() => {
-      skipSendAsSave.current = false;
-      skipCcSave.current = false;
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [emailChannelPreference]);
-
-  useEffect(() => {
-    if (skipSendAsSave.current || !channelId || !canManage) return;
-    const saved = emailChannelPreference?.sendAsEmail ?? '';
-    if (debouncedSendAs === saved) return;
-    void savePreference({ sendAsEmail: debouncedSendAs || null }).catch(() => {
-      setSendAsAlias(saved);
-    });
-  }, [debouncedSendAs, channelId, canManage, emailChannelPreference?.sendAsEmail, savePreference]);
-
-  const persistCc = useCallback(
-    (emails: string[]) => {
-      if (!channelId) return;
-      const saved = parseDefaultCc(emailChannelPreference?.defaultCc).join(',');
-      const next = emails.join(',');
-      if (next === saved) return;
-      void savePreference({ defaultCc: next || null }).catch(() => {
-        setCcEmails(parseDefaultCc(emailChannelPreference?.defaultCc));
-      });
-    },
-    [channelId, emailChannelPreference?.defaultCc, savePreference],
-  );
-
-  const setCcEmailsAndSave = useCallback(
-    (updater: string[] | ((prev: string[]) => string[])) => {
-      setCcEmails(prev => {
-        const next = typeof updater === 'function' ? updater(prev) : updater;
-        if (!skipCcSave.current) {
-          persistCc(next);
-        }
-        return next;
-      });
-    },
-    [persistCc],
-  );
-
-  const handleOwnerChange = useCallback(
-    (nextOwnerId: string) => {
-      if (!nextOwnerId) return;
-      const prev = emailChannelPreference?.ownerUserId ?? '';
-      setOwnerId(nextOwnerId);
-      if (nextOwnerId === prev) return;
-      void savePreference({ ownerUserId: nextOwnerId }).catch(() => {
-        setOwnerId(prev);
-      });
-    },
-    [emailChannelPreference?.ownerUserId, savePreference],
-  );
-
-  const handleAssigneeChange = useCallback(
-    (nextGroupId: string) => {
-      const resolvedId = nextGroupId === 'none' ? '' : nextGroupId;
-      const prev = emailChannelPreference?.assigneeUserGroupId ?? '';
-      setDefaultAssigneeGroupId(resolvedId);
-      if (resolvedId === prev) return;
-      void savePreference({ assigneeUserGroupId: resolvedId || null }).catch(() => {
-        setDefaultAssigneeGroupId(prev);
-      });
-    },
-    [emailChannelPreference?.assigneeUserGroupId, savePreference],
-  );
-
-  const handleAutoMergeChange = useCallback(
-    (checked: boolean) => {
-      if (!canManage) return;
-      const prev = emailChannelPreference?.emailMergeMode === EmailMergeMode.ENABLED;
-      setAutoMergeEmails(checked);
-      if (checked === prev) return;
-      void savePreference({
-        emailMergeMode: checked ? EmailMergeMode.ENABLED : EmailMergeMode.DISABLED,
-      }).catch(() => {
-        setAutoMergeEmails(prev);
-      });
-    },
-    [canManage, emailChannelPreference?.emailMergeMode, savePreference],
-  );
-
-  const handleAutoDraftChange = useCallback(
-    (checked: boolean) => {
-      if (!canManage) return;
-      const prev = emailChannelPreference?.autoDraftMode === AutoDraftMode.DRAFT;
-      setAutoAIDraft(checked);
-      if (checked === prev) return;
-      void savePreference({
-        autoDraftMode: checked ? AutoDraftMode.DRAFT : AutoDraftMode.OFF,
-      }).catch(() => {
-        setAutoAIDraft(prev);
-      });
-    },
-    [canManage, emailChannelPreference?.autoDraftMode, savePreference],
-  );
-
-  const handleAutoDraftAgentChange = useCallback(
-    (slug: string | null) => {
-      if (!canManage) return;
-      const prev = emailChannelPreference?.autoDraftAgentSlug ?? null;
-      setAutoDraftAgentSlug(slug);
-      if (slug === prev) return;
-      void savePreference({ autoDraftAgentSlug: slug }).catch(() => {
-        setAutoDraftAgentSlug(prev);
-      });
-    },
-    [canManage, emailChannelPreference?.autoDraftAgentSlug, savePreference],
-  );
-
-  const buildClassificationPayload = useCallback(
-    (enabled: boolean): SaveConfigPayload => ({
-      enabled,
-      classificationPrompt:
-        classificationConfig?.classificationPrompt ??
-        emailChannelPreference?.classificationPrompt ??
-        '',
-      categoryField:
-        classificationConfig?.categoryField ??
-        emailChannelPreference?.categoryField ??
-        'Query Type',
-      subCategoryField:
-        classificationConfig?.subCategoryField ?? emailChannelPreference?.subCategoryField ?? null,
-    }),
-    [classificationConfig, emailChannelPreference],
-  );
-
-  const handleClassificationToggle = useCallback(
-    (checked: boolean) => {
-      if (!canManage) return;
-      const prompt =
-        classificationConfig?.classificationPrompt ??
-        emailChannelPreference?.classificationPrompt ??
-        '';
-      if (checked && !prompt.trim()) {
-        toast.error('Configure classification first', {
-          description: 'Add a classification prompt before enabling auto-classification.',
-          action: {
-            label: 'Configure',
-            onClick: () => setAiFeatureConfig('auto-classification'),
-          },
-        });
-        return;
-      }
-      void saveClassificationConfig(buildClassificationPayload(checked)).catch(() => {
-        /* hook sets error */
-      });
-    },
-    [
-      canManage,
-      classificationConfig,
-      emailChannelPreference,
-      saveClassificationConfig,
-      buildClassificationPayload,
-      setAiFeatureConfig,
-    ],
-  );
-
-  const handlePriorityToggle = useCallback(() => {
-    if (!canManage) return;
-    void savePriorityConfig({
-      enabled: !(priorityConfig?.enabled ?? false),
-      priorityClassificationPrompt: priorityConfig?.priorityClassificationPrompt ?? null,
-      priorityClassificationThreshold: priorityConfig?.priorityClassificationThreshold ?? 0.5,
-    }).catch(() => {
-      toast.error('Failed to update priority classification', {
-        description: 'Please try again. The previous priority setting has been preserved.',
-      });
-    });
-  }, [canManage, priorityConfig, savePriorityConfig]);
-
-  useEffect(() => {
-    if (open) {
-      setAiFeatureConfig('none');
-    }
+    if (open) setAiFeatureConfig('none');
   }, [open]);
 
-  const openClassificationConfig = useCallback(() => {
-    setAiFeatureConfig('auto-classification');
-  }, []);
+  const ownerId = pref.draft.ownerUserId;
+  const sendAsAlias = pref.draft.sendAsEmail;
+  const ccEmails = parseDefaultCc(pref.draft.defaultCc);
+  const defaultAssigneeGroupId = pref.draft.assigneeUserGroupId;
+  const autoMergeEmails = pref.draft.autoMergeEmails;
+  const autoAIDraft = pref.draft.autoAIDraft;
+  const autoDraftAgentSlug = pref.draft.autoDraftAgentSlug;
+  const classificationEnabledDraft = cls.draft.enabled;
+  const classificationPromptDraft = cls.draft.classificationPrompt;
+  const categoryFieldDraft = cls.draft.categoryField;
+  const subCategoryFieldDraft = cls.draft.subCategoryField;
+  const priorityEnabledDraft = pri.draft.enabled;
+  const priorityPromptDraft = pri.draft.prompt;
+  const priorityThresholdDraft = pri.draft.threshold;
 
-  const openPriorityConfig = useCallback(() => {
-    setAiFeatureConfig('priority');
-  }, []);
+  const setOwner = (next: string) => {
+    if (!canManage || !next) return;
+    pref.setField('ownerUserId', next);
+  };
+  const setSendAsAlias = (next: string) => pref.setField('sendAsEmail', next);
+  const setCcEmails = (updater: string[] | ((prev: string[]) => string[])) => {
+    pref.setField('defaultCc', prevStr => {
+      const prevArr = parseDefaultCc(prevStr);
+      const nextArr = typeof updater === 'function' ? updater(prevArr) : updater;
+      return nextArr.join(',');
+    });
+  };
+  const setAssigneeGroup = (next: string) =>
+    pref.setField('assigneeUserGroupId', next === 'none' ? '' : next);
+  const setAutoMergeEmails = (checked: boolean) => pref.setField('autoMergeEmails', checked);
+  const setAutoAIDraft = (checked: boolean) => pref.setField('autoAIDraft', checked);
+  const setAutoDraftAgentSlug = (slug: string | null) => pref.setField('autoDraftAgentSlug', slug);
+
+  const setClassificationEnabled = (checked: boolean) => {
+    if (!canManage) return;
+    if (checked && !(classificationPromptDraft.trim() && categoryFieldDraft.trim())) {
+      toast.error('Configure classification first', {
+        description: 'Add a classification prompt and category before enabling.',
+        action: { label: 'Configure', onClick: () => setAiFeatureConfig('auto-classification') },
+      });
+      return;
+    }
+    cls.setField('enabled', checked);
+  };
+  const setClassificationPromptDraft = (next: string) => cls.setField('classificationPrompt', next);
+  const setCategoryFieldDraft = (next: string) => cls.setField('categoryField', next);
+  const setSubCategoryFieldDraft = (next: string) => cls.setField('subCategoryField', next);
+
+  const setPriorityEnabled = (checked: boolean) => {
+    if (!canManage) return;
+    pri.setField('enabled', checked);
+  };
+  const setPriorityPromptDraft = (next: string) => pri.setField('prompt', next);
+  const setPriorityThresholdDraft = (next: number) => pri.setField('threshold', next);
+  const isDirty = pref.dirty || cls.dirty || pri.dirty || mappingsDirty;
+
+  const trimmedSendAs = sendAsAlias.trim();
+  const sendAsAliasError =
+    trimmedSendAs.length > 0 && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(trimmedSendAs)
+      ? 'Enter a single valid email address (e.g. support@company.com).'
+      : null;
+
+  const classificationConfigError =
+    classificationEnabledDraft && !(categoryFieldDraft.trim() && classificationPromptDraft.trim())
+      ? 'Add a category and a prompt before enabling auto-classification.'
+      : null;
+
+  const save = async () => {
+    if (!channelId || !isDirty) return;
+    if (sendAsAliasError) {
+      toast.error('Invalid send-as alias', { description: sendAsAliasError });
+      return;
+    }
+    if (classificationConfigError) {
+      toast.error('Incomplete classification config', { description: classificationConfigError });
+      return;
+    }
+    setSaving(true);
+    try {
+      const d = pref.draft;
+      const s = pref.server;
+      const patch: ChannelPreferencePatch = {};
+      if (d.ownerUserId !== s.ownerUserId && d.ownerUserId) patch.ownerUserId = d.ownerUserId;
+      if (d.sendAsEmail !== s.sendAsEmail) patch.sendAsEmail = d.sendAsEmail.trim() || null;
+      if (d.defaultCc !== s.defaultCc) patch.defaultCc = d.defaultCc || null;
+      if (d.assigneeUserGroupId !== s.assigneeUserGroupId) {
+        patch.assigneeUserGroupId = d.assigneeUserGroupId || null;
+      }
+      if (d.autoMergeEmails !== s.autoMergeEmails) {
+        patch.emailMergeMode = d.autoMergeEmails ? EmailMergeMode.ENABLED : EmailMergeMode.DISABLED;
+      }
+      if (d.autoAIDraft !== s.autoAIDraft) {
+        patch.autoDraftMode = d.autoAIDraft ? AutoDraftMode.DRAFT : AutoDraftMode.OFF;
+      }
+      if (d.autoDraftAgentSlug !== s.autoDraftAgentSlug) {
+        patch.autoDraftAgentSlug = d.autoDraftAgentSlug;
+      }
+
+      if (cls.dirty) {
+        await saveClassificationConfig({
+          enabled: cls.draft.enabled,
+          classificationPrompt: cls.draft.classificationPrompt,
+          categoryField: cls.draft.categoryField,
+          subCategoryField: cls.draft.subCategoryField || null,
+        });
+      }
+
+      if (pri.dirty) {
+        const trimmedPrompt = pri.draft.prompt.trim();
+        const promptToSave =
+          trimmedPrompt && trimmedPrompt !== DEFAULT_PRIORITY_PROMPT.trim()
+            ? pri.draft.prompt
+            : null;
+        await savePriorityConfig({
+          enabled: pri.draft.enabled,
+          priorityClassificationPrompt: promptToSave,
+          priorityClassificationThreshold: pri.draft.threshold,
+        });
+      }
+
+      if (mappingsDirty) {
+        const serverById = new Map(serverMappings.map(m => [m.id, m]));
+        const draftIds = new Set(mappingsDraft.map(m => m.id));
+        for (const m of mappingsDraft) {
+          const existing = serverById.get(m.id);
+          if (!existing) {
+            await persistCreateMapping({
+              id: m.id,
+              category: m.category,
+              subCategory: m.subCategory,
+              userGroupId: m.userGroupId,
+              createdAt: typeof m.createdAt === 'number' ? m.createdAt : Date.now(),
+            });
+          } else if (
+            existing.category !== m.category ||
+            (existing.subCategory ?? null) !== (m.subCategory ?? null) ||
+            existing.userGroupId !== m.userGroupId
+          ) {
+            await persistUpdateMapping(m.id, {
+              category: m.category,
+              subCategory: m.subCategory,
+              userGroupId: m.userGroupId,
+            });
+          }
+        }
+        for (const m of serverMappings) {
+          if (!draftIds.has(m.id)) await persistDeleteMapping(m.id);
+        }
+      }
+
+      if (Object.keys(patch).length > 0) await savePreference(patch);
+    } catch {
+      toast.error('Failed to save desk settings', { description: 'Please try again.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancel = () => {
+    pref.reset();
+    cls.reset();
+    pri.reset();
+    setMappingsDraft(serverMappings);
+  };
+
+  const openClassificationConfig = useCallback(() => setAiFeatureConfig('auto-classification'), []);
+  const openPriorityConfig = useCallback(() => setAiFeatureConfig('priority'), []);
 
   return {
     canManage,
     isEmail,
     isSlack,
-    canViewSendAs,
-    emailChannelPreference,
+    isDirty,
+    saving,
+    save,
+    cancel,
     ownerId,
+    setOwner,
     sendAsAlias,
     setSendAsAlias,
+    sendAsAliasError,
+    classificationConfigError,
     ccEmails,
-    setCcEmails: setCcEmailsAndSave,
+    setCcEmails,
     defaultAssigneeGroupId,
+    setAssigneeGroup,
     autoMergeEmails,
+    setAutoMergeEmails,
     autoAIDraft,
+    setAutoAIDraft,
     autoDraftAgentSlug,
-    handleAutoDraftAgentChange,
+    setAutoDraftAgentSlug,
     clawAgents,
-    classificationEnabled,
-    classificationConfig,
-    classificationMappings,
-    saveClassificationConfig,
-    saveClassificationMapping,
-    updateClassificationMapping,
-    deleteClassificationMapping,
+    classificationEnabledDraft,
+    setClassificationEnabled,
+    priorityEnabledDraft,
+    setPriorityEnabled,
+    classificationPromptDraft,
+    setClassificationPromptDraft,
+    categoryFieldDraft,
+    setCategoryFieldDraft,
+    subCategoryFieldDraft,
+    setSubCategoryFieldDraft,
+    classificationMappings: mappingsDraft,
+    saveClassificationMapping: addMapping,
+    updateClassificationMapping: updateMappingDraft,
+    deleteClassificationMapping: deleteMappingDraft,
     classificationPreviewResult,
     isClassificationPreviewing,
-    isClassificationSaving,
     runClassificationPreview,
     classificationError,
-    priorityConfig,
-    isPrioritySaving,
-    savePriorityConfig,
+    priorityPromptDraft,
+    setPriorityPromptDraft,
+    priorityThresholdDraft,
+    setPriorityThresholdDraft,
     priorityPreviewResult,
     isPriorityPreviewing,
     runPriorityPreview,
     priorityError,
-    handleOwnerChange,
-    handleAssigneeChange,
-    handleAutoMergeChange,
-    handleAutoDraftChange,
-    handleClassificationToggle,
-    handlePriorityToggle,
     aiFeatureConfig,
     setAiFeatureConfig,
     openClassificationConfig,

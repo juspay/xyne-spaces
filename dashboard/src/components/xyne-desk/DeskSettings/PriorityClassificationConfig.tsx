@@ -1,36 +1,8 @@
 import { ArrowLeft, Gauge, Sparkles, AlertTriangle, CheckCircle, Info } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
-import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useState } from 'react';
 import { TestClassificationForm } from './TestClassificationForm';
-import type {
-  PriorityClassificationConfig as PriorityConfig,
-  SavePriorityConfigPayload,
-  PriorityClassificationPreviewResult,
-} from '../../../types/priorityClassification';
-
-export const DEFAULT_PRIORITY_PROMPT = `You are an expert support ticket prioritizer for a customer support desk.
-
-Analyze the email and assign a priority level based on:
-- Urgency indicators (outage, critical, urgent, down, broken, failure, crash, emergency)
-- Business impact (revenue loss, customer blocked, production affected, payment failing)
-- Time sensitivity (ASAP, immediately, deadline, expires, today, now)
-- Number of affected customers (many, widespread, everyone, multiple clients)
-- Security concerns (security breach, vulnerability, hack, attack)
-- Severity descriptors (major issue, completely down, severe, catastrophic)
-- Escalation indicators (escalate, manager, supervisor, urgent attention)
-
-IMPORTANT: Your response must be ONLY a valid JSON object with no markdown formatting.
-
-Email Subject: {{subject}}
-
-Email Body: {{body}}
-
-Respond with this exact JSON structure:
-{
-  "priority": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
-  "confidence": number between 0.0 and 1.0,
-  "reasoning": "Brief explanation of why this priority was chosen"
-}`;
+import { DEFAULT_PRIORITY_PROMPT } from './constants';
+import type { PriorityClassificationPreviewResult } from '../../../types/priorityClassification';
 
 export function getPriorityColor(priority: string): string {
   switch (priority) {
@@ -58,8 +30,10 @@ export function getThresholdDescription(value: number): string {
 export interface PriorityClassificationConfigPanelProps {
   canManage: boolean;
   onBack: () => void;
-  config: PriorityConfig | null;
-  saveConfig: (payload: SavePriorityConfigPayload) => Promise<void>;
+  prompt: string;
+  setPrompt: (value: string) => void;
+  threshold: number;
+  setThreshold: (value: number) => void;
   previewResult: PriorityClassificationPreviewResult | null;
   isPreviewing: boolean;
   runPreview: (emailSubject: string, emailBody: string) => Promise<void>;
@@ -68,40 +42,21 @@ export interface PriorityClassificationConfigPanelProps {
 
 export const PriorityClassificationConfigPanel: React.FC<
   PriorityClassificationConfigPanelProps
-> = ({ canManage, onBack, config, saveConfig, previewResult, isPreviewing, runPreview, error }) => {
-  const [prompt, setPrompt] = useState(
-    config?.priorityClassificationPrompt ?? DEFAULT_PRIORITY_PROMPT,
-  );
-  const [threshold, setThreshold] = useState(config?.priorityClassificationThreshold ?? 0.5);
+> = ({
+  canManage,
+  onBack,
+  prompt,
+  setPrompt,
+  threshold,
+  setThreshold,
+  previewResult,
+  isPreviewing,
+  runPreview,
+  error,
+}) => {
   const [previewSubject, setPreviewSubject] = useState('');
   const [previewBody, setPreviewBody] = useState('');
   const [showPreview, setShowPreview] = useState(false);
-  const debouncedPrompt = useDebouncedValue(prompt, 500);
-  const debouncedThreshold = useDebouncedValue(threshold, 500);
-  const isSyncingFromServer = useRef(true);
-
-  useEffect(() => {
-    isSyncingFromServer.current = true;
-    setPrompt(config?.priorityClassificationPrompt ?? DEFAULT_PRIORITY_PROMPT);
-    setThreshold(config?.priorityClassificationThreshold ?? 0.5);
-    const t = window.setTimeout(() => {
-      isSyncingFromServer.current = false;
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [config?.priorityClassificationPrompt, config?.priorityClassificationThreshold]);
-
-  useEffect(() => {
-    if (isSyncingFromServer.current || !config || !canManage) return;
-    const serverPrompt = config.priorityClassificationPrompt ?? DEFAULT_PRIORITY_PROMPT;
-    const serverThreshold = config.priorityClassificationThreshold ?? 0.5;
-    if (debouncedPrompt === serverPrompt && debouncedThreshold === serverThreshold) return;
-
-    void saveConfig({
-      enabled: config.enabled,
-      priorityClassificationPrompt: debouncedPrompt || null,
-      priorityClassificationThreshold: debouncedThreshold,
-    });
-  }, [debouncedPrompt, debouncedThreshold, config, saveConfig, canManage]);
 
   const handleRunPreview = () => {
     if (!previewSubject.trim() || !previewBody.trim()) return;

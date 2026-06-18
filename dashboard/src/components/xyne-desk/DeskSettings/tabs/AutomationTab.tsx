@@ -9,7 +9,7 @@ interface AutomationTabProps {
 }
 
 export const AutomationTab: React.FC<AutomationTabProps> = ({ form }) => {
-  const { autoMergeEmails, handleAutoMergeChange, canManage } = form;
+  const { autoMergeEmails, setAutoMergeEmails, canManage } = form;
 
   return (
     <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6'>
@@ -24,7 +24,7 @@ export const AutomationTab: React.FC<AutomationTabProps> = ({ form }) => {
         variant='desk'
         className='shrink-0'
         checked={autoMergeEmails}
-        onCheckedChange={handleAutoMergeChange}
+        onCheckedChange={setAutoMergeEmails}
         disabled={!canManage}
       />
     </div>

@@ -17,6 +17,7 @@ export interface AutoDraftAgentPickerProps {
   onChange: (slug: string | null) => void;
   clawAgents: ChannelClawAgent[];
   disabled?: boolean;
+  compact?: boolean;
 }
 
 /**
@@ -27,49 +28,58 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
   onChange,
   clawAgents,
   disabled = false,
+  compact = false,
 }) => {
+  const select = (
+    <Select
+      value={value ?? DEFAULT_AGENT_OPTION}
+      onValueChange={v => onChange(v === DEFAULT_AGENT_OPTION ? null : v)}
+      disabled={disabled}
+    >
+      <SelectTrigger
+        id='desk-auto-draft-agent'
+        className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+        data-track-category='DeskSettings'
+        data-track-name='SelectAutoDraftAgent'
+      >
+        <SelectValue placeholder='Default (Xyne AI)' />
+      </SelectTrigger>
+      <SelectContent className='rounded-[10px]'>
+        <SelectItem value={DEFAULT_AGENT_OPTION} className='rounded-[8px]'>
+          <span className='flex items-center gap-2'>
+            <Sparkles size={14} className='text-desk-accent' />
+            <span>
+              Default <span className='text-desk-helper'>(Xyne AI)</span>
+            </span>
+          </span>
+        </SelectItem>
+        {clawAgents.length > 0 && <SelectSeparator />}
+        {clawAgents.map(agent => (
+          <SelectItem key={agent.slug} value={agent.slug} className='rounded-[8px]'>
+            <span className='flex items-center gap-2'>
+              <span
+                className='inline-block h-2.5 w-2.5 shrink-0 rounded-full'
+                style={{ backgroundColor: agent.color || 'var(--desk-accent)' }}
+              />
+              <span>{agent.name}</span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  if (compact) {
+    return <div className='w-[220px] shrink-0'>{select}</div>;
+  }
+
   return (
-    <div className='flex flex-col gap-1.5 pl-12'>
+    <div className='flex flex-col gap-1.5'>
       <label htmlFor='desk-auto-draft-agent' className='flex items-center gap-2 text-sm'>
         <Bot size={14} className='text-desk-muted' />
         <span className='text-desk-label'>Draft agent</span>
       </label>
-      <Select
-        value={value ?? DEFAULT_AGENT_OPTION}
-        onValueChange={v => onChange(v === DEFAULT_AGENT_OPTION ? null : v)}
-        disabled={disabled}
-      >
-        <SelectTrigger
-          id='desk-auto-draft-agent'
-          className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
-          data-track-category='DeskSettings'
-          data-track-name='SelectAutoDraftAgent'
-        >
-          <SelectValue placeholder='Default (Xyne AI)' />
-        </SelectTrigger>
-        <SelectContent className='rounded-[10px]'>
-          <SelectItem value={DEFAULT_AGENT_OPTION} className='rounded-[8px]'>
-            <span className='flex items-center gap-2'>
-              <Sparkles size={14} className='text-desk-accent' />
-              <span>
-                Default <span className='text-desk-helper'>(Xyne AI)</span>
-              </span>
-            </span>
-          </SelectItem>
-          {clawAgents.length > 0 && <SelectSeparator />}
-          {clawAgents.map(agent => (
-            <SelectItem key={agent.slug} value={agent.slug} className='rounded-[8px]'>
-              <span className='flex items-center gap-2'>
-                <span
-                  className='inline-block h-2.5 w-2.5 shrink-0 rounded-full'
-                  style={{ backgroundColor: agent.color || 'var(--desk-accent)' }}
-                />
-                <span>{agent.name}</span>
-              </span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {select}
       <p className='text-desk-helper'>
         {clawAgents.length > 0
           ? 'Choose which agent writes the draft. Claw agents added to this channel appear here.'
