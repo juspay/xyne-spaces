@@ -3437,6 +3437,9 @@ model FormEntityValues {
 
   @@index([entityId, entityType])
   @@index([fieldId])
+  // Speeds up releaseChangeFormValuesByReleaseId, which filters on contextId
+  // (= releaseId) over this large table.
+  @@index([contextId])
   @@unique([entityId, entityType, fieldId, contextId, version])
   @@map("form_entity_values")
   @@schema("public")
@@ -3729,7 +3732,7 @@ model Application {
   envPaths           String[]  @default([]) // Environment file paths matched against PR diffs
   migrationPaths     String[]  @default([]) // Migration file paths matched against PR diffs
   createdAt          DateTime  @default(now())
-  updatedAt          DateTime @default("1970-01-01T00:00:00.000Z") @updatedAt
+  updatedAt          DateTime? @updatedAt 
   applicationBoard Board @relation("ApplicationBoard", fields: [boardId], references: [id], onDelete: Restrict)
   mainReleaseBoard Board? @relation("MainReleaseBoardApplications", fields: [mainReleaseBoardId], references: [id], onDelete: Restrict)
 
@@ -3755,7 +3758,7 @@ model ApplicationReleaseTicket {
   failureReason         String?
   createdAt             DateTime                        @default(now())
   // No @default(now()): see Application.updatedAt — every write sets it explicitly.
-  updatedAt             DateTime                        @default("1970-01-01T00:00:00.000Z") @updatedAt
+  updatedAt             DateTime?                        @updatedAt
 
   @@unique([applicationReleaseId, ticketId])
   @@index([applicationReleaseId])
@@ -3825,7 +3828,7 @@ model ReleaseChangeType {
   // No @default(now()): avoid a DB-level now() default on a Zero-synced table.
   // The repository sets createdAt explicitly on every write; pre-existing rows
   // are backfilled with a fixed literal in the migration, which drops the default.
-  createdAt            DateTime  @default("1970-01-01T00:00:00.000Z")
+  createdAt            DateTime?
 
   @@index([id])
   @@index([applicationId])

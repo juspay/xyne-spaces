@@ -2233,7 +2233,7 @@ export const applicationTable = table('applications')
     envPaths: json<string[]>(),
     migrationPaths: json<string[]>(),
     createdAt: number(),
-    updatedAt: number(),
+    updatedAt: number().optional(), // nullable in DB (no default; set app-side)
   })
   .primaryKey('id');
 
@@ -2247,7 +2247,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
     testedAt: number().optional(),
     failureReason: string().optional(),
     createdAt: number(),
-    updatedAt: number(),
+    updatedAt: number().optional(), // nullable in DB (no default; set app-side)
   })
   .primaryKey('id');
 
@@ -2292,7 +2292,7 @@ export const releaseChangeTypeTable = table('release_change_types')
     devTicketXyneId: string().optional(),
     commitId: string().optional(),
     filePath: string().optional(),
-    createdAt: number(),
+    createdAt: number().optional(), // nullable in DB (no default; set app-side)
   })
   .primaryKey('id');
 

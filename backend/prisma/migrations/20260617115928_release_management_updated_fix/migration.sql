@@ -22,14 +22,14 @@ DROP INDEX "public"."application_release_tickets_status_idx";
 ALTER TABLE "public"."application_release_tickets" DROP COLUMN "status",
 DROP COLUMN "title",
 ADD COLUMN     "releaseId" TEXT NOT NULL,
-ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT '1970-01-01 00:00:00 +00:00';
+ADD COLUMN     "updatedAt" TIMESTAMP(3);
 
 -- AlterTable
 ALTER TABLE "public"."applications" ADD COLUMN     "deployedVersion" TEXT,
 ADD COLUMN     "envPaths" TEXT[] DEFAULT ARRAY[]::TEXT[],
 ADD COLUMN     "mainReleaseBoardId" TEXT,
 ADD COLUMN     "migrationPaths" TEXT[] DEFAULT ARRAY[]::TEXT[],
-ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT '1970-01-01 00:00:00 +00:00';
+ADD COLUMN     "updatedAt" TIMESTAMP(3);
 
 -- AlterTable
 ALTER TABLE "public"."boards" ADD COLUMN     "releaseTrackingMode" "public"."ReleaseTrackingMode",
@@ -38,7 +38,7 @@ ADD COLUMN     "vcsProvider" "public"."VCSProviderType";
 -- AlterTable
 ALTER TABLE "public"."release_change_types" ADD COLUMN     "applicationReleaseId" TEXT,
 ADD COLUMN     "commitId" TEXT,
-ADD COLUMN     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT '1970-01-01 00:00:00 +00:00',
+ADD COLUMN     "createdAt" TIMESTAMP(3),
 ADD COLUMN     "devTicketXyneId" TEXT,
 ADD COLUMN     "filePath" TEXT,
 ADD COLUMN     "releaseId" TEXT;
