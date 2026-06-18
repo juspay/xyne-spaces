@@ -2,7 +2,8 @@ import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { Search, Check } from 'lucide-react';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
-import { useUsers, useUserSearch } from '../../../../../hooks/useUsers';
+import { useUsers } from '../../../../../hooks/useUsers';
+import type { User } from '../../../../../machines/stateMachine';
 import { getUserDisplayName, isUserDeactivated } from '../../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 
@@ -32,50 +33,84 @@ export const UserSubmenu = ({
   }, [searchQuery]);
 
   const users = useUsers();
-  const searchedUsers = useUserSearch(searchTerm, 20);
 
-  const availableUsersData = useMemo(() => {
-    if (availableUserIds && availableUserIds.length > 0) {
-      const idSet = new Set<string>();
-      const orderedUsers = [];
+  const usersMap = useMemo(() => {
+    return new Map<string, User>(users.map((u: User) => [u.id, u]));
+  }, [users]);
 
-      for (const userId of availableUserIds.slice(0, 100)) {
-        if (idSet.has(userId)) continue;
-        idSet.add(userId);
-        const user = users.find(v => v.id === userId);
-        if (user) orderedUsers.push(user);
-      }
-
-      return orderedUsers;
+  const normalizedAvailableUserIds = useMemo(() => {
+    if (!availableUserIds || availableUserIds.length === 0) return null;
+    const ids = new Set<string>();
+    for (const id of availableUserIds) {
+      const rawId = id.replace(/^(user:|group:|userGroup:)/, '');
+      ids.add(rawId);
     }
-    return searchedUsers;
-  }, [availableUserIds, users, searchedUsers]);
+    return ids;
+  }, [availableUserIds]);
 
   const finalResults = useMemo(() => {
-    if (!availableUsersData) return [];
+    const selectedSet = new Set(selectedUsers);
+    const searchLower = searchTerm.toLowerCase().trim();
 
-    let list = [...availableUsersData];
-    if (availableUserIds && availableUserIds.length > 0 && searchTerm.trim()) {
-      const lower = searchTerm.toLowerCase();
-      list = list.filter(u => {
-        const displayName = getUserDisplayName(u).toLowerCase();
+    let baseUsers: User[] = [];
+
+    if (searchLower) {
+      baseUsers = users.filter((user: User) => {
+        const displayName = getUserDisplayName(user).toLowerCase();
         return (
-          displayName.includes(lower) ||
-          u.name.toLowerCase().includes(lower) ||
-          u.email?.toLowerCase().includes(lower)
+          displayName.includes(searchLower) ||
+          user.name.toLowerCase().includes(searchLower) ||
+          user.email?.toLowerCase().includes(searchLower)
         );
       });
+    } else {
+      const idSet = new Set<string>();
+      const list: User[] = [];
+
+      for (const userId of selectedUsers) {
+        if (idSet.has(userId)) continue;
+        const user = usersMap.get(userId);
+        if (user) {
+          idSet.add(userId);
+          list.push(user);
+        }
+      }
+
+      if (normalizedAvailableUserIds) {
+        let addedCount = 0;
+        for (const rawId of normalizedAvailableUserIds) {
+          if (idSet.has(rawId)) continue;
+          const user = usersMap.get(rawId);
+          if (user) {
+            idSet.add(rawId);
+            list.push(user);
+            addedCount++;
+            if (addedCount >= 100) break;
+          }
+        }
+      } else {
+        let addedCount = 0;
+        for (const user of users) {
+          if (idSet.has(user.id)) continue;
+          idSet.add(user.id);
+          list.push(user);
+          addedCount++;
+          if (addedCount >= 20) break;
+        }
+      }
+      baseUsers = list;
     }
 
-    const selectedSet = new Set(selectedUsers);
-    return list
+    return baseUsers
       .sort((a, b) => {
         const aSel = selectedSet.has(a.id) ? 1 : 0;
         const bSel = selectedSet.has(b.id) ? 1 : 0;
         return bSel - aSel;
       })
       .slice(0, 40);
-  }, [availableUsersData, availableUserIds, searchTerm, selectedUsers]);
+  }, [users, usersMap, normalizedAvailableUserIds, selectedUsers, searchTerm]);
+
+  const availableUsersData = finalResults;
 
   const handleUserToggle = (userId: string) => {
     const isSelected = selectedUsers.includes(userId);
