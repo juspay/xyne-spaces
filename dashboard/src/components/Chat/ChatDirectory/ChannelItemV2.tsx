@@ -184,7 +184,7 @@ const ChannelItemV2 = memo(
           >
             <span className='flex items-center'>{getIcon()}</span>
             <span className='text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
-              <span className='visual-regression-hide'>{displayName}</span>
+              <span className='visual-regression-hide truncate'>{displayName}</span>
               {isSupportChannel && <SupportChannelBadge />}
               {is1on1DM && (
                 <StatusIndicator
