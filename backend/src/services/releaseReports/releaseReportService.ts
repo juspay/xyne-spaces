@@ -177,7 +177,7 @@ export class ReleaseReportService {
         oldValue: values.oldValue ?? '',
         newValue: values.newValue ?? '',
         changeLog: values.changeLog ?? values.query ?? '',
-        createdAt: change.createdAt.toISOString(),
+        createdAt: change.createdAt?.toISOString() ?? '',
       };
     });
     const changeTypesById = new Map(releaseChanges.map((change) => [change.id, change.changeType]));
