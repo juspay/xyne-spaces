@@ -251,12 +251,12 @@ const Info = ({
       style={{ position: 'relative' }}
     >
       <div className='w-full flex items-start justify-between gap-2 p-4 pb-6'>
-        <div className='flex items-center gap-2'>
-          <div className='w-11 h-11 rounded-[10px] border border-border bg-muted flex items-center justify-center'>
+        <div className='flex items-center gap-2 min-w-0'>
+          <div className='w-11 h-11 rounded-[10px] border border-border bg-muted flex items-center justify-center shrink-0'>
             <ChannelIcon channel={channel} />
           </div>
-          <div>
-            <div className='text-[17px] font-medium text-foreground visual-regression-hide'>
+          <div className='min-w-0'>
+            <div className='text-[17px] font-medium text-foreground truncate'>
               {channelDisplayName}
             </div>
             {isDM && hasValidStatus && (

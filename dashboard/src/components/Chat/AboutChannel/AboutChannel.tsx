@@ -278,7 +278,7 @@ const AboutChannel = ({
                   </div>
                 </div>
               ) : (
-                <p className='text-sm text-muted-foreground'>#{channel.name}</p>
+                <p className='text-sm text-muted-foreground break-words'>#{channel.name}</p>
               )}
             </div>
 
