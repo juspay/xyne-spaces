@@ -10,6 +10,7 @@ import { websocketService } from '@/services/websocketService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
+import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 
 /**
  * Side effect handler for form_entity_values table.
@@ -24,11 +25,13 @@ import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-field
 export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     await this.emitFormFieldEvent(job, 'insert');
+    await this.createFormFieldActivity(job, 'insert');
     await this.broadcastTicketCountsUpdate(job, 'insert');
   }
 
   async onUpdate(job: SideEffectJobConfig): Promise<void> {
     await this.emitFormFieldEvent(job, 'update');
+    await this.createFormFieldActivity(job, 'update');
     await this.broadcastTicketCountsUpdate(job, 'update');
   }
 
@@ -203,6 +206,53 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     } catch (error) {
       logger.error('[FormEntityValuesSideEffectHandler] Failed to emit form field event:', {
         entityId,
+        operation,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async createFormFieldActivity(
+    job: SideEffectJobConfig,
+    operation: 'insert' | 'update',
+  ): Promise<void> {
+    const previousValue = job.previousValue as FormEntityValuePreviousValue | undefined;
+
+    try {
+      const formEntityValue = await db.formEntityValues.findUnique({
+        where: { id: job.entityId },
+        select: {
+          entityId: true,
+          entityType: true,
+          fieldId: true,
+          fieldValue: true,
+          actualFieldValue: true,
+        },
+      });
+
+      if (!formEntityValue || formEntityValue.entityType !== 'TICKET') {
+        return;
+      }
+
+      const formField = await db.formFields.findUnique({
+        where: { id: formEntityValue.fieldId },
+        select: { fieldName: true },
+      });
+
+      if (!formField?.fieldName) {
+        return;
+      }
+
+      await createTicketCustomFieldActivity({
+        ticketId: formEntityValue.entityId,
+        fieldName: formField.fieldName,
+        oldValue: operation === 'update' ? previousValue?.actualFieldValue : null,
+        newValue: formEntityValue.actualFieldValue ?? formEntityValue.fieldValue,
+        updatedBy: this.ctx.userID,
+      });
+    } catch (error) {
+      logger.error('[FormEntityValuesSideEffectHandler] Failed to create form field activity:', {
+        entityId: job.entityId,
         operation,
         error: error instanceof Error ? error.message : String(error),
       });

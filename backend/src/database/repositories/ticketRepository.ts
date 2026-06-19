@@ -763,6 +763,30 @@ export class TicketRepository {
     });
   }
 
+  async getTicketHistory(ticketId: string, limit = 100) {
+    return await prisma.ticketActivity.findMany({
+      where: { ticketId },
+      select: {
+        id: true,
+        timestamp: true,
+        activityType: true,
+        value: true,
+        updatedByUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: [
+        { timestamp: 'desc' },
+        { id: 'desc' },
+      ],
+      take: limit,
+    });
+  }
+
 
   /**
    * Get hotfix sub-tickets for a parent ticket
@@ -901,7 +925,9 @@ export class TicketRepository {
       fields.title !== undefined ||
       fields.description !== undefined ||
       fields.priority !== undefined ||
-      fields.eta !== undefined;
+     fields.eta !== undefined ||
+      fields.ticketType !== undefined ||
+      fields.isArchived !== undefined;
 
     let prevSnapshot: {
       statusV2: TicketStatusV2 | null;
@@ -909,11 +935,21 @@ export class TicketRepository {
       description: string | null;
       priority: TicketPriority | null;
       eta: Date | null;
+      ticketType?: string | null;
+      isArchived?: boolean | null;
     } | null = null;
     if (needsPrevRead) {
       const prev = await prisma.ticket.findUnique({
         where: { id: ticketId },
-        select: { statusV2: true, title: true, description: true, priority: true, eta: true },
+        select: {
+          statusV2: true,
+          title: true,
+          description: true,
+          priority: true,
+          eta: true,
+          ticketType: true,
+          isArchived: true,
+        },
       });
       prevSnapshot = prev
         ? {
@@ -922,6 +958,8 @@ export class TicketRepository {
             description: prev.description,
             priority: prev.priority,
             eta: prev.eta,
+            ticketType: prev.ticketType,
+            isArchived: prev.isArchived,
           }
         : null;
     }
@@ -952,35 +990,108 @@ export class TicketRepository {
 
     // Consolidate all field changes into a single TICKET_UPDATED emit.
     if (prevSnapshot) {
+      const activities: Array<{ activityType: ActivityType; value: Prisma.InputJsonValue }> = [];
       const changes: TicketChanges = {};
-      if (
-        fields.statusV2 !== undefined &&
-        previousStatus !== fields.statusV2
-      ) {
+
+      if (fields.statusV2 !== undefined && previousStatus !== fields.statusV2) {
+        activities.push({
+          activityType: ActivityType.STATUS,
+          value: {
+            field: 'statusV2',
+            oldValue: previousStatus,
+            newValue: fields.statusV2,
+          },
+        });
         changes.statusV2 = { previousValue: previousStatus, newValue: fields.statusV2 };
       }
+
       if (fields.title !== undefined && prevSnapshot.title !== fields.title) {
+        activities.push({
+          activityType: ActivityType.TITLE,
+          value: { field: 'title', oldValue: prevSnapshot.title, newValue: fields.title },
+        });
         changes.title = { previousValue: prevSnapshot.title, newValue: fields.title };
       }
+
       if (
         fields.description !== undefined &&
         prevSnapshot.description !== fields.description
       ) {
+        activities.push({
+          activityType: ActivityType.DESCRIPTION,
+          value: {
+            field: 'description',
+            oldValue: prevSnapshot.description,
+            newValue: fields.description,
+          },
+        });
         changes.description = {
           previousValue: prevSnapshot.description,
           newValue: fields.description,
         };
       }
+
       if (fields.priority !== undefined && prevSnapshot.priority !== fields.priority) {
+        activities.push({
+          activityType: ActivityType.PRIORITY,
+          value: {
+            field: 'priority',
+            oldValue: prevSnapshot.priority,
+            newValue: fields.priority,
+          },
+        });
         changes.priority = { previousValue: prevSnapshot.priority, newValue: fields.priority };
       }
+
       if (fields.eta !== undefined) {
         const prevEtaMs = prevSnapshot.eta ? prevSnapshot.eta.getTime() : null;
         const nextEtaMs = fields.eta ? fields.eta.getTime() : null;
         if (prevEtaMs !== nextEtaMs) {
+          activities.push({
+            activityType: ActivityType.ETA,
+            value: {
+              field: 'eta',
+              oldValue: prevEtaMs,
+              newValue: nextEtaMs,
+            },
+          });
           changes.eta = { previousValue: prevEtaMs, newValue: nextEtaMs };
         }
       }
+
+      if (fields.ticketType !== undefined && prevSnapshot.ticketType !== fields.ticketType) {
+        activities.push({
+          activityType: ActivityType.TICKET_TYPE,
+          value: {
+            field: 'ticketType',
+            oldValue: prevSnapshot.ticketType,
+            newValue: fields.ticketType,
+          },
+        });
+      }
+
+      if (fields.isArchived === true && prevSnapshot.isArchived !== true) {
+        activities.push({
+          activityType: ActivityType.IS_ARCHIVED,
+          value: {
+            field: 'isArchived',
+            oldValue: prevSnapshot.isArchived,
+            newValue: true,
+          },
+        });
+      }
+
+      if (activities.length > 0) {
+        await prisma.ticketActivity.createMany({
+          data: activities.map(activity => ({
+            ticketId,
+            updatedBy,
+            activityType: activity.activityType,
+            value: activity.value,
+          })),
+        });
+      }
+
       if (Object.keys(changes).length > 0) {
         void emitTicketUpdated({
           ticket: updatedTicket,

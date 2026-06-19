@@ -9,6 +9,19 @@ export interface UpsertTicketFormFieldsResult {
   skippedFields: string[];
 }
 
+export interface TicketCustomFormFieldValue {
+  fieldId: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+  value: Prisma.JsonValue | string | null;
+}
+
+export interface TicketCustomFormData {
+  formId: string;
+  formName: string;
+  fields: TicketCustomFormFieldValue[];
+}
+
 export interface CreateFormInput {
   formName: string;
   formDescription?: string;
@@ -423,5 +436,110 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     }
 
     return result;
+  }
+
+  async getTicketCustomFormData(ticketId: string, boardId: string): Promise<TicketCustomFormData | null> {
+    const formMapping = await this.db.formContextMapping.findFirst({
+      where: {
+        contextId: boardId,
+        contextType: 'BOARD',
+        entityType: 'TICKET',
+      },
+      select: { formId: true },
+    });
+
+    if (!formMapping) {
+      return null;
+    }
+
+    const form = await this.db.form.findUnique({
+      where: { id: formMapping.formId },
+      select: { id: true, formName: true },
+    });
+
+    if (!form) {
+      return null;
+    }
+
+    const currentVersionRow = await this.db.formEntityValues.findFirst({
+      where: {
+        entityId: ticketId,
+        entityType: 'TICKET',
+        formId: form.id,
+        contextId: boardId,
+      },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    const currentVersion = currentVersionRow?.version ?? 1;
+
+    const [formFields, formValues] = await Promise.all([
+      this.db.formFields.findMany({
+        where: { formId: form.id },
+        orderBy: { sequenceNumber: 'asc' },
+      }),
+      this.db.formEntityValues.findMany({
+        where: {
+          entityId: ticketId,
+          entityType: 'TICKET',
+          formId: form.id,
+        },
+        orderBy: [
+          { version: 'desc' },
+          { updatedAt: 'desc' },
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ],
+      }),
+    ]);
+
+    const validValueByFieldId = new Map<string, typeof formValues[number]>();
+
+    for (const value of formValues) {
+      if (value.contextId !== boardId || value.version !== currentVersion) {
+        logger.warn('[FormsRepository] Skipping unexpected ticket form value', {
+          ticketId,
+          boardId,
+          formId: form.id,
+          fieldId: value.fieldId,
+          contextId: value.contextId,
+          version: value.version,
+          expectedVersion: currentVersion,
+          formEntityValueId: value.id,
+        });
+        continue;
+      }
+
+      if (validValueByFieldId.has(value.fieldId)) {
+        logger.warn('[FormsRepository] Skipping duplicate ticket form value for field', {
+          ticketId,
+          boardId,
+          formId: form.id,
+          fieldId: value.fieldId,
+          formEntityValueId: value.id,
+        });
+        continue;
+      }
+
+      validValueByFieldId.set(value.fieldId, value);
+    }
+
+    const fields: TicketCustomFormFieldValue[] = formFields.map((field) => {
+      const savedValue = validValueByFieldId.get(field.id);
+      const value = (savedValue?.actualFieldValue as Prisma.JsonValue | null | undefined) ?? null;
+
+      return {
+        fieldId: field.id,
+        fieldName: field.fieldName,
+        fieldType: field.fieldType as FormFieldType,
+        value,
+      };
+    });
+
+    return {
+      formId: form.id,
+      formName: form.formName,
+      fields,
+    };
   }
 }
