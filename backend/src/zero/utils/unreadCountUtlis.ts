@@ -49,6 +49,7 @@ export async function handleUnreadCount(
               channelId,
               isRead: false,
               actionSource: 'message',
+              actorAction: { not: 'added_v2' },
             },
             select: {
               id: true,

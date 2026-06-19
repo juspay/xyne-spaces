@@ -33,6 +33,7 @@ export const useAllUnreadCount = (): UnreadCounts => {
       if (!activity.channelId) continue;
       if (dmChannelIds.has(activity.channelId)) continue;
       if (activity.isThreadActivity === true) continue;
+      if (activity.actorAction === 'added_v2') continue;
       if (activity.actorAction === 'removed') continue;
       if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') continue;
       const classification = activity.classification ?? ActivityClassification.PENDING;

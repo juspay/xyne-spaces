@@ -18,6 +18,7 @@ export const useUnreadActivitiesCount = (): number => {
     }
 
     return unreadActivities.filter(activity => {
+      if (activity.actorAction === 'added_v2') return false;
       if (activity.actorAction === 'removed') return false;
       if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') return false;
       const classification = activity.classification ?? ActivityClassification.PENDING;

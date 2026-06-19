@@ -365,8 +365,9 @@ export class ActivityService {
     workspaceId?: string;
     actorId: string;
     messageAuthorId: string;
+    isThreadActivity?: boolean;
   }): Promise<'created' | 'updated'> {
-    const { messageId, channelId, workspaceId, actorId, messageAuthorId } = params;
+    const { messageId, channelId, workspaceId, actorId, messageAuthorId, isThreadActivity } = params;
 
     const existingActivity = await this.prisma.activity.findFirst({
       where: {
@@ -387,6 +388,7 @@ export class ActivityService {
         messageId,
         channelId,
         actorId,
+        isThreadActivity,
       });
 
       const conversationSeenCutoffAt = existingActivity.conversationSeenCutoffAt
@@ -398,6 +400,7 @@ export class ActivityService {
         data: {
           actorId: actorId,
           isRead: false,
+          ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
         },
       });
@@ -421,6 +424,7 @@ export class ActivityService {
       channelId,
       actorId,
       classification: ActivityClassification.FYI,
+      isThreadActivity,
     });
 
     await this.prisma.activity.create({
@@ -436,6 +440,7 @@ export class ActivityService {
         actorId: activity.actorId,
         isRead: false,
         classification: activity.classification,
+        ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
         ...(activity.conversationSeenCutoffAt
           ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
           : {}),
