@@ -2959,6 +2959,60 @@ export const mutators = defineMutators({
         }
       },
     ),
+    requestToJoin: defineMutator(
+      z.object({
+        callId: z.string(),
+        participantId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { callId, participantId, timestamp } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+        if (!call || call.status !== CallStatus.ACTIVE) {
+          throw new Error('Call not found or not active');
+        }
+
+        // Check if participant already exists
+        const existingParticipant = await tx.run(
+          zql.call_participants.where('callId', call.id).where('userId', ctx.userID).one(),
+        );
+
+        if (existingParticipant) {
+          // If already REQUESTED, INVITED, or ACCEPTED, no-op
+          if (
+            existingParticipant.response === InvitationResponse.REQUESTED ||
+            existingParticipant.response === InvitationResponse.INVITED ||
+            existingParticipant.response === InvitationResponse.ACCEPTED
+          ) {
+            return;
+          }
+          // Otherwise reset to REQUESTED (for DECLINED or LEFT)
+          await tx.mutate.call_participants.update({
+            id: existingParticipant.id,
+            response: InvitationResponse.REQUESTED,
+            invitedBy: ctx.userID,
+            invitedAt: timestamp,
+            respondedAt: null,
+            joinedAt: null,
+            leftAt: null,
+          });
+        } else {
+          // Create new request
+          await tx.mutate.call_participants.insert({
+            id: participantId,
+            callId: call.id,
+            userId: ctx.userID,
+            invitedBy: ctx.userID,
+            invitedAt: timestamp,
+            response: InvitationResponse.REQUESTED,
+            meetingStatus: MeetingStatus.PENDING,
+            respondedAt: null,
+            joinedAt: null,
+            leftAt: null,
+            isExternal: false,
+          });
+        }
+      },
+    ),
     cancel: defineMutator(
       z.object({
         callId: z.string(),

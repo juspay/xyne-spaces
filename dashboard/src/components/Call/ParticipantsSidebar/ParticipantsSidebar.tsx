@@ -332,6 +332,71 @@ export function ParticipantsSidebar({
     );
   };
 
+  // Inner component for requested participants — looks up user name via useUser
+  const RequestedParticipantItem = ({
+    participant,
+  }: {
+    participant: CallParticipant;
+  }): React.ReactElement => {
+    const { userId, displayName, isExternal } = participant;
+    const participantUser = useUser(!isExternal ? userId : '');
+    const resolvedName = displayName || participantUser?.name || 'Guest';
+    const initial = resolvedName.charAt(0).toUpperCase();
+
+    return (
+      <div className='flex items-center gap-3 py-2 px-3 hover:bg-orange-50/50 transition-colors'>
+        <div className='relative'>
+          <div className='flex items-center justify-center w-8 h-8 bg-orange-400 text-white text-xs font-semibold rounded-full'>
+            {initial}
+          </div>
+        </div>
+        <div className='flex-1 min-w-0'>
+          <div className='flex items-center gap-1.5'>
+            <p className='text-sm font-medium text-foreground truncate'>{resolvedName}</p>
+            {isExternal && (
+              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
+                External
+              </span>
+            )}
+          </div>
+          <p className='text-xs text-orange-500'>Requesting to join</p>
+        </div>
+        {isHost && onApproveLobbyRequest && onRejectLobbyRequest && (
+          <div className='flex items-center gap-1.5 shrink-0'>
+            <button
+              onClick={() => void handleApprove(participant.id)}
+              disabled={approvingId === participant.id}
+              className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              title='Admit'
+              data-track-category='CALLS'
+              data-track-name='APPROVE_LOBBY_REQUEST'
+            >
+              {approvingId === participant.id ? (
+                <div className='w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin' />
+              ) : (
+                <Check size={14} />
+              )}
+            </button>
+            <button
+              onClick={() => void handleReject(participant.id)}
+              disabled={rejectingId === participant.id}
+              className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              title='Decline'
+              data-track-category='CALLS'
+              data-track-name='REJECT_LOBBY_REQUEST'
+            >
+              {rejectingId === participant.id ? (
+                <div className='w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
+              ) : (
+                <XIcon size={14} />
+              )}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const SectionHeader = ({
     title,
     count,
@@ -430,61 +495,7 @@ export function ParticipantsSidebar({
               {isRequestedExpanded && (
                 <div className='border-t border-orange-200'>
                   {requested.map(participant => (
-                    <div
-                      key={participant.id}
-                      className='flex items-center gap-3 py-2 px-3 hover:bg-orange-50/50 transition-colors'
-                    >
-                      <div className='relative'>
-                        <div className='flex items-center justify-center w-8 h-8 bg-orange-400 text-white text-xs font-semibold rounded-full'>
-                          {(participant.displayName || 'G').charAt(0).toUpperCase()}
-                        </div>
-                      </div>
-                      <div className='flex-1 min-w-0'>
-                        <div className='flex items-center gap-1.5'>
-                          <p className='text-sm font-medium text-foreground truncate'>
-                            {participant.displayName || 'Guest'}
-                          </p>
-                          {participant.isExternal && (
-                            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
-                              External
-                            </span>
-                          )}
-                        </div>
-                        <p className='text-xs text-orange-500'>Requesting to join</p>
-                      </div>
-                      {isHost && onApproveLobbyRequest && onRejectLobbyRequest && (
-                        <div className='flex items-center gap-1.5 shrink-0'>
-                          <button
-                            onClick={() => void handleApprove(participant.id)}
-                            disabled={approvingId === participant.id}
-                            className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                            title='Admit'
-                            data-track-category='CALLS'
-                            data-track-name='APPROVE_LOBBY_REQUEST'
-                          >
-                            {approvingId === participant.id ? (
-                              <div className='w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin' />
-                            ) : (
-                              <Check size={14} />
-                            )}
-                          </button>
-                          <button
-                            onClick={() => void handleReject(participant.id)}
-                            disabled={rejectingId === participant.id}
-                            className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                            title='Decline'
-                            data-track-category='CALLS'
-                            data-track-name='REJECT_LOBBY_REQUEST'
-                          >
-                            {rejectingId === participant.id ? (
-                              <div className='w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
-                            ) : (
-                              <XIcon size={14} />
-                            )}
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <RequestedParticipantItem key={participant.id} participant={participant} />
                   ))}
                 </div>
               )}
