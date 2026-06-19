@@ -320,6 +320,29 @@ export async function handleQueries(request: Request): Promise<any> {
   }
 }
 
+type ZeroResultFormat = {
+  singular?: boolean;
+  relationships?: Record<string, ZeroResultFormat>;
+};
+
+function conformToZeroShape(node: unknown, format: ZeroResultFormat | undefined): void {
+  if (!node || !format?.relationships) return;
+  if (Array.isArray(node)) {
+    for (const item of node) conformToZeroShape(item, format);
+    return;
+  }
+  if (typeof node !== 'object') return;
+  const row = node as Record<string, unknown>;
+  for (const [alias, childFormat] of Object.entries(format.relationships)) {
+    const value = row[alias];
+    if (value === null || value === undefined) {
+      if (childFormat.singular) delete row[alias];
+      continue;
+    }
+    conformToZeroShape(value, childFormat);
+  }
+}
+
 export async function handleQueriesFallback(request: Request): Promise<any> {
   const authData = await extractAuthDataFromRequest(request);
   if (!authData) {
@@ -365,6 +388,8 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
               serverSchema
             );
           });
+
+          conformToZeroShape(data, format as ZeroResultFormat);
 
           return {
             name: req.name,
