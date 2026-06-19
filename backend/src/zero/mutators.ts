@@ -4429,6 +4429,60 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         }
       ),
+      requestToJoin: defineMutator(
+        z.object({
+          callId: z.string(),
+          participantId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { callId, participantId, timestamp } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call || call.status !== CallStatus.ACTIVE) {
+            throw new Error('Call not found or not active');
+          }
+
+          // Check if participant already exists
+          const existingParticipant = await tx.run(
+            zql.call_participants.where('callId', call.id).where('userId', authData.sub).one(),
+          );
+
+          if (existingParticipant) {
+            // If already REQUESTED, INVITED, or ACCEPTED, no-op
+            if (
+              existingParticipant.response === InvitationResponse.REQUESTED ||
+              existingParticipant.response === InvitationResponse.INVITED ||
+              existingParticipant.response === InvitationResponse.ACCEPTED
+            ) {
+              return;
+            }
+            // Otherwise reset to REQUESTED (for DECLINED or LEFT)
+            await tx.mutate.call_participants.update({
+              id: existingParticipant.id,
+              response: InvitationResponse.REQUESTED,
+              invitedBy: authData.sub,
+              invitedAt: timestamp,
+              respondedAt: null,
+              joinedAt: null,
+              leftAt: null,
+            });
+          } else {
+            // Create new request
+            await tx.mutate.call_participants.insert({
+              id: participantId,
+              callId: call.id,
+              userId: authData.sub,
+              invitedBy: authData.sub,
+              invitedAt: timestamp,
+              response: InvitationResponse.REQUESTED,
+              meetingStatus: MeetingStatus.PENDING,
+              respondedAt: null,
+              joinedAt: null,
+              leftAt: null,
+              isExternal: false,
+            });
+          }
+        }
+      ),
     },
     activities: {
       markAsRead: defineMutator(

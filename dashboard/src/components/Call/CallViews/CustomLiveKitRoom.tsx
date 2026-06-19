@@ -14,6 +14,7 @@ import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { EndCallModal } from '../EndCallModal/EndCallModal';
 import { useIsCallHost, useIsOnlyParticipant, useCallParticipants } from '../../../hooks/useCalls';
+import { useUsers } from '../../../hooks/useUsers';
 import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
 import { mutators } from '../../../zero/mutators';
@@ -148,6 +149,8 @@ export function CustomLiveKitRoom({
 
   const isHost = useIsCallHost(externalId, user?.id);
 
+  const allUsers = useUsers();
+
   const callParticipants = useCallParticipants(externalId);
 
   const isOnlyParticipant = useIsOnlyParticipant(callParticipants);
@@ -157,12 +160,9 @@ export function CustomLiveKitRoom({
     return (activeCall as { id?: string } | undefined)?.id;
   }, [activeCalls, externalId]);
 
-  // Lobby requests from external users — only visible to the call host
+  // Lobby requests from external AND internal users — only visible to the call host
   const lobbyRequests = useMemo(
-    () =>
-      isHost
-        ? callParticipants.filter(p => p.response === InvitationResponse.REQUESTED && p.isExternal)
-        : [],
+    () => (isHost ? callParticipants.filter(p => p.response === InvitationResponse.REQUESTED) : []),
     [isHost, callParticipants],
   );
 
@@ -172,17 +172,22 @@ export function CustomLiveKitRoom({
     if (lobbyRequests.length > prevLobbyCountRef.current) {
       const newest = lobbyRequests[lobbyRequests.length - 1];
       if (newest) {
-        toast.info(
-          `${(newest as { displayName?: string }).displayName ?? 'Someone'} is requesting to join`,
-          {
-            duration: 5000,
-          },
-        );
+        // Resolve name: external → displayName, internal → look up from users
+        let name: string | undefined;
+        if (newest.isExternal) {
+          name = (newest as { displayName?: string | null }).displayName ?? undefined;
+        } else {
+          const foundUser = allUsers.find(u => u.id === newest.userId);
+          name = foundUser?.name;
+        }
+        toast.info(`${name ?? 'Someone'} is requesting to join`, {
+          duration: 5000,
+        });
         playAudio('/sounds/notification.wav');
       }
     }
     prevLobbyCountRef.current = lobbyRequests.length;
-  }, [lobbyRequests]);
+  }, [lobbyRequests, allUsers]);
 
   // Lobby approval handlers
   const handleApproveLobbyRequest = useCallback(

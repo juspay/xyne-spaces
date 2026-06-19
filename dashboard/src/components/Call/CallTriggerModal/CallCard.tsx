@@ -8,7 +8,14 @@ import { useAuth } from '../../../hooks/useAuth';
 import { roomActor } from '../../../machines/roomMachine';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
-import { useCallDuration, useFetchCallTitle, getActiveParticipants } from '../../../hooks/useCalls';
+import {
+  useCallDuration,
+  useFetchCallTitle,
+  getActiveParticipants,
+  isUserActiveInCall,
+} from '../../../hooks/useCalls';
+import { useAutoJoinOnAccept, useCallJoinState } from '../../../hooks/useCallJoinState';
+import { CallJoinButton } from '../CallJoinButton/CallJoinButton';
 import type { CallData } from './CallTriggerModal';
 
 export interface CallCardProps {
@@ -32,29 +39,25 @@ export const CallCard: React.FC<CallCardProps> = ({
   const { user } = useAuth();
 
   const isCurrentCall = currentCallId === call.externalId;
-
-  // Get channel info for confirmation modal
   const channel = useChannel(call.channelId || '');
 
-  // Use call confirmation hook for join action
+  // ── Confirmation modal for switching calls ──
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
     useCallConfirmation({
       scopeType: channel?.scopeType,
       channelName: channel?.name,
       participantCount: call.participants?.length || 0,
-      hasActiveCallInChannel: false, // Not relevant for joining existing call
-      isUserInCurrentChannelCall: false, // Not relevant for joining existing call
+      hasActiveCallInChannel: false,
+      isUserInCurrentChannelCall: false,
       isInCall,
       onlyShowSwitchModal: true,
     });
 
-  // Handle leaving the current call
   const handleLeaveCall = (): void => {
     roomActor.send({ type: 'DISCONNECT' });
     onActionClick?.();
   };
 
-  // Handle joining a call (with confirmation modal if switching)
   const handleJoinCallDirect = (): void => {
     if (!call.externalId) return;
     joinCall({
@@ -63,45 +66,44 @@ export const CallCard: React.FC<CallCardProps> = ({
     });
   };
 
-  // Use handleCallAction to show confirmation modal when switching calls
   const handleJoinCall = (): void => {
     handleCallAction(handleJoinCallDirect);
   };
 
-  // Get active participants (accepted and not left)
+  // ── Participants ──
   const activeParticipants = useMemo(
     () => getActiveParticipants(call.participants || []),
     [call.participants],
   );
 
-  // Check if user is a participant in this call
-  const isUserCallParticipant = useMemo(() => {
-    if (!user || !call.participants) return false;
-    return call.participants.some(p => p.userId === user.id);
-  }, [user, call.participants]);
-
-  // Get participant user IDs for avatars (limit to 3)
   const participantUserIds = useMemo(
     () => activeParticipants.map(p => p.userId).slice(0, 3),
     [activeParticipants],
   );
 
-  // Get initiator name
   const initiatorName = useMemo(() => {
     const initiator = allUsers.find(u => u.id === call.createdByUserId);
     return initiator?.name || 'Someone';
   }, [call.createdByUserId, allUsers]);
 
-  // Get message content and truncate to characters
   const callTitle = useFetchCallTitle(call.externalId);
-
-  // For current call: use detailed duration (M:SS min format, updates every second)
-  // For other calls: use simple duration (X min format, updates every minute)
   const callDuration = useCallDuration(
     call.startedAt,
     !!call.startedAt,
     isCurrentCall ? 'detailed' : 'simple',
   );
+
+  // ── Request-to-join + auto-join ──
+  useAutoJoinOnAccept({
+    callId: call.externalId || '',
+    userId: user?.id,
+    isUserInCall: isCurrentCall,
+  });
+
+  const { action, requestToJoin, isRequesting } = useCallJoinState(call.externalId || '', user?.id);
+
+  // Check if user is active in this call on another device/tab (for "Switch" label)
+  const userIsActiveInCall = isUserActiveInCall(call.participants || [], user?.id ?? '');
 
   return (
     <Fragment>
@@ -112,7 +114,7 @@ export const CallCard: React.FC<CallCardProps> = ({
           isMobileLiveCall ? 'flex-col !pb-8 !pt-6 !border-none' : 'bg-[#F3FEF1]',
         )}
       >
-        {/* Avatars on the left */}
+        {/* Avatars */}
         <div className='flex-shrink-0'>
           {participantUserIds.length > 0 ? (
             <AvatarGroup
@@ -166,6 +168,7 @@ export const CallCard: React.FC<CallCardProps> = ({
           </div>
         </div>
 
+        {/* Action button */}
         <div className='flex-shrink-0 flex items-center gap-4'>
           {isCurrentCall ? (
             <>
@@ -192,31 +195,35 @@ export const CallCard: React.FC<CallCardProps> = ({
               </button>
             </>
           ) : (
-            isUserCallParticipant && (
-              <button
-                className='flex items-center gap-2'
-                onClick={handleJoinCall}
-                data-track-category='CALL'
-                data-track-name='JoinCall'
-                data-track-metadata={JSON.stringify({
-                  callId: call.externalId,
-                  channelId: call.channelId,
-                })}
-              >
-                <span className='text-sm font-semibold text-foreground hover:text-green-600'>
-                  Join
-                </span>
-              </button>
-            )
+            <CallJoinButton
+              action={action}
+              onJoin={handleJoinCall}
+              onRequest={requestToJoin}
+              isRequesting={isRequesting}
+              variant='text'
+              joinLabel={userIsActiveInCall ? 'Switch' : 'Join'}
+              testId={
+                action === 'canJoin'
+                  ? userIsActiveInCall
+                    ? 'switch-call-button'
+                    : 'join-button'
+                  : action === 'requested'
+                    ? 'waiting-to-join-button'
+                    : 'request-to-join-button'
+              }
+              trackCategory='CALL'
+              trackJoinName={userIsActiveInCall ? 'SwitchCall' : 'JoinCall'}
+              trackRequestName='RequestToJoinCall'
+              trackMetadata={{ callId: call.externalId, channelId: call.channelId }}
+            />
           )}
         </div>
       </div>
+
       <CallConfirmationModal
         isOpen={showConfirmModal}
         onClose={closeModal}
-        onConfirm={() => {
-          handleConfirmCall(handleJoinCallDirect);
-        }}
+        onConfirm={() => handleConfirmCall(handleJoinCallDirect)}
         title={modalContent.title}
         subtitle={modalContent.subtitle}
         description={modalContent.description}

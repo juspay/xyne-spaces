@@ -1,7 +1,7 @@
 import { useSelector } from '@xstate/react';
 import { useMemo } from 'react';
 import { Headphones } from 'lucide-react';
-import { CallStatus, InvitationResponse } from '@xyne/shared';
+import { CallStatus } from '@xyne/shared';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { roomActor } from '../../../machines/roomMachine';
 import { useUsers } from '../../../hooks/useUsers';
@@ -11,7 +11,10 @@ import {
   getActiveParticipants,
   formatParticipantText,
   useCallDuration,
+  isUserActiveInCall,
 } from '../../../hooks/useCalls';
+import { useAutoJoinOnAccept, useCallJoinState } from '../../../hooks/useCallJoinState';
+import { CallJoinButton } from '../../Call/CallJoinButton/CallJoinButton';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { cn } from '../../../utils/classNames';
 
@@ -19,16 +22,11 @@ interface CallLayoutProps {
   callId: string;
 }
 
-interface CallParticipant {
-  userId: string;
-  response?: InvitationResponse | null;
-}
-
 interface CallData {
   externalId?: string;
   status?: CallStatus;
   startedAt?: number;
-  participants?: readonly CallParticipant[];
+  participants?: Array<{ userId: string; response?: string | null }>;
 }
 
 export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
@@ -50,10 +48,8 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
   const currentCallId = useSelector(roomActor, state => state.context.externalId);
   const isUserInCall = currentCallId === callExternalId;
 
-  const isUserCallParticipant = useMemo(() => {
-    if (!user) return false;
-    return allParticipants.some(p => p.userId === user.id);
-  }, [user, allParticipants]);
+  // Check if user is active in this call on another device/tab (for "Switch" label)
+  const userIsActiveInCall = isUserActiveInCall(allParticipants, user?.id ?? '');
 
   const callDuration = useCallDuration(callData?.startedAt, isCallActive);
 
@@ -63,7 +59,6 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
   );
 
   const userMap = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
-
   const participantUserIds = activeParticipants.map(p => p.userId);
 
   const callStatusText = useMemo(() => {
@@ -71,16 +66,16 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
     return `${participantText} ${activeParticipants.length === 1 ? 'is' : 'are'} on a call`;
   }, [activeParticipants, userMap]);
 
+  // ── Request-to-join + auto-join ──
+  useAutoJoinOnAccept({ callId: callExternalId || '', userId: user?.id, isUserInCall });
+
+  const { action, requestToJoin, isRequesting } = useCallJoinState(callExternalId || '', user?.id);
+
   const handleJoinCall = (): void => {
-    if (!callExternalId) return;
-    joinCall({ callId: callExternalId });
+    if (callExternalId) joinCall({ callId: callExternalId });
   };
 
-  if (!callData || !isCallActive) {
-    return null;
-  }
-
-  if (activeParticipants.length === 0) {
+  if (!callData || !isCallActive || activeParticipants.length === 0) {
     return null;
   }
 
@@ -149,19 +144,28 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
             )}
           </div>
 
-          {isUserCallParticipant && !isUserInCall && (
-            <button
-              onClick={handleJoinCall}
-              className={cn(
-                'text-sm font-medium hover:underline transition-all cursor-pointer mx-2',
-                isUserInCall ? 'text-foreground' : 'text-white',
-              )}
-              type='button'
-              data-track-category='CALL'
-              data-track-name='JoinCallFromLayout'
-            >
-              Join Call
-            </button>
+          {!isUserInCall && (
+            <CallJoinButton
+              action={action}
+              onJoin={handleJoinCall}
+              onRequest={requestToJoin}
+              isRequesting={isRequesting}
+              variant='light'
+              joinLabel={userIsActiveInCall ? 'Switch' : 'Join Call'}
+              testId={
+                action === 'canJoin'
+                  ? userIsActiveInCall
+                    ? 'switch-call-button'
+                    : 'join-button'
+                  : action === 'requested'
+                    ? 'waiting-to-join-button'
+                    : 'request-to-join-button'
+              }
+              trackCategory='CALL'
+              trackJoinName={userIsActiveInCall ? 'SwitchCallFromLayout' : 'JoinCallFromLayout'}
+              trackRequestName='RequestToJoinCallFromLayout'
+              className='mx-2'
+            />
           )}
         </div>
       </div>

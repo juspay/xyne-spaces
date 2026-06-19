@@ -52,6 +52,22 @@ export const isUserActiveInCall = <T extends { userId: string; response?: string
   );
 
 /**
+ * Determines what UI action a user should see for a call:
+ * - 'canJoin': User has accepted/invited/left/declined — show "Join" button
+ * - 'requested': User has pending request — show "Waiting..."
+ * - 'requestToJoin': User is not a participant — show "Request to Join"
+ */
+export const getUserCallAccessLevel = (
+  participants: ReadonlyArray<{ userId: string; response?: string | null }>,
+  userId?: string,
+): 'canJoin' | 'requested' | 'requestToJoin' => {
+  if (!userId) return 'requestToJoin';
+  const p = participants.find(part => part.userId === userId);
+  if (!p) return 'requestToJoin';
+  return p.response === InvitationResponse.REQUESTED ? 'requested' : 'canJoin';
+};
+
+/**
  * Gets the meeting status of the current user for a given call
  * @param call - The call object with participants
  * @param currentUserId - Current user ID (optional)
