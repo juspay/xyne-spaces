@@ -6,6 +6,7 @@ import { repositories } from '@/database/repositories';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { callCountService } from '@/services/callCountService';
 import { recurringCallService } from '@/services/recurringCallService';
+import { callSideEffectService } from '@/services/callSideEffectService';
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -264,6 +265,13 @@ export class CallValidationWorker {
           } catch (err) {
             logger.error('[CallValidationWorker] Failed to update call metrics for auto-ended call:', err);
           }
+        }
+
+        // Emit analytics events (call_ended + per-participant) for the Calls dashboards
+        try {
+          await callSideEffectService.logCallAnalytics(call, endedAt);
+        } catch (analyticsError) {
+          logger.error(`[CallValidationWorker] Failed to log call analytics for ${externalId}:`, analyticsError);
         }
       }
     } catch (error) {

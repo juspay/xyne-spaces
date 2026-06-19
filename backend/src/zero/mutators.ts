@@ -7604,12 +7604,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           asyncTasks.push(async () => {
             try {
               logger.info('analytics_event', {
-                event: 'canvas_edited',
+                event: 'canvas_created',
                 timestamp: new Date(now).toISOString(),
                 userId: authData.sub,
+                userName: authData.name,
+                docType: DocType.Canvas,
+                isCollaborative: false,
               });
             } catch (error) {
-              logger.error('❌ [ANALYTICS] Failed to log canvas_edited (create):', error);
+              logger.error('❌ [ANALYTICS] Failed to log canvas_created', error);
             }
           });
         },
@@ -8211,6 +8214,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
+          // Analytics: isCollaborative is always false at creation and only flipped to true here
+          const isEnablingCollaboration =
+            params.isCollaborative === true && !canvas.isCollaborative;
+          let collaborationCreatorName: string | null = null;
+          if (isEnablingCollaboration) {
+            const creator = await tx.run(zql.users.where('id', canvas.createdBy).one());
+            collaborationCreatorName = creator?.name ?? null;
+          }
+
           await tx.mutate.canvases.update({
             id: canvas.id,
             lastEditedBy: authData.sub,
@@ -8233,6 +8245,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               logger.error(`❌ [MUTATOR-CANVAS-UPDATE] Failed to track user activity:`, error);
             }
           });
+          if (isEnablingCollaboration) {
+            asyncTasks.push(async () => {
+              try {
+                logger.info('analytics_event', {
+                  event: 'canvas_collaboration_enabled',
+                  timestamp: new Date(params.timestamp).toISOString(),
+                  canvasId: canvas.id,
+                  createdBy: canvas.createdBy,
+                  creatorName: collaborationCreatorName,
+                  enabledBy: authData.sub,
+                });
+              } catch (error) {
+                logger.error('❌ [ANALYTICS] Failed to log canvas_collaboration_enabled:', error);
+              }
+            });
+          }
         },
       ),
       delete: defineMutator(

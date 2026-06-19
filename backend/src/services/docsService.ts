@@ -395,7 +395,12 @@ export class DocsService {
             }
 
             // XYNE-1287 Wrap database operations in a transaction for consistency
-            const { channelName } = await prisma.$transaction(async (tx) => {
+            const { channelName, canvasId, isNewDoc } = await prisma.$transaction(async (tx) => {
+                // Determine whether this publish creates a new doc vs. re-publishing an existing one
+                const existingDoc = await tx.canvas.findUnique({
+                    where: { userRepo: safeUserRepo },
+                    select: { id: true },
+                });
                 const canvas = await tx.canvas.upsert({
                     where: {
                         userRepo: safeUserRepo,
@@ -439,8 +444,29 @@ export class DocsService {
                     chName = channel?.name || channelId;
                 }
 
-                return { channelName: chName, canvasId: canvas.id };
+                return { channelName: chName, canvasId: canvas.id, isNewDoc: !existingDoc };
             });
+
+            // Analytics: count Quarto doc creations
+            if (isNewDoc) {
+                try {
+                    const creator = await prisma.user.findUnique({
+                        where: { id: userId },
+                        select: { name: true },
+                    });
+                    logger.info('analytics_event', {
+                        event: 'canvas_created',
+                        timestamp: new Date().toISOString(),
+                        canvasId,
+                        userId,
+                        userName: creator?.name ?? null,
+                        docType: DocType.Quarto,
+                        isCollaborative: false,
+                    });
+                } catch (error) {
+                    logger.error('❌ [ANALYTICS] Failed to log canvas_created (Quarto):', error);
+                }
+            }
 
             const docsUrl = this.generateDocsUrl(baseUrl, request.workspaceId, safeUserRepo);
 

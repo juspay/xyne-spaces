@@ -172,6 +172,13 @@ class LiveKitWebhookController {
           logger.error(`[LiveKit Webhook] Failed to trigger call metrics side effects:`, sideEffectError);
         }
 
+        // Emit analytics events (call_ended + per-participant) for the Calls dashboards
+        try {
+          await callSideEffectService.logCallAnalytics(result.call, now);
+        } catch (analyticsError) {
+          logger.error(`[LiveKit Webhook] Failed to log call analytics for ${callId}:`, analyticsError);
+        }
+
         // Post external chat summary if external participants sent messages
         try {
           await callSideEffectService.postExternalChatSummary(result.call.id, callId);
@@ -593,6 +600,13 @@ class LiveKitWebhookController {
           logger.info(`[LiveKit Webhook] Triggered call metrics side effects for ${callId}`);
         } catch (sideEffectError) {
           logger.error(`[LiveKit Webhook] Failed to trigger call metrics side effects:`, sideEffectError);
+        }
+
+        // Emit analytics events (call_ended + per-participant) for the Calls dashboards
+        try {
+          await callSideEffectService.logCallAnalytics(result.call, now);
+        } catch (analyticsError) {
+          logger.error(`[LiveKit Webhook] Failed to log call analytics for ${callId}:`, analyticsError);
         }
 
         // Post external chat summary if external participants sent messages
