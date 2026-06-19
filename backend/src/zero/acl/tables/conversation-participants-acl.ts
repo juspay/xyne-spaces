@@ -33,8 +33,8 @@ export class ConversationParticipantsACL extends BaseACL<'conversation_participa
       .where('channelId', conversation.channelId)
       .one());
 
-    if (!isParticipant) {
-      throw new MutationACLError('Conversation participant insert failed: only channel participants can join conversations', 'conversation_participants')
+    if (!isParticipant && conversation.channel?.visibility !== 'PUBLIC') {
+      throw new MutationACLError('Conversation participant insert failed: only channel participants can join conversations in private channels', 'conversation_participants')
     }
   }
 
@@ -50,9 +50,10 @@ export class ConversationParticipantsACL extends BaseACL<'conversation_participa
 
     // Allow updating denormalized system fields (lastReplyAt, channelId) on any
     // participant row if the updater is a channel member. These fields are synced
-    // by the system when replies are sent, not user-controlled.
+    // by the system when replies are sent, not user-controlled. Also allow
+    // updating subscription/participation type when users are mentioned.
     const isSystemFieldUpdate = Object.keys(args).every(
-      k => ['id', 'lastReplyAt', 'channelId'].includes(k)
+      k => ['id', 'lastReplyAt', 'channelId', 'participationType', 'isSubscribed', 'joinedAt'].includes(k)
     );
 
     if (!isSystemFieldUpdate && participantInfo?.userId != this.ctx.userID) {
