@@ -163,6 +163,7 @@ export class ScheduleCallController {
         description,
         channelId,
         targetUserIds,
+        selectiveParticipants,
         timezone,
         recurrenceRule,
         startTime,
@@ -171,17 +172,25 @@ export class ScheduleCallController {
         endsOn,
       } = RecurringScheduleCallSchema.parse(req.body);
 
+      // When selectiveParticipants=true the caller has hand-picked a subset of a DEFAULT
+      // channel's members. The series stays scoped to that channel (no GROUP_DM is created);
+      // callUpdatesChannel is set to the same channel so post-call summaries are posted there.
+      //
       // When a channelId (broadcast target) and targetUserIds (explicit participants) are both
-      // provided, the user wants to post call updates to a channel while the actual call is
-      // between a specific set of people. We create a GROUP_DM for those participants and use
+      // provided WITHOUT selectiveParticipants, we create a GROUP_DM for those participants and use
       // it as series.channelId so participant lookups always return the right people.
       // The broadcast channel is stored separately in callUpdatesChannel.
-      const isPostCallUpdatesMode = !!(channelId && targetUserIds?.length);
+      const isPostCallUpdatesMode = !selectiveParticipants && !!(channelId && targetUserIds?.length);
 
       let finalChannelId = channelId;
       let callUpdatesChannel: string | null = null;
 
-      if (isPostCallUpdatesMode) {
+      if (selectiveParticipants && channelId) {
+        // Selective participants: keep the DEFAULT channel, record it as callUpdatesChannel
+        // so that post-call summaries land there, and leave finalChannelId = channelId.
+        callUpdatesChannel = channelId;
+        logger.info(`[createRecurringSeries] selectiveParticipants=true — keeping channelId=${channelId}, callUpdatesChannel=${callUpdatesChannel}`);
+      } else if (isPostCallUpdatesMode) {
         // Post-to-channel: create a GROUP_DM for the explicit participants so that
         // series.channelId is always the group of people in the call, not the broadcast channel.
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
@@ -255,7 +264,7 @@ export class ScheduleCallController {
           fromDate,
           finalToDate,
           tx,
-          undefined,
+          targetUserIds,
           callUpdatesChannel,
         );
       });
@@ -292,22 +301,32 @@ export class ScheduleCallController {
         endsAt,
         channelId,
         targetUserIds,
+        selectiveParticipants,
         conversationId,
         externalInvitees,
         invitation,
       } = ScheduleCallSchema.parse(req.body);
 
+      // When selectiveParticipants=true the caller has hand-picked a subset of a DEFAULT
+      // channel's members. The call stays scoped to that channel (no GROUP_DM is created);
+      // callUpdatesChannel is set to the same channel so post-call summaries are posted there.
+      //
       // When a channelId (broadcast target) and targetUserIds (explicit participants) are both
-      // provided, the user wants to post call updates to a channel while the actual call is
-      // between a specific set of people. We create a GROUP_DM for those participants so that
-      // call.channelId always points to the people in the call, not the broadcast channel.
+      // provided WITHOUT selectiveParticipants, the user wants to post call updates to a channel
+      // while the actual call is between a specific set of people. We create a GROUP_DM for those
+      // participants so that call.channelId always points to the people in the call.
       // The broadcast channel is stored separately in callUpdatesChannel.
-      const isPostCallUpdatesMode = !!(channelId && targetUserIds?.length);
+      const isPostCallUpdatesMode = !selectiveParticipants && !!(channelId && targetUserIds?.length);
 
       let finalChannelId = channelId;
       let callUpdatesChannel: string | null = null;
 
-      if (isPostCallUpdatesMode) {
+      if (selectiveParticipants && channelId) {
+        // Selective participants: keep the DEFAULT channel, record it as callUpdatesChannel
+        // so that post-call summaries land there, and leave finalChannelId = channelId.
+        callUpdatesChannel = channelId;
+        logger.info(`[scheduleCall] selectiveParticipants=true — keeping channelId=${channelId}, callUpdatesChannel=${callUpdatesChannel}`);
+      } else if (isPostCallUpdatesMode) {
         // Post-to-channel: create a GROUP_DM for the explicit participants so that
         // call.channelId is the group of people in the call, not the broadcast channel.
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
@@ -357,6 +376,7 @@ export class ScheduleCallController {
           endsAt: new Date(endsAt),
           ...(conversationId && { metadata: { conversationId } }),
           callUpdatesChannel,
+          targetUserIds,
         }, tx);
 
         if (hasExternals) {
@@ -458,9 +478,9 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateScheduleCallSchema.parse(req.body);
-      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId } = parsedBody;
+      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, selectiveParticipants } = parsedBody;
 
-      logger.info(`[updateScheduledCall] request | externalId=${externalId} userId=${userId} reqChannelId=${reqChannelId} targetUserIds=${JSON.stringify(targetUserIds)} title=${title} startsAt=${startsAt} endsAt=${endsAt}`);
+      logger.info(`[updateScheduledCall] request | externalId=${externalId} userId=${userId} reqChannelId=${reqChannelId} selectiveParticipants=${selectiveParticipants} targetUserIds=${JSON.stringify(targetUserIds)} title=${title} startsAt=${startsAt} endsAt=${endsAt}`);
 
       const call = await repositories.calls.findByExternalId(externalId);
       if (!call) {
@@ -486,13 +506,18 @@ export class ScheduleCallController {
       //   reqChannelId stored as callUpdatesChannel (the broadcast target).
       // Only reqChannelId → channel-scoped call (the whole channel is the call scope), no broadcast.
       // Only targetUserIds → direct group call, GROUP_DM for participants, no broadcast.
-      const modeChanged = reqChannelId !== undefined || targetUserIds !== undefined;
+      // selectiveParticipants=true → channel stays fixed, only participants are updated in-place.
+      const modeChanged = !selectiveParticipants && (reqChannelId !== undefined || targetUserIds !== undefined);
       const newIsPostCallUpdatesMode = !!(reqChannelId && targetUserIds?.length);
 
       let resolvedChannelId: string | undefined;
       let newCallUpdatesChannel: string | null | undefined; // undefined = don't touch
 
-      if (modeChanged) {
+      if (selectiveParticipants) {
+        // Selective participants: keep the existing channel, just update who is invited.
+        // resolvedChannelId stays undefined (no channel change).
+        logger.info(`[updateScheduledCall] selectiveParticipants=true — keeping channelId=${call.channelId}, updating participants only`);
+      } else if (modeChanged) {
         if (newIsPostCallUpdatesMode) {
           // Post-to-channel: create a GROUP_DM for the explicit participants.
           logger.info(`[updateScheduledCall] post-to-channel: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
@@ -641,9 +666,9 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateRecurringSeriesSchema.parse(req.body);
-      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId } = parsedBody;
+      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, selectiveParticipants } = parsedBody;
 
-      logger.info(`[updateRecurringSeries] request | seriesId=${seriesId} userId=${userId} reqChannelId=${reqChannelId} targetUserIds=${JSON.stringify(targetUserIds)} title=${title}`);
+      logger.info(`[updateRecurringSeries] request | seriesId=${seriesId} userId=${userId} reqChannelId=${reqChannelId} selectiveParticipants=${selectiveParticipants} targetUserIds=${JSON.stringify(targetUserIds)} title=${title}`);
 
       const db = DatabaseClient.getInstance();
       const series = await db.recurringCallSeries.findUnique({ where: { id: seriesId } });
@@ -670,13 +695,18 @@ export class ScheduleCallController {
       //   reqChannelId stored as callUpdatesChannel (the broadcast target).
       // Only reqChannelId → channel-scoped call (the whole channel is the call scope), no broadcast.
       // Only targetUserIds → direct group call, GROUP_DM for participants, no broadcast.
-      const seriesModeChanged = reqChannelId !== undefined || targetUserIds !== undefined;
+      // selectiveParticipants=true → channel stays fixed, only participants are updated in-place.
+      const seriesModeChanged = !selectiveParticipants && (reqChannelId !== undefined || targetUserIds !== undefined);
       const newIsPostCallUpdatesMode = !!(reqChannelId && targetUserIds?.length);
 
       let resolvedChannelId: string | undefined;
       let newCallUpdatesChannel: string | null | undefined; // undefined = don't touch
 
-      if (seriesModeChanged) {
+      if (selectiveParticipants) {
+        // Selective participants: keep the existing channel, just update who is invited.
+        // resolvedChannelId stays undefined (no channel change).
+        logger.info(`[updateRecurringSeries] selectiveParticipants=true — keeping channelId=${series.channelId}, updating participants only`);
+      } else if (seriesModeChanged) {
         if (newIsPostCallUpdatesMode) {
           // Post-to-channel: create a GROUP_DM for the explicit participants.
           logger.info(`[updateRecurringSeries] post-to-channel: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
