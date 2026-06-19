@@ -215,13 +215,6 @@ export const shortcuts = {
     category: 'Huddle',
     priority: 50,
   },
-  'huddle.toggleMute': {
-    keys: 'mod+shift+space',
-    scope: 'global',
-    description: 'Toggle mute on a huddle',
-    category: 'Huddle',
-    priority: 100,
-  },
   'huddle.pushToTalk': {
     keys: 'space',
     scope: 'global',
@@ -229,6 +222,24 @@ export const shortcuts = {
     category: 'Huddle',
     priority: 200,
     allowInInputs: false,
+  },
+  'huddle.toggleMute': {
+    keys: 'mod+d',
+    scope: 'global',
+    description: 'Toggle mute',
+    category: 'Huddle',
+    priority: 100,
+    allowInInputs: true,
+    preventDefault: true,
+  },
+  'huddle.toggleVideo': {
+    keys: 'mod+e',
+    scope: 'global',
+    description: 'Toggle video',
+    category: 'Huddle',
+    priority: 100,
+    allowInInputs: true,
+    preventDefault: true,
   },
 
   // ===== CANVAS SHORTCUTS =====
