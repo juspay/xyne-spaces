@@ -5,6 +5,10 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { YouTubeThumbnail } from './YouTubeThumbnail';
 import type { TicketPreviewSnapshot } from '@xyne/shared';
 
+// Feature toggle: suppress the OG image card under external link previews.
+// Set to true to render scraped images again. YouTube thumbnails are unaffected.
+const SHOW_PREVIEW_IMAGES = false;
+
 export interface ExternalLinkMetadata {
   type?: 'external';
   url: string;
@@ -231,7 +235,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
 
       {/* Line 4: OG image if present */}
       {/* Skip images for Bitbucket URLs to avoid showing login page screenshots */}
-      {image && !imageError && !isBitbucketUrl(url) && (
+      {SHOW_PREVIEW_IMAGES && image && !imageError && !isBitbucketUrl(url) && (
         // Fixed 2:1 aspect ratio (OG image standard is 1200×630 ≈ 2:1).
         // Skeleton and image share the same box — no layout shift or flicker.
         <div className='relative w-full mt-1 rounded-xl overflow-hidden aspect-[2/1]'>
