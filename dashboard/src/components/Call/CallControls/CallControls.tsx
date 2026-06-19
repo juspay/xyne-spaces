@@ -111,7 +111,8 @@ export function CallControls({
   const [showShareMenu, setShowShareMenu] = useState(false);
   const reactionPickerRef = useRef<HTMLDivElement>(null);
   const shareMenuRef = useRef<HTMLDivElement>(null);
-  const { isMobile } = usePlatform();
+  const { isMobile, isMac } = usePlatform();
+  const modKey = isMac ? '⌘' : 'Ctrl';
 
   const inviteUrlQuery = useQuery({
     queryKey: ['call-invite-url', callId],
@@ -126,8 +127,9 @@ export function CallControls({
   const room = useSelector(roomActor, state => state.context.room);
   const isDrawingEnabled = useDrawStore(s => s.isDrawingEnabled);
 
-  // Keyboard shortcut for mute toggle
+  // Keyboard shortcuts: ⌘D toggles mute, ⌘E toggles video
   useShortcutById('huddle.toggleMute', onToggleMic);
+  useShortcutById('huddle.toggleVideo', onToggleCamera);
 
   // Push-to-talk functionality using spacebar
   const isPushToTalkActive = useSelector(
@@ -310,7 +312,9 @@ export function CallControls({
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title={
-                isMicEnabled ? 'Mute microphone' : 'Unmute microphone (press spacebar to speak)'
+                isMicEnabled
+                  ? `Mute microphone (${modKey}D)`
+                  : `Unmute microphone (${modKey}D, or press spacebar to speak)`
               }
               data-testid='mic-toggle-button'
               data-track-category='CALLS'
@@ -405,7 +409,9 @@ export function CallControls({
                   : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'}
+              title={
+                isCameraEnabled ? `Turn off camera (${modKey}E)` : `Turn on camera (${modKey}E)`
+              }
               data-testid='camera-toggle-button'
               data-track-category='CALLS'
               data-track-name='CAMERA_TOGGLE'
