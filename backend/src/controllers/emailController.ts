@@ -18,6 +18,8 @@ import { logger } from '@/utils/logger';
 import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma, DeskType } from '@prisma/client';
 import { db } from '@/database/client';
 import { listS2SClawAgents, getConversationInsight } from '@/services/clawAgentService';
+import { vespaClient } from '@/services/vespaSearch';
+import { mailSchema } from '@/vespa/src/types';
 import { ZohoService } from '@/services/zohoService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { GoogleService } from '@/services/googleService';
@@ -587,6 +589,81 @@ export class EmailController {
         status: error?.response?.status,
       });
       return res.status(500).json({ error: 'Failed to list desk contacts' });
+    }
+  };
+
+  listPeople = async (req: Request, res: Response) => {
+    try {
+      const { channelId } = req.params;
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+      if (channelId) {
+        const isMember = await this.channelParticipantRepo.isParticipant(channelId, userId);
+        if (!isMember) {
+          return res.status(403).json({ error: 'Not a member of this channel' });
+        }
+      }
+
+      const esc = (v: string): string => v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const cond =
+        (channelId ? `channelId contains "${esc(channelId)}" and ` : '') +
+        `entity contains "support_desk" and permissions contains "${esc(userId)}"`;
+
+      const dedupeByEmail = (
+        raws: Array<{ value: string; count: number }>,
+      ): Array<{ name: string | null; email: string; count: number }> => {
+        const byEmail = new Map<string, { name: string | null; email: string; count: number }>();
+        for (const { value, count } of raws) {
+          const m = value.match(/<([^>]+)>/);
+          const email = (m ? m[1] : value).trim().toLowerCase();
+          if (!email || !email.includes('@')) continue;
+          const name = m ? value.slice(0, value.indexOf('<')).trim() || null : null;
+          const existing = byEmail.get(email);
+          if (existing) existing.count += count;
+          else byEmail.set(email, { name, email, count });
+        }
+        return Array.from(byEmail.values()).sort((a, b) => b.count - a.count);
+      };
+
+      const grouping = (field: string): string =>
+        `all(group(${field}) order(-count()) max(500) each(output(count())))`;
+      const yql =
+        `select * from ${mailSchema} where ${cond} ` +
+        `| all(${grouping('from')} ${grouping('to')} ${grouping('cc')})`;
+      const resp = await vespaClient.search<any>({
+        yql,
+        hits: 0,
+        'ranking.profile': 'unranked',
+      });
+
+      // Bucket grouped entries by their field label (grouplist:from / :to / :cc).
+      const byField: Record<string, Array<{ value: string; count: number }>> = {};
+      const walk = (node: any): void => {
+        for (const c of node?.children ?? []) {
+          if (typeof c?.id === 'string' && c.id.startsWith('grouplist:') && c.label) {
+            const bucket = (byField[c.label] ??= []);
+            for (const g of c.children ?? []) {
+              if (g?.value != null && g?.fields?.['count()'] != null) {
+                bucket.push({ value: String(g.value), count: Number(g.fields['count()']) });
+              }
+            }
+          }
+          walk(c);
+        }
+      };
+      walk(resp?.root ?? {});
+
+      // Senders feed `from:`; recipients (to + cc, merged on dedupe) feed `to:`.
+      const senders = dedupeByEmail(byField['from'] ?? []);
+      const recipients = dedupeByEmail([...(byField['to'] ?? []), ...(byField['cc'] ?? [])]);
+
+      res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=3600');
+      return res.json({ senders, recipients });
+    } catch (error: any) {
+      logger.error('[EmailController] listPeople error:', {
+        message: error?.message,
+      });
+      return res.status(500).json({ error: 'Failed to list desk people' });
     }
   };
 

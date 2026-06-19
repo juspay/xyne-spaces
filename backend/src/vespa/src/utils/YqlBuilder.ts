@@ -87,6 +87,8 @@ export interface MeetingFilters {
 export interface MailFilters {
   userEmail?: string;
   channelId?: string[];
+  from?: string[];
+  to?: string[];
   createdBefore?: string;
   createdAfter?: string;
   createdOn?: string;
@@ -1033,6 +1035,22 @@ export class YqlBuilder {
         .map((channelId) => `channelId contains ${params.bind('channelId', channelId.trim())}`)
         .join(' or ');
       conditions.push(`(${channels})`);
+    }
+
+    const buildPeopleClause = (field: 'from' | 'to', emails: string[]): string =>
+      emails
+        .map(
+          (email) =>
+            `({defaultIndex:"${field}", grammar:"all"}userInput("${this.escapeYqlValue(email.trim())}"))`,
+        )
+        .join(' or ');
+
+    if (filters.from && filters.from.length > 0) {
+      conditions.push(`(${buildPeopleClause('from', filters.from)})`);
+    }
+
+    if (filters.to && filters.to.length > 0) {
+      conditions.push(`(${buildPeopleClause('to', filters.to)})`);
     }
 
     if (filters.createdBefore) {

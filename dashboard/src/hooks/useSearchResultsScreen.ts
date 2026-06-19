@@ -1,6 +1,8 @@
 export interface SearchResultsFilters {
   docType: 'all' | 'messages' | 'files' | 'tickets' | 'channels' | 'desk' | 'people';
   fromUserIds: string[];
+  fromEmails: string[];
+  toEmails: string[];
   inChannelIds: string[];
   assigneeIds: string[];
   sortBy: 'relevance' | 'newest' | 'oldest';
@@ -12,6 +14,8 @@ export interface SearchResultsFilters {
 export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   docType: 'messages',
   fromUserIds: [],
+  fromEmails: [],
+  toEmails: [],
   inChannelIds: [],
   assigneeIds: [],
   sortBy: 'relevance',

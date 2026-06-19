@@ -19,7 +19,7 @@ import { $createFilterChip, $removeExistingPriorityChips } from './FilterChipNod
 import { MentionType, type MentionData } from './ChannelCommandMenu.types';
 
 export type ChannelTriggerType = '#' | 'in:' | 'in:#' | 'in:@';
-export type UserTriggerType = '@' | 'from:' | 'with:' | 'assignee:' | 'in:@';
+export type UserTriggerType = '@' | 'from:' | 'to:' | 'with:' | 'assignee:' | 'in:@';
 export type PriorityTriggerType = 'priority:';
 
 // Gate the `priority:` dropdown: open only for an empty value or a prefix of a real
@@ -33,8 +33,9 @@ function priorityQueryHasMatch(query: string): boolean {
 // 'in:#' and 'in:@' are trigger modifiers; the chip prefix is just 'in:'.
 function normalizePrefix(
   trigger: string,
-): 'from:' | 'with:' | 'in:' | 'assignee:' | 'priority:' | null {
+): 'from:' | 'to:' | 'with:' | 'in:' | 'assignee:' | 'priority:' | null {
   if (trigger === 'from:') return 'from:';
+  if (trigger === 'to:') return 'to:';
   if (trigger === 'with:') return 'with:';
   if (trigger === 'assignee:') return 'assignee:';
   if (trigger === 'priority:') return 'priority:';
@@ -71,6 +72,7 @@ interface MentionPluginProps {
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
   onMentionInserted?: () => void;
+  enableToTrigger?: boolean;
 }
 
 type TriggerType = MentionType | null;
@@ -88,6 +90,7 @@ export function MentionPlugin({
   setSelectedMentionIndex,
   onInsertMentionReady,
   onMentionInserted,
+  enableToTrigger = false,
 }: MentionPluginProps) {
   const [editor] = useLexicalComposerContext();
   const [searchTerm, setSearchTerm] = useState('');
@@ -103,15 +106,17 @@ export function MentionPlugin({
     // Debounce search to avoid too many calls
     const timeoutId = setTimeout(() => {
       if (triggerType === MentionType.USER && onUserSearch) {
-        // User triggers: '@' navigates to DM; 'from:'/'assignee:'/'with:' create filter chips
+        // User triggers: '@' navigates to DM; 'from:'/'to:'/'assignee:'/'with:' create filter chips
         const userTrigger: UserTriggerType =
           triggerText.current === '@'
             ? '@'
-            : triggerText.current === 'assignee:'
-              ? 'assignee:'
-              : triggerText.current === 'with:'
-                ? 'with:'
-                : 'from:';
+            : triggerText.current === 'to:'
+              ? 'to:'
+              : triggerText.current === 'assignee:'
+                ? 'assignee:'
+                : triggerText.current === 'with:'
+                  ? 'with:'
+                  : 'from:';
         onUserSearch(searchTerm, userTrigger);
       } else if (triggerType === MentionType.CHANNEL && onChannelSearch) {
         // Channel triggers today: '#' or 'in:'. Anything else falls back to
@@ -453,8 +458,9 @@ export function MentionPlugin({
         // Look for trigger patterns before cursor
         const textBeforeCursor = textContent.substring(0, cursorOffset);
 
-        // Check for "from:", "with:", or "@" (user triggers)
+        // Check for "from:", "to:", "with:", or "@" (user triggers).
         const fromMatch = textBeforeCursor.match(/\bfrom:\s*(.*)$/i);
+        const toMatch = enableToTrigger ? textBeforeCursor.match(/\bto:\s*(.*)$/i) : null;
         const withMatch = textBeforeCursor.match(/\bwith:\s*(.*)$/i);
         const atMatch = textBeforeCursor.match(/@(\S*)$/);
 
@@ -478,6 +484,13 @@ export function MentionPlugin({
             text: 'from:',
             query: (fromMatch[1] || '').replace(/^@/, '').trim(),
             index: textBeforeCursor.lastIndexOf('from:'),
+          };
+        } else if (toMatch) {
+          trigger = {
+            type: 'user',
+            text: 'to:',
+            query: (toMatch[1] || '').replace(/^@/, '').trim(),
+            index: textBeforeCursor.lastIndexOf('to:'),
           };
         } else if (withMatch) {
           trigger = {
@@ -558,7 +571,15 @@ export function MentionPlugin({
           // Trigger search immediately when trigger is detected
           if (trigger.type === 'user' && onUserSearch) {
             const userTrigger: UserTriggerType =
-              trigger.text === '@' ? '@' : trigger.text === 'assignee:' ? 'assignee:' : 'from:';
+              trigger.text === '@'
+                ? '@'
+                : trigger.text === 'to:'
+                  ? 'to:'
+                  : trigger.text === 'assignee:'
+                    ? 'assignee:'
+                    : trigger.text === 'with:'
+                      ? 'with:'
+                      : 'from:';
             onUserSearch(trigger.query.trim(), userTrigger);
           } else if (trigger.type === 'channel' && onChannelSearch) {
             // Channel triggers: '#' or 'in:' variants
@@ -598,7 +619,7 @@ export function MentionPlugin({
         }
       });
     });
-  }, [editor, triggerType, onUserSearch, onChannelSearch, onPrioritySearch]);
+  }, [editor, triggerType, onUserSearch, onChannelSearch, onPrioritySearch, enableToTrigger]);
 
   // Don't render popup - results will be shown in main search results area
   return null;

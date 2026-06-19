@@ -56,6 +56,7 @@ interface LexicalSearchInputProps {
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
   onMentionInserted?: () => void;
+  enableToTrigger?: boolean;
   onPasteDetected?: () => void;
   onManualKeystroke?: () => void;
   autocompleteSuffix?: string;
@@ -354,6 +355,7 @@ export function LexicalSearchInput({
   availableUsers = [],
   availableChannels = [],
   availablePriorities = [],
+  enableToTrigger = false,
   className,
   open,
   mentionSearchType,
@@ -449,6 +451,7 @@ export function LexicalSearchInput({
             {...(setSelectedMentionIndex ? { setSelectedMentionIndex } : {})}
             {...(onInsertMentionReady ? { onInsertMentionReady } : {})}
             {...(onMentionInserted ? { onMentionInserted } : {})}
+            enableToTrigger={enableToTrigger}
           />
         </div>
       </LexicalComposer>

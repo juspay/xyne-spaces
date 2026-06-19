@@ -145,6 +145,8 @@ export interface VespaSearchFilters {
   query: string;
   type?: string; // 'messages' | 'attachments' | 'channels' | 'tickets' | 'users'
   from?: string; // User IDs
+  fromEmail?: string; // Desk-only: sender email address(es) for the mail `from:` filter
+  toEmail?: string; // Desk-only: recipient email address(es) for the mail `to:` filter
   with?: string; // User ID for participant filter (matches userId, threadMentions, threadSenders)
   in?: string; // Channel IDs
   offset?: number;

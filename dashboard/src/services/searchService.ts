@@ -357,6 +357,14 @@ export class SearchService {
       params['from'] = filters.from;
     }
 
+    if (filters.fromEmail) {
+      params['fromEmail'] = filters.fromEmail;
+    }
+
+    if (filters.toEmail) {
+      params['toEmail'] = filters.toEmail;
+    }
+
     if (filters.with) {
       params['withUser'] = filters.with;
     }
