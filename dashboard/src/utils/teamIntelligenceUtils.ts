@@ -147,3 +147,42 @@ export const getDateRange = (timeRange: TimeRange): { from: string; to: string }
     }
   }
 };
+
+// ── Recap summary parsing ────────────────────────────────────────────────────
+
+export interface RecapPoint {
+  text: string;
+  messageId?: string;
+  conversationId?: string;
+  citationIndex?: number;
+  entityType?: string;
+  channelId?: string;
+}
+
+export interface RecapSummary {
+  points: RecapPoint[];
+  messageCount: number;
+}
+
+/**
+ * Parses a recap summary JSON string into a structured object.
+ * Falls back to empty points on malformed JSON.
+ */
+export const parseRecapSummary = (summary: string): RecapSummary => {
+  try {
+    const parsed = JSON.parse(summary) as RecapSummary;
+    const points = Array.isArray(parsed.points)
+      ? parsed.points.filter(
+          (point): point is RecapPoint =>
+            point !== null && typeof point === 'object' && typeof point.text === 'string',
+        )
+      : [];
+
+    return {
+      points,
+      messageCount: parsed.messageCount ?? 0,
+    };
+  } catch {
+    return { points: [], messageCount: 0 };
+  }
+};
