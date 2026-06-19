@@ -186,6 +186,9 @@ export function useCachedQuery<
 
     void loadCacheEntryFromStorage(hash).then(entry => {
       if (entry?.data) {
+        const current = queryCacheActor.getSnapshot().context.cache.get(hash);
+        if (current) return;
+
         queryCacheActor.send({
           type: 'SET_KEY',
           hash,
