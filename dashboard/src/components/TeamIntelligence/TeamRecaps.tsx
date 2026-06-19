@@ -5,6 +5,7 @@ import Button from '../ui/Button';
 import { cn } from '@/utils/classNames';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { TeamIntelligenceOutletContext } from '@/routes/TeamIntelligenceScreen/TeamIntelligenceScreen';
+import { formatReportDate, parseRecapSummary } from '@/utils/teamIntelligenceUtils';
 
 export const TeamRecaps = (): ReactElement => {
   const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
@@ -85,25 +86,56 @@ export const TeamRecaps = (): ReactElement => {
 
       {/* Recaps list */}
       <div className='space-y-4'>
-        {data?.recaps.map(recap => (
-          <article key={recap.id} className='rounded-xl border border-border/50 bg-card p-5'>
-            <div className='flex items-start gap-4'>
-              <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg')}>
-                <MessageSquareIcon className={cn('h-4 w-4')} />
-              </div>
-              <div className='flex-1 space-y-1'>
-                <div className='flex items-center gap-2'>
-                  <span className='font-mono text-sm text-foreground font-semibold'>
-                    {recap.channelName}
-                  </span>
-                  <span className='text-muted-foreground'>·</span>
-                  <span className='text-xs text-muted-foreground'>{recap.recapDate}</span>
+        {data?.recaps.map(recap => {
+          const parsed = parseRecapSummary(recap.summary);
+          const hasPoints = parsed.points.length > 0;
+
+          return (
+            <article key={recap.id} className='rounded-xl border border-border/50 bg-card p-5'>
+              <div className='flex items-start gap-4'>
+                <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg')}>
+                  <MessageSquareIcon className={cn('h-4 w-4')} />
                 </div>
-                <p className='text-xs leading-relaxed text-muted-foreground'>{recap.summary}</p>
+                <div className='flex-1 space-y-2'>
+                  <div className='flex items-center gap-2 flex-wrap'>
+                    <span className='font-mono text-sm text-foreground font-semibold'>
+                      #{recap.channelName}
+                    </span>
+                    <span className='text-muted-foreground'>·</span>
+                    <span className='text-xs text-muted-foreground'>
+                      {formatReportDate(recap.recapDate)}
+                    </span>
+                  </div>
+
+                  {hasPoints ? (
+                    <ul className='space-y-2'>
+                      {parsed.points.map((point, idx) => {
+                        const fallbackCompoundKey =
+                          point.conversationId || point.citationIndex !== null
+                            ? `${point.conversationId ?? 'unknown'}-${point.citationIndex}`
+                            : undefined;
+                        const pointKey = point.messageId ?? fallbackCompoundKey ?? `point-${idx}`;
+
+                        return (
+                          <li
+                            key={pointKey}
+                            className='items-start gap-2 text-xs text-muted-foreground leading-relaxed list-disc list-inside list-item'
+                          >
+                            <span>{point.text}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className='text-xs text-muted-foreground italic'>
+                      No substantive conversations for this period.
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
 
       {/* Pagination controls */}
