@@ -63,6 +63,7 @@ type ActivityValue = Partial<
     PRActivityValue &
     ReferenceTicketActivityValue &
     SubticketActivityValue & {
+      fieldName?: string;
       reason?: string;
     }
 >;
@@ -276,6 +277,36 @@ const getActivityDescription = (
     }
 
     case ActivityType.METADATA:
+      if (value?.field === 'customField') {
+        const fieldLabel = value?.fieldName || 'custom field';
+        const oldValue = value?.oldValue;
+        const newValue = value?.newValue;
+
+        if (oldValue && newValue) {
+          return {
+            description: `updated ${fieldLabel}`,
+            details: (
+              <>
+                from <span className='font-semibold'>{oldValue}</span> to{' '}
+                <span className='font-semibold'>{newValue}</span>
+              </>
+            ),
+          };
+        }
+
+        if (newValue) {
+          return {
+            description: `set ${fieldLabel}`,
+            details: <span className='font-semibold'>{newValue}</span>,
+          };
+        }
+
+        return {
+          description: `cleared ${fieldLabel}`,
+          details: oldValue ? <span className='font-semibold'>{oldValue}</span> : '',
+        };
+      }
+
       return {
         description: 'updated metadata',
         details: '',

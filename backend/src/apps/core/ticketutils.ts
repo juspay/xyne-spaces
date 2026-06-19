@@ -3,7 +3,8 @@ import { logger } from '@/utils/logger';
 import { findOrCreateConversation } from './conversationUtils';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { DatabaseClient } from '@/database/client';
-import { MessageType, TicketPriority, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
+import { FormEntityType, MessageType, TicketPriority, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { serializeTicketMd } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { TicketActionResponse, TicketEventType } from '../types';
@@ -35,6 +36,15 @@ const CreateTicketParamsSchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.date().optional(),
   ticketType: z.string().trim().optional(),
+  customFieldValues: z.object({
+    formId: z.string().min(1, 'Form ID is required').trim(),
+    contextId: z.string().min(1, 'Context ID is required').trim(),
+    fieldValues: z.array(z.object({
+      fieldId: z.string().min(1, 'Field ID is required').trim(),
+      fieldValue: z.string(),
+      actualFieldValue: z.custom<Prisma.InputJsonValue>(() => true),
+    })),
+  }).optional(),
 });
 
 
@@ -110,6 +120,7 @@ export async function createTicketWithConversation(
       stageName,
       eta,
       ticketType,
+      customFieldValues,
     } = paramsResult.data;
 
     const prisma = DatabaseClient.getInstance();
@@ -200,6 +211,20 @@ export async function createTicketWithConversation(
          where: { conversationId: finalConversationId },
          data: { ticketId: createdTicket.id, ticket_md: ticketMd },
        });
+
+      if (customFieldValues && customFieldValues.fieldValues.length > 0) {
+        await tx.formEntityValues.createMany({
+          data: customFieldValues.fieldValues.map(fieldValue => ({
+            formId: customFieldValues.formId,
+            entityId: createdTicket.id,
+            entityType: FormEntityType.TICKET,
+            fieldId: fieldValue.fieldId,
+            contextId: customFieldValues.contextId,
+            fieldValue: fieldValue.fieldValue,
+            actualFieldValue: fieldValue.actualFieldValue,
+          })),
+        });
+      }
 
       return createdTicket;
     });

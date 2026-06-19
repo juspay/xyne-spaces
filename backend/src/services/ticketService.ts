@@ -143,7 +143,7 @@ export class TicketService {
 
   async updateTicketAssignee(ticketId: string, userId: string, assigneeId: string): Promise<void> {
     try {
-      await this.ticketRepository.updateTicketAssignee(ticketId, userId, assigneeId);
+      await this.ticketRepository.updateTicketAssignee(ticketId, assigneeId, userId);
       logger.debug(`[TicketService] Successfully updated assignee for ticket ${ticketId} to user ${assigneeId}.`);
     } catch (error) {
       logger.error(`[TicketService] Error updating ticket assignee:`, error);

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, Prisma, DeskType } from '@prisma/client';
+import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, FormContextType, FormEntityType, FormFieldType, Prisma, DeskType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -19,11 +19,14 @@ import { extractEmailAddress } from '@/utils/email';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
+import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 
 import { resolveChannelId } from '../utils/channelUtils';
 import { decodeCursor, paginateResults } from '../core/paginationUtils';
 import type { MerchantTicketListItem } from '../types';
 import { validateChannelIdsAccess } from '../middelware/channelValidation';
+import { calculateETADeadline } from '@/utils/etaCalculation';
+import { generateKeyBetween } from 'fractional-indexing';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
@@ -44,6 +47,7 @@ const CreateTicketBodySchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }).optional(),
   ticketType: z.string().trim().optional(),
+  dynamicFields: z.record(z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName,
   { message: 'Either channelId or channelName is required', path: ['channelId'] }
@@ -57,16 +61,21 @@ const UpdateTicketBodySchema = z.object({
   channelId: z.string().trim().optional(),
   channelName: z.string().trim().optional(),
   conversationId: z.string().trim().optional(),
-  assigneeId: z.string().trim().optional(),
+  assigneeId: z.string().trim().nullable().optional(),
   assignedToEmail: z.string().email('Invalid email format').trim().optional(),
   stageName: z.string().trim().optional(),
   statusV2: z.nativeEnum(TicketStatusV2).optional(),
-  groupId: z.string().trim().optional(),
+  groupId: z.string().trim().nullable().optional(),
+  assignedUserGroupAlias: z.string().trim().optional(),
   title: z.string().min(1, 'Title cannot be empty').trim().optional(),
   description: z.string().min(1, 'Description cannot be empty').trim().optional(),
   priority: z.nativeEnum(TicketPriority).optional(),
-  eta: z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }).optional(),
+  eta: z.union([z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }), z.null()]).optional(),
   ticketType: z.string().trim().optional(),
+  boardId: z.string().min(1, 'Board ID cannot be empty').trim().optional(),
+  isArchived: z.boolean().optional(),
+  tags: z.array(z.string().trim().min(1, 'Tags cannot be empty')).optional(),
+  dynamicFields: z.record(z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
@@ -74,15 +83,19 @@ const UpdateTicketBodySchema = z.object({
   data => !!(
     data.assigneeId || data.assignedToEmail || data.stageName || data.groupId ||
     data.title || data.description || data.priority || data.eta ||
-    data.ticketType || data.statusV2
+    data.ticketType || data.statusV2 || data.boardId || data.assignedUserGroupAlias ||
+    data.isArchived !== undefined || data.tags || data.dynamicFields
   ),
   { message: 'At least one field to update is required', path: ['assigneeId'] }
 ).refine(
   data => !(data.assigneeId && data.assignedToEmail),
   { message: 'Provide either assigneeId or assignedToEmail, not both', path: ['assigneeId'] }
 ).refine(
-  data => !data.eta || new Date(data.eta) > new Date(),
+  data => !data.eta || data.eta === null || new Date(data.eta) > new Date(),
   { message: 'ETA must be a future date', path: ['eta'] }
+).refine(
+  data => !(data.boardId && data.stageName),
+  { message: 'boardId and stageName cannot be updated in the same request', path: ['boardId'] }
 );
 
 const CreateEmailTicketBodySchema = z.object({
@@ -137,6 +150,438 @@ interface MerchantTicketsListCursor {
   id: string;
   createdAt: number;
 }
+type CustomFieldWritePayload = {
+  formId: string;
+  contextId: string;
+  fieldValues: Array<{
+    fieldName: string;
+    fieldId: string;
+    fieldValue: string;
+    actualFieldValue: Prisma.InputJsonValue;
+  }>;
+};
+
+const parseFieldOptions = (fieldEnum: Prisma.JsonValue | null): string[] => {
+  if (!Array.isArray(fieldEnum)) return [];
+  return fieldEnum
+    .filter((value): value is string => typeof value === 'string')
+    .map(value => value.trim())
+    .filter(Boolean);
+};
+
+const normalizeCustomFieldValue = (
+  field: {
+    fieldName: string;
+    fieldType: FormFieldType;
+    fieldEnum: Prisma.JsonValue | null;
+  },
+  rawValue: unknown,
+): { actualFieldValue: Prisma.InputJsonValue; fieldValue: string } => {
+  switch (field.fieldType) {
+    case FormFieldType.STRING: {
+      if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+        throw new Error(`Field "${field.fieldName}" must be a non-empty string`);
+      }
+
+      const value = rawValue.trim();
+      return { actualFieldValue: value, fieldValue: value };
+    }
+
+    case FormFieldType.USER: {
+      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+      const normalizedValues = values
+        .filter((value): value is string => typeof value === 'string')
+        .map(value => value.trim())
+        .filter(Boolean);
+
+      if (normalizedValues.length === 0) {
+        throw new Error(`Field "${field.fieldName}" must be a non-empty string or array of strings`);
+      }
+
+      if (normalizedValues.length === 1) {
+        return { actualFieldValue: normalizedValues[0], fieldValue: normalizedValues[0] };
+      }
+
+      const dedupedValues = Array.from(new Set(normalizedValues));
+      return { actualFieldValue: dedupedValues, fieldValue: dedupedValues.join(',') };
+    }
+
+    case FormFieldType.NUMBER: {
+      const numericValue =
+        typeof rawValue === 'number'
+          ? rawValue
+          : typeof rawValue === 'string' && rawValue.trim().length > 0
+            ? Number(rawValue)
+            : Number.NaN;
+
+      if (!Number.isFinite(numericValue)) {
+        throw new Error(`Field "${field.fieldName}" must be a valid number`);
+      }
+
+      return { actualFieldValue: numericValue, fieldValue: String(numericValue) };
+    }
+
+    case FormFieldType.BOOLEAN: {
+      if (typeof rawValue === 'boolean') {
+        return { actualFieldValue: rawValue, fieldValue: String(rawValue) };
+      }
+
+      if (typeof rawValue === 'string') {
+        const normalized = rawValue.trim().toLowerCase();
+        if (normalized === 'true' || normalized === 'false') {
+          const boolValue = normalized === 'true';
+          return { actualFieldValue: boolValue, fieldValue: String(boolValue) };
+        }
+      }
+
+      throw new Error(`Field "${field.fieldName}" must be a boolean`);
+    }
+
+    case FormFieldType.DATE: {
+      const dateValue =
+        rawValue instanceof Date
+          ? rawValue
+          : typeof rawValue === 'string' || typeof rawValue === 'number'
+            ? new Date(rawValue)
+            : null;
+
+      if (!dateValue || Number.isNaN(dateValue.getTime())) {
+        throw new Error(`Field "${field.fieldName}" must be a valid date`);
+      }
+
+      const isoValue = dateValue.toISOString();
+      return { actualFieldValue: isoValue, fieldValue: isoValue };
+    }
+
+    case FormFieldType.SINGLE_SELECT: {
+      if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+        throw new Error(`Field "${field.fieldName}" must be a non-empty string`);
+      }
+
+      const value = rawValue.trim();
+      const options = parseFieldOptions(field.fieldEnum);
+      if (options.length > 0 && !options.includes(value)) {
+        throw new Error(`Field "${field.fieldName}" must be one of: ${options.join(', ')}`);
+      }
+
+      return { actualFieldValue: value, fieldValue: value };
+    }
+
+    case FormFieldType.MULTI_SELECT: {
+      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+      const normalizedValues = values
+        .filter((value): value is string => typeof value === 'string')
+        .map(value => value.trim())
+        .filter(Boolean);
+
+      if (normalizedValues.length === 0) {
+        throw new Error(`Field "${field.fieldName}" must be a non-empty array of strings`);
+      }
+
+      const options = parseFieldOptions(field.fieldEnum);
+      if (options.length > 0) {
+        const invalidValues = normalizedValues.filter(value => !options.includes(value));
+        if (invalidValues.length > 0) {
+          throw new Error(
+            `Field "${field.fieldName}" has invalid values: ${invalidValues.join(', ')}. Allowed values: ${options.join(', ')}`,
+          );
+        }
+      }
+
+      const dedupedValues = Array.from(new Set(normalizedValues));
+      return { actualFieldValue: dedupedValues, fieldValue: dedupedValues.join(',') };
+    }
+
+    default:
+      throw new Error(`Unsupported field type for "${field.fieldName}"`);
+  }
+};
+
+const buildCustomFieldWritePayload = async (
+  boardId: string,
+  dynamicFields: Record<string, unknown> | undefined,
+  options?: { requireAllRequiredFields?: boolean },
+): Promise<CustomFieldWritePayload | undefined> => {
+  const normalizedInput = dynamicFields ?? {};
+  const requireAllRequiredFields = options?.requireAllRequiredFields ?? true;
+  const formMapping = await prismaClient.formContextMapping.findFirst({
+    where: {
+      contextId: boardId,
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    },
+    select: { formId: true },
+  });
+
+  if (!formMapping) {
+    if (Object.keys(normalizedInput).length > 0) {
+      throw new Error(`No form configured for board ${boardId}`);
+    }
+    return undefined;
+  }
+
+  const formFields = await prismaClient.formFields.findMany({
+    where: { formId: formMapping.formId },
+    select: {
+      id: true,
+      fieldName: true,
+      fieldType: true,
+      fieldEnum: true,
+      isOptional: true,
+    },
+  });
+
+  const fieldByName = new Map(formFields.map(field => [field.fieldName, field]));
+  const unknownFields = Object.keys(normalizedInput).filter(fieldName => !fieldByName.has(fieldName));
+  if (unknownFields.length > 0) {
+    throw new Error(`Unknown custom fields for board ${boardId}: ${unknownFields.join(', ')}`);
+  }
+
+  if (requireAllRequiredFields) {
+    const requiredFields = formFields
+      .filter(field => !field.isOptional)
+      .map(field => field.fieldName)
+      .filter(fieldName => normalizedInput[fieldName] === undefined || normalizedInput[fieldName] === null);
+
+    if (requiredFields.length > 0) {
+      throw new Error(`Missing required custom fields: ${requiredFields.join(', ')}`);
+    }
+  }
+
+  const fieldValues = Object.entries(normalizedInput).map(([fieldName, rawValue]) => {
+    const field = fieldByName.get(fieldName);
+    if (!field) {
+      throw new Error(`Unknown custom field: ${fieldName}`);
+    }
+
+    const normalized = normalizeCustomFieldValue(field, rawValue);
+    return {
+      fieldName,
+      fieldId: field.id,
+      fieldValue: normalized.fieldValue,
+      actualFieldValue: normalized.actualFieldValue,
+    };
+  });
+
+  return {
+    formId: formMapping.formId,
+    contextId: boardId,
+    fieldValues,
+  };
+};
+
+const syncCustomFieldValues = async (
+  ticketId: string,
+  customFieldValues: CustomFieldWritePayload,
+  updatedBy: string,
+): Promise<void> => {
+  const latestValue = await prismaClient.formEntityValues.findFirst({
+    where: {
+      entityId: ticketId,
+      entityType: FormEntityType.TICKET,
+      contextId: customFieldValues.contextId,
+    },
+    orderBy: { version: 'desc' },
+    select: { version: true },
+  });
+  const currentVersion = latestValue?.version ?? 1;
+  const existingValues = await prismaClient.formEntityValues.findMany({
+    where: {
+      entityId: ticketId,
+      entityType: FormEntityType.TICKET,
+      contextId: customFieldValues.contextId,
+      version: currentVersion,
+      fieldId: { in: customFieldValues.fieldValues.map(fieldValue => fieldValue.fieldId) },
+    },
+    select: {
+      fieldId: true,
+      fieldValue: true,
+      actualFieldValue: true,
+    },
+  });
+  const existingValueByFieldId = new Map(existingValues.map(value => [value.fieldId, value]));
+
+  await Promise.all(
+    customFieldValues.fieldValues.map(async fieldValue => {
+      const existingValue = existingValueByFieldId.get(fieldValue.fieldId);
+      await prismaClient.formEntityValues.upsert({
+        where: {
+          entityId_entityType_fieldId_contextId_version: {
+            entityId: ticketId,
+            entityType: FormEntityType.TICKET,
+            fieldId: fieldValue.fieldId,
+            contextId: customFieldValues.contextId,
+            version: currentVersion,
+          },
+        },
+        create: {
+          entityId: ticketId,
+          entityType: FormEntityType.TICKET,
+          formId: customFieldValues.formId,
+          fieldId: fieldValue.fieldId,
+          contextId: customFieldValues.contextId,
+          version: currentVersion,
+          fieldValue: fieldValue.fieldValue,
+          actualFieldValue: fieldValue.actualFieldValue,
+        },
+        update: {
+          fieldValue: fieldValue.fieldValue,
+          actualFieldValue: fieldValue.actualFieldValue,
+          updatedAt: new Date(),
+        },
+      });
+
+      await createTicketCustomFieldActivity({
+        ticketId,
+        fieldName: fieldValue.fieldName,
+        oldValue: existingValue?.actualFieldValue ?? existingValue?.fieldValue,
+        newValue: fieldValue.actualFieldValue,
+        updatedBy,
+      });
+    }),
+  );
+};
+
+const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void> => {
+  const normalizedTags = Array.from(new Set(tags.map(tag => tag.trim()).filter(Boolean)));
+  const ticket = await prismaClient.ticket.findUnique({
+    where: { id: ticketId },
+    select: { projectId: true },
+  });
+
+  const existingMappings = await prismaClient.ticketTagMapping.findMany({
+    where: { ticketId },
+    select: { tagName: true },
+  });
+
+  const existingTagNames = new Set(existingMappings.map(tag => tag.tagName));
+  const tagsToAdd = normalizedTags.filter(tag => !existingTagNames.has(tag));
+  const tagsToRemove = existingMappings
+    .map(tag => tag.tagName)
+    .filter(tagName => !normalizedTags.includes(tagName));
+
+  if (tagsToAdd.length > 0) {
+    if (ticket?.projectId) {
+      await prismaClient.projectTag.createMany({
+        data: tagsToAdd.map(name => ({ name, projectId: ticket.projectId! })),
+        skipDuplicates: true,
+      });
+
+      const projectTags = await prismaClient.projectTag.findMany({
+        where: {
+          projectId: ticket.projectId,
+          name: { in: tagsToAdd },
+        },
+        select: { id: true, name: true },
+      });
+      const tagIdByName = new Map(projectTags.map(tag => [tag.name, tag.id]));
+
+      await prismaClient.ticketTagMapping.createMany({
+        data: tagsToAdd
+          .map(name => {
+            const tagId = tagIdByName.get(name);
+            if (!tagId) return null;
+            return { ticketId, tagId, tagName: name };
+          })
+          .filter((value): value is { ticketId: string; tagId: string; tagName: string } => value !== null),
+        skipDuplicates: true,
+      });
+    }
+
+    // Mirror to legacy table while downstream consumers are still being migrated.
+    await prismaClient.ticketTag.createMany({
+      data: tagsToAdd.map(name => ({ ticketId, name })),
+      skipDuplicates: true,
+    });
+  }
+
+  if (tagsToRemove.length > 0) {
+    await prismaClient.ticketTagMapping.deleteMany({
+      where: {
+        ticketId,
+        tagName: { in: tagsToRemove },
+      },
+    });
+
+    await prismaClient.ticketTag.deleteMany({
+      where: {
+        ticketId,
+        name: { in: tagsToRemove },
+      },
+    });
+  }
+};
+
+const transferTicketToBoard = async (params: {
+  ticketId: string;
+  targetBoardId: string;
+  updatedBy: string;
+}): Promise<void> => {
+  const { ticketId, targetBoardId, updatedBy } = params;
+  const now = new Date();
+
+  await prismaClient.$transaction(async tx => {
+    const newBoardStages = await tx.stage.findMany({
+      where: { boardId: targetBoardId },
+      orderBy: { sequenceNumber: 'asc' },
+    });
+
+    if (newBoardStages.length === 0) {
+      throw new Error(`No stages found for board ${targetBoardId}`);
+    }
+
+    const firstStage = newBoardStages[0];
+    const totalEtaHours = newBoardStages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
+    const ticketEta = totalEtaHours > 0 ? calculateETADeadline(now, totalEtaHours) : null;
+
+    const firstTicketInStage = await tx.ticket.findFirst({
+      where: {
+        boardId: targetBoardId,
+        stageName: firstStage.name,
+        kanbanPosition: { not: null },
+      },
+      orderBy: { kanbanPosition: 'asc' },
+      select: { kanbanPosition: true },
+    });
+
+    let kanbanPosition: string;
+    try {
+      kanbanPosition = generateKeyBetween(null, firstTicketInStage?.kanbanPosition ?? null);
+    } catch {
+      kanbanPosition = generateKeyBetween(null, null);
+    }
+
+    const updatedTicket = await tx.ticket.update({
+      where: { id: ticketId },
+      data: {
+        boardId: targetBoardId,
+        stageName: firstStage.name,
+        statusV2: firstStage.defaultTicketStatusV2 ?? undefined,
+        eta: ticketEta,
+        kanbanPosition,
+        updatedAt: now,
+        updatedBy,
+      },
+    });
+
+    await tx.ticketStageEta.deleteMany({ where: { ticketId } });
+
+    if (firstStage.eta !== null && firstStage.eta > 0) {
+      await tx.ticketStageEta.create({
+        data: {
+          ticketId,
+          stageId: firstStage.id,
+          stageEnteredAt: now,
+          stageLeftAt: null,
+          stageEta: calculateETADeadline(now, firstStage.eta),
+          updatedBy,
+        },
+      });
+    }
+
+    await syncConversationTicketMdFromPrismaTicket(tx, updatedTicket);
+  });
+};
 
 export class TicketController {
 
@@ -186,6 +631,7 @@ export class TicketController {
         stageName: requestedStageName,
         eta: etaString,
         ticketType,
+        dynamicFields,
       } = bodyResult.data;
 
       const userId = req.user!.id;
@@ -232,6 +678,17 @@ export class TicketController {
           });
           return;
         }
+      }
+
+      let customFieldValues: CustomFieldWritePayload | undefined;
+      try {
+        customFieldValues = await buildCustomFieldWritePayload(boardId, dynamicFields);
+      } catch (error) {
+        res.status(400).json({
+          error: error instanceof Error ? error.message : 'Invalid custom field values',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
       }
 
       // Resolve channelId from channelName if not provided
@@ -318,6 +775,7 @@ export class TicketController {
         stageName: resolvedStageName,
         eta: etaDate,
         ticketType,
+        customFieldValues,
       });
 
       // Check for duplicate tickets and persist references
@@ -417,6 +875,7 @@ export class TicketController {
         ticketId,
         assigneeId,
         assignedToEmail,
+        assignedUserGroupAlias,
         stageName,
         groupId,
         title,
@@ -425,19 +884,33 @@ export class TicketController {
         eta: etaString,
         ticketType,
         statusV2,
+        boardId,
+        isArchived,
+        tags,
+        dynamicFields,
       } = bodyResult.data;
 
       const userId = req.user!.id;
 
       logger.info(`[TicketController] Updating ticket: ${ticketId}`, {
-        userId, assigneeId, assignedToEmail, stageName, groupId,
+        userId, assigneeId, assignedToEmail, assignedUserGroupAlias, stageName, groupId, boardId,
         title: !!title, description: !!description, priority, eta: etaString, ticketType, statusV2,
+        isArchived, tagsCount: tags?.length, dynamicFieldsCount: dynamicFields ? Object.keys(dynamicFields).length : 0,
       });
 
       // Fetch the ticket to validate it exists and get board/project context
       const ticket = await prismaClient.ticket.findUnique({
         where: { id: ticketId },
-        select: { id: true, boardId: true, projectId: true, workspaceId: true, conversationId: true },
+        select: {
+          id: true,
+          boardId: true,
+          projectId: true,
+          workspaceId: true,
+          conversationId: true,
+          statusV2: true,
+          userGroupId: true,
+          assignedTo: true,
+        },
       });
       if (!ticket) {
         res.status(404).json({
@@ -447,15 +920,35 @@ export class TicketController {
         return;
       }
 
-      // --- Validate stageName exists on the ticket's board ---
+      const targetBoardId = boardId ?? ticket.boardId;
+
+      if (boardId) {
+        const board = await repositories.boards.findById(boardId);
+        if (!board) {
+          res.status(404).json({
+            error: `Board with ID ${boardId} not found`,
+            code: 'BOARD_NOT_FOUND',
+          });
+          return;
+        }
+        if (board.projectId !== ticket.projectId) {
+          res.status(400).json({
+            error: 'Board does not belong to the ticket project',
+            code: 'BOARD_PROJECT_MISMATCH',
+          });
+          return;
+        }
+      }
+
+      // --- Validate stageName exists on the target board ---
       if (stageName) {
         const stage = await prismaClient.stage.findFirst({
-          where: { boardId: ticket.boardId, name: stageName },
+          where: { boardId: targetBoardId, name: stageName },
           select: { name: true, defaultTicketStatusV2: true },
         });
         if (!stage) {
           res.status(400).json({
-            error: `Stage "${stageName}" does not exist on board ${ticket.boardId}`,
+            error: `Stage "${stageName}" does not exist on board ${targetBoardId}`,
             code: 'STAGE_NOT_FOUND',
           });
           return;
@@ -476,7 +969,7 @@ export class TicketController {
       }
 
       // --- Resolve assignedToEmail to a userId ---
-      let resolvedAssigneeId: string | undefined = assigneeId;
+      let resolvedAssigneeId: string | null | undefined = assigneeId;
       if (assignedToEmail) {
         const user = await repositories.users.findByEmail(assignedToEmail, req.user!.workspaceId!);
         if (!user) {
@@ -489,11 +982,64 @@ export class TicketController {
         resolvedAssigneeId = user.id;
       }
 
+      // --- Resolve assignedUserGroupAlias to groupId ---
+      let resolvedGroupId: string | null | undefined = groupId;
+      if (assignedUserGroupAlias) {
+        const userGroup = await repositories.userGroups.findByAlias(
+          assignedUserGroupAlias,
+          req.user!.workspaceId!,
+        );
+        if (!userGroup) {
+          res.status(404).json({
+            error: `User group with alias ${assignedUserGroupAlias} not found`,
+            code: 'USER_GROUP_NOT_FOUND',
+          });
+          return;
+        }
+        resolvedGroupId = userGroup.id;
+      }
+
+      let customFieldValues: CustomFieldWritePayload | undefined;
+      try {
+        customFieldValues = await buildCustomFieldWritePayload(targetBoardId, dynamicFields, {
+          requireAllRequiredFields: false,
+        });
+      } catch (error) {
+        res.status(400).json({
+          error: error instanceof Error ? error.message : 'Invalid custom field values',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      if (isArchived === true) {
+        const finalStatus = statusV2 ?? ticket.statusV2;
+        if (finalStatus !== TicketStatusV2.COMPLETED && finalStatus !== TicketStatusV2.CANCELLED) {
+          res.status(400).json({
+            error: 'Ticket must be in Completed or Cancelled status to be archived',
+            code: 'INVALID_ARCHIVE_STATE',
+          });
+          return;
+        }
+      }
+
       // --- Execute updates ---
+      if (boardId && boardId !== ticket.boardId) {
+        await transferTicketToBoard({
+          ticketId,
+          targetBoardId: boardId,
+          updatedBy: userId,
+        });
+        logger.info(`[TicketController] Ticket board updated: ${ticketId}`, { boardId });
+      }
 
       // Assignee
-      if (resolvedAssigneeId) {
-        await ticketService.updateTicketAssignee(ticketId, userId, resolvedAssigneeId);
+      if (resolvedAssigneeId !== undefined) {
+        if (resolvedAssigneeId === null || resolvedAssigneeId === '') {
+          await repositories.tickets.updateTicketAssignee(ticketId, null, userId);
+        } else {
+          await ticketService.updateTicketAssignee(ticketId, userId, resolvedAssigneeId);
+        }
         logger.info(`[TicketController] Ticket assignee updated: ${ticketId}`);
       }
 
@@ -504,29 +1050,94 @@ export class TicketController {
       }
 
       // User group
-      if (groupId) {
-        await ticketService.asignUserGroupToTicket(ticketId, userId, groupId);
-        logger.info(`[TicketController] User group assigned: ${ticketId}`);
+      if (resolvedGroupId !== undefined) {
+        if (resolvedGroupId === null || resolvedGroupId === '') {
+          const updatedTicket = await prismaClient.ticket.update({
+            where: { id: ticketId },
+            data: { userGroupId: null, updatedBy: userId, updatedAt: new Date() },
+          });
+          await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+        } else {
+          await ticketService.asignUserGroupToTicket(ticketId, userId, resolvedGroupId);
+        }
+        logger.info(`[TicketController] User group updated: ${ticketId}`);
       }
 
-      // Direct field updates: title, description, priority, eta, ticketType, statusV2
-      const directUpdates: Record<string, unknown> = {};
+      // Direct field updates: title, description, priority, eta, ticketType, statusV2, isArchived
+      const directUpdates: Parameters<typeof repositories.tickets.updateTicketFields>[1] = {};
       if (title !== undefined) directUpdates.title = title;
       if (description !== undefined) directUpdates.description = description;
       if (priority !== undefined) directUpdates.priority = priority;
-      if (etaDate !== undefined) directUpdates.eta = etaDate;
+      if (etaString === null) directUpdates.eta = null;
+      else if (etaDate !== undefined) directUpdates.eta = etaDate;
       if (ticketType !== undefined) directUpdates.ticketType = ticketType;
       if (statusV2 !== undefined) directUpdates.statusV2 = statusV2;
+      if (isArchived !== undefined) directUpdates.isArchived = isArchived;
 
       if (Object.keys(directUpdates).length > 0) {
-        directUpdates.updatedBy = userId;
-        directUpdates.updatedAt = new Date();
-        const updatedTicket = await prismaClient.ticket.update({
-          where: { id: ticketId },
-          data: directUpdates as Parameters<typeof prismaClient.ticket.update>[0]['data'],
-        });
-        await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+        await repositories.tickets.updateTicketFields(ticketId, directUpdates, userId);
         logger.info(`[TicketController] Ticket direct fields updated: ${ticketId}`, { fields: Object.keys(directUpdates) });
+      }
+
+      if (tags !== undefined) {
+        await replaceTicketTags(ticketId, tags);
+        logger.info(`[TicketController] Ticket tags replaced: ${ticketId}`, { tagsCount: tags.length });
+      }
+
+      if (customFieldValues && customFieldValues.fieldValues.length > 0) {
+        await syncCustomFieldValues(ticketId, customFieldValues, userId);
+        logger.info(`[TicketController] Ticket custom fields updated: ${ticketId}`, {
+          fields: customFieldValues.fieldValues.length,
+        });
+      }
+
+      const effectiveGroupId =
+        resolvedGroupId !== undefined
+          ? resolvedGroupId === '' ? null : resolvedGroupId
+          : ticket.userGroupId;
+      const shouldAutoAssign =
+        !resolvedAssigneeId &&
+        effectiveGroupId &&
+        ((boardId && boardId !== ticket.boardId) || resolvedGroupId !== undefined);
+
+      if (shouldAutoAssign) {
+        try {
+          const boardRow = await prismaClient.board.findUnique({
+            where: { id: targetBoardId },
+            select: { metadata: true },
+          });
+          const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
+
+          if (boardMetadata?.fullRoleAssignment === true) {
+            const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+              ticketId,
+              userGroupId: effectiveGroupId,
+              boardId: targetBoardId,
+              createdBy: userId,
+              projectId: ticket.projectId,
+            });
+            if (fullRoles.member) {
+              const updatedTicket = await prismaClient.ticket.update({
+                where: { id: ticketId },
+                data: { assignedTo: fullRoles.member, updatedBy: userId, updatedAt: new Date() },
+              });
+              await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+            }
+          } else {
+            const assignmentResult = await evaluateAssignmentRule(
+              effectiveGroupId,
+              targetBoardId,
+              undefined,
+              undefined,
+              ticket.projectId,
+            );
+            if (assignmentResult.assignedUserId) {
+              await ticketService.updateTicketAssignee(ticketId, userId, assignmentResult.assignedUserId);
+            }
+          }
+        } catch (error) {
+          logger.error('[TicketController] Error during auto-assignment after ticket update:', error);
+        }
       }
 
       res.status(200).json({ success: true });
@@ -661,7 +1272,22 @@ export class TicketController {
         return;
       }
 
-      res.status(200).json(ticket);
+      const parsedHistoryLimit = Number(req.query.historyLimit);
+      const historyLimit =
+        Number.isFinite(parsedHistoryLimit) && parsedHistoryLimit > 0
+          ? Math.min(Math.floor(parsedHistoryLimit), 200)
+          : 100;
+
+      const [customFormData, history] = await Promise.all([
+        repositories.forms.getTicketCustomFormData(ticket.id, ticket.boardId),
+        repositories.tickets.getTicketHistory(ticket.id, historyLimit),
+      ]);
+
+      res.status(200).json({
+        ...ticket,
+        customFormData,
+        history,
+      });
     } catch (error) {
       logger.error('[TicketController] Error fetching ticket info:', error);
       res.status(500).json({
