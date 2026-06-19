@@ -24,6 +24,7 @@ export const ScheduleCallSchema = z.object({
   endsAt: z.number(),
   channelId: z.string().optional(),
   targetUserIds: z.array(z.string()).optional(),
+  selectiveParticipants: z.boolean().optional(), // true = targetUserIds is a hand-picked subset from channelId; do NOT create GROUP_DM
   conversationId: z.string().optional(), // Optional: for thread-initiated scheduled calls
   externalInvitees: z.array(z.string().email()).optional(),
   invitation: z.object({
@@ -71,6 +72,7 @@ export const RecurringScheduleCallSchema = z
     description: z.string().max(1000).optional(),
     channelId: z.string().optional(),
     targetUserIds: z.array(z.string()).optional(),
+    selectiveParticipants: z.boolean().optional(), // true = targetUserIds is a hand-picked subset from channelId; do NOT create GROUP_DM
     timezone: z.string().min(1, 'Timezone is required'),
     recurrenceRule: z
       .string()
@@ -118,6 +120,7 @@ export const UpdateScheduleCallSchema = z
     endsAt: z.number().optional(),
     targetUserIds: z.array(z.string()).optional(),
     channelId: z.string().optional(),
+    selectiveParticipants: z.boolean().optional(), // true = only update participants on existing channel, do NOT create GROUP_DM
   })
   .refine(
     (data) => !data.startsAt || !data.endsAt || data.startsAt < data.endsAt,
@@ -147,6 +150,7 @@ export const UpdateRecurringSeriesSchema = z
     timezone: z.string().optional(),
     targetUserIds: z.array(z.string()).optional(),
     channelId: z.string().optional(),
+    selectiveParticipants: z.boolean().optional(), // true = only update participants on existing channel, do NOT create GROUP_DM
   })
   .refine(
     (data) => !data.startTime || !data.endTime || data.startTime !== data.endTime,

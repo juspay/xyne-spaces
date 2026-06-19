@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 import Input from '../../components/ui/Input';
-import { Check, Search, X } from 'lucide-react';
+import { Check, Search, X, ChevronUp, ChevronRight } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
 import { cn } from '../../utils/classNames';
 
@@ -18,6 +18,13 @@ interface SearchParticipantsProps {
   ref?: React.RefObject<HTMLInputElement | null>;
   onEnterQuerySubmit?: (query: string) => boolean;
   helperText?: React.ReactNode;
+  channelMembersOptions?: ParticipantOptions[];
+  excludedChannelMembers?: Set<string>;
+  toggleExcludedChannelMember?: (
+    userId: string,
+    isSelectAll?: boolean,
+    allUserIds?: string[],
+  ) => void;
 }
 
 export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
@@ -29,12 +36,16 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   ref,
   onEnterQuerySubmit,
   helperText,
+  channelMembersOptions,
+  excludedChannelMembers,
+  toggleExcludedChannelMember,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
     new Map(),
   );
   const [isOpen, setIsOpen] = useState(false);
   const [index, setIndex] = useState(0);
+  const [participantSearchQuery, setParticipantSearchQuery] = useState('');
 
   const internalRef = useRef<HTMLInputElement | null>(null);
   const inputRef = ref ?? internalRef;
@@ -244,38 +255,104 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     const selectedGroupOrChannel = selectedOptions.find(opt => opt.value.startsWith('channel:'));
 
     if (selectedGroupOrChannel) {
+      const allSelected = excludedChannelMembers && excludedChannelMembers.size === 0;
+      const someSelected =
+        excludedChannelMembers &&
+        channelMembersOptions &&
+        excludedChannelMembers.size > 0 &&
+        excludedChannelMembers.size < channelMembersOptions.length;
+
       return (
-        <div className='flex items-center gap-3'>
-          <div className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'>
-            {selectedGroupOrChannel.icon && <span>{selectedGroupOrChannel.icon}</span>}
-            <span className='truncate max-w-48 text-foreground'>
-              {selectedGroupOrChannel.label}
-            </span>
+        <div
+          className={cn(
+            'flex items-center justify-between transition-all duration-200',
+            isOpen
+              ? 'w-full h-10 px-2 border border-border rounded-lg bg-background'
+              : 'w-auto inline-flex items-center gap-3',
+          )}
+        >
+          <div
+            className={cn(
+              'flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border',
+              isOpen && 'flex-1',
+            )}
+          >
+            {selectedGroupOrChannel.icon && (
+              <span className='shrink-0'>{selectedGroupOrChannel.icon}</span>
+            )}
+            <span className='truncate text-foreground flex-1'>{selectedGroupOrChannel.label}</span>
+            {channelMembersOptions &&
+              channelMembersOptions.length > 0 &&
+              toggleExcludedChannelMember && (
+                <div className='flex items-center gap-2 mr-1 ml-auto shrink-0'>
+                  {isOpen && (
+                    <input
+                      type='checkbox'
+                      className='w-4 h-4 cursor-pointer'
+                      title='Select All'
+                      checked={!!allSelected}
+                      data-track-category='calls'
+                      data-track-name='select-all-channel-members'
+                      ref={el => {
+                        if (el) {
+                          el.indeterminate = !!someSelected;
+                        }
+                      }}
+                      onChange={e => {
+                        const isSelectAll = e.target.checked;
+                        toggleExcludedChannelMember(
+                          '',
+                          isSelectAll,
+                          channelMembersOptions.map(opt => opt.value.replace('user:', '')),
+                        );
+                      }}
+                    />
+                  )}
+                  <button
+                    type='button'
+                    data-track-category='calls'
+                    data-track-name='toggle-channel-members-expand'
+                    onClick={e => {
+                      e.stopPropagation();
+                      setIsOpen(!isOpen);
+                    }}
+                    className='hover:bg-muted rounded p-0.5 text-foreground'
+                  >
+                    {isOpen ? (
+                      <ChevronUp className='size-3' />
+                    ) : (
+                      <ChevronRight className='size-3' />
+                    )}
+                  </button>
+                </div>
+              )}
             <button
               type='button'
               onClick={e => {
                 e.stopPropagation();
                 toggleValue(selectedGroupOrChannel.value);
               }}
-              className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
+              className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground shrink-0'
               data-track-category='calls'
               data-track-name='remove-participant'
             >
               <X className='size-3' />
             </button>
           </div>
-          <button
-            type='button'
-            onClick={e => {
-              e.stopPropagation();
-              void onMultiSelect([]);
-            }}
-            className='text-xs text-muted-foreground hover:text-foreground transition-colors'
-            data-track-category='calls'
-            data-track-name='change-selection'
-          >
-            Change
-          </button>
+          {!isOpen && (
+            <button
+              type='button'
+              onClick={e => {
+                e.stopPropagation();
+                void onMultiSelect([]);
+              }}
+              className='text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0'
+              data-track-category='calls'
+              data-track-name='change-selection'
+            >
+              Change
+            </button>
+          )}
         </div>
       );
     }
@@ -330,88 +407,155 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
 
   return (
     <div className='relative'>
-      <Popover.Root
-        open={isOpen}
-        onOpenChange={open => {
-          if (open && (hasChannelSelected || isEmailLikeQuery)) return;
-          setIsOpen(open);
-        }}
-      >
-        <Popover.Trigger asChild>{renderTrigger()}</Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content
-            side='bottom'
-            align='start'
-            sideOffset={4}
-            onOpenAutoFocus={e => e.preventDefault()}
-            onWheel={e => {
-              e.stopPropagation();
-            }}
-            onTouchMove={e => {
-              e.stopPropagation();
-            }}
-            className={cn(
-              'z-[100] w-[var(--radix-popover-trigger-width)] max-h-48 overflow-y-auto no-scrollbar rounded-xl border border-border bg-background shadow-lg',
-            )}
-          >
-            {filteredOptions.length > 0 && (
-              <ul
-                ref={listRef}
-                role='listbox'
-                id='participant-listbox'
-                data-testid='participant-search-results'
-                className='p-2 space-y-1 w-full'
-              >
-                {filteredOptions.map((option, i) => {
-                  const isSelected = selectedValues.includes(option.value);
-                  const isHighlighted = i === index;
-                  return (
-                    <li
-                      key={option.value}
-                      role='option'
-                      id={`option-${option.value}`}
-                      aria-selected={isSelected}
-                    >
-                      <button
-                        type='button'
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm text-foreground hover:bg-muted',
-                          isHighlighted && 'bg-muted',
-                        )}
-                        onClick={() => toggleValue(option.value)}
-                        onMouseEnter={() => setIndex(index)}
-                        data-track-category='calls'
-                        data-track-name='select-participant-option'
-                        data-testid='participant-option'
-                      >
-                        {option.children ? (
-                          option.children
-                        ) : (
-                          <>
-                            {option.icon && <span>{option.icon}</span>}
-                            <div className='flex-1 min-w-0 text-left'>
-                              <div className='truncate text-sm text-foreground'>{option.label}</div>
-                              {option.subtitle && (
+      {hasChannelSelected ? (
+        <>
+          {renderTrigger()}
+          {isOpen &&
+            channelMembersOptions &&
+            channelMembersOptions.length > 0 &&
+            toggleExcludedChannelMember && (
+              <div className='mt-2 w-full max-h-60 overflow-y-auto rounded-xl border border-border bg-background shadow-sm'>
+                <div className='flex items-center px-3 py-2.5 border-b border-border sticky top-0 bg-background z-10'>
+                  <Search className='w-4 h-4 text-muted-foreground mr-2 shrink-0' />
+                  <input
+                    type='text'
+                    placeholder='Search participants...'
+                    value={participantSearchQuery}
+                    onChange={e => setParticipantSearchQuery(e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    onKeyDown={e => e.stopPropagation()}
+                    data-track-category='calls'
+                    data-track-name='channel-member-search'
+                    className='flex-1 bg-transparent border-none focus:outline-none text-sm text-foreground placeholder:text-muted-foreground'
+                  />
+                </div>
+                <div className='p-2'>
+                  {channelMembersOptions
+                    .filter(opt =>
+                      opt.label.toLowerCase().includes(participantSearchQuery.toLowerCase()),
+                    )
+                    .map(opt => {
+                      const userId = opt.value.replace('user:', '');
+                      const isChecked = !excludedChannelMembers?.has(userId);
+                      return (
+                        <div
+                          key={opt.value}
+                          className='flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm text-foreground hover:bg-muted'
+                        >
+                          <label className='flex items-center gap-2 flex-1 cursor-pointer min-w-0'>
+                            {opt.icon && <span className='shrink-0'>{opt.icon}</span>}
+                            <div className='flex-1 min-w-0 text-left truncate'>
+                              <div className='truncate text-sm text-foreground'>{opt.label}</div>
+                              {opt.subtitle && (
                                 <div className='truncate text-xs text-muted-foreground'>
-                                  {option.subtitle}
+                                  {opt.subtitle}
                                 </div>
                               )}
                             </div>
-                          </>
-                        )}
-                        {isSelected && <Check className='w-4 h-4 text-blue-600' />}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+                            <input
+                              type='checkbox'
+                              checked={isChecked}
+                              onChange={() => toggleExcludedChannelMember(userId)}
+                              data-track-category='calls'
+                              data-track-name='toggle-channel-member-inclusion'
+                              className='shrink-0'
+                            />
+                          </label>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
             )}
-            {filteredOptions.length === 0 && !isEmailLikeQuery && (
-              <div className='px-3 py-2 text-sm text-foreground'>No results found</div>
-            )}
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
+        </>
+      ) : (
+        <Popover.Root
+          open={isOpen}
+          onOpenChange={open => {
+            if (open && isEmailLikeQuery) return;
+            setIsOpen(open);
+          }}
+        >
+          <Popover.Trigger asChild>{renderTrigger()}</Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              side='bottom'
+              align='start'
+              sideOffset={4}
+              onOpenAutoFocus={e => e.preventDefault()}
+              onWheel={e => {
+                e.stopPropagation();
+              }}
+              onTouchMove={e => {
+                e.stopPropagation();
+              }}
+              className={cn(
+                'z-[100] w-[var(--radix-popover-trigger-width)] max-h-48 overflow-y-auto no-scrollbar rounded-xl border border-border bg-background shadow-lg',
+              )}
+            >
+              <>
+                {filteredOptions.length > 0 && (
+                  <ul
+                    ref={listRef}
+                    role='listbox'
+                    id='participant-listbox'
+                    data-testid='participant-search-results'
+                    className='p-2 space-y-1 w-full'
+                  >
+                    {filteredOptions.map((option, i) => {
+                      const isSelected = selectedValues.includes(option.value);
+                      const isHighlighted = i === index;
+                      return (
+                        <li
+                          key={option.value}
+                          role='option'
+                          id={`option-${option.value}`}
+                          aria-selected={isSelected}
+                        >
+                          <button
+                            type='button'
+                            className={cn(
+                              'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm text-foreground hover:bg-muted',
+                              isHighlighted && 'bg-muted',
+                            )}
+                            onClick={() => toggleValue(option.value)}
+                            onMouseEnter={() => setIndex(index)}
+                            data-track-category='calls'
+                            data-track-name='select-participant-option'
+                            data-testid='participant-option'
+                          >
+                            {option.children ? (
+                              option.children
+                            ) : (
+                              <>
+                                {option.icon && <span>{option.icon}</span>}
+                                <div className='flex-1 min-w-0 text-left'>
+                                  <div className='truncate text-sm text-foreground'>
+                                    {option.label}
+                                  </div>
+                                  {option.subtitle && (
+                                    <div className='truncate text-xs text-muted-foreground'>
+                                      {option.subtitle}
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                            {isSelected && <Check className='w-4 h-4 text-blue-600' />}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {filteredOptions.length === 0 && !isEmailLikeQuery && (
+                  <div className='px-3 py-2 text-sm text-foreground'>No results found</div>
+                )}
+              </>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      )}
 
       {/* Selected participants rendered below the search bar */}
       {selectedOptions.length > 0 && !hasChannelSelected && (
