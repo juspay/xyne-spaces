@@ -1041,7 +1041,7 @@ export class YqlBuilder {
       emails
         .map(
           (email) =>
-            `({defaultIndex:"${field}", grammar:"all"}userInput("${this.escapeYqlValue(email.trim())}"))`,
+            `({defaultIndex:"${field}", grammar:"all"}userInput(${params.bind(field, email.trim())}))`,
         )
         .join(' or ');
 
