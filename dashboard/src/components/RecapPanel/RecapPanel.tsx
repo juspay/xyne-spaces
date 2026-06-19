@@ -1,6 +1,6 @@
 import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import DOMPurify from 'dompurify';
-import { useNavigate, useParams, Outlet } from 'react-router-dom';
+import { Link, useNavigate, useParams, Outlet } from 'react-router-dom';
 import {
   Settings,
   Sparkles,
@@ -385,8 +385,16 @@ const RecapPanel = (): ReactElement => {
           {/* Card header: channel name + recap type toggle */}
           <div className='flex items-center justify-between mb-4'>
             <div className='flex items-center gap-2 text-foreground font-semibold text-base'>
-              <Hash size={16} className='text-muted-foreground' />
-              <span>{card.channelName}</span>
+              <Link
+                to={`/chat/dir/${card.channelId}`}
+                className='flex items-center gap-2 rounded hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
+                title={`Go to #${card.channelName}`}
+                data-track-category='RECAP_PANEL'
+                data-track-name='OPEN_CHANNEL_FROM_RECAP'
+              >
+                <Hash size={16} className='text-muted-foreground' />
+                <span>{card.channelName}</span>
+              </Link>
               {card.hasCustomRecap && (
                 <div className='flex items-center gap-0.5 ml-1 bg-muted rounded-md p-0.5'>
                   <button
