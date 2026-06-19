@@ -774,7 +774,6 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
               : 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[95vw] h-[95vh] rounded-2xl before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
           }`}
           style={{
-            transformOrigin: 'center',
             backgroundImage: backgroundImageUrl ? `url(${backgroundImageUrl})` : undefined,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
@@ -1542,12 +1541,9 @@ export const AttachmentGalleryModal: React.FC = () => {
           data-prevent-drawer='true'
           className={cn(
             'fixed z-[50] bg-black focus:outline-none data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in overflow-hidden',
-            isMobile
-              ? 'inset-0 w-screen h-screen'
-              : 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[95vw] h-[95vh] rounded-2xl',
+            isMobile ? 'inset-0 w-screen h-screen' : 'inset-0 m-auto w-[95vw] h-[95vh] rounded-2xl',
           )}
           style={{
-            transformOrigin: 'center',
             backgroundImage: backgroundImageUrl ? `url(${backgroundImageUrl})` : undefined,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
