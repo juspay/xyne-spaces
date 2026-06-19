@@ -13,7 +13,9 @@ CREATE TYPE "public"."ReenterMode" AS ENUM ('RESET', 'CONTINUE');
 CREATE TYPE "public"."ApproverType" AS ENUM ('USER', 'ROLE');
 
 -- 5. Add visit version tracking to ticket_stage_eta
-ALTER TABLE "public"."ticket_stage_eta" ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1;
+-- Nullable, no DB default: avoids a blocking rewrite/lock on the existing table in prod.
+-- Application code treats NULL as version 1 (see TicketStageEta usages).
+ALTER TABLE "public"."ticket_stage_eta" ADD COLUMN "version" INTEGER;
 CREATE INDEX "ticket_stage_eta_ticketId_stageId_version_idx" ON "public"."ticket_stage_eta"("ticketId", "stageId", "version");
 
 -- 6. Create stage_transitions table (Prisma model: StageTransition)
@@ -23,12 +25,15 @@ CREATE TABLE "public"."stage_transitions" (
     "fromStageId" TEXT,
     "toStageId" TEXT NOT NULL,
     "formId" TEXT,
-    "requiresApproval" BOOLEAN NOT NULL DEFAULT false,
-    "bypassApprovalForAutomation" BOOLEAN NOT NULL DEFAULT false,
-    "visitSlaMode" "public"."VisitSlaMode" NOT NULL DEFAULT 'STAGE_DEFAULT',
+    -- Nullable, no DB defaults: application code supplies defaults and treats NULL as
+    -- requiresApproval=false, bypassApprovalForAutomation=false,
+    -- visitSlaMode=STAGE_DEFAULT, onReenter=RESET (see StageTransition usages).
+    "requiresApproval" BOOLEAN,
+    "bypassApprovalForAutomation" BOOLEAN,
+    "visitSlaMode" "public"."VisitSlaMode",
     "fixedEtaHours" INTEGER,
-    "onReenter" "public"."ReenterMode" NOT NULL DEFAULT 'RESET',
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "onReenter" "public"."ReenterMode",
+    "createdAt" TIMESTAMP(3),
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "stage_transitions_pkey" PRIMARY KEY ("id")
@@ -43,7 +48,9 @@ CREATE INDEX "stage_transitions_toStageId_idx" ON "public"."stage_transitions"("
 -- 7. Extend stage_approvers to also hold NON_LINEAR transition approvers (Prisma model: StageApprovers)
 --    Linear boards key approvers by stageId; NON_LINEAR boards key them by transitionId.
 --    userId is set when approverType = USER; roleId is set when approverType = ROLE.
-ALTER TABLE "public"."stage_approvers" ADD COLUMN "approverType" "public"."ApproverType" NOT NULL DEFAULT 'USER';
+-- Nullable, no DB default: avoids a blocking rewrite/lock on the existing table in prod.
+-- Application code treats NULL as ApproverType.USER (see StageApprovers usages).
+ALTER TABLE "public"."stage_approvers" ADD COLUMN "approverType" "public"."ApproverType";
 ALTER TABLE "public"."stage_approvers" ADD COLUMN "transitionId" TEXT;
 ALTER TABLE "public"."stage_approvers" ADD COLUMN "roleId" TEXT;
 ALTER TABLE "public"."stage_approvers" ALTER COLUMN "stageId" DROP NOT NULL;
@@ -59,6 +66,8 @@ CREATE INDEX "stage_approvers_transitionId_idx" ON "public"."stage_approvers"("t
 ALTER TABLE "public"."stage_approvers" ADD CONSTRAINT "stage_approvers_transitionId_fkey" FOREIGN KEY ("transitionId") REFERENCES "public"."stage_transitions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- 8. Add version to form_entity_values for preserving submissions across revisits
-ALTER TABLE "public"."form_entity_values" ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1;
+-- Nullable, no DB default: avoids a blocking rewrite/lock on the existing table in prod.
+-- Application code treats NULL as version 1 (see FormEntityValues usages).
+ALTER TABLE "public"."form_entity_values" ADD COLUMN "version" INTEGER;
 DROP INDEX IF EXISTS "form_entity_values_entityId_entityType_fieldId_contextId_key";
 CREATE UNIQUE INDEX "form_entity_values_entityId_entityType_fieldId_contextId_version_key" ON "public"."form_entity_values"("entityId", "entityType", "fieldId", "contextId", "version");

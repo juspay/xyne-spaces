@@ -1526,11 +1526,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const execTransition = (
       mt: {
         formId?: string | null;
-        requiresApproval?: boolean;
+        requiresApproval?: boolean | null; // NULL treated as false in code
         transitionApprovers?: ReadonlyArray<{
           userId: string | null;
           roleId: string | null;
-          approverType: ApproverType;
+          approverType?: string | null; // NULL treated as USER in code
         }>;
       },
       _currentStageObj: { id: string; name: string },
@@ -1559,7 +1559,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       if (mt.requiresApproval) {
         const isApprover =
           mt.transitionApprovers?.some(
-            a => a.approverType === ApproverType.USER && a.userId === currentUser?.id,
+            a => (a.approverType ?? 'USER') === 'USER' && a.userId === currentUser?.id,
           ) ?? false;
         if (!isApprover) {
           // Reuse the existing record's ID for revisits (unique constraint on ticketId+stageId)
@@ -3205,7 +3205,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           t.toStageId === item.stageId &&
                           t.transitionApprovers?.some(
                             a =>
-                              a.userId === currentUser?.id && a.approverType === ApproverType.USER,
+                              a.userId === currentUser?.id &&
+                              (a.approverType ?? ApproverType.USER) === ApproverType.USER,
                           ),
                       )
                     : (stage?.approvers?.some(a => a.userId === currentUser?.id) ?? false);

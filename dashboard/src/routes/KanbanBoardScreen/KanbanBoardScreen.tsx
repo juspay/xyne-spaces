@@ -704,11 +704,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       fromStageId: t.fromStageId,
       toStageId: t.toStageId,
       formId: t.formId,
-      requiresApproval: t.requiresApproval,
+      requiresApproval: t.requiresApproval ?? false, // NULL treated as false
       approvers: (t.transitionApprovers ?? []).map(
-        (a: { userId: string | null; roleId: string | null; approverType: string }) => ({
+        (a: { userId: string | null; roleId: string | null; approverType?: string | null }) => ({
           approverId: a.userId ?? a.roleId ?? '',
-          approverType: a.approverType as 'USER' | 'ROLE',
+          // NULL approverType (legacy rows) is treated as USER.
+          approverType: (a.approverType ?? 'USER') as 'USER' | 'ROLE',
         }),
       ),
     }));

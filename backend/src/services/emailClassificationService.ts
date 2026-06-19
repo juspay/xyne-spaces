@@ -367,12 +367,14 @@ export class EmailClassificationService {
     const writableFields = formFields.filter(field => !AI_FORM_FIELD_SKIP_KEYS.has(field.fieldName));
 
     // Resolve current visit version so revisits don't overwrite prior-visit form values.
-    const latestValue = await db.formEntityValues.findFirst({
+    // Compute the max in code (NULL = version 1): the version column is nullable with no DB
+    // default, and ORDER BY version DESC would sort NULLs first in Postgres — a legacy NULL
+    // row would masquerade as the latest version.
+    const existingValues = await db.formEntityValues.findMany({
       where: { entityId: ticketId, entityType: 'TICKET', contextId: ticket.boardId },
-      orderBy: { version: 'desc' },
       select: { version: true },
     });
-    const currentVersion = latestValue?.version ?? 1;
+    const currentVersion = existingValues.reduce((max, v) => Math.max(max, v.version ?? 1), 1);
 
     for (const field of writableFields) {
       const aiValue = rawOutput[field.fieldName];

@@ -6,11 +6,11 @@ interface TransitionLike {
   fromStageId?: string | null;
   toStageId: string;
   formId?: string | null;
-  requiresApproval?: boolean;
+  requiresApproval?: boolean | null; // NULL treated as false in code
   transitionApprovers?: ReadonlyArray<{
     userId: string | null;
     roleId: string | null;
-    approverType: 'USER' | 'ROLE';
+    approverType?: string | null; // NULL treated as USER in code
   }>;
 }
 
