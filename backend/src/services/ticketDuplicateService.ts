@@ -4,6 +4,7 @@ import { DatabaseClient } from '@/database/client';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { vespaService } from '@/services/vespaSearch';
 import { TicketReferenceRelation } from '@prisma/client';
+import { RankProfile } from '@/vespa/src/types';
 import type {
   TicketDuplicateCandidate,
   TicketDuplicateCheckAnalysis,
@@ -176,6 +177,7 @@ class TicketDuplicateService {
         {
           offset: 0,
           limit,
+          rankProfile: RankProfile.duplicateDetection,
           ticket: {
             projectId: [projectId],
           },
