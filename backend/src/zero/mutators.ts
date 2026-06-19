@@ -150,7 +150,7 @@ function computeStageVisitVersion(
   }
   if (reenterMode === ReenterMode.CONTINUE) {
     const mostRecent = targetETAs
-      .filter(e => e.version === maxVersion)
+      .filter(e => (e.version ?? 1) === maxVersion)
       .sort((a, b) => b.stageEnteredAt - a.stageEnteredAt)[0];
     return { newVersion: maxVersion, existingEtaId: mostRecent?.id ?? null };
   }
@@ -206,7 +206,7 @@ async function assertCanReviewStageRequest(
         zql.stage_approvers.where('transitionId', transition.id),
       );
       approverIds = transitionApprovers
-        .filter(a => a.approverType === ApproverType.USER)
+        .filter(a => (a.approverType ?? ApproverType.USER) === ApproverType.USER)
         .map(a => a.userId)
         .filter((id): id is string => id !== null);
     }
@@ -10524,47 +10524,56 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               // duplicate to respect the UNIQUE(entityId,entityType,fieldId,contextId,version)
               // constraint. Otherwise (RESET — a brand-new version) simply re-stamp the version.
               const normalizeFormValueVersions = async () => {
-                const prevETA = targetETAs
-                  .filter(e => e.version === maxVisitIndex)
-                  .sort((a, b) => b.stageEnteredAt - a.stageEnteredAt)[0];
-                const prevLeftAt = prevETA?.stageLeftAt ?? 0;
                 const allFormValues = await tx.run(
                   zql.form_entity_values
                     .where('entityId', ticket.id)
                     .where('contextId', stage.id),
                 );
-                // Values submitted for THIS visit: a different version than newVisitIndex and
-                // updated after the previous visit was left.
+                // Identify THIS submission's values by version, not by timestamp.
+                //
+                // Every completed prior visit has an ETA, so its form values live at a version
+                // <= maxVisitIndex. The frontend creates the current submission's values at a
+                // GUESSED version (maxStageVersion + 1) before this visit's ETA exists, so the
+                // only values with no ETA backing them — version > maxVisitIndex — are the
+                // current submission's guesses. Re-stamp ONLY those to the authoritative
+                // newVisitIndex. Values at version <= maxVisitIndex are real prior visits and
+                // must never be moved or deleted — the old "updatedAt > prevLeftAt" heuristic
+                // could mis-flag them, collapsing two visits onto one version (lost submissions).
                 const staleValues = allFormValues.filter(
                   fv =>
-                    fv.version !== newVisitIndex &&
-                    (fv.updatedAt ?? fv.createdAt ?? 0) > prevLeftAt,
+                    (fv.version ?? 1) > maxVisitIndex &&
+                    (fv.version ?? 1) !== newVisitIndex,
                 );
                 for (const fv of staleValues) {
                   const existingAtTarget = allFormValues.find(
                     other =>
                       other.id !== fv.id &&
                       other.fieldId === fv.fieldId &&
-                      other.version === newVisitIndex,
+                      (other.version ?? 1) === newVisitIndex,
                   );
-                  if (existingAtTarget) {
-                    // CONTINUE: a record already occupies newVisitIndex → merge value, drop dup.
-                    await tx.mutate.form_entity_values.update({
-                      id: existingAtTarget.id,
-                      actualFieldValue: fv.actualFieldValue as any,
-                      updatedAt: now,
-                    });
-                    await tx.mutate.form_entity_values.delete({ id: fv.id });
-                  } else {
-                    await tx.mutate.form_entity_values.update({
-                      id: fv.id,
-                      version: newVisitIndex,
-                      updatedAt: now,
-                    });
-                  }
+                  // If newVisitIndex is already occupied for this field, a prior visit's
+                  // submission lives there. NEVER merge-then-delete onto it — that destroys
+                  // the earlier visit's form (the data loss seen on revisits). Leave this
+                  // value at its own distinct version; the UI groups form values by version,
+                  // so both visits render as separate forms.
+                  if (existingAtTarget) continue;
+                  await tx.mutate.form_entity_values.update({
+                    id: fv.id,
+                    version: newVisitIndex,
+                    updatedAt: now,
+                  });
                 }
               };
-              await normalizeFormValueVersions();
+              // Only re-stamp the client's guessed versions when this approval opens a
+              // genuinely NEW visit version (RESET: newVisitIndex > maxVisitIndex). On
+              // CONTINUE the visit index is unchanged, so the prior visit's values already
+              // occupy it — re-stamping there would collapse both visits onto one version
+              // (old form overwritten / lost). Form-value versions are independent of the
+              // ETA visit index (the UI never joins them), so leaving a CONTINUE submission
+              // at its own higher version is correct and keeps each submission visible.
+              if (newVisitIndex > maxVisitIndex) {
+                await normalizeFormValueVersions();
+              }
 
               await tx.mutate.tickets.update({
                 id: ticket.id,
@@ -13844,7 +13853,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               zql.stage_approvers.where('transitionId', transition.id),
             );
             const isApprover = approvers.some(
-              a => a.userId === authData.sub && a.approverType === 'USER',
+              a => a.userId === authData.sub && (a.approverType ?? 'USER') === 'USER',
             );
             if (!isApprover) {
               throw new Error('This transition requires approval');
@@ -13985,7 +13994,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   .where('fieldId', field.id)
                   .where('contextId', targetStage.id),
               );
-              const existingEntry = existing.find(e => e.version === newVisitIndex);
+              // NULL version (legacy rows predate the column) is treated as visit 1.
+              const existingEntry = existing.find(e => (e.version ?? 1) === newVisitIndex);
               if (existingEntry) {
                 await tx.mutate.form_entity_values.update({
                   id: existingEntry.id,

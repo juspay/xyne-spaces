@@ -1022,7 +1022,7 @@ export const ticketStageEtaTable = table('ticket_stage_eta')
     id: string(),
     ticketId: string(),
     stageId: string(),
-    version: number(),
+    version: number().optional(), // NULL treated as 1 in code
     stageEnteredAt: number(),
     stageLeftAt: number().optional(),
     stageEta: number(),
@@ -2100,7 +2100,7 @@ export const formEntityValuesTable = table('form_entity_values')
     formId: string(),
     fieldId: string(),
     contextId: string().optional(),
-    version: number(),
+    version: number().optional(), // NULL treated as 1 in code
     fieldValue: string(),
     actualFieldValue: json().optional(),
     createdAt: number(),
@@ -2113,7 +2113,7 @@ export const stageApproversTable = table('stage_approvers')
     id: string(),
     userId: string().optional(), // set when approverType = USER
     roleId: string().optional(), // set when approverType = ROLE
-    approverType: enumeration<ApproverType>(),
+    approverType: enumeration<ApproverType>().optional(), // NULL treated as USER in code
     stageId: string().optional(),
     transitionId: string().optional(),
     createdAt: number(),
@@ -2128,12 +2128,12 @@ export const stageTransitionTable = table('stage_transitions') // Prisma: StageT
     fromStageId: string().optional(),
     toStageId: string(),
     formId: string().optional(),
-    requiresApproval: boolean(),
-    bypassApprovalForAutomation: boolean(),
-    visitSlaMode: enumeration<VisitSlaMode>(),
+    requiresApproval: boolean().optional(), // NULL treated as false in code
+    bypassApprovalForAutomation: boolean().optional(), // NULL treated as false in code
+    visitSlaMode: enumeration<VisitSlaMode>().optional(), // NULL treated as STAGE_DEFAULT in code
     fixedEtaHours: number().optional(),
-    onReenter: enumeration<ReenterMode>(),
-    createdAt: number(),
+    onReenter: enumeration<ReenterMode>().optional(), // NULL treated as RESET in code
+    createdAt: number().optional(),
     updatedAt: number(),
   })
   .primaryKey('id');

@@ -219,7 +219,9 @@ export function StagePicker({
           if (matchingTransition.requiresApproval) {
             const approvers = matchingTransition.transitionApprovers ?? [];
             const isApprover = approvers.some(
-              a => a.approverType === ApproverType.USER && a.userId === currentUser?.id,
+              a =>
+                (a.approverType ?? ApproverType.USER) === ApproverType.USER &&
+                a.userId === currentUser?.id,
             );
 
             if (!isApprover) {

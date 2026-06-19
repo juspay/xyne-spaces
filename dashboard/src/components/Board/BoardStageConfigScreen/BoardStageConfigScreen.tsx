@@ -342,14 +342,17 @@ const BoardStageConfigScreen = ({
             metaMap.set(`${fromStage.tempId}->${toStage.tempId}`, {
               id: t.id,
               formId: t.formId,
-              requiresApproval: t.requiresApproval,
+              // NULL columns are treated as their defaults in code.
+              requiresApproval: t.requiresApproval ?? false,
               approverUserIds: (t.transitionApprovers ?? [])
-                .filter((a: { approverType: string }) => a.approverType === 'USER')
+                .filter(
+                  (a: { approverType?: string | null }) => (a.approverType ?? 'USER') === 'USER',
+                )
                 .map((a: { userId: string | null }) => a.userId)
                 .filter((id: string | null): id is string => id !== null),
-              visitSlaMode: t.visitSlaMode,
+              visitSlaMode: t.visitSlaMode ?? 'STAGE_DEFAULT',
               fixedEtaHours: t.fixedEtaHours,
-              onReenter: t.onReenter,
+              onReenter: t.onReenter ?? 'RESET',
             });
           }
         }

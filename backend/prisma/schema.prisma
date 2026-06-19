@@ -708,7 +708,7 @@ model TicketStageEta {
   id             String    @id @default(cuid())
   ticketId       String
   stageId        String
-  version        Int       @default(1) // visit version: 1, 2, 3... per (ticketId, stageId)
+  version        Int?      // visit version: 1, 2, 3... per (ticketId, stageId); NULL treated as 1 in code
   stageEnteredAt DateTime
   stageLeftAt    DateTime?
   stageEta       DateTime  // Deadline = stageEnteredAt + stage.eta hours
@@ -1962,13 +1962,13 @@ model StageTransition {
   fromStageId                 String?      // null = global transition (from any)
   toStageId                   String
   formId                      String?
-  requiresApproval            Boolean      @default(false)
-  bypassApprovalForAutomation Boolean      @default(false)
-  visitSlaMode                VisitSlaMode @default(STAGE_DEFAULT)
+  requiresApproval            Boolean?      // NULL treated as false in code
+  bypassApprovalForAutomation Boolean?      // NULL treated as false in code
+  visitSlaMode                VisitSlaMode? // NULL treated as STAGE_DEFAULT in code
   fixedEtaHours               Int?
-  onReenter                   ReenterMode  @default(RESET)
-  createdAt                   DateTime     @default(now())
-  updatedAt                   DateTime     @updatedAt
+  onReenter                   ReenterMode?  // NULL treated as RESET in code
+  createdAt                   DateTime?     // set by app on insert; NULL treated as creation time in code
+  updatedAt                   DateTime      @updatedAt
 
   transitionApprovers StageApprovers[]
 
@@ -3429,7 +3429,7 @@ model FormEntityValues {
   formId          String   // Reference to Form
   fieldId         String   // Reference to FormFieldsMapping.id
   contextId       String?  // Context ID (e.g., stageId) for scoping values per context
-  version         Int      @default(1)
+  version         Int?     // NULL treated as version 1 in code
   fieldValue      String   // Value stored as String (backward compatibility)
   actualFieldValue Json?   // Value stored as Json for structured data (parse based on fieldType)
   createdAt       DateTime @default(now())
@@ -3673,7 +3673,7 @@ model StageApprovers {
   id                   String       @id @default(cuid())
   userId               String?      // set when approverType = USER
   roleId               String?      // set when approverType = ROLE
-  approverType         ApproverType @default(USER)
+  approverType         ApproverType? // NULL treated as ApproverType.USER in code
   stageId              String?      // Stage ID for linear boards (no FK constraint)
   transitionId         String?      // Transition ID for NON_LINEAR boards
   createdAt            DateTime     @default(now())

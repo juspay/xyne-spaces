@@ -5,7 +5,6 @@ import {
   VisitSlaMode,
   ReenterMode,
   TicketStageRequestStatus,
-  ApproverType,
   Prisma,
 } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
@@ -178,7 +177,13 @@ export class TicketStageTransitionService {
     if (transition?.requiresApproval && !bypassApproval) {
       // Check if the requesting user is a listed transition approver (self-approve path)
       const isTransitionApprover = await prisma.stageApprovers.findFirst({
-        where: { transitionId: transition.id, userId, approverType: ApproverType.USER },
+        // userId is populated only for USER-type approvers, so matching transitionId+userId
+        // already identifies a USER self-approver — including legacy rows whose approverType
+        // is NULL (treated as USER). No approverType filter needed.
+        where: {
+          transitionId: transition.id,
+          userId,
+        },
       });
 
       if (isTransitionApprover) {
@@ -290,7 +295,8 @@ export class TicketStageTransitionService {
           orderBy: { createdAt: 'desc' },
         });
         if (mostRecent) {
-          existingEtaToReopen = { id: mostRecent.id, version: mostRecent.version };
+          // NULL version (legacy rows predate the column) is treated as visit 1.
+          existingEtaToReopen = { id: mostRecent.id, version: mostRecent.version ?? 1 };
         }
       } else {
         // RESET (default) – always increment

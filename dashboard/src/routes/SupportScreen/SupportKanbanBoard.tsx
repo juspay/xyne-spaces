@@ -234,11 +234,12 @@ export const SupportKanbanBoard = ({
       fromStageId: t.fromStageId ?? null,
       toStageId: t.toStageId,
       formId: t.formId ?? null,
-      requiresApproval: t.requiresApproval,
+      requiresApproval: t.requiresApproval ?? false, // NULL treated as false
       approvers: (t.transitionApprovers ?? []).map(
-        (a: { userId: string | null; roleId: string | null; approverType: string }) => ({
+        (a: { userId: string | null; roleId: string | null; approverType?: string | null }) => ({
           approverId: a.userId ?? a.roleId ?? '',
-          approverType: a.approverType as 'USER' | 'ROLE',
+          // NULL approverType (legacy rows) is treated as USER.
+          approverType: (a.approverType ?? 'USER') as 'USER' | 'ROLE',
         }),
       ),
     }));
