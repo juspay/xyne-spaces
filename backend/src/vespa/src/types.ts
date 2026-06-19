@@ -154,7 +154,8 @@ export type VespaTicketFormField = TicketFormField;
 export enum RankProfile {
   nativeRank = "default_native",
   personalizedRank = 'personalized',
-  fuzzyRank = 'default_fuzzy'
+  fuzzyRank = 'default_fuzzy',
+  duplicateDetection = 'duplicate_detection'
 }
 
 export type User = {
