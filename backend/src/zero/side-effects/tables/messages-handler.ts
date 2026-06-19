@@ -356,6 +356,26 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }
     }
 
+    if (isReply && conversationId) {
+      try {
+        await db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: message.createdAt } }],
+          },
+          data: { lastReplyAt: message.createdAt },
+        });
+        logger.info('[MessagesSideEffect] Updated lastReplyAt for conversation participants', {
+          conversationId,
+        });
+      } catch (error) {
+        logger.error('[MessagesSideEffect] Failed to update lastReplyAt for participants:', {
+          conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     if (isDMChannel && channel) {
       const memberNames = channelParticipants
         .filter(p => channel.scopeType === 'DM' ? p.userId !== senderId : true)
@@ -626,24 +646,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         replyExcludedUserIds,
         this.ctx.workspaceId,
       );
-
-      try {
-        await db.conversationParticipant.updateMany({
-          where: {
-            conversationId,
-            OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: message.createdAt } }],
-          },
-          data: { lastReplyAt: message.createdAt },
-        });
-        logger.info('[MessagesSideEffect] Updated lastReplyAt for conversation participants', {
-          conversationId,
-        });
-      } catch (error) {
-        logger.error('[MessagesSideEffect] Failed to update lastReplyAt for participants:', {
-          conversationId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
     }
 
     // Queue Vespa indexing for message attachments
