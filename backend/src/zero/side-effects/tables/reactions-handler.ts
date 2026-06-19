@@ -25,7 +25,7 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
 
     const conversation = await db.conversation.findUnique({
       where: { conversationId: message.conversationId },
-      select: { channelId: true },
+      select: { channelId: true, initialMessageId: true },
     });
 
     if (!conversation?.channelId) {
@@ -39,11 +39,14 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
       return null;
     }
 
+    const isThreadActivity = conversation.initialMessageId !== reaction.messageId;
+
     return {
       reactionId,
       messageId: reaction.messageId,
       messageAuthorId,
       channelId: conversation.channelId,
+      isThreadActivity,
     };
   }
 
@@ -72,6 +75,7 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
       actorId: this.ctx.userID,
       messageAuthorId: context.messageAuthorId,
       workspaceId: this.ctx.workspaceId,
+      isThreadActivity: context.isThreadActivity,
     });
   }
 
