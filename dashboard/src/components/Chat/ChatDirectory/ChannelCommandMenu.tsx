@@ -63,6 +63,8 @@ import {
 } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { useDeskContacts } from '../../../hooks/useDeskContacts';
+import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
@@ -426,7 +428,7 @@ const ChannelCommandMenu = ({
   const [channelTrigger, setChannelTrigger] = useState<'#' | 'in:' | 'in:#' | 'in:@' | null>(null);
 
   const [userTrigger, setUserTrigger] = useState<
-    '@' | 'from:' | 'with:' | 'assignee:' | 'in:@' | null
+    '@' | 'from:' | 'to:' | 'with:' | 'assignee:' | 'in:@' | null
   >(null);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
 
@@ -479,8 +481,15 @@ const ChannelCommandMenu = ({
     const fromMentions = mentions.filter(
       m => m.type === MentionType.USER && (m.prefix === 'from:' || !m.prefix),
     );
-    const fromIds = fromMentions.map(m => m.id);
+    const fromEmails = fromMentions.filter(m => m.id.includes('@')).map(m => m.id);
+    const fromIds = fromMentions.filter(m => !m.id.includes('@')).map(m => m.id);
     if (fromIds.length > 0) params.set('from', fromIds.join(','));
+    if (fromEmails.length > 0) params.set('fromEmail', fromEmails.join(','));
+
+    const toEmails = mentions
+      .filter(m => m.type === MentionType.USER && m.prefix === 'to:')
+      .map(m => m.id);
+    if (toEmails.length > 0) params.set('toEmail', toEmails.join(','));
 
     const inMentions = mentions.filter(m => m.type === MentionType.CHANNEL && m.prefix === 'in:');
     const inIds = inMentions.map(m => m.id);
@@ -693,7 +702,7 @@ const ChannelCommandMenu = ({
 
   // Handle user search from mention plugin
   const handleUserSearch = useCallback(
-    (query: string | null, trigger?: '@' | 'from:' | 'with:' | 'assignee:' | 'in:@') => {
+    (query: string | null, trigger?: '@' | 'from:' | 'to:' | 'with:' | 'assignee:' | 'in:@') => {
       if (query === null) {
         // Mention search was cancelled/cleared
         setMentionSearchType(null);
@@ -776,10 +785,63 @@ const ChannelCommandMenu = ({
     mentionSearchType === MentionType.USER || channelTrigger === 'in:' ? mentionSearchQuery : '';
   const mentionUsers = useUserSearch(mentionUsersQuery, CMDK_USER_LIMIT);
 
+  const deskChannelId = useMemo(() => {
+    const inMention = selectedMentions.find(
+      m => m.type === MentionType.CHANNEL && m.prefix === 'in:',
+    );
+    if (!inMention) return undefined;
+    const match = allChannels.find(c => c.channel.id === inMention.id);
+    return match && isDeskChannelType(match.channel.type) ? inMention.id : undefined;
+  }, [selectedMentions, allChannels]);
+  const isDeskContext = !!deskChannelId || activeTab === TabType.DESK;
+  const deskContacts = useDeskContacts(deskChannelId);
+  const deskPeopleId = deskChannelId ?? (activeTab === TabType.DESK ? ALL_DESK : undefined);
+  const deskPeople = useDeskPeople(deskPeopleId);
+  const isDeskPeopleTrigger = isDeskContext && (userTrigger === 'from:' || userTrigger === 'to:');
+
   // Available users - populated when:
   // 1. mentionSearchType is USER (direct user search like @, from:, assignee:, in:@)
   // 2. channelTrigger is 'in:' (combined search - show both channels and users)
-  const availableUsers = useMemo(() => {
+  // In a Desk channel, `from:`/`to:` instead surface synced mailbox contacts
+  // (id = email) so the chip carries an address for the mail from/to filter.
+  const availableUsers = useMemo<
+    Array<{ id: string; name: string; status?: string; email?: string }>
+  >(() => {
+    if (isDeskPeopleTrigger) {
+      const raw = mentionSearchQuery.trim();
+      const q = raw.toLowerCase();
+      const deskPool = userTrigger === 'to:' ? deskPeople.recipients : deskPeople.senders;
+      const byEmail = new Map<string, { email: string; name: string | null }>();
+      for (const p of deskPool) {
+        const e = p.email.toLowerCase();
+        if (!byEmail.has(e)) byEmail.set(e, { email: p.email, name: p.name });
+      }
+      for (const c of deskContacts) {
+        const e = c.email.toLowerCase();
+        const existing = byEmail.get(e);
+        if (!existing) byEmail.set(e, { email: c.email, name: c.name });
+        else if (!existing.name && c.name) existing.name = c.name;
+      }
+      const pool = Array.from(byEmail.values());
+      const matches = q
+        ? pool.filter(
+            p => p.email.toLowerCase().includes(q) || (p.name?.toLowerCase().includes(q) ?? false),
+          )
+        : pool;
+      const items = matches.slice(0, CMDK_USER_LIMIT).map(p => ({
+        id: p.email,
+        name: p.name || p.email,
+        email: p.email,
+      }));
+      const looksLikeEmail = /\S+@\S+\.\S+/.test(raw);
+      const exactMatch = items.some(i => i.email.toLowerCase() === q);
+      if (looksLikeEmail && !exactMatch) {
+        items.unshift({ id: raw, name: raw, email: raw });
+      }
+      return items;
+    }
+
+    if (userTrigger === 'to:') return [];
     if (mentionSearchType !== MentionType.USER && channelTrigger !== 'in:') return [];
     return rankUsers(mentionUsers, mentionSearchQuery, dmContactRecency).map(user => ({
       id: user.id,
@@ -787,7 +849,17 @@ const ChannelCommandMenu = ({
       status: user.status,
       ...(user.email && { email: user.email }),
     }));
-  }, [mentionUsers, mentionSearchQuery, mentionSearchType, channelTrigger, dmContactRecency]);
+  }, [
+    isDeskPeopleTrigger,
+    userTrigger,
+    deskContacts,
+    deskPeople,
+    mentionUsers,
+    mentionSearchQuery,
+    mentionSearchType,
+    channelTrigger,
+    dmContactRecency,
+  ]);
 
   // Filter mention results for channels.
   // Mirrors the plain-search regular/DM split in useSearchMetrics so `in:` typeahead
@@ -2246,6 +2318,7 @@ const ChannelCommandMenu = ({
             onUserSearch={handleUserSearch}
             onChannelSearch={handleChannelSearch}
             onPrioritySearch={handlePrioritySearch}
+            enableToTrigger={isDeskContext}
             availableUsers={availableUsers}
             availableChannels={availableChannels.map(({ channel, displayName }) => ({
               id: channel.id,
@@ -2752,6 +2825,7 @@ const ChannelCommandMenu = ({
                     {mentionSearchType === MentionType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
+                        userTrigger === 'to:' ||
                         userTrigger === 'assignee:') &&
                       availableUsers.length > 0 && (
                         <Command.Group
@@ -2810,6 +2884,7 @@ const ChannelCommandMenu = ({
                     {mentionSearchType === MentionType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
+                        userTrigger === 'to:' ||
                         userTrigger === 'assignee:') &&
                       availableUsers.length === 0 &&
                       mentionSearchQuery && (
@@ -2969,6 +3044,7 @@ const ChannelCommandMenu = ({
                 {mentionSearchType === MentionType.USER &&
                   (userTrigger === '@' ||
                     userTrigger === 'from:' ||
+                    userTrigger === 'to:' ||
                     userTrigger === 'with:' ||
                     userTrigger === 'assignee:') &&
                   availableUsers.length > 0 && (
@@ -3016,6 +3092,7 @@ const ChannelCommandMenu = ({
                 {mentionSearchType === MentionType.USER &&
                   (userTrigger === '@' ||
                     userTrigger === 'from:' ||
+                    userTrigger === 'to:' ||
                     userTrigger === 'with:' ||
                     userTrigger === 'assignee:') &&
                   availableUsers.length === 0 &&

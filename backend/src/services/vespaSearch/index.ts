@@ -128,6 +128,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       type,        // 'messages' | 'attachments' | 'channels' | 'tickets' | 'files'
       subApp,      // 'canvas' | 'transcript' | 'RCA' - sub-app filter for files
       from,        // User name or ID
+      fromEmail,   // Desk: sender email address(es) for mail `from:` filter
+      toEmail,     // Desk: recipient email address(es) for mail `to:` filter
       withUser,    // User ID for participant filter
       in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
       // Unified filters (work for both slack and ticket)
@@ -278,6 +280,18 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.slack.senderId = from;
       options.ticket.createdBy = from;
       options.file.createdBy = from;
+    }
+
+    if (fromEmail) {
+      options.mail.from = Array.isArray(fromEmail)
+        ? fromEmail
+        : toCommaSeparatedValues(fromEmail as string);
+    }
+
+    if (toEmail) {
+      options.mail.to = Array.isArray(toEmail)
+        ? toEmail
+        : toCommaSeparatedValues(toEmail as string);
     }
 
     if (withUser) {

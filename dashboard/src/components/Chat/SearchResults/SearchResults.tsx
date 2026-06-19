@@ -57,7 +57,7 @@ function docTypeToTabType(docType: SearchResultsFilters['docType']): TabType {
 type ResultsMention = {
   id: string;
   type: MentionType;
-  prefix: 'from:' | 'in:' | 'assignee:' | 'priority:';
+  prefix: 'from:' | 'to:' | 'in:' | 'assignee:' | 'priority:';
 };
 
 // Build the hook's selectedMentions from resolved filter ids. Priority is appended from
@@ -67,9 +67,13 @@ function buildSelectedMentions(
   channelIds: string[],
   assigneeIds: string[],
   priority: string,
+  fromEmails: string[] = [],
+  toEmails: string[] = [],
 ): ResultsMention[] {
   return [
     ...fromUserIds.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
+    ...fromEmails.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
+    ...toEmails.map(id => ({ id, type: MentionType.USER, prefix: 'to:' as const })),
     ...channelIds.map(id => ({ id, type: MentionType.CHANNEL, prefix: 'in:' as const })),
     ...assigneeIds.map(id => ({ id, type: MentionType.USER, prefix: 'assignee:' as const })),
     ...(priority
@@ -96,6 +100,8 @@ const SearchResults = (): ReactElement => {
 
   const [filters, setFilters] = useState<SearchResultsFilters>(() => {
     const fromParam = searchParams.get('from') ?? '';
+    const fromEmailParam = searchParams.get('fromEmail') ?? '';
+    const toEmailParam = searchParams.get('toEmail') ?? '';
     const inParam = searchParams.get('in') ?? '';
     const assigneeParam = searchParams.get('assignee') ?? '';
     const tabParam = parseDocTypeParam(searchParams.get('tab'));
@@ -103,6 +109,8 @@ const SearchResults = (): ReactElement => {
       ...DEFAULT_SEARCH_FILTERS,
       ...(tabParam ? { docType: tabParam } : {}),
       fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
+      fromEmails: fromEmailParam ? fromEmailParam.split(',').filter(Boolean) : [],
+      toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
       inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
       assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
     };
@@ -168,6 +176,8 @@ const SearchResults = (): ReactElement => {
 
   // Sync from/in/assignee/tab URL params → filter state on navigation (popup → search screen while already mounted)
   const fromParam = searchParams.get('from') ?? '';
+  const fromEmailParam = searchParams.get('fromEmail') ?? '';
+  const toEmailParam = searchParams.get('toEmail') ?? '';
   const inParam = searchParams.get('in') ?? '';
   const assigneeParam = searchParams.get('assignee') ?? '';
   const tabParam = searchParams.get('tab') ?? '';
@@ -179,11 +189,13 @@ const SearchResults = (): ReactElement => {
       // current tab so unrelated URL changes don't reset it.
       ...(parsedTab ? { docType: parsedTab } : {}),
       fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
+      fromEmails: fromEmailParam ? fromEmailParam.split(',').filter(Boolean) : [],
+      toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
       inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
       assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromParam, inParam, assigneeParam, tabParam]);
+  }, [fromParam, fromEmailParam, toEmailParam, inParam, assigneeParam, tabParam]);
 
   // Sync docType filter → hook active tab
   useEffect(() => {
@@ -242,10 +254,19 @@ const SearchResults = (): ReactElement => {
         channelIdsForSearch,
         filters.assigneeIds,
         priorityFilter,
+        filters.fromEmails,
+        filters.toEmails,
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.fromUserIds, channelIdsForSearch, filters.assigneeIds, priorityFilter]);
+  }, [
+    filters.fromUserIds,
+    filters.fromEmails,
+    filters.toEmails,
+    channelIdsForSearch,
+    filters.assigneeIds,
+    priorityFilter,
+  ]);
 
   const handleFiltersChange = useCallback(
     (newFilters: SearchResultsFilters) => {
@@ -263,6 +284,8 @@ const SearchResults = (): ReactElement => {
           newFilters.inChannelIds,
           newFilters.assigneeIds,
           priorityFilter,
+          newFilters.fromEmails,
+          newFilters.toEmails,
         ),
       );
     },

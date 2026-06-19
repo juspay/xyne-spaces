@@ -77,6 +77,13 @@ router.get(
   emailController.listContacts,
 );
 
+router.get('/people', authMiddleware.authenticate, emailController.listPeople);
+router.get(
+  '/:channelId/people',
+  authMiddleware.authenticate,
+  emailController.listPeople,
+);
+
 // List Claw agents added to this channel (for the auto-draft agent picker)
 router.get(
   '/:channelId/claw-agents',

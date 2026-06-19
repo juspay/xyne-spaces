@@ -150,7 +150,7 @@ export interface MentionData {
   id: string;
   name: string;
   type: 'user' | 'channel' | 'priority';
-  prefix?: 'from:' | 'with:' | 'in:' | 'assignee:' | 'priority:';
+  prefix?: 'from:' | 'to:' | 'with:' | 'in:' | 'assignee:' | 'priority:';
   email?: string;
   photoLink?: string;
 }

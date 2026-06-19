@@ -938,9 +938,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
             }
 
-            if (fromMentions.length > 0) {
-              searchFilters.from = fromMentions.map(user => user.id).join(',');
-            }
+            const fromUserIds = fromMentions.filter(m => !m.id.includes('@')).map(m => m.id);
+            const fromEmails = fromMentions.filter(m => m.id.includes('@')).map(m => m.id);
+            if (fromUserIds.length > 0) searchFilters.from = fromUserIds.join(',');
+            if (fromEmails.length > 0) searchFilters.fromEmail = fromEmails.join(',');
+
+            const toMentions = userMentions.filter(m => m.prefix === 'to:');
+            if (toMentions.length > 0) searchFilters.toEmail = toMentions.map(m => m.id).join(',');
 
             const withMentions = userMentions.filter(m => m.prefix === 'with:');
             if (withMentions.length > 0) {
@@ -1347,9 +1351,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
         }
 
-        if (fromMentions.length > 0) {
-          searchFilters.from = fromMentions.map(user => user.id).join(',');
-        }
+        const fromUserIdsMore = fromMentions.filter(m => !m.id.includes('@')).map(m => m.id);
+        const fromEmailsMore = fromMentions.filter(m => m.id.includes('@')).map(m => m.id);
+        if (fromUserIdsMore.length > 0) searchFilters.from = fromUserIdsMore.join(',');
+        if (fromEmailsMore.length > 0) searchFilters.fromEmail = fromEmailsMore.join(',');
+
+        const toMentionsMore = userMentions.filter(m => m.prefix === 'to:');
+        if (toMentionsMore.length > 0)
+          searchFilters.toEmail = toMentionsMore.map(m => m.id).join(',');
 
         if (withMentions.length > 0) {
           searchFilters.type = VespaDocTypes.MESSAGES;
