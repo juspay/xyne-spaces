@@ -74,6 +74,17 @@ export const ActivityItem = memo(function ActivityItem({
     case 'ticket_status':
     case 'ticket_eta':
     case 'ticket_board':
+    case 'ticket_assigned_to':
+    case 'ticket_priority':
+    case 'ticket_user_group':
+    case 'ticket_title':
+    case 'ticket_description':
+    case 'ticket_rca_created':
+    case 'ticket_rca_updated':
+    case 'ticket_subticket_added':
+    case 'ticket_reference_added':
+    case 'ticket_reference_removed':
+    case 'ticket_multi_updated':
       return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'ticket_pr_created':

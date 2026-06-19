@@ -8,6 +8,10 @@ import {
   GitPullRequest,
   GitMerge,
   GitPullRequestClosed,
+  ListTree,
+  Link2,
+  FileWarning,
+  AlertTriangle,
 } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
@@ -53,6 +57,76 @@ const getActivityConfig = (actorAction: string): ActivityConfig => {
         badgeColor: 'bg-blue-100',
         description: 'changed assignee of ticket in',
         label: 'Assignee',
+      };
+    case 'ticket_priority':
+      return {
+        icon: <AlertTriangle className='w-4 h-4 text-orange-600' />,
+        badgeColor: 'bg-orange-100',
+        description: 'updated priority of ticket in',
+        label: 'Priority',
+      };
+    case 'ticket_user_group':
+      return {
+        icon: <UserPlus className='w-4 h-4 text-indigo-600' />,
+        badgeColor: 'bg-indigo-100',
+        description: 'changed team of ticket in',
+        label: 'Team',
+      };
+    case 'ticket_title':
+      return {
+        icon: <FileWarning className='w-4 h-4 text-cyan-600' />,
+        badgeColor: 'bg-cyan-100',
+        description: 'renamed ticket in',
+        label: 'Title',
+      };
+    case 'ticket_description':
+      return {
+        icon: <FileWarning className='w-4 h-4 text-teal-600' />,
+        badgeColor: 'bg-teal-100',
+        description: 'updated description of ticket in',
+        label: 'Description',
+      };
+    case 'ticket_rca_created':
+      return {
+        icon: <AlertTriangle className='w-4 h-4 text-red-600' />,
+        badgeColor: 'bg-red-100',
+        description: 'added an RCA to ticket in',
+        label: 'RCA Added',
+      };
+    case 'ticket_rca_updated':
+      return {
+        icon: <AlertTriangle className='w-4 h-4 text-orange-600' />,
+        badgeColor: 'bg-orange-100',
+        description: 'updated the RCA of ticket in',
+        label: 'RCA Updated',
+      };
+    case 'ticket_subticket_added':
+      return {
+        icon: <ListTree className='w-4 h-4 text-emerald-600' />,
+        badgeColor: 'bg-emerald-100',
+        description: 'added a sub-ticket to ticket in',
+        label: 'Sub-ticket Added',
+      };
+    case 'ticket_reference_added':
+      return {
+        icon: <Link2 className='w-4 h-4 text-sky-600' />,
+        badgeColor: 'bg-sky-100',
+        description: 'linked a related ticket in',
+        label: 'Related Ticket Linked',
+      };
+    case 'ticket_reference_removed':
+      return {
+        icon: <Link2 className='w-4 h-4 text-slate-600' />,
+        badgeColor: 'bg-slate-100',
+        description: 'unlinked a related ticket in',
+        label: 'Related Ticket Unlinked',
+      };
+    case 'ticket_multi_updated':
+      return {
+        icon: <Ticket className='w-4 h-4 text-muted-foreground' />,
+        badgeColor: 'bg-muted',
+        description: 'made multiple changes to ticket in',
+        label: 'Multiple Changes',
       };
     case 'ticket_pr_created':
       return {

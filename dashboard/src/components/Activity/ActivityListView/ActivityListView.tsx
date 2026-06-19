@@ -20,12 +20,14 @@ import {
 } from 'lucide-react';
 import { ActivityItem } from '../ActivityItem';
 import { NofocusRefProvider } from '../ActivityItemCard';
+import { GroupedTicketActivity } from '../GroupedTicketActivity';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Switch from '@radix-ui/react-switch';
 import { Badge } from '../../ui/Badge';
 import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification } from '@xyne/shared';
+import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
 import {
   mixpanelService,
   EVENTS,
@@ -296,6 +298,16 @@ const ActivityListView = (): ReactElement => {
           'ticket_pr_declined',
           'ticket_pr_reviewer_assigned',
           'ticket_qa_assigned',
+          'ticket_priority',
+          'ticket_user_group',
+          'ticket_title',
+          'ticket_description',
+          'ticket_rca_created',
+          'ticket_rca_updated',
+          'ticket_subticket_added',
+          'ticket_reference_added',
+          'ticket_reference_removed',
+          'ticket_multi_updated',
           'workflow_question',
         ];
       case 'canvas':
@@ -468,6 +480,10 @@ const ActivityListView = (): ReactElement => {
     return activities.filter(activity => activeTabConfig.filter(activity));
   }, [activities, activeTab, visibleTabs]);
 
+  const groupedActivities = useMemo(() => {
+    return groupActivities(filteredActivities);
+  }, [filteredActivities]);
+
   const selectedActivityIdRef = useRef<string | null>(
     new URLSearchParams(window.location.search).get('selectedActivity'),
   );
@@ -503,7 +519,7 @@ const ActivityListView = (): ReactElement => {
     };
   }, []);
 
-  const hasActivityRows = filteredActivities.length > 0;
+  const hasActivityRows = groupedActivities.length > 0;
 
   useEffect(() => {
     if (!hasActivityRows) return;
@@ -696,11 +712,11 @@ const ActivityListView = (): ReactElement => {
     return counts;
   }, [unreadActivities]);
 
-  const renderActivityList = (activityList: ActivityWithRelated[]): ReactElement => {
+  const renderActivityList = (feedItems: ActivityFeedItem[]): ReactElement => {
     const isExpanded = active === 'detailed';
 
     // Show loading skeleton during initial load
-    if (isLoading && activityList.length === 0) {
+    if (isLoading && feedItems.length === 0) {
       return (
         <div className='flex-1 flex flex-col px-4 py-4 gap-3 overflow-hidden'>
           {Array.from({ length: 15 }).map((_, i) => (
@@ -720,7 +736,7 @@ const ActivityListView = (): ReactElement => {
       );
     }
 
-    if (activityList.length > 0) {
+    if (feedItems.length > 0) {
       return (
         <div
           data-component='ActivityList'
@@ -732,20 +748,27 @@ const ActivityListView = (): ReactElement => {
               ref={activityVirtuosoRef}
               className='no-scrollbar'
               style={{ height: '100%' }}
-              data={activityList}
+              data={feedItems}
               endReached={handleEndReached}
               atTopStateChange={isAtTop => {
                 if (isAtTop && fetchCursor !== null) {
                   setFetchCursor(null);
                 }
               }}
-              computeItemKey={(_, activity) => activity.id}
+              computeItemKey={(_, item) =>
+                item.type === 'single' ? item.activity.id : `group:${item.activities[0]!.id}`
+              }
               increaseViewportBy={1000}
               minOverscanItemCount={{ top: 5, bottom: 10 }}
               itemsRendered={restoreSelectedRow}
-              itemContent={(_, activity) => (
-                <ActivityItem activity={activity} isExpanded={isExpanded} />
-              )}
+              itemContent={(_, item) => {
+                if (item.type === 'single') {
+                  return <ActivityItem activity={item.activity} isExpanded={isExpanded} />;
+                }
+                return (
+                  <GroupedTicketActivity activities={item.activities} isExpanded={isExpanded} />
+                );
+              }}
             />
           </NofocusRefProvider>
         </div>
@@ -1013,7 +1036,7 @@ const ActivityListView = (): ReactElement => {
             }}
             className='focus-visible:outline-none'
           >
-            {renderActivityList(filteredActivities)}
+            {renderActivityList(groupedActivities)}
           </Tabs.Content>
         </Tabs.Root>
       </div>

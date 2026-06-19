@@ -7,6 +7,8 @@ import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { websocketService } from '@/services/websocketService';
+import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+
 import {
   emitTicketUpdated,
   TicketUpdatedFieldSchema,
@@ -25,6 +27,18 @@ interface TicketActivity {
   };
 }
 
+async function fetchTicketActors(ticketId: string): Promise<string[]> {
+  const [roleAssignments, formFieldUserActors] = await Promise.all([
+    db.ticketAssignment.findMany({
+      where: { ticketId },
+      select: { userId: true },
+    }),
+    getFormFieldUserActors(ticketId),
+  ]);
+
+  return roleAssignments.map(a => a.userId).concat(formFieldUserActors);
+}
+
 export class TicketsSideEffectHandler extends BaseSideEffectHandler {
   async onUpdate(job: SideEffectJobConfig): Promise<void> {
     const { entityId: ticketId, args, previousValue } = job;
@@ -39,22 +53,28 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
 
     // Detect field changes and build activities
     const activities: TicketActivity[] = [];
-    const fieldsToTrack = ['stageName', 'eta', 'boardId', 'assignedTo'] as const;
     const changedFields: string[] = [];
+    const fieldMap: Record<string, string> = {
+      stageName: 'STATUS',
+      statusV2: 'STATUS_V2',
+      priority: 'PRIORITY',
+      eta: 'ETA',
+      assignedTo: 'ASSIGNED',
+      boardId: 'BOARD',
+      userGroupId: 'USER_GROUP',
+      title: 'TITLE',
+      description: 'DESCRIPTION',
+    };
 
-    for (const field of fieldsToTrack) {
-      if (args[field] !== undefined && args[field] !== prev[field]) {
-        let activityType = field.toUpperCase();
-        if (field === 'stageName') activityType = 'STATUS';
-        if (field === 'assignedTo') activityType = 'ASSIGNED';
-        if (field === 'eta') activityType = 'ETA';
-        if (field === 'boardId') activityType = 'BOARD';
-
+    for (const [field, activityType] of Object.entries(fieldMap)) {
+      const newValue = args[field];
+      const prevValue = (prev as unknown as Record<string, any>)[field];
+      if (newValue !== undefined && newValue !== prevValue) {
         activities.push({
           activityType,
           value: {
-            oldValue: prev[field],
-            newValue: args[field],
+            oldValue: prevValue,
+            newValue,
           },
         });
         changedFields.push(field);
@@ -122,7 +142,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
       }
     }
 
-    // Send notification to the newly assigned user
+    // Send notification to the newly assigned user (original behavior preserved)
     const assignedToChanged = args.assignedTo !== undefined && args.assignedTo !== prev.assignedTo;
     const newAssignee = args.assignedTo;
 
@@ -135,67 +155,204 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
       }
     }
 
-    // Create activities for relevant users (creator, old assignee, new assignee, excluding the actor)
-    const usersToNotify = [
-      prev.createdBy,
-      prev.assignedTo,
-      args.assignedTo,
-    ].filter((userId, index, arr): userId is string =>
-      Boolean(userId) && userId !== actorId && arr.indexOf(userId) === index
-    );
+    // Check for notifiable changes
+    const stageNameChanged = args.stageName !== undefined && args.stageName !== prev.stageName;
+    const priorityChanged = args.priority !== undefined && args.priority !== prev.priority;
+    const etaChanged = args.eta !== undefined && args.eta !== prev.eta;
+    const userGroupChanged = args.userGroupId !== undefined && args.userGroupId !== prev.userGroupId;
+    const titleChanged = args.title !== undefined && args.title !== prev.title;
+    const descriptionChanged = args.description !== undefined && args.description !== prev.description;
 
-    // Only create activities for STATUS, ETA, BOARD, ASSIGNED_TO changes
-    const relevantActivities = activities.filter(a =>
-      ['STATUS', 'ETA', 'BOARD', 'ASSIGNED'].includes(a.activityType)
-    );
+    const hasNotifiableChange = assignedToChanged || stageNameChanged || priorityChanged || etaChanged || userGroupChanged || titleChanged || descriptionChanged;
 
-    if (usersToNotify.length === 0 || relevantActivities.length === 0) {
+    // Fetch ticket details for notifications and activities
+    const ticket = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        id: true,
+        xyneId: true,
+        title: true,
+        channelId: true,
+        conversationId: true,
+        workspaceId: true,
+        createdBy: true,
+        assignedTo: true,
+      },
+    });
+
+    if (!ticket) {
+      logger.warn(`[TicketsSideEffectHandler] Ticket ${ticketId} not found`);
       return;
     }
 
-    logger.info(`[TicketsSideEffectHandler] usersToNotify: ${JSON.stringify(usersToNotify)}, activities: ${JSON.stringify(relevantActivities.map(a => a.activityType))}`);
+    // Fetch all role assignments (manager, team lead, dev, qa, pr reviewer, etc.)
+    // and board form field users of type USER
+    const extraActors = await fetchTicketActors(ticketId);
+
+    // All actors: creator, old/new assignee, role holders, and form field users
+    const allActorIds = [
+      prev.createdBy,
+      prev.assignedTo,
+      args.assignedTo,
+      ...extraActors,
+    ].filter((id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index);
+
+    // Fetch subscribed conversation participants for activities
+    let subscribedParticipants: string[] = [];
+    if (ticket.conversationId) {
+      try {
+        const participants = await db.conversationParticipant.findMany({
+          where: {
+            conversationId: ticket.conversationId,
+            isSubscribed: true,
+          },
+          select: { userId: true },
+        });
+        subscribedParticipants = participants.map(p => p.userId);
+      } catch (error) {
+        logger.warn(`[TicketsSideEffectHandler] Failed to fetch conversation participants for ticket ${ticketId}:`, error);
+      }
+    }
+
+    // Activity recipients: subscribed participants + all actors, excluding the actor
+    const activityRecipients = [
+      ...subscribedParticipants,
+      ...allActorIds,
+    ].filter((id, index, arr) => arr.indexOf(id) === index && id !== actorId);
+
+    // Send group notifications for specific changes
+    if (hasNotifiableChange && allActorIds.length > 0) {
+      try {
+        const notificationRecipients = allActorIds.filter(id => id !== actorId);
+
+        if (assignedToChanged) {
+          const oldAssigneeId = prev.assignedTo;
+          const newAssigneeId = args.assignedTo;
+
+          const users = await db.user.findMany({
+            where: {
+              id: {
+                in: [oldAssigneeId, newAssigneeId].filter(Boolean) as string[],
+              },
+            },
+            select: { id: true, name: true },
+          });
+
+          const userNameMap = new Map(users.map(u => [u.id, u.name || 'Unknown']));
+          const oldAssigneeName = oldAssigneeId ? userNameMap.get(oldAssigneeId) || 'Unassigned' : 'Unassigned';
+          const newAssigneeName = newAssigneeId ? userNameMap.get(newAssigneeId) || 'Unassigned' : 'Unassigned';
+
+          await notificationService.sendTicketReassignmentNotification(
+            ticketId,
+            notificationRecipients,
+            oldAssigneeName,
+            newAssigneeName,
+            actorId,
+          );
+          logger.info(`[TicketsSideEffectHandler] Sent reassignment notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
+        }
+
+        if (stageNameChanged) {
+          await notificationService.sendTicketStatusChangeNotification(
+            ticketId,
+            notificationRecipients,
+            args.stageName as string,
+            actorId,
+          );
+          logger.info(`[TicketsSideEffectHandler] Sent status change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
+        }
+
+        if (priorityChanged) {
+          await notificationService.sendTicketPriorityChangeNotification(
+            ticketId,
+            notificationRecipients,
+            prev.priority || 'None',
+            args.priority as string,
+            actorId,
+          );
+          logger.info(`[TicketsSideEffectHandler] Sent priority change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
+        }
+
+        if (etaChanged && args.eta !== undefined) {
+          const formattedDate = new Date(args.eta).toLocaleDateString('en-US', {
+            month: 'long',
+            day: 'numeric',
+          });
+
+          await notificationService.sendTicketDueDateChangedNotification(
+            ticketId,
+            notificationRecipients,
+            formattedDate,
+            actorId,
+          );
+          logger.info(`[TicketsSideEffectHandler] Sent due date change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
+        }
+
+        if (userGroupChanged) {
+          await notificationService.sendTicketUserGroupChangeNotification(
+            ticketId,
+            notificationRecipients,
+            args.userGroupId as string,
+            actorId,
+          );
+          logger.info(`[TicketsSideEffectHandler] Sent user group change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
+        }
+
+        if (titleChanged) {
+          await notificationService.sendTicketTitleChangeNotification(
+            ticketId,
+            notificationRecipients,
+            args.title as string,
+            actorId,
+          );
+          logger.info(`[TicketsSideEffectHandler] Sent title change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
+        }
+
+        if (descriptionChanged) {
+          await notificationService.sendTicketDescriptionChangeNotification(
+            ticketId,
+            notificationRecipients,
+            actorId,
+          );
+          logger.info(`[TicketsSideEffectHandler] Sent description change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
+        }
+      } catch (error) {
+        logger.error(`[TicketsSideEffectHandler] Failed to send group notifications:`, error);
+      }
+    }
+
+    // Create activities for ALL changes (including title/description/board/userGroup)
+    const relevantActivities = activities.filter(a =>
+      ['STATUS', 'STATUS_V2', 'PRIORITY', 'ETA', 'BOARD', 'ASSIGNED', 'USER_GROUP', 'TITLE', 'DESCRIPTION'].includes(a.activityType)
+    );
+
+    if (activityRecipients.length === 0 || relevantActivities.length === 0) {
+      return;
+    }
 
     try {
-      // Fetch ticket for activity details (channelId)
-      const ticket = await db.ticket.findUnique({
-        where: { id: ticketId },
-        select: {
-          id: true,
-          xyneId: true,
-          title: true,
-          channelId: true,
-          conversationId: true,
-        },
-      });
-
-      if (!ticket) {
-        logger.warn(`[TicketsSideEffectHandler] Ticket ${ticketId} not found for activity creation`);
-        return;
-      }
-
-      // Create activities for each relevant change
       for (const activity of relevantActivities) {
         const actorAction = `ticket_${activity.activityType.toLowerCase()}`;
 
-        if (usersToNotify.length === 0) continue;
+        logger.info(`[TicketsSideEffectHandler] Creating activity: ${actorAction} for users: ${activityRecipients.join(', ')}`);
 
-        logger.info(`[TicketsSideEffectHandler] Creating activity: ${actorAction} for users: ${usersToNotify.join(', ')}`);
-
-        for (const userId of usersToNotify) {
-          await activityService.createActivity({
-            userId,
-            actorAction,
-            actionSource: 'ticket',
-            actionSourceId: ticketId,
-            ticketId: ticketId,
-            channelId: ticket.channelId || undefined,
-            actorId,
-            classification: ActivityClassification.ACTIONABLE,
-          });
-        }
+        await Promise.all(
+          activityRecipients.map(userId =>
+            activityService.createActivity({
+              userId,
+              actorAction,
+              actionSource: 'ticket',
+              actionSourceId: ticketId,
+              ticketId,
+              channelId: ticket.channelId || undefined,
+              actorId,
+              classification: ActivityClassification.ACTIONABLE,
+            })
+          )
+        );
       }
 
-      logger.info(`[TicketsSideEffectHandler] Created activities for ticket ${ticketId} for users: ${usersToNotify.join(', ')}`);
+      logger.info(`[TicketsSideEffectHandler] Created activities for ticket ${ticketId} for users: ${activityRecipients.join(', ')}`);
     } catch (error) {
       logger.error(`[TicketsSideEffectHandler] Failed to create activities:`, error);
     }

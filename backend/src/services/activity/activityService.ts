@@ -234,7 +234,7 @@ export class ActivityService {
       actorId: activity.actorId,
       classification: activity.classification,
     });
-    await this.prisma.activity.create({
+    const result = await this.prisma.activity.create({
       data: {
         ...(activity.id ? { id: activity.id } : {}),
         userId: activity.userId,
@@ -267,8 +267,14 @@ export class ActivityService {
       },
     });
     logger.info('[ActivityService] Activity persisted', {
-      activityId: activity.id,
-      userId: activity.userId,
+      activityId: result.id,
+      userId: result.userId,
+      actorAction: result.actorAction,
+      createdAt: result.createdAt,
+      updatedAt: result.updatedAt,
+      classification: result.classification,
+      isRead: result.isRead,
+      ticketId: result.ticketId,
     });
   }
 
