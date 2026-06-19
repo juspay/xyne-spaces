@@ -108,9 +108,16 @@ const UserThreads = (): ReactElement => {
   useEffect(() => {
     if (currentBatch && currentBatch.length > 0) {
       setAllConversations(prev => {
-        const existingIds = new Set(prev.map(p => p.conversationId));
-        const uniqueNewItems = currentBatch.filter(p => !existingIds.has(p.conversationId));
-        return [...prev, ...uniqueNewItems];
+        // Merge: use a Map keyed by conversationId so latest data always wins
+        const merged = new Map(prev.map(p => [p.conversationId, p]));
+        currentBatch.forEach(p => merged.set(p.conversationId, p));
+        // Always re-sort to match the database query order (lastReplyAt desc, id desc)
+        return Array.from(merged.values()).sort((a, b) => {
+          const aTime = new Date(a.lastReplyAt ?? 0).getTime();
+          const bTime = new Date(b.lastReplyAt ?? 0).getTime();
+          if (bTime !== aTime) return bTime - aTime;
+          return b.id.localeCompare(a.id);
+        });
       });
 
       if (currentBatch.length < PAGE_SIZE) {

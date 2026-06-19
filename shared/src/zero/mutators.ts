@@ -1922,6 +1922,20 @@ export const mutators = defineMutators({
           return;
         }
 
+        let trueLastReplyAt: number | undefined = undefined;
+        if (conversation.replyCount > 0) {
+          const latestReply = await tx.run(
+            zql.messages
+              .where('conversationId', conversationId)
+              .where('messageId', '!=', conversation.initialMessageId)
+              .orderBy('createdAt', 'desc')
+              .limit(1)
+          );
+          if (latestReply[0]) {
+            trueLastReplyAt = latestReply[0].createdAt;
+          }
+        }
+
         // Create new manual subscription entry with null participationType
         await tx.mutate.conversation_participants.insert({
           id: participantId,
@@ -1930,6 +1944,7 @@ export const mutators = defineMutators({
           isSubscribed: true,
           joinedAt: timestamp,
           channelId: conversation.channelId,
+          lastReplyAt: trueLastReplyAt || null,
         });
       },
     ),
@@ -2070,13 +2085,19 @@ export const mutators = defineMutators({
         );
 
         if (existingParticipant) {
-          await tx.mutate.conversation_participants.update({
-            id: existingParticipant.id,
-            lastReadAt: timestamp,
-            ...(existingParticipant.participationType === ConversationParticipation.MENTIONED && {
-              participationType: ConversationParticipation.AUTHOR,
-            }),
-          });
+          const needsUpgrade = existingParticipant.participationType !== ConversationParticipation.AUTHOR;
+          const needsResubscribe = !existingParticipant.isSubscribed;
+          const needsUpdate = needsUpgrade || needsResubscribe || existingParticipant.lastReplyAt !== timestamp || existingParticipant.lastReadAt !== timestamp;
+
+          if (needsUpdate) {
+            await tx.mutate.conversation_participants.update({
+              id: existingParticipant.id,
+              ...(needsUpgrade ? { participationType: ConversationParticipation.AUTHOR } : {}),
+              ...(needsResubscribe ? { isSubscribed: true } : {}),
+              lastReadAt: timestamp,
+              lastReplyAt: timestamp,
+            });
+          }
         }
 
         await tx.mutate.messages.insert(message);
@@ -2614,6 +2635,29 @@ export const mutators = defineMutators({
               conversationId: conversation.conversationId,
               replyCount: Math.max(0, conversation.replyCount - 1),
             });
+
+            // Find the new latest message to update lastReplyAt
+            const remainingMessages = otherMessages
+              .filter(m => !m.isDeleted)
+              .sort((a, b) => b.createdAt - a.createdAt);
+              
+            if (remainingMessages.length > 0) {
+              const newLastReplyAt = remainingMessages[0].createdAt;
+              const participants = await tx.run(
+                zql.conversation_participants.where('conversationId', conversation.conversationId)
+              );
+              
+              for (const participant of participants) {
+                // Only update if they have a lastReplyAt (are subscribed/lurking with replies)
+                // and we are actually rolling back the lastReplyAt
+                if (participant.lastReplyAt != null && participant.lastReplyAt >= message.createdAt) {
+                  await tx.mutate.conversation_participants.update({
+                    id: participant.id,
+                    lastReplyAt: newLastReplyAt
+                  });
+                }
+              }
+            }
           }
         }
       },
@@ -3227,15 +3271,34 @@ export const mutators = defineMutators({
           );
 
           if (!participant) {
+            const conversation = await tx.run(
+              zql.conversations.where('conversationId', conversationId).one()
+            );
+            
+            let trueLastReplyAt: number | undefined = undefined;
+            if (conversation && conversation.replyCount > 0) {
+              const latestReply = await tx.run(
+                zql.messages
+                  .where('conversationId', conversationId)
+                  .where('messageId', '!=', conversation.initialMessageId)
+                  .orderBy('createdAt', 'desc')
+                  .limit(1)
+              );
+              if (latestReply[0]) {
+                trueLastReplyAt = latestReply[0].createdAt;
+              }
+            }
+
             await tx.mutate.conversation_participants.insert({
               id: participantId,
               conversationId,
               userId: ctx.userID,
               joinedAt: timestamp,
-              channelId: channelId,
+              channelId: channelId || conversation?.channelId || '',
               lastReadAt: timestamp,
               isSubscribed: false,
               participationType: null,
+              lastReplyAt: trueLastReplyAt || null,
             });
           } else {
             await tx.mutate.conversation_participants.update({
@@ -3514,6 +3577,20 @@ export const mutators = defineMutators({
         );
 
         if (!existingParticipant) {
+          let trueLastReplyAt: number | undefined = undefined;
+          if (conversation.replyCount > 0) {
+            const latestReply = await tx.run(
+              zql.messages
+                .where('conversationId', conversationId)
+                .where('messageId', '!=', conversation.initialMessageId)
+                .orderBy('createdAt', 'desc')
+                .limit(1),
+            );
+            if (latestReply[0]) {
+              trueLastReplyAt = latestReply[0].createdAt;
+            }
+          }
+
           await tx.mutate.conversation_participants.insert({
             id: participantId,
             conversationId,
@@ -3521,7 +3598,7 @@ export const mutators = defineMutators({
             joinedAt: timestamp,
             channelId: conversation.channelId,
             lastReadAt: newLastReadAt,
-            lastReplyAt: conversation.lastActivityAt,
+            lastReplyAt: trueLastReplyAt || null,
             isSubscribed: true,
             participationType: null,
           });

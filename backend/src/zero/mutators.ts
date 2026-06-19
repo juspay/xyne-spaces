@@ -321,22 +321,38 @@ async function addMentionedConversationParticipants(
   const existingParticipants = await tx.run(
     zql.conversation_participants.where('conversationId', conversationId),
   );
-  const existingParticipantUserIds = new Set(existingParticipants.map(participant => participant.userId));
+  const existingParticipantMap = new Map(
+    existingParticipants.map(participant => [participant.userId, participant])
+  );
 
   for (const userId of userIds) {
-    if (existingParticipantUserIds.has(userId)) continue;
+    const existing = existingParticipantMap.get(userId);
 
-    await tx.mutate.conversation_participants.insert({
-      id: uuidv4(),
-      conversationId,
-      userId,
-      participationType: ConversationParticipation.MENTIONED,
-      isSubscribed: true,
-      joinedAt,
-      channelId,
-      ...(lastReplyAt != null ? { lastReplyAt } : {}),
-    });
-    existingParticipantUserIds.add(userId);
+    if (existing) {
+      const shouldUpdateParticipationType = existing.participationType === null;
+      const shouldUpdateIsSubscribed = !existing.isSubscribed;
+      
+      if (shouldUpdateParticipationType || shouldUpdateIsSubscribed || lastReplyAt != null) {
+        await tx.mutate.conversation_participants.update({
+          id: existing.id,
+          ...(shouldUpdateParticipationType ? { participationType: ConversationParticipation.MENTIONED } : {}),
+          ...(shouldUpdateIsSubscribed ? { isSubscribed: true } : {}),
+          ...(lastReplyAt != null ? { lastReplyAt } : {}),
+        });
+      }
+    } else {
+      await tx.mutate.conversation_participants.insert({
+        id: uuidv4(),
+        conversationId,
+        userId,
+        participationType: ConversationParticipation.MENTIONED,
+        isSubscribed: true,
+        joinedAt,
+        channelId,
+        ...(lastReplyAt != null ? { lastReplyAt } : {}),
+      });
+      existingParticipantMap.set(userId, { id: 'temp', userId } as any);
+    }
   }
 }
 
@@ -2267,7 +2283,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: uuidv4(),
             conversationId,
             userId: authData.sub,
-            participationType: ConversationParticipation.MENTIONED,
+            participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: now,
             channelId: channelId,
@@ -2728,6 +2744,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             return;
           }
 
+          let trueLastReplyAt: number | undefined = undefined;
+          if (conversation.replyCount > 0) {
+            const latestReply = await tx.run(
+              zql.messages
+                .where('conversationId', conversationId)
+                .where('messageId', '!=', conversation.initialMessageId)
+                .orderBy('createdAt', 'desc')
+                .limit(1)
+            );
+            if (latestReply[0]) {
+              trueLastReplyAt = latestReply[0].createdAt;
+            }
+          }
+
           // Create new manual subscription entry with null participationType
           await tx.mutate.conversation_participants.insert({
             id: participantId,
@@ -2737,6 +2767,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             isSubscribed: true,
             joinedAt: timestamp,
             channelId: conversation.channelId,
+            ...(trueLastReplyAt ? { lastReplyAt: trueLastReplyAt } : {}),
           });
         }
       ),
@@ -2990,11 +3021,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             .one());
 
           if (existingParticipant) {
-            // Upgrade to AUTHOR if they were only MENTIONED
-            if (existingParticipant.participationType === ConversationParticipation.MENTIONED) {
+            // Upgrade to AUTHOR and ensure subscribed if they send a message, and ALWAYS update lastReplyAt for immediate UI bump
+            const needsUpgrade = existingParticipant.participationType !== ConversationParticipation.AUTHOR;
+            const needsResubscribe = !existingParticipant.isSubscribed;
+            const needsUpdate = needsUpgrade || needsResubscribe || existingParticipant.lastReplyAt !== timestamp;
+            
+            if (needsUpdate) {
               await tx.mutate.conversation_participants.update({
                 id: existingParticipant.id,
-                participationType: ConversationParticipation.AUTHOR,
+                ...(needsUpgrade ? { participationType: ConversationParticipation.AUTHOR } : {}),
+                ...(needsResubscribe ? { isSubscribed: true } : {}),
+                lastReplyAt: timestamp,
               });
             }
             // lastReadAt already updated before messages.insert — no duplicate write needed
@@ -3228,12 +3265,28 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               newlyMentionedUsers,
               newlyMentionedGroups,
             );
+
+            let trueLastReplyAt: number | undefined = undefined;
+            if (mentionConversation && mentionConversation.replyCount > 0) {
+              const latestReply = await tx.run(
+                zql.messages
+                  .where('conversationId', message.conversationId)
+                  .where('messageId', '!=', mentionConversation.initialMessageId)
+                  .orderBy('createdAt', 'desc')
+                  .limit(1)
+              );
+              if (latestReply[0]) {
+                trueLastReplyAt = latestReply[0].createdAt;
+              }
+            }
+
             await addMentionedConversationParticipants(
               tx,
               message.conversationId,
               mentionConversation?.channelId,
               mentionParticipantUserIds,
               now,
+              trueLastReplyAt,
             );
           }
 
@@ -3732,26 +3785,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          // Clean up AUTHOR participant if this was their only message
+          // Clean up AUTHOR participant if this was their only message.
+          // Exception: never remove the conversation creator — they are permanently
+          // tied to the thread they started, even if they delete their initial message.
           const senderId = message.senderId;
+          const isConversationCreator = senderId === conversation.createdBy;
 
-          // Check if sender has any other messages in this conversation
-          const otherMessagesFromSender = otherMessages.filter(
-            msg => msg.senderId === senderId
-          );
+          if (!isConversationCreator) {
+            // Check if sender has any other messages in this conversation
+            const otherMessagesFromSender = otherMessages.filter(
+              msg => msg.senderId === senderId
+            );
 
-          // If this was their only message, remove their AUTHOR participant
-          if (otherMessagesFromSender.length === 0) {
-            const senderParticipant = await tx.run(zql.conversation_participants
-              .where('conversationId', message.conversationId)
-              .where('userId', senderId)
-              .one());
+            // If this was their only message, remove their AUTHOR participant
+            if (otherMessagesFromSender.length === 0) {
+              const senderParticipant = await tx.run(zql.conversation_participants
+                .where('conversationId', message.conversationId)
+                .where('userId', senderId)
+                .one());
 
-            // Remove AUTHOR participant (they have no more messages)
-            if (senderParticipant && senderParticipant.participationType === ConversationParticipation.AUTHOR) {
-              await tx.mutate.conversation_participants.delete({
-                id: senderParticipant.id
-              });
+              // Remove AUTHOR participant (they have no more messages)
+              if (senderParticipant && senderParticipant.participationType === ConversationParticipation.AUTHOR) {
+                await tx.mutate.conversation_participants.delete({
+                  id: senderParticipant.id
+                });
+              }
             }
           }
 
@@ -3830,6 +3888,29 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 conversationId: conversation.conversationId,
                 replyCount: Math.max(0, conversation.replyCount - 1),
               });
+
+              // Find the new latest message to update lastReplyAt
+              const remainingMessages = otherMessages
+                .filter(m => !m.isDeleted)
+                .sort((a, b) => b.createdAt - a.createdAt);
+                
+              if (remainingMessages.length > 0) {
+                const newLastReplyAt = remainingMessages[0].createdAt;
+                const participants = await tx.run(
+                  zql.conversation_participants.where('conversationId', conversation.conversationId)
+                );
+                
+                for (const participant of participants) {
+                  // Only update if they have a lastReplyAt (are subscribed/lurking with replies)
+                  // and we are actually rolling back the lastReplyAt
+                  if (participant.lastReplyAt != null && participant.lastReplyAt >= message.createdAt) {
+                    await tx.mutate.conversation_participants.update({
+                      id: participant.id,
+                      lastReplyAt: newLastReplyAt
+                    });
+                  }
+                }
+              }
             }
           }
 
@@ -4720,6 +4801,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
 
           if (!participant) {
+            let trueLastReplyAt: number | undefined = undefined;
+            if (conversation.replyCount > 0) {
+              const latestReply = await tx.run(
+                zql.messages
+                  .where('conversationId', conversationId)
+                  .where('messageId', '!=', conversation.initialMessageId)
+                  .orderBy('createdAt', 'desc')
+                  .limit(1)
+              );
+              if (latestReply[0]) {
+                trueLastReplyAt = latestReply[0].createdAt;
+              }
+            }
+
             await tx.mutate.conversation_participants.insert({
               id: participantId,
               conversationId,
@@ -4729,6 +4824,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               lastReadAt: timestamp,
               isSubscribed: false,
               participationType: null,
+              ...(trueLastReplyAt ? { lastReplyAt: trueLastReplyAt } : {}),
             });
           } else {
             await tx.mutate.conversation_participants.update({
@@ -5017,6 +5113,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
 
           if (!existingParticipant) {
+            // Find true lastReplyAt
+            const latestReply = await tx.run(
+              zql.messages
+                .where('conversationId', conversationId)
+                .where('messageId', '!=', conversation.initialMessageId)
+                .orderBy('createdAt', 'desc')
+                .limit(1)
+            );
+            const trueLastReplyAt = latestReply[0] ? latestReply[0].createdAt : null;
+
             await tx.mutate.conversation_participants.insert({
               id: participantId,
               conversationId,
@@ -5024,7 +5130,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               joinedAt: timestamp,
               channelId: conversation.channelId,
               lastReadAt: newLastReadAt,
-              lastReplyAt: conversation.lastActivityAt,
+              lastReplyAt: trueLastReplyAt,
               isSubscribed: true,
               participationType: null,
             });

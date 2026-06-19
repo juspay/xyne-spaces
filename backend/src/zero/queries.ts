@@ -1638,6 +1638,7 @@ export const queries = defineQueries({
       return zql.channel_participants.where('userId', ctx.userID).where('role', ChannelRole.ADMIN);
     }
   ),
+  // @deprecated Unused by frontend. Use userConversationsPaginatedV2 instead.
   userConversationsPaginated: defineQuery(
     z.object({
       userId: z.string(),
@@ -1672,7 +1673,8 @@ export const queries = defineQueries({
         .where('userId', userId)
         .where('lastReplyAt', 'IS NOT', null)
         .where('isSubscribed', true)
-        .orderBy('lastReplyAt', 'desc');
+        .orderBy('lastReplyAt', 'desc')
+        .orderBy('id', 'desc');
 
       if (start) {
         query = query.start(

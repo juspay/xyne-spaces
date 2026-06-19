@@ -1376,27 +1376,7 @@ export const queries = defineQueries({
   myChannelParticipations: defineQuery(z.object({}), ({ ctx }) => {
     return zql.channel_participants.where('userId', ctx.userID).where('role', ChannelRole.ADMIN);
   }),
-  userConversationsPaginated: defineQuery(
-    z.object({
-      userId: z.string(),
-      limit: z.number(),
-      start: z.object({ lastActivityAt: z.number(), id: z.string() }).nullable(),
-    }),
-    ({ args: { userId, limit, start } }) => {
-      let query = zql.conversations
-        .where('replyCount', '>', 0)
-        .whereExists('participants', participantsQuery => participantsQuery.where('userId', userId))
-        .orderBy('lastActivityAt', 'desc');
 
-      if (start) {
-        query = query.start(
-          { lastActivityAt: start.lastActivityAt, conversationId: start.id },
-          { inclusive: false },
-        );
-      }
-      return query.limit(limit);
-    },
-  ),
   userConversationsPaginatedV2: defineQuery(
     z.object({
       userId: z.string(),
@@ -1408,7 +1388,8 @@ export const queries = defineQueries({
         .where('userId', userId)
         .where('lastReplyAt', 'IS NOT', null)
         .where('isSubscribed', true)
-        .orderBy('lastReplyAt', 'desc');
+        .orderBy('lastReplyAt', 'desc')
+        .orderBy('id', 'desc');
 
       if (start) {
         query = query.start(
