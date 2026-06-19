@@ -8,7 +8,7 @@ import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { websocketService } from '@/services/websocketService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
-import { InvitationResponse, NotificationType, ChannelScopeType, CallType } from '@prisma/client';
+import { InvitationResponse, NotificationType, ChannelScopeType, CallType, CallOrigin } from '@prisma/client';
 import { ActivityClassification, MessageType } from '@xyne/shared';
 
 class CallSideEffectService {
@@ -277,6 +277,64 @@ class CallSideEffectService {
             this.logger.info(`Call metrics updated: duration ${callDurationMinutes}m`);
         } catch (error) {
             this.logger.error('Failed to update call metrics:', error);
+        }
+    }
+
+    /**
+     * Emit analytics_event logs when a call ends
+     * Emits a single `call_ended` event
+     */
+    async logCallAnalytics(
+        call: { id: string; externalId: string; callOrigin: CallOrigin; startedAt: Date | null },
+        endedAt: Date,
+    ): Promise<void> {
+        try {
+            const startedAt = call.startedAt ?? endedAt;
+            const callDurationSeconds = Math.max(0, (endedAt.getTime() - startedAt.getTime()) / 1000);
+
+            logger.info('analytics_event', {
+                event: 'call_ended',
+                timestamp: endedAt.toISOString(),
+                callId: call.externalId,
+                callOrigin: call.callOrigin,
+                startedAt: startedAt.toISOString(),
+                endedAt: endedAt.toISOString(),
+                durationSeconds: callDurationSeconds,
+            });
+
+            // One `call_participant_left` event per participant who actually joined.
+            const participants = await db.callParticipant.findMany({
+                where: { callId: call.id, joinedAt: { not: null }, isExternal: false },
+                select: { userId: true, joinedAt: true, leftAt: true },
+            });
+
+            if (participants.length === 0) return;
+
+            const userIds = participants.map(p => p.userId);
+            const users = await db.user.findMany({
+                where: { id: { in: userIds } },
+                select: { id: true, name: true },
+            });
+            const nameMap = new Map(users.map(u => [u.id, u.name]));
+
+            for (const p of participants) {
+                const joinedAt = p.joinedAt!;
+                const leftAt = p.leftAt ?? endedAt;
+                const durationSeconds = Math.max(0, (leftAt.getTime() - joinedAt.getTime()) / 1000);
+                logger.info('analytics_event', {
+                    event: 'call_participant_left',
+                    timestamp: leftAt.toISOString(),
+                    callId: call.externalId,
+                    userId: p.userId,
+                    userName: nameMap.get(p.userId) ?? null,
+                    callOrigin: call.callOrigin,
+                    joinedAt: joinedAt.toISOString(),
+                    leftAt: leftAt.toISOString(),
+                    durationSeconds,
+                });
+            }
+        } catch (error) {
+            this.logger.error('Failed to log call analytics:', error);
         }
     }
 

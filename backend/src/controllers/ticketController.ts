@@ -1158,6 +1158,7 @@ export class TicketController {
         event: 'ticket_created',
         timestamp: new Date().toISOString(),
         userId: ticket.createdBy,
+        userName: req.user?.name ?? null,
       });
 
       ticketDuplicateService.persistDuplicateReferences({
