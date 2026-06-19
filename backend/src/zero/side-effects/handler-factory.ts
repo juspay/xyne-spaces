@@ -20,6 +20,9 @@ import { EmailReadsSideEffectHandler } from './tables/email-reads-handler';
 import { ChannelUserStatusSideEffectHandler } from './tables/channel-user-status-handler';
 import { ConversationParticipantsSideEffectHandler } from './tables/conversation-participants-handler';
 import { FormEntityValuesSideEffectHandler } from './tables/form-entity-values-handler';
+import { RcasSideEffectHandler } from './tables/rcas-handler';
+import { TicketSubTicketMappingsSideEffectHandler } from './tables/ticket-sub-ticket-mappings-handler';
+import { TicketReferenceMappingsSideEffectHandler } from './tables/ticket-reference-mappings-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -46,6 +49,12 @@ export class SideEffectHandlerFactory {
         return new TicketAssignmentsSideEffectHandler(ctx);
       case 'ticket_stage_eta':
         return new TicketStageEtaSideEffectHandler(ctx);
+      case 'rcas':
+        return new RcasSideEffectHandler(ctx);
+      case 'ticket_sub_ticket_mappings':
+        return new TicketSubTicketMappingsSideEffectHandler(ctx);
+      case 'ticket_reference_mappings':
+        return new TicketReferenceMappingsSideEffectHandler(ctx);
       case 'canvases':
         return new CanvasSideEffectHandler(ctx);
       case 'delayed_messages':

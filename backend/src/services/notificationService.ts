@@ -1707,6 +1707,16 @@ class NotificationService {
       TICKET_STATUS_CHANGE: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       TICKET_ASSIGNMENT: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       TICKET_REASSIGNMENT: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_DUE_DATE_CHANGED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_PRIORITY_CHANGED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_USER_GROUP_CHANGED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_TITLE_CHANGED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_DESCRIPTION_CHANGED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_RCA_CREATED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_RCA_UPDATED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_SUBTICKET_ADDED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_RELATED_TICKET_ADDED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      TICKET_RELATED_TICKET_REMOVED: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       CHANNEL_MESSAGE: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       MENTION: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       DIRECT_MESSAGE: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
@@ -1732,6 +1742,16 @@ class NotificationService {
       'TICKET_STATUS_CHANGE',
       'TICKET_ASSIGNMENT',
       'TICKET_REASSIGNMENT',
+      'TICKET_DUE_DATE_CHANGED',
+      'TICKET_PRIORITY_CHANGED',
+      'TICKET_USER_GROUP_CHANGED',
+      'TICKET_TITLE_CHANGED',
+      'TICKET_DESCRIPTION_CHANGED',
+      'TICKET_RCA_CREATED',
+      'TICKET_RCA_UPDATED',
+      'TICKET_SUBTICKET_ADDED',
+      'TICKET_RELATED_TICKET_ADDED',
+      'TICKET_RELATED_TICKET_REMOVED',
       'CHANNEL_MESSAGE',
       'MENTION',
       'DIRECT_MESSAGE',
@@ -1821,6 +1841,846 @@ class NotificationService {
 
   async getStats(): Promise<any> {
     return await realTimeNotificationService.getStats();
+  }
+
+  async sendTicketReassignmentNotification(
+    ticketId: string,
+    recipients: string[],
+    oldAssigneeName: string,
+    newAssigneeName: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Ticket Reassigned';
+      const message = `Ticket '${ticketDisplayId}' reassigned from ${oldAssigneeName} to ${newAssigneeName}`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_REASSIGNMENT,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_REASSIGNMENT, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_REASSIGNMENT,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket reassignment notification:', error);
+    }
+  }
+
+  async sendTicketDueDateChangedNotification(
+    ticketId: string,
+    recipients: string[],
+    newDueDate: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Due Date Changed';
+      const message = `Due date for ticket '${ticketDisplayId}' changed to ${newDueDate}`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_DUE_DATE_CHANGED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_DUE_DATE_CHANGED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_DUE_DATE_CHANGED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              newDueDate,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket due date changed notification:', error);
+    }
+  }
+
+  async sendTicketStatusChangeNotification(
+    ticketId: string,
+    recipients: string[],
+    newStatus: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Status Changed';
+      const message = `Ticket '${ticketDisplayId}' status changed to ${newStatus}`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_STATUS_CHANGE,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_STATUS_CHANGE, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_STATUS_CHANGE,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              newStatus,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket status change notification:', error);
+    }
+  }
+
+  async sendTicketPriorityChangeNotification(
+    ticketId: string,
+    recipients: string[],
+    oldPriority: string,
+    newPriority: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Priority Changed';
+      const message = `Ticket '${ticketDisplayId}' priority changed from ${oldPriority} to ${newPriority}`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_PRIORITY_CHANGED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_PRIORITY_CHANGED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_PRIORITY_CHANGED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              oldPriority,
+              newPriority,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket priority change notification:', error);
+    }
+  }
+
+  async sendTicketUserGroupChangeNotification(
+    ticketId: string,
+    recipients: string[],
+    newUserGroupName: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'User Group Changed';
+      const message = `Ticket '${ticketDisplayId}' assigned to user group ${newUserGroupName}`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_USER_GROUP_CHANGED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_USER_GROUP_CHANGED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_USER_GROUP_CHANGED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              newUserGroupName,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket user group change notification:', error);
+    }
+  }
+
+  async sendTicketTitleChangeNotification(
+    ticketId: string,
+    recipients: string[],
+    newTitle: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Title Changed';
+      const message = `Ticket '${ticketDisplayId}' renamed to ${newTitle}`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_TITLE_CHANGED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_TITLE_CHANGED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_TITLE_CHANGED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              newTitle,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket title change notification:', error);
+    }
+  }
+
+  async sendTicketDescriptionChangeNotification(
+    ticketId: string,
+    recipients: string[],
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Description Updated';
+      const message = `Ticket '${ticketDisplayId}' description was updated`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_DESCRIPTION_CHANGED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_DESCRIPTION_CHANGED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_DESCRIPTION_CHANGED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket description change notification:', error);
+    }
+  }
+
+  async sendTicketRcaCreatedNotification(
+    ticketId: string,
+    recipients: string[],
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'RCA Added';
+      const message = `An RCA was added to ticket '${ticketDisplayId}'`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_RCA_CREATED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_RCA_CREATED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_RCA_CREATED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket RCA created notification:', error);
+    }
+  }
+
+  async sendTicketRcaUpdatedNotification(
+    ticketId: string,
+    recipients: string[],
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'RCA Updated';
+      const message = `RCA was updated for ticket '${ticketDisplayId}'`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_RCA_UPDATED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_RCA_UPDATED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_RCA_UPDATED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket RCA updated notification:', error);
+    }
+  }
+
+  async sendTicketSubticketAddedNotification(
+    ticketId: string,
+    recipients: string[],
+    subticketTitle: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Sub-ticket Added';
+      const message = `Sub-ticket "${subticketTitle}" was added to ticket '${ticketDisplayId}'`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_SUBTICKET_ADDED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_SUBTICKET_ADDED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_SUBTICKET_ADDED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              subticketTitle,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket subticket added notification:', error);
+    }
+  }
+
+  async sendTicketRelatedTicketAddedNotification(
+    ticketId: string,
+    recipients: string[],
+    relatedTicketTitle: string,
+    relationType: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Related Ticket Added';
+      const message = `Related ticket "${relatedTicketTitle}" (${relationType}) was linked to ticket '${ticketDisplayId}'`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_RELATED_TICKET_ADDED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_RELATED_TICKET_ADDED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_RELATED_TICKET_ADDED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              relatedTicketTitle,
+              relationType,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket related ticket added notification:', error);
+    }
+  }
+
+  async sendTicketRelatedTicketRemovedNotification(
+    ticketId: string,
+    recipients: string[],
+    relatedTicketTitle: string,
+    relationType: string,
+    actorId: string,
+  ): Promise<void> {
+    if (recipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+        },
+      });
+      if (!ticket) {
+        logger.warn(`[NotificationService] Ticket not found: ${ticketId}`);
+        return;
+      }
+
+      const actionUrl = ticket.channelId && ticket.conversationId
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Related Ticket Removed';
+      const message = `Related ticket "${relatedTicketTitle}" (${relationType}) was unlinked from ticket '${ticketDisplayId}'`;
+
+      await Promise.allSettled(
+        recipients.map(async (userId) => {
+          if (userId === actorId) return;
+
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_RELATED_TICKET_REMOVED,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_RELATED_TICKET_REMOVED, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_RELATED_TICKET_REMOVED,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              actorId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              relatedTicketTitle,
+              relationType,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send ticket related ticket removed notification:', error);
+    }
   }
 }
 
