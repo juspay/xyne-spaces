@@ -197,6 +197,9 @@ router.get('/v2/conversations', authMiddleware.authenticate, xyneAIControllerFac
 router.get('/v2/conversations/:convId/messages', authMiddleware.authenticate, xyneAIControllerFactory.getConversationMessages);
 router.get('/v2/conversations/:convId/debug', authMiddleware.authenticate, xyneAIControllerFactory.getConversationDebug);
 
+// DELETE /api/xyne-ai/v2/conversations/:convId - Delete a claw conversation
+router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerFactory.deleteConversation);
+
 // GET /api/xyne-ai/v2/attachments/:attachmentId/download - Download attachment from claw
 router.get('/v2/attachments/:attachmentId/download', authMiddleware.authenticate, xyneAIControllerFactory.downloadAttachment);
 

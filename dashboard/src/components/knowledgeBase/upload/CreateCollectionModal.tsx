@@ -1,6 +1,6 @@
-import { ReactElement, useState, useCallback } from 'react';
+import { ReactElement, useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Upload, X } from 'lucide-react';
+import { Upload, ChevronDown } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
 import { Button } from '../../ui/Button/Button';
 import { CollectionForm } from './CollectionForm';
@@ -13,51 +13,102 @@ import { CollectionRole } from '@xyne/shared';
 import { useUploadHandler } from './useUploadHandler';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
+
+interface ChannelOption {
+  id: string;
+  name: string;
+}
 
 interface CreateCollectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   scopeType: string;
-  scopeId: string;
+  scopeId?: string;
+  channels: ChannelOption[];
   onSuccess: (collection: CollectionSummary) => void;
+  /** If true, only allow folder selection. If false, allow both files and folders. */
+  folderOnly?: boolean;
 }
+
+const extractFolderName = (files: File[]): string => {
+  const file = files[0];
+  if (!file) return '';
+  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || '';
+  if (relativePath) {
+    const parts = relativePath.split('/');
+    if (parts.length > 1) {
+      return parts[0] ?? '';
+    }
+  }
+  // Fallback: use the first file's name without extension
+  const name = file.name;
+  const dotIdx = name.lastIndexOf('.');
+  return dotIdx > 0 ? name.slice(0, dotIdx) : name;
+};
 
 const CreateCollectionModal = ({
   isOpen,
   onClose,
   scopeType,
-  scopeId,
+  scopeId: initialScopeId,
+  channels,
   onSuccess,
+  folderOnly = false,
 }: CreateCollectionModalProps): ReactElement => {
   const { user } = useAuth();
   const zero = useZero();
   const { initUpload, createProgressCallback, completeUpload, handleError } = useUploadHandler();
 
   const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [isPrivate, setIsPrivate] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const [nameError, setNameError] = useState<string | null>(null);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(initialScopeId ?? null);
+
+  const effectiveScopeId = selectedChannelId;
 
   const resetForm = useCallback(() => {
     setTitle('');
-    setDescription('');
     setFiles([]);
     setIsPrivate(false);
     setIsCreating(false);
-    setNameError(null);
-  }, []);
+    setSelectedChannelId(initialScopeId ?? null);
+  }, [initialScopeId]);
 
   const handleClose = useCallback(() => {
-    if (isCreating) return; // don't close while the create API is in-flight
+    if (isCreating) return;
     resetForm();
     onClose();
   }, [isCreating, onClose, resetForm]);
 
-  const handleCreateCollection = useCallback(async () => {
-    if (!title.trim() || files.length === 0) return;
+  useEffect(() => {
+    if (isOpen) {
+      resetForm();
+    }
+  }, [isOpen, resetForm]);
 
+  useEffect(() => {
+    if (files.length > 0) {
+      const derivedName = extractFolderName(files);
+      if (derivedName) {
+        setTitle(derivedName);
+      }
+    }
+  }, [files]);
+
+  const handleCreateCollection = useCallback(async () => {
+    const finalTitle = title.trim() || extractFolderName(files);
+    if (!finalTitle || files.length === 0) return;
+    if (!effectiveScopeId) {
+      toast.error('Please select a channel');
+      return;
+    }
     if (!user) {
       toast.error('You must be logged in to create a collection');
       return;
@@ -72,9 +123,9 @@ const CreateCollectionModal = ({
         mutators.collection.createCollection({
           id,
           scopeType,
-          scopeId,
-          name: title.trim(),
-          description: description || null,
+          scopeId: effectiveScopeId,
+          name: finalTitle,
+          description: null,
           isPrivate,
           permissionId: crypto.randomUUID(),
           timestamp,
@@ -85,7 +136,7 @@ const CreateCollectionModal = ({
         setIsCreating(false);
         const msg = serverRes.error.message || '';
         if (msg.includes('already exists')) {
-          setNameError(msg);
+          toast.error(msg);
         } else {
           toast.error(msg || 'Failed to create collection. Please try again.');
         }
@@ -94,26 +145,20 @@ const CreateCollectionModal = ({
 
       const collection: CollectionSummary = {
         id,
-        name: title.trim(),
-        description: description || null,
+        name: finalTitle,
+        description: null,
         ownerId: user.id,
         canShare: true,
         role: CollectionRole.OWNER,
       };
 
-      // ── Step 2: Capture file list, notify parent, close modal ─
-      // `files` is captured in this closure; resetForm() only
-      // schedules a state update and won't affect the current ref.
       const filesToUpload = files;
-      const collectionName = title.trim();
+      const collectionName = finalTitle;
 
       resetForm();
       onSuccess(collection);
       onClose();
 
-      // ── Step 3: Upload files in the background ───────────────
-      // The modal may already be unmounted at this point.
-      // The global overlay tracks progress via the zustand store.
       if (filesToUpload.length > 0) {
         const { uploadId, sessionId, batches } = initUpload(
           collection.id,
@@ -122,14 +167,14 @@ const CreateCollectionModal = ({
         );
         const progressCallback = createProgressCallback(uploadId, filesToUpload, batches);
 
-        // Fire-and-forget — completeUpload / handleError update the store
         uploadFilesInBatches(
           collection.id,
           filesToUpload,
-          null, // root
+          null,
           'rename',
           progressCallback,
           sessionId,
+          true,
         )
           .then(result => {
             completeUpload(uploadId, {
@@ -141,11 +186,10 @@ const CreateCollectionModal = ({
           .catch((err: unknown) => handleError(uploadId, err));
       }
     } catch (error) {
-      // Collection creation itself failed — stay in the modal
       setIsCreating(false);
       const msg = error instanceof Error ? error.message : '';
       if (msg.includes('already exists')) {
-        setNameError(msg);
+        toast.error(msg);
       } else {
         toast.error(msg || 'Failed to create collection. Please try again.');
       }
@@ -155,8 +199,7 @@ const CreateCollectionModal = ({
     title,
     files,
     scopeType,
-    scopeId,
-    description,
+    effectiveScopeId,
     isPrivate,
     user,
     onSuccess,
@@ -168,7 +211,9 @@ const CreateCollectionModal = ({
     handleError,
   ]);
 
-  const canSubmit = title.trim().length > 0 && files.length > 0 && !isCreating;
+  const canSubmit = files.length > 0 && !!effectiveScopeId && !isCreating;
+  const selectedChannelName =
+    channels.find(c => c.id === selectedChannelId)?.name ?? 'Select channel';
 
   return (
     <Dialog
@@ -176,52 +221,79 @@ const CreateCollectionModal = ({
       onOpenChange={open => {
         if (!open) handleClose();
       }}
-      title='Create New Collection'
-      description='Upload files to create a new knowledge collection'
-      className='max-w-2xl'
+      title='Upload Collection'
+      description={
+        folderOnly
+          ? 'Select a folder to create a new collection'
+          : 'Upload files or a folder to create a new collection'
+      }
+      className='max-w-md bg-secondary border border-border'
     >
-      <div className='p-6'>
-        {/* Header */}
-        <div className='flex items-center justify-between mb-6'>
-          <h2 className='text-sm font-semibold text-gray-500 uppercase tracking-wider'>
-            Create New Collection
-          </h2>
-          <button
-            onClick={handleClose}
-            data-track-category='knowledge-base'
-            data-track-name='close-modal'
-            className='p-1 hover:bg-gray-100 rounded transition-colors'
-          >
-            <X size={20} className='text-gray-500' />
-          </button>
-        </div>
+      <div className='p-4'>
+        {/* Channel selector (only if no initialScopeId provided) */}
+        {!initialScopeId && (
+          <div className='mb-3'>
+            <label
+              htmlFor='create-collection-channel-trigger'
+              className='block text-sm font-medium text-foreground mb-1'
+            >
+              Channel
+            </label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  id='create-collection-channel-trigger'
+                  type='button'
+                  className='inline-flex h-9 w-full items-center justify-between rounded-md border border-border bg-background px-3 text-sm text-foreground transition hover:bg-muted'
+                >
+                  <span className='truncate'>{selectedChannelName}</span>
+                  <ChevronDown className='h-4 w-4 ml-2 shrink-0' />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align='start'
+                className='w-[--radix-dropdown-menu-trigger-width]'
+              >
+                {channels.length === 0 ? (
+                  <DropdownMenuItem disabled>No channels available</DropdownMenuItem>
+                ) : (
+                  channels.map(ch => (
+                    <DropdownMenuItem key={ch.id} onClick={() => setSelectedChannelId(ch.id)}>
+                      <span className='truncate'>{ch.name}</span>
+                    </DropdownMenuItem>
+                  ))
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
 
         {/* Collection Form */}
         <CollectionForm
-          title={title}
-          description={description}
           files={files}
           isPrivate={isPrivate}
-          onTitleChange={v => {
-            setTitle(v);
-            setNameError(null);
-          }}
-          onDescriptionChange={setDescription}
           onFilesChange={setFiles}
           onIsPrivateChange={setIsPrivate}
           disabled={isCreating}
-          nameError={nameError ?? undefined}
+          folderOnly={folderOnly}
         />
 
+        {/* Title preview */}
+        {title && (
+          <div className='mt-2 text-xs text-muted-foreground'>
+            Collection name: <span className='font-medium text-foreground'>{title}</span>
+          </div>
+        )}
+
         {/* Submit Button */}
-        <div className='flex justify-end gap-2 mt-4'>
+        <div className='flex justify-end gap-2 mt-3'>
           <Button
             disabled={!canSubmit}
             loading={isCreating}
             onClick={() => {
               void handleCreateCollection();
             }}
-            className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            className='px-4 py-2 bg-muted-foreground text-background rounded-lg hover:bg-muted-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
           >
             <Upload size={16} />
             Create Collection

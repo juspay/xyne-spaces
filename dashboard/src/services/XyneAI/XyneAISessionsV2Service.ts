@@ -36,6 +36,7 @@ interface ClawChatMessage {
   content: string;
   status: string;
   createdAt: string;
+  reasoning?: string;
   attachments?: Array<{
     id: string;
     mimeType: string;
@@ -220,10 +221,31 @@ export async function fetchV2ConversationMessages(
       }));
     }
 
+    // Map reasoning content from claw format
+    if (msg.reasoning && msg.reasoning.length > 0) {
+      mappedMessage.reasoning = msg.reasoning;
+    }
+
     return mappedMessage;
   });
 
   return mappedMessages;
+}
+
+/**
+ * Delete a v2 conversation from claw. The backend proxies the call through to
+ * claw-auth; both the v2 sessions cache and the per-conversation messages
+ * cache should be invalidated by the caller afterwards.
+ */
+export async function deleteV2Conversation(
+  conversationId: string,
+  agentSlug?: string | null,
+): Promise<void> {
+  const query =
+    agentSlug && agentSlug !== 'ask-ai' ? `?agentSlug=${encodeURIComponent(agentSlug)}` : '';
+  await apiInstance.delete(
+    `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
+  );
 }
 
 export async function fetchV2DebugArtifacts(

@@ -124,6 +124,7 @@ export async function uploadFilesToCollection(
   duplicateStrategy: 'skip' | 'rename' | 'overwrite' = 'rename',
   onProgress?: (progress: { uploaded: number; total: number; currentFile?: string }) => void,
   sessionId?: string,
+  stripTopFolderSegment: boolean = false,
 ): Promise<{
   success: boolean;
   uploaded: number;
@@ -152,6 +153,11 @@ export async function uploadFilesToCollection(
     if (typeof relativePath === 'string' && relativePath.length > 0) {
       const pathParts = relativePath.split('/');
       pathParts.pop(); // Remove filename
+      if (stripTopFolderSegment && pathParts.length > 0) {
+        // The caller is using the top-level folder name as the collection name,
+        // so drop it here to avoid creating a duplicate sub-folder of the same name.
+        pathParts.shift();
+      }
       return pathParts.join('/');
     }
     return '';
@@ -210,6 +216,7 @@ export async function uploadFilesInBatches(
     batchProgress: { currentBatch: number; totalBatches: number };
   }) => void,
   sessionId?: string,
+  stripTopFolderSegment: boolean = false,
 ): Promise<{
   success: boolean;
   totalUploaded: number;
@@ -260,6 +267,7 @@ export async function uploadFilesInBatches(
         duplicateStrategy,
         undefined, // Batch-level progress handled separately
         sessionId,
+        stripTopFolderSegment,
       );
 
       // Process results

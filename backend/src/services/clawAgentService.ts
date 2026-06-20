@@ -771,6 +771,30 @@ export async function getClawConversationMessages(
   return (await response.json()) as ClawMessagesResponse;
 }
 
+export async function deleteClawConversation(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string,
+  agentSlug?: string
+): Promise<{ success: boolean; data: { deleted: number } }> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] deleteConversation failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to delete conversation');
+  }
+
+  return (await response.json()) as { success: boolean; data: { deleted: number } };
+}
+
 export async function getClawDebugArtifacts(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,

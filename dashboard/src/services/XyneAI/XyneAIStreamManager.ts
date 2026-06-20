@@ -168,7 +168,10 @@ class XyneAIStreamManager {
   // Track if sidebar is open for notification logic
   private isSidebarOpen: boolean = false;
 
-  /** Backend session id (or empty) for the conversation currently visible in the sidebar */
+  /** Whether the user is currently viewing the /ai page */
+  private isOnAIPage: boolean = false;
+
+  /** Which conversation the user is currently viewing (drives completion-toast targeting) */
   private visibleConversationId: string | null = null;
 
   // Web Worker instance
@@ -651,6 +654,13 @@ class XyneAIStreamManager {
     if (isOpen && this.visibleConversationId) {
       this.pendingCompletionNotifications.delete(this.visibleConversationId);
     }
+  }
+
+  /**
+   * Set whether the user is currently on the /ai page
+   */
+  public setOnAIPage(isOnAIPage: boolean): void {
+    this.isOnAIPage = isOnAIPage;
   }
 
   /**
@@ -1542,7 +1552,9 @@ class XyneAIStreamManager {
     );
 
     const shouldNotify =
-      !currentState.suppressCompletionToast && (!this.isSidebarOpen || !viewingThis);
+      !currentState.suppressCompletionToast &&
+      (!this.isSidebarOpen || !viewingThis) &&
+      !this.isOnAIPage;
 
     if (shouldNotify) {
       this.pendingCompletionNotifications.add(notifyKey);
@@ -1650,6 +1662,7 @@ class XyneAIStreamManager {
               ? localMsg.streamingContent
               : finalRefreshed.streamingContent || finalRefreshed.content;
 
+          const mergedReasoning = finalRefreshed.reasoning ?? localMsg.reasoning;
           const mergedMsg: Message = {
             ...finalRefreshed,
             // Keep local traceId if it was set during streaming
@@ -1657,6 +1670,8 @@ class XyneAIStreamManager {
             // Preserve locally accumulated content over potentially incomplete backend content
             content: finalContent,
             streamingContent: finalStreamingContent || finalContent,
+            // Preserve locally accumulated reasoning if backend didn't return it
+            ...(mergedReasoning !== undefined && { reasoning: mergedReasoning }),
             // Keep the local ID to avoid breaking React keys and parent references
             id: localMsg.id,
           };

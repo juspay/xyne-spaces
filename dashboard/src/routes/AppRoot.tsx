@@ -13,9 +13,10 @@ import WorkflowScreen from './WorkflowScreen/WorkflowScreen';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
-import { KnowledgeBaseLayout } from './KnowledgeBaseScreen';
+import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
+import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
+import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
 import { MemoryScreen } from './MemoryScreen';
-import { TreeLayout } from '../components/knowledgeBase/layout/TreeLayout';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
@@ -341,6 +342,10 @@ const AppRoot = (): ReactElement => {
   // Initialize activity tracking
   useActivityTracker(location.pathname);
   const isOnboarding = location.pathname.endsWith('/onboarding');
+  // The /ai page is nested under /:workspaceId, so the full pathname looks
+  // like "/<workspaceId>/ai" or "/<workspaceId>/ai/<sub>". Match that
+  // structure rather than a leading "/ai" prefix (which never matches).
+  const isOnAIPage = /^\/[^/]+\/ai(\/|$)/.test(location.pathname);
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -410,6 +415,17 @@ const AppRoot = (): ReactElement => {
       browserPanelActor.send({ type: 'CLOSE' });
     }
   }, [location.pathname, browserPanelState]);
+
+  // The /ai page already hosts its own full-screen XyneAI experience, so the
+  // global XyneAISidebar must never be open there. Close it on any pathname
+  // change that lands inside /ai — this covers both opening it elsewhere and
+  // then navigating in, and any code path that tries to open it while here.
+  useEffect(() => {
+    if (!isOnAIPage) return;
+    if (xyneAIActor.getSnapshot().matches('open')) {
+      xyneAIActor.send({ type: 'CLOSE' });
+    }
+  }, [isOnAIPage, isXyneAIDrawerOpen]);
 
   // Monitor for pathname changes to update XyneAI context when navigating
   useEffect(() => {
@@ -517,7 +533,7 @@ const AppRoot = (): ReactElement => {
                     <EditWarningModal />
                     <Outlet />
                   </main>
-                ) : isXyneAIDrawerOpen && !isMobile ? (
+                ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
                   // XyneAI is open on desktop - show panel layout with XyneAI
                   <div className='flex flex-col h-screen'>
                     {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
@@ -674,7 +690,7 @@ const AppRoot = (): ReactElement => {
                   }}
                 />
                 {/* XyneAI Mobile Drawer */}
-                {isMobile && !isInPanelWebview && (
+                {isMobile && !isInPanelWebview && !isOnAIPage && (
                   <Drawer
                     open={isXyneAIDrawerOpen}
                     onOpenChange={open => {
@@ -959,34 +975,31 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                // Layout route: providers live here and persist across all child routes.
-                // Navigating between TreeLayout ↔ FileViewerLayout never remounts providers.
                 path: 'knowledge-base',
-                element: <KnowledgeBaseLayout />,
+                element: <KnowledgeBaseV2Layout />,
                 children: [
                   {
                     index: true,
-                    element: <TreeLayout />,
+                    element: <KnowledgeBaseV2Screen />,
                   },
                   {
-                    path: ':projectId',
-                    element: <TreeLayout />,
+                    // The file viewer still reads projectId / channelId /
+                    // collectionId / folderId from the URL.
+                    path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+                    element: <FileViewerLayout />,
                   },
-                  {
-                    path: ':projectId/:channelId',
-                    element: <TreeLayout />,
-                  },
+                  // Back-compat shims: pre-port URLs (path-only nesting) get
+                  // redirected to the new ?cl=&parent= layout so browser
+                  // history entries don't 404 after the route change.
+                  { path: ':projectId', element: <LegacyKbRedirect /> },
+                  { path: ':projectId/:channelId', element: <LegacyKbRedirect /> },
                   {
                     path: ':projectId/:channelId/:collectionId',
-                    element: <TreeLayout />,
+                    element: <LegacyKbRedirect />,
                   },
                   {
                     path: ':projectId/:channelId/:collectionId/:folderId',
-                    element: <TreeLayout />,
-                  },
-                  {
-                    path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
-                    element: <FileViewerLayout />,
+                    element: <LegacyKbRedirect />,
                   },
                 ],
               },

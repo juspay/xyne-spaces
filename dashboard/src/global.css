@@ -3105,6 +3105,81 @@ img.inline-emoji,
   display: none;
 }
 
+/* AI page background — soft neutral for light themes, near-black for midnight */
+[data-theme="classic"] .ai-page-bg,
+[data-theme="summer_breeze"] .ai-page-bg {
+  background-color: hsl(220 16% 97%);
+}
+
+[data-theme="midnight"] .ai-page-bg {
+  background-color: #0e0f11;
+}
+
+/* Knowledge Base section header/footer backgrounds */
+[data-theme="classic"] .ai-kb-section,
+[data-theme="summer_breeze"] .ai-kb-section {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="midnight"] .ai-kb-section {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* AI composer — match the page bg in the soft-neutral palette */
+[data-theme="classic"] .ai-composer-wrapper,
+[data-theme="summer_breeze"] .ai-composer-wrapper {
+  background-color: hsl(220 16% 97%);
+}
+
+/* AI composer dark mode overrides */
+[data-theme="midnight"] .ai-composer-wrapper {
+  border-color: #3a3a3a;
+  background-color: #1e1e1e;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05),
+    0 8px 24px -12px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="midnight"] .ai-composer-wrapper:focus-within {
+  border-color: #555;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1),
+    0 12px 30px -12px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="midnight"] .ai-send-btn {
+  background-color: #333;
+}
+
+[data-theme="midnight"] .ai-send-btn:hover:not(:disabled) {
+  background-color: #444;
+}
+
+[data-theme="midnight"] .ai-send-btn:disabled {
+  background-color: rgba(51, 51, 51, 0.5);
+  color: hsl(var(--muted-foreground));
+}
+
+/* AI chat thread dark mode overrides */
+[data-theme="midnight"] .ai-chat-topbar {
+  border-bottom-color: #2a2a2a;
+}
+
+[data-theme="midnight"] .ai-user-bubble {
+  background-color: #2a2a2a;
+  color: hsl(var(--foreground));
+}
+
+/* AI agent selector dropdown — soft neutral for light themes, near-black for midnight */
+[data-theme="classic"] .ai-agent-selector,
+[data-theme="summer_breeze"] .ai-agent-selector {
+  background-color: hsl(220 16% 97%);
+}
+
+[data-theme="midnight"] .ai-agent-selector {
+  background-color: #0e0f11;
+}
+
 /* Voice recording wave animation */
 @keyframes voice-wave {
   0%,
