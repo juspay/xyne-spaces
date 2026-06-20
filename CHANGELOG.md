@@ -1,3 +1,10 @@
+## [1.166.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.165.0...v1.166.0) (2026-06-20)
+
+
+### Features
+
+* Add Ask AI launch page with SEBI + KB ([532c744](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/532c744d2d3599f259bb42a0455ee8a3c395e135)), closes [#7655](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/7655)
+
 ## [1.165.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.164.0...v1.165.0) (2026-06-19)
 
 
