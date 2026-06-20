@@ -9780,11 +9780,13 @@ export const mutators = defineMutators({
           }
         }
 
-        await tx.mutate.collection_items.update({
-          id,
-          name,
-          updatedAt: timestamp,
-        });
+        // In the new design, folders are Collection rows and files are CollectionItem rows.
+        const folder = await tx.run(zql.collections.where('id', id).one());
+        if (folder) {
+          await tx.mutate.collections.update({ id, name, updatedAt: timestamp });
+        } else {
+          await tx.mutate.collection_items.update({ id, name, updatedAt: timestamp });
+        }
       },
     ),
 

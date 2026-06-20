@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, DragEvent, ChangeEvent } from 'react';
-import { Upload, FolderOpen, X, Info } from 'lucide-react';
+import { Upload, FolderOpen, X } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import { formatFileSize, getFileExtension, getExtensionColor } from '../../ui/utils/files';
@@ -10,6 +10,8 @@ interface FileUploadZoneProps {
   disabled?: boolean;
   maxFiles?: number;
   showInfo?: boolean;
+  /** If true, only allow folder selection. */
+  folderOnly?: boolean;
 }
 
 /**
@@ -22,6 +24,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
   disabled = false,
   maxFiles,
   showInfo = true,
+  folderOnly = false,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,26 +112,19 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         if (!disabled) {
-          fileInputRef.current?.click();
+          if (folderOnly) {
+            folderInputRef.current?.click();
+          } else {
+            fileInputRef.current?.click();
+          }
         }
       }
     },
-    [disabled],
+    [disabled, folderOnly],
   );
 
   return (
     <div className='space-y-4'>
-      {/* Info Banner */}
-      {showInfo && (
-        <div className='flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg'>
-          <Info size={16} className='text-blue-600 mt-0.5 flex-shrink-0' />
-          <p className='text-sm text-blue-700'>
-            Note: All file types are supported. Only DOCX, PDF, and MD files will be searchable and
-            have preview capability.
-          </p>
-        </div>
-      )}
-
       {/* Drag & Drop Zone */}
       <div
         role='button'
@@ -148,12 +144,23 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => !disabled && fileInputRef.current?.click()}
+        onClick={() => {
+          if (disabled) return;
+          if (folderOnly) {
+            folderInputRef.current?.click();
+          } else {
+            fileInputRef.current?.click();
+          }
+        }}
         onKeyDown={handleDropZoneKeyDown}
       >
         <Upload size={32} className='mx-auto text-gray-400 mb-3' />
-        <p className='text-sm font-medium text-gray-700'>Drag & drop files or folders here</p>
-        <p className='text-xs text-gray-500 mt-1'>or click to select files</p>
+        <p className='text-sm font-medium text-gray-700'>
+          {folderOnly ? 'Drag & drop a folder here' : 'Drag & drop files or folders here'}
+        </p>
+        <p className='text-xs text-gray-500 mt-1'>
+          {folderOnly ? 'or click to select a folder' : 'or click to select files'}
+        </p>
         {showInfo && (
           <p className='text-xs text-gray-400 mt-2'>
             All file types supported. Only DOCX, PDF, and MD files will be searchable.
@@ -179,22 +186,24 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
         className='hidden'
       />
 
-      {/* Action Buttons */}
-      <div className='flex justify-between'>
-        <Button
-          variant='outline'
-          onClick={e => {
-            e.stopPropagation();
-            if (!disabled) {
-              folderInputRef.current?.click();
-            }
-          }}
-          disabled={disabled}
-        >
-          <FolderOpen size={16} />
-          Select Folder
-        </Button>
-      </div>
+      {/* Action Buttons - only show when NOT folder-only */}
+      {!folderOnly && (
+        <div className='flex justify-between'>
+          <Button
+            variant='outline'
+            onClick={e => {
+              e.stopPropagation();
+              if (!disabled) {
+                folderInputRef.current?.click();
+              }
+            }}
+            disabled={disabled}
+          >
+            <FolderOpen size={16} />
+            Select Folder
+          </Button>
+        </div>
+      )}
 
       {/* Selected Files List */}
       {files.length > 0 && (

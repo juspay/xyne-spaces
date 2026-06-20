@@ -196,29 +196,29 @@ export const ShareCollectionModal = ({
       }}
       title='Share Collection'
       description={`Share "${collectionName}" with other users`}
-      className='max-w-md'
+      className='max-w-md bg-secondary border border-border'
     >
       <div className='p-6'>
         {/* Header */}
         <div className='flex items-center justify-between mb-6'>
-          <h2 className='text-lg font-semibold text-gray-900'>Share Collection</h2>
+          <h2 className='text-lg font-semibold text-foreground'>Share Collection</h2>
           <button
             onClick={handleClose}
-            className='p-1 hover:bg-gray-100 rounded transition-colors'
+            className='p-1 hover:bg-muted rounded transition-colors'
             disabled={isLoading}
             data-track-category='knowledge-base'
             data-track-name='close-modal'
           >
-            <X size={20} className='text-gray-500' />
+            <X size={20} className='text-muted-foreground' />
           </button>
         </div>
 
         {/* Collection Info */}
         <div className='mb-6'>
-          <p className='text-sm text-gray-600 mb-2'>
-            Collection: <span className='font-medium text-gray-900'>{collectionName}</span>
+          <p className='text-sm text-muted-foreground mb-2'>
+            Collection: <span className='font-medium text-foreground'>{collectionName}</span>
           </p>
-          <p className='text-xs text-gray-500'>
+          <p className='text-xs text-muted-foreground'>
             {channelId
               ? 'Only users in this channel can be shared with. Choose viewer or editor permission for each user.'
               : 'Search and select users from your workspace. Choose viewer or editor permission for each user.'}
@@ -227,7 +227,7 @@ export const ShareCollectionModal = ({
 
         {/* User Search */}
         <div className='mb-4'>
-          <label htmlFor='user-search' className='block text-sm font-medium text-gray-700 mb-2'>
+          <label htmlFor='user-search' className='block text-sm font-medium text-foreground mb-2'>
             Select Users
           </label>
           <SearchUser
@@ -249,24 +249,24 @@ export const ShareCollectionModal = ({
         {/* Permission Selection for Selected Users */}
         {selectedUsers.length > 0 && (
           <div className='mb-6'>
-            <div className='block text-sm font-medium text-gray-700 mb-3'>Set Permissions</div>
+            <div className='block text-sm font-medium text-foreground mb-3'>Set Permissions</div>
             <div className='max-h-64 overflow-y-auto space-y-3 pr-2'>
               {selectedUsers.map(user => (
                 <div
                   key={user.id}
-                  className='flex items-center justify-between p-3 g-3 border border-gray-200 rounded-md bg-gray-50'
+                  className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
                 >
                   <div className='flex items-center gap-3 flex-1 min-w-0'>
                     <div className='flex-shrink-0'>
-                      <div className='w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-medium text-sm'>
+                      <div className='w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-300 font-medium text-sm'>
                         {user.name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || '?'}
                       </div>
                     </div>
                     <div className='flex-1 min-w-0'>
-                      <div className='text-sm font-medium text-gray-900 truncate'>
+                      <div className='text-sm font-medium text-foreground truncate'>
                         {user.name || 'Unnamed User'}
                       </div>
-                      <div className='text-xs text-gray-500 truncate'>{user.email}</div>
+                      <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
                     </div>
                   </div>
                   <div className='flex flex-col gap-2 flex-shrink-0'>
@@ -282,8 +282,8 @@ export const ShareCollectionModal = ({
                             px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                             ${
                               (userPermissions[user.id] || 'VIEWER') === 'VIEWER'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                                ? 'bg-muted-foreground text-background'
+                                : 'bg-background text-foreground border border-border hover:bg-muted'
                             }
                             disabled:opacity-50 disabled:cursor-not-allowed
                           `}
@@ -302,8 +302,8 @@ export const ShareCollectionModal = ({
                             px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                             ${
                               userPermissions[user.id] === 'EDITOR'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                                ? 'bg-muted-foreground text-background'
+                                : 'bg-background text-foreground border border-border hover:bg-muted'
                             }
                             disabled:opacity-50 disabled:cursor-not-allowed
                           `}
@@ -313,7 +313,7 @@ export const ShareCollectionModal = ({
                       )}
                     </div>
                     {canGrantCanShare && (
-                      <label className='flex justify-center items-center gap-2 text-xs text-gray-600 cursor-pointer'>
+                      <label className='flex justify-center items-center gap-2 text-xs text-muted-foreground cursor-pointer'>
                         <input
                           type='checkbox'
                           checked={userCanShare[user.id] || false}
@@ -321,7 +321,7 @@ export const ShareCollectionModal = ({
                           disabled={isLoading}
                           data-track-category='knowledge-base'
                           data-track-name='toggle-can-share'
-                          className='w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500'
+                          className='w-4 h-4 text-blue-600 border-border rounded focus:ring-blue-500'
                         />
                         <span>Can share</span>
                       </label>
@@ -344,7 +344,7 @@ export const ShareCollectionModal = ({
             onClick={() => {
               void handleShare();
             }}
-            className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            className='px-4 py-2 bg-muted-foreground text-background rounded-lg hover:bg-muted-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
           >
             <Share2 size={16} />
             Share Collection

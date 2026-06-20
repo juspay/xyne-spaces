@@ -19,6 +19,7 @@ import {
   approveClawAction,
   downloadClawAttachment,
   listAccessibleClawAgents,
+  deleteClawConversation,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
 
@@ -587,6 +588,35 @@ export class XyneAIControllerV2 {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] getMessages error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  /**
+   * DELETE /api/xyne-ai/v2/conversations/:convId
+   * Proxies to claw-auth to delete a conversation and all of its messages.
+   */
+  deleteConversation = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { convId } = req.params;
+    if (!convId) {
+      res.status(400).json({ success: false, error: 'convId is required' });
+      return;
+    }
+
+    const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+
+    try {
+      const result = await deleteClawConversation({ headers: req.headers, userId }, convId, agentSlug);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] deleteConversation error:', error);
       res.status(503).json({ success: false, error: message });
     }
   };

@@ -21,6 +21,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
+import { ChannelScopeType } from '@xyne/shared';
 import CreateCollectionModal from '../upload/CreateCollectionModal';
 import { ShareCollectionModal } from '../upload/ShareCollectionModal';
 import { CollectionSummary, CollectionRole } from '../../../services/Knowledge/collectionService';
@@ -632,7 +633,13 @@ export const TreeSidebar: React.FC<TreeSidebarProps> = ({
           onClose={() => setIsCreateModalOpen(false)}
           scopeType='CHANNEL'
           scopeId={currentChannelId}
+          channels={allVisibleChannels
+            .filter(
+              ch => ch.projectId === currentProjectId && ch.scopeType === ChannelScopeType.DEFAULT,
+            )
+            .map(ch => ({ id: ch.id, name: ch.name }))}
           onSuccess={handleCreateSuccess}
+          folderOnly={false}
         />
       )}
 

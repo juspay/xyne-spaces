@@ -217,6 +217,19 @@ export class XyneAIControllerFactory {
   };
 
   /**
+   * DELETE /api/xyne-ai/v2/conversations/:convId
+   * Delete a conversation in claw (v2 only)
+   */
+  deleteConversation = async (req: Request, res: Response): Promise<void> => {
+    const agentSlug = (req.query?.agentSlug || req.query?.agent_slug) as string | undefined;
+    if (config.askAI.version !== 'v2' && !agentSlug) {
+      res.status(404).json({ error: 'v2 endpoints not enabled' });
+      return;
+    }
+    return xyneAIControllerV2.deleteConversation(req, res);
+  };
+
+  /**
    * Download attachment from claw - v2 only
    */
   downloadAttachment = async (req: Request, res: Response): Promise<void> => {
