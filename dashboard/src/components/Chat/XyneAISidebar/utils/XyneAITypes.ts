@@ -388,6 +388,10 @@ export interface Message {
   selectionContexts?: SelectionContext[]; // Canvas selection contexts
   parentId?: string | null; // Parent message ID for tree branching
   sessionId?: string; // Session ID for v2 streaming
+  /** AgentRun.sessionId for the run that produced this assistant message.
+   *  Drives branching-safe "Debug this response" selection — chronological
+   *  turn index doesn't survive sibling branches. */
+  debugSessionId?: string;
   sources?: DraftSource[];
 
   // ============================================================================
