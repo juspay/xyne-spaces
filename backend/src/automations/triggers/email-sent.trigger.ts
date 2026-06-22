@@ -48,6 +48,12 @@ const EmailSentConfigSchema = z.object({
     .describe(
       'Restrict to specific reply kinds. Empty matches both REPLY and REPLY_ALL.',
     ),
+  onlyFirstReply: z
+    .boolean()
+    .optional()
+    .describe(
+      'When on, only the first outbound reply in a conversation fires this trigger.',
+    ),
 });
 
 export const EmailSentOutputSchema = TicketContextSchema.partial().extend({
@@ -79,6 +85,7 @@ export const EmailSentOutputSchema = TicketContextSchema.partial().extend({
   bccDomains: z.array(z.string()),
   recipients: z.array(z.string()),
   recipientDomains: z.array(z.string()),
+  isFirstReply: z.boolean(),
 });
 
 type EmailSentConfig = z.infer<typeof EmailSentConfigSchema>;
@@ -155,6 +162,8 @@ function matchEmailSent(cfg: EmailSentConfig, payload: EmailSentPayload): boolea
     const body = norm(e.body);
     if (!bodyContains.some(needle => body.includes(norm(needle)))) return false;
   }
+
+  if (cfg.onlyFirstReply && !payload.isFirstReply) return false;
 
   return true;
 }
