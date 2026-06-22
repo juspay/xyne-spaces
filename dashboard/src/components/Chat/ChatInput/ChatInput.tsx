@@ -510,16 +510,17 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             ? channel.scopeType
             : 'Channel';
 
-        // Determines if an error is transient (Replicache will retry/recover).
-        // oooMutation (out-of-order mutation) is a server-stream sequencing error
-        // that causes a connection reset; Replicache's mutation recovery will
-        // re-send unacknowledged mutations. Restoring the draft in this case
-        // leads to a duplicate message experience because the original mutation
-        // was processed before the disconnect.
+        // Zero normalizes every server mutation failure to { type: 'app' | 'zero', message }.
+        // - 'zero' = protocol / connection / out-of-order error. The connection resets and
+        //   Replicache's mutation recovery re-sends unacknowledged mutations, so the message is
+        //   (or will be) persisted. Restoring the draft here duplicates it back into the editor.
+        // - 'app'  = the mutator genuinely threw (validation/permission/etc). Zero rolls back the
+        //   optimistic write, the message disappears, so restoring the draft is correct.
+        // Only 'app' errors should restore; everything else is treated as transient.
+        // NOTE: serverResult.error is a plain object (NOT an Error instance), so we branch on its
+        // normalized `type` field rather than matching the message string.
         const isTransientError = (error: unknown): boolean => {
-          const msg = error instanceof Error ? error.message : String(error);
-          const isTransient = msg.includes('sent mutation ID') && msg.includes('but expected');
-          return isTransient;
+          return !!error && typeof error === 'object' && 'type' in error && error.type === 'zero';
         };
 
         // Handles client and server mutation rejection: restores draft + editor content on failure
