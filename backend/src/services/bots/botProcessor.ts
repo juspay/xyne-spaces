@@ -1,16 +1,19 @@
 import { botQueueService, BotJobData } from './botQueueService';
 import { BotExecutionSession } from './botExecutionSession';
 import { MessageRepository } from '@/database/repositories/messageRepository';
+import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { botRegistry } from '@/bots/core/bot-registry';
 import { BotExecutionContext } from '@/bots/core/types/bot';
 import { logger } from '@/utils/logger';
 
 export class BotProcessor {
   private messageRepository: MessageRepository;
+  private conversationRepository: ConversationRepository;
   private isInitialized = false;
 
   constructor() {
     this.messageRepository = new MessageRepository();
+    this.conversationRepository = new ConversationRepository();
   }
 
   async initialize(): Promise<void> {
@@ -79,7 +82,13 @@ export class BotProcessor {
     // Get bot instance
     const botEntry = botRegistry.getBot(botName);
     if (!botEntry) {
-      throw new Error(`Bot ${botName} not found in registry`);
+      logger.error(`Bot ${botName} not found in registry, skipping execution and decrementing reply count`);
+      try {
+        await this.conversationRepository.decrementReplyCount(conversationId);
+      } catch (decrementErr) {
+        logger.error(`[BotProcessor] Failed to decrement reply count for conversation ${conversationId}:`, decrementErr);
+      }
+      return;
     }
 
     // Create bot instance
