@@ -147,6 +147,7 @@ export interface S2SRunAgentResponse {
 
 export interface ConversationInsight {
   reasoning: string | null;
+  content: string | null;
   toolInvocations: unknown[];
 }
 
@@ -1052,18 +1053,20 @@ export async function getConversationInsight(params: {
 
   const json = (await res.json()) as {
     success?: boolean;
-    data?: Array<{ id: string; role: string; reasoning?: string | null }>;
+    data?: Array<{ id: string; role: string; reasoning?: string | null; content?: string | null }>;
     invocationsByMsgId?: Record<string, unknown[]>;
   };
   const messages = Array.isArray(json.data) ? json.data : [];
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
   const reasoning =
     lastAssistant?.reasoning && lastAssistant.reasoning.trim() ? lastAssistant.reasoning : null;
+  const content =
+    lastAssistant?.content && lastAssistant.content.trim() ? lastAssistant.content : null;
   const toolInvocations =
     lastAssistant && Array.isArray(json.invocationsByMsgId?.[lastAssistant.id])
       ? (json.invocationsByMsgId![lastAssistant.id] as unknown[])
       : [];
-  return { reasoning, toolInvocations };
+  return { reasoning, content, toolInvocations };
 }
 
 async function safeReadText(res: globalThis.Response): Promise<string> {

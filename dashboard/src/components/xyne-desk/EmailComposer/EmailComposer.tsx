@@ -190,6 +190,8 @@ interface EmailComposerProps {
   ) => void;
   onCitationClick?: (ref: string) => void;
   onCitationOrderChange?: (orderedRefs: string[]) => void;
+  onSeeSources?: (sessionId?: string) => void;
+  showSeeSources?: boolean;
   /** Pre-fill the To field when the composer mounts (draft restoration takes precedence). */
   initialTo?: string[];
 }
@@ -215,6 +217,8 @@ export const EmailComposer = ({
   onDraftInlineCitationsChange,
   onCitationClick,
   onCitationOrderChange,
+  onSeeSources,
+  showSeeSources = false,
   initialTo,
 }: EmailComposerProps): ReactElement => {
   const isComposeMode = mode === 'compose';
@@ -2195,12 +2199,13 @@ export const EmailComposer = ({
             const draftCard = draftActive ? (
               <DraftCard
                 draftContent={aiDraft.draftContent}
+                toolInvocations={aiDraft.draftToolInvocations}
                 isStreaming={aiDraft.isStreaming}
                 defaultAcceptAction={draftOrigin === 'rewrite' ? 'replace' : 'insert'}
                 onAccept={action => {
                   const content = aiDraft.acceptDraft();
                   void (async (): Promise<void> => {
-                    const html = content ? await markdownToHtml(content) : '';
+                    const html = content ? await markdownToHtml(stripCitationMarks(content)) : '';
                     const next =
                       action === 'insert' && hasEmailBody ? `${emailContent}${html}` : html;
                     setEmailContent(next);
@@ -2219,6 +2224,9 @@ export const EmailComposer = ({
                 }}
                 selectedTextForRefine={aiDraft.selectedTextForRefine}
                 onClearSelectedText={aiDraft.clearSelectedTextForRefine}
+                {...(onSeeSources && {
+                  onSeeSources: () => onSeeSources(aiDraft.sessionId ?? undefined),
+                })}
               />
             ) : null;
 
@@ -2523,6 +2531,10 @@ export const EmailComposer = ({
                   agentName={draftAgentName}
                   showQuickRewrite={hasEmailBody || aiDraft.isDraftActive}
                   disabled={aiDraft.isStreaming}
+                  {...(onSeeSources && {
+                    onSeeSources: () => onSeeSources(aiDraft.sessionId ?? undefined),
+                  })}
+                  showSeeSources={showSeeSources || !!aiDraft.sessionId}
                 />
               )}
               <button

@@ -10,6 +10,7 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
@@ -173,6 +174,8 @@ interface AIRefineDropdownProps {
   onQuickRewrite: (action: AIRefineQuickAction) => void;
   onAskAI: () => void;
   onRerunDraft?: () => void;
+  onSeeSources?: () => void;
+  showSeeSources?: boolean;
   agentName?: string;
   disabled?: boolean;
   showQuickRewrite?: boolean;
@@ -182,6 +185,8 @@ export const AIRefineDropdown = ({
   onQuickRewrite,
   onAskAI,
   onRerunDraft,
+  onSeeSources,
+  showSeeSources = false,
   agentName,
   disabled = false,
   showQuickRewrite = true,
@@ -301,6 +306,25 @@ export const AIRefineDropdown = ({
                   <RefreshCw size={14} />
                 </span>
                 <span>Rerun draft</span>
+              </button>
+            )}
+            {showSeeSources && onSeeSources && (
+              <button
+                type='button'
+                disabled={disabled}
+                onClick={() => {
+                  onSeeSources();
+                  setOpen(false);
+                }}
+                className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
+                title='View sources in the AI sidebar'
+                data-track-category='Support'
+                data-track-name='SeeSourcesFromDropdown'
+              >
+                <span className='text-muted-foreground'>
+                  <ExternalLink size={14} />
+                </span>
+                <span>See sources</span>
               </button>
             )}
           </motion.div>

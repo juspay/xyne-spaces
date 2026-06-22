@@ -77,6 +77,8 @@ function stripCitationBlock(text: string): string {
   return text.replace(/\s*<citation\b[^>]*>([\s\S]*?)<\/citation>\s*/gi, '');
 }
 
+const CLF_TOKEN_RE = /([【[⟦])(clf-[A-Za-z0-9_.:-]+#\d+)([】\]⟧])/g;
+
 
 interface UserInfo {
   id: string;
@@ -714,7 +716,7 @@ export class EmailService {
       return;
     }
 
-    const cleanedSummary = stripCitationBlock(summary);
+    const cleanedSummary = stripCitationBlock(summary).replace(CLF_TOKEN_RE, '');
     const html = await marked.parse(cleanedSummary);
     const now = new Date();
     try {

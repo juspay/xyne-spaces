@@ -718,9 +718,9 @@ export class EmailController {
       }
 
       const preference = await this.emailChannelPreferenceRepo.findByChannelId(channelId);
-      const agentSlug = preference?.autoDraftAgentSlug?.trim() || null;
+      const agentSlug = preference?.autoDraftAgentSlug?.trim() || 'draft-agent';
       const personaUserId = preference?.ownerUserId || null;
-      if (!agentSlug || !personaUserId) {
+      if (!personaUserId) {
         return res.json({ available: false, reasoning: null, toolInvocations: [] });
       }
 
