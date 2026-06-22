@@ -57,6 +57,7 @@ interface ParticipantInfo {
 }
 
 import { executeCallLlmWithRetry } from './callLlmRetry';
+import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
  * Sanitize input strings to prevent injection attacks
@@ -764,7 +765,8 @@ export class CallDocumentService {
     prd: PRDDocument,
     createdByUserId: string,
     conversationId: string,
-    channelId: string
+    channelId: string,
+    callCreatorUserId: string
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -772,23 +774,25 @@ export class CallDocumentService {
 
       const canvasId = uuidv4();
       const viewAccessId = uuidv4();
+      const editAccessId = uuidv4();
       const participantId = uuidv4();
 
       const title = `📋 PRD: ${prd.title}`;
       const content = formatPRDToBlockNote(prd, callId);
 
-      // Create canvas
+      // Create canvas with empty content (Y-Sweet is source of truth)
       await prisma.canvas.create({
         data: {
           id: canvasId,
           title,
-          content: content as any,
+          content: [],
           channelId,
           createdBy: createdByUserId,
           viewAccessId,
-          editAccessId: null,
+          editAccessId,
           visibility: 'PUBLIC',
           isTemplate: false,
+          isCollaborative: true,
           lastEditedBy: createdByUserId,
           lastEditedAt: now,
           createdAt: now,
@@ -802,7 +806,7 @@ export class CallDocumentService {
         },
       });
 
-      // Add creator as OWNER
+      // Add creator (Xyne Automatic bot) as OWNER
       await prisma.canvasParticipant.create({
         data: {
           id: participantId,
@@ -814,7 +818,25 @@ export class CallDocumentService {
         },
       });
 
-      logger.info(`[CallDocumentService] Created PRD canvas ${canvasId} for call ${callId}`);
+      // Add call initiator as OWNER
+      await prisma.canvasParticipant.create({
+        data: {
+          id: uuidv4(),
+          canvasId,
+          userId: callCreatorUserId,
+          role: 'OWNER',
+          joinedAt: now,
+          updatedAt: now,
+        },
+      });
+
+      // Initialize Y-Sweet for collaborative editing
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, content);
+      if (!ysweetInitialized) {
+        logger.warn(`[CallDocumentService] Y-Sweet init failed for PRD canvas ${canvasId}`);
+      }
+
+      logger.info(`[CallDocumentService] Created collaborative PRD canvas ${canvasId} for call ${callId} with Xyne Automatic and call initiator as owners`);
 
       // Fetch workspaceId from channel for Vespa job routing
       const channel = await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
@@ -859,18 +881,19 @@ export class CallDocumentService {
         callTitle
       );
 
-      // Create canvas
+      // Create canvas with empty content (Y-Sweet is source of truth)
       await prisma.canvas.create({
         data: {
           id: canvasId,
           title,
-          content: sanitizedContent as any,
+          content: [],
           channelId,
           createdBy: createdByUserId,
           viewAccessId,
           editAccessId,
           visibility: 'PUBLIC',
           isTemplate: false,
+          isCollaborative: true,
           lastEditedBy: createdByUserId,
           lastEditedAt: now,
           createdAt: now,
@@ -911,7 +934,13 @@ export class CallDocumentService {
         },
       });
 
-      logger.info(`[CallDocumentService] Created detailed summary canvas ${canvasId} for call ${callId} with Xyne Automatic and call creator as owners`);
+      // Initialize Y-Sweet for collaborative editing
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      if (!ysweetInitialized) {
+        logger.warn(`[CallDocumentService] Y-Sweet init failed for detailed summary canvas ${canvasId}`);
+      }
+
+      logger.info(`[CallDocumentService] Created collaborative detailed summary canvas ${canvasId} for call ${callId} with Xyne Automatic and call creator as owners`);
 
       // Fetch complete context for the user to pass to side-effect handler
       const user = await db.user.findUnique({
@@ -983,11 +1012,12 @@ export class CallDocumentService {
       const newVersion = currentVersion + 1;
 
       // Update existing canvas - preserve viewAccessId and editAccessId
+      // Content is kept empty in DB (Y-Sweet is source of truth)
       await prisma.canvas.update({
         where: { id: canvasId },
         data: {
           title,
-          content: sanitizedContent as any,
+          content: [],
           lastEditedBy: updatedByUserId,
           lastEditedAt: now,
           updatedAt: now,
@@ -1004,6 +1034,12 @@ export class CallDocumentService {
       });
 
       logger.info(`[CallDocumentService] Updated detailed summary canvas ${canvasId} for call ${callId}, version ${currentVersion} -> ${newVersion}`);
+
+      // Sync to Y-Sweet for collaborative editing
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      if (!ysweetSynced) {
+        logger.warn(`[CallDocumentService] Y-Sweet sync failed for canvas ${canvasId}`);
+      }
 
       // Queue Vespa re-indexing for the updated canvas
       await this.queueVespaIndexing(canvasId, updatedByUserId, 'update');
@@ -1265,7 +1301,7 @@ A comprehensive detailed summary has been generated from this call.
     callId: string,
     transcript: string,
     summary: string | null,
-    _createdByUserId: string,
+    createdByUserId: string,
     conversationId: string,
     customPrompt?: string
   ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
@@ -1294,13 +1330,15 @@ A comprehensive detailed summary has been generated from this call.
         return { success: false, error: 'Xyne Automatic bot not found' };
       }
 
-      // 2. Create Canvas with bot as creator
+
+      // 2. Create Canvas with bot as creator and call initiator as co-owner
       const viewAccessId = await this.createPRDCanvas(
         callId,
         prd,
         xyneAutomaticBot.id,
         conversationId,
-        conversation.channelId
+        conversation.channelId,
+        createdByUserId
       );
       if (!viewAccessId) {
         return { success: false, error: 'Failed to create PRD canvas' };
