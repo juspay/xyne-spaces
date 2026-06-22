@@ -8,7 +8,8 @@ import { InboxTab } from './tabs/InboxTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { AutomationTab } from './tabs/AutomationTab';
 import { AIFeaturesTab } from './tabs/AIFeaturesTab';
-import { Inbox, Route, Zap, Bot, X } from 'lucide-react';
+import { AiSyncTab } from './tabs/AiSyncTab';
+import { Inbox, Route, Zap, Bot, RefreshCw, X } from 'lucide-react';
 
 /** Props for the DeskSettings modal component */
 export interface DeskSettingsProps {
@@ -18,7 +19,7 @@ export interface DeskSettingsProps {
   userID: string | null | undefined;
 }
 
-export type TabId = 'inbox' | 'assignment' | 'automation' | 'ai-features';
+export type TabId = 'inbox' | 'assignment' | 'automation' | 'ai-features' | 'ai-sync';
 
 /** Configuration for a single settings tab */
 export interface TabConfig {
@@ -38,6 +39,7 @@ export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.Element
   { id: 'assignment', label: 'Assignment & Routing', icon: Route },
   { id: 'automation', label: 'Automation', icon: Zap },
   { id: 'ai-features', label: 'AI Features', icon: Bot },
+  { id: 'ai-sync', label: 'AI Sync', icon: RefreshCw },
 ];
 
 /**
@@ -137,10 +139,11 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                   {activeTab === 'assignment' && <AssignmentTab form={form} />}
                   {activeTab === 'automation' && <AutomationTab form={form} />}
                   {activeTab === 'ai-features' && <AIFeaturesTab form={form} />}
+                  {activeTab === 'ai-sync' && <AiSyncTab channelId={channelId} form={form} />}
                 </div>
               </div>
             </div>
-            {isDirty && (
+            {isDirty && activeTab !== 'ai-sync' && (
               <div className='shrink-0 border-t border-desk-border px-6 md:px-12 lg:px-[86px] py-[12px] dark:border-border'>
                 <div className='flex items-center justify-end gap-[8px]'>
                   <button

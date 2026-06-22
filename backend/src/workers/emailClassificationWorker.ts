@@ -58,7 +58,16 @@ class EmailClassificationWorker {
 
   private async processJob(job: Bull.Job<EmailClassificationJobData>): Promise<void> {
     const { ticketId, channelId, emailId, groupId } = job.data;
-    logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId}`);
+    // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
+    const runClassification = job.data.runClassification ?? true;
+    const runPriority = job.data.runPriority ?? true;
+
+    logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority}`);
+
+    if (!runClassification && !runPriority) {
+      logger.info(`[EMAIL-CLASSIFICATION-WORKER] Nothing to run for ticket ${ticketId}, skipping`);
+      return;
+    }
 
     const emailRecord = await prisma.email.findUnique({
       where: { id: emailId },
@@ -91,12 +100,15 @@ class EmailClassificationWorker {
 
     if (classificationData) {
       const { result, config } = classificationData;
-      resolvedGroupId = await emailClassificationService.resolveUserGroup(result, config);
-      effectiveGroupId = resolvedGroupId ?? null;
 
-      // Only store if classification actually produced data
-      if (result && Object.keys(result.rawOutput ?? {}).length > 0) {
-        await emailClassificationService.storeOnTicket(ticketId, result, effectiveGroupId);
+      if (runClassification) {
+        resolvedGroupId = await emailClassificationService.resolveUserGroup(result, config);
+        effectiveGroupId = resolvedGroupId ?? null;
+
+        // Only store if classification actually produced data
+        if (result && Object.keys(result.rawOutput ?? {}).length > 0) {
+          await emailClassificationService.storeOnTicket(ticketId, result, effectiveGroupId);
+        }
       }
     }
 
@@ -122,6 +134,7 @@ class EmailClassificationWorker {
     const ticketIsUnassigned = !ticket.assignedTo;
 
     const priorityAboveThreshold =
+      runPriority &&
       classificationData?.result?.priority &&
       classificationData.result.priority.confidence >= (classificationData.config.priorityClassificationThreshold ?? 0.5);
 

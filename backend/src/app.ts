@@ -123,6 +123,7 @@ import emailRoutes from '@/routes/email';
 import emailDemergeRoutes from '@/routes/emailDemerge';
 import emailClassificationRoutes from '@/routes/emailClassification';
 import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
+import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
@@ -167,6 +168,7 @@ import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -295,6 +297,7 @@ export class App {
     this.app.use('/api/email', emailDemergeRoutes);
     this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
     this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
+    this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);
@@ -774,6 +777,9 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      logger.info('Initializing auto draft queue...');
+      await autoDraftQueue.initialize();
     }
 
     logger.info('Initializing automations module (registries + queue producers)...');
@@ -933,6 +939,9 @@ export class App {
 
       // Close email classification queue
       await emailClassificationQueue.close();
+
+      // Close auto draft queue
+      await autoDraftQueue.close();
 
       // Shutdown notification service
       await notificationService.shutdown();
