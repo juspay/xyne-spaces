@@ -117,6 +117,7 @@ interface XyneAISidebarProps {
   kbChannelId?: string;
   kbDocId?: string;
   kbDocName?: string;
+  visible?: boolean;
 }
 
 const XyneAISidebar = ({
@@ -132,6 +133,7 @@ const XyneAISidebar = ({
   kbCollectionId: kbCollectionIdProp,
   kbDocId: kbDocIdProp,
   kbDocName: kbDocNameProp,
+  visible = true,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -413,13 +415,15 @@ const XyneAISidebar = ({
     return xyneAIStreamManager.subscribe(() => syncStreaming());
   }, []);
 
-  // Notify stream manager when sidebar opens/closes
+  // Notify stream manager when the sidebar is actually visible. Hidden keep-alive
+  // mounts preserve live subscriptions while the drawer is closed, but should
+  // still count as closed for completion-toast logic.
   useEffect(() => {
-    xyneAIStreamManager.setSidebarOpen(true);
+    xyneAIStreamManager.setSidebarOpen(visible);
     return () => {
       xyneAIStreamManager.setSidebarOpen(false);
     };
-  }, []);
+  }, [visible]);
 
   const channel = useChannel(channelId || '');
 
@@ -687,6 +691,30 @@ const XyneAISidebar = ({
         setIsLoadingConversation(true);
 
         const threadConversationId = threadInfo?.conversationId;
+
+        const latestLiveStream = xyneAIStreamManager.findLatestSidebarStream();
+        if (isV2 && latestLiveStream) {
+          setStreamThreadKey(latestLiveStream.streamSlotKey);
+          usesDraftStreamKeyRef.current =
+            latestLiveStream.streamSlotKey !== latestLiveStream.sessionId;
+          setMessages(latestLiveStream.messages);
+          setDebugEvents(latestLiveStream.debugEvents);
+          setDebugArtifactsReadyVersion(latestLiveStream.debugArtifactsReadyVersion);
+          if (latestLiveStream.agentSlug && latestLiveStream.agentSlug !== selectedAgentSlug) {
+            setSelectedAgentSlug(latestLiveStream.agentSlug);
+          }
+          if (latestLiveStream.sessionId) {
+            setConversationId(latestLiveStream.sessionId);
+          }
+          const originalChannelId = getChannelIdFromStreamThreadId(latestLiveStream.threadId);
+          setConversationChannelId(originalChannelId);
+          hasLoadedInitialConversationRef.current = true;
+          setIsLoadingConversation(false);
+          setTimeout(() => {
+            scrollToBottom();
+          }, 100);
+          return;
+        }
 
         // Global / channel-only / channel+thread: load session list first, then match active stream by session id
         if (isV2) {

@@ -143,6 +143,7 @@ import DocsScreen from './DocsScreen/DocsScreen';
 import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
+import { xyneAIStreamManager } from '../services/XyneAI';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
@@ -275,6 +276,9 @@ const AppRoot = (): ReactElement => {
   const [pendingRecording, setPendingRecording] = useState<File | null>(null);
   const [pendingRecordingFilePath, setPendingRecordingFilePath] = useState<string | null>(null);
   const [isXyneDebuggerOpen, setIsXyneDebuggerOpen] = useState(false);
+  const [hasXyneAIStreaming, setHasXyneAIStreaming] = useState(() =>
+    xyneAIStreamManager.hasStreamingSidebarStreams(),
+  );
 
   const { recordingState, recordingSeconds, startRecording, stopRecording } = useScreenRecorder(
     (file: File, filePath: string) => {
@@ -288,6 +292,14 @@ const AppRoot = (): ReactElement => {
     'global.composeMessage',
     () => void navigate('/chat/search?mode=dm', { replace: true }),
   );
+
+  useEffect(() => {
+    const syncStreaming = (): void => {
+      setHasXyneAIStreaming(xyneAIStreamManager.hasStreamingSidebarStreams());
+    };
+    syncStreaming();
+    return xyneAIStreamManager.subscribe(syncStreaming);
+  }, []);
 
   // Set panel refs when component mounts
   useEffect(() => {
@@ -689,6 +701,23 @@ const AppRoot = (): ReactElement => {
                     setPendingRecordingFilePath(null);
                   }}
                 />
+
+                {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
+                  <div className='hidden' aria-hidden='true'>
+                    <XyneAISidebar
+                      channelId={xyneAIChannelId}
+                      threadInfo={xyneAIThreadInfo}
+                      startFreshChat={xyneAIStartFreshChat}
+                      canvasInfo={xyneAICanvasInfo}
+                      kbCollectionId={xyneAIKbCollectionId ?? ''}
+                      kbChannelId={xyneAIKbChannelId ?? ''}
+                      kbDocId={xyneAIKbDocId ?? ''}
+                      kbDocName={xyneAIKbDocName ?? ''}
+                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                      visible={false}
+                    />
+                  </div>
+                )}
                 {/* XyneAI Mobile Drawer */}
                 {isMobile && !isInPanelWebview && !isOnAIPage && (
                   <Drawer
