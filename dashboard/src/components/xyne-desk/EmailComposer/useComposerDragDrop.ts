@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 interface DragDropHandlers {
   onDragEnter: (e: React.DragEvent<HTMLDivElement>) => void;
@@ -10,6 +10,7 @@ interface DragDropHandlers {
 interface UseComposerDragDropReturn {
   isDraggingFiles: boolean;
   dragHandlers: DragDropHandlers;
+  reset: () => void;
 }
 
 /**
@@ -55,8 +56,14 @@ export const useComposerDragDrop = (
     if (files.length > 0) void onAddFiles(files);
   };
 
+  const reset = useCallback((): void => {
+    dragDepthRef.current = 0;
+    setIsDraggingFiles(false);
+  }, []);
+
   return {
     isDraggingFiles,
     dragHandlers: { onDragEnter, onDragOver, onDragLeave, onDrop },
+    reset,
   };
 };

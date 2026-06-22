@@ -106,6 +106,15 @@ interface EmailEditorProps {
   /** Whether to show the selection refine popover (default: false) */
   showSelectionRefine?: boolean;
   bubbleToolbar?: boolean;
+  /** Called when an attachment is dropped into the editor to become an inline image. */
+  onDropAttachmentIntoEditor?: (data: {
+    attachmentId: string;
+    name: string;
+    mimeType: string;
+  }) => void;
+  /** Called after the editor handles an external file drop so the parent
+   * composer can reset its drag overlay state. */
+  onFileDropHandled?: () => void;
 }
 
 export const EmailEditor = ({
@@ -129,6 +138,8 @@ export const EmailEditor = ({
   onSelectionRefine,
   showSelectionRefine = false,
   bubbleToolbar = false,
+  onDropAttachmentIntoEditor,
+  onFileDropHandled,
 }: EmailEditorProps): ReactElement => {
   const cb = useRef({
     onChange,
@@ -140,6 +151,8 @@ export const EmailEditor = ({
     onEditorReady,
     onCitationClick,
     onSelectionRefine,
+    onDropAttachmentIntoEditor,
+    onFileDropHandled,
   });
   cb.current = {
     onChange,
@@ -151,6 +164,8 @@ export const EmailEditor = ({
     onEditorReady,
     onCitationClick,
     onSelectionRefine,
+    onDropAttachmentIntoEditor,
+    onFileDropHandled,
   };
   const lastEmittedRef = useRef('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -336,12 +351,44 @@ export const EmailEditor = ({
         return files.length > 0;
       },
       handleDrop: (_view, event) => {
-        const files = event.dataTransfer?.files;
-        if (files && files.length > 0) {
-          event.preventDefault();
-          return true;
+        const dt = event.dataTransfer;
+
+        // Handle attachment-to-inline-image drops first.
+        const inlineAtt = dt?.getData('application/x-xd-inline-attachment');
+        if (inlineAtt) {
+          try {
+            const data = JSON.parse(inlineAtt) as {
+              attachmentId: string;
+              name: string;
+              mimeType: string;
+            };
+            if (data.attachmentId) {
+              event.preventDefault();
+              cb.current.onDropAttachmentIntoEditor?.(data);
+              return true;
+            }
+          } catch {
+            // ignore malformed payload
+          }
         }
-        return false;
+
+        const files = Array.from(dt?.files ?? []);
+        if (files.length === 0) return false;
+        const images = files.filter(f => f.type.startsWith('image/'));
+        const nonImages = files.filter(f => !f.type.startsWith('image/'));
+        if (images.length > 0 && cb.current.uploadAndInsertInlineImages) {
+          event.preventDefault();
+          void cb.current.uploadAndInsertInlineImages(images);
+        }
+        if (nonImages.length > 0 && cb.current.onAddFiles) {
+          event.preventDefault();
+          void cb.current.onAddFiles(nonImages);
+        }
+        if (files.length > 0) {
+          event.stopPropagation();
+          cb.current.onFileDropHandled?.();
+        }
+        return files.length > 0;
       },
     },
   });
