@@ -1,5 +1,4 @@
 
-
 import { z } from 'zod';
 import { Request, Response } from 'express';
 import { Bot, UnifiedBaseBot } from '@/bots/unified/index.js';
@@ -15,8 +14,13 @@ import { UserGroupRepository } from '@/database/repositories/userGroups';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
-
-
+import { UserRepository } from '@/database/repositories/users';
+import {
+  formatGroupMention,
+  formatJenkinsAlertMessage,
+  formatUserMention,
+  type JenkinsWebhookPayload,
+} from './alert-formatting';
 
 export enum JenkinsEventType {
   BUILD_SUCCESS = 'build_success',
@@ -26,126 +30,6 @@ export enum JenkinsEventType {
   AUTOMATION_SKIPPED = 'automation_skipped',
   BUILD_UNKNOWN = 'build_unknown',
 }
-
-export interface JenkinsWebhookPayload {
-  event: JenkinsEventType | string;
-  status: string;
-  branch: string;
-  buildNumber: string;
-  buildUrl: string;
-  prUrl?: string;
-  contributor: string;
-  failedStage?: string;
-  ticketXyneId?: string;
-  commitMessage?: string;
-  message: string;
-  testsPassed?: number;
-  testsFailed?: number;
-  testsSkipped?: number;
-  testsTotal?: number;
-  cucumberReportUrl?: string;
-  groupMention?: string;
-  userGroupAlias?: string;
-}
-
-
-
-
-
-export function formatGroupMention(
-  groupId: string,
-  groupName: string,
-  groupAlias?: string | null,
-  memberCount?: number
-): string {
-  const aliasAttr = groupAlias ? ` data-group-alias="${groupAlias}"` : '';
-  const memberCountAttr = memberCount !== undefined ? ` data-member-count="${memberCount}"` : '';
-  return `<span class="chat-input-group-mention" data-mention-type="group" data-group-id="${groupId}" data-group-name="${groupName}"${aliasAttr}${memberCountAttr}>@${groupAlias || groupName}</span>`;
-}
-
-export function formatJenkinsAlertMessage(
-  payload: JenkinsWebhookPayload,
-): string {
-  const {
-    event,
-    branch,
-    buildNumber,
-    buildUrl,
-    contributor,
-    failedStage,
-    testsPassed,
-    testsFailed,
-    testsSkipped,
-    testsTotal,
-    cucumberReportUrl,
-    prUrl,
-    groupMention
-    
-  } = payload;
-
-  let statusText = 'UNKNOWN';
-
-  switch (event) {
-    case JenkinsEventType.BUILD_SUCCESS:
-      statusText = 'SUCCESS';
-      break;
-    case JenkinsEventType.BUILD_FAILED:
-      statusText = 'FAILED';
-      break;
-    case JenkinsEventType.BUILD_UNSTABLE:
-      statusText = 'UNSTABLE';
-      break;
-    case JenkinsEventType.BUILD_ABORTED:
-      statusText = 'ABORTED';
-      break;
-    case JenkinsEventType.AUTOMATION_SKIPPED:
-      statusText = 'SKIPPED';
-      break;
-  }
-
-  const lines: string[] = [];
-
-  if (groupMention) {
-    lines.push(groupMention);
-  }
-
-
-  lines.push(`<strong>Build Status: ${statusText}</strong>`);
-
- 
-  if (prUrl) {
-    lines.push(`<strong>Branch:</strong> <a href="${prUrl}">${branch}</a>`);
-  } else {
-    lines.push(`<strong>Branch:</strong> ${branch}`);
-  }
-  lines.push(`<strong>Build:</strong> <a href="${buildUrl}">#${buildNumber}</a>`);
-  lines.push(`<strong>Contributor:</strong> ${contributor}`);
-
-  if (failedStage) {
-    lines.push(`<strong>Failed Stage:</strong> ${failedStage}`);
-  }
-
-
-  if (testsTotal && testsTotal > 0) {
-    const passRate = Math.round(((testsPassed || 0) / testsTotal) * 100);
-    let testSummary = `<strong>Tests:</strong> ${testsPassed || 0}/${testsTotal} passed (${passRate}%)`;
-    if (testsFailed && testsFailed > 0) {
-      testSummary += ` • ${testsFailed} failed`;
-    }
-    if (testsSkipped && testsSkipped > 0) {
-      testSummary += ` • ${testsSkipped} skipped`;
-    }
-    lines.push(testSummary);
-
-    if (cucumberReportUrl) {
-      lines.push(`<a href="${cucumberReportUrl}"> View Cucumber Report</a>`);
-    }
-  }
-
-  return lines.join('<br/>');
-}
-
-
 
 type QaAlertBotInput = { message: string };
 type QaAlertBotOutput = { response: string };
@@ -183,6 +67,7 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
   private ticketRepository = new TicketRepository();
   private conversationService = new ConversationService();
   private userGroupRepository = new UserGroupRepository();
+  private userRepository = new UserRepository();
   private messageRepository = new MessageRepository();
   private conversationRepository = new ConversationRepository();
 
@@ -222,6 +107,78 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
     );
   }
 
+  private async buildMentions(
+    payload: JenkinsWebhookPayload,
+    ticket: { workspaceId: string; createdBy: string | null },
+  ): Promise<string[]> {
+    const mentions: string[] = [];
+    const seenMentions = new Set<string>();
+
+    const addMention = (mention: string | null): void => {
+      if (!mention || seenMentions.has(mention)) {
+        return;
+      }
+      seenMentions.add(mention);
+      mentions.push(mention);
+    };
+
+    if (!payload.alertCategory) {
+      logger.warn('[QaAlertBot] No alertCategory in payload, no mentions will be generated');
+      return mentions;
+    }
+
+    if (payload.alertCategory === 'automation_failed' || payload.alertCategory === 'automation_skipped') {
+      const userGroupAlias = payload.userGroupAlias || 'qa-xyne';
+      const userGroup = await this.userGroupRepository.findByAlias(userGroupAlias, ticket.workspaceId);
+      if (userGroup) {
+        const memberCount = await this.userGroupRepository.getUserCount(userGroup.id);
+        addMention(formatGroupMention(userGroup.id, userGroup.name, userGroup.alias, memberCount));
+      } else {
+        logger.warn(`[QaAlertBot] Configured QA user group not found: ${userGroupAlias}`);
+      }
+
+      if (payload.alertCategory === 'automation_failed') {
+        if (ticket.createdBy) {
+          const ticketCreator = await this.userRepository.findById(ticket.createdBy);
+          if (ticketCreator) {
+            addMention(
+              formatUserMention(ticketCreator.id, ticketCreator.name, {
+                email: ticketCreator.email,
+                picture: ticketCreator.picture,
+              }),
+            );
+          }
+        }
+      }
+
+      return mentions;
+    }
+
+    if (payload.alertCategory === 'non_automation_failed') {
+      if (ticket.createdBy) {
+        const ticketCreator = await this.userRepository.findById(ticket.createdBy);
+        if (ticketCreator) {
+          addMention(
+            formatUserMention(ticketCreator.id, ticketCreator.name, {
+              email: ticketCreator.email,
+              picture: ticketCreator.picture,
+            }),
+          );
+        }
+      }
+    }
+
+    if (
+      payload.alertCategory !== 'automation_failed' &&
+      payload.alertCategory !== 'automation_skipped' &&
+      payload.alertCategory !== 'non_automation_failed'
+    ) {
+      logger.warn(`[QaAlertBot] Unhandled alertCategory "${payload.alertCategory}", no mentions generated`);
+    }
+
+    return mentions;
+  }
+
   /**
    * Push a Jenkins alert message to a ticket's conversation channel
    * @param payload - Jenkins webhook payload
@@ -232,7 +189,7 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
     message: string;
     conversationId?: string;
   }> {
-    const { ticketXyneId ,userGroupAlias} = payload;
+    const { ticketXyneId } = payload;
 
     if (!ticketXyneId) {
       logger.info('[QaAlertBot] No ticketXyneId provided, skipping conversation post');
@@ -261,28 +218,15 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
         return { success: false, message: 'QA Alert bot user not found' };
       }
 
-     
-      let groupMention: string | undefined;
-       if(userGroupAlias){
-        const userGroup = await this.userGroupRepository.findByAlias(userGroupAlias, config.defaultWorkspaceId);
-        if (userGroup) {
-          const memberCount = await this.userGroupRepository.getUserCount(userGroup.id);
-          groupMention = formatGroupMention(userGroup.id, userGroup.name, userGroup.alias, memberCount);
-          logger.info(
-            `[QaAlertBot] Will mention group: ${userGroup.name} (${userGroup.id}) with ${memberCount} members`
-          );
-        } else {
-          logger.warn(`[QaAlertBot] Configured QA user group not found: `);
-        }
-      }
-      
+      payload.mentionHtmlList = await this.buildMentions(payload, {
+        workspaceId: ticket.workspaceId,
+        createdBy: ticket.createdBy,
+      });
 
-      payload.groupMention = groupMention;
-   const lastMessage = await this.messageRepository.findLastMessage({
-  conversationId: ticket.conversationId,
-  senderId: qaAlertBot.id,
-
-});
+      const lastMessage = await this.messageRepository.findLastMessage({
+        conversationId: ticket.conversationId,
+        senderId: qaAlertBot.id,
+      });
 
       // Fetch complete bot context
       const { workspaceId, role, orgRole, memberId } = await this.fetchBotContext(qaAlertBot);
