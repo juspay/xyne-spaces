@@ -86,5 +86,3 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({ headings, onHe
     </div>
   );
 };
-
-export default TableOfContents;

@@ -371,5 +371,3 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
     </>
   );
 };
-
-export default ChannelCanvasList;

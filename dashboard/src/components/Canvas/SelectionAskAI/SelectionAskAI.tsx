@@ -174,5 +174,3 @@ export const SelectionAskAI = ({
     </div>
   );
 };
-
-export default SelectionAskAI;
