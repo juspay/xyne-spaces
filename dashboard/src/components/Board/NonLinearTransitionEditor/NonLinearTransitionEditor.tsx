@@ -11,6 +11,7 @@ import ReactFlow, {
   type Edge,
   type EdgeProps,
   type Node,
+  type NodeChange,
   type NodeProps,
   EdgeLabelRenderer,
   getBezierPath,
@@ -18,7 +19,18 @@ import ReactFlow, {
   Panel,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Plus, X, Pencil, ChevronDown, Settings2, Timer, Trash2, GitBranch } from 'lucide-react';
+import {
+  Plus,
+  X,
+  Pencil,
+  ChevronDown,
+  Settings2,
+  Timer,
+  Trash2,
+  GitBranch,
+  Save,
+  LayoutGrid,
+} from 'lucide-react';
 import {
   STATUS_OPTIONS,
   getStatusOption,
@@ -117,20 +129,6 @@ const StageNodeComponent: React.FC<NodeProps<StageNodeData>> = ({ data, selected
         position={Position.Right}
         className='!w-3 !h-3 !bg-[#6276be] !border-2 !border-background !rounded-full'
         style={{ right: -7 }}
-      />
-      <Handle
-        type='source'
-        position={Position.Bottom}
-        id='bottom'
-        className='!w-2.5 !h-2.5 !bg-[#6276be]/60 !border-2 !border-background !rounded-full'
-        style={{ bottom: -6 }}
-      />
-      <Handle
-        type='target'
-        position={Position.Top}
-        id='top'
-        className='!w-2.5 !h-2.5 !bg-[#6276be]/60 !border-2 !border-background !rounded-full'
-        style={{ top: -6 }}
       />
 
       {/* Card Header */}
@@ -238,6 +236,90 @@ interface TransitionEdgeData {
   meta: TransitionMeta;
   onSelectEdge: (edgeId: string) => void;
   selectedEdgeId: string | null;
+  isReciprocal?: boolean;
+  curveOffset?: number;
+}
+
+// ─── Graph Layout Helper ─────────────────────────────────────────────────────
+
+const COL_WIDTH = 320;
+const ROW_HEIGHT = 180;
+
+function computeGraphLayout(
+  stages: StageNode[],
+  transitionsByTempId: Map<number, Set<number>>,
+): Map<number, { x: number; y: number }> {
+  const positions = new Map<number, { x: number; y: number }>();
+  if (stages.length === 0) return positions;
+
+  // Build incoming adjacency and in-degree
+  const incoming = new Map<number, number[]>();
+  const inDegree = new Map<number, number>();
+  stages.forEach(s => {
+    incoming.set(s.tempId, []);
+    inDegree.set(s.tempId, 0);
+  });
+  transitionsByTempId.forEach((targets, from) => {
+    targets.forEach(to => {
+      if (incoming.has(to) && incoming.has(from)) {
+        incoming.get(to)!.push(from);
+        inDegree.set(to, (inDegree.get(to) ?? 0) + 1);
+      }
+    });
+  });
+
+  // BFS topological layering
+  const layerOf = new Map<number, number>();
+  const queue: number[] = [];
+  stages.forEach(s => {
+    if ((inDegree.get(s.tempId) ?? 0) === 0) {
+      layerOf.set(s.tempId, 0);
+      queue.push(s.tempId);
+    }
+  });
+
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    const layer = layerOf.get(node) ?? 0;
+    const targets = transitionsByTempId.get(node);
+    if (targets) {
+      targets.forEach(t => {
+        if (!layerOf.has(t)) {
+          layerOf.set(t, layer + 1);
+          queue.push(t);
+        }
+      });
+    }
+  }
+
+  // Any remaining (cyclic or disconnected) go to max layer + 1
+  const maxLayer = stages.length > 0 ? Math.max(0, ...Array.from(layerOf.values())) : 0;
+  stages.forEach(s => {
+    if (!layerOf.has(s.tempId)) {
+      layerOf.set(s.tempId, maxLayer + 1);
+    }
+  });
+
+  // Group stages by layer
+  const layers = new Map<number, number[]>();
+  layerOf.forEach((layer, tempId) => {
+    if (!layers.has(layer)) layers.set(layer, []);
+    layers.get(layer)!.push(tempId);
+  });
+
+  // Assign positions
+  const sortedLayers = Array.from(layers.keys()).sort((a, b) => a - b);
+  sortedLayers.forEach(layer => {
+    const ids = layers.get(layer)!;
+    ids.forEach((tempId, idx) => {
+      positions.set(tempId, {
+        x: layer * COL_WIDTH + 60,
+        y: idx * ROW_HEIGHT + 60,
+      });
+    });
+  });
+
+  return positions;
 }
 
 const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
@@ -251,14 +333,26 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
   data,
   markerEnd,
 }) => {
+  const curveOffset = data?.curveOffset ?? 0;
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
     sourcePosition,
     targetX,
-    targetY,
+    targetY: targetY + curveOffset,
     targetPosition,
   });
+
+  // For reciprocal edges, shift control points to create a distinct arc
+  let finalEdgePath = edgePath;
+  if (curveOffset !== 0) {
+    const dx = Math.abs(targetX - sourceX) * 0.5;
+    const cp1x = sourceX + dx;
+    const cp1y = sourceY + curveOffset;
+    const cp2x = targetX - dx;
+    const cp2y = targetY + curveOffset;
+    finalEdgePath = `M ${sourceX} ${sourceY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${targetX} ${targetY + curveOffset}`;
+  }
 
   const isSelected = data?.selectedEdgeId === id;
   const meta = data?.meta;
@@ -269,7 +363,7 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
       <path
         id={id}
         className='react-flow__edge-path'
-        d={edgePath}
+        d={finalEdgePath}
         markerEnd={markerEnd}
         style={{
           stroke: isSelected ? '#6276be' : '#94a3b8',
@@ -278,7 +372,7 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
         }}
       />
       <path
-        d={edgePath}
+        d={finalEdgePath}
         fill='none'
         stroke='transparent'
         strokeWidth={16}
@@ -381,7 +475,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = ({
           className='p-1.5 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
           title='Remove'
         >
-          <X size={13} />
+          <Trash2 size={13} />
         </button>
         <button
           type='button'
@@ -390,7 +484,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = ({
           data-track-name='close_transition_config'
           className='p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors'
         >
-          <ChevronDown size={13} />
+          <Save size={13} />
         </button>
       </div>
     </div>
@@ -622,14 +716,18 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
 }) => {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
-  // Build initial nodes in a grid layout
+  // Track whether the user has manually dragged any node — if so, we
+  // preserve their custom positions and don't auto-relayout on transition changes.
+  const hasUserDraggedRef = useRef(false);
+
+  // Build initial nodes using graph-aware layout
   const makeNodes = useCallback(
     (stageList: StageNode[]): Node<StageNodeData>[] => {
-      const cols = Math.max(1, Math.ceil(Math.sqrt(stageList.length)));
-      return stageList.map((s, i) => ({
+      const layout = computeGraphLayout(stageList, transitionsByTempId);
+      return stageList.map(s => ({
         id: String(s.tempId),
         type: 'stage',
-        position: { x: (i % cols) * 280 + 60, y: Math.floor(i / cols) * 160 + 60 },
+        position: layout.get(s.tempId) ?? { x: 60, y: 60 },
         data: {
           stage: s,
           onUpdate: (patch: Partial<StageNode>) => onUpdateStage(s.tempId, patch),
@@ -645,6 +743,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
       }));
     },
     [
+      transitionsByTempId,
       onUpdateStage,
       onDeleteStage,
       editingEtaId,
@@ -660,6 +759,37 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   const [nodes, setNodes, onNodesChange] = useNodesState<StageNodeData>(makeNodes(stages));
   const [edges, setEdges, onEdgesChange] = useEdgesState<TransitionEdgeData>([]);
 
+  // Detect user-initiated node drags so we can preserve custom positions.
+  // A position change with `dragging === false` indicates the drag just ended.
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      if (changes.some(c => c.type === 'position' && c.dragging === false)) {
+        hasUserDraggedRef.current = true;
+      }
+      onNodesChange(changes);
+    },
+    [onNodesChange],
+  );
+
+  // Reposition all nodes when transitions change (handles async load).
+  // Only applies auto-layout if the user hasn't manually dragged any node —
+  // once the user customises positions, only the explicit "Rearrange" button
+  // triggers a full re-layout, preventing unexpected position resets.
+  // Uses ref for stages so it only fires on transition changes, not stage-name edits
+  const stagesRef = useRef(stages);
+  stagesRef.current = stages;
+  useEffect(() => {
+    if (isTransitionsLoading) return;
+    if (hasUserDraggedRef.current) return; // preserve user-dragged positions
+    const layout = computeGraphLayout(stagesRef.current, transitionsByTempId);
+    setNodes(prev =>
+      prev.map(n => {
+        const pos = layout.get(Number(n.id));
+        return pos ? { ...n, position: pos } : n;
+      }),
+    );
+  }, [transitionsByTempId, isTransitionsLoading, setNodes]);
+
   // Sync node count when stages added/removed; update data when stages change
   const prevStageTempIds = useRef<number[]>([]);
   useEffect(() => {
@@ -672,7 +802,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     setNodes(prev => {
       // Remove deleted stages
       let updated = prev.filter(n => !removed.includes(Number(n.id)));
-      // Add new stages with a position offset
+      // Add new stages with positions from graph layout
+      const layout = computeGraphLayout(stages, transitionsByTempId);
       added.forEach((tempId, _i) => {
         const s = stages.find(s => s.tempId === tempId)!;
         updated = [
@@ -680,7 +811,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
           {
             id: String(tempId),
             type: 'stage',
-            position: { x: updated.length * 280 + 60, y: 60 },
+            position: layout.get(tempId) ?? { x: 60, y: 60 },
             data: {
               stage: s,
               onUpdate: (patch: Partial<StageNode>) => onUpdateStage(s.tempId, patch),
@@ -720,6 +851,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     });
   }, [
     stages,
+    transitionsByTempId,
     onUpdateStage,
     onDeleteStage,
     editingEtaId,
@@ -734,24 +866,45 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
 
   // Sync edges from transition state
   useEffect(() => {
+    // Build set of all transition keys for reciprocal detection
+    const allKeys = new Set<string>();
+    transitionsByTempId.forEach((targets, from) => {
+      targets.forEach(to => allKeys.add(`${from}->${to}`));
+    });
+
     const newEdges: Edge<TransitionEdgeData>[] = [];
     transitionsByTempId.forEach((targets, fromTempId) => {
       targets.forEach(toTempId => {
         const edgeId = `e${fromTempId}-${toTempId}`;
         const metaKey = `${fromTempId}->${toTempId}`;
+        const reverseKey = `${toTempId}->${fromTempId}`;
         const meta: TransitionMeta = transitionsMeta.get(metaKey) ?? {
           requiresApproval: false,
           approverUserIds: [],
           visitSlaMode: 'STAGE_DEFAULT',
           onReenter: 'RESET',
         };
+
+        // Detect reciprocal edge and assign alternating curve offset
+        const isReciprocal = allKeys.has(reverseKey);
+        // First edge in pair gets -28, second gets +28 (based on tempId comparison)
+        const curveOffset = isReciprocal ? (fromTempId < toTempId ? -28 : 28) : 0;
+
         newEdges.push({
           id: edgeId,
           source: String(fromTempId),
           target: String(toTempId),
           type: 'transition',
           markerEnd: { type: MarkerType.ArrowClosed, color: '#6276be', width: 18, height: 18 },
-          data: { fromTempId, toTempId, meta, onSelectEdge: setSelectedEdgeId, selectedEdgeId },
+          data: {
+            fromTempId,
+            toTempId,
+            meta,
+            onSelectEdge: setSelectedEdgeId,
+            selectedEdgeId,
+            isReciprocal,
+            curveOffset,
+          },
         });
       });
     });
@@ -813,7 +966,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onEdgesDelete={onEdgesDelete}
@@ -831,6 +984,32 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color='hsl(var(--border))' />
         <Controls showInteractive={false} className='!bg-background !border-border !shadow-md' />
 
+        {/* Rearrange button */}
+        <Panel position='top-left'>
+          <button
+            type='button'
+            onClick={() => {
+              const layout = computeGraphLayout(stages, transitionsByTempId);
+              setNodes(prev =>
+                prev.map(n => {
+                  const pos = layout.get(Number(n.id));
+                  return pos ? { ...n, position: pos } : n;
+                }),
+              );
+              // Reset the flag so future transition changes can auto-layout again
+              // until the user drags once more.
+              hasUserDraggedRef.current = false;
+            }}
+            data-track-category='board_stage_config'
+            data-track-name='rearrange_stages'
+            className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
+            title='Auto-arrange stages'
+          >
+            <LayoutGrid size={13} />
+            <span className='font-medium'>Rearrange</span>
+          </button>
+        </Panel>
+
         {/* Hint + Add Stage */}
         <Panel position='bottom-center'>
           <div className='flex items-center gap-3'>
@@ -838,8 +1017,6 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
               <span>Drag handle → to connect</span>
               <span className='opacity-40'>·</span>
               <span>Click edge to configure</span>
-              <span className='opacity-40'>·</span>
-              <span>Del to remove</span>
             </div>
             <button
               type='button'

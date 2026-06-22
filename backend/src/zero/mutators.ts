@@ -10534,20 +10534,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 : null;
 
               if (currentStageObj) {
-                const currentETAs = await tx.run(
-                  zql.ticket_stage_eta
-                    .where('ticketId', ticket.id)
-                    .where('stageId', currentStageObj.id),
-                );
-                const activeETA = currentETAs.find(e => e.stageLeftAt === null);
-                if (activeETA) {
-                  await tx.mutate.ticket_stage_eta.update({
-                    id: activeETA.id,
-                    stageLeftAt: now,
-                    updatedAt: now,
-                    updatedBy: authData.sub,
-                  });
-                }
+                const currentStageId = currentStageObj.id;
+                const ticketIdForEta = ticket.id;
+                asyncTasks.push(async () => {
+                  const currentETAs = await tx.run(
+                    zql.ticket_stage_eta
+                      .where('ticketId', ticketIdForEta)
+                      .where('stageId', currentStageId),
+                  );
+                  const activeETA = currentETAs.find(e => e.stageLeftAt === null);
+                  if (activeETA) {
+                    await tx.mutate.ticket_stage_eta.update({
+                      id: activeETA.id,
+                      stageLeftAt: now,
+                      updatedAt: now,
+                      updatedBy: authData.sub,
+                    });
+                  }
+                });
               } else {
                 // ticket.stageName is a required field, so an unresolvable current stage means it
                 // references a stage that no longer exists on the board — corrupt state. Fail fast
@@ -14031,41 +14035,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // `now` is supplied by the caller (see args schema) so client + server runs agree.
 
-          // Close current stage ETA
-          if (currentStage) {
-            const currentETAs = await tx.run(
-              zql.ticket_stage_eta
-                .where('ticketId', ticketId)
-                .where('stageId', currentStage.id),
-            );
-            const activeETA = currentETAs.find(e => e.stageLeftAt === null);
-            if (activeETA) {
-              await tx.mutate.ticket_stage_eta.update({
-                id: activeETA.id,
-                stageLeftAt: now,
-                updatedAt: now,
-                updatedBy: authData.sub,
-              });
-            }
-          } else {
-            // currentStage couldn't be resolved (e.g. ticket.stageName is null or points to a
-            // renamed/deleted stage). Close any dangling open ETAs (except the target's, which
-            // we may reopen below) so the ticket doesn't end up with two open visits.
-            const allOpenETAs = await tx.run(
-              zql.ticket_stage_eta.where('ticketId', ticketId),
-            );
-            for (const e of allOpenETAs) {
-              if (e.stageLeftAt === null && e.stageId !== targetStage.id) {
-                await tx.mutate.ticket_stage_eta.update({
-                  id: e.id,
-                  stageLeftAt: now,
-                  updatedAt: now,
-                  updatedBy: authData.sub,
-                });
-              }
-            }
-          }
-
           const stageEtaDeadline = computeStageEtaDeadline(
             now,
             (transition?.visitSlaMode as VisitSlaMode | undefined) ?? VisitSlaMode.STAGE_DEFAULT,
@@ -14105,9 +14074,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt: now,
           });
 
-          // Persist form values with the correct version (visitIndex).
-          // Use effectiveFormId — covers both matched-transition formId and the fallback
-          // formId from any transition to the target stage (unrestricted source path).
+          // Persist form values at the correct visitIndex. effectiveFormId covers both the
+          // matched transition's formId and the fallback for an unrestricted-source move.
+          // Must stay inline: form_entity_values' side-effect handler (app events, custom-field
+          // activity, Vespa feed) only fires for mutations drained during the main transaction —
+          // deferring it would skip those side-effects entirely.
           if (formValues && effectiveFormId) {
             const formFields = await tx.run(
               zql.form_fields.where('formId', effectiveFormId),
@@ -14147,6 +14118,82 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
             }
           }
+
+          // Defer the non-transactional side-effects (post-commit, via asyncTasks). All three
+          // are safe here: the ETA close only touches stageLeftAt (the ticket_stage_eta handler
+          // is stageEta-gated, so it no-ops); ticket_activities has no side-effect handler; and
+          // the SYSTEM message's handler returns early for SYSTEM messages.
+          // Capture the pre-move snapshot into locals so the closure is self-contained.
+          const currentStageIdForEta = currentStage?.id ?? null;
+          const targetStageId = targetStage.id;
+          const conversationId = ticket.conversationId ?? null;
+          const fromStageName = ticket.stageName;
+          asyncTasks.push(async () => {
+            // Close the prior stage's open ETA — or, if the current stage couldn't be resolved,
+            // close any dangling open ETAs except the target's — so the ticket keeps one open visit.
+            if (currentStageIdForEta) {
+              const currentETAs = await tx.run(
+                zql.ticket_stage_eta
+                  .where('ticketId', ticketId)
+                  .where('stageId', currentStageIdForEta),
+              );
+              const activeETA = currentETAs.find(e => e.stageLeftAt === null);
+              if (activeETA) {
+                await tx.mutate.ticket_stage_eta.update({
+                  id: activeETA.id,
+                  stageLeftAt: now,
+                  updatedAt: now,
+                  updatedBy: authData.sub,
+                });
+              }
+            } else {
+              const allOpenETAs = await tx.run(
+                zql.ticket_stage_eta.where('ticketId', ticketId),
+              );
+              for (const e of allOpenETAs) {
+                if (e.stageLeftAt === null && e.stageId !== targetStageId) {
+                  await tx.mutate.ticket_stage_eta.update({
+                    id: e.id,
+                    stageLeftAt: now,
+                    updatedAt: now,
+                    updatedBy: authData.sub,
+                  });
+                }
+              }
+            }
+
+            await tx.mutate.ticket_activities.insert({
+              id: uuidv4(),
+              ticketId,
+              updatedBy: authData.sub,
+              timestamp: now,
+              activityType: ActivityType.STATUS,
+              value: { field: 'stageName', oldValue: fromStageName, newValue: toStageName },
+            });
+
+            if (conversationId) {
+              const user = await tx.run(zql.users.where('id', authData.sub).one());
+              const userName = user?.name || 'Someone';
+              await tx.mutate.messages.insert({
+                messageId: uuidv4(),
+                conversationId,
+                workspaceId: authData.workspaceId,
+                senderId: authData.sub,
+                content: `${userName} moved ticket from "${fromStageName}" to "${toStageName}"`,
+                msgType: MessageType.SYSTEM,
+                hasAttachment: false,
+                edited: false,
+                isDeleted: false,
+                isSent: true,
+                showInChannel: false,
+                createdAt: now,
+                metadata: {
+                  activityType: ActivityType.STATUS,
+                  isTicketActivity: true,
+                },
+              });
+            }
+          });
         },
       ),
     },
