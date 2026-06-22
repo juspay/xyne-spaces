@@ -219,16 +219,3 @@ export const buildKanbanTicketWhere = (
     ]),
   };
 };
-
-export const addKanbanStageWhere = (
-  where: Prisma.TicketWhereInput,
-  stageName: string,
-): Prisma.TicketWhereInput => ({
-  AND: [where, { stageName }],
-});
-
-export const getKanbanTicketOrderBy = (): Prisma.TicketOrderByWithRelationInput[] => [
-  { kanbanPosition: 'asc' },
-  { createdAt: 'desc' },
-  { id: 'asc' },
-];

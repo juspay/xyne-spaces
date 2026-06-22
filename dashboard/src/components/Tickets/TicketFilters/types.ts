@@ -31,27 +31,6 @@ export interface TicketFilters {
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 }
 
-export interface FilterConfig {
-  label: string;
-  field: keyof TicketFilters;
-  type: 'multi-select' | 'date-range';
-  placeholder?: string;
-}
-
-export interface UserOption {
-  id: string;
-  name: string;
-  email?: string;
-  picture?: string;
-}
-
-export interface UserGroupOption {
-  id: string;
-  name: string;
-  alias?: string;
-  memberCount?: number;
-}
-
 export interface DateRange {
   start?: number;
   end?: number;
@@ -92,13 +71,6 @@ export interface PriorityFilterProps {
 export interface UserFilterProps {
   selectedUsers: string[];
   onChange: (userIds: string[]) => void;
-  placeholder?: string;
-  className?: string;
-}
-
-export interface UserGroupFilterProps {
-  selectedGroups: string[];
-  onChange: (groupIds: string[]) => void;
   placeholder?: string;
   className?: string;
 }

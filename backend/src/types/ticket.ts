@@ -39,11 +39,6 @@ export interface CreateTicketRequest {
   // Note: stageName is auto-assigned from first stage (sequenceNumber=1) of the board
 }
 
-export interface CreateTicketResponse {
-  ticketId: string;
-  status: string;
-}
-
 export interface GetTicketDetailsResponse {
   id: string;
   title: string;
@@ -107,16 +102,6 @@ export interface TicketDuplicateCheckResponse {
 export enum ActivitySource {
   INTERNAL = 'INTERNAL', // All internal updates (manual user actions + AI workflows) - creates STAGE_NAME activity
   WEBHOOK = 'WEBHOOK', // External PR webhook events - skips STAGE_NAME activity (handled separately)
-}
-
-/**
- * PR-specific stage enums
- * These stages are used for tracking ticket progress through the PR lifecycle
- */
-export enum PR_STAGES {
-  REVIEW = 'Review',
-  COMPLETED = 'Completed',
-  IN_PROGRESS = 'In Progress',
 }
 
 /**

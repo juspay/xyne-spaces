@@ -1,12 +1,6 @@
 import React from 'react';
 import { cn } from '../../../utils/classNames';
 
-interface Stage {
-  id: string;
-  name: string;
-  sequenceNumber: number;
-}
-
 interface TicketStatusIconProps {
   progressPercentage: number;
   size?: number;
@@ -66,20 +60,6 @@ export const TicketStatusIcon: React.FC<TicketStatusIconProps> = ({
 };
 
 // calculate progress based on stages
-export const useStageProgress = (currentStageName: string | null, stages: Stage[] | null) => {
-  return React.useMemo(() => {
-    if (!stages || stages.length === 0 || !currentStageName) return 0;
-
-    const currentStage = stages.find(s => s.name === currentStageName);
-    if (!currentStage) return 0;
-
-    const totalStages = stages.length;
-    const currentSequence = currentStage.sequenceNumber;
-
-    return Math.round((currentSequence / totalStages) * 100);
-  }, [stages, currentStageName]);
-};
-
 // handles progress calculation
 interface TicketStatusWithStagesProps {
   currentStageName: string | null;

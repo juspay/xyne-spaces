@@ -1,4 +1,3 @@
-import { CreateWorkflowRequest } from '../../services/Workflow/workflowService';
 import { TicketStageRequestStatus } from '@xyne/shared';
 
 export interface StatusBadgeConfig {
@@ -41,59 +40,6 @@ export const getStatusBadgeConfig = (
       return null;
   }
 };
-
-/**
- * Validate ticket creation request with dynamic field support
- */
-export const validateTicketRequest = (
-  data: Record<string, unknown>,
-): {
-  isValid: boolean;
-  errors: string[];
-} => {
-  const errors: string[] = [];
-
-  if (typeof data['title'] !== 'string' || data['title'].trim() === '') {
-    errors.push('Title is required');
-  }
-
-  if (!data['workflowType'] || typeof data['workflowType'] !== 'string') {
-    errors.push('Workflow type is required');
-  }
-
-  if (typeof data['title'] === 'string' && data['title'].length > 255) {
-    errors.push('Title must be 255 characters or less');
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors,
-  };
-};
-
-/**
- * Build ticket creation request from typed form data
- */
-export const buildTicketRequest = (
-  workflowType: string,
-  formData: Record<string, unknown>,
-): CreateWorkflowRequest => {
-  const title = formData['title'] as string;
-
-  const request: CreateWorkflowRequest = {
-    title,
-    workflowType,
-  };
-
-  Object.entries(formData).forEach(([key, value]) => {
-    if (key !== 'title') {
-      request[key] = value;
-    }
-  });
-
-  return request;
-};
-
 // ETA Utility Functions
 export const formatETADisplay = (eta: number | null | undefined): string => {
   if (!eta) return '—';

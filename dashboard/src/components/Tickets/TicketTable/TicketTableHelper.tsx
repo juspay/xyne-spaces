@@ -12,7 +12,6 @@ import {
   UserIcon,
 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
-import { format, isToday, isTomorrow } from 'date-fns';
 import { useMemo } from 'react';
 import type { User, UserGroup } from '../../../machines/stateMachine';
 import { EntityOption, StatusEntityOption } from './TicketTableTypes';
@@ -162,26 +161,4 @@ export const useAssigneeOptions = (users: User[], userGroups: UserGroup[]) => {
 
 export const useStageOptions = (stages: Array<{ id: string; name: string }> = []) => {
   return useMemo(() => getStageOptions(stages), [stages]);
-};
-
-export const useTagOptions = (availableTags: string[] = []) => {
-  return useMemo(() => getTagOptions(availableTags), [availableTags]);
-};
-
-export const useTagsWithCreateOption = (availableTags: string[], searchValue: string) => {
-  return useMemo(
-    () => getTagsWithCreateOption(availableTags, searchValue),
-    [availableTags, searchValue],
-  );
-};
-
-export const formatDueDate = (date: string | number | Date | null): string => {
-  if (!date) return 'No due date';
-  const d = new Date(date);
-
-  if (isToday(d)) return 'Today';
-  if (isTomorrow(d)) return 'Tomorrow';
-
-  const currentYear = new Date().getFullYear();
-  return d.getFullYear() === currentYear ? format(d, 'MMM d') : format(d, 'MMM d, yyyy');
 };

@@ -10,34 +10,8 @@ export const PRIORITY_CONFIG = {
   [TicketPriority.CRITICAL]: { label: 'Critical', color: 'bg-red-100 text-red-700 border-red-200' },
 };
 
-export const DATE_FILTER_OPTIONS = [
-  { value: 'today', label: 'Today' },
-  { value: 'yesterday', label: 'Yesterday' },
-  { value: 'lastWeek', label: 'Last 7 Days' },
-  { value: 'lastMonth', label: 'Last 30 Days' },
-  { value: 'custom', label: 'Custom Range' },
-] as const;
-
 export interface QuickSelectOption {
   label: string;
   startDate: Date;
   endDate: Date;
 }
-
-export const QUICK_SELECT_OPTIONS: QuickSelectOption[] = [
-  {
-    label: 'Today',
-    startDate: new Date(new Date().setHours(0, 0, 0, 0)),
-    endDate: new Date(new Date().setHours(23, 59, 59, 999)),
-  },
-  {
-    label: 'Yesterday',
-    startDate: new Date(new Date().setDate(new Date().getDate() - 1)),
-    endDate: new Date(new Date().setDate(new Date().getDate() - 1)),
-  },
-  {
-    label: 'Last 7 Days',
-    startDate: new Date(new Date().setDate(new Date().getDate() - 7)),
-    endDate: new Date(),
-  },
-];
