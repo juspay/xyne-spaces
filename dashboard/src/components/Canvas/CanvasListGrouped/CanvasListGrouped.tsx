@@ -672,5 +672,3 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     </>
   );
 };
-
-export default CanvasListGrouped;

@@ -1,1 +1,1 @@
-export { ChannelCanvasList, default } from './ChannelCanvasList';
+export { ChannelCanvasList } from './ChannelCanvasList';

@@ -158,13 +158,3 @@ export interface CanvasListProps {
   showStarredOnly?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
 }
-
-export interface CanvasHeaderProps {
-  canvas?: Canvas;
-  onTitleChange?: (title: string) => void;
-  onSave?: () => void;
-  onShare?: () => void;
-  onDelete?: () => void;
-  isOwner?: boolean;
-  saving?: boolean;
-}

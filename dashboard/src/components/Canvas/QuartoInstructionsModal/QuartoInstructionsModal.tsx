@@ -44,5 +44,3 @@ export const PublishDocsModal: React.FC<PublishDocsModalProps> = ({ isOpen, onCl
     </Dialog>
   );
 };
-
-export default PublishDocsModal;

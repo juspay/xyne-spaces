@@ -1,1 +1,1 @@
-export { CanvasListGrouped, default } from './CanvasListGrouped';
+export { CanvasListGrouped } from './CanvasListGrouped';
