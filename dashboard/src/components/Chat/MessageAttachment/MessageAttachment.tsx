@@ -242,7 +242,7 @@ const Preview: React.FC<{
     return (
       <div
         className={cn(
-          'bg-muted animate-pulse flex items-center justify-center min-w-[256px] min-h-[256px]',
+          'bg-muted animate-pulse flex items-center justify-center',
           (isInGrid || fullSize) && 'w-full h-full',
         )}
         style={

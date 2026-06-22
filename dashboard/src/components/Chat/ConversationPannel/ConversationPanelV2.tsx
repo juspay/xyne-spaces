@@ -27,7 +27,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
-import ChatListV3 from '../ChatList/ChatListV3';
+import ChatListV4 from '../ChatList/ChatListV4';
 import LinksTab from '../LinksTab/LinksTab';
 import { Archive } from 'lucide-react';
 import { useUser } from '../../../hooks/useUsers';
@@ -237,7 +237,7 @@ const ConversationPanelV2 = ({
                   />
                 </div>
               ) : (
-                <ChatListV3
+                <ChatListV4
                   {...(urlConversationId && { linkedConversationId: urlConversationId })}
                   {...(urlCreatedAt && { linkedItemCreatedAt: { createdAt: urlCreatedAt } })}
                   {...(stateLinkedCutoffCreatedAt && {
@@ -248,7 +248,7 @@ const ConversationPanelV2 = ({
                   projectId={channel?.projectId}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
-                ></ChatListV3>
+                ></ChatListV4>
               )}
               {shouldShowJoinChannel ? (
                 <JoinChannel channelId={channelId} channelTitle={channel?.name} />
