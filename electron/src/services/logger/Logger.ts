@@ -68,6 +68,7 @@ class LoggerService {
   private consecutiveFailures: number = 0;
   private droppedLogsCount: number = 0; 
   private preProdEnabled: boolean = false;
+  private serialNumber: string = '';
 
   constructor() {
     this.store = new Store();
@@ -81,6 +82,7 @@ class LoggerService {
       os.platform();
     // Use a non-mTLS endpoint for pre-enrollment logs
     this.loggerUrl = `${config.UNPROTECTED_URL}/godel/events`;
+    void this.loadSerialNumber();
     this.startBackgroundFlush();
   }
 
@@ -169,14 +171,25 @@ class LoggerService {
   }
 
   /**
+   * Load system serial once. systeminformation.system() can be expensive on some
+   * machines, so it must not run for every log event.
+   */
+  private async loadSerialNumber(): Promise<void> {
+    try {
+      const systemInfo = await si.system();
+      this.serialNumber = systemInfo.serial;
+    } catch (error) {
+      log.warn('[Logger] Failed to load system serial number:', error);
+    }
+  }
+
+  /**
    * Add a log entry
    */
-  private async addLog(level: LogLevel, event: EventType, extraFields?: Record<string, unknown>, logType?: string): Promise<void> {
+  private addLog(level: LogLevel, event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
     if (!this.isEnabled) {
       return;
     }
-
-    const systemInfo = await si.system();
 
     const logEntry: LogEntry = {
       clientSessionId: this.clientSessionId,
@@ -187,7 +200,7 @@ class LoggerService {
       timestamp: new Date().toISOString(),
       level,
       hostname: os.hostname(),
-      serialNumber: systemInfo.serial,
+      serialNumber: this.serialNumber,
       event,
       ...(extraFields || {}),
     };
