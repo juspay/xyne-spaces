@@ -1,4 +1,3 @@
-export { TicketFilters } from './TicketFilters';
 export { TicketFiltersDropdown } from './TicketFiltersDropdown';
 export { PriorityFilter } from './PriorityFilter';
 export { UserFilter } from './UserFilter';
@@ -9,10 +8,6 @@ export type {
   TicketFiltersProps,
   PriorityFilterProps,
   UserFilterProps,
-  UserGroupFilterProps,
   DateRangeFilterProps,
-  UserOption,
-  UserGroupOption,
   DateRange,
-  FilterConfig,
 } from './types';

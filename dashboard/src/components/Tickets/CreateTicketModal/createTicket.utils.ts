@@ -1,9 +1,6 @@
-import { Conversation, TicketPriority } from '@xyne/shared';
+import { TicketPriority } from '@xyne/shared';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { CreateTicketFormData } from './CreateTicketModal';
-
-export const DUPLICATE_REASON_TRUNCATE_LENGTH = 140;
-
 export const TAG_COLORS = [
   'bg-cyan-600',
   'bg-yellow-600',
@@ -29,21 +26,6 @@ export const parseAssignee = (value: string | null): CreateTicketFormData['assig
 };
 
 // Get source id
-export function getSourceId(
-  sourceConversation: Conversation | undefined,
-  tab: string | null,
-  channelId: string,
-): string {
-  if (sourceConversation?.conversationId) {
-    return sourceConversation.conversationId;
-  }
-
-  if (tab === 'tickets') {
-    return `${channelId}-tickets`;
-  }
-
-  return channelId;
-}
 
 interface MissingMandatoryFieldInput {
   formValues: CreateTicketFormData;

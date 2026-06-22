@@ -602,5 +602,3 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
     </Dialog>
   );
 };
-
-export default StageFormModal;
