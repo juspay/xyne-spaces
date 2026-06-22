@@ -1,0 +1,362 @@
+import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
+import { tagRepository } from '@/database/repositories/tagRepository';
+import { assertConfigScriptsValid } from './generators/automated';
+import { TAG_FORMAT_REGEX, TagsConfigShapeSchema } from './schema';
+import type { CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
+
+export class TagServiceError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'TagServiceError';
+  }
+}
+
+/** Options shared by config writes. `validateScripts` runs each automated
+ * category's `script` once at save time (default on); the pipeline's internal
+ * auto-merge of new tags passes `false` since it never changes scripts. */
+export interface ConfigWriteOptions {
+  validateScripts?: boolean;
+  mockContext?: string;
+}
+
+const TAG_METHOD_MAP: Record<string, TagMethod> = {
+  llm: TagMethod.LLM,
+  automated: TagMethod.AUTOMATED,
+  manual: TagMethod.MANUAL,
+};
+
+export class TagService {
+  // ─── TagsConfig CRUD ─────────────────────────────────────────────────────────
+
+  async createConfig(
+    configKey: string,
+    sourceType: string,
+    workspaceId: string,
+    config: TagsConfigShape,
+    createdBy?: string | null,
+    options: ConfigWriteOptions = {},
+  ): Promise<TagsConfig> {
+    if (options.validateScripts !== false) {
+      assertConfigScriptsValid(config, options.mockContext);
+    }
+
+    const existing = await tagRepository.getActiveConfigByKey(configKey);
+    if (existing) {
+      throw new TagServiceError(`Active config already exists for configKey "${configKey}"`, 409);
+    }
+
+    return tagRepository.insertConfigRow({
+      configKey,
+      sourceType,
+      workspaceId,
+      config: config as unknown as Prisma.InputJsonValue,
+      createdBy,
+      updatedBy: createdBy,
+    });
+  }
+
+  async updateConfig(
+    configKey: string,
+    newConfig: TagsConfigShape,
+    updatedBy?: string | null,
+    options: ConfigWriteOptions = {},
+  ): Promise<TagsConfig> {
+    if (options.validateScripts !== false) {
+      assertConfigScriptsValid(newConfig, options.mockContext);
+    }
+
+    return tagRepository.getDb().$transaction(async (tx) => {
+      const existing = await tagRepository.getActiveConfigByKey(configKey, tx);
+      if (!existing) {
+        throw new TagServiceError(`No active config found for configKey "${configKey}"`, 404);
+      }
+
+      await tagRepository.softDeleteConfigRow(existing.id, updatedBy, tx);
+
+      return tagRepository.insertConfigRow({
+        configKey,
+        sourceType: existing.sourceType,
+        workspaceId: existing.workspaceId,
+        config: newConfig as unknown as Prisma.InputJsonValue,
+        createdBy: existing.createdBy,
+        updatedBy,
+      }, tx);
+    });
+  }
+
+  async deleteConfig(configKey: string, deletedBy?: string | null): Promise<void> {
+    const existing = await tagRepository.getActiveConfigByKey(configKey);
+    if (!existing) {
+      throw new TagServiceError(`No active config found for configKey "${configKey}"`, 404);
+    }
+
+    await tagRepository.softDeleteConfigRow(existing.id, deletedBy);
+  }
+
+  async getConfig(configKey: string): Promise<TagsConfig | null> {
+    return tagRepository.getActiveConfigByKey(configKey);
+  }
+
+  async listConfigsBySource(sourceType: string, workspaceId: string): Promise<TagsConfig[]> {
+    return tagRepository.listActiveConfigsBySource(sourceType, workspaceId);
+  }
+
+  // ─── Tag CRUD ────────────────────────────────────────────────────────────────
+
+  async createTag(
+    sourceId: string,
+    sourceType: string,
+    workspaceId: string,
+    tagCategory: string,
+    tag: string,
+    method: TagMethod,
+    createdBy?: string | null,
+    override?: boolean,
+    configKey?: string | null,
+  ): Promise<Tag> {
+    this.assertTagNameFormat(tagCategory, 'Tag category');
+    this.assertTagNameFormat(tag, 'Tag');
+    await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
+
+    const existing = await tagRepository.findActiveTag(sourceId, sourceType, tagCategory, tag);
+    if (existing) {
+      throw new TagServiceError(
+        `Active tag "${tag}" already exists for ${sourceType}/${sourceId} in category "${tagCategory}"`,
+        409,
+      );
+    }
+
+    return tagRepository.insertTagRow({
+      sourceId,
+      sourceType,
+      workspaceId,
+      configKey,
+      tagCategory,
+      tag,
+      method,
+      createdBy,
+      updatedBy: createdBy,
+    });
+  }
+
+  async updateTag(
+    sourceId: string,
+    sourceType: string,
+    tagCategory: string,
+    oldTag: string,
+    newTag: string,
+    updatedBy?: string | null,
+    override?: boolean,
+    configKey?: string | null,
+  ): Promise<Tag> {
+    this.assertTagNameFormat(tagCategory, 'Tag category');
+    this.assertTagNameFormat(oldTag, 'Tag');
+    this.assertTagNameFormat(newTag, 'Tag');
+
+    return tagRepository.getDb().$transaction(async (tx) => {
+      const existing = await tagRepository.findActiveTag(sourceId, sourceType, tagCategory, oldTag, tx);
+      if (!existing) {
+        throw new TagServiceError(
+          `No active tag "${oldTag}" found for ${sourceType}/${sourceId} in category "${tagCategory}"`,
+          404,
+        );
+      }
+
+      await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
+
+      await tagRepository.softDeleteTagRow(existing.id, updatedBy, tx);
+
+      return tagRepository.insertTagRow({
+        sourceId,
+        sourceType,
+        workspaceId: existing.workspaceId,
+        configKey: existing.configKey,
+        tagCategory,
+        tag: newTag,
+        method: existing.method,
+        createdBy: existing.createdBy,
+        updatedBy,
+      }, tx);
+    });
+  }
+
+  async deleteTag(
+    sourceId: string,
+    sourceType: string,
+    tagCategory: string,
+    tag: string,
+    deletedBy?: string | null,
+    override?: boolean,
+    configKey?: string | null,
+  ): Promise<void> {
+    this.assertTagNameFormat(tagCategory, 'Tag category');
+    this.assertTagNameFormat(tag, 'Tag');
+
+    const existing = await tagRepository.findActiveTag(sourceId, sourceType, tagCategory, tag);
+    if (!existing) {
+      throw new TagServiceError(
+        `No active tag "${tag}" found for ${sourceType}/${sourceId} in category "${tagCategory}"`,
+        404,
+      );
+    }
+
+    await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
+
+    await tagRepository.softDeleteTagRow(existing.id, deletedBy);
+  }
+
+  async listTags(sourceId: string, sourceType: string, tagCategory?: string): Promise<Tag[]> {
+    if (tagCategory !== undefined) {
+      this.assertTagNameFormat(tagCategory, 'Tag category');
+    }
+    return tagRepository.findActiveTags(sourceId, sourceType, tagCategory);
+  }
+
+  // ─── Bulk operations used by the framework & manual-tagging UI ───────────────
+
+  async setManualTags(
+    sourceId: string,
+    sourceType: string,
+    workspaceId: string,
+    tagCategory: string,
+    tags: string[],
+    userId: string,
+    override?: boolean,
+    configKey?: string | null,
+  ): Promise<PersistedTag[]> {
+    this.assertTagNameFormat(tagCategory, 'Tag category');
+    for (const tag of tags) {
+      this.assertTagNameFormat(tag, 'Tag');
+    }
+    await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
+
+    return tagRepository.getDb().$transaction(async (tx) => {
+      const current = await tagRepository.findActiveTags(sourceId, sourceType, tagCategory, tx);
+      const currentTagValues = new Set(current.map((row) => row.tag));
+      const desiredTagValues = new Set(tags);
+
+      const toAdd = tags.filter((tag) => !currentTagValues.has(tag));
+      const toRemove = current.filter((row) => !desiredTagValues.has(row.tag));
+
+      for (const row of toRemove) {
+        await tagRepository.softDeleteTagRow(row.id, userId, tx);
+      }
+
+      for (const tag of toAdd) {
+        await tagRepository.insertTagRow({
+          sourceId,
+          sourceType,
+          workspaceId,
+          configKey,
+          tagCategory,
+          tag,
+          method: TagMethod.MANUAL,
+          createdBy: userId,
+          updatedBy: userId,
+        }, tx);
+      }
+
+      const updated = await tagRepository.findActiveTags(sourceId, sourceType, tagCategory, tx);
+      return updated.map((row) => ({ tagCategory: row.tagCategory, tag: row.tag, method: row.method }));
+    });
+  }
+
+  async replaceTagsForCategories(
+    sourceId: string,
+    sourceType: string,
+    workspaceId: string,
+    categories: Record<string, CategoryConfig>,
+    generated: GeneratedTag[],
+    configKey?: string | null,
+  ): Promise<PersistedTag[]> {
+    const generatedByCategory = new Map<string, GeneratedTag[]>();
+    for (const item of generated) {
+      const list = generatedByCategory.get(item.category) ?? [];
+      list.push(item);
+      generatedByCategory.set(item.category, list);
+    }
+
+    return tagRepository.getDb().$transaction(async (tx) => {
+      const persisted: PersistedTag[] = [];
+
+      for (const [category, categoryConfig] of Object.entries(categories)) {
+        if (categoryConfig.method === 'manual') continue;
+        this.assertTagNameFormat(category, 'Tag category');
+
+        const method = TAG_METHOD_MAP[categoryConfig.method];
+        if (!method) continue;
+
+        const existing = await tagRepository.findActiveTags(sourceId, sourceType, category, tx);
+        for (const row of existing) {
+          await tagRepository.softDeleteTagRow(row.id, undefined, tx);
+        }
+
+        const tagsForCategory = generatedByCategory.get(category) ?? [];
+        for (const item of tagsForCategory) {
+          const reason = item.reason ?? null;
+          await tagRepository.insertTagRow({
+            sourceId,
+            sourceType,
+            workspaceId,
+            configKey,
+            tagCategory: category,
+            tag: item.tag,
+            method,
+            reason,
+          }, tx);
+          persisted.push({ tagCategory: category, tag: item.tag, method, reason });
+        }
+      }
+
+      return persisted;
+    });
+  }
+
+  private assertTagNameFormat(value: string, label: 'Tag' | 'Tag category'): void {
+    if (!TAG_FORMAT_REGEX.test(value)) {
+      throw new TagServiceError(
+        `${label} "${value}" does not match required format (lowercase, hyphen-separated, alphanumeric segments)`,
+        400,
+      );
+    }
+  }
+
+  private async assertManualCategoryOrOverride(
+    configKey: string | null | undefined,
+    tagCategory: string,
+    override?: boolean,
+  ): Promise<void> {
+    this.assertTagNameFormat(tagCategory, 'Tag category');
+
+    if (!configKey) return;
+
+    const configRow = await tagRepository.getActiveConfigByKey(configKey);
+    if (!configRow) return;
+
+    const parsedConfig = TagsConfigShapeSchema.safeParse(configRow.config);
+    if (!parsedConfig.success) {
+      throw new Error(`Invalid active tag config for configKey "${configKey}"`);
+    }
+
+    const categoryConfig = parsedConfig.data.categories[tagCategory];
+    if (!categoryConfig) {
+      throw new TagServiceError(
+        `Tag category "${tagCategory}" is not configured. Add it to the active tag config first.`,
+        400,
+      );
+    }
+
+    if (categoryConfig?.method === 'manual') return;
+    if (override === true) return;
+
+    throw new TagServiceError(
+      `Tag category "${tagCategory}" is not manual. Pass override=true to modify it manually.`,
+      400,
+    );
+  }
+}
+
+export const tagService = new TagService();

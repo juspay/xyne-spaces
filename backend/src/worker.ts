@@ -35,6 +35,7 @@ import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
+import { tagGenerationPipeline } from '@/tags';
 import { recoveryService } from './workflows/services/recovery-service'
 config()
 
@@ -228,6 +229,11 @@ class WorkerService {
       logger.info('Starting auto draft worker...');
       await autoDraftWorker.start();
 
+      if (appConfig.enableTagGenerationPipeline) {
+        logger.info('Initializing tag generation pipeline...');
+        await tagGenerationPipeline.initialize();
+      }
+
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {
         logger.info('Starting document ingestion worker...');
@@ -359,6 +365,10 @@ class WorkerService {
 
       await emailClassificationWorker.shutdown();
       await autoDraftWorker.shutdown();
+
+      if (appConfig.enableTagGenerationPipeline) {
+        await tagGenerationPipeline.close();
+      }
 
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {

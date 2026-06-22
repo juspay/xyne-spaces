@@ -4575,6 +4575,58 @@ model InstalledAppPermission {
   @@schema("public")
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Generic Tag Framework (V1)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum TagMethod {
+  MANUAL
+  LLM
+  AUTOMATED
+
+  @@schema("non_zero")
+}
+
+model Tag {
+  id          String    @id @default(cuid())
+  sourceId    String
+  sourceType  String
+  workspaceId String
+  configKey   String?
+  tagCategory String
+  tag         String
+  method      TagMethod
+  reason      String?
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime
+  updatedAt   DateTime
+  isDeleted   Boolean
+
+  @@index([sourceId, sourceType, tagCategory])
+  @@index([workspaceId, sourceType, configKey, tagCategory, tag])
+  @@map("tags")
+  @@schema("non_zero")
+}
+
+model TagsConfig {
+  id          String   @id @default(cuid())
+  configKey   String
+  sourceType  String
+  workspaceId String
+  config      Json
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime
+  updatedAt   DateTime
+  isDeleted   Boolean
+
+  @@index([configKey, isDeleted])
+  @@index([sourceType, workspaceId, isDeleted])   // list active configs for a sourceType+workspace
+  @@map("tags_config")
+  @@schema("non_zero")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Async OCR (Docling/LightOn) scheduler state machine
 // Ported from xyne-search. Two tables drive the splitter→submitter→result→
