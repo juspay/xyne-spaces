@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { FlowContext, FlowContextValue } from './FlowContext';
-import { NodeRegistry, initializeRegistry } from './nodes/NodeRegistry';
+import { NodeRegistry } from './nodes/NodeRegistry';
 import type {
   FlowComponent,
   FlowState,
@@ -34,7 +34,6 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validatedFlow, setValidatedFlow] = useState<FlowDefinition | null>(null);
   const [state, setState] = useState<FlowState>(flow.state);
-  const [registryReady, setRegistryReady] = useState(false);
 
   // Always-current ref so executeAction closures never read stale values.
   // Synced synchronously inside updateFieldValue (not via useEffect) so debounced
@@ -64,10 +63,6 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       }
     }
   }, [flow]);
-
-  useEffect(() => {
-    void initializeRegistry().then(() => setRegistryReady(true));
-  }, []);
 
   useEffect(() => {
     onStateChange?.(state);
@@ -304,7 +299,9 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     );
   }
 
-  if (!registryReady || !validatedFlow) {
+  // The node registry is populated synchronously at module load (see NodeRegistry.ts),
+  // so the only thing we wait for here is the one-tick flow validation below.
+  if (!validatedFlow) {
     return <div className='animate-pulse bg-muted h-32 rounded-lg' />;
   }
 

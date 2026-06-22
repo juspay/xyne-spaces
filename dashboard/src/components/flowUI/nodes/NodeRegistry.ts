@@ -1,5 +1,17 @@
 import type { FlowComponentType, FlowComponent } from '@xyne/shared';
 import type { ComponentType, ReactNode } from 'react';
+import { TextNode } from './TextNode';
+import { HeadingNode } from './HeadingNode';
+import { ButtonNode } from './ButtonNode';
+import { InputNode } from './InputNode';
+import { TextareaNode } from './TextareaNode';
+import { SelectNode } from './SelectNode';
+import { CheckboxNode } from './CheckboxNode';
+import { RadioNode } from './RadioNode';
+import { RowNode, ColumnNode, CardNode } from './ContainerNodes';
+import { DividerNode } from './DividerNode';
+import { ImageNode } from './ImageNode';
+import { TableNode } from './TableNode';
 
 // Base props interface that all node components extend
 export interface NodeComponentBaseProps {
@@ -18,52 +30,32 @@ export const NodeRegistry = {
   },
 };
 
-// Lazy imports to avoid circular dependencies
-export const initializeRegistry = async (): Promise<void> => {
-  const [
-    { TextNode },
-    { HeadingNode },
-    { ButtonNode },
-    { InputNode },
-    { TextareaNode },
-    { SelectNode },
-    { CheckboxNode },
-    { RadioNode },
-    { RowNode },
-    { ColumnNode },
-    { CardNode },
-    { DividerNode },
-    { ImageNode },
-    { TableNode },
-  ] = await Promise.all([
-    import('./TextNode'),
-    import('./HeadingNode'),
-    import('./ButtonNode'),
-    import('./InputNode'),
-    import('./TextareaNode'),
-    import('./SelectNode'),
-    import('./CheckboxNode'),
-    import('./RadioNode'),
-    import('./ContainerNodes'),
-    import('./ContainerNodes'),
-    import('./ContainerNodes'),
-    import('./DividerNode'),
-    import('./ImageNode'),
-    import('./TableNode'),
-  ]);
+// Register synchronously at module load.
+//
+// This was previously done via dynamic import() inside an async initializeRegistry(), which
+// made FlowRenderer gate rendering on a promise that had no error handling: a single failed
+// chunk load (common in Electron right after an app update, when chunk filenames change, or on
+// a transient read race) left the renderer stuck forever on its loading skeleton — showing as
+// "empty space" that only a full reload could fix. These node components are leaf modules (none
+// import back into NodeRegistry/FlowRenderer), so eager static imports are safe and remove the
+// race entirely — the registry is always ready before any flow renders.
+NodeRegistry.register('text', TextNode);
+NodeRegistry.register('heading', HeadingNode);
+NodeRegistry.register('button', ButtonNode);
+NodeRegistry.register('input', InputNode);
+NodeRegistry.register('textarea', TextareaNode);
+NodeRegistry.register('dropdown', SelectNode); // single-option dropdown
+NodeRegistry.register('select', RadioNode); // single-option radio group
+NodeRegistry.register('multiselect', CheckboxNode); // multi-option checkbox group
+NodeRegistry.register('row', RowNode);
+NodeRegistry.register('column', ColumnNode);
+NodeRegistry.register('card', CardNode);
+NodeRegistry.register('divider', DividerNode);
+NodeRegistry.register('image', ImageNode);
+NodeRegistry.register('table', TableNode);
 
-  NodeRegistry.register('text', TextNode);
-  NodeRegistry.register('heading', HeadingNode);
-  NodeRegistry.register('button', ButtonNode);
-  NodeRegistry.register('input', InputNode);
-  NodeRegistry.register('textarea', TextareaNode);
-  NodeRegistry.register('dropdown', SelectNode); // single-option dropdown
-  NodeRegistry.register('select', RadioNode); // single-option radio group
-  NodeRegistry.register('multiselect', CheckboxNode); // multi-option checkbox group
-  NodeRegistry.register('row', RowNode);
-  NodeRegistry.register('column', ColumnNode);
-  NodeRegistry.register('card', CardNode);
-  NodeRegistry.register('divider', DividerNode);
-  NodeRegistry.register('image', ImageNode);
-  NodeRegistry.register('table', TableNode);
-};
+/**
+ * Kept for backward compatibility with existing callers/imports.
+ * Registration now happens eagerly at module load, so this is a resolved no-op.
+ */
+export const initializeRegistry = async (): Promise<void> => {};

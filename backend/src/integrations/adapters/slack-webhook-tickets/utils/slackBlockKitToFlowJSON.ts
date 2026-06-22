@@ -444,6 +444,26 @@ function withColorStripe(children: FlowComponent[], color: string): FlowComponen
   };
 }
 
+/**
+ * Lay out Slack section/attachment `fields` the way Slack does: a 2-column
+ * grid that wraps onto new rows. Each cell is wrapped in a flex column so the
+ * two columns share the width evenly and long values wrap instead of
+ * overflowing the message width.
+ */
+function fieldsToGrid(fields: FlowComponent[], columns = 2): FlowComponent {
+  const rows: FlowComponent[] = [];
+  for (let i = 0; i < fields.length; i += columns) {
+    const cells = fields.slice(i, i + columns).map((cell) => ({
+      id: crypto.randomUUID(),
+      type: 'column' as const,
+      children: [cell],
+    }));
+    rows.push({ id: crypto.randomUUID(), type: 'row', children: cells });
+  }
+  if (rows.length === 1) return rows[0];
+  return { id: crypto.randomUUID(), type: 'column', children: rows };
+}
+
 function withChatQuoteStyle(children: FlowComponent[]): FlowComponent {
   return {
     id: crypto.randomUUID(),
@@ -545,11 +565,9 @@ export function slackBlockToFlowComponent(
         const fieldComponents: FlowComponent[] = sectionBlock.fields.map(
           (field): FlowComponent => mrkdwnToFlowComponent(field, slackToXyneMap, slackToXyneGroupMap),
         );
-        sectionChildren.push({
-          id: crypto.randomUUID(),
-          type: 'row',
-          children: fieldComponents,
-        });
+        // Slack lays section `fields` out in a 2-column grid that wraps onto
+        // additional rows — not a single full-width row. Chunk into rows of 2.
+        sectionChildren.push(fieldsToGrid(fieldComponents));
       }
 
       const accessoryComponent = sectionBlock.accessory
@@ -696,7 +714,8 @@ export function slackAttachmentToFlowComponent(
     children.push(mrkdwnToFlowComponent(attachment.text, slackToXyneMap, slackToXyneGroupMap));
   }
 
-  // Key-value fields — each field value is parsed through mrkdwn
+  // Key-value fields — each field value is parsed through mrkdwn.
+  // Slack renders these in a 2-column grid that wraps; mirror that layout.
   if (attachment.fields?.length) {
     const fieldColumns: FlowComponent[] = attachment.fields.map(
       (field): FlowComponent => ({
@@ -708,7 +727,7 @@ export function slackAttachmentToFlowComponent(
         ],
       }),
     );
-    children.push({ id: crypto.randomUUID(), type: 'row', children: fieldColumns });
+    children.push(fieldsToGrid(fieldColumns));
   }
 
   if (attachment.image_url) {
