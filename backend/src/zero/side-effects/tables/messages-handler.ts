@@ -1791,6 +1791,26 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       orderBy: { createdAt: 'asc' },
     });
 
+    // Sync the rollback of lastReplyAt to all conversation participants now that the message is deleted
+    const newLastReplyAt = replies.length > 0 ? replies[replies.length - 1].createdAt : null;
+    try {
+      await db.conversationParticipant.updateMany({
+        where: {
+          conversationId: previousValue.conversationId,
+          lastReplyAt: { not: null }, // Only update if they have a lastReplyAt (are subscribed/lurking with replies)
+        },
+        data: { lastReplyAt: newLastReplyAt },
+      });
+      logger.info('[MessagesSideEffectHandler] Rolled back lastReplyAt for participants on delete', { 
+        conversationId: previousValue.conversationId, 
+        newLastReplyAt 
+      });
+    } catch (error) {
+      logger.error('[MessagesSideEffectHandler] Failed to roll back lastReplyAt on delete', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
     let repliers: string[] = [];
     for (const reply of replies) {
       repliers = repliers.filter(id => id !== reply.senderId);

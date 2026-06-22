@@ -2641,28 +2641,6 @@ export const mutators = defineMutators({
               replyCount: Math.max(0, conversation.replyCount - 1),
             });
 
-            // Find the new latest message to update lastReplyAt
-            const remainingMessages = otherMessages
-              .filter(m => !m.isDeleted)
-              .sort((a, b) => b.createdAt - a.createdAt);
-              
-            if (remainingMessages.length > 0) {
-              const newLastReplyAt = remainingMessages[0].createdAt;
-              const participants = await tx.run(
-                zql.conversation_participants.where('conversationId', conversation.conversationId)
-              );
-              
-              for (const participant of participants) {
-                // Only update if they have a lastReplyAt (are subscribed/lurking with replies)
-                // and we are actually rolling back the lastReplyAt
-                if (participant.lastReplyAt != null && participant.lastReplyAt >= message.createdAt) {
-                  await tx.mutate.conversation_participants.update({
-                    id: participant.id,
-                    lastReplyAt: newLastReplyAt
-                  });
-                }
-              }
-            }
           }
         }
       },
