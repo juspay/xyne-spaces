@@ -96,7 +96,7 @@ const UserThreads = (): ReactElement => {
   const [cursor, setCursor] = useState<Cursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
 
-  const [currentBatch] = useQuery(
+  const [currentBatch, details] = useQuery(
     queries.userConversationsPaginatedV2({
       userId: user?.id || '',
       limit: PAGE_SIZE,
@@ -106,6 +106,8 @@ const UserThreads = (): ReactElement => {
   );
 
   useEffect(() => {
+    if (details.type !== 'complete') return;
+
     if (currentBatch && currentBatch.length > 0) {
       setAllConversations(prev => {
         // Merge: use a Map keyed by conversationId so latest data always wins
@@ -126,7 +128,7 @@ const UserThreads = (): ReactElement => {
     } else if (currentBatch && currentBatch.length === 0 && cursor !== null) {
       setHasMore(false);
     }
-  }, [currentBatch, cursor]);
+  }, [currentBatch, cursor, details.type]);
 
   const loadMore = useCallback(() => {
     if (!hasMore || allConversations.length === 0) return;
