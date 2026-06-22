@@ -685,6 +685,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             return true;
           }
 
+          // Inline code: ⌘⇧C (Mac) / Ctrl+Shift+C (Windows/Linux)
+          // Use lowercase check since Shift+key often produces uppercase letter
+          if (
+            (event.key === 'c' || event.key === 'C') &&
+            event.shiftKey &&
+            (event.metaKey || event.ctrlKey)
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            editor?.chain().focus().toggleCode().run();
+            return true;
+          }
+
           // Strikethrough: ⌘⇧X (Mac) / Ctrl+Shift+X (Windows/Linux)
           // Use lowercase check since Shift+key often produces uppercase letter
           if (
