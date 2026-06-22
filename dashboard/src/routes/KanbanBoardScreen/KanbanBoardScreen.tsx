@@ -268,6 +268,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createTicketSeed, setCreateTicketSeed] = useState<{
+    status?: TicketStatusV2 | undefined;
+    stageName?: string | undefined;
+    assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
+  } | null>(null);
   const [localTickets, setLocalTickets] = useState<Ticket[] | null>([]);
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -352,18 +357,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     );
   };
 
-  const toggleGroupExpansion = (groupKey: string) => {
-    setExpandedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(groupKey)) {
-        next.delete(groupKey);
-      } else {
-        next.add(groupKey);
-      }
-      return next;
-    });
-  };
-
   // available columns
   const availableColumns = [
     { key: 'assignee', label: 'Assignee', icon: <User className='h-4 w-4' /> },
@@ -423,6 +416,43 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
   const activeViewKey = `active-view-${state.context.storageKey}`;
   const hasRestoredActiveView = useRef<string | null>(null);
+  const groupByKey = typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy;
+  const expandedGroupsStorageKey = `kanban-expanded-groups-${state.context.storageKey}`;
+
+  const toggleGroupExpansion = useCallback(
+    (groupKey: string) => {
+      setExpandedGroups(prev => {
+        const next = new Set(prev);
+        if (next.has(groupKey)) {
+          next.delete(groupKey);
+        } else {
+          next.add(groupKey);
+        }
+        try {
+          const raw = sessionStorage.getItem(expandedGroupsStorageKey);
+          const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
+          map[groupByKey] = [...next];
+          sessionStorage.setItem(expandedGroupsStorageKey, JSON.stringify(map));
+        } catch (err) {
+          console.error('Failed to persist expanded groups to sessionStorage', err);
+        }
+        return next;
+      });
+    },
+    [expandedGroupsStorageKey, groupByKey],
+  );
+
+  useEffect(() => {
+    if (groupBy === 'none') return;
+    try {
+      const raw = sessionStorage.getItem(expandedGroupsStorageKey);
+      const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
+      setExpandedGroups(new Set(map[groupByKey] ?? []));
+    } catch (err) {
+      console.error('Failed to read expanded groups from sessionStorage', err);
+      setExpandedGroups(new Set());
+    }
+  }, [expandedGroupsStorageKey, groupByKey, groupBy]);
 
   const searchTerm = searchParams.get('search') ?? '';
   const [isBoardDropdownOpen, setIsBoardDropdownOpen] = useState(false);
@@ -1639,6 +1669,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     [navigate, channel, isMobile, baseRoute, buildChannelRoute],
   );
 
+  const openCreateForColumn = useCallback(
+    (seed: {
+      status?: TicketStatusV2 | undefined;
+      stageName?: string | undefined;
+      assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
+    }): void => {
+      setCreateTicketSeed(seed);
+      setIsCreateModalOpen(true);
+    },
+    [],
+  );
+
   // Handle ticket creation success
   const handleTicketCreated = useCallback(
     (ticket: { id: string; conversationId?: string }) => {
@@ -1766,7 +1808,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ]
         : localEntries;
 
-    return entries.map(([groupName, groupTickets]) => {
+    const mapped = entries.map(([groupName, groupTickets]) => {
       const serverCountGroup = isKanbanLayout ? kanbanCounts.groupsByKey.get(groupName) : undefined;
       const serverColumnCounts = shouldUseStatusColumns
         ? (serverCountGroup?.statuses ?? {})
@@ -1824,6 +1866,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         stageCounts: serverColumnCounts,
       };
     });
+
+    const isAssigneeGrouping =
+      groupBy === 'assignee' ||
+      (isFormFieldGroup(groupBy) && groupBy.fieldType === FormFieldType.USER);
+    if (isAssigneeGrouping) {
+      const isUnassigned = (key: string): boolean => key === 'Unassigned';
+      mapped.sort((a, b) => {
+        if (isUnassigned(a.key) !== isUnassigned(b.key)) return isUnassigned(a.key) ? 1 : -1;
+        return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
+      });
+    }
+
+    return mapped;
   }, [
     localTickets,
     groupBy,
@@ -1841,30 +1896,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     kanbanColumnQueryKey,
     hasMatchingLastKnownKanbanGroups,
   ]);
-
-  // Auto-expand the first group when groups change
-  const lastGroupedGroupByRef = useRef<GroupByType | null>(null);
-  const lastAutoExpandedFirstGroupKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (groupBy === 'none') {
-      lastGroupedGroupByRef.current = groupBy;
-      lastAutoExpandedFirstGroupKeyRef.current = null;
-      return;
-    }
-
-    const firstGroupKey = processedGroups[0]?.key ?? null;
-    if (!firstGroupKey) return;
-
-    const shouldAutoExpand =
-      lastGroupedGroupByRef.current !== groupBy ||
-      lastAutoExpandedFirstGroupKeyRef.current !== firstGroupKey;
-
-    if (!shouldAutoExpand) return;
-
-    setExpandedGroups(new Set([firstGroupKey]));
-    lastGroupedGroupByRef.current = groupBy;
-    lastAutoExpandedFirstGroupKeyRef.current = firstGroupKey;
-  }, [groupBy, processedGroups]);
 
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table') {
@@ -1933,7 +1964,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               data-track-category='TICKETS'
               data-track-name='CREATE_TICKET_KANBAN'
               data-track-metadata={JSON.stringify({ boardId, channelId })}
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={() => {
+                setCreateTicketSeed(null);
+                setIsCreateModalOpen(true);
+              }}
               className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-sidebar-badge-accent rounded-lg transition-colors flex-shrink-0'
             >
               <Plus className='w-4 h-4' />
@@ -2581,6 +2615,27 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           onTicketsChange={handleKanbanTicketsChange}
                           allKnownTickets={localTickets ?? []}
                           {...(paginatedColumnConfig ? { paginatedColumnConfig } : {})}
+                          {...(canCreateTicket &&
+                          channel &&
+                          !channel.isArchived &&
+                          effectiveProjectId
+                            ? {
+                                onAddTicketInColumn: (col: {
+                                  status?: TicketStatusV2 | undefined;
+                                  stageName?: string | undefined;
+                                }) =>
+                                  openCreateForColumn({
+                                    status: col.status,
+                                    stageName: col.stageName,
+                                    assignee:
+                                      group.entityType === 'user' && group.entityId
+                                        ? { type: 'assigneeTo', value: group.entityId }
+                                        : group.entityType === 'group' && group.entityId
+                                          ? { type: 'userGroup', value: group.entityId }
+                                          : null,
+                                  }),
+                              }
+                            : {})}
                           slaPolicies={kanbanSlaPolicies}
                         />
                       </div>
@@ -2610,10 +2665,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       {effectiveProjectId && channel && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
+          onClose={() => {
+            setIsCreateModalOpen(false);
+            setCreateTicketSeed(null);
+          }}
           channelId={channel.id}
           projectId={effectiveProjectId}
           selectedBoardId={currentBoardId}
+          initialStatus={createTicketSeed?.status ?? null}
+          initialStageName={createTicketSeed?.stageName ?? null}
+          initialAssignee={createTicketSeed?.assignee ?? null}
           onTicketCreated={handleTicketCreated}
         />
       )}
