@@ -17,6 +17,10 @@ export interface TeamIntelligenceGeneratedSummary {
   summaryMetadata: Prisma.InputJsonValue;
 }
 
+interface RawEmployeeBulletRewriteResponse {
+  bullets?: unknown;
+}
+
 function asObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -26,6 +30,10 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function asArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function normalizeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value.trim() || fallback : fallback;
 }
 
 function toFiniteNumber(value: unknown, fallback = 0): number {
@@ -84,6 +92,8 @@ function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): stri
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\b[A-Z][A-Z0-9]+-\d+\b:?\s*/g, ' ')
+    .replace(/\b(?:feat|fix|chore|refactor|docs|test|perf|style|build|ci|revert)(?:\([^)]+\))?!?:\s*/gi, ' ')
     .replace(/[#>*\-\[\]`*_~]|\d+\./g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -140,13 +150,21 @@ function buildSubjectivePullRequestBullet(
   commitSummaries: string[]
 ): string {
   const repoLabel = [pr.projectName, pr.repoName].filter(Boolean).join('/');
-  const focus = trimSentence(pr.prDescription?.trim() || pr.prSummary?.trim() || pr.prTitle);
+  const focus = trimSentence(normalizeSummaryText(pr.prSummary?.trim() || pr.prDescription?.trim() || pr.prTitle, 14));
   const highlights = commitSummaries.map(trimSentence).filter(Boolean).slice(0, 2);
   const highlightText = highlights.length > 0
-    ? `, improving ${formatList(highlights)}`
+    ? `, with refinements in ${formatList(highlights)}`
     : '';
+  const target = repoLabel || 'the product';
+  const variants = [
+    `Delivery in ${target} advanced through ${focus}${highlightText}.`,
+    `${focus} was delivered in ${target}${highlightText}.`,
+    `Work in ${target} moved forward with ${focus}${highlightText}.`,
+    `${userName} moved ${target} forward by delivering ${focus}${highlightText}.`,
+  ];
 
-  return `${userName} implemented ${focus} in ${repoLabel || 'the product'} through ${pr.prTitle}${highlightText}.`;
+  const variantIndex = Math.abs(pr.prId) % variants.length;
+  return variants[variantIndex];
 }
 
 function buildSubjectiveSoloCommitBullet(userName: string, commits: TeamIntelligenceCommitInput[]): string | null {
@@ -198,8 +216,7 @@ function extractEmployeeBullets(rawText: string): string[] {
     if (Array.isArray(parsed)) {
       return parsed
         .map((item) => (typeof item === 'string' ? normalizeSummaryText(item, SUMMARY_MAX_WORDS) : ''))
-        .filter(Boolean)
-        .slice(0, SUMMARY_MAX_LINES);
+        .filter(Boolean);
     }
   } catch {
     // Fall through to plain-text parsing.
@@ -214,14 +231,13 @@ function extractEmployeeBullets(rawText: string): string[] {
     .filter(Boolean);
 
   if (bulletLines.length > 0) {
-    return bulletLines.slice(0, SUMMARY_MAX_LINES);
+    return bulletLines;
   }
 
   return trimmed
     .split(/[\n.!?]+/)
     .map((line) => normalizeSummaryText(line, SUMMARY_MAX_WORDS))
-    .filter(Boolean)
-    .slice(0, SUMMARY_MAX_LINES);
+    .filter(Boolean);
 }
 
 function enforceEmployeeSummaryWindow(input: {
@@ -287,6 +303,58 @@ async function llmGenerate(llmClient: LLMClient, prompt: string): Promise<string
     logger.warn('[TEAM-INTEL-SUMMARY] LLM call failed, falling back to rule-based', { error });
     return null;
   }
+}
+
+async function llmRewriteEmployeeSummary(
+  llmClient: LLMClient,
+  input: {
+    userName: string;
+    teamName: string | null;
+    reportDate: Date;
+  },
+  bullets: string[]
+): Promise<string[] | null> {
+  const prompt = [
+    'Rewrite employee summary bullets for a manager feed.',
+    'Return STRICT JSON only with this shape:',
+    '{ "bullets": ["string", "string"] }',
+    'Rules:',
+    '- Keep the same number of bullets as input.',
+    '- Keep each bullet to exactly one sentence under 50 words.',
+    '- Use natural, fluent narration with clean grammar.',
+    '- Avoid repetitive starts; do not always begin with the employee name.',
+    '- Do not include ticket IDs, PR IDs, commit hashes, branch names, or conventional-commit prefixes.',
+    '- Do not copy PR titles or commit lines verbatim; paraphrase into plain language.',
+    '- Keep factual meaning and concrete engineering outcomes from input bullets.',
+    '- No filler or promotional language.',
+    `Context employee: ${input.userName}`,
+    `Context team: ${input.teamName ?? 'No Team'}`,
+    `Context date: ${input.reportDate.toISOString().slice(0, 10)}`,
+    'Input bullets:',
+    ...bullets.map((bullet, index) => `${index + 1}. ${bullet}`),
+  ].join('\n');
+
+  const raw = await llmGenerate(llmClient, prompt);
+  if (!raw) {
+    return null;
+  }
+
+  let parsed: RawEmployeeBulletRewriteResponse;
+  try {
+    parsed = JSON.parse(raw) as RawEmployeeBulletRewriteResponse;
+  } catch {
+    return null;
+  }
+
+  const rewritten = asArray<unknown>(parsed.bullets)
+    .map((value) => normalizeSummaryText(normalizeString(value), SUMMARY_MAX_WORDS))
+    .filter(Boolean);
+
+  if (rewritten.length === 0) {
+    return null;
+  }
+
+  return rewritten;
 }
 
 class TeamIntelligenceSummaryService {
@@ -418,27 +486,46 @@ class TeamIntelligenceSummaryService {
         ];
 
     let employeeSummary: string[] = completeFallbackEmployeeSummary;
+    let llmPrimaryCallSucceeded = false;
     if (llmClient) {
       const llmText = await llmGenerate(
         llmClient,
-        `Create a manager-ready employee summary as a JSON array of 2-3 bullet strings.\nEmployee: ${input.userName}\nTeam: ${input.teamName ?? 'No Team'}\nDate: ${input.reportDate.toISOString().slice(0, 10)}\n\nPull Requests:\n${prBullets || 'None'}\n\nDirect Commits:\n${commitBullets || 'None'}\n\nAI Usage: ${formatAiUsage(aiUsage)}\n\nSelection strategy (must follow):\n1) Build candidate insights from PR and commit evidence.\n2) Score candidates by impact, specificity, and uniqueness.\n3) Keep top non-overlapping insights only.\n4) If there are more than 3 strong insights, keep the highest-impact 3 (not the first 3).\n\nRequirements:\n- Use factual, evidence-based bullets (not narrative or promotional style).\n- Say exactly what the engineer implemented, improved, fixed, or enabled.\n- Mention repo or system area when available.\n- Keep each bullet to one sentence and under 50 words.\n- Return exactly 2 or 3 bullets only.\n- Prefer concrete delivery outcomes over broad activity statements.\n- Avoid PR counts, token counts, and generic status lines unless there is no other signal.\n- Do not include markdown bullets, just JSON array strings.\nRespond with valid JSON only.`,
+        `Create a manager-ready employee summary as a JSON array of 2-3 bullet strings.\nEmployee: ${input.userName}\nTeam: ${input.teamName ?? 'No Team'}\nDate: ${input.reportDate.toISOString().slice(0, 10)}\n\nPull Requests:\n${prBullets || 'None'}\n\nDirect Commits:\n${commitBullets || 'None'}\n\nAI Usage: ${formatAiUsage(aiUsage)}\n\nSelection strategy (must follow):\n1) Build candidate insights from PR and commit evidence.\n2) Score candidates by impact, specificity, and uniqueness.\n3) Keep top non-overlapping insights only.\n4) If there are more than 3 strong insights, keep the highest-impact 3 (not the first 3).\n\nRequirements:\n- Use factual, evidence-based bullets (not narrative or promotional style).\n- Say exactly what the engineer implemented, improved, fixed, or enabled.\n- Mention repo or system area when available.\n- Keep each bullet to one sentence and under 50 words.\n- Return exactly 2 or 3 bullets only.\n- Prefer concrete delivery outcomes over broad activity statements.\n- Avoid PR counts, token counts, and generic status lines unless there is no other signal.\n- Write in natural, human narration with clean grammar.\n- Do not include ticket IDs, PR IDs, commit hashes, branch names, or conventional-commit prefixes.\n- Never copy PR titles or commit messages verbatim; paraphrase into plain language.\n- Avoid repetitive phrasing and avoid always starting bullets with the employee name.\n- Do not include markdown bullets, just JSON array strings.\nRespond with valid JSON only.`,
       );
       if (llmText) {
+        llmPrimaryCallSucceeded = true;
         const parsedBullets = extractEmployeeBullets(llmText);
         if (parsedBullets.length > 0) {
           employeeSummary = parsedBullets;
+        } else {
+          employeeSummary = [normalizeSummaryText(llmText, SUMMARY_MAX_WORDS)].filter(Boolean);
         }
+      }
+
+      const rewrittenEmployeeSummary = await llmRewriteEmployeeSummary(
+        llmClient,
+        {
+          userName: input.userName,
+          teamName: input.teamName,
+          reportDate: input.reportDate,
+        },
+        employeeSummary
+      );
+      if (rewrittenEmployeeSummary) {
+        employeeSummary = rewrittenEmployeeSummary;
       }
     }
 
-    employeeSummary = enforceEmployeeSummaryWindow(
-      {
-        userName: input.userName,
-        teamName: input.teamName,
-        reportDate: input.reportDate,
-      },
-      employeeSummary
-    );
+    if (!llmPrimaryCallSucceeded) {
+      employeeSummary = enforceEmployeeSummaryWindow(
+        {
+          userName: input.userName,
+          teamName: input.teamName,
+          reportDate: input.reportDate,
+        },
+        employeeSummary
+      );
+    }
 
     const summaryMetadata: Prisma.InputJsonValue = {
       generator: llmClient ? 'team-intelligence-llm-summary-v1' : 'team-intelligence-summary-v1',

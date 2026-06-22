@@ -132,13 +132,21 @@ function buildBulletTitle(bulletText: string): string {
     return 'Team Update';
   }
 
-  const clean = compact.replace(/[.!?]+$/g, '');
-  const words = clean.split(' ').filter(Boolean);
-  const concise = words.slice(0, 8).join(' ');
+  // Strip common narrative boilerplate to keep the title headline-like.
+  const cleaned = compact
+    .replace(/[.!?]+$/g, '')
+    .replace(/^Delivery progressed in\s+[^,]+\s+as\s+[^,]+\s+implemented\s+/i, '')
+    .replace(/^\w+\s+continued\s+focused\s+delivery\s+in\s+[^,]+\s+during\s+\d{4}-\d{2}-\d{2}\.?$/i, 'Delivery Update')
+    .replace(/^Implemented\s+/i, '')
+    .replace(/,\s*with\s+additional\s+refinements\s+in\s+.*$/i, '')
+    .trim();
+
+  const words = (cleaned || compact).split(' ').filter(Boolean);
+  const concise = words.slice(0, 6).join(' ');
   return concise || 'Team Update';
 }
 
-const SUMMARY_MIN_LINES = 3;
+const SUMMARY_MIN_LINES = 2;
 const SUMMARY_MAX_LINES = 4;
 const SUMMARY_MAX_WORDS = 50;
 
@@ -150,6 +158,8 @@ function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): stri
     .replace(/^\s{0,3}#{1,6}\s+/gm, ' ')
     .replace(/^\s*[-*+]\s+/gm, ' ')
     .replace(/^\s*\d+\.\s+/gm, ' ')
+    .replace(/\b[A-Z][A-Z0-9]+-\d+\b:?\s*/g, ' ')
+    .replace(/\b(?:feat|fix|chore|refactor|docs|test|perf|style|build|ci|revert)(?:\([^)]+\))?!?:\s*/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -177,9 +187,18 @@ async function llmRewriteBullets(
     'Rules:',
     '- Keep all bulletId values exactly the same as input.',
     '- bulletTitle must be concise: 3-8 words.',
+    '- bulletTitle must be a standalone headline that summarizes the main outcome.',
+    '- bulletTitle must NOT reuse the opening clause of bulletText.',
+    '- bulletTitle must not start with phrases like "Delivery progressed", "Work progressed", "Team continued", or similar narrative lead-ins.',
+    '- Prefer noun-phrase style titles such as "Mandate ACL Enforcement" or "Checkout Styling Expansion".',
     '- bulletText must be descriptive: one sentence with concrete delivery details.',
     '- bulletText must stay under 50 words.',
     '- bulletTitle must not be the same as bulletText.',
+    '- Use clear, natural manager narration with correct grammar.',
+    '- Do not include ticket IDs, commit hashes, or branch names (examples: BC-223, XYZ-19, a1b2c3d).',
+    '- Do not copy PR titles or commit messages verbatim.',
+    '- Paraphrase technical work into plain engineering outcomes.',
+    '- Avoid malformed phrasing like duplicated verbs or repeated clauses.',
     '- Preserve the highest-impact signal from each input bullet while compressing.',
     '- If a detail must be dropped, drop lower-impact context first.',
     '- Keep factual meaning aligned to the input evidence.',
@@ -318,10 +337,18 @@ function buildPrompt(input: TeamIntelligenceOrgSummaryInput): string {
     '- teamId must match the source bullet team id.',
     '- teamName should match the source team display name.',
     '- bulletTitle must be a short headline (3-8 words).',
+    '- bulletTitle must summarize the outcome/theme, not repeat the first words of bulletText.',
+    '- bulletTitle must avoid narrative lead-ins such as "Delivery progressed" or "Team continued".',
+    '- Prefer noun-phrase headline style (for example: "Mandate ACL Enforcement", "Checkout Styling Expansion").',
     '- bulletTitle must not repeat bulletText.',
     '- bulletText must be descriptive and concrete (not just a short label).',
     '- Return exactly 2 or 3 bullets total (never more than 3).',
     '- bulletText must be one sentence under 50 words.',
+    '- Write in natural, human narration, as if briefing leadership on what happened.',
+    '- Keep grammar clean and fluent; avoid awkward or repetitive phrasing.',
+    '- Do not include ticket IDs, PR IDs, commit hashes, or conventional-commit prefixes in bulletText.',
+    '- Never copy PR titles or commit messages verbatim; always paraphrase into plain language.',
+    '- Focus on what changed and why it mattered for product, platform, or developer experience.',
     '- bulletCat must be one of: shipped, achievement, collaboration, learning, recognition, learned, helped, milestone.',
     '- Use factual, evidence-based bullets for a manager feed.',
     '- Say what the team shipped, improved, fixed, or enabled.',
@@ -401,12 +428,7 @@ function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: st
     } satisfies TeamIntelligenceOrgSummaryBullet;
   }).filter((bullet) => bullet !== null) as TeamIntelligenceOrgSummaryBullet[];
 
-  const conciseBullets = bullets.slice(0, SUMMARY_MAX_LINES);
-  if (conciseBullets.length < SUMMARY_MIN_LINES) {
-    return null;
-  }
-
-  return conciseBullets;
+  return bullets.length > 0 ? bullets : null;
 }
 
 function enforceOrgBulletWindow(input: TeamIntelligenceOrgSummaryInput, bullets: TeamIntelligenceOrgSummaryBullet[]): TeamIntelligenceOrgSummaryBullet[] {
@@ -483,9 +505,11 @@ class TeamIntelligenceOrgSummaryService {
   async generate(input: TeamIntelligenceOrgSummaryInput): Promise<TeamIntelligenceOrgSummaryOutput> {
     const llmClient = this.llmClient;
     let bullets = buildDeterministicBullets(input);
+    let llmPrimaryCallSucceeded = false;
     if (llmClient && input.teamSummaries.length > 0) {
       const raw = await llmGenerate(llmClient, buildPrompt(input));
       if (raw) {
+        llmPrimaryCallSucceeded = true;
         const parsed = parseOrgSummaryResponse(input, raw);
         if (parsed) {
           bullets = parsed;
@@ -500,7 +524,9 @@ class TeamIntelligenceOrgSummaryService {
       }
     }
 
-    bullets = enforceOrgBulletWindow(input, bullets);
+    if (!llmPrimaryCallSucceeded) {
+      bullets = enforceOrgBulletWindow(input, bullets);
+    }
 
     const summaryText = buildSummaryText(bullets);
 

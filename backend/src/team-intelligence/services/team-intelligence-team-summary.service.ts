@@ -14,7 +14,9 @@ import type {
 } from '../types';
 
 interface RawTeamSummaryBullet {
+  bulletTitle?: unknown;
   bulletText?: unknown;
+  bulletCat?: unknown;
   reportDate?: unknown;
   prIdsUsed?: unknown;
   repoNames?: unknown;
@@ -33,6 +35,16 @@ interface RawTeamSummaryContributor {
 interface RawTeamSummaryResponse {
   reportDate?: unknown;
   teamName?: unknown;
+  bullets?: unknown;
+}
+
+interface RawTeamBulletRewriteItem {
+  bulletId?: unknown;
+  bulletTitle?: unknown;
+  bulletText?: unknown;
+}
+
+interface RawTeamBulletRewriteResponse {
   bullets?: unknown;
 }
 
@@ -114,6 +126,89 @@ const SUMMARY_MIN_LINES = 3;
 const SUMMARY_MAX_LINES = 4;
 const SUMMARY_MAX_WORDS = 50;
 
+const TEAM_BULLET_CATEGORIES = new Set([
+  'shipped',
+  'achievement',
+  'collaboration',
+  'learning',
+  'recognition',
+  'learned',
+  'helped',
+  'milestone',
+] as const);
+
+type TeamBulletCategory = TeamIntelligenceTeamSummaryBullet['bulletCat'];
+
+function inferBulletCategory(text: string): TeamBulletCategory {
+  const normalized = text.toLowerCase();
+
+  if (/\bshipped\b|\breleased\b|\bdelivered\b|\blaunched\b/.test(normalized)) {
+    return 'shipped';
+  }
+  if (/\bcollaborat|\bpartnered|\bcross[- ]?team|\baligned\b/.test(normalized)) {
+    return 'collaboration';
+  }
+  if (/\blearned\b/.test(normalized)) {
+    return 'learned';
+  }
+  if (/\blearning\b|\blearn\b|\bexplored\b/.test(normalized)) {
+    return 'learning';
+  }
+  if (/\brecognized\b|\brecognition\b|\bawarded\b|\bpraised\b/.test(normalized)) {
+    return 'recognition';
+  }
+  if (/\bhelped\b|\bsupported\b|\bassisted\b|\bunblocked\b/.test(normalized)) {
+    return 'helped';
+  }
+  if (/\bmilestone\b|\bphase\b|\brollout\b|\bgo[- ]live\b/.test(normalized)) {
+    return 'milestone';
+  }
+
+  return 'achievement';
+}
+
+function normalizeBulletCategory(value: unknown, bulletText: string): TeamBulletCategory {
+  const normalized = normalizeString(value).toLowerCase();
+  if (TEAM_BULLET_CATEGORIES.has(normalized as TeamBulletCategory)) {
+    return normalized as TeamBulletCategory;
+  }
+  return inferBulletCategory(bulletText);
+}
+
+function normalizeComparableText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function isTitleTooSimilarToText(title: string, text: string): boolean {
+  const normalizedTitle = normalizeComparableText(title);
+  const normalizedText = normalizeComparableText(text);
+
+  if (!normalizedTitle || !normalizedText) {
+    return true;
+  }
+
+  return normalizedTitle === normalizedText || normalizedText.includes(normalizedTitle);
+}
+
+function buildBulletTitle(bulletText: string): string {
+  const compact = bulletText.replace(/\s+/g, ' ').trim();
+  if (!compact) {
+    return 'Team Update';
+  }
+
+  const cleaned = compact
+    .replace(/[.!?]+$/g, '')
+    .replace(/^Delivery progressed in\s+[^,]+\s+as\s+[^,]+\s+implemented\s+/i, '')
+    .replace(/^\w+\s+continued\s+focused\s+delivery\s+in\s+[^,]+\s+during\s+\d{4}-\d{2}-\d{2}\.?$/i, 'Delivery Update')
+    .replace(/^Implemented\s+/i, '')
+    .replace(/,\s*with\s+additional\s+refinements\s+in\s+.*$/i, '')
+    .trim();
+
+  const words = (cleaned || compact).split(' ').filter(Boolean);
+  const concise = words.slice(0, 6).join(' ');
+  return concise || 'Team Update';
+}
+
 function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): string {
   const plain = value
     .replace(/```[\s\S]*?```/g, ' ')
@@ -122,6 +217,8 @@ function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): stri
     .replace(/^\s{0,3}#{1,6}\s+/gm, ' ')
     .replace(/^\s*[-*+]\s+/gm, ' ')
     .replace(/^\s*\d+\.\s+/gm, ' ')
+    .replace(/\b[A-Z][A-Z0-9]+-\d+\b:?\s*/g, ' ')
+    .replace(/\b(?:feat|fix|chore|refactor|docs|test|perf|style|build|ci|revert)(?:\([^)]+\))?!?:\s*/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -136,6 +233,98 @@ function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): stri
   return /[.!?]$/.test(clipped) ? clipped : `${clipped}.`;
 }
 
+async function llmRewriteTeamBullets(
+  llmClient: LLMClient,
+  input: TeamIntelligenceTeamSummaryInput,
+  bullets: TeamIntelligenceTeamSummaryBullet[]
+): Promise<TeamIntelligenceTeamSummaryBullet[] | null> {
+  const prompt = [
+    'Rewrite team bullets for a manager feed.',
+    'Return STRICT JSON only with this shape:',
+    '{ "bullets": [ { "bulletId": "string", "bulletTitle": "string", "bulletText": "string" } ] }',
+    'Rules:',
+    '- Keep all bulletId values exactly the same as input.',
+    '- bulletTitle must be concise: 3-8 words.',
+    '- bulletTitle must be a standalone headline that summarizes the main outcome.',
+    '- bulletTitle must NOT reuse the opening clause of bulletText.',
+    '- bulletTitle must not start with phrases like "Delivery progressed", "Work progressed", "Team continued", or similar narrative lead-ins.',
+    '- Prefer noun-phrase style titles such as "Mandate ACL Enforcement" or "Checkout Styling Expansion".',
+    '- bulletTitle must not be the same as bulletText.',
+    '- Keep every bullet as one sentence under 50 words.',
+    '- Use natural, fluent narration with clean grammar.',
+    '- Do not include ticket IDs, PR IDs, commit hashes, or branch names.',
+    '- Do not copy PR titles or commit messages verbatim; paraphrase into plain language.',
+    '- Avoid repetitive phrasing patterns and avoid always starting with team name.',
+    '- Preserve factual meaning and evidence from input bullets.',
+    '- Keep concrete engineering outcomes; remove filler and awkward wording.',
+    `Context reportDate: ${input.reportDate}`,
+    `Context teamName: ${input.teamName}`,
+    `Context teamId: ${input.teamId}`,
+    'Input bullets:',
+    ...bullets.map((bullet) => JSON.stringify({
+      bulletId: bullet.bulletId,
+      bulletTitle: bullet.bulletTitle,
+      bulletText: bullet.bulletText,
+      bulletCat: bullet.bulletCat,
+      prIdsUsed: bullet.prIdsUsed,
+      repoNames: bullet.repoNames,
+      contributors: bullet.contributors.map((contributor) => ({
+        userName: contributor.userName,
+        role: contributor.role,
+      })),
+    })),
+  ].join('\n');
+
+  const raw = await llmGenerate(llmClient, prompt);
+  if (!raw) {
+    return null;
+  }
+
+  let parsed: RawTeamBulletRewriteResponse;
+  try {
+    parsed = JSON.parse(raw) as RawTeamBulletRewriteResponse;
+  } catch {
+    return null;
+  }
+
+  const rewriteRows = asArray<RawTeamBulletRewriteItem>(parsed.bullets);
+  const rewriteMap = new Map<string, { bulletTitle: string; bulletText: string }>();
+
+  for (const row of rewriteRows) {
+    const bulletId = normalizeString(row.bulletId);
+    const bulletTitle = normalizeString(row.bulletTitle);
+    const bulletText = normalizeSummaryText(normalizeString(row.bulletText), SUMMARY_MAX_WORDS);
+
+    if (!bulletId || !bulletTitle || !bulletText) {
+      continue;
+    }
+
+    if (isTitleTooSimilarToText(bulletTitle, bulletText)) {
+      continue;
+    }
+
+    rewriteMap.set(bulletId, { bulletTitle, bulletText });
+  }
+
+  if (rewriteMap.size !== bullets.length) {
+    return null;
+  }
+
+  return bullets.map((bullet) => {
+    const rewritten = rewriteMap.get(bullet.bulletId);
+    if (!rewritten) {
+      return bullet;
+    }
+
+    return {
+      ...bullet,
+      bulletTitle: rewritten.bulletTitle,
+      bulletText: rewritten.bulletText,
+      bulletCat: normalizeBulletCategory(bullet.bulletCat, rewritten.bulletText),
+    };
+  });
+}
+
 function buildPrNarrativeBullet(
   reportDate: string,
   teamId: string,
@@ -148,7 +337,7 @@ function buildPrNarrativeBullet(
     userEmail: item.userEmail,
     userName: item.userName,
     role: item.role ?? null,
-    contributionNote: `${item.userName} helped deliver ${firstItem.prTitle}`,
+    contributionNote: `${item.userName} contributed to this delivery`,
   }));
   const uniqueContributors = [...new Map(contributors.map((contributor) => [contributor.userEmail, contributor])).values()];
   const prIdsUsed = [...new Set(evidenceItems.map((item) => item.prId))].sort((left, right) => left - right);
@@ -157,21 +346,24 @@ function buildPrNarrativeBullet(
   const focus = trimSentence(normalizeSummaryText(firstItem.prSummary ?? firstItem.prDescription ?? firstItem.prTitle, 14));
   const improvements = evidenceItems
     .flatMap((item) => item.commitSummaries)
-    .map(trimSentence)
+    .map((summary) => trimSentence(normalizeSummaryText(summary, 12)))
     .filter(Boolean)
     .slice(0, 2);
-  const improvementText = improvements.length > 0 ? `, improving ${formatList(improvements)}` : '';
+  const improvementText = improvements.length > 0 ? `, with additional refinements in ${formatList(improvements)}` : '';
   const actorText = contributorNames.length > 0 ? formatList(contributorNames) : teamName;
   const repoLabel = formatList(repoNames);
+  const repoText = repoLabel ? ` in ${repoLabel}` : ' across core systems';
   const bulletText = normalizeSummaryText(
-    `${teamName} shipped ${focus} in ${repoLabel}, where ${actorText} helped deliver ${firstItem.prTitle}${improvementText}.`,
+    `Delivery progressed${repoText} as ${actorText} implemented ${focus}${improvementText}.`,
     SUMMARY_MAX_WORDS
   );
 
   return {
     bulletId: createStableId({ reportDate, teamId, prIdsUsed, bulletText }),
     reportDate,
+    bulletTitle: buildBulletTitle(bulletText),
     bulletText,
+    bulletCat: inferBulletCategory(bulletText),
     prIdsUsed,
     repoNames,
     contributors: uniqueContributors,
@@ -230,8 +422,14 @@ function buildTeamSummaryPrompt(input: TeamIntelligenceTeamSummaryInput, evidenc
   return [
     'You are writing a team summary for managers.',
     'Return STRICT JSON only with this shape:',
-    '{ "reportDate": "YYYY-MM-DD", "teamName": "string", "bullets": [ { "bulletId": "string", "bulletText": "string", "reportDate": "YYYY-MM-DD", "prIdsUsed": [1,2], "repoNames": ["repo-a"], "contributors": [ { "userId": "string|null", "userEmail": "string", "userName": "string", "role": "string|null", "contributionNote": "string" } ], "confidence": 0.0 } ] }',
+      '{ "reportDate": "YYYY-MM-DD", "teamName": "string", "bullets": [ { "bulletId": "string", "bulletTitle": "string", "bulletText": "string", "bulletCat": "shipped|achievement|collaboration|learning|recognition|learned|helped|milestone", "reportDate": "YYYY-MM-DD", "prIdsUsed": [1,2], "repoNames": ["repo-a"], "contributors": [ { "userId": "string|null", "userEmail": "string", "userName": "string", "role": "string|null", "contributionNote": "string" } ], "confidence": 0.0 } ] }',
     'Rules:',
+      '- bulletTitle must be a short headline (3-8 words).',
+      '- bulletTitle must summarize the outcome/theme, not repeat the first words of bulletText.',
+      '- bulletTitle must avoid narrative lead-ins such as "Delivery progressed" or "Team continued".',
+      '- Prefer noun-phrase headline style (for example: "Mandate ACL Enforcement", "Checkout Styling Expansion").',
+      '- bulletTitle must not repeat bulletText.',
+      '- bulletCat must be one of: shipped, achievement, collaboration, learning, recognition, learned, helped, milestone.',
     '- Every bullet must reference at least one PR id from the input evidence.',
     '- Every prIdUsed must exist in the evidence set.',
     '- contributors must only contain users from the input evidence.',
@@ -245,6 +443,10 @@ function buildTeamSummaryPrompt(input: TeamIntelligenceTeamSummaryInput, evidenc
     '- Return exactly 2 or 3 bullets total (never more than 3).',
     '- If there are more than 3 strong points, keep the highest-impact 3 (not first-come order).',
     '- Keep each bullet to one sentence and under 50 words.',
+    '- Write in natural, human narration with clean grammar.',
+    '- Do not include ticket IDs, PR IDs, commit hashes, or conventional-commit prefixes in bulletText.',
+    '- Never copy PR titles or commit messages verbatim; always paraphrase into plain language.',
+    '- Avoid repetitive structures such as "shipped X ... improving X".',
     '- Prefer prSummary as the primary signal; use prDescription only if prSummary is missing.',
     '- Do not copy markdown sections, checklists, links, screenshot names, or test plan text from PR descriptions.',
     '- No speculation or filler words; keep only high-signal facts.',
@@ -299,7 +501,9 @@ function buildDeterministicBulletFromEvidence(
           bulletText,
         }),
         reportDate: input.reportDate,
+        bulletTitle: buildBulletTitle(normalizeSummaryText(bulletText, SUMMARY_MAX_WORDS)),
         bulletText,
+        bulletCat: inferBulletCategory(normalizeSummaryText(bulletText, SUMMARY_MAX_WORDS)),
         prIdsUsed: [],
         repoNames: [],
         contributors: [
@@ -394,6 +598,9 @@ function parseTeamSummaryResponse(
         return null;
       }
 
+      const bulletTitleRaw = normalizeString(bullet.bulletTitle);
+      const bulletTitle = bulletTitleRaw || buildBulletTitle(bulletText);
+
       const repoNames = asArray<unknown>(bullet.repoNames)
         .map((value) => normalizeString(value))
         .filter(Boolean);
@@ -406,7 +613,9 @@ function parseTeamSummaryResponse(
           prIdsUsed,
         }),
         reportDate: input.reportDate,
+        bulletTitle: isTitleTooSimilarToText(bulletTitle, bulletText) ? buildBulletTitle(bulletText) : bulletTitle,
         bulletText,
+        bulletCat: normalizeBulletCategory(bullet.bulletCat, bulletText),
         prIdsUsed,
         repoNames,
         contributors,
@@ -417,8 +626,7 @@ function parseTeamSummaryResponse(
     })
     .filter((bullet) => bullet !== null) as TeamIntelligenceTeamSummaryBullet[];
 
-  const conciseBullets = bullets.slice(0, SUMMARY_MAX_LINES);
-  return conciseBullets.length >= SUMMARY_MIN_LINES ? conciseBullets : null;
+  return bullets.length > 0 ? bullets : null;
 }
 
 function buildProvenance(
@@ -479,7 +687,9 @@ function enforceTeamBulletWindow(
         prIdsUsed: primary.prIdsUsed,
       }),
       reportDate: input.reportDate,
+      bulletTitle: buildBulletTitle(secondText),
       bulletText: secondText,
+      bulletCat: normalizeBulletCategory(primary.bulletCat, secondText),
       prIdsUsed: primary.prIdsUsed,
       repoNames: primary.repoNames,
       contributors: primary.contributors,
@@ -505,7 +715,9 @@ function enforceTeamBulletWindow(
       prIdsUsed: [],
     }),
     reportDate: input.reportDate,
+    bulletTitle: buildBulletTitle(defaultText),
     bulletText: defaultText,
+    bulletCat: inferBulletCategory(defaultText),
     prIdsUsed: [],
     repoNames: [],
     contributors: [],
@@ -520,7 +732,9 @@ function enforceTeamBulletWindow(
       prIdsUsed: [],
     }),
     reportDate: input.reportDate,
+    bulletTitle: buildBulletTitle(secondaryText),
     bulletText: secondaryText,
+    bulletCat: inferBulletCategory(secondaryText),
     prIdsUsed: [],
     repoNames: [],
     contributors: [],
@@ -555,11 +769,13 @@ class TeamIntelligenceTeamSummaryService {
     const llmClient = this.llmClient;
 
     let bullets: TeamIntelligenceTeamSummaryBullet[] | null = null;
+    let llmPrimaryCallSucceeded = false;
 
     if (llmClient && evidenceItems.length > 0) {
       const prompt = buildTeamSummaryPrompt(input, evidenceItems);
       const rawContent = await llmGenerate(llmClient, prompt);
       if (rawContent) {
+        llmPrimaryCallSucceeded = true;
         bullets = parseTeamSummaryResponse(rawContent, input, evidenceItems);
       }
     }
@@ -568,7 +784,16 @@ class TeamIntelligenceTeamSummaryService {
       bullets = buildDeterministicBulletFromEvidence(input, evidenceItems);
     }
 
-    bullets = enforceTeamBulletWindow(input, evidenceItems, bullets);
+    if (llmClient && bullets.length > 0) {
+      const rewritten = await llmRewriteTeamBullets(llmClient, input, bullets);
+      if (rewritten) {
+        bullets = rewritten;
+      }
+    }
+
+    if (!llmPrimaryCallSucceeded) {
+      bullets = enforceTeamBulletWindow(input, evidenceItems, bullets);
+    }
 
     const provenance = buildProvenance(input, evidenceItems, bullets);
     const summaryText = buildSummaryText(bullets, input.teamName);
