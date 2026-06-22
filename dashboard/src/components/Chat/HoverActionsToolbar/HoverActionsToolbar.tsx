@@ -319,7 +319,13 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               <MoreVertical className='w-4 h-4' />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align='end' side='bottom' className='w-[280px]'>
+          <DropdownMenuContent
+            align='end'
+            alignOffset={-5}
+            side='bottom'
+            sideOffset={7}
+            className='w-[280px]'
+          >
             {/* Compute which sections have visible items */}
             {(() => {
               const hasEditSection = (showEditAction && onEditMessage) || onSendToChannel;
