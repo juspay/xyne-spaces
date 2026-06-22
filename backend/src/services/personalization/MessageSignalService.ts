@@ -3,6 +3,7 @@ import { SignalType } from './types';
 import { ChannelScopeType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { redisService } from '@/services/redisService';
 
 export interface MessageSignalContext {
     messageId: string;
@@ -22,6 +23,11 @@ export class MessageSignalService {
      */
     async captureCreateMessage(context: MessageSignalContext): Promise<void> {
         try {
+            const redis = redisService.getClient();
+            const key = `signal:msg:${context.messageId}`;
+            // Atomic claim: returns null if key already exists (another pod already processed this message)
+            const acquired = await redis.set(key, '1', 'EX', 3600, 'NX');
+            if (!acquired) return;
             await this.processMessageSignals(context);
         } catch (error) {
             logger.error('[PERSONALIZATION] Failed to capture create message signals', {
@@ -49,7 +55,7 @@ export class MessageSignalService {
         const isGroupDM = channelScopeType === ChannelScopeType.GROUP_DM;
 
         // 1. Capture channel interaction signal
-        const channelSignalType = isDM
+        const channelSignalType = (isDM || isGroupDM)
             ? (isThreadReply ? SignalType.CHANNEL_DM_THREAD_REPLY : SignalType.CHANNEL_DM_MESSAGE_SENT)
             : (isThreadReply ? SignalType.CHANNEL_THREAD_REPLY : SignalType.CHANNEL_MESSAGE_SENT);
 

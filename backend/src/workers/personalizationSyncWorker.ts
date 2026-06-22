@@ -16,9 +16,12 @@ const vespaService = createVespaService(dependencies);
 
 export class PersonalizationSyncWorker {
     // Configuration
-    private readonly MIN_SIGNAL_THRESHOLD = 0.01; // Drop signals below this weight
-    private readonly BATCH_SIZE = 100; // Process users in batches
-    private readonly MAX_SIGNAL_WEIGHT = 100; // Max weight for any signal  
+    private readonly MIN_SIGNAL_THRESHOLD = 0.01;
+    private readonly BATCH_SIZE = 100;
+    private readonly MAX_SIGNAL_WEIGHT = 100;
+    // Weight halves every 21 days — three working-week cadence to handle monthly-cycle usage patterns.
+    private readonly HALF_LIFE_MS = 21 * 24 * 60 * 60 * 1000;
+    private readonly MAX_ELAPSED_MS = 10 * 365 * 24 * 60 * 60 * 1000; // cap at 10 years to guard against overflow
 
     /**
      * Main sync function - processes all users with pending signals
@@ -109,26 +112,34 @@ export class PersonalizationSyncWorker {
             const now = Date.now();
             const decayedChannelSignals = this.applyPerSignalDecay(
                 currentState.channelSignals,
+                currentState.channelTimestamps,
+                now,
             );
 
             const decayedUserSignals = this.applyPerSignalDecay(
                 currentState.userSignals,
+                currentState.userTimestamps,
+                now,
             );
 
             // 4. Merge new deltas with decayed signals
             const mergedChannelSignals = this.mergeSignals(decayedChannelSignals, channelDeltas);
             const mergedUserSignals = this.mergeSignals(decayedUserSignals, userDeltas);
 
-            // 5. Update timestamps for signals that received new deltas
+            // 5. Update timestamps for all persisted signals.
+            // Must cover every entity in the merged map, not just delta'd ones —
+            // decay has been applied and banked into the stored weight for all of
+            // them, so the origin must advance to now or next sync re-decays from
+            // the same old timestamp and compounds the exponent.
             const updatedChannelTimestamps = this.updateTimestamps(
                 currentState.channelTimestamps,
-                channelDeltas,
+                mergedChannelSignals,
                 now
             );
 
             const updatedUserTimestamps = this.updateTimestamps(
                 currentState.userTimestamps,
-                userDeltas,
+                mergedUserSignals,
                 now
             );
 
@@ -313,12 +324,16 @@ export class PersonalizationSyncWorker {
      */
     private applyPerSignalDecay(
         signals: Map<string, number>,
+        timestamps: Map<string, number>,
+        now: number,
     ): Map<string, number> {
         const decayedSignals = new Map<string, number>();
 
         for (const [entityId, weight] of signals) {
-            const decayedWeight = weight * 0.9;
-            // Only keep signals above threshold
+            const lastUpdated = timestamps.get(entityId) ?? now;
+            const elapsed = Math.min(now - lastUpdated, this.MAX_ELAPSED_MS);
+            const decayFactor = Math.pow(0.5, elapsed / this.HALF_LIFE_MS);
+            const decayedWeight = weight * decayFactor;
             if (decayedWeight >= this.MIN_SIGNAL_THRESHOLD) {
                 decayedSignals.set(entityId, decayedWeight);
             }
@@ -345,17 +360,18 @@ export class PersonalizationSyncWorker {
     }
 
     /**
-     * Update timestamps for signals that received new deltas
+     * Advance timestamps to now for every entity in mergedSignals.
+     * Using the merged map (not just newDeltas) ensures that entities which were
+     * only decayed — no new activity — still get their origin moved forward.
      */
     private updateTimestamps(
         existingTimestamps: Map<string, number>,
-        newDeltas: Map<string, number>,
+        mergedSignals: Map<string, number>,
         currentTime: number
     ): Map<string, number> {
         const updatedTimestamps = new Map(existingTimestamps);
 
-        // Update timestamp for signals that received new deltas
-        for (const entityId of newDeltas.keys()) {
+        for (const entityId of mergedSignals.keys()) {
             updatedTimestamps.set(entityId, currentTime);
         }
 
@@ -380,7 +396,6 @@ export class PersonalizationSyncWorker {
             personalizationLastUpdated: Date.now()
         };
 
-        // Cast to any since personalization fields may not be in base type yet
         await vespaService.crudService.update([{ docId: userId, fields: updateFields as any }], userSchema);
     }
 

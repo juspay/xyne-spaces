@@ -50,11 +50,11 @@ export class WorkerScheduler {
             }
         });
 
-        // Schedule repeatable job (every 6 hours)
+        // Schedule repeatable job (every 1 hour)
         await this.personalizationQueue.add(
             {},
             {
-                repeat: { cron: '0 */6 * * *' },
+                repeat: { cron: '0 * * * *' },
                 jobId: 'personalization-sync-repeatable',
                 attempts: 3,
                 backoff: {

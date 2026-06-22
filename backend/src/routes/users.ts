@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ChannelController } from '../controllers/channelController';
 import { userManagementController } from '../controllers/userManagementController';
 import { uploadConfig } from '../middleware/upload';
+import { affinityController } from '../controllers/affinityController';
 
 const router = Router();
 const channelController = new ChannelController();
@@ -9,6 +10,7 @@ const channelController = new ChannelController();
 // User search and listing routes (no ACL required, just auth)
 // Note: Specific routes must come before parameterized routes
 router.get('/search', userManagementController.searchUsers); // Search users
+router.get('/me/affinity', affinityController.getAffinity); // Get personalization weights
 router.get('/me/dms', channelController.getUserDMs); // Get all user's DM channels
 router.post('/me/picture', uploadConfig.single('picture'), userManagementController.uploadProfilePicture); // Upload profile picture
 router.patch('/me/calendar-visibility', userManagementController.updateCalendarVisibility); // Update calendar visibility
