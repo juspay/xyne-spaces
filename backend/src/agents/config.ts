@@ -34,6 +34,7 @@ const DEFAULT_XYNE_AI_VISION_MODEL_NAME = 'private-large';
 // Other agents defaults
 const DEFAULT_TICKET_DUPLICATE_MODEL = 'glm-flash-experimental';
 const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash-experimental';
+const DEFAULT_TAG_GENERATION_MODEL = 'private-large';
 const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
@@ -78,6 +79,7 @@ const CAC_KEYS = {
   // Other agents keys
   ticketDuplicateModel: 'ticket_duplicate_model_name',
   titleGeneratorModel: 'title_generator_model_name',
+  tagGenerationModel: 'tag_generation_model_name',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   summariserModel: 'summariser_model_name',
@@ -120,6 +122,7 @@ export class AgentsConfig {
   // Other agents config
   public readonly ticketDuplicateModelName: string;
   public readonly titleGeneratorModelName: string;
+  public readonly tagGenerationModelName: string;
   public readonly ticketBoardModelName: string;
   public readonly releaseNotesGeneratorModelName: string;
   public readonly summariserModelName: string;
@@ -161,6 +164,7 @@ export class AgentsConfig {
     xyneAiVisionModelName: string,
     ticketDuplicateModelName: string,
     titleGeneratorModelName: string,
+    tagGenerationModelName: string,
     ticketBoardModelName: string,
     releaseNotesGeneratorModelName: string,
     summariserModelName: string,
@@ -187,6 +191,7 @@ export class AgentsConfig {
     this.xyneAiVisionModelName = xyneAiVisionModelName;
     this.ticketDuplicateModelName = ticketDuplicateModelName;
     this.titleGeneratorModelName = titleGeneratorModelName;
+    this.tagGenerationModelName = tagGenerationModelName;
     this.ticketBoardModelName = ticketBoardModelName;
     this.releaseNotesGeneratorModelName = releaseNotesGeneratorModelName;
     this.summariserModelName = summariserModelName;
@@ -249,6 +254,7 @@ export class AgentsConfig {
       // Extract other agents values
       const ticketDuplicateModelName = getValue<string>(CAC_KEYS.ticketDuplicateModel, DEFAULT_TICKET_DUPLICATE_MODEL);
       const titleGeneratorModelName = getValue<string>(CAC_KEYS.titleGeneratorModel, DEFAULT_TITLE_GENERATOR_MODEL);
+      const tagGenerationModelName = getValue<string>(CAC_KEYS.tagGenerationModel, DEFAULT_TAG_GENERATION_MODEL);
       const ticketBoardModelName = getValue<string>(CAC_KEYS.ticketBoardModel, DEFAULT_TICKET_BOARD_MODEL);
       const releaseNotesGeneratorModelName = getValue<string>(CAC_KEYS.releaseNotesGeneratorModel, DEFAULT_RELEASE_NOTES_GENERATOR_MODEL);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
@@ -317,6 +323,12 @@ export class AgentsConfig {
         fromCAC.push(CAC_KEYS.titleGeneratorModel);
       } else {
         usingDefaults.push(CAC_KEYS.titleGeneratorModel);
+      }
+
+      if (CAC_KEYS.tagGenerationModel in allConfigs) {
+        fromCAC.push(CAC_KEYS.tagGenerationModel);
+      } else {
+        usingDefaults.push(CAC_KEYS.tagGenerationModel);
       }
 
       if (CAC_KEYS.ticketBoardModel in allConfigs) {
@@ -427,7 +439,7 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.dataSourceIngestTableLimit);
       }
 
-      const totalKeys = 24;
+      const totalKeys = 25;
       if (usingDefaults.length === totalKeys) {
         logger.debug('[Agents Config] All configs using DEFAULTS (not configured in CAC)', {
           xyneAiTracingEnabled: `${xyneAiTracingEnabled} (default)`,
@@ -436,6 +448,7 @@ export class AgentsConfig {
           xyneAiVisionModelName: `${xyneAiVisionModelName} (default)`,
           ticketDuplicateModelName: `${ticketDuplicateModelName} (default)`,
           titleGeneratorModelName: `${titleGeneratorModelName} (default)`,
+          tagGenerationModelName: `${tagGenerationModelName} (default)`,
           ticketBoardModelName: `${ticketBoardModelName} (default)`,
           releaseNotesGeneratorModelName: `${releaseNotesGeneratorModelName} (default)`,
           summariserModelName: `${summariserModelName} (default)`,
@@ -460,6 +473,9 @@ export class AgentsConfig {
           titleGeneratorModelName: usingDefaults.includes(CAC_KEYS.titleGeneratorModel)
             ? `${titleGeneratorModelName} (default)`
             : `${titleGeneratorModelName} (CAC)`,
+          tagGenerationModelName: usingDefaults.includes(CAC_KEYS.tagGenerationModel)
+            ? `${tagGenerationModelName} (default)`
+            : `${tagGenerationModelName} (CAC)`,
           ticketBoardModelName: usingDefaults.includes(CAC_KEYS.ticketBoardModel)
             ? `${ticketBoardModelName} (default)`
             : `${ticketBoardModelName} (CAC)`,
@@ -480,6 +496,7 @@ export class AgentsConfig {
           xyneAiVisionModelName: `${xyneAiVisionModelName} (CAC)`,
           ticketDuplicateModelName: `${ticketDuplicateModelName} (CAC)`,
           titleGeneratorModelName: `${titleGeneratorModelName} (CAC)`,
+          tagGenerationModelName: `${tagGenerationModelName} (CAC)`,
           ticketBoardModelName: `${ticketBoardModelName} (CAC)`,
           releaseNotesGeneratorModelName: `${releaseNotesGeneratorModelName} (CAC)`,
           summariserModelName: `${summariserModelName} (CAC)`,
@@ -493,6 +510,7 @@ export class AgentsConfig {
         xyneAiVisionModelName,
         ticketDuplicateModelName,
         titleGeneratorModelName,
+        tagGenerationModelName,
         ticketBoardModelName,
         releaseNotesGeneratorModelName,
         summariserModelName,
@@ -523,6 +541,7 @@ export class AgentsConfig {
         DEFAULT_XYNE_AI_VISION_MODEL_NAME,
         DEFAULT_TICKET_DUPLICATE_MODEL,
         DEFAULT_TITLE_GENERATOR_MODEL,
+        DEFAULT_TAG_GENERATION_MODEL,
         DEFAULT_TICKET_BOARD_MODEL,
         DEFAULT_RELEASE_NOTES_GENERATOR_MODEL,
         DEFAULT_SUMMARISER_MODEL,
@@ -554,6 +573,7 @@ export class AgentsConfig {
       DEFAULT_XYNE_AI_VISION_MODEL_NAME,
       DEFAULT_TICKET_DUPLICATE_MODEL,
       DEFAULT_TITLE_GENERATOR_MODEL,
+      DEFAULT_TAG_GENERATION_MODEL,
       DEFAULT_TICKET_BOARD_MODEL,
       DEFAULT_RELEASE_NOTES_GENERATOR_MODEL,
       DEFAULT_SUMMARISER_MODEL,
