@@ -153,6 +153,19 @@ export async function hydrateEmailSentPayload(
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
 
+  const priorReply = await db.email
+    .findFirst({
+      where: {
+        conversationId: email.conversationId,
+        type: { in: [EmailType.REPLY, EmailType.REPLY_ALL] },
+        id: { not: email.id },
+        createdAt: { lte: email.createdAt },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+    .catch(() => null);
+  const isFirstReply = priorReply === null;
+
   return {
     ...payload,
     email: emailRowToOutput(email),
@@ -163,5 +176,6 @@ export async function hydrateEmailSentPayload(
     },
     senderDomain: extractDomain(email.from),
     ...deriveAddressFields(email),
+    isFirstReply,
   };
 }
