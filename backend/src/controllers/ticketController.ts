@@ -444,7 +444,8 @@ export class TicketController {
         tags,
         merchantId,
         parentTicketId,
-        ticketType
+        ticketType,
+        stageName
       }: CreateTicketRequest & { parentTicketId?: string } = req.body;
 
       const fromTicketsTab = req.body.fromTicketsTab === true || req.body.fromTicketsTab === 'true';
@@ -678,6 +679,7 @@ export class TicketController {
             merchantId,
             xyneId,
             ticketType,
+            stageName,
             dynamicFields: dynamicFields as Record<string, string>,
           }, tx);
 
@@ -810,6 +812,7 @@ export class TicketController {
             merchantId,
             xyneId,
             ticketType,
+            stageName,
             dynamicFields: dynamicFields as Record<string, string>,
           }, tx);
 

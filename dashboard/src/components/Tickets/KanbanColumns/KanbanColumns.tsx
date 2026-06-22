@@ -1,5 +1,5 @@
 import React from 'react';
-import { Circle } from 'lucide-react';
+import { Circle, Plus } from 'lucide-react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -88,6 +88,7 @@ const VirtualizedStageList: React.FC<{
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
+  onAddTicket?: () => void;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stageId,
@@ -97,6 +98,7 @@ const VirtualizedStageList: React.FC<{
   isLoadingMore = false,
   onLoadMore,
   onTicketsChange,
+  onAddTicket,
   availableTags,
   visibleColumns,
   onTicketClick,
@@ -184,6 +186,18 @@ const VirtualizedStageList: React.FC<{
           );
         })}
       </div>
+      {onAddTicket && (
+        <button
+          type='button'
+          onClick={onAddTicket}
+          data-track-category='Tickets'
+          data-track-name='AddTicketInColumn'
+          className='hidden group-hover/kanbancol:flex items-center gap-2 w-full mb-2 px-3 py-2 rounded-lg border border-dashed border-border text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-accent/40 hover:text-foreground'
+        >
+          <Plus className='h-3.5 w-3.5' />
+          New ticket
+        </button>
+      )}
       {isLoadingMore && (
         <div className='py-3 text-center text-xs text-muted-foreground'>Loading more...</div>
       )}
@@ -201,6 +215,7 @@ const PaginatedStageList: React.FC<{
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
+  onAddTicket?: () => void;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stage,
@@ -212,6 +227,7 @@ const PaginatedStageList: React.FC<{
   availableTags,
   visibleColumns,
   onTicketClick,
+  onAddTicket,
   slaPolicies,
 }) => {
   const columnValue = columnType === 'status' ? stage.id : stage.name;
@@ -269,6 +285,7 @@ const PaginatedStageList: React.FC<{
         availableTags={availableTags}
         visibleColumns={visibleColumns}
         onTicketClick={onTicketClick}
+        {...(onAddTicket !== undefined && { onAddTicket })}
         {...(slaPolicies !== undefined && { slaPolicies })}
       />
     </SortableContext>
@@ -306,6 +323,10 @@ interface KanbanColumnsProps {
   };
   allKnownTickets?: Ticket[];
   onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
+  onAddTicketInColumn?: (column: {
+    status?: TicketStatusV2 | undefined;
+    stageName?: string | undefined;
+  }) => void;
   /**
    * SLA policies pre-fetched by the parent for the active board.
    * Passed through to each TicketCard so they skip their own per-card
@@ -340,7 +361,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   paginatedColumnConfig,
   allKnownTickets,
   onTicketsChange,
+  onAddTicketInColumn,
 }) => {
+  const columnType = paginatedColumnConfig?.columnType ?? 'stage';
   const knownTicketsForOptimisticMerge = React.useMemo(
     () => allKnownTickets ?? Object.values(ticketsByStage).flat(),
     [allKnownTickets, ticketsByStage],
@@ -397,12 +420,19 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         const stageCount = countByStageId ?? countByStageName ?? stageTickets.length;
         const isCollapsed = collapsedStageIds.includes(stage.id);
         const columnKey = `${keyPrefix}${stage.id}`;
+        const handleAddTicket = onAddTicketInColumn
+          ? (): void =>
+              onAddTicketInColumn({
+                status: stage.defaultTicketStatusV2,
+                ...(columnType === 'stage' ? { stageName: stage.name } : {}),
+              })
+          : undefined;
 
         return (
           <DroppableStage key={`${keyPrefix}${stage.id}`} id={stage.id}>
             <div
               className={cn(
-                'flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
+                'group/kanbancol flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
                 isCollapsed ? 'w-12 sm:w-14' : 'w-72 sm:w-96',
               )}
             >
@@ -514,6 +544,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       availableTags={availableTags}
                       visibleColumns={visibleColumns}
                       onTicketClick={onTicketClick}
+                      {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                       {...(slaPolicies !== undefined && { slaPolicies })}
                     />
                   ) : (
@@ -526,6 +557,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                         availableTags={availableTags}
                         visibleColumns={visibleColumns}
                         onTicketClick={onTicketClick}
+                        {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                         {...(slaPolicies !== undefined && { slaPolicies })}
                       />
                     </SortableContext>

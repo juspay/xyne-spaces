@@ -100,6 +100,8 @@ interface CreateTicketModalProps {
   initialAssignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
   initialEta?: Date | null;
   initialPriority?: TicketPriority | null;
+  initialStatus?: TicketStatusV2 | null;
+  initialStageName?: string | null;
   initialTags?: string[];
   sourceConversation?: ConversationWithTicket | undefined;
   isFromSubTicket?: boolean;
@@ -181,6 +183,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialAssignee = null,
   initialEta = null,
   initialPriority = null,
+  initialStatus = null,
+  initialStageName = null,
   initialTags = EMPTY_TAGS,
   isFromSubTicket = false,
   isFromAI = false,
@@ -369,7 +373,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       title: initialTitle,
       description: initialDescription,
       priority: initialPriority,
-      status: TicketStatusV2.TODO as TicketStatusV2,
+      status: initialStatus ?? TicketStatusV2.TODO,
       eta: initialEta,
       tags: initialTags,
       assignee: initialAssignee,
@@ -652,6 +656,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       if (initialPriority) {
         form.setFieldValue('priority', initialPriority);
       }
+      if (initialStatus) {
+        form.setFieldValue('status', initialStatus);
+      }
       form.setFieldValue('tags', initialTags);
       if (selectedBoardId) {
         form.setFieldValue('boardId', selectedBoardId);
@@ -664,6 +671,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     initialTitle,
     initialDescription,
     initialPriority,
+    initialStatus,
     initialSubTickets,
     initialTags,
     resetDuplicateState,
@@ -1007,6 +1015,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         if (formData.status) {
           formDataPayload.append('statusV2', formData.status);
         }
+        if (initialStageName) {
+          formDataPayload.append('stageName', initialStageName);
+        }
         if (formData.workflowType) {
           formDataPayload.append('workflowType', formData.workflowType);
         }
@@ -1084,6 +1095,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           description: formData.description.trim(),
           priority: formData.priority,
           statusV2: formData.status,
+          ...(initialStageName ? { stageName: initialStageName } : {}),
           assignedTo: assignedTo || undefined,
           userGroupId: userGroupId || undefined,
           boardId: formData.boardId,
