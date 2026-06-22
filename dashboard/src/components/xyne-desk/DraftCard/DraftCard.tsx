@@ -20,6 +20,7 @@ import {
   CheckCheck,
   Maximize2,
   Minimize2,
+  ExternalLink,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -29,7 +30,8 @@ import { RefineInput } from '../RefineInput/RefineInput';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
-import { stripCitationBlock } from '../../ui/TipTapExtensions/CitationMark';
+import { stripCitationBlock, stripCitationMarks } from '../../ui/TipTapExtensions/CitationMark';
+import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 
 const DRAFT_SELECTION_HIGHLIGHT_KEY = 'desk-ai-draft-selection';
 
@@ -48,6 +50,7 @@ export type DraftAcceptAction = 'insert' | 'replace';
 
 interface DraftCardProps {
   draftContent: string;
+  toolInvocations?: ToolInvocation[];
   isStreaming: boolean;
   onAccept: (action: DraftAcceptAction) => void;
   defaultAcceptAction?: DraftAcceptAction;
@@ -60,6 +63,11 @@ interface DraftCardProps {
   /** Clear the selected text for refinement */
   onClearSelectedText?: () => void;
   onCollapse?: () => void;
+  /**
+   * Open the user's draft-agent sidebar session where this draft's citations
+   * live. When provided, a "See sources" button is shown beside Insert/Replace.
+   */
+  onSeeSources?: () => void;
 }
 
 interface SelectionPopoverState {
@@ -88,8 +96,16 @@ export const DraftCard = ({
   selectedTextForRefine,
   onClearSelectedText,
   onCollapse,
+  onSeeSources,
 }: DraftCardProps): ReactElement => {
-  const visibleDraftContent = useMemo(() => stripCitationBlock(draftContent), [draftContent]);
+  // Inline citations (the [clf-…] tokens / [1.1] chips) are intentionally
+  // stripped from the draft body — sources now live only in the sources panel
+  // (auto-draft) or the AI sidebar (rerun / help-me-write).
+  const visibleDraftContent = useMemo(
+    () => stripCitationMarks(stripCitationBlock(draftContent)),
+    [draftContent],
+  );
+
   const contentRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const selectedRangeRef = useRef<Range | null>(null);
@@ -361,7 +377,18 @@ export const DraftCard = ({
         >
           {visibleDraftContent ? (
             <div className={aiMarkdownProseClassName}>
-              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={[rehypeRaw]}>
+              <Markdown
+                remarkPlugins={[remarkGfm, remarkBreaks]}
+                rehypePlugins={[rehypeRaw]}
+                urlTransform={url => url}
+                components={{
+                  a: ({ href, children }) => (
+                    <a href={href} target='_blank' rel='noopener noreferrer'>
+                      {children}
+                    </a>
+                  ),
+                }}
+              >
                 {visibleDraftContent}
               </Markdown>
               {isStreaming && (
@@ -459,7 +486,23 @@ export const DraftCard = ({
               </div>
             )}
           </div>
-          <div className='ml-auto relative flex items-center' ref={acceptMenuRef}>
+          {onSeeSources && (
+            <button
+              type='button'
+              onClick={onSeeSources}
+              className='ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+              title='View sources in the AI sidebar'
+              data-track-category='AIDraft'
+              data-track-name='SeeSources'
+            >
+              <ExternalLink size={13} />
+              See sources
+            </button>
+          )}
+          <div
+            className={cn('relative flex items-center', !onSeeSources && 'ml-auto')}
+            ref={acceptMenuRef}
+          >
             <button
               type='button'
               onClick={() => onAccept(defaultAcceptAction)}

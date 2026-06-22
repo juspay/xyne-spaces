@@ -4,7 +4,11 @@ import {
   fetchSessionDetail,
   fetchUserSessionForConversation,
 } from '../services/XyneAI/XyneAISessionsService';
-import type { Message, DraftSource } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import type {
+  Message,
+  DraftSource,
+  ToolInvocation,
+} from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { logger, Event } from '../utils/logger';
 import { rewriteEmailText } from '../services/emailQuickRewriteService';
 import {
@@ -33,6 +37,8 @@ export interface UseDeskAIDraftReturn {
   draftContent: string;
   draftSources: DraftSource[];
   draftInlineCitations: InlineCitation[];
+  draftToolInvocations: ToolInvocation[];
+  sessionId: string | null;
   isStreaming: boolean;
   isDraftActive: boolean;
   /** Text selected by user for partial refinement (from AI Draft or Your Draft) */
@@ -63,6 +69,11 @@ const latestBotContent = (messages: Message[]): string | null => {
 const latestBotSources = (messages: Message[]): DraftSource[] => {
   const bot = [...messages].reverse().find(m => m.type === 'bot');
   return bot?.sources ?? [];
+};
+
+const latestBotToolInvocations = (messages: Message[]): ToolInvocation[] => {
+  const bot = [...messages].reverse().find(m => m.type === 'bot');
+  return bot?.toolInvocations ?? [];
 };
 
 // Prior messages are chained via parentId — without a chain, every parentless
@@ -124,6 +135,7 @@ export function useDeskAIDraft({
   const [draftContent, setDraftContent] = useState('');
   const [draftSources, setDraftSources] = useState<DraftSource[]>([]);
   const [draftInlineCitations, setDraftInlineCitations] = useState<InlineCitation[]>([]);
+  const [draftToolInvocations, setDraftToolInvocations] = useState<ToolInvocation[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -144,6 +156,7 @@ export function useDeskAIDraft({
         : ''
     : '';
   const storageKey = threadId ? `xd-ai-draft:${threadId}` : '';
+  const sessionStorageKey = threadId ? `xd-ai-session:${threadId}` : '';
 
   const writeStorage = useCallback(
     (content: string): void => {
@@ -190,6 +203,7 @@ export function useDeskAIDraft({
         const content = latestBotContent(active.messages);
         if (content !== null) setDraftContent(content);
         setDraftSources(latestBotSources(active.messages));
+        setDraftToolInvocations(latestBotToolInvocations(active.messages));
         const raw = active.messages[active.messages.length - 1]?.content ?? '';
         setDraftInlineCitations(extractInlineCitations(raw));
       }
@@ -211,7 +225,17 @@ export function useDeskAIDraft({
       }
     }
 
-    if (!isComposeMode && conversationId) {
+    let restoredSessionId: string | null = null;
+    if (sessionStorageKey && typeof window !== 'undefined') {
+      try {
+        restoredSessionId = localStorage.getItem(sessionStorageKey);
+        if (restoredSessionId) setSessionId(restoredSessionId);
+      } catch {
+        /* non-fatal */
+      }
+    }
+
+    if (!restoredSessionId && !isComposeMode && conversationId) {
       void (async () => {
         try {
           const resolved = await fetchUserSessionForConversation(conversationId);
@@ -225,7 +249,16 @@ export function useDeskAIDraft({
     return () => {
       cancelled = true;
     };
-  }, [conversationId, storageKey, isComposeMode, threadId]);
+  }, [conversationId, storageKey, sessionStorageKey, isComposeMode, threadId]);
+
+  useEffect(() => {
+    if (!sessionStorageKey || typeof window === 'undefined' || !sessionId) return;
+    try {
+      localStorage.setItem(sessionStorageKey, sessionId);
+    } catch {
+      /* non-fatal */
+    }
+  }, [sessionId, sessionStorageKey]);
 
   useEffect(() => {
     if (!isDraftActive) return;
@@ -256,6 +289,7 @@ export function useDeskAIDraft({
       const content = latestBotContent(state.messages);
       if (content !== null) setDraftContent(content);
       setDraftSources(latestBotSources(state.messages));
+      setDraftToolInvocations(latestBotToolInvocations(state.messages));
       const raw = state.messages[state.messages.length - 1]?.content ?? '';
       setDraftInlineCitations(extractInlineCitations(raw));
       setIsStreaming(state.status === 'streaming');
@@ -271,6 +305,7 @@ export function useDeskAIDraft({
       setIsStreaming(true);
       setDraftContent('');
       setDraftSources([]);
+      setDraftToolInvocations([]);
       setDraftInlineCitations([]);
 
       const userMessageId = `user-${Date.now()}`;
@@ -390,6 +425,7 @@ export function useDeskAIDraft({
       setIsStreaming(true);
       setDraftContent('');
       setDraftSources([]);
+      setDraftToolInvocations([]);
       setDraftInlineCitations([]);
 
       try {
@@ -452,6 +488,7 @@ export function useDeskAIDraft({
       setIsStreaming(true);
       setDraftContent('');
       setDraftSources([]);
+      setDraftToolInvocations([]);
       setDraftInlineCitations([]);
 
       try {
@@ -504,6 +541,7 @@ export function useDeskAIDraft({
       setIsStreaming(true);
       setDraftContent('');
       setDraftSources([]);
+      setDraftToolInvocations([]);
       setDraftInlineCitations([]);
 
       try {
@@ -540,6 +578,7 @@ export function useDeskAIDraft({
     setIsDraftActive(false);
     setDraftContent('');
     setDraftSources([]);
+    setDraftToolInvocations([]);
     setDraftInlineCitations([]);
     setIsStreaming(false);
     setSelectedTextForRefine('');
@@ -552,6 +591,7 @@ export function useDeskAIDraft({
       setSelectedTextForRefine(selectedText);
       setIsDraftActive(true);
       setDraftSources([]);
+      setDraftToolInvocations([]);
       setDraftInlineCitations(extractInlineCitations(sourceContent));
     },
     [],
@@ -565,6 +605,8 @@ export function useDeskAIDraft({
     draftContent,
     draftSources,
     draftInlineCitations,
+    draftToolInvocations,
+    sessionId,
     isStreaming,
     isDraftActive,
     selectedTextForRefine,

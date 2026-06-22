@@ -1,25 +1,52 @@
 import { type ReactElement, useMemo } from 'react';
-import { ExternalLink, FileText } from 'lucide-react';
-import type { DraftSource } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
-import type { InlineCitation } from '../../ui/TipTapExtensions/CitationMark';
+import { ExternalLink, FileText, Info } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import type { ClawCitation, ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
+import {
+  buildClawCitationUrl,
+  getClawCitationLabel,
+  findCitationForChunk,
+} from '../../Chat/XyneAISidebar/utils/clawCitationUrl';
+import { extractClawCitationRefs } from '../../ui/TipTapExtensions/CitationMark';
 import { cn } from '../../../utils/classNames';
 
 interface DraftSourcesPanelProps {
-  sources?: DraftSource[];
-  inlineCitations?: InlineCitation[];
+  /** Auto-draft citations (from the desk-owner's claw conversation). */
+  citations?: ClawCitation[];
   embedded?: boolean;
-  highlightedRef?: string | null;
   loading?: boolean;
+  /** Show the "sources are from the auto-generated draft only" info note. */
+  showAutoDraftNote?: boolean;
 }
 
-export function filterUsefulSources(sources: DraftSource[] | undefined): DraftSource[] {
-  if (!sources || sources.length === 0) return [];
+function citationKey(c: ClawCitation): string {
+  return (
+    buildClawCitationUrl(c) ||
+    `${c.kind}:${c.channelId ?? ''}:${c.conversationId ?? ''}:${c.ticketId ?? ''}:${c.viewAccessId ?? ''}`
+  );
+}
+
+/**
+ * Resolve the citations the agent actually cited in its FINAL response — i.e.
+ * the inline `[clf-<toolCallId>#<chunkIndex>]` tokens in `content`, each mapped
+ * to its citation on the matching tool invocation (same `findCitationForChunk`
+ * the sidebar uses). NOT every citation from every tool call — only what the
+ * answer references. Returned in citation order, deduped.
+ */
+export function resolveCitedClawCitations(
+  content: string | null | undefined,
+  toolInvocations: ToolInvocation[] | undefined,
+): ClawCitation[] {
+  if (!content || !toolInvocations || toolInvocations.length === 0) return [];
   const seen = new Set<string>();
-  const out: DraftSource[] = [];
-  for (const s of sources) {
-    if (!s.prefixedRef || seen.has(s.prefixedRef)) continue;
-    seen.add(s.prefixedRef);
-    out.push(s);
+  const out: ClawCitation[] = [];
+  for (const ref of extractClawCitationRefs(content)) {
+    const c = findCitationForChunk(toolInvocations, ref.toolCallId, ref.chunkIndex);
+    if (!c) continue;
+    const key = citationKey(c);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
   }
   return out;
 }
@@ -61,7 +88,6 @@ function SourcesSkeleton(): ReactElement {
           <div className='min-w-0 flex-1 space-y-1.5 py-0.5'>
             <div className='h-2.5 w-24 rounded bg-muted animate-pulse' />
             <div className='h-2.5 w-full rounded bg-muted animate-pulse' />
-            <div className='h-2.5 w-2/3 rounded bg-muted animate-pulse' />
           </div>
         </li>
       ))}
@@ -69,58 +95,80 @@ function SourcesSkeleton(): ReactElement {
   );
 }
 
-function CitationRow({
-  citation,
-  index,
-}: {
-  citation: InlineCitation;
-  index: number;
-}): ReactElement {
+function AutoDraftNote(): ReactElement {
   return (
-    <li className='flex items-start gap-2 rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-left text-xs w-full'>
+    <div className='mb-2 flex items-start gap-1.5 rounded-lg border border-border/50 bg-muted/30 px-2.5 py-1.5 text-[11px] leading-snug text-muted-foreground'>
+      <Info size={12} className='mt-0.5 flex-shrink-0 opacity-70' />
+      <span>
+        Sources shown are from the auto-generated draft only. For rerun / help-me-write sources,
+        open them in the AI sidebar.
+      </span>
+    </div>
+  );
+}
+
+function CitationRow({ citation, index }: { citation: ClawCitation; index: number }): ReactElement {
+  const label = getClawCitationLabel(citation);
+  const url = buildClawCitationUrl(citation);
+
+  const rowClass = cn(
+    'flex items-start gap-2 rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-left text-xs transition-colors w-full',
+    url && 'hover:border-red-300 hover:bg-red-50/50 dark:hover:bg-red-950/20',
+  );
+
+  const inner = (
+    <>
       <span className='mt-0.5 flex-shrink-0 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-md bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 text-[10px] font-semibold tabular-nums'>
         {index + 1}
       </span>
       <div className='min-w-0 flex-1'>
-        <p className='text-foreground/90 line-clamp-2 break-words'>{citation.point}</p>
-        {citation.url ? (
-          <a
-            href={citation.url}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold text-red-700 dark:text-red-300 hover:underline'
-            data-track-category='AIDraft'
-            data-track-name='OpenInlineCitation'
-          >
-            {citation.label}
-            <ExternalLink size={10} />
-          </a>
-        ) : (
-          <span className='text-[10px] font-semibold text-muted-foreground mt-0.5'>
-            {citation.label}
-          </span>
-        )}
+        <p className='inline-flex items-center gap-1 font-medium text-foreground/90 break-words'>
+          {label}
+          {url && <ExternalLink size={10} className='flex-shrink-0 opacity-70' />}
+        </p>
       </div>
-    </li>
+    </>
   );
+
+  if (url) {
+    return (
+      <li>
+        <Link
+          to={url}
+          className={rowClass}
+          aria-label={label}
+          data-track-category='AIDraft'
+          data-track-name='OpenDraftSource'
+        >
+          {inner}
+        </Link>
+      </li>
+    );
+  }
+  return <li className={rowClass}>{inner}</li>;
 }
 
 export const DraftSourcesPanel = ({
-  sources,
-  inlineCitations,
+  citations,
   embedded = false,
-  highlightedRef = null,
   loading = false,
+  showAutoDraftNote = false,
 }: DraftSourcesPanelProps): ReactElement | null => {
-  const dedupedSources = useMemo(() => filterUsefulSources(sources), [sources]);
-  const visibleSources = dedupedSources;
-  const visibleInlineCitations = useMemo(
-    () => (inlineCitations ?? []).filter(citation => isOpenableCitationUrl(citation.url)),
-    [inlineCitations],
-  );
-  const hasInlineCitations = visibleInlineCitations.length > 0;
+  // Defensive dedupe in case the caller passes raw (non-deduped) citations.
+  const visible = useMemo(() => {
+    const list = citations ?? [];
+    const seen = new Set<string>();
+    const out: ClawCitation[] = [];
+    for (const c of list) {
+      const key = citationKey(c);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(c);
+    }
+    return out;
+  }, [citations]);
 
-  if (!hasInlineCitations && visibleSources.length === 0) {
+  if (visible.length === 0) {
     if (!embedded) return null;
     if (loading) return <SourcesSkeleton />;
     return (
@@ -138,84 +186,31 @@ export const DraftSourcesPanel = ({
         embedded ? 'pb-1' : 'px-4 pb-3 max-h-72 overflow-y-auto',
       )}
     >
-      {visibleInlineCitations.map((c, idx) => (
-        <CitationRow key={`cite-${idx}`} citation={c} index={idx} />
-      ))}
-      {visibleSources.map((source, idx) => (
-        <DraftSourceRow
-          key={`${source.prefixedRef}-${source.entityId ?? source.messageId ?? source.canvasId ?? ''}`}
-          source={source}
-          isHighlighted={source.prefixedRef === highlightedRef}
-          displayNumber={hasInlineCitations ? undefined : idx + 1}
-        />
+      {visible.map((c, idx) => (
+        <CitationRow key={`${buildClawCitationUrl(c) ?? c.kind}-${idx}`} citation={c} index={idx} />
       ))}
     </ul>
   );
 
-  if (embedded) return sourceList;
+  if (embedded) {
+    return (
+      <>
+        {showAutoDraftNote && <AutoDraftNote />}
+        {sourceList}
+      </>
+    );
+  }
 
   return (
     <div className='mb-4 rounded-xl border border-border/60 bg-muted/20'>
-      <button
-        type='button'
-        onClick={() => {}}
-        className='flex w-full items-center justify-between gap-2 px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors'
-        data-track-category='AIDraft'
-        data-track-name='ToggleSources'
-      >
-        <span className='inline-flex items-center gap-1.5'>
-          AI sources used ({visibleInlineCitations.length + visibleSources.length})
-        </span>
+      <div className='flex w-full items-center justify-between gap-2 px-4 py-2.5 text-xs font-semibold text-muted-foreground'>
+        <span className='inline-flex items-center gap-1.5'>AI sources used ({visible.length})</span>
         <span className='text-[10px] font-normal text-muted-foreground/70'>
           Click any source to verify
         </span>
-      </button>
+      </div>
+      <div className='px-4'>{showAutoDraftNote && <AutoDraftNote />}</div>
       {sourceList}
     </div>
   );
 };
-
-function DraftSourceRow({
-  source,
-  isHighlighted = false,
-  displayNumber,
-}: {
-  source: DraftSource;
-  isHighlighted?: boolean;
-  displayNumber?: number | undefined;
-}): ReactElement {
-  const preview = source.chunkText?.trim()
-    ? source.chunkText
-        .replace(/<\/?hi\b[^>]*>/gi, '')
-        .replace(/<\/?[a-z][^>]*>/gi, '')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/&/gi, '&')
-        .replace(/</gi, '<')
-        .replace(/>/gi, '>')
-        .replace(/"/gi, '"')
-        .replace(/&#39;/gi, "'")
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 140)
-    : source.fileName || source.externalUrl || source.entityId || source.prefixedRef;
-
-  return (
-    <li
-      className={cn(
-        'flex items-start gap-2 rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-left text-xs transition-colors w-full',
-        isHighlighted && 'border-red-400 bg-red-50 dark:bg-red-950/40 ring-1 ring-red-300',
-      )}
-    >
-      {displayNumber !== undefined ? (
-        <span className='mt-0.5 flex-shrink-0 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-md bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 text-[10px] font-semibold tabular-nums'>
-          {displayNumber}
-        </span>
-      ) : (
-        <FileText size={13} className='mt-0.5 flex-shrink-0 text-muted-foreground' />
-      )}
-      <div className='min-w-0 flex-1'>
-        <p className='text-foreground/90 line-clamp-2 break-words'>{preview}</p>
-      </div>
-    </li>
-  );
-}

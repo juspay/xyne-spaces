@@ -105,12 +105,15 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   DraftSourcesPanel,
   isOpenableCitationUrl,
+  resolveCitedClawCitations,
 } from '../../components/xyne-desk/DraftSourcesPanel/DraftSourcesPanel';
 import { AutoDraftReasoningPanel } from '../../components/xyne-desk/AutoDraftReasoningPanel/AutoDraftReasoningPanel';
-import type { DraftSource } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import type {
+  ClawCitation,
+  ToolInvocation,
+} from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import {
   fetchSessionDetail,
-  fetchAutodraftSessionForConversation,
   fetchUserSessionForConversation,
 } from '../../services/XyneAI/XyneAISessionsService';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
@@ -126,16 +129,10 @@ import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetch
 import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 import {
-  extractCitationRefs,
   extractInlineCitations,
   type InlineCitation,
 } from '../../components/ui/TipTapExtensions/CitationMark';
 
-interface BotMessageBrief {
-  id: string;
-  timestamp: number;
-  sources: DraftSource[];
-}
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import {
   useChannelConnectedEmail,
@@ -150,6 +147,7 @@ import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/
 import { useMutation } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
+import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
@@ -2274,11 +2272,19 @@ export const SupportTicketDetail = ({
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
-  const [autodraftBotMessages, setAutodraftBotMessages] = useState<BotMessageBrief[]>([]);
-  const [userSessionBotMessages, setUserSessionBotMessages] = useState<BotMessageBrief[]>([]);
+  // Auto-draft citations, fetched from the desk-owner's claw draft conversation
+  // via the autodraft-insight read-through endpoint (the auto-draft runs as the
+  // channel owner, so its citations aren't in the querying user's sidebar).
+  const [autoDraftCitations, setAutoDraftCitations] = useState<ClawCitation[]>([]);
+  // The querying user's own draft-agent session for this email thread (rerun /
+  // help-me-write run as the user). Used only to gate the "See sources" entry
+  // points — its citations live in the user's sidebar, not in this panel.
+  const [userDraftSession, setUserDraftSession] = useState<{
+    sessionId: string;
+    answered: boolean;
+  } | null>(null);
   const [sourcesHydrating, setSourcesHydrating] = useState(false);
   const [draftInlineCitations, setDraftInlineCitations] = useState<InlineCitation[]>([]);
-  const [highlightedSourceRef, setHighlightedSourceRef] = useState<string | null>(null);
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {
     if (!cid) return;
     try {
@@ -2345,7 +2351,6 @@ export const SupportTicketDetail = ({
       ticketEmailDrafts.find(d => d.userId === null)?.draftContent ?? null;
     return ownedBody ?? fallbackBody;
   }, [ticketEmailDrafts, userID]);
-  const bodyCitedRefs = useMemo(() => extractCitationRefs(draftBodyHtml), [draftBodyHtml]);
   const persistedInlineCitations = useMemo(
     () => extractInlineCitations(draftBodyHtml ?? ''),
     [draftBodyHtml],
@@ -2357,33 +2362,15 @@ export const SupportTicketDetail = ({
       ),
     [draftInlineCitations, persistedInlineCitations],
   );
-  const draftSources = useMemo<DraftSource[]>(() => {
-    if (bodyCitedRefs.length === 0) return [];
-    const allBots: BotMessageBrief[] = [...userSessionBotMessages, ...autodraftBotMessages];
-    if (allBots.length === 0) return [];
-    const bodyRefSet = new Set(bodyCitedRefs);
-    const sortedBots = [...allBots].sort((a, b) => b.timestamp - a.timestamp);
-    const refToSource = new Map<string, DraftSource>();
-    for (const msg of sortedBots) {
-      for (const src of msg.sources) {
-        if (!bodyRefSet.has(src.prefixedRef)) continue;
-        if (refToSource.has(src.prefixedRef)) continue;
-        refToSource.set(src.prefixedRef, src);
-      }
-    }
-
-    return Array.from(refToSource.values());
-  }, [userSessionBotMessages, autodraftBotMessages, bodyCitedRefs]);
-  const visibleDraftSources = useMemo<DraftSource[]>(() => {
+  const visibleAutoDraftCitations = useMemo<ClawCitation[]>(() => {
     if (!(composerOpen || ticketEmailDraftCount > 0)) return [];
-    if (bodyCitedRefs.length === 0) return [];
-    const bySrc = new Map(draftSources.map(s => [s.prefixedRef, s]));
-    return bodyCitedRefs.map(ref => bySrc.get(ref)).filter((s): s is DraftSource => !!s);
-  }, [composerOpen, ticketEmailDraftCount, bodyCitedRefs, draftSources]);
+    return autoDraftCitations;
+  }, [composerOpen, ticketEmailDraftCount, autoDraftCitations]);
 
   const draftHasCitations =
     (composerOpen || ticketEmailDraftCount > 0) &&
-    (bodyCitedRefs.length > 0 || visibleInlineCitations.length > 0);
+    (visibleAutoDraftCitations.length > 0 || visibleInlineCitations.length > 0);
+  const hasUserDraftAgentSession = !!userDraftSession?.answered;
   const emails = useMemo(() => (ticket?.emails as Email[] | undefined) ?? [], [ticket?.emails]);
   const emailCollapseState = useEmailCollapseState(emails);
 
@@ -2428,6 +2415,50 @@ export const SupportTicketDetail = ({
   const title = ticket?.title ?? null;
   const boardId = ticket?.boardId ?? null;
 
+  const [channelPreferenceList] = useCachedQuery(
+    queries.getEmailChannelPreference({ channelId: channelId || '' }),
+    { enabled: !!channelId },
+  );
+  const draftAgentSlug = channelPreferenceList?.[0]?.autoDraftAgentSlug || 'draft-agent';
+  const { setSelectedAgentSlug } = useSelectedAgent();
+
+  const openDraftAgentSession = useCallback(
+    async (explicitSessionId?: string): Promise<void> => {
+      if (!conversationId || !channelId) {
+        xyneAIActor.send({ type: 'OPEN' });
+        return;
+      }
+      setSelectedAgentSlug(draftAgentSlug);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+
+      let sessionId: string | null = explicitSessionId ?? null;
+      if (!sessionId) {
+        try {
+          sessionId = localStorage.getItem(`xd-ai-session:${channelId}_${conversationId}`);
+        } catch {
+          sessionId = null;
+        }
+      }
+      if (!sessionId) {
+        try {
+          sessionId = await fetchUserSessionForConversation(conversationId);
+        } catch {
+          sessionId = null;
+        }
+      }
+
+      const threadInfo = { conversationId, previewText: title ?? '' };
+      xyneAIActor.send({
+        type: 'OPEN',
+        contextType: 'chat',
+        channelId,
+        threadInfo,
+        ...(sessionId ? { focusSessionId: sessionId } : { startFreshChat: true }),
+      });
+    },
+    [conversationId, channelId, draftAgentSlug, title, setSelectedAgentSlug],
+  );
+
   useEffect(() => {
     if (!conversationId) {
       setComposerOpenState(false);
@@ -2438,8 +2469,8 @@ export const SupportTicketDetail = ({
 
   useEffect(() => {
     let cancelled = false;
-    setAutodraftBotMessages([]);
-    setUserSessionBotMessages([]);
+    setAutoDraftCitations([]);
+    setUserDraftSession(null);
     if (!conversationId) {
       setSourcesHydrating(false);
       return () => {
@@ -2462,39 +2493,46 @@ export const SupportTicketDetail = ({
       throw lastErr;
     };
 
-    const hydrateFrom = async (
-      lookup: (convId: string) => Promise<string | null>,
-      setter: (msgs: BotMessageBrief[]) => void,
-    ): Promise<void> => {
+    const hydrateAutodraft = async (): Promise<void> => {
+      if (!channelId) return;
       try {
-        const sessionId = await withRetry(() => lookup(conversationId));
-        if (cancelled || !sessionId) return;
-        const detail = await withRetry(() => fetchSessionDetail(sessionId));
+        const res = await withRetry(() =>
+          apiInstance.get<{
+            available: boolean;
+            content: string | null;
+            toolInvocations: ToolInvocation[];
+          }>(`/email/${conversationId}/autodraft-insight`, { params: { channelId } }),
+        );
         if (cancelled) return;
-        const bots: BotMessageBrief[] = detail.messages
-          .filter(m => m.type === 'bot' && (m.sources?.length ?? 0) > 0)
-          .map(m => ({
-            id: m.id,
-            timestamp: new Date(m.timestamp).getTime(),
-            sources: m.sources ?? [],
-          }));
-        if (!cancelled) setter(bots);
+        const citations = resolveCitedClawCitations(res.data.content, res.data.toolInvocations);
+        if (!cancelled) setAutoDraftCitations(citations);
       } catch {
-        // 404 = no such session yet for this conv — fine, leave that slot empty.
+        // No auto-draft insight yet for this conv — fine, leave empty.
       }
     };
 
-    void Promise.allSettled([
-      hydrateFrom(fetchAutodraftSessionForConversation, setAutodraftBotMessages),
-      hydrateFrom(fetchUserSessionForConversation, setUserSessionBotMessages),
-    ]).finally(() => {
+    const hydrateUserSession = async (): Promise<void> => {
+      try {
+        const sessionId = await withRetry(() => fetchUserSessionForConversation(conversationId));
+        if (cancelled || !sessionId) return;
+        const detail = await withRetry(() => fetchSessionDetail(sessionId));
+        if (cancelled) return;
+        const answered = detail.messages.some(m => m.type === 'bot');
+        if (!cancelled) setUserDraftSession({ sessionId, answered });
+      } catch {
+        // 404 = no user session yet for this conv — leave null (button hidden).
+      }
+    };
+
+    void Promise.allSettled([hydrateAutodraft(), hydrateUserSession()]).finally(() => {
       if (!cancelled) setSourcesHydrating(false);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, channelId]);
 
   const setComposerOpen: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
     next => {
@@ -3299,10 +3337,11 @@ export const SupportTicketDetail = ({
                         onOpenAskAISidebarFresh={() => {
                           xyneAIActor.send({ type: 'OPEN' });
                         }}
-                        onCitationClick={(ref): void => {
+                        onCitationClick={(): void => {
                           setActiveTab('sources');
-                          setHighlightedSourceRef(ref);
                         }}
+                        onSeeSources={sessionId => void openDraftAgentSession(sessionId)}
+                        showSeeSources={hasUserDraftAgentSession}
                         onDraftInlineCitationsChange={setDraftInlineCitations}
                         channelId={channelId}
                         ticketId={ticketId}
@@ -3440,10 +3479,10 @@ export const SupportTicketDetail = ({
                                       : 'bg-muted text-muted-foreground',
                                   )}
                                 >
-                                  {sourcesHydrating && visibleDraftSources.length === 0 ? (
+                                  {sourcesHydrating && visibleAutoDraftCitations.length === 0 ? (
                                     <Loader2 size={10} className='animate-spin' />
                                   ) : (
-                                    visibleDraftSources.length + visibleInlineCitations.length
+                                    visibleAutoDraftCitations.length
                                   )}
                                 </span>
                               </button>
@@ -3492,7 +3531,7 @@ export const SupportTicketDetail = ({
                                 if (isAIPanelOpen) {
                                   xyneAIActor.send({ type: 'CLOSE' });
                                 } else {
-                                  xyneAIActor.send({ type: 'OPEN' });
+                                  void openDraftAgentSession();
                                 }
                               }}
                               className={cn(
@@ -3576,11 +3615,10 @@ export const SupportTicketDetail = ({
                       className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
                     >
                       <DraftSourcesPanel
-                        sources={visibleDraftSources}
-                        inlineCitations={visibleInlineCitations}
+                        citations={visibleAutoDraftCitations}
                         embedded
+                        showAutoDraftNote
                         loading={sourcesHydrating}
-                        highlightedRef={highlightedSourceRef}
                       />
                     </Tabs.Content>
 
