@@ -64,6 +64,9 @@ export interface StreamState {
   suppressCompletionToast?: boolean;
   debugEvents: DebugEventRecord[];
   debugArtifactsReadyVersion: number;
+  startedAt: number;
+  agentSlug?: string;
+  showInSidebar: boolean;
 }
 
 export interface StreamRequest {
@@ -101,6 +104,7 @@ export interface StreamRequest {
   version?: 'v1' | 'v2' | undefined;
   disableTools?: boolean | undefined;
   agentSlug?: string | undefined;
+  showInSidebar?: boolean | undefined;
 }
 
 type StreamSubscriber = (state: StreamState) => void;
@@ -735,6 +739,21 @@ class XyneAIStreamManager {
   /**
    * Session / slot keys that currently have a streaming response (for history row indicators).
    */
+  public hasStreamingSidebarStreams(): boolean {
+    return this.findLatestSidebarStream() !== null;
+  }
+
+  public findLatestSidebarStream(): StreamState | null {
+    let latest: StreamState | null = null;
+    for (const state of this.activeStreams.values()) {
+      if (state.status !== 'streaming' || !state.showInSidebar) continue;
+      if (!latest || state.startedAt > latest.startedAt) {
+        latest = state;
+      }
+    }
+    return latest;
+  }
+
   public getStreamingSessionIds(): string[] {
     const ids = new Set<string>();
     for (const state of this.activeStreams.values()) {
@@ -823,6 +842,9 @@ class XyneAIStreamManager {
       messages: initialMessages,
       debugEvents: [],
       debugArtifactsReadyVersion: 0,
+      startedAt: Date.now(),
+      showInSidebar: request.showInSidebar ?? true,
+      ...(request.agentSlug && { agentSlug: request.agentSlug }),
       ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
     };
 

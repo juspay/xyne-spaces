@@ -95,6 +95,7 @@ export function useComposeSubjectAI(
               localUserMessageId: userMessageId,
               suppressCompletionToast: true,
               draftMode: true,
+              showInSidebar: false,
             },
             [
               {

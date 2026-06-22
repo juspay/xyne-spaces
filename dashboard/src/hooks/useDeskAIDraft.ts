@@ -333,6 +333,7 @@ export function useDeskAIDraft({
             ...(!options?.disableTools && lastPriorId && { parentMessageId: lastPriorId }),
             suppressCompletionToast: true,
             draftMode: true,
+            showInSidebar: true,
             ...(options?.disableTools && { disableTools: true }),
             agentSlug,
           },
