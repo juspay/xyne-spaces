@@ -1,6 +1,7 @@
 import { memo, ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageMentionActivity } from './MessageMentionActivity';
+import { KeywordMatchActivity } from './KeywordMatchActivity';
 import { CanvasMentionActivity } from './CanvasMentionActivity';
 import { MessageRepliedActivity } from './MessageRepliedActivity';
 import { MessageRepliedActivityV2 } from './MessageRepliedActivityV2';
@@ -40,6 +41,9 @@ export const ActivityItem = memo(function ActivityItem({
 
     case 'group_mention':
       return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'keyword_match':
+      return <KeywordMatchActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'direct_message':
       return <DirectMessageActivity activity={activity} isExpanded={isExpanded} />;

@@ -77,6 +77,11 @@ import {
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
 import type { MessageType as MessageTypeEnum } from './schema.js';
 import { extractAllMentions } from '../utils/mentionParser.js';
+import {
+  MAX_NOTIFICATION_KEYWORDS,
+  MAX_NOTIFICATION_KEYWORD_LENGTH,
+  normalizeNotificationKeywords,
+} from '../utils/notificationKeywords.js';
 import { z } from 'zod';
 
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
@@ -7370,6 +7375,7 @@ export const mutators = defineMutators({
             globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
+            notificationKeywords: [],
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7403,6 +7409,7 @@ export const mutators = defineMutators({
             globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
+            notificationKeywords: [],
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7436,6 +7443,7 @@ export const mutators = defineMutators({
             globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
+            notificationKeywords: [],
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7486,6 +7494,42 @@ export const mutators = defineMutators({
             globalMobileNotificationLevel: globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
             threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
             channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
+            notificationKeywords: [],
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    setNotificationKeywords: defineMutator(
+      z.object({
+        id: z.string(),
+        keywords: z.array(z.string().min(1).max(MAX_NOTIFICATION_KEYWORD_LENGTH)).max(MAX_NOTIFICATION_KEYWORDS),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, keywords, timestamp } }) => {
+        const notificationKeywords = normalizeNotificationKeywords(keywords);
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            notificationKeywords,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
