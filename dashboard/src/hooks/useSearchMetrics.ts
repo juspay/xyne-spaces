@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import Fuse from 'fuse.js';
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
 import { searchService } from '../services/searchService';
@@ -31,6 +32,39 @@ import {
   hasActiveMentionFilter,
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
+import { affinityService } from '../services/affinityService';
+
+// Squashes raw affinity into [0, 1] with diminishing returns.
+// At affinity=50 → sat=0.5; at affinity=200 → sat≈0.9.
+const sat = (x: number): number => (2 / Math.PI) * Math.atan(x / 50);
+
+// Fuse instances are expensive to construct — cache by searchableNames content
+// so the same instance is reused across keystrokes for the same DM channel.
+// Bounded LRU: evict oldest entry when the map grows beyond MAX_FUSE_CACHE_SIZE.
+const MAX_FUSE_CACHE_SIZE = 50;
+const fuseCache = new Map<string, Fuse<string>>();
+function getFuseInstance(searchableNames: string[]): Fuse<string> {
+  const key = searchableNames.join('\0');
+  let instance = fuseCache.get(key);
+  if (!instance) {
+    if (fuseCache.size >= MAX_FUSE_CACHE_SIZE) {
+      fuseCache.delete(fuseCache.keys().next().value!);
+    }
+    instance = new Fuse(searchableNames, {
+      threshold: 0.35,
+      includeScore: true,
+      ignoreLocation: true,
+      minMatchCharLength: 1,
+    });
+    fuseCache.set(key, instance);
+  }
+  return instance;
+}
+
+// Max score reduction from affinity. 0.5 means at peak affinity a result's
+// score shifts by half the prefix-boost range — enough to reorder within a
+// tier but not enough to let a weak text match beat a strong one.
+const AFFINITY_WEIGHT = 0.5;
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -131,11 +165,35 @@ export function filterChannelsBySearchableNames<
     .map(p => p.trim())
     .filter(Boolean);
 
-  const matchedDms = dmItems.filter(({ searchableNames }) => {
-    if (!searchableNames || searchableNames.length === 0 || queryParts.length === 0) return false;
-    const namesLower = searchableNames.map(n => n.toLowerCase());
-    return queryParts.every(part => namesLower.some(name => name.includes(part)));
-  });
+  const matchedDms = dmItems
+    .flatMap(item => {
+      const { searchableNames } = item;
+      if (!searchableNames || searchableNames.length === 0 || queryParts.length === 0) return [];
+
+      const fuse = getFuseInstance(searchableNames);
+
+      let totalFuseScore = 0;
+      for (const part of queryParts) {
+        const results = fuse.search(part);
+        if (results.length === 0) return []; // AND: every token must match some participant
+        const best = results[0]!;
+        const score = best.score ?? 1;
+        const matched = best.item.toLowerCase();
+        totalFuseScore += matched.startsWith(part) ? score - 0.5 : score;
+      }
+
+      // Fuse scores are [0, 1] (0 = perfect). Prefix boost subtracts 0.5, making
+      // per-part scores potentially negative. Subtraction (not division) is critical:
+      // division would make negative scores less negative with high affinity, inverting
+      // the ranking. Lower finalScore = better rank.
+      const fuseScore = totalFuseScore / queryParts.length;
+      const affinity = affinityService.getChannelWeight(item.channel.id);
+      const finalScore = fuseScore - sat(affinity) * AFFINITY_WEIGHT;
+
+      return [{ item, score: finalScore }];
+    })
+    .sort((a, b) => a.score - b.score) // lower = better
+    .map(({ item }) => item);
 
   const regularChannels = regularItems.map(item => item.channel);
   const orderedChannels = searchChannels(regularChannels, query, regularChannels.length);
@@ -150,6 +208,11 @@ export function filterChannelsBySearchableNames<
 
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
+
+  useEffect(() => {
+    affinityService.prefetch();
+  }, []);
+
   const [searchSessionId, setSearchSessionId] = useState<string | null>(null);
   const searchTriggerRef = useRef<SearchTrigger | null>(null);
   const impressionStartTimeRef = useRef<number>(0);
