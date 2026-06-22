@@ -365,6 +365,8 @@ export const EmailComposer = ({
 
   // Attachment state - tracks files with their uploaded attachment IDs
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const attachmentsRef = useRef<ComposerAttachment[]>([]);
+  attachmentsRef.current = attachments;
   const [isUploadingAttachments, setIsUploadingAttachments] = useState<boolean>(false);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
@@ -1158,6 +1160,35 @@ export const EmailComposer = ({
     [uploadAttachments, isComposeMode, channelId, conversationId], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  const handleDropAttachmentIntoEditor = useCallback(
+    (data: { attachmentId: string; name: string; mimeType: string }): void => {
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      // Validate the attachment exists in the current list before removing/inserting.
+      // Use ref for synchronous read; setAttachments updater is queued by React
+      // so relying on a variable mutated inside it would be a race condition.
+      const exists = attachmentsRef.current.some(att => att.attachmentId === data.attachmentId);
+      if (!exists) return;
+
+      setAttachments(prev => prev.filter(att => att.attachmentId !== data.attachmentId));
+
+      // Insert as an inline image with the proper attachment ID.
+      editor
+        .chain()
+        .focus()
+        .setImage({
+          src: `${BASE_URL}/attachments/${data.attachmentId}/download`,
+          alt: data.name,
+          dataAttId: data.attachmentId,
+          width: 480,
+        })
+        .run();
+      editor.commands.splitBlock();
+    },
+    [],
+  );
+
   const handleSendEmail = async (): Promise<void> => {
     const hasContent = hasEmailBody;
     const hasAttachments = attachments.length > 0;
@@ -1631,22 +1662,68 @@ export const EmailComposer = ({
     anyFieldExpanded,
   ]);
 
-  const { isDraggingFiles, dragHandlers } = useComposerDragDrop(addFilesToAttachments);
+  const {
+    isDraggingFiles,
+    dragHandlers,
+    reset: resetDragState,
+  } = useComposerDragDrop(addFilesToAttachments);
+
+  const handleAttachmentDragStart = useCallback((e: React.DragEvent<HTMLSpanElement>) => {
+    const target = e.currentTarget;
+    const dragData = target.getAttribute('data-inline-attachment');
+    if (!dragData) return;
+    if ((e.target as HTMLElement).tagName !== 'IMG') return;
+    e.dataTransfer.setData('application/x-xd-inline-attachment', dragData);
+    e.dataTransfer.effectAllowed = 'move';
+  }, []);
 
   const composerFooter = (
     <>
       {attachments.length > 0 && (
         <div className='px-4 pb-3'>
           <div className='flex flex-wrap gap-2'>
-            {attachments.map((attachment, index) => (
-              <AttachmentPreview
-                key={`${isBrowserFile(attachment.file) ? attachment.file.name : attachment.file.originalName}-${isBrowserFile(attachment.file) ? attachment.file.size : attachment.file.fileSize}-${index}`}
-                file={attachment.file}
-                onRemove={() => handleRemoveAttachment(index)}
-                onPreview={() => handlePreviewAttachment(attachment)}
-                isUploading={isUploadingAttachments && index === attachments.length - 1}
-              />
-            ))}
+            {attachments.map((attachment, index) => {
+              const fileName = isBrowserFile(attachment.file)
+                ? attachment.file.name
+                : attachment.file.originalName;
+              const fileSize = isBrowserFile(attachment.file)
+                ? attachment.file.size
+                : attachment.file.fileSize;
+              const mimeType = isBrowserFile(attachment.file)
+                ? attachment.file.type
+                : attachment.file.mimeType;
+              const isImageByMimeType = mimeType.startsWith('image/');
+              const isImageByExtension = /\.(jpe?g|png|gif|webp|bmp|svg|heic|heif)$/i.test(
+                fileName,
+              );
+              const isImage = isImageByMimeType || isImageByExtension;
+              const dragData =
+                attachment.attachmentId && isImage
+                  ? JSON.stringify({
+                      attachmentId: attachment.attachmentId,
+                      name: fileName,
+                      mimeType,
+                    })
+                  : undefined;
+              return (
+                <span
+                  key={
+                    attachment.attachmentId ??
+                    attachment.tempId ??
+                    `${fileName}-${fileSize}-${index}`
+                  }
+                  data-inline-attachment={dragData}
+                  onDragStart={dragData ? handleAttachmentDragStart : undefined}
+                >
+                  <AttachmentPreview
+                    file={attachment.file}
+                    onRemove={() => handleRemoveAttachment(index)}
+                    onPreview={() => handlePreviewAttachment(attachment)}
+                    isUploading={isUploadingAttachments && index === attachments.length - 1}
+                  />
+                </span>
+              );
+            })}
           </div>
         </div>
       )}
@@ -2298,6 +2375,8 @@ export const EmailComposer = ({
                   uploadAndInsertInlineImages={uploadAndInsertInlineImages}
                   extraExtensions={recipientExtensions}
                   onEditorReady={handleBodyEditorReady}
+                  onDropAttachmentIntoEditor={handleDropAttachmentIntoEditor}
+                  onFileDropHandled={resetDragState}
                   onSendShortcut={() => {
                     const canSend = isComposeMode
                       ? !!channelId && composeSubject.trim().length > 0
