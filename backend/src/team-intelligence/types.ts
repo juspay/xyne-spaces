@@ -183,7 +183,9 @@ export interface TeamIntelligenceTeamSummaryBulletContributor {
 export interface TeamIntelligenceTeamSummaryBullet {
   bulletId: string;
   reportDate: string;
+  bulletTitle: string;
   bulletText: string;
+  bulletCat: 'shipped' | 'achievement' | 'collaboration' | 'learning' | 'recognition' | 'learned' | 'helped' | 'milestone';
   prIdsUsed: number[];
   repoNames: string[];
   contributors: TeamIntelligenceTeamSummaryBulletContributor[];
